@@ -1,10 +1,13 @@
 {
-  "name": "rembric",
+  "name": "@susomejias/rembric",
   "version": "1.0.0",
   "description": "Self-hosted MCP memory server for AI agents",
   "type": "module",
   "license": "MIT",
   "author": "rembric contributors",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "engines": {
     "node": ">=20"
   },
