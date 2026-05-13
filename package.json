@@ -23,6 +23,12 @@
       "import": "./dist/index.js"
     }
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "sqlite-vec"
+    ]
+  },
   "files": [
     "dist",
     "README.md",
