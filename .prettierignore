@@ -1,0 +1,10 @@
+dist/
+node_modules/
+coverage/
+data/
+*.log
+*.db
+*.db-*
+package-lock.json
+.husky/_
+openspec/changes/**/specs/

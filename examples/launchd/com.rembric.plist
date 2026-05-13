@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rembric</string>
+
+    <!-- Install once: `pnpm add -g rembric` (or `npm i -g rembric`). -->
+    <!-- Adjust the path below to match your Node global bin dir. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/rembric</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>REMBRIC_HOST</key>
+        <string>127.0.0.1</string>
+        <key>REMBRIC_PORT</key>
+        <string>8787</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/rembric.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/rembric.err.log</string>
+</dict>
+</plist>

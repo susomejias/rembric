@@ -1,5 +1,6 @@
-# Node
+# Node / pnpm
 node_modules/
+.pnpm-store/
 dist/
 build/
 coverage/

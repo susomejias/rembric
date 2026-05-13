@@ -1,0 +1,10 @@
+# cloudflared tunnel pointing at the local rembric.
+# Run: cloudflared tunnel --config ./config.yml run
+
+tunnel: <your-tunnel-uuid>
+credentials-file: /root/.cloudflared/<your-tunnel-uuid>.json
+
+ingress:
+  - hostname: rembric.example.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404

@@ -1,0 +1,23 @@
+# rembric behind Caddy with automatic Let's Encrypt.
+# Replace rembric.example.com with your domain.
+
+rembric.example.com {
+    reverse_proxy 127.0.0.1:8787
+
+    # Optional: long-lived MCP Streamable HTTP connections benefit
+    # from a higher idle timeout.
+    @mcp path /mcp /mcp/*
+    handle @mcp {
+        reverse_proxy 127.0.0.1:8787 {
+            transport http {
+                read_timeout 1h
+                write_timeout 1h
+            }
+        }
+    }
+
+    encode gzip zstd
+    log {
+        output file /var/log/caddy/rembric.log
+    }
+}
