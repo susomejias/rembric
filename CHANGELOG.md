@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/susomejias/rembric/compare/v3.0.0...v3.0.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **install:** declare native build deps in package.json ([24df878](https://github.com/susomejias/rembric/commit/24df8784fe5c46f7e9c97a935529f1ba0c3e4e2f))
+
 ## [3.0.0](https://github.com/susomejias/rembric/compare/v2.0.0...v3.0.0) (2026-05-13)
 
 
