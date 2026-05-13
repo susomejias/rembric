@@ -1,6 +1,6 @@
 {
   "name": "@susomejias/rembric",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Self-hosted MCP memory server for AI agents",
   "type": "module",
   "license": "MIT",
