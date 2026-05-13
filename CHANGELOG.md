@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/susomejias/rembric/compare/v2.0.0...v3.0.0) (2026-05-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* MemoryService method signatures now require a Scope argument. Any external consumer importing the service directly must pass it. The MCP and CLI surfaces are unaffected behaviourally beyond the bug fix (cross-scope reads are now properly walled off).
+
+### Features
+
+* scope-required services + slug-friendly auth + dashboard pages ([9d5aaa3](https://github.com/susomejias/rembric/commit/9d5aaa3f6912e5529a5b0eb7a5f42f5c45ffd8c8))
+
 ## [2.0.0](https://github.com/susomejias/rembric/compare/v1.0.0...v2.0.0) (2026-05-13)
 
 
