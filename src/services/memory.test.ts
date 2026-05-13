@@ -4,6 +4,7 @@ import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
+import { SCOPE_GLOBAL, projectScope } from './scope.js';
 
 let db: TestDb;
 let projects: ProjectsService;
@@ -23,135 +24,134 @@ afterEach(() => {
   db.cleanup();
 });
 
-describe('memory.save scope discipline', () => {
-  it('rejects scope=project without projectId', () => {
-    expect(() => memory.save({ scope: 'project', type: 'user', content: 'x' })).toThrow(
-      /requires.*projectId/i,
+describe('memory.save', () => {
+  it('persists with the scope passed in (project)', () => {
+    const m = memory.save(
+      { type: 'user', content: 'prefers tabs', tags: ['editor'] },
+      projectScope(projectId),
     );
+    expect(m.scope).toBe('project');
+    expect(m.projectId).toBe(projectId);
+    expect(m.status).toBe('active');
+    expect(m.tags).toEqual(['editor']);
   });
 
-  it('rejects scope=global with a projectId', () => {
-    expect(() => memory.save({ scope: 'global', type: 'user', content: 'x', projectId })).toThrow(
-      /rejects.*projectId/i,
-    );
+  it('persists with the scope passed in (global)', () => {
+    const m = memory.save({ type: 'user', content: 'dark mode' }, SCOPE_GLOBAL);
+    expect(m.scope).toBe('global');
+    expect(m.projectId).toBeNull();
   });
 
   it('rejects empty content', () => {
-    expect(() => memory.save({ scope: 'global', type: 'user', content: '   ' })).toThrow(
-      /non-empty/,
-    );
-  });
-
-  it('persists a valid project memory', () => {
-    const m = memory.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'prefers tabs',
-      tags: ['editor'],
-    });
-    expect(m.status).toBe('active');
-    expect(m.replaces).toEqual([]);
-    expect(m.tags).toEqual(['editor']);
-    expect(m.projectId).toBe(projectId);
+    expect(() => memory.save({ type: 'user', content: '   ' }, SCOPE_GLOBAL)).toThrow(/non-empty/);
   });
 });
 
-describe('memory.search FTS5', () => {
-  it('finds memories by keyword', () => {
-    memory.save({ scope: 'project', projectId, type: 'user', content: 'prefers tabs over spaces' });
-    memory.save({ scope: 'project', projectId, type: 'user', content: 'uses pnpm not npm' });
+describe('memory.search', () => {
+  it('FTS5 keyword match within scope', () => {
+    memory.save({ type: 'user', content: 'prefers tabs over spaces' }, projectScope(projectId));
+    memory.save({ type: 'user', content: 'uses pnpm not npm' }, projectScope(projectId));
 
-    const results = memory.search({ scope: 'project', projectId, query: 'tabs' });
+    const results = memory.search({ query: 'tabs' }, projectScope(projectId));
     expect(results.length).toBe(1);
     expect(results[0]!.content).toMatch(/tabs/);
   });
 
-  it('respects scope isolation between projects', () => {
-    const otherProject = projects.findOrCreate('other-app').id;
-    memory.save({ scope: 'project', projectId, type: 'user', content: 'project-a memory' });
-    memory.save({
-      scope: 'project',
-      projectId: otherProject,
-      type: 'user',
-      content: 'project-b memory',
-    });
+  it('never leaks across projects', () => {
+    const otherId = projects.findOrCreate('other-app').id;
+    memory.save({ type: 'user', content: 'in project A' }, projectScope(projectId));
+    memory.save({ type: 'user', content: 'in project B' }, projectScope(otherId));
 
-    const aResults = memory.search({ scope: 'project', projectId, includeGlobal: false });
-    expect(aResults.every((m) => m.projectId === projectId)).toBe(true);
+    const a = memory.search({}, projectScope(projectId));
+    expect(a.every((m) => m.projectId === projectId)).toBe(true);
+    expect(a.some((m) => m.content.includes('B'))).toBe(false);
   });
 
-  it('includes globals when scope=project and includeGlobal=true', () => {
-    memory.save({ scope: 'global', type: 'user', content: 'global memory' });
-    memory.save({ scope: 'project', projectId, type: 'user', content: 'project memory' });
+  it("global scope returns globals only — projects don't leak", () => {
+    memory.save({ type: 'user', content: 'global one' }, SCOPE_GLOBAL);
+    memory.save({ type: 'user', content: 'project one' }, projectScope(projectId));
 
-    const merged = memory.search({ scope: 'project', projectId, includeGlobal: true });
-    expect(merged.length).toBe(2);
+    const globals = memory.search({}, SCOPE_GLOBAL);
+    expect(globals.every((m) => m.scope === 'global')).toBe(true);
   });
 
-  it('globals search never leaks project memories', () => {
-    memory.save({ scope: 'global', type: 'user', content: 'g' });
-    memory.save({ scope: 'project', projectId, type: 'user', content: 'p' });
-    const results = memory.search({ scope: 'global' });
-    expect(results.every((m) => m.scope === 'global')).toBe(true);
+  it("project scope returns project only — globals don't leak", () => {
+    memory.save({ type: 'user', content: 'global g' }, SCOPE_GLOBAL);
+    memory.save({ type: 'user', content: 'project p' }, projectScope(projectId));
+
+    const proj = memory.search({}, projectScope(projectId));
+    expect(proj.every((m) => m.scope === 'project' && m.projectId === projectId)).toBe(true);
   });
 });
 
-describe('memory.get and history', () => {
-  it('returns memory + head + zero predecessors for a fresh save', () => {
-    const m = memory.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'fresh',
-    });
-    const result = memory.getWithHistory(m.id);
-    expect(result?.head.id).toBe(m.id);
+describe('memory.get', () => {
+  it('returns memory + history when in scope', () => {
+    const saved = memory.save({ type: 'user', content: 'fresh' }, projectScope(projectId));
+    const result = memory.get(saved.id, projectScope(projectId));
+    expect(result?.memory.id).toBe(saved.id);
     expect(result?.predecessors).toEqual([]);
     expect(result?.confirmationCount).toBe(0);
   });
+
+  it('returns null for a global id when scope is project', () => {
+    const g = memory.save({ type: 'user', content: 'g' }, SCOPE_GLOBAL);
+    const result = memory.get(g.id, projectScope(projectId));
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a project id when scope is global', () => {
+    const p = memory.save({ type: 'user', content: 'p' }, projectScope(projectId));
+    const result = memory.get(p.id, SCOPE_GLOBAL);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for a memory in a different project', () => {
+    const otherId = projects.findOrCreate('other').id;
+    const m = memory.save({ type: 'user', content: 'in other' }, projectScope(otherId));
+    const result = memory.get(m.id, projectScope(projectId));
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an unknown id', () => {
+    expect(memory.get('does-not-exist', SCOPE_GLOBAL)).toBeNull();
+  });
 });
 
-describe('memory.confirm increments via event table', () => {
-  it('records confirmations and exposes them via getWithHistory', () => {
-    const m = memory.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'count me',
-    });
-    memory.confirm(m.id);
-    memory.confirm(m.id);
-    const result = memory.getWithHistory(m.id);
+describe('memory.confirm', () => {
+  it('records confirmations against the head', () => {
+    const m = memory.save({ type: 'user', content: 'count me' }, projectScope(projectId));
+    memory.confirm(m.id, projectScope(projectId));
+    memory.confirm(m.id, projectScope(projectId));
+    const result = memory.get(m.id, projectScope(projectId));
     expect(result?.confirmationCount).toBe(2);
   });
 
-  it('throws for unknown ids', () => {
-    expect(() => memory.confirm('not-real')).toThrow(/not found/);
+  it('throws not_found for cross-scope ids', () => {
+    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    expect(() => memory.confirm(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
+  });
+
+  it('throws not_found for unknown ids', () => {
+    expect(() => memory.confirm('nope', SCOPE_GLOBAL)).toThrow(/not found/);
   });
 });
 
 describe('memory.archive', () => {
-  it('flips active → archived', () => {
-    const m = memory.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'to archive',
-    });
-    memory.archive(m.id);
-    const refetched = memory.getById(m.id);
+  it('flips active → archived when in scope', () => {
+    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    memory.archive(m.id, projectScope(projectId));
+    const refetched = memory.unsafeGetById(m.id);
     expect(refetched?.status).toBe('archived');
   });
 
-  it('rejects archiving a non-active memory', () => {
-    const m = memory.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'x',
-    });
-    memory.archive(m.id);
-    expect(() => memory.archive(m.id)).toThrow(/not in 'active' state/);
+  it('refuses to archive an out-of-scope memory', () => {
+    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    expect(() => memory.archive(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
+  });
+
+  it('refuses to archive a non-active memory', () => {
+    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    memory.archive(m.id, projectScope(projectId));
+    expect(() => memory.archive(m.id, projectScope(projectId))).toThrow(/not in 'active'/);
   });
 });

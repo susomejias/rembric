@@ -5,6 +5,7 @@ import { consolidationOps } from '../db/schema/consolidation.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { projectScope } from '../services/scope.js';
 import { asLlmClient, createTestDb, MockLlmClient, type TestDb } from '../test/index.js';
 
 import { ConsolidationRunner } from './runner.js';
@@ -52,8 +53,8 @@ describe('ConsolidationRunner.runAll', () => {
 
   it('keeps unrelated pairs separate when the judge says keep_separate', async () => {
     const project = projects.findOrCreate('app');
-    memory.save({ scope: 'project', projectId: project.id, type: 'user', content: 'apples' });
-    memory.save({ scope: 'project', projectId: project.id, type: 'user', content: 'oranges' });
+    memory.save({ type: 'user', content: 'apples' }, projectScope(project.id));
+    memory.save({ type: 'user', content: 'oranges' }, projectScope(project.id));
 
     llm.setChatJsonResponse({
       decision: 'keep_separate',
@@ -69,8 +70,8 @@ describe('ConsolidationRunner.runAll', () => {
 
   it('idempotency: a second runAll on stable state produces no new merge/supersede ops', async () => {
     const project = projects.findOrCreate('app');
-    memory.save({ scope: 'project', projectId: project.id, type: 'user', content: 'a' });
-    memory.save({ scope: 'project', projectId: project.id, type: 'user', content: 'b' });
+    memory.save({ type: 'user', content: 'a' }, projectScope(project.id));
+    memory.save({ type: 'user', content: 'b' }, projectScope(project.id));
 
     llm.setChatJsonResponse({
       decision: 'keep_separate',

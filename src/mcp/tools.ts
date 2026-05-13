@@ -3,20 +3,31 @@ import { z } from 'zod';
 import { getRequestContext } from '../server/request-context.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
+import { type Scope, SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
 import { mcpError } from './errors.js';
 
 /**
- * Tool handlers backing the four MCP tools. Validation of arguments is
- * performed by the SDK against the zod schemas declared below; these
- * handlers focus on domain dispatch and authorization.
+ * Tool handlers backing the four MCP tools.
  *
- * Each handler:
- *   1. Reads the per-request context (token + project) via AsyncLocalStorage.
- *   2. Enforces token scope vs. requested action and target.
- *   3. Calls the corresponding `MemoryService` method.
- *   4. Wraps known `DomainError`s into MCP-shaped error responses.
+ * Scope resolution happens here once and is then threaded into every
+ * service call. The service layer enforces the scope at the SQL level
+ * (rows outside scope are invisible) so handlers cannot leak by mistake.
+ *
+ * Path-scoping contract (also asserted by tests):
+ *
+ *   /mcp/<slug>  (or X-Rembric-Project)  → scope = project:<id>
+ *     - memory.save scope='global'  →  mcpError 'scope_locked'
+ *     - memory.save scope='project' →  saved to that project
+ *     - memory.search                →  only that project's memories
+ *     - memory.get / .confirm        →  cross-scope ids are 'not_found'
+ *
+ *   /mcp  (no slug, no header)            → scope = global
+ *     - memory.save scope='project' →  mcpError 'project_required'
+ *     - memory.save scope='global'  →  saved as user-wide
+ *     - memory.search                →  globals only
+ *     - memory.get / .confirm        →  project ids are 'not_found'
  */
 
 const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const;
@@ -35,7 +46,6 @@ export const memorySearchSchema = {
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
   status: z.enum(MEMORY_STATUSES).optional(),
-  includeGlobal: z.boolean().optional(),
   limit: z.number().int().min(1).max(200).optional(),
   offset: z.number().int().min(0).optional(),
 };
@@ -61,8 +71,6 @@ export function buildHandlers(deps: ToolDeps) {
   };
 }
 
-type Json = string;
-
 function ok(payload: unknown) {
   return {
     content: [
@@ -72,6 +80,12 @@ function ok(payload: unknown) {
       },
     ],
   };
+}
+
+/** Translate the request context into the scope to operate under. */
+function scopeFromContext(): Scope {
+  const ctx = getRequestContext();
+  return ctx.project ? projectScope(ctx.project.id) : SCOPE_GLOBAL;
 }
 
 function handleSave(
@@ -85,9 +99,7 @@ function handleSave(
 ) {
   const ctx = getRequestContext();
 
-  // Strict path scoping: when the connection is bound to a project (via
-  // `/mcp/<slug>` or the X-Rembric-Project header), the contract is hard:
-  // every write goes to that project and global writes are rejected.
+  // Path-scoped connections forbid global writes.
   if (ctx.project && args.scope === 'global') {
     return mcpError(
       'scope_locked',
@@ -98,7 +110,8 @@ function handleSave(
     );
   }
 
-  if (args.scope === 'project' && !ctx.project) {
+  // Unscoped connections cannot persist project memories without a target.
+  if (!ctx.project && args.scope === 'project') {
     return mcpError(
       'project_required',
       'This MCP server is registered without a project scope. To save a project memory, either: ' +
@@ -108,35 +121,26 @@ function handleSave(
     );
   }
 
-  // When path-scoped, force project regardless of what the agent asked for.
-  // The defensive branch above already handled scope='global' explicitly;
-  // any other input is normalised here.
-  const effectiveScope: 'global' | 'project' = ctx.project ? 'project' : args.scope;
-  const target = {
-    scope: effectiveScope,
-    projectId: effectiveScope === 'project' ? (ctx.project?.id ?? null) : null,
-  };
-  if (!isAuthorized(ctx.scope, 'write', target)) {
-    return mcpError(
-      'forbidden',
-      `token scope '${ctx.scope}' cannot write ${effectiveScope} memories`,
-    );
+  const scope: Scope = ctx.project ? projectScope(ctx.project.id) : SCOPE_GLOBAL;
+  const authzTarget = {
+    scope: scope.kind,
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+    projectSlug: ctx.project?.path ?? null,
+  } as const;
+  if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
+    return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${scope.kind} memories`);
   }
 
   const input: SaveMemoryInput = {
-    scope: effectiveScope,
-    projectId: target.projectId,
     type: args.type,
     content: args.content,
     tags: args.tags,
-    source: {
-      tokenName: ctx.token.name,
-    },
+    source: { tokenName: ctx.token.name },
   };
 
   try {
-    const memory = deps.memory.save(input);
-    return ok({ id: memory.id, status: memory.status, createdAt: memory.createdAt });
+    const m = deps.memory.save(input, scope);
+    return ok({ id: m.id, status: m.status, createdAt: m.createdAt });
   } catch (err) {
     return errToMcp(err);
   }
@@ -149,30 +153,23 @@ function handleSearch(
     type?: (typeof MEMORY_TYPES)[number];
     tag?: string;
     status?: (typeof MEMORY_STATUSES)[number];
-    includeGlobal?: boolean;
     limit?: number;
     offset?: number;
   },
 ) {
   const ctx = getRequestContext();
-  const scope: 'global' | 'project' = ctx.project ? 'project' : 'global';
-  const target = {
-    scope,
-    projectId: ctx.project?.id ?? null,
-  };
+  const scope = scopeFromContext();
 
-  if (!isAuthorized(ctx.scope, 'read', target)) {
-    return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope} memories`);
+  const authzTarget = {
+    scope: scope.kind,
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+    projectSlug: ctx.project?.path ?? null,
+  } as const;
+  if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
+    return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope.kind} memories`);
   }
 
-  // Strict path scoping: when the connection is path-bound to a project,
-  // searches NEVER leak global memories. The `includeGlobal` argument is
-  // honoured only on unscoped connections (/mcp without slug); there it
-  // is moot because the scope is already global.
   const input: SearchMemoriesInput = {
-    scope,
-    projectId: target.projectId,
-    includeGlobal: ctx.project ? false : (args.includeGlobal ?? false),
     query: args.query,
     type: args.type,
     tag: args.tag,
@@ -182,7 +179,7 @@ function handleSearch(
   };
 
   try {
-    const memories = deps.memory.search(input);
+    const memories = deps.memory.search(input, scope);
     return ok({
       count: memories.length,
       memories: memories.map((m) => ({
@@ -204,30 +201,20 @@ function handleSearch(
 
 function handleGet(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
+  const scope = scopeFromContext();
   try {
-    const result = deps.memory.getWithHistory(args.id);
+    const result = deps.memory.get(args.id, scope);
     if (!result) {
       return mcpError('not_found', `memory '${args.id}' not found`);
     }
-
-    // Strict path scoping: when the connection is bound to a project,
-    // memories outside that project (globals or other projects) are
-    // invisible — return not_found so callers cannot probe existence.
-    if (ctx.project) {
-      const m = result.memory;
-      if (m.scope !== 'project' || m.projectId !== ctx.project.id) {
-        return mcpError('not_found', `memory '${args.id}' not found`);
-      }
-    }
-
-    const target = {
+    const authzTarget = {
       scope: result.memory.scope,
       projectId: result.memory.projectId,
-    };
-    if (!isAuthorized(ctx.scope, 'read', target)) {
+      projectSlug: ctx.project?.path ?? null,
+    } as const;
+    if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot read this memory`);
     }
-
     return ok({
       memory: {
         id: result.memory.id,
@@ -260,28 +247,22 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
 
 function handleConfirm(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
+  const scope = scopeFromContext();
   try {
-    const memory = deps.memory.getById(args.id);
-    if (!memory) {
-      return mcpError('not_found', `memory '${args.id}' not found`);
+    const authzTarget = {
+      scope: scope.kind,
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectSlug: ctx.project?.path ?? null,
+    } as const;
+    if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
+      return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm in this scope`);
     }
-    // Strict path scoping: confirming a memory outside the path-bound
-    // project is treated as not_found, mirroring memory.get above.
-    if (ctx.project) {
-      if (memory.scope !== 'project' || memory.projectId !== ctx.project.id) {
-        return mcpError('not_found', `memory '${args.id}' not found`);
-      }
-    }
-    const target = {
-      scope: memory.scope,
-      projectId: memory.projectId,
-    };
-    if (!isAuthorized(ctx.scope, 'write', target)) {
-      return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm this memory`);
-    }
-    deps.memory.confirm(args.id, { tokenName: ctx.token.name });
+    deps.memory.confirm(args.id, scope, { tokenName: ctx.token.name });
     return ok({ ok: true });
   } catch (err) {
+    if (err instanceof DomainError && err.code === 'memory_not_found') {
+      return mcpError('not_found', `memory '${args.id}' not found`);
+    }
     return errToMcp(err);
   }
 }
@@ -293,6 +274,3 @@ function errToMcp(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   return mcpError('internal_error', message);
 }
-
-// Maintained for future inspection of the Json brand.
-void (null as unknown as Json);

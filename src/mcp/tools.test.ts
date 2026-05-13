@@ -5,27 +5,16 @@ import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { buildHandlers } from './tools.js';
 
 /**
- * Strict path-scoping contract:
- *
- *   When the MCP connection is bound to a project (via `/mcp/<slug>` or
- *   the X-Rembric-Project header), every operation is locked to that
- *   project. Globals and other projects are invisible.
- *
- *   memory.save  scope='global'           → mcpError code 'scope_locked'
- *   memory.search                          → never returns globals
- *   memory.get / .confirm  cross-scope id  → mcpError code 'not_found'
- *
- *   When the connection is unscoped (/mcp without slug):
- *
- *   memory.save  scope='project'  (no header)  → 'project_required'
- *   memory.search                                → globals only
- *   memory.get / .confirm                        → existing token-scope checks
+ * Strict path-scoping contract — see src/services/memory.ts and
+ * src/services/scope.ts for the application-level RLS pattern this
+ * encodes.
  */
 
 let db: TestDb;
@@ -71,7 +60,6 @@ beforeEach(() => {
   projects = new ProjectsService(db.handle.db);
   memory = new MemoryService(db.handle.db);
   handlers = buildHandlers({ memory });
-
   projectA = projects.findOrCreate('test-rembric');
   projectB = projects.findOrCreate('other-project');
 });
@@ -81,18 +69,16 @@ afterEach(() => {
 });
 
 describe('memory.save — strict path scoping', () => {
-  it("rejects scope='global' on a path-scoped connection with code 'scope_locked'", () => {
-    const resp = runWithContext(fakeContext(projectA), () =>
+  it("rejects scope='global' on a path-scoped connection with code 'scope_locked'", async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
         handlers.save({ scope: 'global', type: 'user', content: 'developer of full-stack' }),
       ),
     );
-    return resp.then((r) => {
-      expect(isErrorResponse(r)).toBe(true);
-      const payload = parseText<{ code: string; message: string }>(r);
-      expect(payload.code).toBe('scope_locked');
-      expect(payload.message).toContain('test-rembric');
-    });
+    expect(isErrorResponse(r)).toBe(true);
+    const payload = parseText<{ code: string; message: string }>(r);
+    expect(payload.code).toBe('scope_locked');
+    expect(payload.message).toContain('test-rembric');
   });
 
   it("rejects scope='project' on an unscoped connection with code 'project_required'", async () => {
@@ -104,8 +90,6 @@ describe('memory.save — strict path scoping', () => {
   });
 
   it('saves under the bound project regardless of the input scope', async () => {
-    // Even though the agent (hypothetically) sends scope=project, the
-    // resulting row must carry the path-bound project_id.
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
         handlers.save({ scope: 'project', type: 'user', content: 'prefers pnpm', tags: [] }),
@@ -113,7 +97,7 @@ describe('memory.save — strict path scoping', () => {
     );
     expect(isErrorResponse(r)).toBeFalsy();
     const { id } = parseText<{ id: string }>(r);
-    const persisted = memory.getById(id);
+    const persisted = memory.unsafeGetById(id);
     expect(persisted?.scope).toBe('project');
     expect(persisted?.projectId).toBe(projectA.id);
   });
@@ -124,7 +108,7 @@ describe('memory.save — strict path scoping', () => {
     );
     expect(isErrorResponse(r)).toBeFalsy();
     const { id } = parseText<{ id: string }>(r);
-    const persisted = memory.getById(id);
+    const persisted = memory.unsafeGetById(id);
     expect(persisted?.scope).toBe('global');
     expect(persisted?.projectId).toBeNull();
   });
@@ -132,19 +116,9 @@ describe('memory.save — strict path scoping', () => {
 
 describe('memory.search — strict path scoping', () => {
   beforeEach(() => {
-    memory.save({ scope: 'global', type: 'user', content: 'global preference one' });
-    memory.save({
-      scope: 'project',
-      projectId: projectA.id,
-      type: 'user',
-      content: 'project-A specific',
-    });
-    memory.save({
-      scope: 'project',
-      projectId: projectB.id,
-      type: 'user',
-      content: 'project-B specific',
-    });
+    memory.save({ type: 'user', content: 'global preference one' }, SCOPE_GLOBAL);
+    memory.save({ type: 'user', content: 'project-A specific' }, projectScope(projectA.id));
+    memory.save({ type: 'user', content: 'project-B specific' }, projectScope(projectB.id));
   });
 
   it('path-scoped: returns only memories in the bound project — no globals leak', async () => {
@@ -153,14 +127,6 @@ describe('memory.search — strict path scoping', () => {
     );
     const { memories } = parseText<{ memories: { scope: string; projectId: string | null }[] }>(r);
     expect(memories.every((m) => m.scope === 'project' && m.projectId === projectA.id)).toBe(true);
-    expect(memories.some((m) => m.scope === 'global')).toBe(false);
-  });
-
-  it('path-scoped: includeGlobal=true is ignored (cannot opt out of the lock)', async () => {
-    const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.search({ includeGlobal: true })),
-    );
-    const { memories } = parseText<{ memories: { scope: string }[] }>(r);
     expect(memories.some((m) => m.scope === 'global')).toBe(false);
   });
 
@@ -186,19 +152,9 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
   let projectBId: string;
 
   beforeEach(() => {
-    globalId = memory.save({ scope: 'global', type: 'user', content: 'global' }).id;
-    projectAId = memory.save({
-      scope: 'project',
-      projectId: projectA.id,
-      type: 'user',
-      content: 'A',
-    }).id;
-    projectBId = memory.save({
-      scope: 'project',
-      projectId: projectB.id,
-      type: 'user',
-      content: 'B',
-    }).id;
+    globalId = memory.save({ type: 'user', content: 'global' }, SCOPE_GLOBAL).id;
+    projectAId = memory.save({ type: 'user', content: 'A' }, projectScope(projectA.id)).id;
+    projectBId = memory.save({ type: 'user', content: 'B' }, projectScope(projectB.id)).id;
   });
 
   it('path-scoped: get(global id) → not_found', async () => {
@@ -226,6 +182,21 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
     expect(payload.memory.id).toBe(projectAId);
   });
 
+  it('unscoped /mcp: get(project id) → not_found  (the previously-leaky path is now closed)', async () => {
+    const r = await runWithContext(fakeContext(null), () =>
+      Promise.resolve(handlers.get({ id: projectAId })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('not_found');
+  });
+
+  it('unscoped /mcp: get(global id) → ok', async () => {
+    const r = await runWithContext(fakeContext(null), () =>
+      Promise.resolve(handlers.get({ id: globalId })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+  });
+
   it('path-scoped: confirm(global id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(handlers.confirm({ id: globalId })),
@@ -242,16 +213,17 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
   });
 
+  it('unscoped /mcp: confirm(project id) → not_found  (was leaky, now closed)', async () => {
+    const r = await runWithContext(fakeContext(null), () =>
+      Promise.resolve(handlers.confirm({ id: projectAId })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('not_found');
+  });
+
   it('path-scoped: confirm(own-project id) → ok', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(handlers.confirm({ id: projectAId })),
-    );
-    expect(isErrorResponse(r)).toBeFalsy();
-  });
-
-  it('unscoped: get(global) → ok', async () => {
-    const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.get({ id: globalId })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
   });

@@ -89,3 +89,48 @@ describe('append-only invariants (static grep)', () => {
     });
   }
 });
+
+/**
+ * Scope-leak invariant.
+ *
+ * Application-level RLS is enforced by passing a `Scope` argument into
+ * every read/write through `MemoryService`. The scope-bypassing escape
+ * hatches are `unsafeGetById` / `unsafeGetByIds`. Those must NOT be
+ * called from the MCP layer (which would re-open the bug we just
+ * closed). Allow-listed callers: the service itself (private helpers),
+ * the consolidation engine (which legitimately crosses scopes), the
+ * dashboard admin views, and tests.
+ */
+const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
+const SCOPE_BYPASS_ALLOWED_PREFIXES = ['services/memory.ts', 'consolidation/', 'dashboard/'];
+
+describe('scope-leak invariant', () => {
+  const files = listSourceFiles(srcRoot);
+
+  it('memory.unsafeGetBy* may only be called from allow-listed modules', () => {
+    const offenders: { file: string; line: number; text: string }[] = [];
+    for (const file of files) {
+      const rel = file.slice(srcRoot.length + 1);
+      const allowed = SCOPE_BYPASS_ALLOWED_PREFIXES.some((prefix) => rel.startsWith(prefix));
+      if (allowed) continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        if (SCOPE_BYPASS_PATTERN.test(line)) {
+          offenders.push({ file: rel, line: i + 1, text: trimmed });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
+      throw new Error(
+        `memory.unsafeGetBy* called outside allow-list (consolidation/, dashboard/, services/memory.ts). ` +
+          `Use the scoped API instead, or add a justification + extend the allow-list.\n${formatted}`,
+      );
+    }
+  });
+});

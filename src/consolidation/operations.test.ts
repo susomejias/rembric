@@ -2,9 +2,9 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
 import { applyDecay, applyMerge, applySupersede, undoOp, undoRun } from './operations.js';
@@ -36,18 +36,14 @@ afterEach(() => {
 
 describe('applyMerge', () => {
   it('inserts a new active memory, supersedes predecessors, and journals the op', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'prefers tabs',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'wants tab indentation',
-    });
+    const a = memoryService.save(
+      { type: 'user', content: 'prefers tabs' },
+      projectScope(projectId),
+    );
+    const b = memoryService.save(
+      { type: 'user', content: 'wants tab indentation' },
+      projectScope(projectId),
+    );
 
     const { mergedId, opId } = applyMerge(db.handle.db, {
       consolidationId: runId,
@@ -56,12 +52,12 @@ describe('applyMerge', () => {
       reasoning: 'both say the same thing',
     });
 
-    const merged = memoryService.getById(mergedId)!;
+    const merged = memoryService.unsafeGetById(mergedId)!;
     expect(merged.status).toBe('active');
     expect(merged.replaces).toEqual([a.id, b.id]);
 
-    expect(memoryService.getById(a.id)!.status).toBe('superseded');
-    expect(memoryService.getById(b.id)!.status).toBe('superseded');
+    expect(memoryService.unsafeGetById(a.id)!.status).toBe('superseded');
+    expect(memoryService.unsafeGetById(b.id)!.status).toBe('superseded');
 
     const op = db.handle.db
       .select()
@@ -74,17 +70,8 @@ describe('applyMerge', () => {
   });
 
   it('rejects predecessors spanning multiple scopes', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'p1',
-    });
-    const b = memoryService.save({
-      scope: 'global',
-      type: 'user',
-      content: 'g1',
-    });
+    const a = memoryService.save({ type: 'user', content: 'p1' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'g1' }, SCOPE_GLOBAL);
     expect(() =>
       applyMerge(db.handle.db, {
         consolidationId: runId,
@@ -96,20 +83,10 @@ describe('applyMerge', () => {
   });
 
   it('rejects non-active predecessors', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'a',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'b',
-    });
-    memoryService.archive(a.id);
-    const aArchived = memoryService.getById(a.id)!;
+    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
+    memoryService.archive(a.id, projectScope(projectId));
+    const aArchived = memoryService.unsafeGetById(a.id)!;
     expect(() =>
       applyMerge(db.handle.db, {
         consolidationId: runId,
@@ -123,18 +100,8 @@ describe('applyMerge', () => {
 
 describe('applySupersede', () => {
   it('appends losers to the winner replaces array and flips them to superseded', () => {
-    const winner = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'winner',
-    });
-    const loser = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'loser',
-    });
+    const winner = memoryService.save({ type: 'user', content: 'winner' }, projectScope(projectId));
+    const loser = memoryService.save({ type: 'user', content: 'loser' }, projectScope(projectId));
     applySupersede(db.handle.db, {
       consolidationId: runId,
       winner,
@@ -142,27 +109,17 @@ describe('applySupersede', () => {
       reasoning: 'newer wins',
     });
 
-    expect(memoryService.getById(loser.id)!.status).toBe('superseded');
-    const updatedWinner = memoryService.getById(winner.id)!;
+    expect(memoryService.unsafeGetById(loser.id)!.status).toBe('superseded');
+    const updatedWinner = memoryService.unsafeGetById(winner.id)!;
     expect(updatedWinner.replaces).toContain(loser.id);
   });
 });
 
 describe('applyDecay', () => {
   it('archives only currently-active memories', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'a',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'b',
-    });
-    memoryService.archive(b.id); // pre-archived; decay shouldn't error on it
+    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
+    memoryService.archive(b.id, projectScope(projectId));
 
     applyDecay(db.handle.db, {
       consolidationId: runId,
@@ -170,25 +127,15 @@ describe('applyDecay', () => {
       reasoning: 'stale',
     });
 
-    expect(memoryService.getById(a.id)!.status).toBe('archived');
-    expect(memoryService.getById(b.id)!.status).toBe('archived');
+    expect(memoryService.unsafeGetById(a.id)!.status).toBe('archived');
+    expect(memoryService.unsafeGetById(b.id)!.status).toBe('archived');
   });
 });
 
 describe('undoOp / undoRun', () => {
   it('reverts a merge: predecessors active again, merged-into archived', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'a',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'b',
-    });
+    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
     const { mergedId, opId } = applyMerge(db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
@@ -198,9 +145,9 @@ describe('undoOp / undoRun', () => {
 
     undoOp(db.handle.db, opId);
 
-    expect(memoryService.getById(a.id)!.status).toBe('active');
-    expect(memoryService.getById(b.id)!.status).toBe('active');
-    expect(memoryService.getById(mergedId)!.status).toBe('archived');
+    expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(b.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(mergedId)!.status).toBe('archived');
 
     const op = db.handle.db
       .select()
@@ -211,18 +158,8 @@ describe('undoOp / undoRun', () => {
   });
 
   it('refuses to undo an already-reverted op', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'a',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'b',
-    });
+    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
     const { opId } = applyMerge(db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
@@ -234,39 +171,20 @@ describe('undoOp / undoRun', () => {
   });
 
   it('undoRun reverses every op in reverse order', () => {
-    const a = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'a',
-    });
-    const b = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'b',
-    });
+    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
+    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
     applyMerge(db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged',
       reasoning: 'r',
     });
-    const c = memoryService.save({
-      scope: 'project',
-      projectId,
-      type: 'user',
-      content: 'c',
-    });
+    const c = memoryService.save({ type: 'user', content: 'c' }, projectScope(projectId));
     applyDecay(db.handle.db, { consolidationId: runId, ids: [c.id], reasoning: 'r' });
 
     const { reverted } = undoRun(db.handle.db, runId);
     expect(reverted.length).toBe(2);
-    expect(memoryService.getById(a.id)!.status).toBe('active');
-    expect(memoryService.getById(c.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(c.id)!.status).toBe('active');
   });
 });
-
-// memory table is unused in this file but importing it forces the module
-// graph to load so test failures around schema show in this suite too.
-void memory;

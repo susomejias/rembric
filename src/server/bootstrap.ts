@@ -130,9 +130,11 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     tokens,
     projects,
     dashboard: {
+      db: dbHandle.db,
       tokens,
       sessions,
       projects,
+      memory: memorySvc,
       getStats: () => collectStats(dbHandle),
     },
   });

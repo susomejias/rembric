@@ -25,12 +25,14 @@ export function runTokenCreate(args: CreateTokenArgs): void {
     const projects = new ProjectsService(handle.db);
 
     let projectId: string | null = null;
+    let projectSlug: string | null = null;
     if (args.project) {
       const project = projects.findOrCreate(args.project);
       projectId = project.id;
+      projectSlug = project.path;
     }
 
-    const scope = resolveScope(args.scope, projectId);
+    const scope = resolveScope(args.scope, projectSlug);
     const expiresAt = parseExpiry(args.expires);
 
     const { plaintext, token } = tokens.create({
@@ -99,17 +101,17 @@ export function runTokenRevoke(name: string): void {
   }
 }
 
-function resolveScope(raw: string | undefined, projectId: string | null): TokenScope {
+function resolveScope(raw: string | undefined, projectSlug: string | null): TokenScope {
   if (!raw || raw === '*') {
-    return projectId ? `project:${projectId}` : '*';
+    return projectSlug ? `project:${projectSlug}` : '*';
   }
-  if (raw === 'read:*' || raw === '*') return raw;
+  if (raw === 'read:*') return raw;
   if (raw.startsWith('project:') || raw.startsWith('read:project:')) {
     return raw as TokenScope;
   }
   throw new DomainError(
     'invalid_input',
-    `unsupported --scope '${raw}'. Use '*', 'read:*', 'project:<id>', or 'read:project:<id>'.`,
+    `unsupported --scope '${raw}'. Use '*', 'read:*', 'project:<slug>', or 'read:project:<slug>'.`,
   );
 }
 

@@ -1,25 +1,40 @@
-import { type Context, Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
+import { createConsolidationRouter } from '../dashboard/consolidation.js';
+import { createMemoriesRouter } from '../dashboard/memories.js';
+import { createProjectsRouter } from '../dashboard/projects.js';
+import { html, shell } from '../dashboard/templates.js';
+import { createTokensRouter } from '../dashboard/tokens.js';
+import type { ResolvedSession } from '../dashboard/types.js';
+import type { Db } from '../db/client.js';
 import { DomainError } from '../services/errors.js';
+import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
 
 /**
- * Minimal dashboard router. v0 scope here: cookie session lifecycle
- * (`/dashboard/login` and `/dashboard/logout`) plus a placeholder home
- * page showing high-level stats. Per-resource pages (memories, consolidation,
- * tokens, projects) land in section 9 of tasks.md.
+ * Dashboard router. Composes the per-resource sub-routers under a single
+ * cookie-authenticated mount at `/dashboard/*`.
+ *
+ *   - /dashboard/login  /logout         (anonymous, by design)
+ *   - /dashboard                        (home, stats summary)
+ *   - /dashboard/memories               (list + detail + archive)
+ *   - /dashboard/consolidation          (runs + run detail + undo)
+ *   - /dashboard/projects               (list + rename + archive)
+ *   - /dashboard/tokens                 (list + create + revoke)
  */
 
 const COOKIE_NAME = 'rembric_session';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface DashboardDeps {
+  db: Db;
   tokens: TokensService;
   sessions: SessionsService;
   projects: ProjectsService;
-  /** Provider of summary stats. Kept abstract so the router doesn't pull in services. */
+  memory: MemoryService;
   getStats: () => DashboardStats;
 }
 
@@ -34,21 +49,13 @@ export interface DashboardStats {
 export function createDashboardRouter(deps: DashboardDeps): Hono {
   const app = new Hono();
 
-  app.get('/', (c) => {
-    const session = resolveSession(c, deps);
-    if (!session) return c.redirect('/dashboard/login');
-    const stats = deps.getStats();
-    return c.html(renderHome(stats));
-  });
-
-  app.get('/login', (c) => {
-    return c.html(renderLogin(null));
-  });
+  // ── public routes ──────────────────────────────────────────────────
+  app.get('/login', (c) => c.html(renderLogin(null)));
 
   app.post('/login', async (c) => {
     const form = await c.req.formData();
-    const rawToken = form.get('token');
-    const tokenPlain = typeof rawToken === 'string' ? rawToken : '';
+    const raw = form.get('token');
+    const tokenPlain = typeof raw === 'string' ? raw : '';
     if (tokenPlain.length === 0) {
       return c.html(renderLogin('Token is required.'), 400);
     }
@@ -62,7 +69,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         httpOnly: true,
         sameSite: 'Lax',
         path: '/dashboard',
-        maxAge: 7 * 24 * 60 * 60,
+        maxAge: SESSION_TTL_SECONDS,
       });
       return c.redirect('/dashboard');
     } catch (err) {
@@ -88,107 +95,94 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     return c.redirect('/dashboard/login');
   });
 
-  // Placeholder routes for sections 9.6+. They return a "coming soon"
-  // panel so links from the home page don't 404 in v0.0.x.
-  for (const path of ['/memories', '/consolidation', '/projects', '/tokens']) {
-    app.get(path, (c) => {
-      const session = resolveSession(c, deps);
-      if (!session) return c.redirect('/dashboard/login');
-      return c.html(renderComingSoon(path));
-    });
-  }
+  // ── auth middleware for everything else ────────────────────────────
+  app.use('*', async (c: Context, next: Next) => {
+    // Skip auth for login/logout (already declared above; this is for the
+    // catch-all that comes after).
+    if (c.req.path === '/login' || c.req.path === '/logout') {
+      return next();
+    }
+    const cookie = getCookie(c, COOKIE_NAME);
+    if (!cookie) return c.redirect('/dashboard/login');
+    const ctx = deps.sessions.resolve(cookie);
+    if (!ctx) return c.redirect('/dashboard/login');
+
+    const resolved: ResolvedSession = {
+      session: ctx.session,
+      sessions: deps.sessions,
+      tokenId: ctx.tokenId,
+    };
+    c.set('session', resolved);
+    return next();
+  });
+
+  // ── home ───────────────────────────────────────────────────────────
+  app.get('/', (c) => {
+    const stats = deps.getStats();
+    const body = html`
+      <h1>Overview</h1>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="label">Total memories</div>
+          <div class="value">${stats.totalMemories}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Active</div>
+          <div class="value">${stats.activeMemories}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Archived</div>
+          <div class="value">${stats.archivedMemories}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Projects</div>
+          <div class="value">${stats.projects}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Last consolidation</div>
+          <div class="value" style="font-size:.9rem">
+            ${stats.lastConsolidationAt
+              ? stats.lastConsolidationAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+              : '—'}
+          </div>
+        </div>
+      </div>
+      <p class="small muted">
+        Navigate the tabs above to manage memories, browse consolidation runs, projects, and tokens.
+      </p>
+    `;
+    return c.html(shell(body, { title: 'Dashboard', activeNav: 'home' }));
+  });
+
+  // ── resource routers ───────────────────────────────────────────────
+  app.route(
+    '/memories',
+    createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
+  );
+  app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route(
+    '/projects',
+    createProjectsRouter({ projects: deps.projects, sessions: deps.sessions }),
+  );
+  app.route(
+    '/tokens',
+    createTokensRouter({ tokens: deps.tokens, projects: deps.projects, sessions: deps.sessions }),
+  );
 
   return app;
 }
 
-interface ResolvedSession {
-  tokenId: string;
-}
-
-function resolveSession(c: Context, deps: DashboardDeps): ResolvedSession | null {
-  const cookie = getCookie(c, COOKIE_NAME);
-  if (!cookie) return null;
-  const ctx = deps.sessions.resolve(cookie);
-  return ctx ? { tokenId: ctx.tokenId } : null;
-}
-
-/* --- Minimal HTML rendering. Full HTMX+Pico templates land in section 9. --- */
-
-function shell(title: string, body: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escape(title)} · Rembric</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; }
-    h1 { margin-top: 0; }
-    form { display: grid; gap: .75rem; }
-    input, button { padding: .5rem .75rem; font: inherit; }
-    .err { color: #c00; }
-    nav a { margin-right: 1rem; }
-    table { width: 100%; border-collapse: collapse; }
-    td, th { text-align: left; padding: .5rem; border-bottom: 1px solid #ddd; }
-  </style>
-</head>
-<body>
-${body}
-</body>
-</html>`;
-}
-
-function renderHome(stats: DashboardStats): string {
-  return shell(
-    'Dashboard',
-    `<h1>Rembric</h1>
-<nav>
-  <a href="/dashboard/memories">Memories</a>
-  <a href="/dashboard/consolidation">Consolidation</a>
-  <a href="/dashboard/projects">Projects</a>
-  <a href="/dashboard/tokens">Tokens</a>
-  <form action="/dashboard/logout" method="post" style="display:inline">
-    <button type="submit">Logout</button>
-  </form>
-</nav>
-<table>
-  <tr><th>Total memories</th><td>${stats.totalMemories}</td></tr>
-  <tr><th>Active</th><td>${stats.activeMemories}</td></tr>
-  <tr><th>Archived</th><td>${stats.archivedMemories}</td></tr>
-  <tr><th>Projects</th><td>${stats.projects}</td></tr>
-  <tr><th>Last consolidation</th><td>${stats.lastConsolidationAt ? escape(stats.lastConsolidationAt.toISOString()) : '—'}</td></tr>
-</table>`,
-  );
-}
-
 function renderLogin(error: string | null): string {
-  return shell(
-    'Login',
-    `<h1>Rembric · Login</h1>
-${error ? `<p class="err">${escape(error)}</p>` : ''}
-<form action="/dashboard/login" method="post">
-  <label>Admin token
-    <input name="token" type="password" autocomplete="off" required autofocus>
-  </label>
-  <button type="submit">Sign in</button>
-</form>`,
-  );
-}
-
-function renderComingSoon(path: string): string {
-  return shell(
-    `Coming soon: ${path}`,
-    `<h1>Coming soon</h1>
-<p>The <code>${escape(path)}</code> view is part of the v0.1 dashboard milestone.</p>
-<p><a href="/dashboard">Back to home</a></p>`,
-  );
-}
-
-function escape(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  const body = html`
+    <h1>Rembric · Login</h1>
+    ${error ? html`<p class="flash error">${error}</p>` : ''}
+    <form action="/dashboard/login" method="post" class="stack">
+      <label
+        >Admin token
+        <input name="token" type="password" autocomplete="off" required autofocus />
+      </label>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  `;
+  return shell(body, { title: 'Login' });
 }
