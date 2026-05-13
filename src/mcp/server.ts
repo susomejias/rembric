@@ -33,14 +33,14 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
 
   server.tool(
     'memory.save',
-    'Save a new memory. Scope defaults to project; set scope=global for a user-wide memory.',
+    "Save a new memory. When this MCP connection is path-scoped (/mcp/<slug>) every save is locked to that project — scope='global' is rejected with code 'scope_locked'. On an unscoped /mcp connection, the agent picks scope ('project' requires X-Rembric-Project or returns code 'project_required').",
     memorySaveSchema,
     handlers.save,
   );
 
   server.tool(
     'memory.search',
-    'Search memories by FTS5 keyword query and/or filters. Scoped to the project carried in X-Rembric-Project (plus globals by default).',
+    'Search memories by FTS5 keyword query and/or filters. When path-scoped, results are strictly limited to that project; globals are not returned. On an unscoped /mcp connection, searches return globals only.',
     memorySearchSchema,
     handlers.search,
   );

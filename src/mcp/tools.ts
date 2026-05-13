@@ -85,6 +85,19 @@ function handleSave(
 ) {
   const ctx = getRequestContext();
 
+  // Strict path scoping: when the connection is bound to a project (via
+  // `/mcp/<slug>` or the X-Rembric-Project header), the contract is hard:
+  // every write goes to that project and global writes are rejected.
+  if (ctx.project && args.scope === 'global') {
+    return mcpError(
+      'scope_locked',
+      `This MCP connection is path-scoped to project '${ctx.project.path}'. ` +
+        'Global writes are not permitted on this connection. To save a ' +
+        "user-wide memory, open a separate MCP connection at '/mcp' (no " +
+        'project slug) with the same token.',
+    );
+  }
+
   if (args.scope === 'project' && !ctx.project) {
     return mcpError(
       'project_required',
@@ -94,16 +107,24 @@ function handleSave(
         "or (c) set scope='global' to save this as a user-wide memory instead.",
     );
   }
+
+  // When path-scoped, force project regardless of what the agent asked for.
+  // The defensive branch above already handled scope='global' explicitly;
+  // any other input is normalised here.
+  const effectiveScope: 'global' | 'project' = ctx.project ? 'project' : args.scope;
   const target = {
-    scope: args.scope,
-    projectId: args.scope === 'project' ? (ctx.project?.id ?? null) : null,
+    scope: effectiveScope,
+    projectId: effectiveScope === 'project' ? (ctx.project?.id ?? null) : null,
   };
   if (!isAuthorized(ctx.scope, 'write', target)) {
-    return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${args.scope} memories`);
+    return mcpError(
+      'forbidden',
+      `token scope '${ctx.scope}' cannot write ${effectiveScope} memories`,
+    );
   }
 
   const input: SaveMemoryInput = {
-    scope: args.scope,
+    scope: effectiveScope,
     projectId: target.projectId,
     type: args.type,
     content: args.content,
@@ -144,10 +165,14 @@ function handleSearch(
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope} memories`);
   }
 
+  // Strict path scoping: when the connection is path-bound to a project,
+  // searches NEVER leak global memories. The `includeGlobal` argument is
+  // honoured only on unscoped connections (/mcp without slug); there it
+  // is moot because the scope is already global.
   const input: SearchMemoriesInput = {
     scope,
     projectId: target.projectId,
-    includeGlobal: args.includeGlobal ?? scope === 'project',
+    includeGlobal: ctx.project ? false : (args.includeGlobal ?? false),
     query: args.query,
     type: args.type,
     tag: args.tag,
@@ -183,6 +208,16 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
     const result = deps.memory.getWithHistory(args.id);
     if (!result) {
       return mcpError('not_found', `memory '${args.id}' not found`);
+    }
+
+    // Strict path scoping: when the connection is bound to a project,
+    // memories outside that project (globals or other projects) are
+    // invisible — return not_found so callers cannot probe existence.
+    if (ctx.project) {
+      const m = result.memory;
+      if (m.scope !== 'project' || m.projectId !== ctx.project.id) {
+        return mcpError('not_found', `memory '${args.id}' not found`);
+      }
     }
 
     const target = {
@@ -229,6 +264,13 @@ function handleConfirm(deps: ToolDeps, args: { id: string }) {
     const memory = deps.memory.getById(args.id);
     if (!memory) {
       return mcpError('not_found', `memory '${args.id}' not found`);
+    }
+    // Strict path scoping: confirming a memory outside the path-bound
+    // project is treated as not_found, mirroring memory.get above.
+    if (ctx.project) {
+      if (memory.scope !== 'project' || memory.projectId !== ctx.project.id) {
+        return mcpError('not_found', `memory '${args.id}' not found`);
+      }
     }
     const target = {
       scope: memory.scope,

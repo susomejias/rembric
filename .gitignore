@@ -33,3 +33,4 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
+.claude/

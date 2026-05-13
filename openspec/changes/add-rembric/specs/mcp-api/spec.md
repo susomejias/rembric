@@ -8,6 +8,30 @@ The server SHALL expose the Model Context Protocol over the Streamable HTTP tran
 - **WHEN** an MCP client opens a session against `/mcp` using the Streamable HTTP transport
 - **THEN** the server SHALL respond with a valid initialize result advertising the registered tools
 
+### Requirement: Path-scoped connections MUST enforce strict project isolation
+
+When the MCP connection is path-scoped (`/mcp/<slug>` or via `X-Rembric-Project` header) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope visible:
+
+- `memory.save` with `scope='global'` SHALL be rejected with structured code `scope_locked`.
+- `memory.save` with `scope='project'` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies.
+- `memory.search` SHALL return only memories whose `scope = 'project'` and `project_id` equals the bound project; global memories SHALL NOT be returned. The `includeGlobal` argument SHALL be ignored on path-scoped connections.
+- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory is global or belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes.
+
+#### Scenario: save with scope='global' on a path-scoped connection
+- **GIVEN** a client connected at `/mcp/foo` with a valid token
+- **WHEN** the client calls `memory.save` with `scope='global'`
+- **THEN** the response SHALL be an MCP error containing `code: 'scope_locked'` and a message naming the bound project
+
+#### Scenario: search on a path-scoped connection does not leak globals
+- **GIVEN** a path-scoped connection at `/mcp/foo` and at least one memory with `scope='global'`
+- **WHEN** the client calls `memory.search` with or without `includeGlobal=true`
+- **THEN** the response SHALL NOT contain any memory whose `scope='global'`
+
+#### Scenario: get across project boundaries
+- **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M with `scope='project'`, `project_id='bar'`
+- **WHEN** the client calls `memory.get('M')`
+- **THEN** the response SHALL be an MCP error with `code: 'not_found'`, identical to the response for a non-existent id
+
 ### Requirement: The MCP endpoint MUST support path-based project scoping
 
 The server SHALL accept MCP requests at `/mcp` (global) and at `/mcp/<project-slug>` (project-scoped). When the path includes a non-empty slug after `/mcp/`, the server SHALL resolve that slug to a project via `projects.findOrCreate(slug)` and SHALL use the resulting project as the request's project scope. The path slug SHALL take precedence over any `X-Rembric-Project` header.
