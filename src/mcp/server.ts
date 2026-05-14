@@ -7,6 +7,8 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
+import type { RelationsService } from '../services/relations.js';
+import type { CandidateOptions } from '../services/save-time-candidates.js';
 
 import { buildInstructions } from './instructions.js';
 import {
@@ -15,6 +17,12 @@ import {
   projectListSchema,
   projectUseSchema,
 } from './project-tools.js';
+import {
+  buildRelationsHandlers,
+  compareSchema,
+  judgeSchema,
+  suggestTopicKeySchema,
+} from './relations-tools.js';
 import {
   buildSessionsHandlers,
   capturePassiveSchema,
@@ -49,6 +57,8 @@ export interface CreateMcpServerOptions {
   projects: ProjectsService;
   agentSessions: AgentSessionsService;
   prompts: PromptsService;
+  relations: RelationsService;
+  candidates: CandidateOptions;
   router: SessionRouter;
   db: Db;
   doctor: () => DoctorReport;
@@ -59,7 +69,7 @@ export interface CreateMcpServerOptions {
 }
 
 const SAVE_DESCRIPTION =
-  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, content. Optional: tags[]. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
+  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, content. Optional: tags[], topic_key. If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 
 const SEARCH_DESCRIPTION =
   'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recordá", "acordate". Supports FTS5 keyword search + type/tag/status/limit filters. Path-scoped connections see only that project; unscoped see globals only.';
@@ -82,7 +92,12 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   );
 
   // ── Original 4 memory tools ────────────────────────────────────────
-  const handlers = buildHandlers({ memory: opts.memory });
+  const handlers = buildHandlers({
+    memory: opts.memory,
+    relations: opts.relations,
+    candidates: opts.candidates,
+    db: opts.db,
+  });
   server.registerTool(
     'memory.save',
     { description: SAVE_DESCRIPTION, inputSchema: memorySaveSchema },
@@ -235,6 +250,36 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       inputSchema: projectCurrentSchema,
     },
     projectHandlers.current,
+  );
+
+  // ── Relations tools (judgment graph) ──────────────────────────────
+  const relationsHandlers = buildRelationsHandlers({ relations: opts.relations });
+  server.registerTool(
+    'memory.suggest_topic_key',
+    {
+      description:
+        'Suggest a stable topic_key for an evolving memory based on type + title/content. Deterministic — no LLM. Call before memory.save when updating a topic you have saved before, so the new row supersedes the previous one atomically instead of fragmenting the result set.',
+      inputSchema: suggestTopicKeySchema,
+    },
+    relationsHandlers.suggestTopicKey,
+  );
+  server.registerTool(
+    'memory.judge',
+    {
+      description:
+        'Close a pending judgment surfaced by memory.save.candidates[]. Pass the judgmentId, a relation (supersedes/conflicts_with/related/compatible/scoped/not_conflict), optional reason and confidence. relation=supersedes atomically marks the candidate target memory as superseded.',
+      inputSchema: judgeSchema,
+    },
+    relationsHandlers.judge,
+  );
+  server.registerTool(
+    'memory.compare',
+    {
+      description:
+        'Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge instead.',
+      inputSchema: compareSchema,
+    },
+    relationsHandlers.compare,
   );
 
   // ── notifications/roots/list_changed ───────────────────────────────

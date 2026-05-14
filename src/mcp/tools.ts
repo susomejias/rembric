@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
+import type { Db } from '../db/client.js';
 import { getRequestContext } from '../server/request-context.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
+import type { RelationsService } from '../services/relations.js';
+import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import { type Scope, SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
@@ -39,6 +42,7 @@ export const memorySaveSchema = {
   type: z.enum(MEMORY_TYPES),
   content: z.string().min(1),
   tags: z.array(z.string()).max(64).optional(),
+  topic_key: z.string().min(1).max(128).optional(),
 };
 
 export const memorySearchSchema = {
@@ -60,6 +64,12 @@ export const memoryConfirmSchema = {
 
 export interface ToolDeps {
   memory: MemoryService;
+  /** Optional — when present, save surfaces candidates + writes pending relations. */
+  relations?: RelationsService;
+  /** Optional — when present, controls candidate detection thresholds. */
+  candidates?: CandidateOptions;
+  /** Optional — db handle needed for save-time candidate queries. */
+  db?: Db;
 }
 
 export function buildHandlers(deps: ToolDeps) {
@@ -95,6 +105,7 @@ function handleSave(
     type: (typeof MEMORY_TYPES)[number];
     content: string;
     tags?: string[];
+    topic_key?: string;
   },
 ) {
   const ctx = getRequestContext();
@@ -146,11 +157,76 @@ function handleSave(
     content: args.content,
     tags: args.tags,
     source: { tokenName: ctx.token.name },
+    topicKey: args.topic_key ?? null,
   };
 
   try {
-    const m = deps.memory.save(input, scope);
-    return ok({ id: m.id, status: m.status, createdAt: m.createdAt });
+    const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
+
+    // If the topic_key upsert path fired, record the auto-judged
+    // 'supersedes' relation so the search annotations and the dashboard
+    // can show provenance.
+    if (supersededByTopicKey && deps.relations) {
+      try {
+        deps.relations.compare({
+          sourceId: m.id,
+          targetId: supersededByTopicKey.id,
+          relation: 'supersedes',
+          reason: `topic_key='${args.topic_key}' upsert`,
+          confidence: 1.0,
+          actor: ctx.token.name,
+          kind: 'agent_topic_key',
+        });
+      } catch {
+        // Topic-key relation logging is best-effort. The supersede side
+        // effect on the memory row already happened atomically in
+        // saveWithTopicKey; failing to record the audit row should not
+        // fail the save itself.
+      }
+    }
+
+    // Save-time candidate detection: surface up to N similar active
+    // memories so the agent can judge them while the context is fresh.
+    let candidates: {
+      judgmentId: string;
+      targetId: string;
+      snippet: string;
+      similarity: number;
+      source: 'vec' | 'fts';
+    }[] = [];
+    if (deps.db && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
+      try {
+        const detected = findSaveTimeCandidates(deps.db, m, deps.candidates);
+        for (const c of detected) {
+          // Skip the topic_key supersede target — we already wrote that relation.
+          if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;
+          const row = deps.relations.createPending({
+            sourceId: m.id,
+            targetId: c.targetId,
+          });
+          candidates.push({
+            judgmentId: row.judgmentId,
+            targetId: c.targetId,
+            snippet: c.snippet,
+            similarity: c.similarity,
+            source: c.source,
+          });
+        }
+      } catch {
+        // Candidate detection is best-effort. A failure here (e.g. the
+        // FTS5 query rejects an unusual token) must not prevent the
+        // save from returning a usable response.
+        candidates = [];
+      }
+    }
+
+    return ok({
+      id: m.id,
+      status: m.status,
+      createdAt: m.createdAt,
+      candidates,
+      judgmentRequired: candidates.length > 0,
+    });
   } catch (err) {
     return errToMcp(err);
   }
@@ -190,6 +266,13 @@ function handleSearch(
 
   try {
     const memories = deps.memory.search(input, scope);
+    // Single JOIN against memory_relations — no N+1.
+    const relations = deps.relations
+      ? deps.relations.listForMemories(
+          memories.map((m) => m.id),
+          10,
+        )
+      : null;
     return ok({
       count: memories.length,
       memories: memories.map((m) => ({
@@ -202,6 +285,7 @@ function handleSearch(
         status: m.status,
         createdAt: m.createdAt,
         lastSeenAt: m.lastSeenAt,
+        relations: relations?.get(m.id) ?? [],
       })),
     });
   } catch (err) {
@@ -249,6 +333,7 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
         createdAt: p.createdAt,
       })),
       confirmationCount: result.confirmationCount,
+      relations: deps.relations ? deps.relations.listForMemory(result.memory.id, 50) : [],
     });
   } catch (err) {
     return errToMcp(err);
