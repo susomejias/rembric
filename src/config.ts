@@ -83,6 +83,24 @@ const envSchema = z.object({
     .min(60_000) // 1 minute floor
     .max(30 * 86_400_000) // 30-day ceiling
     .default(86_400_000),
+
+  // Save-time candidate detection. Controls how many similar memories
+  // `memory.save` surfaces to the agent for judgment. 0 disables
+  // surfacing (the pending rows are still inserted for the consolidator
+  // to pick up later); useful for batch/automation paths.
+  CANDIDATES_PER_SAVE_MAX: z.coerce.number().int().min(0).max(25).default(5),
+  CANDIDATE_VEC_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+  CANDIDATE_FTS_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
+
+  // Orphan promotion: relations stuck in 'pending' longer than this
+  // get fed to the LLM judge during consolidation; rows the judge
+  // cannot resolve confidently transition to 'orphaned'.
+  JUDGMENT_ORPHAN_AFTER_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000) // 1 minute floor
+    .max(30 * 86_400_000) // 30-day ceiling
+    .default(86_400_000),
 });
 
 export type ParsedEnv = z.infer<typeof envSchema>;
@@ -123,6 +141,14 @@ export interface Config {
   };
   sessions: {
     abandonAfterMs: number;
+  };
+  candidates: {
+    perSaveMax: number;
+    vecThreshold: number;
+    ftsThreshold: number;
+  };
+  judgments: {
+    orphanAfterMs: number;
   };
 }
 
@@ -241,6 +267,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessions: {
       abandonAfterMs: parsed.SESSION_ABANDON_AFTER_MS,
     },
+    candidates: {
+      perSaveMax: parsed.CANDIDATES_PER_SAVE_MAX,
+      vecThreshold: parsed.CANDIDATE_VEC_THRESHOLD,
+      ftsThreshold: parsed.CANDIDATE_FTS_THRESHOLD,
+    },
+    judgments: {
+      orphanAfterMs: parsed.JUDGMENT_ORPHAN_AFTER_MS,
+    },
   };
 }
 
@@ -269,5 +303,7 @@ export function redactConfig(config: Config): Record<string, unknown> {
     consolidation: config.consolidation,
     rateLimit: config.rateLimit,
     sessions: config.sessions,
+    candidates: config.candidates,
+    judgments: config.judgments,
   };
 }

@@ -94,7 +94,8 @@ consolidation
   .description('Trigger a consolidation pass on demand (server must be running)')
   .option('--token <token>', 'Admin bearer token (falls back to REMBRIC_ADMIN_TOKEN)')
   .option('--url <url>', 'Base URL of the running server (defaults to host/port from config)')
-  .action(async (opts: { token?: string; url?: string }) => {
+  .option('--orphans-only', 'Skip the decay sweep; only promote pending judgments')
+  .action(async (opts: { token?: string; url?: string; orphansOnly?: boolean }) => {
     const { runConsolidationRunNow } = await import('./cli/consolidation-cli.js');
     await runConsolidationRunNow(opts);
   });

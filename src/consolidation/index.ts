@@ -4,12 +4,11 @@
  * (consolidation_runs / consolidation_ops) directly via Drizzle.
  */
 
-export {
-  findRedundancyCandidates,
-  findDriftCandidates,
-  findContradictionCandidates,
-} from './candidates.js';
-export type { ScopeKey, CandidatePair, CandidatesOptions } from './candidates.js';
+// Note: findRedundancyCandidates / findDriftCandidates /
+// findContradictionCandidates were removed in v0.5. Save-time candidate
+// detection in `memory.save` + `RelationsService` superseded them; the
+// orphan-promotion pass in `ConsolidationRunner` handles the long tail.
+export type { ScopeKey } from './candidates.js';
 
 export { findDecayCandidates, DEFAULT_DECAY } from './decay.js';
 export type { DecayThresholds } from './decay.js';

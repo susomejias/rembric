@@ -13,6 +13,7 @@ import { loadConfig } from '../config.js';
 export async function runConsolidationRunNow(opts: {
   token?: string;
   url?: string;
+  orphansOnly?: boolean;
 }): Promise<void> {
   const config = loadConfig();
   const baseUrl = opts.url ?? `http://${config.host}:${config.port}`;
@@ -26,7 +27,10 @@ export async function runConsolidationRunNow(opts: {
     return;
   }
 
-  const url = `${baseUrl.replace(/\/$/, '')}/admin/consolidation/run`;
+  const path = opts.orphansOnly
+    ? '/admin/consolidation/run?mode=orphans-only'
+    : '/admin/consolidation/run';
+  const url = `${baseUrl.replace(/\/$/, '')}${path}`;
   process.stderr.write(`rembric: triggering consolidation at ${url} …\n`);
 
   let response: Response;

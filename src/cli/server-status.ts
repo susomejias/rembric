@@ -4,6 +4,7 @@ import { loadConfig } from '../config.js';
 import { createDb } from '../db/index.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
+import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory } from '../db/schema/memory.js';
 import { projects } from '../db/schema/projects.js';
 import { tokens } from '../db/schema/tokens.js';
@@ -66,6 +67,19 @@ export function runStatus(): void {
         { active: 0, ended: 0, abandoned: 0 },
       );
 
+    const relationsByStatus = handle.db
+      .select({ status: memoryRelations.status, n: sql<number>`count(*)` })
+      .from(memoryRelations)
+      .groupBy(memoryRelations.status)
+      .all()
+      .reduce<Record<string, number>>(
+        (acc, row) => {
+          acc[row.status] = Number(row.n);
+          return acc;
+        },
+        { pending: 0, judged: 0, orphaned: 0 },
+      );
+
     process.stdout.write(
       JSON.stringify(
         {
@@ -77,6 +91,11 @@ export function runStatus(): void {
             active: sessionsByStatus.active ?? 0,
             ended: sessionsByStatus.ended ?? 0,
             abandoned: sessionsByStatus.abandoned ?? 0,
+          },
+          relations: {
+            pending: relationsByStatus.pending ?? 0,
+            judged: relationsByStatus.judged ?? 0,
+            orphaned: relationsByStatus.orphaned ?? 0,
           },
           lastConsolidation: lastConsolidation
             ? { at: lastConsolidation.startedAt, summary: lastConsolidation.summary }

@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import type { Db } from '../db/client.js';
 import { consolidationOps, type ConsolidationOpType } from '../db/schema/consolidation.js';
+import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory, type Memory } from '../db/schema/memory.js';
 
 /**
@@ -205,6 +206,41 @@ export function recordFailed(
 }
 
 /**
+ * Journal an orphan-promotion verdict. Called by the consolidator after
+ * `RelationsService.judge` / `.orphan` writes the actual relation row.
+ *
+ * `createdId` is set to the `judgment_id` so `undoOp` can find the
+ * relation row to revert. `affectedIds` carries `[sourceId, targetId]`
+ * for backwards-compatible journaling.
+ */
+export function recordOrphanPromote(
+  db: Db,
+  input: {
+    consolidationId: string;
+    judgmentId: string;
+    sourceId: string;
+    targetId: string;
+    relation: string | null;
+    reasoning: string;
+  },
+): { opId: string } {
+  const now = new Date();
+  const opId = ulid(now.getTime());
+  db.insert(consolidationOps)
+    .values({
+      id: opId,
+      consolidationId: input.consolidationId,
+      opType: 'orphan_promote',
+      affectedIds: [input.sourceId, input.targetId],
+      createdId: input.judgmentId,
+      reasoning: `${input.relation ?? 'orphaned'}: ${input.reasoning}`,
+      appliedAt: now,
+    })
+    .run();
+  return { opId };
+}
+
+/**
  * Undo a previously applied consolidation op. Re-activates the affected memories
  * and (for merges) archives the consolidated row so it no longer surfaces
  * in active retrieval.
@@ -226,6 +262,49 @@ export function undoOp(db: Db, opId: string): void {
       }
     } else if (op.opType === 'decay' || op.opType === 'archive') {
       tx.update(memory).set({ status: 'active' }).where(inArray(memory.id, op.affectedIds)).run();
+    } else if (op.opType === 'orphan_promote' && op.createdId) {
+      // The createdId carries the judgment_id of the relation row that
+      // was promoted. Undo:
+      //   - relation 'supersedes' reverts the target memory to active
+      //     and drops the target id from the source's replaces[]
+      //   - other relations: simply flip the relation row back to pending
+      const judgmentId = op.createdId;
+      const rel = tx
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.judgmentId, judgmentId))
+        .get();
+      if (rel) {
+        if (rel.relation === 'supersedes' && rel.status === 'judged') {
+          tx.update(memory)
+            .set({ status: 'active' as const })
+            .where(eq(memory.id, rel.targetId))
+            .run();
+          const source = tx
+            .select({ replaces: memory.replaces })
+            .from(memory)
+            .where(eq(memory.id, rel.sourceId))
+            .get();
+          if (source) {
+            const stripped = source.replaces.filter((id) => id !== rel.targetId);
+            tx.update(memory).set({ replaces: stripped }).where(eq(memory.id, rel.sourceId)).run();
+          }
+        }
+        // Flip the relation row back to pending so the consolidator can
+        // pick it up again on its next pass.
+        tx.update(memoryRelations)
+          .set({
+            status: 'pending' as const,
+            relation: null,
+            reason: null,
+            confidence: null,
+            judgedAt: null,
+            markedByKind: null,
+            markedByActor: null,
+          })
+          .where(eq(memoryRelations.id, rel.id))
+          .run();
+      }
     } else {
       // noop / failed: nothing to revert.
     }
