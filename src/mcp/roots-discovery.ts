@@ -6,14 +6,18 @@ import type { ProjectsService } from '../services/projects.js';
 /**
  * Server-driven project auto-detection via the MCP `roots` capability.
  *
- * Eager entry point: `server.oninitialized` fires `ensureRootsDiscoveryRun`
- * as soon as the client sends `notifications/initialized`, so the router
- * is populated before the first scope-aware tool call. A handful of
- * scope-aware tool handlers (`project.current`, `memory.session_start`,
- * `memory.{save,search,get,confirm}`) re-call `ensureRootsDiscoveryRun`
- * as a belt-and-suspenders fallback for clients that never emit
- * `notifications/initialized` and to handle the eager-vs-tool-call race
- * (single-flight via `SessionRouter.discoveryInFlight`).
+ * Triggered lazily from scope-aware tool handlers (`project.current`,
+ * `memory.session_start`, `memory.{save,search,get,confirm}`). We tried
+ * an eager `server.oninitialized` hook (commit 1379c93) but found that
+ * the MCP HTTP streamable client doesn't open its server→client SSE
+ * channel until AFTER `notifications/initialized` has been processed,
+ * so a `roots/list` issued from `oninitialized` always times out and
+ * poisons the discovery slot for the rest of the transport. By the
+ * time the agent issues a tool call the channel is up, so `listRoots`
+ * succeeds there.
+ *
+ * Single-flight semantics across concurrent lazy callers come from
+ * `SessionRouter.discoveryInFlight`.
  *
  * The behaviour is intentionally conservative:
  *
@@ -28,7 +32,11 @@ import type { ProjectsService } from '../services/projects.js';
  * either of those happen.
  */
 
-const ROOTS_LIST_TIMEOUT_MS = 2000;
+// 1s is enough for any compliant client whose SSE channel is open by
+// the time the lazy path fires (first tool call from the agent).
+// Lower values cap the worst-case latency hit when a non-compliant
+// client advertises `roots` but never responds.
+const ROOTS_LIST_TIMEOUT_MS = 1000;
 
 /**
  * One slot per `(tokenId, mcpSessionId)` records whether discovery has

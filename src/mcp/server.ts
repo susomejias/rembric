@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import type { Db } from '../db/client.js';
-import { tryGetRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
@@ -24,7 +23,6 @@ import {
   judgeSchema,
   suggestTopicKeySchema,
 } from './relations-tools.js';
-import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 import {
   buildSessionsHandlers,
   capturePassiveSchema,
@@ -286,29 +284,6 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     relationsHandlers.compare,
   );
-
-  // ── notifications/initialized → eager roots discovery ─────────────
-  // The MCP client sends `notifications/initialized` immediately after
-  // the `initialize` response. Hooking it lets us run roots discovery
-  // ONCE per transport, eagerly, so the router is populated before any
-  // scope-aware tool call (incl. `memory.save`) lands. Single-flight
-  // semantics are enforced via `SessionRouter.discoveryInFlight`, so a
-  // tool call that races ahead awaits the same promise instead of
-  // triggering a second `listRoots`. Spec-violating clients that never
-  // send `notifications/initialized` still get covered by the lazy
-  // fallback inside the scope-aware handlers (`resolveEffectiveProject`,
-  // `project.current`, `memory.session_start`).
-  server.server.oninitialized = () => {
-    const ctx = tryGetRequestContext();
-    if (!ctx?.mcpSessionId) return;
-    const tokenId = ctx.token.id;
-    const mcpSessionId = ctx.mcpSessionId;
-    const pathSlug = ctx.requestedSlug;
-    void ensureRootsDiscoveryRun(
-      { server, router: opts.router, projects: opts.projects },
-      { tokenId, mcpSessionId, pathSlug },
-    );
-  };
 
   // ── notifications/roots/list_changed ───────────────────────────────
   // The client emits this notification when its workspace roots change.
