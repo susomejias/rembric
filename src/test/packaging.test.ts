@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * 12.1 / 12.2 — packaging shape.
@@ -25,7 +25,10 @@ import { describe, expect, it } from 'vitest';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
 
+let cachedFiles: string[] | undefined;
+
 function loadPackaged(): string[] {
+  if (cachedFiles) return cachedFiles;
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -33,16 +36,19 @@ function loadPackaged(): string[] {
   const start = out.indexOf('[');
   if (start === -1) throw new Error(`npm pack --json produced no array: ${out.slice(0, 200)}`);
   const json = JSON.parse(out.slice(start)) as Array<{ files: Array<{ path: string }> }>;
-  return json[0]!.files.map((f) => f.path).sort();
+  cachedFiles = json[0]!.files.map((f) => f.path).sort();
+  return cachedFiles;
 }
 
 describe('npm pack tarball shape', () => {
+  // `npm pack` runs the `prepack` lifecycle (which builds `dist/`), so calling
+  // it once up-front both warms the cache and ensures later tests aren't the
+  // ones paying the build cost.
+  beforeAll(() => {
+    loadPackaged();
+  });
+
   it('produces only the allow-listed top-level entries', () => {
-    if (!existsSync(join(repoRoot, 'dist'))) {
-      throw new Error(
-        'dist/ is missing — run `pnpm build` once before invoking this test, or add it to the test pipeline.',
-      );
-    }
     const files = loadPackaged();
     const allowedRoots = new Set(['dist', 'examples', 'package.json', 'README.md', 'LICENSE']);
     for (const f of files) {
