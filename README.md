@@ -230,6 +230,14 @@ Migrations are idempotent and applied on startup.
 The DB is one SQLite file in `REMBRIC_DATA_DIR` (`~/.rembric/data.db` by
 default). Cold backup: stop the server, copy the file. Live backup: use
 SQLite's online backup API or a tool like `litestream` streaming to S3/R2.
+See [docs/backup.md](./docs/backup.md) for `rsync` / snapshot / litestream
+recipes and what NOT to copy.
+
+## More docs
+
+- [docs/agents.md](./docs/agents.md) — wiring Claude Code, Codex CLI, and Hermes to rembric
+- [docs/backup.md](./docs/backup.md) — backup strategies (rsync, snapshots, litestream)
+- [docs/troubleshooting.md](./docs/troubleshooting.md) — common errors, LLM endpoint issues, locked-DB recovery
 
 ## Contributing
 
