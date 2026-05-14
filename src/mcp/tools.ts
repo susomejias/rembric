@@ -29,11 +29,15 @@ import { pendingSuggestionGate, suggestionPendingMessage } from './project-sugge
  *     - memory.search                →  only that project's memories
  *     - memory.get / .confirm        →  cross-scope ids are 'not_found'
  *
- *   /mcp  (no slug)            → scope = global
+ *   /mcp  (no slug)            → scope = global (unless `project.use` ran)
  *     - memory.save scope='project' →  mcpError 'project_required'
+ *                                     (unless `project.use` activated one
+ *                                      for this transport — see
+ *                                      `resolveEffectiveProject`)
  *     - memory.save scope='global'  →  saved as user-wide
- *     - memory.search                →  globals only
- *     - memory.get / .confirm        →  project ids are 'not_found'
+ *     - memory.search                →  globals only (or the active project
+ *                                       set via `project.use`)
+ *     - memory.get / .confirm        →  project ids are 'not_found' (idem)
  */
 
 const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const;
@@ -99,10 +103,30 @@ function ok(payload: unknown) {
   };
 }
 
-/** Translate the request context into the scope to operate under. */
-function scopeFromContext(): Scope {
+/**
+ * Resolve the project that subsequent operations should target.
+ *
+ * Sources, in order of precedence:
+ *   1. `ctx.project` — set by the HTTP layer when the URL was `/mcp/<slug>`
+ *      and the slug resolved to an existing project.
+ *   2. `SessionRouter` entry — set by an explicit `project.use({slug})` or
+ *      by roots-based discovery on a path-less `/mcp` connection.
+ *
+ * Without source #2 a `project.use` call would update only `project.current`
+ * and have no effect on subsequent `memory.*` calls (the bug this helper
+ * was added to fix). Path-scoped connections that pointed at a NON-existent
+ * slug are intentionally NOT covered — the earlier `project_not_found`
+ * check in `handleSave` fires first, and we only consult the router on
+ * truly unscoped connections (`ctx.requestedSlug === null`).
+ */
+function resolveEffectiveProject(deps: ToolDeps): { id: string; slug: string } | null {
   const ctx = getRequestContext();
-  return ctx.project ? projectScope(ctx.project.id) : SCOPE_GLOBAL;
+  if (ctx.project) return ctx.project;
+  if (ctx.requestedSlug !== null) return null;
+  if (!ctx.mcpSessionId || !deps.router || !deps.projects) return null;
+  const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
+  if (!entry?.projectId) return null;
+  return deps.projects.getById(entry.projectId) ?? null;
 }
 
 function handleSave(
@@ -138,10 +162,16 @@ function handleSave(
     );
   }
 
+  // Pick up the project the agent already activated via `project.use` on
+  // this transport (or that roots discovery activated), in addition to the
+  // URL-derived `ctx.project`. Mirrors the precedence used by
+  // `handleSessionStart` and `project.current`.
+  const activeProject = resolveEffectiveProject(deps);
+
   // When roots-based discovery surfaced suggestions the agent has not yet
   // acted on, refuse the silent fallback to global. The agent must either
   // pass scope='global' explicitly, or call project.use({slug, autocreate}).
-  if (!ctx.project && args.scope === 'project' && deps.router && deps.projects) {
+  if (!activeProject && args.scope === 'project' && deps.router && deps.projects) {
     const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
     if (pending) {
       return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
@@ -151,7 +181,7 @@ function handleSave(
   }
 
   // Unscoped connections cannot persist project memories without a target.
-  if (!ctx.project && args.scope === 'project') {
+  if (!activeProject && args.scope === 'project') {
     return mcpError(
       'project_required',
       'This MCP connection has no active project. To save a project memory, either: ' +
@@ -161,11 +191,11 @@ function handleSave(
     );
   }
 
-  const scope: Scope = ctx.project ? projectScope(ctx.project.id) : SCOPE_GLOBAL;
+  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
   const authzTarget = {
     scope: scope.kind,
     projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: ctx.project?.slug ?? null,
+    projectSlug: activeProject?.slug ?? null,
   } as const;
   if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${scope.kind} memories`);
@@ -263,12 +293,13 @@ function handleSearch(
   },
 ) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext();
+  const activeProject = resolveEffectiveProject(deps);
+  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
 
   const authzTarget = {
     scope: scope.kind,
     projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: ctx.project?.slug ?? null,
+    projectSlug: activeProject?.slug ?? null,
   } as const;
   if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope.kind} memories`);
@@ -314,7 +345,8 @@ function handleSearch(
 
 function handleGet(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext();
+  const activeProject = resolveEffectiveProject(deps);
+  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
   try {
     const result = deps.memory.get(args.id, scope);
     if (!result) {
@@ -323,7 +355,7 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
     const authzTarget = {
       scope: result.memory.scope,
       projectId: result.memory.projectId,
-      projectSlug: ctx.project?.slug ?? null,
+      projectSlug: activeProject?.slug ?? null,
     } as const;
     if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot read this memory`);
@@ -361,12 +393,13 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
 
 function handleConfirm(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext();
+  const activeProject = resolveEffectiveProject(deps);
+  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
   try {
     const authzTarget = {
       scope: scope.kind,
       projectId: scope.kind === 'project' ? scope.projectId : null,
-      projectSlug: ctx.project?.slug ?? null,
+      projectSlug: activeProject?.slug ?? null,
     } as const;
     if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm in this scope`);

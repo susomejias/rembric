@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
+import { SessionRouter } from '../server/session-router.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
@@ -232,5 +233,96 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
       Promise.resolve(handlers.confirm({ id: projectAId })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
+  });
+});
+
+describe('memory.* — router-activated project on an unscoped /mcp connection', () => {
+  // Reproduces the bug where calling `project.use({slug})` on a path-less
+  // /mcp connection correctly updates the SessionRouter and is reported by
+  // `project.current`, yet subsequent `memory.save({scope:'project'})`
+  // calls still returned `project_required` because the memory handlers
+  // only consulted `ctx.project` (URL-derived) and never the router.
+
+  const MCP_SESSION = 'mcp-sess-1';
+
+  function unscopedContextWithSession(): RequestContext {
+    const token: Token = {
+      id: 'tk_test',
+      name: 'test-token',
+      hash: 'hash',
+      scope: ADMIN_TOKEN_SCOPE,
+      projectId: null,
+      createdAt: new Date(),
+      expiresAt: null,
+      revokedAt: null,
+    };
+    return {
+      token,
+      scope: ADMIN_TOKEN_SCOPE,
+      project: null,
+      requestedSlug: null,
+      mcpSessionId: MCP_SESSION,
+    };
+  }
+
+  let router: SessionRouter;
+  let routerHandlers: ReturnType<typeof buildHandlers>;
+
+  beforeEach(() => {
+    router = new SessionRouter();
+    routerHandlers = buildHandlers({ memory, router, projects });
+  });
+
+  it('memory.save({scope:project}) succeeds after project.use activates a project', async () => {
+    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
+    const r = await runWithContext(unscopedContextWithSession(), () =>
+      Promise.resolve(
+        routerHandlers.save({
+          scope: 'project',
+          type: 'user',
+          content: 'router-activated save',
+        }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.scope).toBe('project');
+    expect(persisted?.projectId).toBe(projectA.id);
+  });
+
+  it('memory.save without router activation still returns project_required', async () => {
+    const r = await runWithContext(unscopedContextWithSession(), () =>
+      Promise.resolve(
+        routerHandlers.save({ scope: 'project', type: 'user', content: 'no project' }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('project_required');
+  });
+
+  it('memory.search returns the router-activated project memories, not globals', async () => {
+    memory.save({ type: 'user', content: 'global only' }, SCOPE_GLOBAL);
+    const saved = memory.save({ type: 'user', content: 'in project A' }, projectScope(projectA.id));
+    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
+    const r = await runWithContext(unscopedContextWithSession(), () =>
+      Promise.resolve(routerHandlers.search({})),
+    );
+    const { memories } = parseText<{
+      memories: { id: string; scope: string; projectId: string | null }[];
+    }>(r);
+    expect(memories.some((m) => m.id === saved.id)).toBe(true);
+    expect(memories.every((m) => m.scope === 'project' && m.projectId === projectA.id)).toBe(true);
+  });
+
+  it('memory.get on a project id resolves once the router has activated that project', async () => {
+    const saved = memory.save({ type: 'user', content: 'gettable' }, projectScope(projectA.id));
+    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
+    const r = await runWithContext(unscopedContextWithSession(), () =>
+      Promise.resolve(routerHandlers.get({ id: saved.id })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const payload = parseText<{ memory: { id: string } }>(r);
+    expect(payload.memory.id).toBe(saved.id);
   });
 });
