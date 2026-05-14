@@ -45,3 +45,6 @@ jobs:
 
       - name: Build (artifact sanity)
         run: pnpm run build
+
+      - name: Smoke test (install tarball + npx rembric llm ping)
+        run: node scripts/smoke-pack.mjs
