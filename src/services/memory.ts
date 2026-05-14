@@ -45,6 +45,28 @@ export interface SaveMemoryInput {
    * with `session_id = NULL` for backwards compatibility.
    */
   sessionId?: string | null;
+  /**
+   * Optional stable topic identifier. When supplied, the save acts as
+   * an upsert: the previously-active row in `(scope, project_id,
+   * topic_key)` is auto-superseded and the new row gains it in its
+   * `replaces[]` array. Empty string is normalized to null. Max 128
+   * chars; NUL bytes rejected.
+   */
+  topicKey?: string | null;
+}
+
+/**
+ * Output of `MemoryService.save` when called via `saveWithCandidates`.
+ * Pure `save()` keeps its old signature (just the row) so existing
+ * callers don't have to change.
+ */
+export interface SaveResult {
+  memory: Memory;
+  /**
+   * If the topic_key upsert path fired, this is the row that was just
+   * superseded (its status moved active → superseded). Null otherwise.
+   */
+  supersededByTopicKey: Memory | null;
 }
 
 export interface SearchMemoriesInput {
@@ -75,35 +97,80 @@ export class MemoryService {
   // ────────────────────────────────────────────────────────────────────
 
   save(input: SaveMemoryInput, scope: Scope): Memory {
+    const { memory: m } = this.saveWithTopicKey(input, scope);
+    return m;
+  }
+
+  /**
+   * Save plus topic_key upsert. Returns both the new row and the row
+   * that was superseded (if any) so the MCP layer can write the
+   * accompanying `memory_relations` rows in the same transaction.
+   *
+   * The save itself is atomic: insert + supersede happen in a single
+   * SQLite transaction; a failure rolls both back.
+   */
+  saveWithTopicKey(input: SaveMemoryInput, scope: Scope): SaveResult {
     if (input.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
     }
+    const topicKey = normalizeTopicKey(input.topicKey);
 
     const ts = this.now();
     const id = ulid(ts.getTime());
-    const inserted = this.db
-      .insert(memory)
-      .values({
-        id,
-        scope: scope.kind === 'global' ? 'global' : 'project',
-        projectId: scope.kind === 'project' ? scope.projectId : null,
-        type: input.type,
-        content: input.content,
-        tags: input.tags ?? [],
-        status: 'active',
-        replaces: [],
-        createdAt: ts,
-        lastSeenAt: ts,
-        source: input.source ?? null,
-        sessionId: input.sessionId ?? null,
-      })
-      .returning()
-      .get();
 
-    if (!inserted) {
-      throw new DomainError('conflict', 'memory.save: insert did not return a row');
-    }
-    return inserted;
+    return this.db.transaction((tx): SaveResult => {
+      // Locate any prior active row in the same (scope, project_id, topic_key).
+      let supersededByTopicKey: Memory | null = null;
+      let replacesPrefix: string[] = [];
+      if (topicKey !== null) {
+        const scopeClause =
+          scope.kind === 'project'
+            ? sql`scope = 'project' AND project_id = ${scope.projectId}`
+            : sql`scope = 'global' AND project_id IS NULL`;
+        const prior = tx
+          .select()
+          .from(memory)
+          .where(sql`${scopeClause} AND topic_key = ${topicKey} AND status = 'active'`)
+          .limit(1)
+          .get();
+        if (prior) {
+          supersededByTopicKey = prior;
+          replacesPrefix = [prior.id];
+        }
+      }
+
+      const inserted = tx
+        .insert(memory)
+        .values({
+          id,
+          scope: scope.kind === 'global' ? 'global' : 'project',
+          projectId: scope.kind === 'project' ? scope.projectId : null,
+          type: input.type,
+          content: input.content,
+          tags: input.tags ?? [],
+          status: 'active',
+          replaces: replacesPrefix,
+          createdAt: ts,
+          lastSeenAt: ts,
+          source: input.source ?? null,
+          sessionId: input.sessionId ?? null,
+          topicKey,
+        })
+        .returning()
+        .get();
+      if (!inserted) {
+        throw new DomainError('conflict', 'memory.save: insert did not return a row');
+      }
+
+      if (supersededByTopicKey) {
+        tx.update(memory)
+          .set({ status: 'superseded' as const })
+          .where(and(eq(memory.id, supersededByTopicKey.id), eq(memory.status, 'active')))
+          .run();
+      }
+
+      return { memory: inserted, supersededByTopicKey };
+    });
   }
 
   /**
@@ -330,4 +397,25 @@ function clampLimit(limit: number | undefined): number {
   if (limit < 1) return 1;
   if (limit > 200) return 200;
   return Math.floor(limit);
+}
+
+/**
+ * Normalize `topic_key`:
+ *   - undefined or null   → null
+ *   - empty / whitespace  → null (degenerate; treat as "no topic")
+ *   - > 128 chars         → throws invalid_input
+ *   - NUL bytes           → throws invalid_input (SQLite TEXT does not
+ *                            tolerate them)
+ */
+function normalizeTopicKey(input: string | null | undefined): string | null {
+  if (input == null) return null;
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > 128) {
+    throw new DomainError('invalid_input', 'memory.save: topic_key exceeds 128 characters');
+  }
+  if (trimmed.includes('\0')) {
+    throw new DomainError('invalid_input', 'memory.save: topic_key contains NUL byte');
+  }
+  return trimmed;
 }
