@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/susomejias/rembric/compare/v0.3.0...v0.3.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **mcp:** resolve router-activated project in memory.* handlers ([7b5dd3d](https://github.com/susomejias/rembric/commit/7b5dd3d0dfc822391890074c08178a295a5f03cc))
+
+
+### Documentation
+
+* **agents:** broaden setup coverage + memory protocol snippet ([dff71d5](https://github.com/susomejias/rembric/commit/dff71d5722e2e7f1d59cc274b63b00794cc40f2f))
+
 ## [0.3.0](https://github.com/susomejias/rembric/compare/v0.2.1...v0.3.0) (2026-05-14)
 
 ### Features
