@@ -60,6 +60,34 @@ For independent analysis (no preceding save), use `memory.compare({memoryIdA, me
 
 See [docs/relations.md](./relations.md) for the relation taxonomy in full.
 
+### Handling `project_suggestion_pending`
+
+When an MCP client lands on the path-less `/mcp` endpoint and roots-based discovery surfaces a slug that does not yet exist as a project, write tools (`memory.save` with default scope, `memory.session_start` with no `project` arg) refuse to silently fall through to `scope='global'`. They return a structured error:
+
+```json
+{
+  "ok": false,
+  "code": "project_suggestion_pending",
+  "message": "No project is active and roots-based discovery surfaced suggestions. Either pass scope:'global' explicitly, or call project.use({slug:'<one of suggestedSlugs>', autocreate:true}).",
+  "suggestedSlugs": ["acme-research"]
+}
+```
+
+The agent has exactly two resolutions, and the choice belongs to the user:
+
+- **Stay global**: re-issue the same call passing `scope: 'global'` explicitly. The write lands in the user-wide global scope.
+- **Mint the suggested project**: call `project.use({slug: '<suggestedSlug>', autocreate: true})` first. The project is created, pinned to the session, and the original call (re-issued without `scope`) lands in `scope='project'`.
+
+The contract: never autocreate or autopin silently. Surface the choice to the user and let them direct it.
+
+### Deleting sessions
+
+Operators can retire stale sessions from `rembric session delete <id>` or from the `/dashboard/sessions` row form. Delete is **soft**: the row stays in the table with a `deleted_at` timestamp, every `memory.session_id` reference keeps pointing at it (audit trail preserved), but the row is hidden from default listings.
+
+- CLI: `rembric session list --include-deleted` to surface them.
+- Dashboard: `?include_deleted=1` on `/dashboard/sessions` or the row's detail view exposes an `Undelete` button.
+- MCP: `memory.session_end` / `memory.session_summary` against a deleted row return `code: 'session_deleted'`. Ask the operator to undelete before retrying.
+
 ---
 
 ## Claude Code (validated)

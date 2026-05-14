@@ -59,7 +59,7 @@ Brand: **Rembric**. CLI / binary / npm package: `rembric` (singular).
    │   ┌───────────────────────────────────────────────────────────────┐   │
    │   │  SQLite (Drizzle ORM, append-only + tombstones)               │   │
    │   │   memory (+ topic_key) · projects · confirmations · tokens    │   │
-   │   │   sessions · prompts · memory_relations (judgment graph)      │   │
+   │   │   sessions (+ deleted_at) · prompts · memory_relations        │   │
    │   │   consolidation_runs · consolidation_ops · dashboard_sessions │   │
    │   │   + memory_fts  (FTS5)      + memory_vec  (sqlite-vec)        │   │
    │   └───────────────────────────────▲───────────────────────────────┘   │
@@ -183,6 +183,20 @@ The `X-Rembric-Project: <slug>` header is also accepted as an equivalent way
 to scope, useful when an agent doesn't let you change the URL path.
 
 Generate a token with `rembric token create <name>`.
+
+### Operating the CLI
+
+| Command                                                           | Purpose                                                                                  |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `rembric project create <slug> [--name <name>]`                   | Mint a project. Slug must match `[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?`.                    |
+| `rembric project list [--all] [--table]`                          | List active (or `--all`) projects. JSON by default; `--table` for human-readable output. |
+| `rembric session list [--status …] [--include-deleted] [--table]` | Inspect agent sessions. Add `--include-deleted` to surface soft-deleted rows.            |
+| `rembric session delete <id>`                                     | Soft-delete a session (audit trail preserved; hidden from default listings).             |
+| `rembric token create <name> [--project <slug>]`                  | Mint a bearer token. Plaintext is shown exactly once.                                    |
+| `rembric token revoke <name>`                                     | Revoke a token (effective immediately).                                                  |
+
+Projects are also creatable from `/dashboard/projects` via the always-visible
+form at the top of the page — same validation, same end state.
 
 ## Configuration
 
