@@ -1,23 +1,28 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { loadConfig } from '../config.js';
 import { createDb } from '../db/index.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
 import { projects } from '../db/schema/projects.js';
 import { tokens } from '../db/schema/tokens.js';
+import { AgentSessionsService } from '../services/agent-sessions.js';
+import { DomainError } from '../services/errors.js';
 
 /**
- * `rembric session list` — read-only report of agent sessions.
+ * `rembric session list` / `delete` — operator-facing inspection and
+ * lifecycle for agent sessions.
  *
- * The CLI hits the local SQLite directly (read-only); operators with
- * a running server share the same data file. JSON output by default;
- * `--table` switches to a column-aligned text table for human reading.
+ * The CLI hits the local SQLite directly (read-only for list, read-write
+ * for delete); operators with a running server share the same data file.
+ * JSON output by default; `--table` switches to a column-aligned text
+ * table for human reading.
  */
 
 export interface SessionListArgs {
   limit?: number;
   status?: 'active' | 'ended' | 'abandoned';
   json?: boolean;
+  includeDeleted?: boolean;
 }
 
 export function runSessionList(args: SessionListArgs = {}): void {
@@ -32,6 +37,7 @@ export function runSessionList(args: SessionListArgs = {}): void {
         status: agentSessions.status,
         startedAt: agentSessions.startedAt,
         endedAt: agentSessions.endedAt,
+        deletedAt: agentSessions.deletedAt,
         tokenName: tokens.name,
         projectSlug: projects.slug,
       })
@@ -41,9 +47,10 @@ export function runSessionList(args: SessionListArgs = {}): void {
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit);
 
-    const rows = args.status
-      ? query.where(eq(agentSessions.status, args.status)).all()
-      : query.all();
+    const conditions = [];
+    if (args.status) conditions.push(eq(agentSessions.status, args.status));
+    if (!args.includeDeleted) conditions.push(isNull(agentSessions.deletedAt));
+    const rows = conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
 
     if (args.json === false) {
       process.stdout.write(renderTable(rows));
@@ -55,12 +62,46 @@ export function runSessionList(args: SessionListArgs = {}): void {
   }
 }
 
+export interface SessionDeleteArgs {
+  id: string;
+}
+
+export function runSessionDelete(args: SessionDeleteArgs): void {
+  const config = loadConfig();
+  const handle = createDb({ dataDir: config.dataDir });
+  try {
+    const sessions = new AgentSessionsService(handle.db);
+    const updated = sessions.softDelete(args.id, { adminBypass: true });
+    process.stdout.write(
+      JSON.stringify(
+        {
+          id: updated.id,
+          status: updated.status,
+          deletedAt: updated.deletedAt,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  } catch (err) {
+    if (err instanceof DomainError) {
+      process.stderr.write(`rembric: ${err.message}\n`);
+      process.exit(1);
+      return;
+    }
+    throw err;
+  } finally {
+    handle.close();
+  }
+}
+
 interface RenderableRow {
   id: string;
   agent: string;
   status: string;
   startedAt: Date | null;
   endedAt: Date | null;
+  deletedAt: Date | null;
   tokenName: string | null;
   projectSlug: string | null;
 }
@@ -71,7 +112,7 @@ function renderTable(rows: RenderableRow[]): string {
   const lines = rows.map((r) => [
     r.id,
     r.agent,
-    r.status,
+    r.deletedAt ? `${r.status} (deleted)` : r.status,
     r.projectSlug ?? '(global)',
     r.tokenName ?? '(deleted)',
     r.startedAt ? r.startedAt.toISOString() : '',

@@ -68,23 +68,56 @@ tokenCmd
     runTokenRevoke(name);
   });
 
-const sessionCmd = program.command('session').description('Read-only inspection of agent sessions');
+const projectCmd = program.command('project').description('Manage projects');
+projectCmd
+  .command('create <slug>')
+  .description('Create a project with the given slug (must match the strict slug regex)')
+  .option('--name <name>', 'Optional display name (cosmetic only; slug remains the identity)')
+  .action(async (slug: string, opts: { name?: string }) => {
+    const { runProjectCreate } = await import('./cli/project-cli.js');
+    runProjectCreate({ slug, name: opts.name });
+  });
+projectCmd
+  .command('list')
+  .description('List projects')
+  .option('--all', 'Include archived projects (default: active only)')
+  .option('--table', 'Render as a text table (default: JSON)')
+  .action(async (opts: { all?: boolean; table?: boolean }) => {
+    const { runProjectList } = await import('./cli/project-cli.js');
+    runProjectList({ json: !opts.table, includeArchived: opts.all });
+  });
+
+const sessionCmd = program.command('session').description('Manage agent sessions');
 sessionCmd
   .command('list')
   .description('List recent agent sessions')
   .option('--status <status>', 'Filter by status: active | ended | abandoned')
   .option('--limit <n>', 'Maximum rows to return (default 50)', (v: string) => parseInt(v, 10))
+  .option('--include-deleted', 'Include soft-deleted sessions (default: hide)')
   .option('--table', 'Render as a text table (default: JSON)')
   .action(
     async (opts: {
       status?: 'active' | 'ended' | 'abandoned';
       limit?: number;
+      includeDeleted?: boolean;
       table?: boolean;
     }) => {
       const { runSessionList } = await import('./cli/session-cli.js');
-      runSessionList({ status: opts.status, limit: opts.limit, json: !opts.table });
+      runSessionList({
+        status: opts.status,
+        limit: opts.limit,
+        includeDeleted: opts.includeDeleted,
+        json: !opts.table,
+      });
     },
   );
+sessionCmd
+  .command('delete <id>')
+  .description('Soft-delete a session (hides it from listings; preserves audit trail)')
+  .action(async (id: string) => {
+    const { runSessionDelete } = await import('./cli/session-cli.js');
+    runSessionDelete({ id });
+  });
 
 const consolidation = program
   .command('consolidation')
