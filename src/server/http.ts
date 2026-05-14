@@ -126,7 +126,9 @@ async function handleMcpRequest(
   opts: CreateHttpServerOptions,
   pathname: string,
 ): Promise<void> {
-  // 0. Extract project slug from the URL path, if any. Path wins over header.
+  // 0. Extract project slug from the URL path, if any. The header
+  // `X-Rembric-Project` is intentionally ignored — scope is sourced only
+  // from `/mcp/<slug>` or from explicit `project.use({slug})` tool calls.
   const slug = extractProjectSlug(pathname);
   if (slug && !isValidSlug(slug)) {
     respondJson(res, 400, {
@@ -136,14 +138,13 @@ async function handleMcpRequest(
     });
     return;
   }
-  const projectIdentifier = slug ?? headerString(req.headers['x-rembric-project']) ?? undefined;
 
   // 1. Auth.
   let ctx;
   try {
     ctx = authenticate({
       authorization: headerString(req.headers.authorization),
-      projectIdentifier,
+      pathSlug: slug,
       tokens: opts.tokens,
       projects: opts.projects,
     });
@@ -176,12 +177,16 @@ async function handleMcpRequest(
     body = await readJsonBody(req);
   }
 
-  // 3. Look up or create the transport keyed by mcp-session-id.
+  // 3. Look up or create the transport keyed by mcp-session-id. The
+  // factory receives the URL path slug so the per-session McpServer
+  // emits the right instructions variant.
   const sessionId = headerString(req.headers['mcp-session-id']);
-  const transport = await opts.mcp.getOrCreate(sessionId);
+  const transport = await opts.mcp.getOrCreate(sessionId, {
+    requestedSlug: slug ?? null,
+  });
 
   // 4. Hand off to the transport inside the per-request context.
-  await runWithContext(ctx, async () => {
+  await runWithContext({ ...ctx, mcpSessionId: sessionId ?? null }, async () => {
     await transport.handleRequest(req, res, body);
   });
 }

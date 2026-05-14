@@ -8,16 +8,20 @@ import { memory } from '../db/schema/memory.js';
 import { projects as projectsTable } from '../db/schema/projects.js';
 import { LlmClient } from '../llm/index.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
+import type { DoctorReport } from '../mcp/sessions-tools.js';
+import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { PromptsService } from '../services/prompts.js';
 import { SessionsService } from '../services/sessions.js';
 import { deriveSessionKey, TokensService } from '../services/tokens.js';
 
 import type { DashboardStats } from './dashboard-router.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
 import { RateLimiter } from './rate-limit.js';
+import { SessionRouter } from './session-router.js';
 
 /**
  * Wire dependencies, apply migrations, bootstrap the admin token, and
@@ -41,6 +45,19 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   const tokens = new TokensService(dbHandle.db);
   const projects = new ProjectsService(dbHandle.db);
   const memorySvc = new MemoryService(dbHandle.db);
+  const agentSessionsSvc = new AgentSessionsService(dbHandle.db);
+  const promptsSvc = new PromptsService(dbHandle.db);
+  const sessionRouter = new SessionRouter();
+
+  // Mark inflight sessions from a prior run as abandoned. The router is
+  // an in-process map so a restart wipes routing state; sweeping the DB
+  // keeps it consistent.
+  const abandoned = agentSessionsSvc.abandonStale({
+    olderThanMs: config.sessions.abandonAfterMs,
+  });
+  if (abandoned.abandoned > 0) {
+    console.error(`  ↻ ${abandoned.abandoned} stale session(s) marked abandoned`);
+  }
 
   const firstRun = tokens.count() === 0;
   try {
@@ -64,10 +81,6 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     throw new Error('session secret is missing; set REMBRIC_SESSION_SECRET or REMBRIC_ADMIN_TOKEN');
   }
   const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
-
-  // One McpServer per session (the SDK requires a fresh server per
-  // connected transport). The manager lazily creates pairs on demand.
-  const mcpManager = new McpTransportManager(() => createMcpServer({ memory: memorySvc }));
 
   // LLM clients. Chat and embedding may share a provider (typical
   // OpenAI/Ollama case) or differ; either way we instantiate one client
@@ -108,6 +121,30 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     embedTimer.unref?.();
   }
 
+  // Doctor report builder — captures live services for `memory.doctor`.
+  const buildDoctorReport = buildDoctorReportFactory({
+    dbHandle,
+    agentSessions: agentSessionsSvc,
+    llm: chatLlm,
+    embeddingEnabled: config.embedding.enabled,
+  });
+
+  // One McpServer per session (the SDK requires a fresh server per
+  // connected transport). The factory receives the URL path slug so the
+  // emitted instructions block matches the connection scope.
+  const mcpManager = new McpTransportManager((factoryCtx) =>
+    createMcpServer({
+      memory: memorySvc,
+      projects,
+      agentSessions: agentSessionsSvc,
+      prompts: promptsSvc,
+      router: sessionRouter,
+      db: dbHandle.db,
+      doctor: buildDoctorReport,
+      requestedSlug: factoryCtx.requestedSlug,
+    }),
+  );
+
   // Background consolidation scheduler. Idle until the configured cron fires.
   const runner = new ConsolidationRunner({
     db: dbHandle.db,
@@ -145,7 +182,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       sessions,
       projects,
       memory: memorySvc,
-      getStats: () => collectStats(dbHandle),
+      getStats: () => collectStats(dbHandle, agentSessionsSvc),
     },
   });
 
@@ -188,7 +225,93 @@ function printReadyBanner(url: string, firstRun: boolean): void {
   console.error('');
 }
 
-function collectStats(dbHandle: DbHandle): DashboardStats {
+/**
+ * Build a one-shot operational report for `memory.doctor`. The closure
+ * captures the live services so this can be called inside any handler.
+ */
+function buildDoctorReportFactory(deps: {
+  dbHandle: DbHandle;
+  agentSessions: AgentSessionsService;
+  llm: LlmClient;
+  embeddingEnabled: boolean;
+}): () => DoctorReport {
+  return () => {
+    const warnings: string[] = [];
+
+    let journalMode = 'unknown';
+    let integrity = 'unknown';
+    let sizeBytes = 0;
+    try {
+      const jmRow = deps.dbHandle.raw
+        .prepare<[], { journal_mode: string }>('PRAGMA journal_mode')
+        .get();
+      journalMode = jmRow?.journal_mode ?? 'unknown';
+      const checkRow = deps.dbHandle.raw
+        .prepare<[], Record<string, string>>('PRAGMA quick_check')
+        .get();
+      if (checkRow) {
+        // SQLite returns the first (and only) column as the result; the
+        // column name is the PRAGMA name. Read the first value.
+        const firstValue = Object.values(checkRow)[0];
+        integrity = firstValue ?? 'unknown';
+      }
+      const sizeRow = deps.dbHandle.raw
+        .prepare<
+          [],
+          { page_count: number; page_size: number }
+        >('SELECT (SELECT page_count FROM pragma_page_count) AS page_count, (SELECT page_size FROM pragma_page_size) AS page_size')
+        .get();
+      sizeBytes = (sizeRow?.page_count ?? 0) * (sizeRow?.page_size ?? 0);
+    } catch (err) {
+      warnings.push(`db pragma read failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    if (integrity !== 'ok') warnings.push(`db integrity: ${integrity}`);
+
+    const lastConsolidation = deps.dbHandle.db
+      .select({
+        startedAt: consolidationRuns.startedAt,
+        summary: consolidationRuns.summary,
+      })
+      .from(consolidationRuns)
+      .orderBy(sql`started_at DESC`)
+      .limit(1)
+      .get();
+
+    let lastRunOps: Record<string, number> = {};
+    if (lastConsolidation?.summary) {
+      try {
+        lastRunOps = JSON.parse(lastConsolidation.summary) as Record<string, number>;
+      } catch {
+        // ignore malformed JSON; the journal stays the source of truth
+      }
+    }
+
+    const backlogRow = deps.dbHandle.db.get<{ v: number }>(
+      sql`SELECT COUNT(*) AS v FROM memory m LEFT JOIN memory_vec v ON v.memory_id = m.id WHERE v.memory_id IS NULL AND m.status != 'archived'`,
+    ) as { v: number } | undefined;
+    const backlog = backlogRow?.v ?? 0;
+    if (deps.embeddingEnabled && backlog > 100) {
+      warnings.push(`embeddings backlog: ${backlog}`);
+    }
+
+    const sessionsByStatus = deps.agentSessions.countByStatus();
+
+    return {
+      db: { open: true, journalMode, integrity, sizeBytes },
+      llm: { reachable: false, lastPingAt: null },
+      embeddings: { enabled: deps.embeddingEnabled, backlog },
+      consolidation: {
+        lastRunAt: lastConsolidation?.startedAt ? lastConsolidation.startedAt.toISOString() : null,
+        lastRunOps,
+      },
+      sessions: { active: sessionsByStatus.active },
+      warnings,
+    };
+  };
+}
+
+function collectStats(dbHandle: DbHandle, agentSessionsSvc: AgentSessionsService): DashboardStats {
   const totalRow = dbHandle.db
     .select({ value: sql<number>`count(*)` })
     .from(memory)
@@ -214,11 +337,14 @@ function collectStats(dbHandle: DbHandle): DashboardStats {
     .limit(1)
     .get();
 
+  const sessionsByStatus = agentSessionsSvc.countByStatus();
+
   return {
     totalMemories: totalRow?.value ?? 0,
     activeMemories: activeRow?.value ?? 0,
     archivedMemories: archivedRow?.value ?? 0,
     projects: projectsRow?.value ?? 0,
     lastConsolidationAt: consolidationRow?.startedAt ?? null,
+    activeSessions: sessionsByStatus.active,
   };
 }

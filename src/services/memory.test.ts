@@ -17,7 +17,7 @@ beforeEach(() => {
   clock = new TestClock();
   projects = new ProjectsService(db.handle.db, clock.now);
   memory = new MemoryService(db.handle.db, clock.now);
-  projectId = projects.findOrCreate('test-app').id;
+  projectId = projects.create({ slug: 'test-app' }).id;
 });
 
 afterEach(() => {
@@ -58,7 +58,7 @@ describe('memory.search', () => {
   });
 
   it('never leaks across projects', () => {
-    const otherId = projects.findOrCreate('other-app').id;
+    const otherId = projects.create({ slug: 'other-app' }).id;
     memory.save({ type: 'user', content: 'in project A' }, projectScope(projectId));
     memory.save({ type: 'user', content: 'in project B' }, projectScope(otherId));
 
@@ -106,7 +106,7 @@ describe('memory.get', () => {
   });
 
   it('returns null for a memory in a different project', () => {
-    const otherId = projects.findOrCreate('other').id;
+    const otherId = projects.create({ slug: 'other' }).id;
     const m = memory.save({ type: 'user', content: 'in other' }, projectScope(otherId));
     const result = memory.get(m.id, projectScope(projectId));
     expect(result).toBeNull();

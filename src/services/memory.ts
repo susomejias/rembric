@@ -38,6 +38,13 @@ export interface SaveMemoryInput {
   content: string;
   tags?: string[];
   source?: MemorySource;
+  /**
+   * Optional explicit agent-session id to stamp on the memory row. When
+   * omitted, the caller's request context (via the in-process
+   * SessionRouter) is consulted; absence there means the memory is saved
+   * with `session_id = NULL` for backwards compatibility.
+   */
+  sessionId?: string | null;
 }
 
 export interface SearchMemoriesInput {
@@ -88,6 +95,7 @@ export class MemoryService {
         createdAt: ts,
         lastSeenAt: ts,
         source: input.source ?? null,
+        sessionId: input.sessionId ?? null,
       })
       .returning()
       .get();

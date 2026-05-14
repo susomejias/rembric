@@ -1,5 +1,3 @@
-import { basename } from 'node:path';
-
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
@@ -12,15 +10,24 @@ import { DomainError } from './errors.js';
  * Project resolution and lifecycle.
  *
  * Projects identify the scope of a memory beyond `global`. They are
- * resolved either by absolute filesystem path (when an agent passes one)
- * or by an opaque external name carried in `X-Rembric-Project`.
+ * identified by an opaque slug — the cross-machine logical identity of
+ * the project. The slug appears in the URL path `/mcp/<slug>`, the
+ * `project.use({slug})` tool argument, and the `projects.slug` column.
+ * Paths never appear in the API or in the DB.
  *
  * `displayName` exists so a rename via the dashboard doesn't change the
- * canonical `path` identifier, preserving all memory associations.
+ * canonical `slug` identifier, preserving all memory associations.
  */
 
+/**
+ * Strict slug regex enforced on creation. Legacy values that pre-date this
+ * change (mixed case, dots, underscores) continue to function for read and
+ * write — only the `create()` path enforces the new shape.
+ */
+export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+
 export interface ProjectView extends Project {
-  /** Computed display label: `displayName` if set, otherwise `basename(path)`. */
+  /** Computed display label: `displayName` if set, otherwise `slug`. */
   label: string;
 }
 
@@ -30,24 +37,38 @@ export class ProjectsService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  findOrCreate(path: string): Project {
-    if (path.trim().length === 0) {
-      throw new DomainError('invalid_input', 'projects.findOrCreate: path must be non-empty');
-    }
-    const existing = this.db.select().from(projects).where(eq(projects.path, path)).get();
-    if (existing) return existing;
+  /** Look up a project by slug. Returns `undefined` if missing. Never inserts. */
+  findBySlug(slug: string): Project | undefined {
+    if (slug.length === 0) return undefined;
+    return this.db.select().from(projects).where(eq(projects.slug, slug)).get();
+  }
 
+  /**
+   * Insert a new project with the given slug.
+   *
+   * The slug MUST match the strict regex; legacy-shaped values cannot be
+   * minted here (they only exist for rows created under v0.1).
+   */
+  create(input: { slug: string; displayName?: string | null }): Project {
+    if (!SLUG_REGEX.test(input.slug)) {
+      throw new DomainError(
+        'invalid_slug',
+        `projects.create: slug '${input.slug}' must match ${SLUG_REGEX.source}`,
+      );
+    }
     const ts = this.now();
     const inserted = this.db
       .insert(projects)
-      .values({ id: ulid(ts.getTime()), path, createdAt: ts })
+      .values({
+        id: ulid(ts.getTime()),
+        slug: input.slug,
+        displayName: input.displayName ?? null,
+        createdAt: ts,
+      })
       .returning()
       .get();
     if (!inserted) {
-      // Race: another writer created it in between. Fetch again.
-      const recovered = this.db.select().from(projects).where(eq(projects.path, path)).get();
-      if (!recovered) throw new DomainError('conflict', 'projects.findOrCreate: race condition');
-      return recovered;
+      throw new DomainError('conflict', `projects.create: slug '${input.slug}' already exists`);
     }
     return inserted;
   }
@@ -67,7 +88,7 @@ export class ProjectsService {
           .all();
     return rows.map((row) => ({
       ...row,
-      label: row.displayName ?? (basename(row.path) || row.path),
+      label: row.displayName ?? row.slug,
     }));
   }
 
@@ -80,7 +101,7 @@ export class ProjectsService {
       .all();
     return rows.map((row) => ({
       ...row,
-      label: row.displayName ?? (basename(row.path) || row.path),
+      label: row.displayName ?? row.slug,
     }));
   }
 
@@ -141,4 +162,66 @@ export class ProjectsService {
       );
     }
   }
+
+  /**
+   * Return up to `limit` slugs whose Levenshtein distance to `input` is ≤
+   * `maxDistance` (default 3). Deterministic — no LLM, no embeddings. Used
+   * to populate `suggestedSlugs[]` in `project_not_found` responses.
+   */
+  findSimilarSlugs(input: string, opts: { limit?: number; maxDistance?: number } = {}): string[] {
+    const limit = opts.limit ?? 3;
+    const maxDistance = opts.maxDistance ?? 3;
+    if (input.length === 0) return [];
+
+    const allSlugs = this.db
+      .select({ slug: projects.slug })
+      .from(projects)
+      .where(isNull(projects.archivedAt))
+      .all()
+      .map((r) => r.slug);
+
+    type Ranked = { slug: string; distance: number };
+    const ranked: Ranked[] = [];
+    for (const slug of allSlugs) {
+      if (slug === input) continue;
+      const distance = levenshtein(input, slug);
+      if (distance <= maxDistance) ranked.push({ slug, distance });
+    }
+    ranked.sort((a, b) => a.distance - b.distance || a.slug.localeCompare(b.slug));
+    return ranked.slice(0, limit).map((r) => r.slug);
+  }
+}
+
+/**
+ * Iterative Levenshtein distance. O(n*m) time, O(min(n,m)) space.
+ * Pure function; same input always yields same output.
+ */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  // Swap so `a` is the shorter — keeps memory tight.
+  if (a.length > b.length) {
+    const t = a;
+    a = b;
+    b = t;
+  }
+
+  let prev = new Array<number>(a.length + 1);
+  let curr = new Array<number>(a.length + 1);
+  for (let i = 0; i <= a.length; i++) prev[i] = i;
+
+  for (let j = 1; j <= b.length; j++) {
+    curr[0] = j;
+    const bj = b.charCodeAt(j - 1);
+    for (let i = 1; i <= a.length; i++) {
+      const cost = a.charCodeAt(i - 1) === bj ? 0 : 1;
+      curr[i] = Math.min(curr[i - 1]! + 1, prev[i]! + 1, prev[i - 1]! + cost);
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[a.length]!;
 }

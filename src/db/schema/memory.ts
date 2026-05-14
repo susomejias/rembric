@@ -54,6 +54,12 @@ export const memory = sqliteTable(
     /** Last time this memory was retrieved or confirmed. Drives decay. */
     lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }),
     source: text('source', { mode: 'json' }).$type<MemorySource>(),
+    /**
+     * Agent session that produced this memory. Nullable for backwards
+     * compat: rows saved before sessions existed, or by clients that
+     * never call `memory.session_start`, carry NULL here.
+     */
+    sessionId: text('session_id'),
   },
   (table) => ({
     scopeProjectStatusIdx: index('memory_scope_project_status_idx').on(
@@ -63,6 +69,7 @@ export const memory = sqliteTable(
     ),
     statusLastSeenIdx: index('memory_status_last_seen_idx').on(table.status, table.lastSeenAt),
     createdAtIdx: index('memory_created_at_idx').on(table.createdAt),
+    sessionIdx: index('memory_session_idx').on(table.sessionId),
   }),
 );
 

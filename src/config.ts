@@ -73,6 +73,16 @@ const envSchema = z.object({
     .default(false),
   RATE_LIMIT_RPS: z.coerce.number().positive().max(10_000).default(10),
   RATE_LIMIT_BURST: z.coerce.number().int().min(1).max(10_000).default(30),
+
+  // Sessions sweep: status='active' rows whose started_at is older than
+  // this threshold are flipped to 'abandoned' at server startup. Default
+  // 24h. Operators that run very long-lived agents can extend the window.
+  SESSION_ABANDON_AFTER_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000) // 1 minute floor
+    .max(30 * 86_400_000) // 30-day ceiling
+    .default(86_400_000),
 });
 
 export type ParsedEnv = z.infer<typeof envSchema>;
@@ -110,6 +120,9 @@ export interface Config {
     enabled: boolean;
     ratePerSecond: number;
     burst: number;
+  };
+  sessions: {
+    abandonAfterMs: number;
   };
 }
 
@@ -225,6 +238,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ratePerSecond: parsed.RATE_LIMIT_RPS,
       burst: parsed.RATE_LIMIT_BURST,
     },
+    sessions: {
+      abandonAfterMs: parsed.SESSION_ABANDON_AFTER_MS,
+    },
   };
 }
 
@@ -252,5 +268,6 @@ export function redactConfig(config: Config): Record<string, unknown> {
     },
     consolidation: config.consolidation,
     rateLimit: config.rateLimit,
+    sessions: config.sessions,
   };
 }

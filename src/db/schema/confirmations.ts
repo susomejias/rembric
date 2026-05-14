@@ -21,10 +21,13 @@ export const confirmations = sqliteTable(
       .references(() => memory.id),
     eventTs: integer('event_ts', { mode: 'timestamp_ms' }).notNull(),
     source: text('source', { mode: 'json' }).$type<MemorySource>(),
+    /** Agent session this confirmation was emitted from (nullable). */
+    sessionId: text('session_id'),
   },
   (table) => ({
     memoryIdIdx: index('confirmations_memory_id_idx').on(table.memoryId),
     eventTsIdx: index('confirmations_event_ts_idx').on(table.eventTs),
+    sessionIdx: index('confirmations_session_idx').on(table.sessionId),
   }),
 );
 

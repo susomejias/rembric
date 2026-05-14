@@ -8,6 +8,11 @@ import type { RequestContext } from './request-context.js';
  * HTTP-agnostic authentication helpers. The MCP and dashboard layers use
  * these to convert raw header values into a `RequestContext` or to reject
  * the request with a typed `AuthError`.
+ *
+ * Project scope is resolved exclusively from the URL path slug
+ * (`/mcp/<slug>`). The `X-Rembric-Project` header is intentionally NOT
+ * consulted — it was removed in change `add-sessions-and-research-tools`
+ * along with path-based project identity.
  */
 
 export type AuthErrorCode =
@@ -32,23 +37,22 @@ export class AuthError extends Error {
 const BEARER_PREFIX = 'bearer ';
 
 /**
- * Validate an `Authorization` header value and resolve the project
- * identifier (taken from the URL path slug or, as fallback, the
- * `X-Rembric-Project` header) into a project row, returning the full
- * request context. Throws `AuthError` on any failure.
+ * Validate an `Authorization` header value and resolve the optional URL
+ * path slug into a project row. Returns the full request context.
+ *
+ * If the URL path carried a slug that does NOT exist, the request
+ * context is returned with `project = null` and `requestedSlug` populated;
+ * tool calls that require a real project SHALL respond with
+ * `project_not_found`. The `initialize` handshake itself succeeds.
  */
 export function authenticate(input: {
   authorization: string | undefined;
-  /**
-   * Project identifier sourced from the request. Path slug
-   * (e.g. `/mcp/<slug>`) takes precedence over the header; callers
-   * supply the already-resolved choice here.
-   */
-  projectIdentifier: string | undefined;
+  /** Slug from the URL path `/mcp/<slug>`, or undefined for `/mcp`. */
+  pathSlug: string | undefined;
   tokens: TokensService;
   projects: ProjectsService;
 }): RequestContext {
-  const { authorization, projectIdentifier, tokens, projects } = input;
+  const { authorization, pathSlug, tokens, projects } = input;
 
   if (!authorization) {
     throw new AuthError('missing_token', 'missing Authorization header', 401);
@@ -77,18 +81,21 @@ export function authenticate(input: {
     throw err;
   }
 
-  const project =
-    projectIdentifier && projectIdentifier.length > 0
-      ? projects.findOrCreate(projectIdentifier)
-      : null;
+  const project = pathSlug && pathSlug.length > 0 ? (projects.findBySlug(pathSlug) ?? null) : null;
 
   if (project?.archivedAt) {
     throw new AuthError(
       'project_archived',
-      `project '${project.path}' is archived; new writes are rejected`,
+      `project '${project.slug}' is archived; new writes are rejected`,
       403,
     );
   }
 
-  return { token: resolved.token, scope: resolved.scope, project };
+  return {
+    token: resolved.token,
+    scope: resolved.scope,
+    project,
+    requestedSlug: pathSlug && pathSlug.length > 0 ? pathSlug : null,
+    mcpSessionId: null,
+  };
 }
