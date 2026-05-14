@@ -91,6 +91,15 @@ Run `rembric status` from another shell. If that hangs, the SQLite handle is con
 
 ## MCP transport
 
+### Agent never calls `memory.session_summary` before saying "done"
+
+The protocol-teaching `instructions` block fires at handshake but some MCP clients ignore the field. Two checks:
+
+1. **Confirm the client honors `instructions`.** Claude Code and Codex CLI inject it into the LLM system prompt. Older or stripped builds may not. Check the client's docs.
+2. **Confirm `tools/list` returns `memory.session_summary` with a description.** If the description is missing or the tool is absent, the LLM has no nudge to call it. Run a `tools/list` request manually to verify.
+
+Workaround: paste the protocol from `docs/agents.md` into the agent's per-project / per-session prompt manually. The tool descriptions teach the same thing, but a system-prompt nudge raises the hit rate further.
+
 ### Agent reports `expected "Bearer <token>"`
 
 The agent is sending a plain token, not a `Bearer <token>` header. Configure the agent's MCP entry to set `Authorization: Bearer <token>` explicitly.

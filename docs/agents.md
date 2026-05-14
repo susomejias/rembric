@@ -5,12 +5,35 @@ Rembric exposes the MCP Streamable HTTP transport on `/mcp` (global scope) and `
 ```
 URL:        http(s)://your-host:8787/mcp[/<project-slug>]
 Header:     Authorization: Bearer <agent-token>
-Optional:   X-Rembric-Project: <slug>   (alternative to URL-path scoping)
 ```
 
-If you connect to `/mcp` the agent can only read/write **global** memories. If you connect to `/mcp/<slug>` the agent is locked to that project — `memory.save` with `scope=global` is rejected with `code: scope_locked`.
+> The `X-Rembric-Project` header was removed in v0.5. Project scope is sourced from the URL path or set per-session via `project.use({slug})`.
+
+If you connect to `/mcp` the agent can only read/write **global** memories until it calls `project.use({slug})` (or until server-side roots-based detection picks up the workspace). If you connect to `/mcp/<slug>` the agent is locked to that project — `memory.save` with `scope=global` is rejected with `code: scope_locked`.
 
 > **Tokens.** Mint per-agent tokens from the dashboard (`/dashboard/tokens`) or via `rembric token create <name>`. The plaintext is shown exactly once; copy it directly into the agent's MCP config.
+
+## Tool surface (v0.5)
+
+| Tool                     | Purpose                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `memory.save`            | Persist a structured memory; teaches when to call via tool description + initialize.instructions           |
+| `memory.search`          | FTS5 keyword search scoped to the active project (or globals)                                              |
+| `memory.get`             | Retrieve a memory with its predecessor chain                                                               |
+| `memory.confirm`         | Bump confidence on a memory the user endorsed                                                              |
+| `memory.session_start`   | Open a working session; optionally pass a `project` slug                                                   |
+| `memory.session_end`     | Close the session without a summary                                                                        |
+| `memory.session_summary` | Close with a structured Goal/Discoveries/Accomplished/Next Steps/Files summary — call BEFORE saying "done" |
+| `memory.context`         | Bootstrap context for a new session: recent sessions + recent memories                                     |
+| `memory.timeline`        | Drill into chronological neighbors of a memory within its session                                          |
+| `memory.capture_passive` | Parse `## Key Learnings:` from agent output and save each item                                             |
+| `memory.doctor`          | Read-only operational health report                                                                        |
+| `memory.stats`           | Counters scoped to the active project                                                                      |
+| `project.use`            | Activate a project for the session; `autocreate`/`confirmSwitch` are opt-in                                |
+| `project.list`           | List existing projects + memory counts                                                                     |
+| `project.current`        | Report the active project, source, and any roots-derived suggestions                                       |
+
+The MCP server emits a short `instructions` block at handshake that teaches the protocol to clients that support the field (Claude Code, Codex CLI). Clients that ignore it still get the protocol from each tool's description.
 
 ---
 
