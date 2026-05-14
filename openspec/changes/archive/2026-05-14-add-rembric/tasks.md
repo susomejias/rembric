@@ -90,32 +90,32 @@
 - [x] 8.5 Register `memory.search` tool with zod input schema (query, type, tags, status, limit) and structured response
 - [x] 8.6 Register `memory.get` tool with input id and response including history chain
 - [x] 8.7 Register `memory.confirm` tool with input id and a no-op response on success
-- [ ] 8.8 Add request-level rate limiting per token (configurable; default off)
+- [x] 8.8 Add request-level rate limiting per token (configurable; default off)
 - [x] 8.9 Add structured error responses matching MCP conventions (with helpful message strings)
-- [ ] 8.10 Add integration tests using the official MCP TS SDK as a client against an in-process server instance
+- [x] 8.10 Add integration tests using the official MCP TS SDK as a client against an in-process server instance
 
 ## 9. Dashboard web UI
 
 - [x] 9.1 Implement minimal SSR engine: an `html` tagged template literal with safe interpolation (HTML-escape by default, opt-in raw via marker)
-- [ ] 9.2 Bundle HTMX 2.x and Pico.css as static files served from `/dashboard/assets/`
+- [x] 9.2 Bundle HTMX 2.x and Pico.css as static files served from `/dashboard/assets/`
 - [x] 9.3 Implement layout component (header with project switcher, nav, footer)
 - [x] 9.4 Implement `/dashboard/login` route: form posts admin token, sets cookie, redirects to `/dashboard`
 - [x] 9.5 Implement `/dashboard` home: stats (memories per project, last consolidation summary, token count), recent activity
-- [ ] 9.6 Implement `/dashboard/memories` list view: filters (project, type, status, search), pagination, HTMX-powered filter form
-- [ ] 9.7 Implement `/dashboard/memories/:id` detail: full content, history chain visualization, confirmations count, source, archive button
-- [ ] 9.8 Implement `/dashboard/consolidation` list of runs: timestamp, llm/model, ops count, summary
-- [ ] 9.9 Implement `/dashboard/consolidation/:id` detail: per-op view with LLM reasoning, "undo this op" and "undo whole run" buttons
-- [ ] 9.10 Implement `/dashboard/projects`: list, rename, archive
-- [ ] 9.11 Implement `/dashboard/tokens`: list, create (shows plaintext once), revoke
-- [ ] 9.12 Add CSRF protection on mutating HTMX requests
-- [ ] 9.13 Add E2E tests using a headless browser harness
+- [x] 9.6 Implement `/dashboard/memories` list view: filters (project, type, status, search), pagination, HTMX-powered filter form
+- [x] 9.7 Implement `/dashboard/memories/:id` detail: full content, history chain visualization, confirmations count, source, archive button
+- [x] 9.8 Implement `/dashboard/consolidation` list of runs: timestamp, llm/model, ops count, summary
+- [x] 9.9 Implement `/dashboard/consolidation/:id` detail: per-op view with LLM reasoning, "undo this op" and "undo whole run" buttons
+- [x] 9.10 Implement `/dashboard/projects`: list, rename, archive
+- [x] 9.11 Implement `/dashboard/tokens`: list, create (shows plaintext once), revoke
+- [x] 9.12 Add CSRF protection on mutating HTMX requests
+- [x] 9.13 Add E2E tests using a headless browser harness
 
 ## 10. CLI surface
 
 - [x] 10.1 Wire CLI entrypoint via the `bin` field in package.json
 - [x] 10.2 Implement `rembric` (no subcommand) → starts the server
 - [x] 10.3 Implement `rembric status` → prints health, count by scope, last consolidation
-- [ ] 10.4 Implement `rembric consolidation run-now` → triggers a consolidation on demand against a running server (via local HTTP)
+- [x] 10.4 Implement `rembric consolidation run-now` → triggers a consolidation on demand against a running server (via local HTTP)
 - [x] 10.5 Implement `rembric db migrate` → applies pending migrations (requires server stopped; fails fast otherwise)
 - [x] 10.6 Implement `rembric llm ping` (already in section 3)
 - [x] 10.7 Implement `rembric token …` (already in section 7)
@@ -130,10 +130,10 @@
 
 ## 12. Packaging and release
 
-- [ ] 12.1 Set up TS build pipeline producing `dist/` with type declarations and the bundled `public/` assets
-- [ ] 12.2 Configure `npm pack` to include only `dist/`, `package.json`, `README.md`, `LICENSE`, `examples/`
+- [x] 12.1 Set up TS build pipeline producing `dist/` with type declarations and the bundled `public/` assets
+- [x] 12.2 Configure `npm pack` to include only `dist/`, `package.json`, `README.md`, `LICENSE`, `examples/`
 - [x] 12.3 Set up CI workflow: typecheck, lint, unit tests, integration tests, on tag push run `npm publish`
-- [ ] 12.4 Add a smoke test in CI: install the published package in a fresh sandbox and run `npx rembric llm ping` against a stubbed endpoint
+- [x] 12.4 Add a smoke test in CI: install the published package in a fresh sandbox and run `npx rembric llm ping` against a stubbed endpoint
 - [x] 12.5 Document upgrade path: stop service, `npm i -g rembric@latest`, restart; migrations are idempotent
 
 ## 13. Testing infrastructure and invariants
@@ -145,31 +145,31 @@
 - [x] 13.5 Build a clock fixture: freezable/forwardable time used by consolidation schedule and `last_seen_at` decay tests
 - [x] 13.6 Build a token/auth fixture: helpers to mint test tokens with arbitrary scopes and inject them into HTTP requests
 - [x] 13.7 Write invariant tests asserting the append-only contract: no code path emits a `DELETE FROM memory`, no code path emits an `UPDATE memory SET content=…`; enforce via runtime assertions in dev and a grep test in CI
-- [ ] 13.8 Write invariant tests for the status state machine: only legal transitions (active→superseded, active→archived, archived→active, superseded→active via undo) are reachable
-- [ ] 13.9 Write invariant tests for scope discipline: consolidation never produces an op whose affected_ids span more than one (scope, project_id) tuple
-- [ ] 13.10 Write property-based tests (using `fast-check`) for the `replaces` graph: cycles are impossible; the head of any chain is reachable in O(depth)
-- [ ] 13.11 Write property-based tests for confirm-chain: confirming any predecessor always increments the count of the current head's confirmations
-- [ ] 13.12 Add migration round-trip tests: every generated migration runs forward on an empty DB, then a snapshot of the resulting schema is asserted against a checked-in fixture (any unexpected diff fails CI)
-- [ ] 13.13 Add a "schema-drift" test: parses Drizzle schema, parses the current DB after applying migrations, asserts they match
-- [ ] 13.14 Add MCP protocol conformance tests using the official MCP TS SDK as the client against an in-process server (covers handshake, tool listing, tool invocation, error shapes)
-- [ ] 13.15 Add consolidation correctness tests: seed a DB with known redundant/drifted/contradictory/decayed memories, run consolidation with the deterministic LLM mock, assert the resulting journal and final state
-- [ ] 13.16 Add consolidation idempotency tests: running consolidation twice on the same state produces no new ops
-- [ ] 13.17 Add consolidation reversibility tests: every consolidation run can be undone to bit-for-bit equality with the pre-run state (excluding the journal itself)
-- [ ] 13.18 Add concurrency tests: 100 concurrent `memory.save` calls leave the DB in a consistent state with the correct count
-- [ ] 13.19 Add embedding worker tests: backfill behavior, retry on transient LLM failure, skip on `EMBEDDING_ENABLED=false`
+- [x] 13.8 Write invariant tests for the status state machine: only legal transitions (active→superseded, active→archived, archived→active, superseded→active via undo) are reachable
+- [x] 13.9 Write invariant tests for scope discipline: consolidation never produces an op whose affected_ids span more than one (scope, project_id) tuple
+- [x] 13.10 Write property-based tests (using `fast-check`) for the `replaces` graph: cycles are impossible; the head of any chain is reachable in O(depth)
+- [x] 13.11 Write property-based tests for confirm-chain: confirming any predecessor always increments the count of the current head's confirmations
+- [x] 13.12 Add migration round-trip tests: every generated migration runs forward on an empty DB, then a snapshot of the resulting schema is asserted against a checked-in fixture (any unexpected diff fails CI)
+- [x] 13.13 Add a "schema-drift" test: parses Drizzle schema, parses the current DB after applying migrations, asserts they match
+- [x] 13.14 Add MCP protocol conformance tests using the official MCP TS SDK as the client against an in-process server (covers handshake, tool listing, tool invocation, error shapes)
+- [x] 13.15 Add consolidation correctness tests: seed a DB with known redundant/drifted/contradictory/decayed memories, run consolidation with the deterministic LLM mock, assert the resulting journal and final state
+- [x] 13.16 Add consolidation idempotency tests: running consolidation twice on the same state produces no new ops
+- [x] 13.17 Add consolidation reversibility tests: every consolidation run can be undone to bit-for-bit equality with the pre-run state (excluding the journal itself)
+- [x] 13.18 Add concurrency tests: 100 concurrent `memory.save` calls leave the DB in a consistent state with the correct count
+- [x] 13.19 Add embedding worker tests: backfill behavior, retry on transient LLM failure, skip on `EMBEDDING_ENABLED=false`
 - [x] 13.20 Add config tests: env-var validation rejects malformed values with helpful messages; defaults are documented and tested
 - [x] 13.21 Add token/auth tests: revoked tokens are rejected immediately, expired tokens are rejected, scope mismatches return 403, admin token bootstrap is idempotent
-- [ ] 13.22 Add dashboard E2E tests using Playwright in headless mode: login flow, browse memories, undo a consolidation op, create/revoke a token, CSRF rejection
-- [ ] 13.23 Add CLI tests: every subcommand exits with the expected code, stdout is parseable where documented, `--help` is non-empty
-- [ ] 13.24 Add a smoke test that runs `npx rembric` against an LLM mock for 60 seconds and asserts no unhandled errors, no DB locks, healthy `status` output
+- [x] 13.22 Add dashboard E2E tests using Playwright in headless mode: login flow, browse memories, undo a consolidation op, create/revoke a token, CSRF rejection
+- [x] 13.23 Add CLI tests: every subcommand exits with the expected code, stdout is parseable where documented, `--help` is non-empty
+- [x] 13.24 Add a smoke test that runs `npx rembric` against an LLM mock for 60 seconds and asserts no unhandled errors, no DB locks, healthy `status` output
 - [x] 13.25 Wire all of the above into a single `pnpm test:ci` target that CI runs on every PR and tag
 
 ## 14. Documentation
 
 - [x] 14.1 Quickstart in README: `npx rembric` with minimal env
 - [x] 14.2 Env-var reference table in README
-- [ ] 14.3 Agent integration guides: Claude Code (validated), Codex CLI (validated), Hermes (pending verification, document stdio↔HTTP bridge fallback)
+- [x] 14.3 Agent integration guides: Claude Code (validated), Codex CLI (validated), Hermes (pending verification, document stdio↔HTTP bridge fallback)
 - [x] 14.4 Process-supervisor recipes in `examples/`: systemd, pm2, launchd
 - [x] 14.5 Reverse-proxy recipes in `examples/`: Caddy, Nginx, Traefik, Cloudflare Tunnel
-- [ ] 14.6 Backup strategy doc: rsync, litestream, periodic snapshot
-- [ ] 14.7 Troubleshooting guide: common errors, LLM endpoint issues, migration failures, locked DB
+- [x] 14.6 Backup strategy doc: rsync, litestream, periodic snapshot
+- [x] 14.7 Troubleshooting guide: common errors, LLM endpoint issues, migration failures, locked DB
