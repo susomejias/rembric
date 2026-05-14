@@ -20,6 +20,7 @@ function mem(id: string, content: string): Memory {
     lastSeenAt: new Date('2026-01-01T00:00:00Z'),
     source: null,
     sessionId: null,
+    topicKey: null,
   };
 }
 

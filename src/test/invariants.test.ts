@@ -57,6 +57,21 @@ const FORBIDDEN: { pattern: RegExp; description: string }[] = [
     description:
       'raw `UPDATE sessions SET (agent|started_at|token_id|project_id) =` is forbidden — immutable',
   },
+  {
+    pattern: /delete\s*\(\s*memoryRelations\s*\)/i,
+    description:
+      'Drizzle `db.delete(memoryRelations)` is forbidden — relations are append-only with status FSM',
+  },
+  {
+    pattern: /DELETE\s+FROM\s+memory_relations\b/i,
+    description: 'raw `DELETE FROM memory_relations` is forbidden — relations are append-only',
+  },
+  {
+    pattern:
+      /update\([^)]*memoryRelations[^)]*\)[^.]*\.set\([^)]*(source_id|target_id|judgment_id|sourceId|targetId|judgmentId)\s*:/i,
+    description:
+      '`db.update(memoryRelations).set({ sourceId|targetId|judgmentId })` is forbidden — immutable',
+  },
 ];
 
 function listSourceFiles(dir: string): string[] {

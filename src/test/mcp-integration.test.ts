@@ -263,6 +263,140 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.save with topic_key auto-supersedes the prior active row', async () => {
+    const client = await connect();
+    const first = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'project',
+        content: 'auth model: JWT',
+        topic_key: 'decision/auth-model',
+      },
+    })) as ToolResult;
+    expect(first.isError).toBeFalsy();
+    const firstPayload = readJson(first) as { id: string };
+
+    const second = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'project',
+        content: 'auth model: opaque tokens',
+        topic_key: 'decision/auth-model',
+      },
+    })) as ToolResult;
+    expect(second.isError).toBeFalsy();
+    const secondPayload = readJson(second) as { id: string };
+    expect(secondPayload.id).not.toBe(firstPayload.id);
+
+    // The prior row should now be superseded; memory.get on it reflects that.
+    const got = (await client.callTool({
+      name: 'memory.get',
+      arguments: { id: firstPayload.id },
+    })) as ToolResult;
+    const gotPayload = readJson(got) as { memory: { status: string } };
+    expect(gotPayload.memory.status).toBe('superseded');
+
+    await client.close();
+  });
+
+  it('memory.save surfaces candidates[] when similar content already exists', async () => {
+    const client = await connect();
+    // Plant two rows with overlapping content so the third save has
+    // strong FTS5 BM25 scores.
+    for (let i = 0; i < 3; i++) {
+      await client.callTool({
+        name: 'memory.save',
+        arguments: {
+          scope: 'global',
+          type: 'feedback',
+          content: 'fruitcake bicycle aluminum windowpane horizon',
+        },
+      });
+    }
+    // Save a near-duplicate.
+    const second = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        content: 'fruitcake bicycle aluminum windowpane horizon',
+      },
+    })) as ToolResult;
+    expect(second.isError).toBeFalsy();
+    const payload = readJson(second) as {
+      id: string;
+      candidates: { judgmentId: string; targetId: string; source: 'fts' | 'vec' }[];
+      judgmentRequired: boolean;
+    };
+    expect(payload.candidates.length).toBeGreaterThanOrEqual(1);
+    expect(payload.judgmentRequired).toBe(true);
+    expect(payload.candidates[0]!.source).toBe('fts');
+
+    // Close the pending judgment via memory.judge.
+    const judgmentId = payload.candidates[0]!.judgmentId;
+    const judgement = (await client.callTool({
+      name: 'memory.judge',
+      arguments: {
+        judgmentId,
+        relation: 'related',
+        confidence: 0.9,
+        reason: 'overlapping content',
+      },
+    })) as ToolResult;
+    expect(judgement.isError).toBeFalsy();
+    const judgedPayload = readJson(judgement) as { status: string; relation: string };
+    expect(judgedPayload.status).toBe('judged');
+    expect(judgedPayload.relation).toBe('related');
+
+    await client.close();
+  });
+
+  it('memory.compare records a verdict between two arbitrary memories', async () => {
+    const client = await connect();
+    const a = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'compare-test-aaa' },
+    })) as ToolResult;
+    const b = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'compare-test-bbb' },
+    })) as ToolResult;
+    const aId = (readJson(a) as { id: string }).id;
+    const bId = (readJson(b) as { id: string }).id;
+
+    const compared = (await client.callTool({
+      name: 'memory.compare',
+      arguments: {
+        memoryIdA: aId,
+        memoryIdB: bId,
+        relation: 'related',
+        confidence: 0.8,
+        reason: 'both about compare-test',
+      },
+    })) as ToolResult;
+    expect(compared.isError).toBeFalsy();
+    const payload = readJson(compared) as { status: string; relation: string };
+    expect(payload.status).toBe('judged');
+    expect(payload.relation).toBe('related');
+
+    await client.close();
+  });
+
+  it('memory.suggest_topic_key returns a deterministic family/slug', async () => {
+    const client = await connect();
+    const res = (await client.callTool({
+      name: 'memory.suggest_topic_key',
+      arguments: { type: 'project', title: 'JWT auth middleware' },
+    })) as ToolResult;
+    expect(res.isError).toBeFalsy();
+    const payload = readJson(res) as { topic_key: string };
+    expect(payload.topic_key).toMatch(/^decision\//);
+    expect(payload.topic_key.length).toBeGreaterThan('decision/'.length);
+    await client.close();
+  });
+
   it('memory.doctor returns the expected JSON shape', async () => {
     const client = await connect();
     const result = (await client.callTool({
