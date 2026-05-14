@@ -17,13 +17,13 @@ import { mcpError } from './errors.js';
  *
  * Path-scoping contract (also asserted by tests):
  *
- *   /mcp/<slug>  (or X-Rembric-Project)  → scope = project:<id>
+ *   /mcp/<slug>  → scope = project:<id>
  *     - memory.save scope='global'  →  mcpError 'scope_locked'
  *     - memory.save scope='project' →  saved to that project
  *     - memory.search                →  only that project's memories
  *     - memory.get / .confirm        →  cross-scope ids are 'not_found'
  *
- *   /mcp  (no slug, no header)            → scope = global
+ *   /mcp  (no slug)            → scope = global
  *     - memory.save scope='project' →  mcpError 'project_required'
  *     - memory.save scope='global'  →  saved as user-wide
  *     - memory.search                →  globals only
@@ -99,14 +99,24 @@ function handleSave(
 ) {
   const ctx = getRequestContext();
 
-  // Path-scoped connections forbid global writes.
-  if (ctx.project && args.scope === 'global') {
+  // Path-scoped connections forbid global writes. "Path-scoped" means the
+  // URL carried a slug (`requestedSlug` is non-null), regardless of whether
+  // the slug resolved to an existing project.
+  if (ctx.requestedSlug && args.scope === 'global') {
     return mcpError(
       'scope_locked',
-      `This MCP connection is path-scoped to project '${ctx.project.path}'. ` +
+      `This MCP connection is path-scoped to project '${ctx.requestedSlug}'. ` +
         'Global writes are not permitted on this connection. To save a ' +
         "user-wide memory, open a separate MCP connection at '/mcp' (no " +
         'project slug) with the same token.',
+    );
+  }
+
+  // Path-scoped to a slug that doesn't exist: writes need an existing project.
+  if (ctx.requestedSlug && !ctx.project && args.scope === 'project') {
+    return mcpError(
+      'project_not_found',
+      `project '${ctx.requestedSlug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
     );
   }
 
@@ -114,10 +124,10 @@ function handleSave(
   if (!ctx.project && args.scope === 'project') {
     return mcpError(
       'project_required',
-      'This MCP server is registered without a project scope. To save a project memory, either: ' +
-        "(a) reconnect the MCP server at '/mcp/<your-project-slug>' (recommended for per-project setups), " +
-        "(b) pass an 'X-Rembric-Project: <slug>' header, " +
-        "or (c) set scope='global' to save this as a user-wide memory instead.",
+      'This MCP connection has no active project. To save a project memory, either: ' +
+        "(a) reconnect at '/mcp/<your-project-slug>' (recommended for per-project setups), " +
+        '(b) call project.use({slug}) to set a project for this session, ' +
+        "or (c) set scope='global' to save as a user-wide memory instead.",
     );
   }
 
@@ -125,7 +135,7 @@ function handleSave(
   const authzTarget = {
     scope: scope.kind,
     projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: ctx.project?.path ?? null,
+    projectSlug: ctx.project?.slug ?? null,
   } as const;
   if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${scope.kind} memories`);
@@ -163,7 +173,7 @@ function handleSearch(
   const authzTarget = {
     scope: scope.kind,
     projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: ctx.project?.path ?? null,
+    projectSlug: ctx.project?.slug ?? null,
   } as const;
   if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope.kind} memories`);
@@ -210,7 +220,7 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
     const authzTarget = {
       scope: result.memory.scope,
       projectId: result.memory.projectId,
-      projectSlug: ctx.project?.path ?? null,
+      projectSlug: ctx.project?.slug ?? null,
     } as const;
     if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot read this memory`);
@@ -252,7 +262,7 @@ function handleConfirm(deps: ToolDeps, args: { id: string }) {
     const authzTarget = {
       scope: scope.kind,
       projectId: scope.kind === 'project' ? scope.projectId : null,
-      projectSlug: ctx.project?.path ?? null,
+      projectSlug: ctx.project?.slug ?? null,
     } as const;
     if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm in this scope`);

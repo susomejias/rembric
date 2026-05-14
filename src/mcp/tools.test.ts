@@ -37,7 +37,13 @@ function fakeContext(project: Project | null): RequestContext {
     expiresAt: null,
     revokedAt: null,
   };
-  return { token, scope: ADMIN_TOKEN_SCOPE, project };
+  return {
+    token,
+    scope: ADMIN_TOKEN_SCOPE,
+    project,
+    requestedSlug: project?.slug ?? null,
+    mcpSessionId: null,
+  };
 }
 
 interface McpTextResponse {
@@ -60,8 +66,8 @@ beforeEach(() => {
   projects = new ProjectsService(db.handle.db);
   memory = new MemoryService(db.handle.db);
   handlers = buildHandlers({ memory });
-  projectA = projects.findOrCreate('test-rembric');
-  projectB = projects.findOrCreate('other-project');
+  projectA = projects.create({ slug: 'test-rembric' });
+  projectB = projects.create({ slug: 'other-project' });
 });
 
 afterEach(() => {

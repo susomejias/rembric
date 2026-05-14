@@ -3,13 +3,13 @@
  * in the JSON payload so clients (and tests) can branch on it without
  * parsing message strings.
  */
-export function mcpError(code: string, message: string) {
+export function mcpError(code: string, message: string, extra?: Record<string, unknown>) {
   return {
     isError: true,
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify({ ok: false, code, message }, null, 2),
+        text: JSON.stringify({ ok: false, code, message, ...(extra ?? {}) }, null, 2),
       },
     ],
   };

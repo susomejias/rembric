@@ -8,9 +8,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
  *
  * The Streamable HTTP transport supports session resumption via the
  * `mcp-session-id` request header. The MCP SDK requires a fresh
- * `McpServer` per connected transport (a server cannot be re-connected
- * once attached), so we keep `(server, transport)` pairs keyed by
- * session id and instantiate a new pair on first contact.
+ * `McpServer` per connected transport, so we keep `(server, transport)`
+ * pairs keyed by session id and instantiate a new pair on first contact.
+ *
+ * The factory receives the URL path slug (or null) for the connection so
+ * the emitted `initialize.instructions` block matches the scope.
  */
 
 interface Session {
@@ -18,18 +20,27 @@ interface Session {
   transport: StreamableHTTPServerTransport;
 }
 
+export interface ServerFactoryContext {
+  requestedSlug: string | null;
+}
+
+export type ServerFactory = (ctx: ServerFactoryContext) => McpServer;
+
 export class McpTransportManager {
   private readonly sessions = new Map<string, Session>();
 
-  constructor(private readonly serverFactory: () => McpServer) {}
+  constructor(private readonly serverFactory: ServerFactory) {}
 
-  async getOrCreate(sessionId: string | undefined): Promise<StreamableHTTPServerTransport> {
+  async getOrCreate(
+    sessionId: string | undefined,
+    factoryCtx: ServerFactoryContext,
+  ): Promise<StreamableHTTPServerTransport> {
     if (sessionId) {
       const existing = this.sessions.get(sessionId);
       if (existing) return existing.transport;
     }
 
-    const server = this.serverFactory();
+    const server = this.serverFactory(factoryCtx);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {

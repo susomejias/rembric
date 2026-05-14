@@ -1,0 +1,215 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { sql } from 'drizzle-orm';
+import { z } from 'zod';
+
+import type { Db } from '../db/client.js';
+import { memory } from '../db/schema/memory.js';
+import { getRequestContext } from '../server/request-context.js';
+import type { SessionRouter } from '../server/session-router.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { DomainError } from '../services/errors.js';
+import { type ProjectsService } from '../services/projects.js';
+
+import { mcpError } from './errors.js';
+import { maybeDiscoverViaRoots } from './roots-discovery.js';
+
+/**
+ * Tool handlers for the `project.*` MCP namespace introduced in change
+ * `add-sessions-and-research-tools`.
+ *
+ * The defaults are conservative:
+ *   - `project.use` never auto-creates unless `autocreate: true`
+ *   - `project.use` never switches mid-session unless `confirmSwitch: true`
+ *   - `project.use` never switches while a session is active (must end first)
+ */
+
+export const projectUseSchema = {
+  slug: z.string().min(1).max(128),
+  autocreate: z.boolean().optional(),
+  confirmSwitch: z.boolean().optional(),
+};
+
+export const projectListSchema = {
+  includeArchived: z.boolean().optional(),
+};
+
+export const projectCurrentSchema = {} as const;
+
+export interface ProjectToolDeps {
+  db: Db;
+  projects: ProjectsService;
+  agentSessions: AgentSessionsService;
+  router: SessionRouter;
+  /** Set by `createMcpServer` after construction to enable roots discovery. */
+  getServer?: () => McpServer;
+}
+
+function ok(payload: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function routerKey(): { tokenId: string; mcpSessionId: string } | null {
+  const ctx = getRequestContext();
+  if (!ctx.mcpSessionId) return null;
+  return { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId };
+}
+
+export function buildProjectHandlers(deps: ProjectToolDeps) {
+  return {
+    use: handleUse.bind(null, deps),
+    list: handleList.bind(null, deps),
+    current: handleCurrent.bind(null, deps),
+  };
+}
+
+function handleUse(
+  deps: ProjectToolDeps,
+  args: { slug: string; autocreate?: boolean; confirmSwitch?: boolean },
+) {
+  const ctx = getRequestContext();
+  if (ctx.requestedSlug && ctx.requestedSlug !== args.slug) {
+    return mcpError(
+      'scope_locked',
+      `connection is path-scoped to '${ctx.requestedSlug}'; cannot switch via tool`,
+    );
+  }
+  const key = routerKey();
+  const currentEntry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
+  const currentProjectId = currentEntry?.projectId ?? ctx.project?.id ?? null;
+
+  let project = deps.projects.findBySlug(args.slug);
+  let created = false;
+  if (!project) {
+    if (args.autocreate === true) {
+      try {
+        project = deps.projects.create({ slug: args.slug });
+        created = true;
+      } catch (err) {
+        if (err instanceof DomainError) return mcpError(err.code, err.message);
+        throw err;
+      }
+    } else {
+      return mcpError('project_not_found', `project '${args.slug}' not found`, {
+        suggestedSlugs: deps.projects.findSimilarSlugs(args.slug),
+      });
+    }
+  }
+
+  if (project.archivedAt) {
+    return mcpError('project_archived', `project '${project.slug}' is archived`);
+  }
+
+  // Same as currently active → idempotent.
+  if (currentProjectId === project.id) {
+    return ok({
+      slug: project.slug,
+      projectId: project.id,
+      created,
+      switched: false,
+      source: currentEntry?.projectResolutionSource ?? 'tool-explicit',
+    });
+  }
+
+  // Different from active → switch requires confirmation.
+  if (currentProjectId !== null) {
+    if (args.confirmSwitch !== true) {
+      const currentSlug =
+        currentEntry?.projectId === project.id
+          ? project.slug
+          : (deps.projects.getById(currentProjectId)?.slug ?? null);
+      return mcpError(
+        'project_switch_requires_confirm',
+        `switching projects requires confirmSwitch:true`,
+        { currentSlug, targetSlug: project.slug },
+      );
+    }
+    // Switch blocked while a session is active.
+    const activeSessionId = currentEntry?.rembricSessionId ?? null;
+    if (activeSessionId !== null) {
+      return mcpError(
+        'session_active_must_end',
+        `end the active session via memory.session_summary or memory.session_end before switching projects`,
+        {
+          activeSessionId,
+          currentSlug:
+            currentEntry?.projectId !== undefined && currentEntry.projectId !== null
+              ? (deps.projects.getById(currentEntry.projectId)?.slug ?? null)
+              : null,
+          targetSlug: project.slug,
+        },
+      );
+    }
+  }
+
+  if (key) {
+    deps.router.setActiveProject(key.tokenId, key.mcpSessionId, project.id, 'tool-explicit');
+  }
+  return ok({
+    slug: project.slug,
+    projectId: project.id,
+    created,
+    switched: currentProjectId !== null,
+    previousSlug:
+      currentProjectId !== null ? (deps.projects.getById(currentProjectId)?.slug ?? null) : null,
+    source: 'tool-explicit' as const,
+  });
+}
+
+function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) {
+  const includeArchived = args.includeArchived === true;
+  const rows = deps.projects.list(includeArchived);
+  // Memory counts per project — one extra query, batched.
+  const counts = deps.db
+    .all<{
+      project_id: string;
+      n: number;
+    }>(sql`SELECT project_id, COUNT(*) AS n FROM ${memory} WHERE project_id IS NOT NULL GROUP BY project_id`)
+    .reduce<Record<string, number>>((acc, r) => {
+      acc[r.project_id] = Number(r.n);
+      return acc;
+    }, {});
+
+  return ok({
+    projects: rows.map((p) => ({
+      slug: p.slug,
+      displayName: p.displayName ?? null,
+      archived: p.archivedAt !== null,
+      memoryCount: counts[p.id] ?? 0,
+    })),
+  });
+}
+
+async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>) {
+  void _args;
+  const ctx = getRequestContext();
+  const key = routerKey();
+
+  // Lazy `roots/list` discovery on the first call. No-op when the URL
+  // already pinned a slug, when the client doesn't advertise `roots`, or
+  // when discovery already fired for this transport.
+  if (key && deps.getServer) {
+    await maybeDiscoverViaRoots(
+      { server: deps.getServer(), router: deps.router, projects: deps.projects },
+      { tokenId: key.tokenId, mcpSessionId: key.mcpSessionId, pathSlug: ctx.requestedSlug },
+    );
+  }
+
+  const entry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
+
+  const activeProjectId = entry?.projectId ?? ctx.project?.id ?? null;
+  const activeSlug = activeProjectId
+    ? (deps.projects.getById(activeProjectId)?.slug ?? null)
+    : null;
+  const source =
+    entry?.projectResolutionSource ??
+    (ctx.project ? 'url-path' : ctx.requestedSlug ? 'url-path' : 'none');
+
+  return ok({
+    slug: activeSlug,
+    projectId: activeProjectId,
+    source,
+    suggestedSlugs: entry?.pendingSuggestedSlugs ?? [],
+  });
+}
