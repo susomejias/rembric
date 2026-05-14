@@ -43,6 +43,8 @@ const EXPECTED_TABLES = [
   'memory_fts_idx',
   'memory_vec',
   'projects',
+  'prompts',
+  'sessions',
   'tokens',
 ];
 
@@ -62,10 +64,11 @@ const EXPECTED_COLUMNS: Record<
     { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
     { name: 'last_seen_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'source', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'session_id', type: 'TEXT', notnull: 0, pk: 0 },
   ],
   projects: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },
-    { name: 'path', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'slug', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'display_name', type: 'TEXT', notnull: 0, pk: 0 },
     { name: 'archived_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
@@ -79,6 +82,24 @@ const EXPECTED_COLUMNS: Record<
     { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
     { name: 'revoked_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'expires_at', type: 'INTEGER', notnull: 0, pk: 0 },
+  ],
+  sessions: [
+    { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },
+    { name: 'token_id', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'project_id', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'agent', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'description', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'started_at', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'ended_at', type: 'INTEGER', notnull: 0, pk: 0 },
+    { name: 'summary', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'status', type: 'TEXT', notnull: 1, pk: 0 },
+  ],
+  confirmations: [
+    { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },
+    { name: 'memory_id', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'event_ts', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'source', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'session_id', type: 'TEXT', notnull: 0, pk: 0 },
   ],
 };
 

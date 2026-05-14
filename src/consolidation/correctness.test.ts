@@ -61,7 +61,7 @@ describe('consolidation correctness + idempotency + reversibility', () => {
   afterEach(() => f.db.cleanup());
 
   it('merges a redundant pair when the judge says merge, then is idempotent', async () => {
-    const project = f.projects.findOrCreate('app');
+    const project = f.projects.create({ slug: 'app' });
     const a = f.memory.save(
       { type: 'feedback', content: 'use 2-space indentation' },
       projectScope(project.id),
@@ -123,7 +123,7 @@ describe('consolidation correctness + idempotency + reversibility', () => {
   });
 
   it('undoes a run and returns the affected rows to active', async () => {
-    const project = f.projects.findOrCreate('app');
+    const project = f.projects.create({ slug: 'app' });
     const a = f.memory.save(
       { type: 'feedback', content: 'prefer dependency injection in services' },
       projectScope(project.id),

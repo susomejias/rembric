@@ -106,11 +106,47 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('emits scope-aware instructions in the initialize result', async () => {
+    // Unscoped /mcp connection — instructions point at project.use.
+    const globalClient = await connect();
+    const globalInstructions = globalClient.getInstructions();
+    expect(globalInstructions).toMatch(/project\.use/);
+    expect(globalInstructions).not.toContain('X-Rembric-Project');
+    expect((globalInstructions ?? '').length).toBeLessThanOrEqual(800);
+    await globalClient.close();
+
+    // Path-scoped /mcp/<slug> connection — instructions name the slug.
+    const projClient = await connect({ projectSlug: 'integration-proj' });
+    const projInstructions = projClient.getInstructions();
+    expect(projInstructions).toContain("'integration-proj'");
+    expect((projInstructions ?? '').length).toBeLessThanOrEqual(800);
+    await projClient.close();
+  });
+
   it('lists the four memory.* tools', async () => {
     const client = await connect();
     const tools = await client.listTools();
     const names = tools.tools.map((t) => t.name).sort();
-    expect(names).toEqual(['memory.confirm', 'memory.get', 'memory.save', 'memory.search']);
+    // The four legacy memory tools must remain present; new tools are
+    // verified separately by name.
+    expect(names).toEqual(
+      expect.arrayContaining(['memory.confirm', 'memory.get', 'memory.save', 'memory.search']),
+    );
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'memory.session_start',
+        'memory.session_end',
+        'memory.session_summary',
+        'memory.context',
+        'memory.timeline',
+        'memory.capture_passive',
+        'memory.doctor',
+        'memory.stats',
+        'project.use',
+        'project.list',
+        'project.current',
+      ]),
+    );
     await client.close();
   });
 
@@ -177,6 +213,112 @@ describe('MCP protocol conformance', () => {
 
   it('rejects an invalid token before reaching tool dispatch', async () => {
     await expect(connect({ token: 'definitely-not-valid' })).rejects.toThrow();
+  });
+
+  it('session lifecycle: start → save (stamps session_id) → summary → context returns it', async () => {
+    const client = await connect();
+
+    // 1. Start a session.
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'wiring the lifecycle test' },
+    })) as ToolResult;
+    expect(started.isError).toBeFalsy();
+    const startedPayload = readJson(started) as { sessionId: string };
+    expect(startedPayload.sessionId).toMatch(/^[0-9A-Z]+$/);
+
+    // 2. Save a memory; server should auto-stamp session_id.
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        content: 'lifecycle-saved-row',
+      },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+    const savedPayload = readJson(saved) as { id: string };
+
+    // 3. Summarise the session.
+    const summarised = (await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: wire test. Accomplished: done.' },
+    })) as ToolResult;
+    expect(summarised.isError).toBeFalsy();
+
+    // 4. memory.context should include the session as recent.
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 5, memories: 5 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null; status: string }[];
+      recentMemories: { id: string }[];
+    };
+    const seenSession = ctxPayload.recentSessions.find((s) => s.id === startedPayload.sessionId);
+    expect(seenSession?.status).toBe('ended');
+    expect(seenSession?.summary).toMatch(/wire test/);
+    expect(ctxPayload.recentMemories.some((m) => m.id === savedPayload.id)).toBe(true);
+
+    await client.close();
+  });
+
+  it('memory.doctor returns the expected JSON shape', async () => {
+    const client = await connect();
+    const result = (await client.callTool({
+      name: 'memory.doctor',
+      arguments: {},
+    })) as ToolResult;
+    expect(result.isError).toBeFalsy();
+    const payload = readJson(result) as {
+      db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
+      llm: { reachable: boolean; lastPingAt: string | null };
+      embeddings: { enabled: boolean; backlog: number };
+      consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
+      sessions: { active: number };
+      warnings: string[];
+    };
+    expect(payload.db.open).toBe(true);
+    expect(payload.db.journalMode).toMatch(/wal/i);
+    expect(payload.db.integrity).toMatch(/ok/i);
+    expect(typeof payload.db.sizeBytes).toBe('number');
+    expect(typeof payload.llm.reachable).toBe('boolean');
+    expect(typeof payload.embeddings.enabled).toBe('boolean');
+    expect(Array.isArray(payload.warnings)).toBe(true);
+    await client.close();
+  });
+
+  it('memory.save without session_start succeeds and the row has session_id = null', async () => {
+    const client = await connect();
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        content: 'no-session-row-marker',
+      },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+    const savedPayload = readJson(saved) as { id: string };
+
+    const got = (await client.callTool({
+      name: 'memory.get',
+      arguments: { id: savedPayload.id },
+    })) as ToolResult;
+    expect(got.isError).toBeFalsy();
+    // Server side: the row is present and the timeline tool falls back to
+    // the time-window mode since session_id is null.
+    const tl = (await client.callTool({
+      name: 'memory.timeline',
+      arguments: { memoryId: savedPayload.id, before: 1, after: 1 },
+    })) as ToolResult;
+    if (tl.isError) {
+      throw new Error(`timeline failed: ${JSON.stringify(readJson(tl))}`);
+    }
+    const tlPayload = readJson(tl) as { fallback: string | null };
+    expect(tlPayload.fallback).toBe('time_window');
+
+    await client.close();
   });
 
   it('returns a structured error when memory.get is called with an unknown id', async () => {

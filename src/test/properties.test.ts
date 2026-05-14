@@ -28,6 +28,44 @@ function applyTransition(from: Status, to: Status): { ok: boolean } {
   return { ok: LEGAL_TRANSITIONS.has(`${from}->${to}`) };
 }
 
+// ─── session FSM (added in `add-sessions-and-research-tools`) ──────
+
+type SessionStatus = 'active' | 'ended' | 'abandoned';
+type SessionTransition = `${SessionStatus}->${SessionStatus}`;
+
+const LEGAL_SESSION_TRANSITIONS = new Set<SessionTransition>([
+  'active->ended',
+  'active->abandoned',
+]);
+
+describe('session state machine — legal transitions', () => {
+  it('only active→ended and active→abandoned are legal', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom<SessionStatus>('active', 'ended', 'abandoned'),
+        fc.constantFrom<SessionStatus>('active', 'ended', 'abandoned'),
+        (from, to) => {
+          const expected = LEGAL_SESSION_TRANSITIONS.has(`${from}->${to}`);
+          // Ended and abandoned are terminal: no exit.
+          if (from === 'ended' || from === 'abandoned') {
+            expect(expected).toBe(false);
+          }
+          // No self-transition is legal.
+          if (from === to) {
+            expect(expected).toBe(false);
+          }
+        },
+      ),
+    );
+  });
+
+  it('contains exactly the two legal session transitions', () => {
+    expect([...LEGAL_SESSION_TRANSITIONS].sort()).toEqual(
+      ['active->ended', 'active->abandoned'].sort(),
+    );
+  });
+});
+
 describe('13.8 status state machine', () => {
   it('refuses every transition not on the allow-list', () => {
     fc.assert(

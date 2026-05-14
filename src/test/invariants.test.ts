@@ -38,6 +38,25 @@ const FORBIDDEN: { pattern: RegExp; description: string }[] = [
     pattern: /UPDATE\s+memory\b[^;]*\bSET\s+content\s*=/i,
     description: 'raw `UPDATE memory SET content = …` is forbidden — content is immutable',
   },
+  {
+    pattern: /delete\s*\(\s*agentSessions\s*\)/i,
+    description: 'Drizzle `db.delete(agentSessions)` is forbidden — agent sessions are append-only',
+  },
+  {
+    pattern: /DELETE\s+FROM\s+sessions\b/i,
+    description: 'raw `DELETE FROM sessions` is forbidden — sessions are append-only',
+  },
+  {
+    pattern:
+      /update\([^)]*agentSessions[^)]*\)[^.]*\.set\([^)]*(agent|started_at|tokenId|projectId)\s*:/i,
+    description:
+      '`db.update(agentSessions).set({ agent|startedAt|tokenId|projectId })` is forbidden — immutable session columns',
+  },
+  {
+    pattern: /UPDATE\s+sessions\b[^;]*\bSET\s+(agent|started_at|token_id|project_id)\s*=/i,
+    description:
+      'raw `UPDATE sessions SET (agent|started_at|token_id|project_id) =` is forbidden — immutable',
+  },
 ];
 
 function listSourceFiles(dir: string): string[] {

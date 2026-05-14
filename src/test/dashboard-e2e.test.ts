@@ -230,6 +230,26 @@ describe('dashboard E2E', () => {
     expect(finalBody).toContain('revoked');
   });
 
+  it('sessions list and detail render after login', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const list = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(list.status).toBe(200);
+    const body = await list.text();
+    expect(body).toContain('Sessions');
+  });
+
+  it('sessions detail 404 for unknown id', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const res = await get(baseUrl, '/dashboard/sessions/not-a-real-id', jar);
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).toContain('Session not found');
+  });
+
   it('CSRF rejection — POST without csrf field returns 403', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });

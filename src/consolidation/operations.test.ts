@@ -21,7 +21,7 @@ beforeEach(() => {
   clock = new TestClock();
   projects = new ProjectsService(db.handle.db, clock.now);
   memoryService = new MemoryService(db.handle.db, clock.now);
-  projectId = projects.findOrCreate('app').id;
+  projectId = projects.create({ slug: 'app' }).id;
 
   runId = 'test-run-id';
   db.handle.db

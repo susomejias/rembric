@@ -52,7 +52,7 @@ describe('ConsolidationRunner.runAll', () => {
   });
 
   it('keeps unrelated pairs separate when the judge says keep_separate', async () => {
-    const project = projects.findOrCreate('app');
+    const project = projects.create({ slug: 'app' });
     memory.save({ type: 'user', content: 'apples' }, projectScope(project.id));
     memory.save({ type: 'user', content: 'oranges' }, projectScope(project.id));
 
@@ -69,7 +69,7 @@ describe('ConsolidationRunner.runAll', () => {
   });
 
   it('idempotency: a second runAll on stable state produces no new merge/supersede ops', async () => {
-    const project = projects.findOrCreate('app');
+    const project = projects.create({ slug: 'app' });
     memory.save({ type: 'user', content: 'a' }, projectScope(project.id));
     memory.save({ type: 'user', content: 'b' }, projectScope(project.id));
 

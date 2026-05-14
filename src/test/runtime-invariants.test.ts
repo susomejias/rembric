@@ -19,8 +19,8 @@ describe('runtime invariants — status FSM and scope discipline', () => {
   beforeAll(() => {
     testDb = createTestDb();
     const projects = new ProjectsService(testDb.handle.db);
-    const x = projects.findOrCreate('proj-x');
-    const y = projects.findOrCreate('proj-y');
+    const x = projects.create({ slug: 'proj-x' });
+    const y = projects.create({ slug: 'proj-y' });
     projXScope = projectScope(x.id);
     projYScope = projectScope(y.id);
   });
