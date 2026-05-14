@@ -111,20 +111,112 @@ export class AgentSessionsService {
     return row ?? null;
   }
 
-  /** N most recent sessions for the given scope, ordered newest first. */
+  /**
+   * N most recent sessions for the given scope, ordered newest first.
+   * Soft-deleted sessions are NEVER surfaced via this path — memory.context
+   * callers must not see them.
+   */
   recentForContext(input: RecentForContextInput): AgentSession[] {
     const limit = clamp(input.limit ?? 5, 1, 25);
-    const baseCondition =
+    const scopeCondition =
       input.projectId === null
         ? isNull(agentSessions.projectId)
         : eq(agentSessions.projectId, input.projectId);
     return this.db
       .select()
       .from(agentSessions)
-      .where(baseCondition)
+      .where(and(scopeCondition, isNull(agentSessions.deletedAt)))
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit)
       .all();
+  }
+
+  /**
+   * Soft-delete a session by setting `deleted_at` to the current time.
+   * Idempotent: a second call on an already-deleted row is a no-op that
+   * returns the existing row. Cross-token rule: without `adminBypass`,
+   * the caller's token must match the session's `token_id`.
+   */
+  softDelete(
+    sessionId: string,
+    input: { tokenId?: string; adminBypass?: boolean } = {},
+  ): AgentSession {
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (!input.adminBypass) {
+      if (!input.tokenId || existing.tokenId !== input.tokenId) {
+        throw new DomainError('forbidden', `session '${sessionId}' belongs to a different token`);
+      }
+    }
+    if (existing.deletedAt) {
+      return existing;
+    }
+    const ts = this.now();
+    const updated = this.db
+      .update(agentSessions)
+      .set({ deletedAt: ts })
+      .where(eq(agentSessions.id, sessionId))
+      .returning()
+      .get();
+    if (!updated) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    return updated;
+  }
+
+  /**
+   * Clear `deleted_at`, returning the row to visibility. Admin-only:
+   * agent-facing callers do not have access. Idempotent: re-undeleting an
+   * already-visible row returns the row as-is.
+   */
+  undelete(sessionId: string, _input: { adminBypass?: boolean } = {}): AgentSession {
+    void _input;
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (!existing.deletedAt) {
+      return existing;
+    }
+    const updated = this.db
+      .update(agentSessions)
+      .set({ deletedAt: null })
+      .where(eq(agentSessions.id, sessionId))
+      .returning()
+      .get();
+    if (!updated) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    return updated;
+  }
+
+  /**
+   * List sessions ordered newest first. Hides soft-deleted rows by
+   * default; pass `includeDeleted: true` to surface them.
+   */
+  list(
+    input: {
+      limit?: number;
+      status?: 'active' | 'ended' | 'abandoned';
+      includeDeleted?: boolean;
+    } = {},
+  ): AgentSession[] {
+    const limit = clamp(input.limit ?? 50, 1, 500);
+    const conditions = [];
+    if (!input.includeDeleted) {
+      conditions.push(isNull(agentSessions.deletedAt));
+    }
+    if (input.status) {
+      conditions.push(eq(agentSessions.status, input.status));
+    }
+    const query = this.db
+      .select()
+      .from(agentSessions)
+      .orderBy(desc(agentSessions.startedAt))
+      .limit(limit);
+    return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
   }
 
   /**

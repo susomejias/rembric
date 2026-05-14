@@ -49,6 +49,13 @@ export const agentSessions = sqliteTable(
     /** Structured summary populated by memory.session_summary. */
     summary: text('summary'),
     status: text('status', { enum: AGENT_SESSION_STATUSES }).notNull().default('active'),
+    /**
+     * Soft-delete timestamp. NULL means visible. Set by operators via
+     * `rembric session delete` (CLI) or `/dashboard/sessions/:id/delete`
+     * (dashboard). The row is never physically deleted; `session_id`
+     * references from `memory` and `confirmations` remain valid.
+     */
+    deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     tokenStatusIdx: index('sessions_token_status_idx').on(table.tokenId, table.status),
