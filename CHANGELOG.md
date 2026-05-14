@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/susomejias/rembric/compare/v0.3.1...v0.3.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* **mcp:** eager roots discovery so first memory.save resolves project ([1379c93](https://github.com/susomejias/rembric/commit/1379c937b090649f2b0161047ed65193064486c5))
+
+
+### Documentation
+
+* add CLAUDE.md for Claude Code guidance ([bae431e](https://github.com/susomejias/rembric/commit/bae431ee38ab6090a1150dfbecf186a7d580e9e6))
+
 ## [0.3.1](https://github.com/susomejias/rembric/compare/v0.3.0...v0.3.1) (2026-05-14)
 
 
