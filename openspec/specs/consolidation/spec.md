@@ -27,19 +27,30 @@ The server SHALL run a background consolidation on the cron schedule defined by 
 
 ### Requirement: The consolidation MUST target redundancy, drift, contradiction, and decay
 
-The consolidation SHALL detect and handle exactly four pollution categories in v0: redundancy (semantic duplicates → merge), drift (newer fact contradicts older → supersede), contradiction (mutually exclusive active facts → resolve), and decay (memories not seen for a configurable period with low confidence → archive).
-
-#### Scenario: Two near-duplicate active memories
-
-- **GIVEN** two `active` memories of the same scope and type whose vector similarity exceeds the redundancy threshold
-- **WHEN** the consolidation runs
-- **THEN** the LLM judge SHALL be invoked with the pair as candidates, and on `merge` the runner SHALL insert a merged memory and transition both predecessors to `superseded`
+The consolidation SHALL perform exactly two passes per run in v0.5: (1) decay (deterministic, no LLM), and (2) orphan promotion of pending relations older than `JUDGMENT_ORPHAN_AFTER_MS`. The LLM-driven detection of redundancy / drift / contradiction over the full corpus is REMOVED — that work moves to save-time as `memory.save` candidate detection.
 
 #### Scenario: A memory has not been seen for a long time
 
 - **GIVEN** a memory whose `last_seen_at` is older than the decay threshold and whose `confidence` count is below the floor
 - **WHEN** the consolidation runs
-- **THEN** the memory SHALL transition from `active` to `archived` without an LLM call
+- **THEN** the memory SHALL transition from `active` to `archived` without an LLM call (decay path is unchanged)
+
+#### Scenario: A pending relation is older than the orphan threshold
+
+- **GIVEN** a `memory_relations` row with `status = 'pending'` and `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)` (default 24h)
+- **WHEN** the consolidation runs
+- **THEN** the existing LLM judge SHALL be invoked on the (source, target) pair; the verdict SHALL translate to a relation value and the row SHALL transition to `status = 'judged'` with `marked_by_kind = 'consolidator'`
+
+#### Scenario: The LLM judge cannot decide an orphan
+
+- **WHEN** the LLM judge errors, returns malformed output, or returns a verdict with confidence below the configured floor
+- **THEN** the relation row SHALL transition to `status = 'orphaned'`; the orphaned status is final unless a future `memory.judge` or `memory.compare` call writes a fresh row
+
+#### Scenario: Two near-duplicate memories save apart from each other
+
+- **GIVEN** EMBEDDING_ENABLED is true and the second save's candidate detection found the first as a candidate
+- **WHEN** that save returned `candidates: [{...}]` and the agent never called `memory.judge`
+- **THEN** after `JUDGMENT_ORPHAN_AFTER_MS` the consolidator's orphan-promotion pass SHALL invoke the LLM judge on the pair (this is the only path that runs LLM detection in the new pipeline)
 
 ### Requirement: Consolidation operations MUST be atomic per operation
 
@@ -87,13 +98,12 @@ The dashboard and CLI SHALL provide an undo for any individual consolidation op 
 
 ### Requirement: The consolidation MUST be idempotent on stable input
 
-Running the consolidation twice with no intervening writes SHALL produce zero new operations on the second run.
+Running the consolidation twice with no intervening writes SHALL produce zero new operations beyond noops. Specifically: the decay pass SHALL be a no-op if no row crossed the threshold since the previous run; the orphan-promotion pass SHALL be a no-op if no pending relation crossed `JUDGMENT_ORPHAN_AFTER_MS` since the previous run.
 
-#### Scenario: Back-to-back consolidation runs
+#### Scenario: Back-to-back consolidation runs with no intervening saves
 
-- **GIVEN** a consolidation run has just completed
-- **WHEN** the consolidation runs again immediately with no new memories saved
-- **THEN** the new `consolidation_runs` row SHALL have an op count of zero
+- **WHEN** the consolidation runs twice in immediate succession
+- **THEN** the second run's `consolidation_runs.summary` SHALL show zero new decay archives and zero new orphan promotions
 
 ### Requirement: LLM judge output MUST be validated
 
