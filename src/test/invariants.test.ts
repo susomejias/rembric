@@ -57,6 +57,10 @@ const FORBIDDEN: { pattern: RegExp; description: string }[] = [
     description:
       'raw `UPDATE sessions SET (agent|started_at|token_id|project_id) =` is forbidden — immutable',
   },
+  // NOTE: `deleted_at` is intentionally NOT listed among immutable session
+  // columns — it is the single field that may transition NULL → timestamp
+  // (soft-delete) and back to NULL (undelete). See the `sessions` spec
+  // and `add-session-deletion` change for the narrowed contract.
   {
     pattern: /delete\s*\(\s*memoryRelations\s*\)/i,
     description:

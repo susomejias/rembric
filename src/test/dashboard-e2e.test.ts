@@ -250,6 +250,74 @@ describe('dashboard E2E', () => {
     expect(body).toContain('Session not found');
   });
 
+  it('sessions delete soft-deletes via the row form and undelete restores from detail view', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    // Seed a session row using the dashboard's own data dir.
+    const { createDb } = await import('../db/index.js');
+    const { ProjectsService } = await import('../services/projects.js');
+    const { TokensService } = await import('../services/tokens.js');
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { eq } = await import('drizzle-orm');
+    const dataDir = server.config.dataDir;
+    const handle = createDb({ dataDir });
+    const tokensSvc = new TokensService(handle.db);
+    const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
+    void tokensSvc;
+    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-del-proj' });
+    const sess = new AgentSessionsService(handle.db).start({
+      tokenId: admin!.id,
+      projectId: proj.id,
+      agent: 'e2e',
+    });
+    handle.close();
+
+    // Pull the list page to extract the CSRF token bound to this row's
+    // Delete form.
+    const list = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(list.status).toBe(200);
+    const listBody = await list.text();
+    const csrf = extractCsrf(listBody, `/dashboard/sessions/${sess.id}/delete`);
+    expect(csrf).toBeTruthy();
+
+    const deleted = await postForm(baseUrl, `/dashboard/sessions/${sess.id}/delete`, jar, {
+      csrf: csrf!,
+    });
+    expect(deleted.status).toBe(302);
+    expect(deleted.headers.get('location')).toContain(`deleted=${sess.id}`);
+
+    // Default list hides the row; ?include_deleted=1 surfaces it.
+    const after = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(await after.text()).not.toContain(sess.id);
+    const withDeleted = await get(baseUrl, '/dashboard/sessions?include_deleted=1', jar);
+    expect(await withDeleted.text()).toContain(sess.id);
+
+    // Detail view shows the deleted flash and an Undelete button.
+    const detail = await get(baseUrl, `/dashboard/sessions/${sess.id}`, jar);
+    const detailBody = await detail.text();
+    expect(detailBody).toContain('soft-deleted');
+    const undeleteCsrf = extractCsrf(detailBody, `/dashboard/sessions/${sess.id}/undelete`);
+    expect(undeleteCsrf).toBeTruthy();
+    const undeleted = await postForm(baseUrl, `/dashboard/sessions/${sess.id}/undelete`, jar, {
+      csrf: undeleteCsrf!,
+    });
+    expect(undeleted.status).toBe(302);
+    expect(undeleted.headers.get('location')).toContain(`restored=${sess.id}`);
+
+    const final = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(await final.text()).toContain(sess.id);
+  });
+
+  it('session delete without csrf returns 403', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const res = await postForm(baseUrl, '/dashboard/sessions/anything/delete', jar, {});
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('csrf_invalid');
+  });
+
   it('relations list view renders after login', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
@@ -257,6 +325,49 @@ describe('dashboard E2E', () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('Relations');
+  });
+
+  it('projects page renders a create form and a POST mints the project', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const page = await get(baseUrl, '/dashboard/projects', jar);
+    expect(page.status).toBe(200);
+    const pageBody = await page.text();
+    expect(pageBody).toContain('Create project');
+
+    const csrf = extractCsrf(pageBody, '/dashboard/projects/create');
+    expect(csrf).toBeTruthy();
+
+    const created = await postForm(baseUrl, '/dashboard/projects/create', jar, {
+      csrf: csrf!,
+      slug: 'e2e-created-project',
+      displayName: 'E2E Created',
+    });
+    expect(created.status).toBe(302);
+    expect(created.headers.get('location')).toContain('created=e2e-created-project');
+
+    const after = await get(baseUrl, '/dashboard/projects?created=e2e-created-project', jar);
+    const afterBody = await after.text();
+    expect(afterBody).toContain('e2e-created-project');
+    expect(afterBody).toContain('E2E Created');
+  });
+
+  it('project create rejects an invalid slug with a flash error in the redirect', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const page = await get(baseUrl, '/dashboard/projects', jar);
+    const csrf = extractCsrf(await page.text(), '/dashboard/projects/create');
+    expect(csrf).toBeTruthy();
+
+    const res = await postForm(baseUrl, '/dashboard/projects/create', jar, {
+      csrf: csrf!,
+      slug: 'INVALID Slug!',
+      displayName: '',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toMatch(/error=/);
   });
 
   it('CSRF rejection — POST without csrf field returns 403', async () => {

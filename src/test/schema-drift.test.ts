@@ -110,6 +110,7 @@ const EXPECTED_COLUMNS: Record<
     { name: 'ended_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'summary', type: 'TEXT', notnull: 0, pk: 0 },
     { name: 'status', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'deleted_at', type: 'INTEGER', notnull: 0, pk: 0 },
   ],
   confirmations: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },

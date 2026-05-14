@@ -130,4 +130,59 @@ describe('AgentSessionsService', () => {
     expect(counts.ended).toBe(1);
     expect(counts.abandoned).toBe(0);
   });
+
+  describe('soft-delete', () => {
+    it('softDelete sets deleted_at and hides the row from default list', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'to-delete' });
+      const deleted = sessions.softDelete(s.id, { adminBypass: true });
+      expect(deleted.deletedAt).toBeInstanceOf(Date);
+
+      const visible = sessions.list();
+      expect(visible.some((r) => r.id === s.id)).toBe(false);
+      const all = sessions.list({ includeDeleted: true });
+      expect(all.some((r) => r.id === s.id)).toBe(true);
+
+      // findById is unfiltered; the detail view must still resolve.
+      expect(sessions.getById(s.id)?.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('softDelete is idempotent on double-call', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'idempotent' });
+      const first = sessions.softDelete(s.id, { adminBypass: true });
+      const second = sessions.softDelete(s.id, { adminBypass: true });
+      expect(second.id).toBe(first.id);
+      expect(second.deletedAt?.getTime()).toBe(first.deletedAt?.getTime());
+    });
+
+    it('undelete clears deleted_at and the row re-appears in the default list', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'restore' });
+      sessions.softDelete(s.id, { adminBypass: true });
+      const restored = sessions.undelete(s.id, { adminBypass: true });
+      expect(restored.deletedAt).toBeNull();
+      expect(sessions.list().some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('softDelete without adminBypass requires the owning token', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'cross-token' });
+      expect(() => sessions.softDelete(s.id, { tokenId: otherTokenId })).toThrow(
+        /belongs to a different token/,
+      );
+      // owning token can soft-delete without adminBypass
+      const deleted = sessions.softDelete(s.id, { tokenId });
+      expect(deleted.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('recentForContext never returns deleted rows', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'context' });
+      sessions.softDelete(s.id, { adminBypass: true });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
+
+    it('softDelete on a missing id throws session_not_found', () => {
+      expect(() => sessions.softDelete('not-a-real-ulid', { adminBypass: true })).toThrow(
+        /not found/,
+      );
+    });
+  });
 });

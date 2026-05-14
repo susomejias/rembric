@@ -104,6 +104,135 @@ describe('CLI action functions', () => {
     expect(parsed).toHaveProperty('dataDir');
   });
 
+  it('project create mints a project and list contains its slug', async () => {
+    const { runDbMigrate } = await import('./db-migrate.js');
+    const { runProjectCreate, runProjectList } = await import('./project-cli.js');
+    await captureExit(() => {
+      runDbMigrate();
+      return Promise.resolve();
+    });
+    const { exitCode, stdout } = await captureExit(() => {
+      runProjectCreate({ slug: 'cli-test-project', name: 'CLI Test' });
+      return Promise.resolve();
+    });
+    expect(exitCode === 0 || exitCode === null).toBe(true);
+    const parsed = JSON.parse(stdout) as { slug: string; displayName: string | null };
+    expect(parsed.slug).toBe('cli-test-project');
+    expect(parsed.displayName).toBe('CLI Test');
+
+    const { stdout: listOut } = await captureExit(() => {
+      runProjectList({ json: true });
+      return Promise.resolve();
+    });
+    const listed = JSON.parse(listOut) as { projects: { slug: string }[] };
+    expect(listed.projects.some((p) => p.slug === 'cli-test-project')).toBe(true);
+  });
+
+  it('project create with an invalid slug exits 2', async () => {
+    const { runDbMigrate } = await import('./db-migrate.js');
+    const { runProjectCreate } = await import('./project-cli.js');
+    await captureExit(() => {
+      runDbMigrate();
+      return Promise.resolve();
+    });
+    const { exitCode, stderr } = await captureExit(() => {
+      runProjectCreate({ slug: 'INVALID Slug!' });
+      return Promise.resolve();
+    });
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/slug/i);
+  });
+
+  it('project create rejects a duplicate slug with exit 1', async () => {
+    const { runDbMigrate } = await import('./db-migrate.js');
+    const { runProjectCreate } = await import('./project-cli.js');
+    await captureExit(() => {
+      runDbMigrate();
+      return Promise.resolve();
+    });
+    await captureExit(() => {
+      runProjectCreate({ slug: 'dup-project' });
+      return Promise.resolve();
+    });
+    const { exitCode, stderr } = await captureExit(() => {
+      runProjectCreate({ slug: 'dup-project' });
+      return Promise.resolve();
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/already exists/i);
+  });
+
+  it('session delete soft-deletes the row and list hides it by default', async () => {
+    const { runDbMigrate } = await import('./db-migrate.js');
+    const { runSessionDelete, runSessionList } = await import('./session-cli.js');
+    await captureExit(() => {
+      runDbMigrate();
+      return Promise.resolve();
+    });
+
+    // Bootstrap an admin token + a project + a session via direct DB access.
+    const { createDb } = await import('../db/index.js');
+    const { loadConfig } = await import('../config.js');
+    const { ProjectsService } = await import('../services/projects.js');
+    const { TokensService } = await import('../services/tokens.js');
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { eq } = await import('drizzle-orm');
+    const cfg = loadConfig();
+    const handle = createDb({ dataDir: cfg.dataDir });
+    const tokensSvc = new TokensService(handle.db);
+    tokensSvc.bootstrapAdmin(ENV_BASE.REMBRIC_ADMIN_TOKEN);
+    const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
+    const proj = new ProjectsService(handle.db).create({ slug: 'cli-del-proj' });
+    const sess = new AgentSessionsService(handle.db).start({
+      tokenId: admin!.id,
+      projectId: proj.id,
+      agent: 'cli-test',
+    });
+    handle.close();
+
+    // Delete the session via the CLI surface.
+    const { exitCode, stdout } = await captureExit(() => {
+      runSessionDelete({ id: sess.id });
+      return Promise.resolve();
+    });
+    expect(exitCode === 0 || exitCode === null).toBe(true);
+    const parsed = JSON.parse(stdout) as { id: string; deletedAt: string | null };
+    expect(parsed.id).toBe(sess.id);
+    expect(parsed.deletedAt).not.toBeNull();
+
+    // Default list does NOT include the deleted row.
+    const { stdout: defaultList } = await captureExit(() => {
+      runSessionList({ json: true });
+      return Promise.resolve();
+    });
+    const listed = JSON.parse(defaultList) as { sessions: { id: string }[] };
+    expect(listed.sessions.some((r) => r.id === sess.id)).toBe(false);
+
+    // With --include-deleted the row reappears.
+    const { stdout: allList } = await captureExit(() => {
+      runSessionList({ json: true, includeDeleted: true });
+      return Promise.resolve();
+    });
+    const allListed = JSON.parse(allList) as { sessions: { id: string }[] };
+    expect(allListed.sessions.some((r) => r.id === sess.id)).toBe(true);
+  });
+
+  it('session delete on an unknown id exits non-zero', async () => {
+    const { runDbMigrate } = await import('./db-migrate.js');
+    const { runSessionDelete } = await import('./session-cli.js');
+    await captureExit(() => {
+      runDbMigrate();
+      return Promise.resolve();
+    });
+    const { exitCode, stderr } = await captureExit(() => {
+      runSessionDelete({ id: 'not-a-real-ulid' });
+      return Promise.resolve();
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/not found/i);
+  });
+
   it('consolidation run-now without --token exits non-zero', async () => {
     delete process.env.REMBRIC_ADMIN_TOKEN;
     const { runConsolidationRunNow } = await import('./consolidation-cli.js');
