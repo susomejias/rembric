@@ -167,7 +167,14 @@ const STYLE = `
 
 export interface ShellOptions {
   title: string;
-  activeNav?: 'home' | 'memories' | 'sessions' | 'consolidation' | 'projects' | 'tokens';
+  activeNav?:
+    | 'home'
+    | 'memories'
+    | 'sessions'
+    | 'relations'
+    | 'consolidation'
+    | 'projects'
+    | 'tokens';
   flash?: { kind: 'error' | 'success'; text: string };
 }
 
@@ -175,6 +182,7 @@ const NAV = [
   { key: 'home', label: 'Home', href: '/dashboard' },
   { key: 'memories', label: 'Memories', href: '/dashboard/memories' },
   { key: 'sessions', label: 'Sessions', href: '/dashboard/sessions' },
+  { key: 'relations', label: 'Relations', href: '/dashboard/relations' },
   { key: 'consolidation', label: 'Consolidation', href: '/dashboard/consolidation' },
   { key: 'projects', label: 'Projects', href: '/dashboard/projects' },
   { key: 'tokens', label: 'Tokens', href: '/dashboard/tokens' },

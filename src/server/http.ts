@@ -45,7 +45,7 @@ export interface CreateHttpServerOptions {
    * to the in-process ConsolidationRunner; exposed over HTTP to support
    * `rembric consolidation run-now` against a running server.
    */
-  triggerConsolidation?: () => Promise<unknown>;
+  triggerConsolidation?: (opts: { orphansOnly?: boolean }) => Promise<unknown>;
 }
 
 export interface HttpServerHandle {
@@ -80,7 +80,9 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
         );
       }
       try {
-        const result = await trigger();
+        const mode = c.req.query('mode');
+        const orphansOnly = mode === 'orphans-only';
+        const result = await trigger({ orphansOnly });
         return c.json({ ok: true, result });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

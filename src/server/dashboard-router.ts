@@ -5,8 +5,9 @@ import { createAssetsMiddleware } from '../dashboard/assets.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
+import { createRelationsRouter } from '../dashboard/relations.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
-import { html, shell } from '../dashboard/templates.js';
+import { html, raw, shell } from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import type { Db } from '../db/client.js';
@@ -47,6 +48,7 @@ export interface DashboardStats {
   projects: number;
   lastConsolidationAt: Date | null;
   activeSessions: number;
+  pendingJudgments: number;
 }
 
 export function createDashboardRouter(deps: DashboardDeps): Hono {
@@ -158,6 +160,14 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <div class="value">${stats.activeSessions}</div>
         </div>
         <div class="stat-card">
+          <div class="label">Pending judgments</div>
+          <div class="value">
+            ${stats.pendingJudgments > 0
+              ? raw(`<a href="/dashboard/relations?status=pending">${stats.pendingJudgments}</a>`)
+              : 0}
+          </div>
+        </div>
+        <div class="stat-card">
           <div class="label">Last consolidation</div>
           <div class="value" style="font-size:.9rem">
             ${stats.lastConsolidationAt
@@ -180,6 +190,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
   );
   app.route('/sessions', createSessionsRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route('/relations', createRelationsRouter({ db: deps.db, sessions: deps.sessions }));
   app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
   app.route(
     '/projects',

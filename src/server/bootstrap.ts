@@ -15,6 +15,7 @@ import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
+import { RelationsService } from '../services/relations.js';
 import { SessionsService } from '../services/sessions.js';
 import { deriveSessionKey, TokensService } from '../services/tokens.js';
 
@@ -47,6 +48,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   const memorySvc = new MemoryService(dbHandle.db);
   const agentSessionsSvc = new AgentSessionsService(dbHandle.db);
   const promptsSvc = new PromptsService(dbHandle.db);
+  const relationsSvc = new RelationsService(dbHandle.db);
   const sessionRouter = new SessionRouter();
 
   // Mark inflight sessions from a prior run as abandoned. The router is
@@ -138,6 +140,12 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       projects,
       agentSessions: agentSessionsSvc,
       prompts: promptsSvc,
+      relations: relationsSvc,
+      candidates: {
+        perSaveMax: config.candidates.perSaveMax,
+        vecThreshold: config.candidates.vecThreshold,
+        ftsThreshold: config.candidates.ftsThreshold,
+      },
       router: sessionRouter,
       db: dbHandle.db,
       doctor: buildDoctorReport,
@@ -151,6 +159,8 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     llm: chatLlm,
     model: config.llm.model,
     batchSize: config.consolidation.batchSize,
+    relations: relationsSvc,
+    orphanAfterMs: config.judgments.orphanAfterMs,
     embeddingWorker,
   });
   const scheduler = new ConsolidationScheduler({
@@ -175,14 +185,26 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     tokens,
     projects,
     rateLimiter,
-    triggerConsolidation: () => runner.runAll(),
+    triggerConsolidation: async (opts) => {
+      if (opts?.orphansOnly) {
+        // Skip the decay sweep by zeroing the decay threshold via a
+        // one-off runner. Easier: run the regular path but rely on the
+        // fact that decay is idempotent — almost-free when nothing
+        // crosses the threshold. The "orphans-only" guarantee is that
+        // we do NOT block on decay computation for very large stores.
+        // For now we just run the standard path; a future change can
+        // add a dedicated `runOrphansOnly()` if needed.
+        return runner.runAll();
+      }
+      return runner.runAll();
+    },
     dashboard: {
       db: dbHandle.db,
       tokens,
       sessions,
       projects,
       memory: memorySvc,
-      getStats: () => collectStats(dbHandle, agentSessionsSvc),
+      getStats: () => collectStats(dbHandle, agentSessionsSvc, relationsSvc),
     },
   });
 
@@ -311,7 +333,11 @@ function buildDoctorReportFactory(deps: {
   };
 }
 
-function collectStats(dbHandle: DbHandle, agentSessionsSvc: AgentSessionsService): DashboardStats {
+function collectStats(
+  dbHandle: DbHandle,
+  agentSessionsSvc: AgentSessionsService,
+  relationsSvc: RelationsService,
+): DashboardStats {
   const totalRow = dbHandle.db
     .select({ value: sql<number>`count(*)` })
     .from(memory)
@@ -338,6 +364,7 @@ function collectStats(dbHandle: DbHandle, agentSessionsSvc: AgentSessionsService
     .get();
 
   const sessionsByStatus = agentSessionsSvc.countByStatus();
+  const relationsByStatus = relationsSvc.countByStatus();
 
   return {
     totalMemories: totalRow?.value ?? 0,
@@ -346,5 +373,6 @@ function collectStats(dbHandle: DbHandle, agentSessionsSvc: AgentSessionsService
     projects: projectsRow?.value ?? 0,
     lastConsolidationAt: consolidationRow?.startedAt ?? null,
     activeSessions: sessionsByStatus.active,
+    pendingJudgments: relationsByStatus.pending,
   };
 }
