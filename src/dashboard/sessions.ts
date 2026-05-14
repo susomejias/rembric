@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
 import type { Db } from '../db/client.js';
@@ -6,14 +6,18 @@ import { agentSessions } from '../db/schema/agent-sessions.js';
 import { memory } from '../db/schema/memory.js';
 import { projects } from '../db/schema/projects.js';
 import { tokens } from '../db/schema/tokens.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';
 
+import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { formatTs, html, raw, scopePill, shell, shortId, statusPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface SessionsDeps {
   db: Db;
   sessions: SessionsService;
+  agentSessions: AgentSessionsService;
 }
 
 function getSession(c: Context): ResolvedSession | null {
@@ -27,24 +31,35 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const rows = deps.db
-      .select({
-        id: agentSessions.id,
-        agent: agentSessions.agent,
-        startedAt: agentSessions.startedAt,
-        endedAt: agentSessions.endedAt,
-        status: agentSessions.status,
-        projectId: agentSessions.projectId,
-        tokenName: tokens.name,
-        tokenRevokedAt: tokens.revokedAt,
-        projectSlug: projects.slug,
-      })
-      .from(agentSessions)
-      .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
-      .leftJoin(projects, eq(projects.id, agentSessions.projectId))
-      .orderBy(desc(agentSessions.startedAt))
-      .limit(50)
-      .all();
+    const url = new URL(c.req.url);
+    const justDeleted = url.searchParams.get('deleted');
+    const justRestored = url.searchParams.get('restored');
+    const includeDeleted = url.searchParams.get('include_deleted') === '1';
+
+    const baseQuery = () =>
+      deps.db
+        .select({
+          id: agentSessions.id,
+          agent: agentSessions.agent,
+          startedAt: agentSessions.startedAt,
+          endedAt: agentSessions.endedAt,
+          status: agentSessions.status,
+          deletedAt: agentSessions.deletedAt,
+          projectId: agentSessions.projectId,
+          tokenName: tokens.name,
+          tokenRevokedAt: tokens.revokedAt,
+          projectSlug: projects.slug,
+        })
+        .from(agentSessions)
+        .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
+        .leftJoin(projects, eq(projects.id, agentSessions.projectId))
+        .orderBy(desc(agentSessions.startedAt))
+        .limit(50);
+
+    const visibleRows = baseQuery().where(isNull(agentSessions.deletedAt)).all();
+    const deletedRows = includeDeleted
+      ? baseQuery().where(isNotNull(agentSessions.deletedAt)).all()
+      : [];
 
     // Per-session memory counts in one query.
     const countRows = deps.db
@@ -60,9 +75,61 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       }, {});
     void memory;
 
+    const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => html`
+      <tr>
+        <td class="mono">
+          <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
+        </td>
+        <td>${r.agent}</td>
+        <td>${r.projectSlug ? raw(`<code>${r.projectSlug}</code>`) : scopePill('global')}</td>
+        <td class="small">
+          ${r.tokenName ?? '—'}
+          ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
+        </td>
+        <td class="muted">${formatTs(r.startedAt)}</td>
+        <td class="muted">${formatTs(r.endedAt)}</td>
+        <td>${statusPill(r.status)}</td>
+        <td class="right">${countRows[r.id] ?? 0}</td>
+        <td>
+          ${opts.deleted
+            ? html`
+                <form action="/dashboard/sessions/${r.id}/undelete" method="post" class="inline">
+                  ${csrfInput(session.session, deps.sessions, 'session.undelete')}
+                  <button type="submit">Undelete</button>
+                </form>
+              `
+            : html`
+                <form action="/dashboard/sessions/${r.id}/delete" method="post" class="inline">
+                  ${csrfInput(session.session, deps.sessions, 'session.delete')}
+                  <button class="warn" type="submit">Delete</button>
+                </form>
+              `}
+        </td>
+      </tr>
+    `;
+
+    const flash = justDeleted
+      ? html`<p class="flash success">
+          Session <code>${justDeleted}</code> soft-deleted.
+          <a href="/dashboard/sessions/${justDeleted}">View</a>
+          to undelete.
+        </p>`
+      : justRestored
+        ? html`<p class="flash success">Session <code>${justRestored}</code> restored.</p>`
+        : raw('');
+
     const body = html`
       <h1>Sessions</h1>
-      ${rows.length === 0
+      ${flash}
+      ${includeDeleted
+        ? raw(
+            '<p class="small muted">Showing soft-deleted rows. <a href="/dashboard/sessions">Hide</a>.</p>',
+          )
+        : raw(
+            '<p class="small muted"><a href="/dashboard/sessions?include_deleted=1">Show deleted</a></p>',
+          )}
+      <h2>Active (${visibleRows.length})</h2>
+      ${visibleRows.length === 0
         ? html`<p class="muted">No agent sessions yet.</p>`
         : html`
             <table>
@@ -76,37 +143,37 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                   <th>ended</th>
                   <th>status</th>
                   <th>memories</th>
+                  <th>actions</th>
                 </tr>
               </thead>
               <tbody>
-                ${rows.map(
-                  (r) => html`
-                    <tr>
-                      <td class="mono">
-                        <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
-                      </td>
-                      <td>${r.agent}</td>
-                      <td>
-                        ${r.projectSlug
-                          ? raw(`<code>${r.projectSlug}</code>`)
-                          : scopePill('global')}
-                      </td>
-                      <td class="small">
-                        ${r.tokenName ?? '—'}
-                        ${r.tokenRevokedAt
-                          ? raw('<span class="muted small">(revoked)</span>')
-                          : raw('')}
-                      </td>
-                      <td class="muted">${formatTs(r.startedAt)}</td>
-                      <td class="muted">${formatTs(r.endedAt)}</td>
-                      <td>${statusPill(r.status)}</td>
-                      <td class="right">${countRows[r.id] ?? 0}</td>
-                    </tr>
-                  `,
-                )}
+                ${visibleRows.map((r) => renderRow(r, { deleted: false }))}
               </tbody>
             </table>
           `}
+      ${includeDeleted && deletedRows.length > 0
+        ? html`
+            <h2>Deleted (${deletedRows.length})</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>agent</th>
+                  <th>project</th>
+                  <th>token</th>
+                  <th>started</th>
+                  <th>ended</th>
+                  <th>status</th>
+                  <th>memories</th>
+                  <th>actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${deletedRows.map((r) => renderRow(r, { deleted: true }))}
+              </tbody>
+            </table>
+          `
+        : raw('')}
     `;
     return c.html(shell(body, { title: 'Sessions', activeNav: 'sessions' }));
   });
@@ -125,6 +192,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         endedAt: agentSessions.endedAt,
         status: agentSessions.status,
         summary: agentSessions.summary,
+        deletedAt: agentSessions.deletedAt,
         projectId: agentSessions.projectId,
         tokenName: tokens.name,
         tokenRevokedAt: tokens.revokedAt,
@@ -153,8 +221,28 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       .orderBy(memory.createdAt)
       .all();
 
+    const actionForm = row.deletedAt
+      ? html`
+          <form action="/dashboard/sessions/${row.id}/undelete" method="post" class="inline">
+            ${csrfInput(session.session, deps.sessions, 'session.undelete')}
+            <button class="primary" type="submit">Undelete</button>
+          </form>
+        `
+      : html`
+          <form action="/dashboard/sessions/${row.id}/delete" method="post" class="inline">
+            ${csrfInput(session.session, deps.sessions, 'session.delete')}
+            <button class="warn" type="submit">Delete</button>
+          </form>
+        `;
+
     const body = html`
       <h1>Session <code>${shortId(row.id)}</code></h1>
+      ${row.deletedAt
+        ? html`<p class="flash error">
+            This session is soft-deleted (at ${formatTs(row.deletedAt)}). Memories that reference it
+            keep their <code>session_id</code> pointer intact.
+          </p>`
+        : raw('')}
       <div class="stat-grid">
         <div class="stat-card">
           <div class="label">Status</div>
@@ -184,6 +272,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           <div class="value" style="font-size:.9rem">${formatTs(row.endedAt)}</div>
         </div>
       </div>
+
+      <p>${actionForm}</p>
 
       ${row.description
         ? html`<h2>Description (seed goal)</h2>
@@ -228,6 +318,52 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     return c.html(shell(body, { title: `Session ${shortId(row.id)}`, activeNav: 'sessions' }));
   });
 
+  app.post('/:id/delete', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'session.delete');
+    if (form instanceof Response) return form;
+    const id = c.req.param('id');
+    try {
+      deps.agentSessions.softDelete(id, { adminBypass: true });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          shell(html`<p class="flash error">${err.message}</p>`, {
+            title: 'Sessions',
+            activeNav: 'sessions',
+          }),
+          err.code === 'session_not_found' ? 404 : 400,
+        );
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/sessions?deleted=${encodeURIComponent(id)}`);
+  });
+
+  app.post('/:id/undelete', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'session.undelete');
+    if (form instanceof Response) return form;
+    const id = c.req.param('id');
+    try {
+      deps.agentSessions.undelete(id, { adminBypass: true });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          shell(html`<p class="flash error">${err.message}</p>`, {
+            title: 'Sessions',
+            activeNav: 'sessions',
+          }),
+          err.code === 'session_not_found' ? 404 : 400,
+        );
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/sessions?restored=${encodeURIComponent(id)}`);
+  });
+
   return app;
 }
 
@@ -235,3 +371,6 @@ function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + '…';
 }
+
+// Maintained import to keep `and` available if future filters compose.
+void and;

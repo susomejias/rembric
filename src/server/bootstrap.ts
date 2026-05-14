@@ -202,6 +202,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       db: dbHandle.db,
       tokens,
       sessions,
+      agentSessions: agentSessionsSvc,
       projects,
       memory: memorySvc,
       getStats: () => collectStats(dbHandle, agentSessionsSvc, relationsSvc),

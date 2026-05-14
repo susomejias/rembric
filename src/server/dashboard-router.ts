@@ -11,6 +11,7 @@ import { html, raw, shell } from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import type { Db } from '../db/client.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -36,6 +37,7 @@ export interface DashboardDeps {
   db: Db;
   tokens: TokensService;
   sessions: SessionsService;
+  agentSessions: AgentSessionsService;
   projects: ProjectsService;
   memory: MemoryService;
   getStats: () => DashboardStats;
@@ -189,7 +191,14 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     '/memories',
     createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
   );
-  app.route('/sessions', createSessionsRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route(
+    '/sessions',
+    createSessionsRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      agentSessions: deps.agentSessions,
+    }),
+  );
   app.route('/relations', createRelationsRouter({ db: deps.db, sessions: deps.sessions }));
   app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
   app.route(

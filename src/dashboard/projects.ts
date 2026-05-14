@@ -24,6 +24,10 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
+    const url = new URL(c.req.url);
+    const justCreated = url.searchParams.get('created');
+    const errorMessage = url.searchParams.get('error');
+
     const active = deps.projects.list();
     const archived = deps.projects.listArchived();
 
@@ -82,6 +86,30 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
         are flagged. The display name is cosmetic.
       </p>
 
+      ${justCreated
+        ? html`<p class="flash success">Created project <code>${justCreated}</code>.</p>`
+        : raw('')}
+      ${errorMessage ? html`<p class="flash error">${errorMessage}</p>` : raw('')}
+
+      <form action="/dashboard/projects/create" method="post" class="inline">
+        ${csrfInput(session.session, deps.sessions, 'project.create')}
+        <input
+          type="text"
+          name="slug"
+          placeholder="my-project"
+          pattern="[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?"
+          required
+          style="max-width:24ch"
+        />
+        <input
+          type="text"
+          name="displayName"
+          placeholder="display name (optional)"
+          style="max-width:20ch"
+        />
+        <button class="primary" type="submit">Create project</button>
+      </form>
+
       <h2>Active (${active.length})</h2>
       ${active.length === 0
         ? html`<p class="muted">No active projects.</p>`
@@ -122,6 +150,30 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
           `}
     `;
     return c.html(shell(body, { title: 'Projects', activeNav: 'projects' }));
+  });
+
+  app.post('/create', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'project.create');
+    if (form instanceof Response) return form;
+    const rawSlug = form.get('slug');
+    const rawDisplay = form.get('displayName');
+    const slug = (typeof rawSlug === 'string' ? rawSlug : '').trim();
+    const displayNameInput = (typeof rawDisplay === 'string' ? rawDisplay : '').trim();
+    const displayName = displayNameInput.length > 0 ? displayNameInput : null;
+    if (!slug) {
+      return c.redirect(`/dashboard/projects?error=${encodeURIComponent('Slug is required.')}`);
+    }
+    try {
+      const project = deps.projects.create({ slug, displayName });
+      return c.redirect(`/dashboard/projects?created=${encodeURIComponent(project.slug)}`);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.redirect(`/dashboard/projects?error=${encodeURIComponent(err.message)}`);
+      }
+      throw err;
+    }
   });
 
   app.post('/:id/archive', async (c) => {
