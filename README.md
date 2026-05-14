@@ -20,42 +20,58 @@ Brand: **Rembric**. CLI / binary / npm package: `rembric` (singular).
                                            │
                                            │  HTTPS via your reverse proxy
                                            │  Authorization: Bearer <token>
-                                           │  X-Rembric-Project: <slug>
+                                           │  URL path: /mcp/<slug>  (or /mcp + project.use)
                                            ▼
    ┌───────────────────────────────────────────────────────────────────────┐
    │                       rembric  (single Node process)                  │
    │                                                                       │
    │   ┌────────────────────────────┐   ┌───────────────────────────────┐  │
-   │   │  /mcp        /mcp/<slug>   │   │  /dashboard                   │  │
+   │   │  /mcp       /mcp/<slug>    │   │  /dashboard                   │  │
    │   │  Streamable HTTP transport │   │  SSR HTML + HTMX              │  │
-   │   │  ┌──────────────────────┐  │   │  ┌─────────────────────────┐  │  │
-   │   │  │ memory.save          │  │   │  │ /login   /memories      │  │  │
-   │   │  │ memory.search (FTS5) │  │   │  │ /consolidation /tokens  │  │  │
-   │   │  │ memory.get  + history│  │   │  │ /projects               │  │  │
-   │   │  │ memory.confirm       │  │   │  └─────────────────────────┘  │  │
+   │   │  + initialize.instructions │   │  ┌─────────────────────────┐  │  │
+   │   │  ┌──────────────────────┐  │   │  │ /login   /memories      │  │  │
+   │   │  │ memory.{save,search, │  │   │  │ /sessions  /consolidat. │  │  │
+   │   │  │   get,confirm}       │  │   │  │ /projects  /tokens      │  │  │
+   │   │  │ memory.session_*     │  │   │  └─────────────────────────┘  │  │
+   │   │  │ memory.context       │  │   │                               │  │
+   │   │  │ memory.timeline      │  │   │                               │  │
+   │   │  │ memory.capture_pass. │  │   │                               │  │
+   │   │  │ memory.doctor/stats  │  │   │                               │  │
+   │   │  │ memory.save_prompt   │  │   │                               │  │
+   │   │  │ memory.suggest_topic │  │   │                               │  │
+   │   │  │ memory.judge         │  │   │                               │  │
+   │   │  │ memory.compare       │  │   │                               │  │
+   │   │  │ project.{use,list,   │  │   │                               │  │
+   │   │  │          current}    │  │   │                               │  │
    │   │  └──────────────────────┘  │   │                               │  │
    │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
    │                 │                                │                    │
    │                 ▼                                ▼                    │
    │   ┌───────────────────────────────────────────────────────────────┐   │
    │   │  Service layer                                                │   │
-   │   │   MemoryService · ProjectsService · TokensService · Sessions  │   │
+   │   │   MemoryService (save = insert + topic_key upsert +           │   │
+   │   │                  save-time candidate detection)               │   │
+   │   │   RelationsService · ProjectsService · TokensService          │   │
+   │   │   AgentSessionsService · PromptsService · SessionRouter       │   │
    │   └───────────────────────────────┬───────────────────────────────┘   │
    │                                   │                                   │
    │                                   ▼                                   │
    │   ┌───────────────────────────────────────────────────────────────┐   │
    │   │  SQLite (Drizzle ORM, append-only + tombstones)               │   │
-   │   │   memory · projects · confirmations · tokens · sessions       │   │
-   │   │   consolidation_runs · consolidation_ops                      │   │
+   │   │   memory (+ topic_key) · projects · confirmations · tokens    │   │
+   │   │   sessions · prompts · memory_relations (judgment graph)      │   │
+   │   │   consolidation_runs · consolidation_ops · dashboard_sessions │   │
    │   │   + memory_fts  (FTS5)      + memory_vec  (sqlite-vec)        │   │
    │   └───────────────────────────────▲───────────────────────────────┘   │
    │                                   │                                   │
+   │                                   │ pending → judged | orphaned       │
    │   ┌───────────────────────────────┴───────────────────────────────┐   │
    │   │  Background workers                                           │   │
    │   │   EmbeddingWorker          (every 30s + pre-consolidation)    │   │
    │   │   ConsolidationScheduler   (CONSOLIDATION_CRON, default 03:00)│   │
-   │   │     └── candidate detection  →  LLM judge  →  atomic ops      │   │
-   │   │         (redundancy / drift / contradiction / decay)          │   │
+   │   │     ├── decay              (deterministic, no LLM)            │   │
+   │   │     └── orphan promotion   (LLM judge over pending relations  │   │
+   │   │                              older than JUDGMENT_ORPHAN_*)    │   │
    │   └───────────────────────────────┬───────────────────────────────┘   │
    │                                   │                                   │
    └───────────────────────────────────┼───────────────────────────────────┘
@@ -69,11 +85,45 @@ Brand: **Rembric**. CLI / binary / npm package: `rembric` (singular).
                    └────────────────────────────────────────┘
 ```
 
-Three load-bearing invariants:
+The save → judge flow (when `memory.save` finds similar memories):
+
+```
+   agent ──▶ memory.save({type, content, topic_key?})
+                │
+                ▼ atomic transaction
+   ① insert row     ② if topic_key, supersede previous in slot
+                              │
+                              ▼
+                ③ candidate detection (FTS5 + vec kNN, scoped)
+                              │
+                              ▼
+                ④ insert memory_relations rows (status='pending')
+                              │
+                              ▼
+                ⑤ return { id, candidates[], judgmentRequired }
+                              │
+                              ▼
+   agent reads response, judges per candidate:
+     memory.judge({judgmentId, relation: 'supersedes' | 'related' | …})
+       ├─ 'supersedes' → target → status='superseded',
+       │                  source.replaces += target.id  (atomic)
+       └─ other         → metadata-only update on the relation row
+
+   agent never judged in time?
+       └─ consolidator's orphan-promotion pass picks it up after
+          JUDGMENT_ORPHAN_AFTER_MS (default 24h) and either
+          promotes it via the LLM judge or marks it orphaned.
+```
+
+Four load-bearing invariants:
 
 - **Append-only memory**: rows are never DELETEd; `content` is never UPDATEd. Lifecycle is `status` flips (`active` → `superseded` | `archived`) and `replaces` links. Every consolidation op lands in a reversible journal.
-- **Project scoping by construction**: every memory is `global` or attached to a single `project_id`. The consolidation engine never crosses scope boundaries.
+- **Project scoping by construction**: every memory is `global` or attached to a single `project_id`. The consolidation engine and `memory_relations` never cross scope boundaries.
+- **Convergent topics via `topic_key`**: when supplied on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically. The agent declares identity; the server enforces uniqueness of the head.
+- **Fresh-context judgment**: candidate conflicts surface at `memory.save` time (`candidates[]` in the response). The agent that produced the conflict is the agent that judges it. The nightly consolidator no longer does LLM-driven detection — it only handles decay + orphan promotion of pending judgments the agent never closed.
 - **Provider-namespaced env vars**: `LLM_PROVIDER=openai` (only option today) routes to `OPENAI_*` namespace. The same code works against OpenAI, Ollama, LM Studio, vLLM, etc.
+
+See [docs/relations.md](./docs/relations.md) for the relation taxonomy and how annotations propagate to search results.
 
 ## Quickstart
 
@@ -191,11 +241,39 @@ export OPENAI_EMBEDDING_MODEL=nomic-embed-text:latest
 
 ### Consolidation
 
-| Variable                   | Default     | Description                                |
-| -------------------------- | ----------- | ------------------------------------------ |
-| `CONSOLIDATION_ENABLED`    | `true`      | Background consolidation toggle.           |
-| `CONSOLIDATION_CRON`       | `0 3 * * *` | Cron schedule for the consolidation.       |
-| `CONSOLIDATION_BATCH_SIZE` | `50`        | Memories considered per consolidation run. |
+| Variable                   | Default     | Description                                                    |
+| -------------------------- | ----------- | -------------------------------------------------------------- |
+| `CONSOLIDATION_ENABLED`    | `true`      | Background consolidation toggle.                               |
+| `CONSOLIDATION_CRON`       | `0 3 * * *` | Cron schedule for the consolidation.                           |
+| `CONSOLIDATION_BATCH_SIZE` | `50`        | Pending relations considered per orphan-promotion pass.        |
+| `JUDGMENT_ORPHAN_AFTER_MS` | `86400000`  | Age threshold past which a pending judgment is sent to the LLM |
+|                            |             | judge during consolidation; verdicts the LLM can't resolve are |
+|                            |             | marked `orphaned`.                                             |
+
+### Save-time candidate detection
+
+| Variable                  | Default | Description                                                             |
+| ------------------------- | ------- | ----------------------------------------------------------------------- |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max candidates surfaced to the agent in `memory.save.candidates[]`. Set |
+|                           |         | to `0` to disable surfacing (pending rows are still inserted for the    |
+|                           |         | consolidator). Range 0–25.                                              |
+| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor for vec candidate detection (0..1).             |
+| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | Normalized BM25-rank floor for FTS5 candidate detection (0..1).         |
+
+### Sessions
+
+| Variable                   | Default    | Description                                                |
+| -------------------------- | ---------- | ---------------------------------------------------------- |
+| `SESSION_ABANDON_AFTER_MS` | `86400000` | At startup, agent sessions stuck `active` longer than this |
+|                            |            | are flipped to `abandoned`.                                |
+
+### Rate limiting
+
+| Variable             | Default | Description                                                |
+| -------------------- | ------- | ---------------------------------------------------------- |
+| `RATE_LIMIT_ENABLED` | `false` | Per-token token-bucket rate limiter on the `/mcp` surface. |
+| `RATE_LIMIT_RPS`     | `10`    | Sustained requests-per-second per token.                   |
+| `RATE_LIMIT_BURST`   | `30`    | Bucket capacity (max burst before sustained rate applies). |
 
 ## Running it as a long-lived service
 

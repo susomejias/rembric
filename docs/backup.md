@@ -10,7 +10,7 @@ Rembric's entire state is a single SQLite file (plus its WAL sidecar) under `$RE
 | Periodic snapshots | hours-day      | seconds       | trivial    | dev / personal use                |
 | litestream         | seconds        | seconds-mins  | moderate   | multi-machine / cloud deployments |
 
-> **Append-only is a backup ally.** Because rembric never DELETEs from `memory` and never overwrites `content`, even partial backups are useful: an older snapshot is missing rows, never corrupted by overwrites.
+> **Append-only is a backup ally.** Because rembric never DELETEs from `memory` and never overwrites `content`, even partial backups are useful: an older snapshot is missing rows, never corrupted by overwrites. The same property holds for `memory_relations` (the judgment graph) and the `sessions` table — both are append-only with status FSMs.
 
 ---
 

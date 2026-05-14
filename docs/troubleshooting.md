@@ -91,6 +91,17 @@ Run `rembric status` from another shell. If that hangs, the SQLite handle is con
 
 ## MCP transport
 
+### Too many pending judgments showing up in `memory.search` annotations
+
+The new save flow (v0.5+) inserts a `memory_relations` row with `status='pending'` for every candidate it surfaces to the agent. When the agent ignores `candidates[]` in the save response, those rows accumulate and surface as `pending_conflict` annotations on subsequent searches.
+
+Two paths:
+
+1. **Wait for the consolidator.** After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h), the consolidator's orphan-promotion pass runs the LLM judge over each pending row and resolves or orphans it.
+2. **Check why the agent isn't calling `memory.judge`.** Inspect `tools/list` from the client; confirm `memory.judge` is exposed. If the agent ignores `judgmentRequired: true` in the save response, paste the relation-flow excerpt from `docs/relations.md` into the agent's prompt.
+
+See [docs/relations.md](./relations.md) for the full lifecycle and the relation taxonomy.
+
 ### Agent never calls `memory.session_summary` before saying "done"
 
 The protocol-teaching `instructions` block fires at handshake but some MCP clients ignore the field. Two checks:

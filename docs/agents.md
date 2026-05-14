@@ -15,25 +15,50 @@ If you connect to `/mcp` the agent can only read/write **global** memories until
 
 ## Tool surface (v0.5)
 
-| Tool                     | Purpose                                                                                                    |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `memory.save`            | Persist a structured memory; teaches when to call via tool description + initialize.instructions           |
-| `memory.search`          | FTS5 keyword search scoped to the active project (or globals)                                              |
-| `memory.get`             | Retrieve a memory with its predecessor chain                                                               |
-| `memory.confirm`         | Bump confidence on a memory the user endorsed                                                              |
-| `memory.session_start`   | Open a working session; optionally pass a `project` slug                                                   |
-| `memory.session_end`     | Close the session without a summary                                                                        |
-| `memory.session_summary` | Close with a structured Goal/Discoveries/Accomplished/Next Steps/Files summary — call BEFORE saying "done" |
-| `memory.context`         | Bootstrap context for a new session: recent sessions + recent memories                                     |
-| `memory.timeline`        | Drill into chronological neighbors of a memory within its session                                          |
-| `memory.capture_passive` | Parse `## Key Learnings:` from agent output and save each item                                             |
-| `memory.doctor`          | Read-only operational health report                                                                        |
-| `memory.stats`           | Counters scoped to the active project                                                                      |
-| `project.use`            | Activate a project for the session; `autocreate`/`confirmSwitch` are opt-in                                |
-| `project.list`           | List existing projects + memory counts                                                                     |
-| `project.current`        | Report the active project, source, and any roots-derived suggestions                                       |
+| Tool                       | Purpose                                                                                                                                                                                                  |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `memory.save`              | Persist a structured memory; optional `topic_key` auto-supersedes the previous active row in the same slot. Response includes `candidates[]` (similar memories pending judgment) and `judgmentRequired`. |
+| `memory.search`            | FTS5 keyword search scoped to the active project (or globals). Results carry `relations[]` annotations.                                                                                                  |
+| `memory.get`               | Retrieve a memory with its predecessor chain and full relation annotations.                                                                                                                              |
+| `memory.confirm`           | Bump confidence on a memory the user endorsed                                                                                                                                                            |
+| `memory.session_start`     | Open a working session; optionally pass a `project` slug                                                                                                                                                 |
+| `memory.session_end`       | Close the session without a summary                                                                                                                                                                      |
+| `memory.session_summary`   | Close with a structured Goal/Discoveries/Accomplished/Next Steps/Files summary — call BEFORE saying "done"                                                                                               |
+| `memory.context`           | Bootstrap context for a new session: recent sessions + recent prompts + recent memories                                                                                                                  |
+| `memory.timeline`          | Drill into chronological neighbors of a memory within its session                                                                                                                                        |
+| `memory.capture_passive`   | Parse `## Key Learnings:` from agent output and save each item                                                                                                                                           |
+| `memory.save_prompt`       | Persist the user's most recent prompt so future sessions can read it via `memory.context.recentPrompts`                                                                                                  |
+| `memory.suggest_topic_key` | Deterministic family/slug suggestion — call before save when updating an evolving topic                                                                                                                  |
+| `memory.judge`             | Close a pending candidate from `memory.save.candidates[]`; relation=supersedes mutates the target memory                                                                                                 |
+| `memory.compare`           | Proactive verdict on two arbitrary memories (no preceding save); idempotent on the `(A,B)` pair                                                                                                          |
+| `memory.doctor`            | Read-only operational health report                                                                                                                                                                      |
+| `memory.stats`             | Counters scoped to the active project                                                                                                                                                                    |
+| `project.use`              | Activate a project for the session; `autocreate`/`confirmSwitch` are opt-in                                                                                                                              |
+| `project.list`             | List existing projects + memory counts                                                                                                                                                                   |
+| `project.current`          | Report the active project, source, and any roots-derived suggestions                                                                                                                                     |
 
 The MCP server emits a short `instructions` block at handshake that teaches the protocol to clients that support the field (Claude Code, Codex CLI). Clients that ignore it still get the protocol from each tool's description.
+
+### The save → judge cadence
+
+If an agent updates a topic across sessions, prefer the `topic_key` upsert path. Otherwise let save-time candidate detection do its job:
+
+```
+   memory.save({content})
+       │
+       ▼ response: { id, candidates: [{judgmentId, targetId, similarity}…], judgmentRequired: true }
+       │
+       ▼ for each candidate the agent reads:
+   memory.judge({judgmentId, relation, reason?, confidence?})
+       ├─ 'supersedes'   — new replaces old (atomic side effect on memory row)
+       ├─ 'conflicts_with' — both stay active; annotation records the conflict
+       ├─ 'related' / 'compatible' / 'scoped' — informational
+       └─ 'not_conflict' — false positive; row closed, hidden from search annotations
+```
+
+For independent analysis (no preceding save), use `memory.compare({memoryIdA, memoryIdB, relation, confidence})` — same backing table, different entry point.
+
+See [docs/relations.md](./relations.md) for the relation taxonomy in full.
 
 ---
 
