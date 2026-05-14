@@ -1,6 +1,7 @@
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
+import { createAssetsMiddleware } from '../dashboard/assets.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
@@ -48,6 +49,9 @@ export interface DashboardStats {
 
 export function createDashboardRouter(deps: DashboardDeps): Hono {
   const app = new Hono();
+
+  // ── static assets (anonymous, no CSRF; safe-by-design read-only) ──
+  app.get('/assets/:path{.+}', createAssetsMiddleware());
 
   // ── public routes ──────────────────────────────────────────────────
   app.get('/login', (c) => c.html(renderLogin(null)));
@@ -97,9 +101,18 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
 
   // ── auth middleware for everything else ────────────────────────────
   app.use('*', async (c: Context, next: Next) => {
-    // Skip auth for login/logout (already declared above; this is for the
-    // catch-all that comes after).
-    if (c.req.path === '/login' || c.req.path === '/logout') {
+    // Skip auth for login/logout/static assets. The route handlers for
+    // those paths are registered above this middleware, so a normal
+    // request never reaches here. This is defensive belt-and-braces.
+    const p = c.req.path;
+    if (
+      p === '/login' ||
+      p === '/logout' ||
+      p === '/dashboard/login' ||
+      p === '/dashboard/logout' ||
+      p.startsWith('/dashboard/assets/') ||
+      p.startsWith('/assets/')
+    ) {
       return next();
     }
     const cookie = getCookie(c, COOKIE_NAME);

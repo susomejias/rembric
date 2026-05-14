@@ -1,0 +1,16 @@
+/*!
+ * Rembric — local Pico.css mirror (placeholder)
+ *
+ * The dashboard already ships a self-contained stylesheet via the
+ * `STYLE` constant in src/dashboard/templates.ts; loading Pico.css is
+ * optional. Operators who prefer Pico's defaults can drop the official
+ * minified file at this path:
+ *
+ *   curl -L -o dist/dashboard/public/assets/pico.min.css \
+ *     https://unpkg.com/@picocss/pico@2.0.6/css/pico.min.css
+ */
+/* Provided minimal reset so that even with no upstream Pico shipped the
+ * page styling stays consistent if the dashboard ever opts into linking it.
+ */
+:root { --pico-font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+body { font-family: var(--pico-font-family); }
