@@ -2,8 +2,8 @@
 name: Bun
 description: Use when building, running, testing, or bundling JavaScript/TypeScript applications. Reach for Bun when you need to execute scripts, manage dependencies, run tests, or bundle code for production. Bun is a drop-in replacement for Node.js with integrated package manager, test runner, and bundler.
 metadata:
-    mintlify-proj: bun
-    version: "1.0"
+  mintlify-proj: bun
+  version: '1.0'
 ---
 
 # Bun Skill Reference
@@ -15,6 +15,7 @@ Bun is an all-in-one JavaScript/TypeScript runtime and toolkit written in Zig, p
 ## When to Use
 
 Use Bun when:
+
 - **Running scripts**: Execute `.ts`, `.tsx`, `.js`, `.jsx` files directly without compilation overhead
 - **Managing dependencies**: Install packages 25x faster than npm with `bun install`
 - **Running tests**: Execute Jest-compatible tests with TypeScript support via `bun test`
@@ -27,82 +28,88 @@ Use Bun when:
 
 ### Core Commands
 
-| Task | Command | Notes |
-|------|---------|-------|
-| Run a file | `bun run index.ts` | Supports TS/TSX/JSX out of the box |
-| Run a script | `bun run dev` | Executes `package.json` scripts |
-| Install deps | `bun install` | Creates `bun.lock` lockfile |
-| Add package | `bun add react` | Adds to `package.json` |
-| Remove package | `bun remove react` | Removes from `package.json` |
-| Run tests | `bun test` | Finds `*.test.ts`, `*.spec.ts` files |
-| Build bundle | `bun build ./index.ts --outdir ./out` | Bundles for browser/server |
-| Watch mode | `bun --watch run index.ts` | Re-runs on file changes |
+| Task           | Command                               | Notes                                |
+| -------------- | ------------------------------------- | ------------------------------------ |
+| Run a file     | `bun run index.ts`                    | Supports TS/TSX/JSX out of the box   |
+| Run a script   | `bun run dev`                         | Executes `package.json` scripts      |
+| Install deps   | `bun install`                         | Creates `bun.lock` lockfile          |
+| Add package    | `bun add react`                       | Adds to `package.json`               |
+| Remove package | `bun remove react`                    | Removes from `package.json`          |
+| Run tests      | `bun test`                            | Finds `*.test.ts`, `*.spec.ts` files |
+| Build bundle   | `bun build ./index.ts --outdir ./out` | Bundles for browser/server           |
+| Watch mode     | `bun --watch run index.ts`            | Re-runs on file changes              |
 
 ### Configuration Files
 
-| File | Purpose | Example |
-|------|---------|---------|
-| `bunfig.toml` | Bun-specific settings | `[test]`, `[install]`, `[run]` sections |
-| `package.json` | Scripts, dependencies, metadata | `"scripts"`, `"dependencies"` |
-| `tsconfig.json` | TypeScript compiler options | `"compilerOptions"` |
-| `.env` | Environment variables | `FOO=bar` (auto-loaded) |
-| `bun.lock` | Lockfile (text format) | Commit to version control |
+| File            | Purpose                         | Example                                 |
+| --------------- | ------------------------------- | --------------------------------------- |
+| `bunfig.toml`   | Bun-specific settings           | `[test]`, `[install]`, `[run]` sections |
+| `package.json`  | Scripts, dependencies, metadata | `"scripts"`, `"dependencies"`           |
+| `tsconfig.json` | TypeScript compiler options     | `"compilerOptions"`                     |
+| `.env`          | Environment variables           | `FOO=bar` (auto-loaded)                 |
+| `bun.lock`      | Lockfile (text format)          | Commit to version control               |
 
 ### Key Bun APIs
 
 ```typescript
 // HTTP server
-Bun.serve({ port: 3000, fetch(req) { return new Response("Hello"); } })
+Bun.serve({
+  port: 3000,
+  fetch(req) {
+    return new Response('Hello');
+  },
+});
 
 // File I/O
-Bun.file(path)           // Read file
-Bun.write(path, data)    // Write file
+Bun.file(path); // Read file
+Bun.write(path, data); // Write file
 
 // Environment
-process.env.FOO          // Read env var
-Bun.env.FOO              // Alias for process.env
+process.env.FOO; // Read env var
+Bun.env.FOO; // Alias for process.env
 
 // Bundling
-await Bun.build({ entrypoints: ["./index.ts"], outdir: "./out" })
+await Bun.build({ entrypoints: ['./index.ts'], outdir: './out' });
 
 // Shell
-import { $ } from "bun"
-await $`echo hello`
+import { $ } from 'bun';
+await $`echo hello`;
 ```
 
 ## Decision Guidance
 
 ### When to Use Bun vs Node.js
 
-| Scenario | Use Bun | Use Node.js |
-|----------|---------|-----------|
-| New project, greenfield | ✓ | |
-| Existing Node.js project | ✓ (drop-in) | If no issues |
-| Needs specific Node.js module | | ✓ (check compatibility) |
-| Performance critical | ✓ | |
-| Team unfamiliar with Bun | | ✓ |
+| Scenario                      | Use Bun     | Use Node.js             |
+| ----------------------------- | ----------- | ----------------------- |
+| New project, greenfield       | ✓           |                         |
+| Existing Node.js project      | ✓ (drop-in) | If no issues            |
+| Needs specific Node.js module |             | ✓ (check compatibility) |
+| Performance critical          | ✓           |                         |
+| Team unfamiliar with Bun      |             | ✓                       |
 
 ### Bundler: `bun build` vs `bun run`
 
-| Use Case | Command | Notes |
-|----------|---------|-------|
-| Development, quick iteration | `bun run index.ts` | No bundling, direct execution |
-| Production deployment | `bun build ./index.ts --outdir ./out` | Optimized, minified output |
-| Browser code | `bun build --target browser` | Default, uses browser exports |
-| Server code | `bun build --target bun` | Optimized for Bun runtime |
-| Node.js compatibility | `bun build --target node --format cjs` | CommonJS output |
+| Use Case                     | Command                                | Notes                         |
+| ---------------------------- | -------------------------------------- | ----------------------------- |
+| Development, quick iteration | `bun run index.ts`                     | No bundling, direct execution |
+| Production deployment        | `bun build ./index.ts --outdir ./out`  | Optimized, minified output    |
+| Browser code                 | `bun build --target browser`           | Default, uses browser exports |
+| Server code                  | `bun build --target bun`               | Optimized for Bun runtime     |
+| Node.js compatibility        | `bun build --target node --format cjs` | CommonJS output               |
 
 ### Package Manager: Installation Strategies
 
-| Strategy | Command | Use Case |
-|----------|---------|----------|
-| Hoisted (npm-like) | `bun install --linker hoisted` | Traditional flat `node_modules` |
-| Isolated (pnpm-like) | `bun install --linker isolated` | Strict dependency isolation |
-| Default (new projects) | `bun install` | Isolated for workspaces, hoisted for single packages |
+| Strategy               | Command                         | Use Case                                             |
+| ---------------------- | ------------------------------- | ---------------------------------------------------- |
+| Hoisted (npm-like)     | `bun install --linker hoisted`  | Traditional flat `node_modules`                      |
+| Isolated (pnpm-like)   | `bun install --linker isolated` | Strict dependency isolation                          |
+| Default (new projects) | `bun install`                   | Isolated for workspaces, hoisted for single packages |
 
 ## Workflow
 
 ### 1. Initialize a Project
+
 ```bash
 bun init my-app
 # Choose template: Blank, React, or Library
@@ -110,6 +117,7 @@ cd my-app
 ```
 
 ### 2. Install Dependencies
+
 ```bash
 bun install
 # Or add specific packages
@@ -118,7 +126,9 @@ bun add -d typescript @types/react
 ```
 
 ### 3. Configure (if needed)
+
 Create `bunfig.toml` in project root:
+
 ```toml
 [test]
 coverage = true
@@ -128,11 +138,13 @@ optional = true
 ```
 
 ### 4. Write Code
+
 - Create `.ts`, `.tsx`, `.js`, `.jsx` files
 - Use `import`/`require` freely (both work)
 - Reference `package.json` scripts in `"scripts"` field
 
 ### 5. Run Scripts
+
 ```bash
 bun run dev          # Runs "dev" script from package.json
 bun run index.ts     # Runs file directly
@@ -140,6 +152,7 @@ bun --watch run dev  # Watch mode
 ```
 
 ### 6. Test
+
 ```bash
 # Write tests in *.test.ts files
 bun test             # Run all tests
@@ -148,12 +161,14 @@ bun test --coverage  # Generate coverage report
 ```
 
 ### 7. Build for Production
+
 ```bash
 bun build ./src/index.ts --outdir ./dist --minify
 # Or use JavaScript API in build script
 ```
 
 ### 8. Deploy
+
 - Commit `bun.lock` to version control
 - Use `bun ci` in CI/CD (equivalent to `bun install --frozen-lockfile`)
 - Deploy built artifacts or run with `bun run`

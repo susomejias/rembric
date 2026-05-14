@@ -165,7 +165,9 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
     .all<{
       project_id: string;
       n: number;
-    }>(sql`SELECT project_id, COUNT(*) AS n FROM ${memory} WHERE project_id IS NOT NULL GROUP BY project_id`)
+    }>(
+      sql`SELECT project_id, COUNT(*) AS n FROM ${memory} WHERE project_id IS NOT NULL GROUP BY project_id`,
+    )
     .reduce<Record<string, number>>((acc, r) => {
       acc[r.project_id] = Number(r.n);
       return acc;

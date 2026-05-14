@@ -51,7 +51,9 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       .all<{
         session_id: string;
         n: number;
-      }>(sql`SELECT session_id, COUNT(*) AS n FROM memory WHERE session_id IS NOT NULL GROUP BY session_id`)
+      }>(
+        sql`SELECT session_id, COUNT(*) AS n FROM memory WHERE session_id IS NOT NULL GROUP BY session_id`,
+      )
       .reduce<Record<string, number>>((acc, r) => {
         acc[r.session_id] = Number(r.n);
         return acc;

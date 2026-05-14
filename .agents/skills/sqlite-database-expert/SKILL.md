@@ -17,6 +17,7 @@ model: claude-sonnet-4-5-20250929
 ### Trigger Conditions for Reference Files
 
 **Read `references/advanced-patterns.md` WHEN**:
+
 - Implementing database migrations
 - Setting up Full-Text Search (FTS5)
 - Designing complex queries with CTEs or window functions
@@ -24,6 +25,7 @@ model: claude-sonnet-4-5-20250929
 - Performance optimization tasks
 
 **Read `references/security-examples.md` WHEN**:
+
 - Writing ANY SQL query with user input
 - Implementing parameterized queries
 - Setting up database encryption considerations
@@ -39,6 +41,7 @@ model: claude-sonnet-4-5-20250929
 **Justification**: SQLite databases in desktop applications handle user data locally, present SQL injection risks if queries aren't properly parameterized, and require careful migration management to prevent data loss.
 
 You are an expert in SQLite embedded database development, specializing in:
+
 - **Secure SQL patterns** with parameterized queries to prevent SQL injection
 - **Database migrations** with version control and rollback capabilities
 - **Full-Text Search (FTS5)** for efficient text searching
@@ -54,6 +57,7 @@ You are an expert in SQLite embedded database development, specializing in:
 5. **Migration Discipline** - Version all schema changes with rollback capability
 
 ### Primary Use Cases
+
 - Local data persistence for desktop applications
 - Offline-first application data storage
 - Full-text search implementation
@@ -85,12 +89,12 @@ You are an expert in SQLite embedded database development, specializing in:
 
 ### 3.1 Version Recommendations
 
-| Component | Recommended | Minimum | Notes |
-|-----------|-------------|---------|-------|
-| SQLite | 3.45+ | 3.35 | FTS5, JSON functions |
-| rusqlite | 0.31+ | 0.29 | Bundled SQLite support |
-| sea-query | 0.30+ | 0.28 | Query builder |
-| r2d2 | 0.8+ | 0.8 | Connection pooling |
+| Component | Recommended | Minimum | Notes                  |
+| --------- | ----------- | ------- | ---------------------- |
+| SQLite    | 3.45+       | 3.35    | FTS5, JSON functions   |
+| rusqlite  | 0.31+       | 0.29    | Bundled SQLite support |
+| sea-query | 0.30+       | 0.28    | Query builder          |
+| r2d2      | 0.8+        | 0.8     | Connection pooling     |
 
 ### 3.2 Required Dependencies (Cargo.toml)
 
@@ -249,15 +253,16 @@ pub fn search_documents(&self, query: &str) -> Result<Vec<Document>> {
 
 ### 5.2 OWASP Mapping
 
-| OWASP Category | Risk | Key Controls |
-|----------------|------|--------------|
-| A03 - Injection | Critical | Parameterized queries, input validation |
-| A04 - Insecure Design | Medium | Schema constraints, foreign keys |
-| A05 - Misconfiguration | Medium | Secure PRAGMAs, file permissions (600) |
+| OWASP Category         | Risk     | Key Controls                            |
+| ---------------------- | -------- | --------------------------------------- |
+| A03 - Injection        | Critical | Parameterized queries, input validation |
+| A04 - Insecure Design  | Medium   | Schema constraints, foreign keys        |
+| A05 - Misconfiguration | Medium   | Secure PRAGMAs, file permissions (600)  |
 
 ### 5.3 SQL Injection Prevention
 
 **Critical Rules** (see `references/security-examples.md`):
+
 1. NEVER use string formatting for SQL queries
 2. ALWAYS use `?` positional or `:name` named parameters
 3. Whitelist column/table names for dynamic queries
@@ -448,12 +453,12 @@ def nightly_maintenance(conn):
 
 ## 8. Common Mistakes
 
-| Mistake | Wrong | Correct |
-|---------|-------|---------|
-| SQL Injection | `format!("...WHERE name = '{}'", input)` | `"...WHERE name = ?1"` with params |
-| No Transaction | Separate execute calls | Wrap in `transaction()` + `commit()` |
-| No Foreign Keys | Default connection | `PRAGMA foreign_keys = ON` |
-| LIKE for Search | `LIKE '%term%'` | FTS5 `MATCH 'term'` |
+| Mistake         | Wrong                                    | Correct                              |
+| --------------- | ---------------------------------------- | ------------------------------------ |
+| SQL Injection   | `format!("...WHERE name = '{}'", input)` | `"...WHERE name = ?1"` with params   |
+| No Transaction  | Separate execute calls                   | Wrap in `transaction()` + `commit()` |
+| No Foreign Keys | Default connection                       | `PRAGMA foreign_keys = ON`           |
+| LIKE for Search | `LIKE '%term%'`                          | FTS5 `MATCH 'term'`                  |
 
 ---
 
