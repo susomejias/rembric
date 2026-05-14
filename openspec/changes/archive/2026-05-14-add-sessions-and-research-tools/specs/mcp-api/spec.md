@@ -1,189 +1,22 @@
-# mcp-api Specification
-
-## Purpose
-
-Defines the Model Context Protocol surface exposed by Rembric over Streamable HTTP, including transport, project scoping, authentication, tool contracts (`memory.save`, `memory.search`, `memory.get`, `memory.confirm`), and error conventions.
-
-## Requirements
-
-### Requirement: The MCP endpoint MUST use Streamable HTTP transport
-
-The server SHALL expose the Model Context Protocol over the Streamable HTTP transport at `/mcp`, using `@modelcontextprotocol/sdk`. The legacy SSE transport SHALL NOT be exposed.
-
-#### Scenario: Client initiates a session
-
-- **WHEN** an MCP client opens a session against `/mcp` using the Streamable HTTP transport
-- **THEN** the server SHALL respond with a valid initialize result advertising the registered tools
-
-### Requirement: Path-scoped connections MUST enforce strict project isolation
-
-When the MCP connection is path-scoped (`/mcp/<slug>` or via `X-Rembric-Project` header) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope visible:
-
-- `memory.save` with `scope='global'` SHALL be rejected with structured code `scope_locked`.
-- `memory.save` with `scope='project'` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies.
-- `memory.search` SHALL return only memories whose `scope = 'project'` and `project_id` equals the bound project; global memories SHALL NOT be returned. The `includeGlobal` argument SHALL be ignored on path-scoped connections.
-- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory is global or belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes.
-
-#### Scenario: save with scope='global' on a path-scoped connection
-
-- **GIVEN** a client connected at `/mcp/foo` with a valid token
-- **WHEN** the client calls `memory.save` with `scope='global'`
-- **THEN** the response SHALL be an MCP error containing `code: 'scope_locked'` and a message naming the bound project
-
-#### Scenario: search on a path-scoped connection does not leak globals
-
-- **GIVEN** a path-scoped connection at `/mcp/foo` and at least one memory with `scope='global'`
-- **WHEN** the client calls `memory.search` with or without `includeGlobal=true`
-- **THEN** the response SHALL NOT contain any memory whose `scope='global'`
-
-#### Scenario: get across project boundaries
-
-- **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M with `scope='project'`, `project_id='bar'`
-- **WHEN** the client calls `memory.get('M')`
-- **THEN** the response SHALL be an MCP error with `code: 'not_found'`, identical to the response for a non-existent id
-
-### Requirement: The MCP endpoint MUST support path-based project scoping
-
-The server SHALL accept MCP requests at `/mcp` (global) and at `/mcp/<project-slug>` (project-scoped). When the path includes a non-empty slug after `/mcp/`, the server SHALL resolve that slug to a project via `projects.findOrCreate(slug)` and SHALL use the resulting project as the request's project scope. The path slug SHALL take precedence over any `X-Rembric-Project` header.
-
-#### Scenario: Connecting at a project-scoped path
-
-- **WHEN** an MCP client connects to `/mcp/my-app` with a valid token
-- **THEN** the server SHALL resolve `my-app` to a project row (creating it if needed) and every tool call in that session SHALL behave as if `X-Rembric-Project: my-app` were present
-
-#### Scenario: Path slug and conflicting header
-
-- **GIVEN** a client connecting to `/mcp/foo` while also sending `X-Rembric-Project: bar`
-- **WHEN** the server processes the request
-- **THEN** the project SHALL resolve to `foo` (the path wins); the header SHALL be ignored
-
-#### Scenario: Global connection
-
-- **WHEN** an MCP client connects to `/mcp` without a slug and without `X-Rembric-Project`
-- **THEN** the request SHALL be accepted without a project scope; tools that require a project (e.g. `memory.save` with `scope='project'`) SHALL respond with a structured error code `project_required` whose message instructs the operator to reconnect at `/mcp/<slug>` or supply the header
-
-### Requirement: Every MCP request MUST be authenticated
-
-The server SHALL reject any request to `/mcp` that does not include a valid bearer token in the `Authorization` header. Tokens SHALL be matched against the `tokens` table by hash; revoked or expired tokens SHALL be rejected.
-
-#### Scenario: Missing token
-
-- **WHEN** a request arrives at `/mcp` without an `Authorization` header
-- **THEN** the response SHALL be `401 Unauthorized` and no MCP handshake SHALL be performed
-
-#### Scenario: Revoked token
-
-- **GIVEN** a token whose `revoked_at` is set
-- **WHEN** a request arrives at `/mcp` with that token
-- **THEN** the response SHALL be `401 Unauthorized`
-
-#### Scenario: Expired token
-
-- **GIVEN** a token whose `expires_at` is in the past
-- **WHEN** a request arrives at `/mcp` with that token
-- **THEN** the response SHALL be `401 Unauthorized`
-
-### Requirement: Tool inputs MUST be validated by zod
-
-Every MCP tool SHALL declare its input schema with zod, and the SDK shall reject calls with invalid arguments before the tool handler runs. Tool handlers SHALL NOT need to re-validate primitive fields.
-
-#### Scenario: Invalid input
-
-- **WHEN** an MCP client calls `memory.save` with `content` set to an integer
-- **THEN** the tool SHALL respond with an MCP error indicating the schema violation and SHALL NOT touch the database
-
-### Requirement: The `memory.save` tool MUST persist a new active memory
-
-`memory.save` SHALL accept `scope`, `type`, `content`, optional `tags`, and SHALL insert a new memory with `status = 'active'`, the current timestamp, and `source` populated from the call context (token name, project header, client info).
-
-#### Scenario: Save a project-scoped memory
-
-- **WHEN** an authenticated client calls `memory.save` with `scope = 'project'`, `type = 'user'`, `content = 'prefers tabs'`, headers including `X-Rembric-Project: app`
-- **THEN** a new memory row SHALL exist with the given fields, `scope = 'project'`, `project_id` resolving to the `app` project, and `source.token_name` matching the caller's token
-
-### Requirement: The `memory.search` tool MUST return active memories matching the query
-
-`memory.search` SHALL accept `query`, optional `type`, `tags`, `status` (default `active`), `limit` (default 20), and SHALL return memories ordered by FTS5 relevance then `last_seen_at` desc. Results SHALL respect the caller's scope as defined by `X-Rembric-Project`.
-
-#### Scenario: Search by keyword in a project
-
-- **GIVEN** the project `app` has active memories matching the query "tabs"
-- **WHEN** an authenticated client calls `memory.search` with `query = 'tabs'` and `X-Rembric-Project: app`
-- **THEN** the response SHALL include only memories from project `app` (plus globals if `include_global = true`) matching the FTS5 search
-
-### Requirement: The `memory.get` tool MUST return the memory and its history
-
-`memory.get` SHALL accept an `id` and SHALL return the memory's content, status, scope, project, tags, source, and the full chain of predecessors derived from `replaces`, plus the confirmation count for the current head.
-
-#### Scenario: Retrieve a merged memory
-
-- **WHEN** an authenticated client calls `memory.get` with the id of a merged memory M
-- **THEN** the response SHALL include M's content, M's predecessor ids, their content snapshots, and the confirmation count against M
-
-### Requirement: The `memory.confirm` tool MUST follow the supersedes chain
-
-`memory.confirm` SHALL accept an `id` and SHALL insert a `confirmations` row for the current head of the supersedes chain reachable from `id`. The tool SHALL NOT mutate any `memory` row.
-
-#### Scenario: Confirming an outdated id
-
-- **GIVEN** memory A is superseded by M
-- **WHEN** an authenticated client calls `memory.confirm('A')`
-- **THEN** a row SHALL be inserted into `confirmations` with `memory_id = 'M'` and no `memory` row SHALL be updated
-
-### Requirement: Errors MUST follow MCP conventions
-
-The server SHALL return MCP-conformant errors for invalid operations, including helpful messages but never leaking secrets or internal stack traces.
-
-#### Scenario: Unknown tool
-
-- **WHEN** a client invokes a tool name not registered by the server
-- **THEN** the response SHALL be an MCP error of the appropriate code with a human-readable message identifying the missing tool
-
-#### Scenario: Internal error
-
-- **WHEN** a tool handler throws an unexpected exception
-- **THEN** the response SHALL be an MCP error with a generic message and an error id; the full stack SHALL be logged server-side but NOT returned to the client
-
-### Requirement: The four existing memory tools MUST advertise protocol-teaching descriptions
-
-The descriptions of `memory.save`, `memory.search`, `memory.get`, and `memory.confirm` SHALL begin with a "Call this WHEN …" trigger list before documenting the request/response shape. The request and response shapes themselves are unchanged.
-
-#### Scenario: `memory.save` description teaches the trigger list
-
-- **WHEN** an MCP client retrieves the tool description for `memory.save` via `tools/list`
-- **THEN** the description SHALL contain the substring `Call this IMMEDIATELY after` followed by a list including at least: bug fix, decision, discovery, configuration change, pattern, user preference
-
-#### Scenario: `memory.search` description teaches when to call
-
-- **WHEN** an MCP client retrieves the tool description for `memory.search`
-- **THEN** the description SHALL contain wording instructing the agent to call it whenever the user references past work or asks to recall ("remember", "recall", "what did we do")
-
-#### Scenario: An accidental edit removes the protocol-teaching phrase
-
-- **WHEN** a developer rewrites a tool description in a way that removes the `Call this …` trigger
-- **THEN** a CI test SHALL fail asserting the presence of the trigger phrase, and the build SHALL be rejected
+## ADDED Requirements
 
 ### Requirement: The MCP server MUST expose three session-lifecycle tools
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, and `memory.session_summary` with the following contracts.
 
 #### Scenario: `memory.session_start` opens a new session
-
 - **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
 - **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, and `project_id` from the request scope; **AND** the response SHALL be `{ sessionId, scope, startedAt }`
 
 #### Scenario: `memory.session_end` ends a session without summary
-
 - **WHEN** an MCP client calls `memory.session_end` with `{ sessionId: string }` for an active session
 - **THEN** the server SHALL set `status = 'ended'` and `ended_at = now` on that row and SHALL return `{ ok: true, endedAt }`
 
 #### Scenario: `memory.session_summary` ends a session with summary
-
 - **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string }`
 - **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, set `summary`, `status = 'ended'`, and `ended_at = now` on the resolved row, and SHALL return `{ ok: true, sessionId, endedAt }`
 
 #### Scenario: A session-lifecycle tool targets a session owned by a different token
-
 - **WHEN** any of the three tools is called with a `sessionId` whose `token_id` does not match the caller's token
 - **THEN** the call SHALL be rejected with code `session_not_found` (never `forbidden`, to avoid information disclosure)
 
@@ -192,37 +25,30 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.timeline`, and `memory.capture_passive` with the following contracts.
 
 #### Scenario: `memory.context` returns a bootstrap snapshot
-
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
 - **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories }`, with each list scoped to the request context (global vs path-scoped project), `recentSessions` ordered by `started_at DESC`, `recentMemories` ordered by `last_seen_at DESC`, and `includeArchived = false` (default) filtering out `status = 'archived'` rows
 
 #### Scenario: `memory.context` arguments exceed clamps
-
 - **WHEN** the caller passes `sessions > 25`, `prompts > 50`, or `memories > 100`
 - **THEN** the server SHALL silently clamp to the maximum and SHALL include a `clamped: true` field in the response
 
 #### Scenario: `memory.timeline` returns chronological neighbors within a session
-
 - **WHEN** an MCP client calls `memory.timeline` with `{ memoryId, before?: 5, after?: 5 }` and the target memory has a non-null `session_id`
 - **THEN** the server SHALL return up to `before` memories with `created_at < target.created_at` and `session_id = target.session_id`, plus up to `after` memories with `created_at > target.created_at` and `session_id = target.session_id`, ordered chronologically
 
 #### Scenario: `memory.timeline` falls back when the target has no session
-
 - **WHEN** the target memory has `session_id = NULL`
 - **THEN** the server SHALL return neighbors selected by `created_at` within ±2 hours of the target's `created_at`, scoped to the same `(scope, project_id)`, and the response SHALL include `fallback: 'time_window'`
 
 #### Scenario: `memory.timeline` combined window exceeds 50
-
 - **WHEN** `before + after > 50`
 - **THEN** the call SHALL be rejected with code `invalid_input` and a message referring the caller to `memory.search`
 
 #### Scenario: `memory.capture_passive` extracts numbered learnings
-
 - **WHEN** an MCP client calls `memory.capture_passive` with `{ text: string, sessionId?: string }` and `text` contains a section starting with `^## Key Learnings:\s*$`
 - **THEN** the server SHALL extract each subsequent numbered (`1.`, `2.`) or bulleted (`-`, `*`) item, save each as a separate memory with `type = 'discovery'` and the active scope, and SHALL return `{ saved: number, ids: string[] }`
 
 #### Scenario: `memory.capture_passive` finds no learnings block
-
 - **WHEN** the input text has no matching `## Key Learnings:` heading
 - **THEN** the server SHALL return `{ saved: 0, ids: [] }` and SHALL NOT error
 
@@ -231,17 +57,14 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memory.stats`.
 
 #### Scenario: `memory.doctor` returns an operational report
-
 - **WHEN** an MCP client calls `memory.doctor`
 - **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, llm: { reachable, lastPingAt }, embeddings: { enabled, backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, warnings: string[] }`
 
 #### Scenario: `memory.stats` returns counters by scope and status
-
 - **WHEN** an MCP client calls `memory.stats`
 - **THEN** the server SHALL return `{ memoriesByStatus, memoriesByType, memoriesByScope, sessionsByStatus, totalProjects, totalTokens }` with each value being a `Record<string, number>` of counts scoped to the request context
 
 #### Scenario: A read-only token calls `memory.doctor` or `memory.stats`
-
 - **WHEN** the caller's scope is `read:*` or `read:project:<id>`
 - **THEN** both tools SHALL succeed (they are read-only by design)
 
@@ -250,49 +73,40 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memor
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.use`, `project.list`, and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
 
 #### Scenario: `project.use` activates an existing slug
-
 - **WHEN** an MCP client calls `project.use({slug: 'rembric'})` and no project is currently active for the session
 - **AND** a project row exists with `slug = 'rembric'`
 - **THEN** the server SHALL activate that project for the session and SHALL return `{ slug: 'rembric', projectId, created: false, switched: false, source: 'tool-explicit' }`
 
 #### Scenario: `project.use` with the same slug as currently active is idempotent
-
 - **WHEN** `project.use({slug})` is called where `slug` matches the project already active for the session
 - **THEN** the server SHALL return `{ slug, projectId, created: false, switched: false }` and SHALL NOT mutate any state
 
 #### Scenario: `project.use` against a different active project requires `confirmSwitch`
-
 - **WHEN** `project.use({slug: 'api'})` is called where the session is already active in project `'rembric'` and `confirmSwitch` is omitted or `false`
 - **THEN** the call SHALL be rejected with code `project_switch_requires_confirm` and a payload `{ currentSlug: 'rembric', targetSlug: 'api' }`
 
 #### Scenario: `project.use` against a different active project with active session
-
 - **WHEN** `project.use({slug: 'api', confirmSwitch: true})` is called where the session is active in project `'rembric'` AND a Rembric session is currently `status = 'active'` for this MCP transport session
 - **THEN** the call SHALL be rejected with code `session_active_must_end` and a payload `{ activeSessionId }`, instructing the agent to call `memory.session_summary` (or `memory.session_end`) first
 
 #### Scenario: `project.use` against an unknown slug without `autocreate`
-
 - **WHEN** `project.use({slug: 'does-not-exist'})` is called and no project with that slug exists
 - **THEN** the call SHALL be rejected with code `project_not_found` and a payload `{ suggestedSlugs: string[] }` of up to 3 deterministic Levenshtein-≤3 suggestions
 
 #### Scenario: `project.use` with `autocreate` creates a valid slug
-
 - **WHEN** `project.use({slug: 'new-thing', autocreate: true})` is called where no project has that slug and no other project is active for the session
 - **AND** the slug matches the strict regex
 - **THEN** the server SHALL insert a new `projects` row and activate it, returning `{ slug, projectId, created: true, switched: false }`
 
 #### Scenario: `project.use` with `autocreate` and an invalid slug
-
 - **WHEN** `project.use({slug: 'Bad_Slug', autocreate: true})` is called
 - **THEN** the call SHALL be rejected with code `invalid_slug` and SHALL NOT insert a row
 
 #### Scenario: `project.list` returns available slugs
-
 - **WHEN** an MCP client calls `project.list({includeArchived?: false})`
 - **THEN** the server SHALL return `{ projects: Array<{ slug, displayName, archived, memoryCount }> }` ordered by slug ascending, filtering archived rows by default
 
 #### Scenario: `project.current` reports resolution provenance
-
 - **WHEN** an MCP client calls `project.current`
 - **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'roots' | 'tool-explicit' | 'none', suggestedSlugs: string[] }` where `suggestedSlugs` is populated by the most recent `roots/list` derivation that did NOT auto-activate (existing-but-already-active, or non-existing)
 
@@ -301,21 +115,35 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.use`, `project.li
 When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 800 characters or fewer.
 
 #### Scenario: An MCP client connects on `/mcp/<slug>`
-
 - **WHEN** the `initialize` handshake completes against `/mcp/my-project`
 - **THEN** the `InitializeResult.instructions` SHALL contain references to `memory.save`, `memory.search`, and `memory.session_summary` plus a note indicating the connection is project-scoped to `'my-project'` and that `scope='global'` will be rejected
 
 #### Scenario: An MCP client connects on `/mcp` without a project
-
 - **WHEN** the `initialize` handshake completes against `/mcp`
 - **THEN** the `InitializeResult.instructions` SHALL contain the same protocol triggers and a note indicating the connection is global-scope and that project memories require opening `/mcp/<slug>` or sending `X-Rembric-Project`
 
 #### Scenario: Instructions length is checked at build time
-
 - **WHEN** the test suite runs against both `/mcp` and `/mcp/<slug>` variants of `buildInstructions(ctx)`
 - **THEN** both outputs SHALL be 800 characters or fewer
 
 #### Scenario: A client that does not consume `instructions` connects
-
 - **WHEN** an MCP client ignores the `instructions` field
 - **THEN** every tool SHALL still function normally (the field is informational only)
+
+## MODIFIED Requirements
+
+### Requirement: The four existing memory tools MUST advertise protocol-teaching descriptions
+
+The descriptions of `memory.save`, `memory.search`, `memory.get`, and `memory.confirm` SHALL begin with a "Call this WHEN …" trigger list before documenting the request/response shape. The request and response shapes themselves are unchanged.
+
+#### Scenario: `memory.save` description teaches the trigger list
+- **WHEN** an MCP client retrieves the tool description for `memory.save` via `tools/list`
+- **THEN** the description SHALL contain the substring `Call this IMMEDIATELY after` followed by a list including at least: bug fix, decision, discovery, configuration change, pattern, user preference
+
+#### Scenario: `memory.search` description teaches when to call
+- **WHEN** an MCP client retrieves the tool description for `memory.search`
+- **THEN** the description SHALL contain wording instructing the agent to call it whenever the user references past work or asks to recall ("remember", "recall", "what did we do")
+
+#### Scenario: An accidental edit removes the protocol-teaching phrase
+- **WHEN** a developer rewrites a tool description in a way that removes the `Call this …` trigger
+- **THEN** a CI test SHALL fail asserting the presence of the trigger phrase, and the build SHALL be rejected
