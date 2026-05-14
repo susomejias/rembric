@@ -42,7 +42,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.db.select().from(projects).all();
-    const projectByPath = new Map(projectRows.map((p) => [p.path, p]));
+    const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
     const conditions = [eq(memory.status, statusFilter as 'active' | 'superseded' | 'archived')];
@@ -53,7 +53,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       conditions.push(eq(memory.scope, 'global'));
       conditions.push(isNull(memory.projectId));
     } else if (projectFilter) {
-      const p = projectByPath.get(projectFilter);
+      const p = projectBySlug.get(projectFilter);
       if (p) {
         conditions.push(eq(memory.scope, 'project'));
         conditions.push(eq(memory.projectId, p.id));
@@ -83,7 +83,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               .where(sql`id IN ${ids}`)
               .all()
               .filter((m) =>
-                clientSideFilter(m, projectByPath, projectFilter, statusFilter, typeFilter),
+                clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter),
               );
     } else {
       rows = deps.db
@@ -101,7 +101,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const rowsHtml = visible.map((m) => {
       const projectLabel = m.projectId
-        ? (projectById.get(m.projectId)?.path ?? shortId(m.projectId))
+        ? (projectById.get(m.projectId)?.slug ?? shortId(m.projectId))
         : '—';
       return html`
         <tr>
@@ -123,7 +123,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       ),
       ...projectRows.map((p) =>
         raw(
-          `<option value="${escape(p.path)}"${projectFilter === p.path ? ' selected' : ''}>${escape(p.path)}</option>`,
+          `<option value="${escape(p.slug)}"${projectFilter === p.slug ? ' selected' : ''}>${escape(p.slug)}</option>`,
         ),
       ),
     ];
@@ -280,7 +280,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         </div>
         <div class="stat-card">
           <div class="label">Project</div>
-          <div class="value">${project?.path ?? '—'}</div>
+          <div class="value">${project?.slug ?? '—'}</div>
         </div>
         <div class="stat-card">
           <div class="label">Type</div>
@@ -353,7 +353,7 @@ function truncate(s: string, max: number): string {
 
 function clientSideFilter(
   m: Memory,
-  projectByPath: Map<string, { id: string }>,
+  projectBySlug: Map<string, { id: string }>,
   projectFilter: string,
   statusFilter: string,
   typeFilter: string,
@@ -362,7 +362,7 @@ function clientSideFilter(
   if (typeFilter && m.type !== typeFilter) return false;
   if (projectFilter === '__global__') return m.scope === 'global';
   if (projectFilter) {
-    const p = projectByPath.get(projectFilter);
+    const p = projectBySlug.get(projectFilter);
     return m.scope === 'project' && m.projectId === p?.id;
   }
   return true;

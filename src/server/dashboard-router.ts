@@ -5,6 +5,7 @@ import { createAssetsMiddleware } from '../dashboard/assets.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
+import { createSessionsRouter } from '../dashboard/sessions.js';
 import { html, shell } from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
@@ -45,6 +46,7 @@ export interface DashboardStats {
   archivedMemories: number;
   projects: number;
   lastConsolidationAt: Date | null;
+  activeSessions: number;
 }
 
 export function createDashboardRouter(deps: DashboardDeps): Hono {
@@ -152,6 +154,10 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <div class="value">${stats.projects}</div>
         </div>
         <div class="stat-card">
+          <div class="label">Sessions (active)</div>
+          <div class="value">${stats.activeSessions}</div>
+        </div>
+        <div class="stat-card">
           <div class="label">Last consolidation</div>
           <div class="value" style="font-size:.9rem">
             ${stats.lastConsolidationAt
@@ -161,7 +167,8 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         </div>
       </div>
       <p class="small muted">
-        Navigate the tabs above to manage memories, browse consolidation runs, projects, and tokens.
+        Navigate the tabs above to manage memories, browse sessions, consolidation runs, projects,
+        and tokens.
       </p>
     `;
     return c.html(shell(body, { title: 'Dashboard', activeNav: 'home' }));
@@ -172,6 +179,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     '/memories',
     createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
   );
+  app.route('/sessions', createSessionsRouter({ db: deps.db, sessions: deps.sessions }));
   app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
   app.route(
     '/projects',

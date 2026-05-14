@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 
 import { DomainError } from '../services/errors.js';
-import type { ProjectsService } from '../services/projects.js';
+import { SLUG_REGEX, type ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
@@ -29,50 +29,57 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
 
     const renderRow = (p: {
       id: string;
-      path: string;
+      slug: string;
       displayName: string | null;
       archivedAt: Date | null;
       createdAt: Date;
-    }) => html`
-      <tr>
-        <td>${p.displayName ?? p.path}</td>
-        <td class="mono">${p.path}</td>
-        <td class="muted small">${shortId(p.id)}</td>
-        <td class="muted">${formatTs(p.createdAt)}</td>
-        <td>
-          <form action="/dashboard/projects/${p.id}/rename" method="post" class="inline">
-            ${csrfInput(session.session, deps.sessions, 'project.rename')}
-            <input
-              type="text"
-              name="displayName"
-              placeholder="display name"
-              value="${p.displayName ?? ''}"
-              style="max-width:14ch"
-            />
-            <button type="submit">Rename</button>
-          </form>
-          ${p.archivedAt
-            ? html`
-                <form action="/dashboard/projects/${p.id}/unarchive" method="post" class="inline">
-                  ${csrfInput(session.session, deps.sessions, 'project.unarchive')}
-                  <button type="submit">Unarchive</button>
-                </form>
-              `
-            : html`
-                <form action="/dashboard/projects/${p.id}/archive" method="post" class="inline">
-                  ${csrfInput(session.session, deps.sessions, 'project.archive')}
-                  <button class="warn" type="submit">Archive</button>
-                </form>
-              `}
-        </td>
-      </tr>
-    `;
+    }) => {
+      const isLegacy = !SLUG_REGEX.test(p.slug);
+      return html`
+        <tr>
+          <td>${p.displayName ?? p.slug}</td>
+          <td class="mono">
+            ${p.slug} ${isLegacy ? raw(' <span class="pill superseded">legacy</span>') : raw('')}
+          </td>
+          <td class="muted small">${shortId(p.id)}</td>
+          <td class="muted">${formatTs(p.createdAt)}</td>
+          <td>
+            <form action="/dashboard/projects/${p.id}/rename" method="post" class="inline">
+              ${csrfInput(session.session, deps.sessions, 'project.rename')}
+              <input
+                type="text"
+                name="displayName"
+                placeholder="display name"
+                value="${p.displayName ?? ''}"
+                style="max-width:14ch"
+              />
+              <button type="submit">Rename</button>
+            </form>
+            ${p.archivedAt
+              ? html`
+                  <form action="/dashboard/projects/${p.id}/unarchive" method="post" class="inline">
+                    ${csrfInput(session.session, deps.sessions, 'project.unarchive')}
+                    <button type="submit">Unarchive</button>
+                  </form>
+                `
+              : html`
+                  <form action="/dashboard/projects/${p.id}/archive" method="post" class="inline">
+                    ${csrfInput(session.session, deps.sessions, 'project.archive')}
+                    <button class="warn" type="submit">Archive</button>
+                  </form>
+                `}
+          </td>
+        </tr>
+      `;
+    };
 
     const body = html`
       <h1>Projects</h1>
       <p class="small muted">
-        A project is identified by its slug (the path you pass via <code>/mcp/&lt;slug&gt;</code> or
-        <code>X-Rembric-Project</code>). The display name is cosmetic.
+        A project is identified by its slug (the value passed via
+        <code>/mcp/&lt;slug&gt;</code> or <code>project.use({slug})</code>). New slugs must match
+        <code>[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?</code>. Legacy slugs (from v0.1) keep working but
+        are flagged. The display name is cosmetic.
       </p>
 
       <h2>Active (${active.length})</h2>

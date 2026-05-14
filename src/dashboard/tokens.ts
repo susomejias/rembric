@@ -112,7 +112,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
           <select name="project">
             <option value="">— none (admin / global) —</option>
             ${projects.map((p) =>
-              raw(`<option value="${escape(p.path)}">${escape(p.path)}</option>`),
+              raw(`<option value="${escape(p.slug)}">${escape(p.slug)}</option>`),
             )}
           </select>
         </label>
@@ -149,8 +149,19 @@ export function createTokensRouter(deps: TokensDeps): Hono {
 
     let projectSlug: string | null = null;
     if (projectInput) {
-      const p = deps.projects.findOrCreate(projectInput);
-      projectSlug = p.path;
+      // Operator-initiated token creation: autocreate the project row if
+      // the slug is new. The slug must still satisfy the strict regex,
+      // which `ProjectsService.create` enforces.
+      try {
+        let p = deps.projects.findBySlug(projectInput);
+        p ??= deps.projects.create({ slug: projectInput });
+        projectSlug = p.slug;
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return errorResponse(c, err.message);
+        }
+        throw err;
+      }
     }
 
     let scope: TokenScope;
