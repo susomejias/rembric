@@ -2,25 +2,22 @@
 
 ## [0.3.0](https://github.com/susomejias/rembric/compare/v0.2.1...v0.3.0) (2026-05-14)
 
-
 ### Features
 
-* **cli:** rembric project create/list + session delete + --include-deleted ([dce9898](https://github.com/susomejias/rembric/commit/dce9898a46e096c20c04bb9d8696995c2e41172b))
-* **dashboard:** project create form + session Delete/Undelete UI ([864fe20](https://github.com/susomejias/rembric/commit/864fe202715d838ffdfa3346384253d1dae57da0))
-* **mcp:** project_suggestion_pending gate + session_deleted rejection ([36e29d5](https://github.com/susomejias/rembric/commit/36e29d5b9e37b2c9338baa8f7fab1c3b6ba651ba))
-* **persistence:** sessions.deleted_at + soft-delete service API ([2f08b7d](https://github.com/susomejias/rembric/commit/2f08b7dd1b8e4cce530f97c36cc558122c1f8102))
-
+- **cli:** rembric project create/list + session delete + --include-deleted ([dce9898](https://github.com/susomejias/rembric/commit/dce9898a46e096c20c04bb9d8696995c2e41172b))
+- **dashboard:** project create form + session Delete/Undelete UI ([864fe20](https://github.com/susomejias/rembric/commit/864fe202715d838ffdfa3346384253d1dae57da0))
+- **mcp:** project_suggestion_pending gate + session_deleted rejection ([36e29d5](https://github.com/susomejias/rembric/commit/36e29d5b9e37b2c9338baa8f7fab1c3b6ba651ba))
+- **persistence:** sessions.deleted_at + soft-delete service API ([2f08b7d](https://github.com/susomejias/rembric/commit/2f08b7dd1b8e4cce530f97c36cc558122c1f8102))
 
 ### Documentation
 
-* agents.md guidance + README CLI table + sessions.deleted_at on diagram ([92acbf7](https://github.com/susomejias/rembric/commit/92acbf76ca80bb009b588c21d802368f42c055bb))
+- agents.md guidance + README CLI table + sessions.deleted_at on diagram ([92acbf7](https://github.com/susomejias/rembric/commit/92acbf76ca80bb009b588c21d802368f42c055bb))
 
 ## [0.2.1](https://github.com/susomejias/rembric/compare/v0.2.0...v0.2.1) (2026-05-14)
 
-
 ### Bug Fixes
 
-* **test:** handle whitespace-only fast-check inputs in save-time property ([26de8b3](https://github.com/susomejias/rembric/commit/26de8b35a65c1c20a085330081677c20bd14b645))
+- **test:** handle whitespace-only fast-check inputs in save-time property ([26de8b3](https://github.com/susomejias/rembric/commit/26de8b35a65c1c20a085330081677c20bd14b645))
 
 ## [0.2.0](https://github.com/susomejias/rembric/compare/v0.1.0...v0.2.0) (2026-05-14)
 
