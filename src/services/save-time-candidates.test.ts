@@ -218,7 +218,7 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
               svc.saveWithTopicKey(
                 {
                   type: 'project',
-                  content: op.content || 'x',
+                  content: op.content.trim() || 'x',
                   topicKey: `decision/${op.key}`,
                 },
                 SCOPE_GLOBAL,
