@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/susomejias/rembric/compare/v0.3.2...v0.3.3) (2026-05-14)
+
+
+### Bug Fixes
+
+* **mcp:** drop eager oninitialized roots discovery, shorten timeout ([36e136e](https://github.com/susomejias/rembric/commit/36e136e202e971b0e272be11cdddde17802264f4))
+
 ## [0.3.2](https://github.com/susomejias/rembric/compare/v0.3.1...v0.3.2) (2026-05-14)
 
 
