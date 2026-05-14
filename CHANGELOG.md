@@ -2,32 +2,29 @@
 
 ## [0.2.0](https://github.com/susomejias/rembric/compare/v0.1.0...v0.2.0) (2026-05-14)
 
-
 ### Features
 
-* **cli:** rembric session list + status sessions count + slug refactor ([8a5d7a1](https://github.com/susomejias/rembric/commit/8a5d7a193b886ca2488ed1d5e343bee2e468cd36))
-* **consolidation:** two-pass runner + orphan-promotion + journal ([601e682](https://github.com/susomejias/rembric/commit/601e6820ec71c06228e22876e8b5d1487dd1ec60))
-* **dashboard:** /dashboard/relations list + CSRF-protected orphan controls ([4d02a9f](https://github.com/susomejias/rembric/commit/4d02a9f23769aafbc43b4072fcfd8fa3b0574e9a))
-* **dashboard:** /dashboard/sessions list+detail, slug rename, stat card ([a4739ad](https://github.com/susomejias/rembric/commit/a4739adf621c5c381abb59b4d74eb685a4bef925))
-* **dashboard:** serve static assets under /dashboard/assets/ ([6fb0f4e](https://github.com/susomejias/rembric/commit/6fb0f4e7b6eb17875d664b1d53930b2c0b966e0e))
-* **mcp:** relations tools + topic_key suggest + save annotations ([2173376](https://github.com/susomejias/rembric/commit/217337673bb845813e4465e2f8d1be9bba0a040a))
-* **mcp:** session lifecycle + research + project tools + instructions + roots ([e38212d](https://github.com/susomejias/rembric/commit/e38212ddfd93cc92975e0e5cdbb5b2948932cc92))
-* **persistence:** memory_relations table + topic_key column ([d61c3a4](https://github.com/susomejias/rembric/commit/d61c3a457e676c776a34b068e0d09694615bc6e8))
-* **persistence:** slug-only project identity + sessions/prompts tables ([6bcb9ba](https://github.com/susomejias/rembric/commit/6bcb9ba729be2015bab9a795191969feed0af05f))
-* **server:** add per-token rate limiter, admin consolidation endpoint, and CLI run-now ([b076733](https://github.com/susomejias/rembric/commit/b0767338cb0e59cd735d9cd8964a650e285a90af))
-* **services:** relations + save-time candidates + topic_key upsert ([9803f11](https://github.com/susomejias/rembric/commit/9803f11491090cf560be0bc52ee756d6582dda34))
-
+- **cli:** rembric session list + status sessions count + slug refactor ([8a5d7a1](https://github.com/susomejias/rembric/commit/8a5d7a193b886ca2488ed1d5e343bee2e468cd36))
+- **consolidation:** two-pass runner + orphan-promotion + journal ([601e682](https://github.com/susomejias/rembric/commit/601e6820ec71c06228e22876e8b5d1487dd1ec60))
+- **dashboard:** /dashboard/relations list + CSRF-protected orphan controls ([4d02a9f](https://github.com/susomejias/rembric/commit/4d02a9f23769aafbc43b4072fcfd8fa3b0574e9a))
+- **dashboard:** /dashboard/sessions list+detail, slug rename, stat card ([a4739ad](https://github.com/susomejias/rembric/commit/a4739adf621c5c381abb59b4d74eb685a4bef925))
+- **dashboard:** serve static assets under /dashboard/assets/ ([6fb0f4e](https://github.com/susomejias/rembric/commit/6fb0f4e7b6eb17875d664b1d53930b2c0b966e0e))
+- **mcp:** relations tools + topic_key suggest + save annotations ([2173376](https://github.com/susomejias/rembric/commit/217337673bb845813e4465e2f8d1be9bba0a040a))
+- **mcp:** session lifecycle + research + project tools + instructions + roots ([e38212d](https://github.com/susomejias/rembric/commit/e38212ddfd93cc92975e0e5cdbb5b2948932cc92))
+- **persistence:** memory_relations table + topic_key column ([d61c3a4](https://github.com/susomejias/rembric/commit/d61c3a457e676c776a34b068e0d09694615bc6e8))
+- **persistence:** slug-only project identity + sessions/prompts tables ([6bcb9ba](https://github.com/susomejias/rembric/commit/6bcb9ba729be2015bab9a795191969feed0af05f))
+- **server:** add per-token rate limiter, admin consolidation endpoint, and CLI run-now ([b076733](https://github.com/susomejias/rembric/commit/b0767338cb0e59cd735d9cd8964a650e285a90af))
+- **services:** relations + save-time candidates + topic_key upsert ([9803f11](https://github.com/susomejias/rembric/commit/9803f11491090cf560be0bc52ee756d6582dda34))
 
 ### Bug Fixes
 
-* **test:** packaging test no longer requires pre-built dist/ ([41aa14c](https://github.com/susomejias/rembric/commit/41aa14cc18f8c17c76919ed96f9c560c0fd3146e))
-
+- **test:** packaging test no longer requires pre-built dist/ ([41aa14c](https://github.com/susomejias/rembric/commit/41aa14cc18f8c17c76919ed96f9c560c0fd3146e))
 
 ### Documentation
 
-* add agent integration, backup, and troubleshooting guides ([e34b1b7](https://github.com/susomejias/rembric/commit/e34b1b7aa989c79949429f44fed83500e0ccd687))
-* full tool surface in agents.md, troubleshooting for session_summary ([945f7c6](https://github.com/susomejias/rembric/commit/945f7c6c1989b77b5c6409fc0bcbeb75930bf72a))
-* relations taxonomy + README save→judge flow + agents/troubleshooting ([fdf4070](https://github.com/susomejias/rembric/commit/fdf40708cb38591add3a36d559a8692c7ca3d3a3))
+- add agent integration, backup, and troubleshooting guides ([e34b1b7](https://github.com/susomejias/rembric/commit/e34b1b7aa989c79949429f44fed83500e0ccd687))
+- full tool surface in agents.md, troubleshooting for session_summary ([945f7c6](https://github.com/susomejias/rembric/commit/945f7c6c1989b77b5c6409fc0bcbeb75930bf72a))
+- relations taxonomy + README save→judge flow + agents/troubleshooting ([fdf4070](https://github.com/susomejias/rembric/commit/fdf40708cb38591add3a36d559a8692c7ca3d3a3))
 
 ## 0.1.0 (2026-05-13)
 
