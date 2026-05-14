@@ -15,6 +15,7 @@ import { type PromptsService } from '../services/prompts.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
 import { mcpError } from './errors.js';
+import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { maybeDiscoverViaRoots } from './roots-discovery.js';
 
 /**
@@ -157,6 +158,20 @@ async function handleSessionStart(
     const routerEntry = deps.router.get(key.tokenId, key.mcpSessionId);
     projectId = routerEntry?.projectId ?? null;
   }
+  // When the agent did not pin a project and roots-based discovery
+  // surfaced pending suggestions, refuse to silently open a global-scope
+  // session — make the choice explicit.
+  if (args.project === undefined && projectId === null) {
+    const pending = pendingSuggestionGate(ctx, {
+      router: deps.router,
+      projects: deps.projects,
+    });
+    if (pending) {
+      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+        suggestedSlugs: pending,
+      });
+    }
+  }
   if (args.project !== undefined) {
     if (ctx.requestedSlug && ctx.requestedSlug !== args.project) {
       return mcpError(
@@ -226,6 +241,8 @@ function handleSessionEnd(deps: SessionsToolDeps, args: { sessionId?: string }) 
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
+  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+  if (blocked) return blocked;
   try {
     const ended = deps.agentSessions.end(sessionId, { tokenId: ctx.token.id });
     const key = routerKey();
@@ -248,6 +265,8 @@ function handleSessionSummary(
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
+  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+  if (blocked) return blocked;
   try {
     const summed = deps.agentSessions.summarize(sessionId, {
       tokenId: ctx.token.id,
@@ -259,6 +278,33 @@ function handleSessionSummary(
   } catch (err) {
     return errToMcp(err);
   }
+}
+
+/**
+ * Run the cross-token check first (mask as session_not_found, matching
+ * the existing behavior of `end`/`summarize`), then check the soft-delete
+ * gate. Returns an MCP error response when the session is deleted by the
+ * owning token, or `null` when the caller may proceed.
+ */
+function rejectIfDeleted(
+  deps: SessionsToolDeps,
+  sessionId: string,
+  callerTokenId: string,
+): ReturnType<typeof mcpError> | null {
+  const row = deps.agentSessions.getById(sessionId);
+  if (!row) {
+    return mcpError('session_not_found', `session '${sessionId}' not found`);
+  }
+  if (row.tokenId !== callerTokenId) {
+    return mcpError('session_not_found', `session '${sessionId}' not found`);
+  }
+  if (row.deletedAt) {
+    return mcpError(
+      'session_deleted',
+      `session '${sessionId}' was soft-deleted at ${row.deletedAt.toISOString()}; ask an operator to undelete it before resuming`,
+    );
+  }
+  return null;
 }
 
 function handleContext(

@@ -2,14 +2,17 @@ import { z } from 'zod';
 
 import type { Db } from '../db/client.js';
 import { getRequestContext } from '../server/request-context.js';
+import type { SessionRouter } from '../server/session-router.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
+import type { ProjectsService } from '../services/projects.js';
 import type { RelationsService } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import { type Scope, SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
 import { mcpError } from './errors.js';
+import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 
 /**
  * Tool handlers backing the four MCP tools.
@@ -70,6 +73,10 @@ export interface ToolDeps {
   candidates?: CandidateOptions;
   /** Optional — db handle needed for save-time candidate queries. */
   db?: Db;
+  /** Optional — required to evaluate the project-suggestion gate on save. */
+  router?: SessionRouter;
+  /** Optional — required to evaluate the project-suggestion gate on save. */
+  projects?: ProjectsService;
 }
 
 export function buildHandlers(deps: ToolDeps) {
@@ -129,6 +136,18 @@ function handleSave(
       'project_not_found',
       `project '${ctx.requestedSlug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
     );
+  }
+
+  // When roots-based discovery surfaced suggestions the agent has not yet
+  // acted on, refuse the silent fallback to global. The agent must either
+  // pass scope='global' explicitly, or call project.use({slug, autocreate}).
+  if (!ctx.project && args.scope === 'project' && deps.router && deps.projects) {
+    const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
+    if (pending) {
+      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+        suggestedSlugs: pending,
+      });
+    }
   }
 
   // Unscoped connections cannot persist project memories without a target.

@@ -97,6 +97,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     relations: opts.relations,
     candidates: opts.candidates,
     db: opts.db,
+    router: opts.router,
+    projects: opts.projects,
   });
   server.registerTool(
     'memory.save',
