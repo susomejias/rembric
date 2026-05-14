@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/susomejias/rembric/compare/v0.2.0...v0.2.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **test:** handle whitespace-only fast-check inputs in save-time property ([26de8b3](https://github.com/susomejias/rembric/commit/26de8b35a65c1c20a085330081677c20bd14b645))
+
 ## [0.2.0](https://github.com/susomejias/rembric/compare/v0.1.0...v0.2.0) (2026-05-14)
 
 ### Features
