@@ -6,9 +6,16 @@ import type { ProjectsService } from '../services/projects.js';
 /**
  * Server-driven project auto-detection via the MCP `roots` capability.
  *
- * Run once per transport session, lazily on the first tool call that
- * cares about scope (`project.current`, `memory.session_start`,
- * `memory.context`). The behaviour is intentionally conservative:
+ * Eager entry point: `server.oninitialized` fires `ensureRootsDiscoveryRun`
+ * as soon as the client sends `notifications/initialized`, so the router
+ * is populated before the first scope-aware tool call. A handful of
+ * scope-aware tool handlers (`project.current`, `memory.session_start`,
+ * `memory.{save,search,get,confirm}`) re-call `ensureRootsDiscoveryRun`
+ * as a belt-and-suspenders fallback for clients that never emit
+ * `notifications/initialized` and to handle the eager-vs-tool-call race
+ * (single-flight via `SessionRouter.discoveryInFlight`).
+ *
+ * The behaviour is intentionally conservative:
  *
  *   - clients without `roots` capability → no-op
  *   - existing slug + no active project    → silently activate, source='roots'
@@ -57,6 +64,36 @@ export interface RootsDiscoveryContext {
   mcpSessionId: string;
   /** When the URL path already pinned a slug, discovery is a no-op. */
   pathSlug: string | null;
+}
+
+/**
+ * Single-flight wrapper around `maybeDiscoverViaRoots`. Use this from
+ * any code path that benefits from roots-derived project resolution:
+ *
+ *   - `server.oninitialized` (eager — fires the moment the handshake
+ *     completes, so the router is populated before any tool call)
+ *   - scope-aware tool handlers (fallback — clients that never emit
+ *     `notifications/initialized`, or tool calls that arrive in the
+ *     short window before eager discovery settles)
+ *
+ * The router stores the in-flight promise so concurrent callers all
+ * await the same `listRoots` round trip. Failures are swallowed —
+ * discovery must never break a request.
+ */
+export async function ensureRootsDiscoveryRun(
+  deps: RootsDiscoveryDeps,
+  ctx: RootsDiscoveryContext,
+): Promise<void> {
+  if (ctx.pathSlug) return;
+  const pending = deps.router.getDiscoveryPromise(ctx.tokenId, ctx.mcpSessionId);
+  if (pending) {
+    await pending;
+    return;
+  }
+  if (isDiscoveryRun(ctx.tokenId, ctx.mcpSessionId)) return;
+  const promise = maybeDiscoverViaRoots(deps, ctx).catch(() => undefined);
+  deps.router.setDiscoveryPromise(ctx.tokenId, ctx.mcpSessionId, promise);
+  await promise;
 }
 
 export async function maybeDiscoverViaRoots(

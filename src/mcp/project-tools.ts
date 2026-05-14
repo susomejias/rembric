@@ -11,7 +11,7 @@ import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
 
 import { mcpError } from './errors.js';
-import { maybeDiscoverViaRoots } from './roots-discovery.js';
+import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Tool handlers for the `project.*` MCP namespace introduced in change
@@ -188,11 +188,12 @@ async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>
   const ctx = getRequestContext();
   const key = routerKey();
 
-  // Lazy `roots/list` discovery on the first call. No-op when the URL
-  // already pinned a slug, when the client doesn't advertise `roots`, or
-  // when discovery already fired for this transport.
+  // Await any eager (or in-flight) roots discovery; trigger it lazily
+  // if no eager run happened. No-op when the URL already pinned a slug,
+  // when the client doesn't advertise `roots`, or when discovery already
+  // settled for this transport.
   if (key && deps.getServer) {
-    await maybeDiscoverViaRoots(
+    await ensureRootsDiscoveryRun(
       { server: deps.getServer(), router: deps.router, projects: deps.projects },
       { tokenId: key.tokenId, mcpSessionId: key.mcpSessionId, pathSlug: ctx.requestedSlug },
     );

@@ -326,3 +326,117 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(payload.memory.id).toBe(saved.id);
   });
 });
+
+describe('memory.save — eager roots discovery race (option B fix)', () => {
+  // Reproduces the bug where the very first scope-aware call on a fresh
+  // transport (e.g. `memory.save({scope:'project'})`) returned
+  // `project_required` because roots discovery had not run yet — it was
+  // only wired into `project.current` / `memory.session_start`. The fix:
+  // `createMcpServer` fires discovery eagerly from `oninitialized` and
+  // stashes the in-flight Promise on the router so any tool handler
+  // that resolves project scope awaits the same promise (single-flight)
+  // instead of falling through to `project_required`.
+
+  const MCP_SESSION = 'mcp-sess-eager';
+
+  function unscopedContextWithSession(): RequestContext {
+    const token: Token = {
+      id: 'tk_test',
+      name: 'test-token',
+      hash: 'hash',
+      scope: ADMIN_TOKEN_SCOPE,
+      projectId: null,
+      createdAt: new Date(),
+      expiresAt: null,
+      revokedAt: null,
+    };
+    return {
+      token,
+      scope: ADMIN_TOKEN_SCOPE,
+      project: null,
+      requestedSlug: null,
+      mcpSessionId: MCP_SESSION,
+    };
+  }
+
+  // Minimal stand-in for the McpServer that the handler's `getServer`
+  // factory returns. `resolveEffectiveProject` only forwards it to
+  // `ensureRootsDiscoveryRun`, which short-circuits when there is an
+  // in-flight promise on the router — so the stub is never dereferenced.
+  const fakeServer = {} as unknown as Parameters<typeof buildHandlers>[0]['getServer'] extends
+    | (() => infer S)
+    | undefined
+    ? S
+    : never;
+
+  let router: SessionRouter;
+  let routerHandlers: ReturnType<typeof buildHandlers>;
+
+  beforeEach(() => {
+    router = new SessionRouter();
+    routerHandlers = buildHandlers({
+      memory,
+      router,
+      projects,
+      getServer: () => fakeServer,
+    });
+  });
+
+  it('memory.save awaits an in-flight discovery promise and resolves the activated project', async () => {
+    // Simulate the state created by `server.oninitialized`: discovery
+    // is in flight; its resolution will activate `projectA` on this
+    // transport (mirrors what `maybeDiscoverViaRoots`'s
+    // `applyDerivedSlug` does once `listRoots` returns).
+    let resolveDiscovery: () => void = () => undefined;
+    const discoveryPromise = new Promise<void>((resolve) => {
+      resolveDiscovery = resolve;
+    }).then(() => {
+      router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'roots');
+    });
+    router.setDiscoveryPromise('tk_test', MCP_SESSION, discoveryPromise);
+
+    // Kick off the save BEFORE discovery settles. With the fix in place
+    // the save awaits the in-flight promise; without it the save would
+    // return `project_required` immediately.
+    const pending = runWithContext(unscopedContextWithSession(), async () =>
+      routerHandlers.save({
+        scope: 'project',
+        type: 'project',
+        content: 'eager-discovery save',
+      }),
+    );
+    resolveDiscovery();
+    const r = await pending;
+
+    expect(isErrorResponse(r)).toBeFalsy();
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.scope).toBe('project');
+    expect(persisted?.projectId).toBe(projectA.id);
+  });
+
+  it('memory.search awaits the same in-flight discovery promise', async () => {
+    const saved = memory.save(
+      { type: 'user', content: 'visible only with project scope' },
+      projectScope(projectA.id),
+    );
+
+    let resolveDiscovery: () => void = () => undefined;
+    const discoveryPromise = new Promise<void>((resolve) => {
+      resolveDiscovery = resolve;
+    }).then(() => {
+      router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'roots');
+    });
+    router.setDiscoveryPromise('tk_test', MCP_SESSION, discoveryPromise);
+
+    const pending = runWithContext(unscopedContextWithSession(), async () =>
+      routerHandlers.search({}),
+    );
+    resolveDiscovery();
+    const r = await pending;
+
+    const { memories } = parseText<{ memories: { id: string; projectId: string | null }[] }>(r);
+    expect(memories.some((m) => m.id === saved.id)).toBe(true);
+    expect(memories.every((m) => m.projectId === projectA.id)).toBe(true);
+  });
+});

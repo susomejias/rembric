@@ -46,6 +46,13 @@ function entryKey(tokenId: string, mcpSessionId: string): string {
 
 export class SessionRouter {
   private readonly entries = new Map<string, RouterEntry>();
+  /**
+   * In-flight roots-discovery promise per transport. Used to serialize
+   * concurrent discovery attempts (e.g. `oninitialized` fires eager
+   * discovery and a tool handler arrives before it settles — the handler
+   * awaits the same promise instead of triggering a second listRoots).
+   */
+  private readonly discoveryInFlight = new Map<string, Promise<unknown>>();
 
   /** Read the entry for a given transport, returning a copy for safety. */
   get(tokenId: string, mcpSessionId: string): RouterEntry | undefined {
@@ -104,9 +111,20 @@ export class SessionRouter {
     if (e) e.rembricSessionId = null;
   }
 
+  /** Track an in-flight roots-discovery promise for this transport. */
+  setDiscoveryPromise(tokenId: string, mcpSessionId: string, promise: Promise<unknown>): void {
+    this.discoveryInFlight.set(entryKey(tokenId, mcpSessionId), promise);
+  }
+
+  /** Read the in-flight roots-discovery promise for this transport, if any. */
+  getDiscoveryPromise(tokenId: string, mcpSessionId: string): Promise<unknown> | undefined {
+    return this.discoveryInFlight.get(entryKey(tokenId, mcpSessionId));
+  }
+
   /** Test-only helper: drop everything. */
   resetAll(): void {
     this.entries.clear();
+    this.discoveryInFlight.clear();
   }
 
   /** Number of live transport entries; exposed for stats/debug. */

@@ -16,7 +16,7 @@ import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
 import { mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
-import { maybeDiscoverViaRoots } from './roots-discovery.js';
+import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Tool handlers for the session-lifecycle, research, and observability
@@ -138,12 +138,12 @@ async function handleSessionStart(
 ) {
   const ctx = getRequestContext();
 
-  // Trigger lazy roots discovery on session start when no explicit
-  // project is supplied; the agent may then end up scoped via the
+  // Await any eager (or in-flight) roots discovery; trigger it lazily
+  // if no eager run happened. The agent may then end up scoped via the
   // derived slug.
   const key = routerKey();
   if (!args.project && key && deps.getServer) {
-    await maybeDiscoverViaRoots(
+    await ensureRootsDiscoveryRun(
       { server: deps.getServer(), router: deps.router, projects: deps.projects },
       { tokenId: key.tokenId, mcpSessionId: key.mcpSessionId, pathSlug: ctx.requestedSlug },
     );

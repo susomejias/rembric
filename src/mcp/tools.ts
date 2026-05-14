@@ -1,3 +1,4 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Db } from '../db/client.js';
@@ -13,6 +14,7 @@ import { isAuthorized } from '../services/tokens.js';
 
 import { mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
+import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Tool handlers backing the four MCP tools.
@@ -81,6 +83,12 @@ export interface ToolDeps {
   router?: SessionRouter;
   /** Optional — required to evaluate the project-suggestion gate on save. */
   projects?: ProjectsService;
+  /**
+   * Optional — provides access to the active `McpServer` so handlers can
+   * await (or trigger) roots discovery when no project is resolved yet.
+   * Set by `createMcpServer` after construction.
+   */
+  getServer?: () => McpServer;
 }
 
 export function buildHandlers(deps: ToolDeps) {
@@ -112,24 +120,31 @@ function ok(payload: unknown) {
  *   2. `SessionRouter` entry — set by an explicit `project.use({slug})` or
  *      by roots-based discovery on a path-less `/mcp` connection.
  *
- * Without source #2 a `project.use` call would update only `project.current`
- * and have no effect on subsequent `memory.*` calls (the bug this helper
- * was added to fix). Path-scoped connections that pointed at a NON-existent
- * slug are intentionally NOT covered — the earlier `project_not_found`
- * check in `handleSave` fires first, and we only consult the router on
- * truly unscoped connections (`ctx.requestedSlug === null`).
+ * Before consulting source #2 on an unscoped connection, this helper
+ * awaits any in-flight roots discovery (or triggers it lazily as a
+ * fallback for clients that never emit `notifications/initialized`) so
+ * the router is populated by the time we read it. Path-scoped
+ * connections short-circuit on `ctx.requestedSlug`.
  */
-function resolveEffectiveProject(deps: ToolDeps): { id: string; slug: string } | null {
+async function resolveEffectiveProject(
+  deps: ToolDeps,
+): Promise<{ id: string; slug: string } | null> {
   const ctx = getRequestContext();
   if (ctx.project) return ctx.project;
   if (ctx.requestedSlug !== null) return null;
   if (!ctx.mcpSessionId || !deps.router || !deps.projects) return null;
+  if (deps.getServer) {
+    await ensureRootsDiscoveryRun(
+      { server: deps.getServer(), router: deps.router, projects: deps.projects },
+      { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId, pathSlug: ctx.requestedSlug },
+    );
+  }
   const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
   if (!entry?.projectId) return null;
   return deps.projects.getById(entry.projectId) ?? null;
 }
 
-function handleSave(
+async function handleSave(
   deps: ToolDeps,
   args: {
     scope: 'global' | 'project';
@@ -166,7 +181,7 @@ function handleSave(
   // this transport (or that roots discovery activated), in addition to the
   // URL-derived `ctx.project`. Mirrors the precedence used by
   // `handleSessionStart` and `project.current`.
-  const activeProject = resolveEffectiveProject(deps);
+  const activeProject = await resolveEffectiveProject(deps);
 
   // When roots-based discovery surfaced suggestions the agent has not yet
   // acted on, refuse the silent fallback to global. The agent must either
@@ -281,7 +296,7 @@ function handleSave(
   }
 }
 
-function handleSearch(
+async function handleSearch(
   deps: ToolDeps,
   args: {
     query?: string;
@@ -293,7 +308,7 @@ function handleSearch(
   },
 ) {
   const ctx = getRequestContext();
-  const activeProject = resolveEffectiveProject(deps);
+  const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
 
   const authzTarget = {
@@ -343,9 +358,9 @@ function handleSearch(
   }
 }
 
-function handleGet(deps: ToolDeps, args: { id: string }) {
+async function handleGet(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
-  const activeProject = resolveEffectiveProject(deps);
+  const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
   try {
     const result = deps.memory.get(args.id, scope);
@@ -391,9 +406,9 @@ function handleGet(deps: ToolDeps, args: { id: string }) {
   }
 }
 
-function handleConfirm(deps: ToolDeps, args: { id: string }) {
+async function handleConfirm(deps: ToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
-  const activeProject = resolveEffectiveProject(deps);
+  const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
   try {
     const authzTarget = {
