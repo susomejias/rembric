@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 
 import { loadConfig } from '../config.js';
 import { createDb } from '../db/index.js';
+import { agentSessions } from '../db/schema/agent-sessions.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { projects } from '../db/schema/projects.js';
@@ -52,6 +53,19 @@ export function runStatus(): void {
       .limit(1)
       .get();
 
+    const sessionsByStatus = handle.db
+      .select({ status: agentSessions.status, n: sql<number>`count(*)` })
+      .from(agentSessions)
+      .groupBy(agentSessions.status)
+      .all()
+      .reduce<Record<string, number>>(
+        (acc, row) => {
+          acc[row.status] = Number(row.n);
+          return acc;
+        },
+        { active: 0, ended: 0, abandoned: 0 },
+      );
+
     process.stdout.write(
       JSON.stringify(
         {
@@ -59,6 +73,11 @@ export function runStatus(): void {
           memories: { total, active, superseded, archived },
           projects: projectsCount,
           tokens: tokensCount,
+          sessions: {
+            active: sessionsByStatus.active ?? 0,
+            ended: sessionsByStatus.ended ?? 0,
+            abandoned: sessionsByStatus.abandoned ?? 0,
+          },
           lastConsolidation: lastConsolidation
             ? { at: lastConsolidation.startedAt, summary: lastConsolidation.summary }
             : null,

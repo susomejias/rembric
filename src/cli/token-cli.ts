@@ -27,9 +27,13 @@ export function runTokenCreate(args: CreateTokenArgs): void {
     let projectId: string | null = null;
     let projectSlug: string | null = null;
     if (args.project) {
-      const project = projects.findOrCreate(args.project);
+      // Token-creation is an operator action — autocreate is desirable so
+      // operators can mint tokens for projects that don't yet have any
+      // memories. The slug must still pass the strict regex.
+      let project = projects.findBySlug(args.project);
+      project ??= projects.create({ slug: args.project });
       projectId = project.id;
-      projectSlug = project.path;
+      projectSlug = project.slug;
     }
 
     const scope = resolveScope(args.scope, projectSlug);

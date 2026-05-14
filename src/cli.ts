@@ -68,6 +68,24 @@ tokenCmd
     runTokenRevoke(name);
   });
 
+const sessionCmd = program.command('session').description('Read-only inspection of agent sessions');
+sessionCmd
+  .command('list')
+  .description('List recent agent sessions')
+  .option('--status <status>', 'Filter by status: active | ended | abandoned')
+  .option('--limit <n>', 'Maximum rows to return (default 50)', (v: string) => parseInt(v, 10))
+  .option('--table', 'Render as a text table (default: JSON)')
+  .action(
+    async (opts: {
+      status?: 'active' | 'ended' | 'abandoned';
+      limit?: number;
+      table?: boolean;
+    }) => {
+      const { runSessionList } = await import('./cli/session-cli.js');
+      runSessionList({ status: opts.status, limit: opts.limit, json: !opts.table });
+    },
+  );
+
 const consolidation = program
   .command('consolidation')
   .description('Manage the consolidation engine');
