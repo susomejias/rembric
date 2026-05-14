@@ -34,7 +34,7 @@ export const consolidationOps = sqliteTable(
       .notNull()
       .references(() => consolidationRuns.id),
     opType: text('op_type', {
-      enum: ['merge', 'supersede', 'archive', 'decay', 'noop', 'failed'],
+      enum: ['merge', 'supersede', 'archive', 'decay', 'noop', 'failed', 'orphan_promote'],
     }).notNull(),
     /** Memory ids touched by this op (predecessors, archived ones). */
     affectedIds: text('affected_ids', { mode: 'json' }).$type<string[]>().notNull(),

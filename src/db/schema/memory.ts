@@ -60,6 +60,14 @@ export const memory = sqliteTable(
      * never call `memory.session_start`, carry NULL here.
      */
     sessionId: text('session_id'),
+    /**
+     * Stable identifier for an evolving topic. When `memory.save` is
+     * called with a `topic_key`, the previously-active row in the same
+     * (scope, project_id, topic_key) is auto-superseded and the new row
+     * becomes the head. Nullable; max 128 chars (validated at the
+     * service layer). The partial index below makes the lookup O(1).
+     */
+    topicKey: text('topic_key'),
   },
   (table) => ({
     scopeProjectStatusIdx: index('memory_scope_project_status_idx').on(
@@ -70,6 +78,9 @@ export const memory = sqliteTable(
     statusLastSeenIdx: index('memory_status_last_seen_idx').on(table.status, table.lastSeenAt),
     createdAtIdx: index('memory_created_at_idx').on(table.createdAt),
     sessionIdx: index('memory_session_idx').on(table.sessionId),
+    // Partial index for topic_key resolution — see migration 0005 for
+    // the WHERE clause (Drizzle's index helper doesn't expose the
+    // `WHERE` syntax, so the index DDL lives in raw SQL).
   }),
 );
 
