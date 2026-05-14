@@ -14,6 +14,7 @@ import type { TokensService } from '../services/tokens.js';
 
 import { AuthError, authenticate } from './auth.js';
 import { createDashboardRouter, type DashboardDeps } from './dashboard-router.js';
+import type { RateLimiter } from './rate-limit.js';
 import { runWithContext } from './request-context.js';
 
 /**
@@ -37,6 +38,14 @@ export interface CreateHttpServerOptions {
   tokens: TokensService;
   projects: ProjectsService;
   dashboard: DashboardDeps;
+  /** Optional per-token rate limiter applied before MCP transport handoff. */
+  rateLimiter?: RateLimiter | null;
+  /**
+   * Triggers a consolidation pass on demand. Wired by the bootstrapper
+   * to the in-process ConsolidationRunner; exposed over HTTP to support
+   * `rembric consolidation run-now` against a running server.
+   */
+  triggerConsolidation?: () => Promise<unknown>;
 }
 
 export interface HttpServerHandle {
@@ -54,6 +63,31 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
   honoApp.get('/', (c) => c.redirect('/dashboard'));
 
   honoApp.route('/dashboard', createDashboardRouter(opts.dashboard));
+
+  // Admin endpoints. Require an admin-scope bearer token. Only one for
+  // now: trigger a consolidation pass. Kept off the MCP surface because
+  // the operation is privileged and we don't want it advertised over
+  // MCP tool listing.
+  if (opts.triggerConsolidation) {
+    const trigger = opts.triggerConsolidation;
+    honoApp.post('/admin/consolidation/run', async (c) => {
+      const authz = c.req.header('authorization');
+      const adminCheck = adminAuth(authz, opts.tokens);
+      if (adminCheck !== null) {
+        return c.json(
+          { ok: false, code: adminCheck.code, message: adminCheck.message },
+          adminCheck.status,
+        );
+      }
+      try {
+        const result = await trigger();
+        return c.json({ ok: true, result });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ ok: false, code: 'internal_error', message }, 500);
+      }
+    });
+  }
 
   honoApp.notFound((c) => c.json({ ok: false, code: 'not_found', path: c.req.path }, 404));
 
@@ -119,6 +153,21 @@ async function handleMcpRequest(
       return;
     }
     throw err;
+  }
+
+  // 1b. Rate limit per token (after auth so we know the token id).
+  if (opts.rateLimiter) {
+    const decision = opts.rateLimiter.check(ctx.token.id);
+    if (!decision.allowed) {
+      res.setHeader('Retry-After', String(decision.retryAfterSeconds));
+      respondJson(res, 429, {
+        ok: false,
+        code: 'rate_limited',
+        message: `token '${ctx.token.name}' exceeded its rate limit; retry in ${decision.retryAfterSeconds}s`,
+        retryAfterSeconds: decision.retryAfterSeconds,
+      });
+      return;
+    }
   }
 
   // 2. Parse body (POST/DELETE may carry JSON; GET/HEAD don't).
@@ -193,4 +242,39 @@ function respondJson(res: ServerResponse, status: number, body: unknown): void {
 function respondInternal(res: ServerResponse, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   respondJson(res, 500, { ok: false, code: 'internal_error', message });
+}
+
+interface AdminAuthFailure {
+  status: 401 | 403;
+  code: string;
+  message: string;
+}
+
+/**
+ * Verify `Authorization: Bearer <admin-token>` for privileged HTTP
+ * endpoints. Returns `null` on success, or a failure descriptor that
+ * the caller renders as JSON.
+ */
+function adminAuth(authz: string | undefined, tokens: TokensService): AdminAuthFailure | null {
+  if (!authz) {
+    return { status: 401, code: 'missing_token', message: 'missing Authorization header' };
+  }
+  if (authz.toLowerCase().slice(0, 7) !== 'bearer ') {
+    return { status: 401, code: 'malformed_authorization', message: 'expected "Bearer <token>"' };
+  }
+  const plaintext = authz.slice(7).trim();
+  try {
+    const resolved = tokens.authenticate(plaintext);
+    if (resolved.scope !== '*') {
+      return {
+        status: 403,
+        code: 'forbidden',
+        message: 'admin endpoints require a token with scope=*',
+      };
+    }
+    return null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'token not recognized';
+    return { status: 401, code: 'token_invalid', message };
+  }
 }

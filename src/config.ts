@@ -63,6 +63,16 @@ const envSchema = z.object({
     .default(true),
   CONSOLIDATION_CRON: z.string().default('0 3 * * *'),
   CONSOLIDATION_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(50),
+
+  // Per-token MCP rate limiting. Disabled by default — single-user
+  // localhost deployments do not need it. Set RATE_LIMIT_ENABLED=true
+  // to turn on the token-bucket limiter.
+  RATE_LIMIT_ENABLED: z
+    .union([z.string(), z.boolean()])
+    .transform((v) => (typeof v === 'boolean' ? v : v.toLowerCase() === 'true'))
+    .default(false),
+  RATE_LIMIT_RPS: z.coerce.number().positive().max(10_000).default(10),
+  RATE_LIMIT_BURST: z.coerce.number().int().min(1).max(10_000).default(30),
 });
 
 export type ParsedEnv = z.infer<typeof envSchema>;
@@ -95,6 +105,11 @@ export interface Config {
     enabled: boolean;
     cron: string;
     batchSize: number;
+  };
+  rateLimit: {
+    enabled: boolean;
+    ratePerSecond: number;
+    burst: number;
   };
 }
 
@@ -205,6 +220,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       cron: parsed.CONSOLIDATION_CRON,
       batchSize: parsed.CONSOLIDATION_BATCH_SIZE,
     },
+    rateLimit: {
+      enabled: parsed.RATE_LIMIT_ENABLED,
+      ratePerSecond: parsed.RATE_LIMIT_RPS,
+      burst: parsed.RATE_LIMIT_BURST,
+    },
   };
 }
 
@@ -231,5 +251,6 @@ export function redactConfig(config: Config): Record<string, unknown> {
       enabled: config.embedding.enabled,
     },
     consolidation: config.consolidation,
+    rateLimit: config.rateLimit,
   };
 }

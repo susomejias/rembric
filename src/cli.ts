@@ -74,9 +74,11 @@ const consolidation = program
 consolidation
   .command('run-now')
   .description('Trigger a consolidation pass on demand (server must be running)')
-  .action(() => {
-    console.error('rembric consolidation run-now: not yet implemented (task 10.4)');
-    process.exit(2);
+  .option('--token <token>', 'Admin bearer token (falls back to REMBRIC_ADMIN_TOKEN)')
+  .option('--url <url>', 'Base URL of the running server (defaults to host/port from config)')
+  .action(async (opts: { token?: string; url?: string }) => {
+    const { runConsolidationRunNow } = await import('./cli/consolidation-cli.js');
+    await runConsolidationRunNow(opts);
   });
 
 const db = program.command('db').description('Database admin');

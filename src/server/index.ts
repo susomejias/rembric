@@ -5,6 +5,8 @@
 
 import { bootstrap, type BootstrappedServer } from './bootstrap.js';
 
+export type { BootstrappedServer };
+
 export async function createServer(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BootstrappedServer> {

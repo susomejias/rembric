@@ -17,6 +17,7 @@ import { deriveSessionKey, TokensService } from '../services/tokens.js';
 
 import type { DashboardStats } from './dashboard-router.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
+import { RateLimiter } from './rate-limit.js';
 
 /**
  * Wire dependencies, apply migrations, bootstrap the admin token, and
@@ -123,12 +124,21 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   });
   scheduler.start();
 
+  const rateLimiter = config.rateLimit.enabled
+    ? new RateLimiter({
+        ratePerSecond: config.rateLimit.ratePerSecond,
+        burst: config.rateLimit.burst,
+      })
+    : null;
+
   const http = await startHttpServer({
     host: config.host,
     port: config.port,
     mcp: mcpManager,
     tokens,
     projects,
+    rateLimiter,
+    triggerConsolidation: () => runner.runAll(),
     dashboard: {
       db: dbHandle.db,
       tokens,
