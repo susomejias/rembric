@@ -20,7 +20,7 @@ Proactive memory protocol ("save after decisions, fixes, conventions, preference
 ### As a teammate (marketplace install)
 
 ```bash
-claude plugin marketplace add git@github.com:susomejias/rembric.git
+claude plugin marketplace add https://github.com/susomejias/rembric.git
 claude plugin install rembric@rembric
 ```
 

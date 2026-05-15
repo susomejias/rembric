@@ -103,7 +103,7 @@ The server binds to `127.0.0.1` by default. Remote exposure is up to you; how yo
 **Strongly recommended path.** The bundled plugin replaces hand-editing `.mcp.json`, stores your token in the keychain, registers `/rembric:*` commands, and ships hooks that trigger memory ops at the right lifecycle moments without the model needing to remember them.
 
 ```bash
-claude plugin marketplace add git@github.com:susomejias/rembric.git
+claude plugin marketplace add https://github.com/susomejias/rembric.git
 claude plugin install rembric@rembric
 ```
 
@@ -127,7 +127,7 @@ Full plugin docs: [`plugin/README.md`](./plugin/README.md).
 Codex CLI installs the same `plugin/` directory via its native marketplace, alongside its own `.codex-plugin/plugin.json` manifest and a Codex-specific `hooks.codex.json`. One source tree, both clients:
 
 ```bash
-codex plugin marketplace add git@github.com:susomejias/rembric.git
+codex plugin marketplace add https://github.com/susomejias/rembric.git
 codex plugin install rembric
 ```
 

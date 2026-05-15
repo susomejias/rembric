@@ -41,7 +41,7 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 Use the Codex marketplace install — the plugin ships from the same `plugin/` directory as the Claude Code plugin (one source tree, two manifests):
 
 ```bash
-codex plugin marketplace add git@github.com:susomejias/rembric.git
+codex plugin marketplace add https://github.com/susomejias/rembric.git
 codex plugin install rembric
 ```
 
