@@ -185,4 +185,74 @@ describe('AgentSessionsService', () => {
       );
     });
   });
+
+  describe('ensure (client-provided id)', () => {
+    it('inserts a new row with the provided id and returns created: true', () => {
+      const { session, created } = sessions.ensure({
+        id: 'sess-abc12345',
+        tokenId,
+        projectId,
+        agent: 'claude-code',
+      });
+      expect(created).toBe(true);
+      expect(session.id).toBe('sess-abc12345');
+      expect(session.tokenId).toBe(tokenId);
+      expect(session.status).toBe('active');
+    });
+
+    it('is idempotent for the same (tokenId, id) — returns existing row with created: false', () => {
+      const first = sessions.ensure({
+        id: 'sess-idempo-1',
+        tokenId,
+        projectId,
+        agent: 'claude',
+      });
+      const second = sessions.ensure({
+        id: 'sess-idempo-1',
+        tokenId,
+        projectId,
+        agent: 'claude',
+      });
+      expect(second.created).toBe(false);
+      expect(second.session.id).toBe(first.session.id);
+      expect(second.session.startedAt.getTime()).toBe(first.session.startedAt.getTime());
+      const all = sessions.list({ includeDeleted: true }).filter((r) => r.id === 'sess-idempo-1');
+      expect(all).toHaveLength(1);
+    });
+
+    it('rejects cross-token id collision with id_collision', () => {
+      sessions.ensure({ id: 'shared-id-12345', tokenId, projectId, agent: 'a' });
+      expect(() =>
+        sessions.ensure({
+          id: 'shared-id-12345',
+          tokenId: otherTokenId,
+          projectId,
+          agent: 'b',
+        }),
+      ).toThrow(/already in use by a different token/);
+      const original = sessions.getById('shared-id-12345');
+      expect(original?.tokenId).toBe(tokenId);
+    });
+
+    it('rejects malformed ids', () => {
+      const bad = ['x', 'has spaces', 'has\nnewlines', 'A'.repeat(129), ''];
+      for (const id of bad) {
+        expect(() => sessions.ensure({ id, tokenId, projectId, agent: 'a' })).toThrow(
+          /id must match/,
+        );
+      }
+    });
+
+    it('accepts UUID-, ULID-, and prefixed-id formats', () => {
+      const ids = [
+        '550e8400-e29b-41d4-a716-446655440000',
+        '01HXC9Z8H8R8RVV3M9CWY2J5RM',
+        'claude-2026-05-15-abc123',
+      ];
+      for (const id of ids) {
+        const result = sessions.ensure({ id, tokenId, projectId, agent: 'a' });
+        expect(result.created).toBe(true);
+      }
+    });
+  });
 });

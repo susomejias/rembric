@@ -184,6 +184,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     mcp: mcpManager,
     tokens,
     projects,
+    agentSessions: agentSessionsSvc,
     rateLimiter,
     triggerConsolidation: async (opts) => {
       if (opts?.orphansOnly) {

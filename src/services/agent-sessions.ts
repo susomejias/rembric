@@ -26,6 +26,30 @@ export interface StartSessionInput {
   description?: string | null;
 }
 
+/**
+ * Input for `ensure()` — the hook-driven path used by the Claude Code /
+ * Codex plugin to create or upsert a session by the host's own session id.
+ */
+export interface EnsureSessionInput {
+  /**
+   * Client-provided session id (typically the Claude Code or Codex host
+   * session id from hook stdin). Must match `^[A-Za-z0-9_-]{8,128}$`.
+   */
+  id: string;
+  tokenId: string;
+  projectId: string | null;
+  agent: string;
+  description?: string | null;
+}
+
+export interface EnsureSessionResult {
+  session: AgentSession;
+  /** True for fresh inserts, false for idempotent hits on the same `(tokenId, id)`. */
+  created: boolean;
+}
+
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+
 export interface EndSessionInput {
   tokenId: string;
 }
@@ -66,6 +90,53 @@ export class AgentSessionsService {
       .get();
     if (!row) throw new DomainError('conflict', 'sessions.start: insert returned no row');
     return row;
+  }
+
+  /**
+   * Hook-driven session creation: the plugin POSTs the host session id
+   * (from Claude Code or Codex hook stdin) and the server upserts.
+   *
+   * Idempotent: when `(id)` already exists for the same token, returns the
+   * existing row with `created: false`. When it exists for a different
+   * token, rejects with `id_collision` (theoretically possible with non-
+   * UUID/ULID ids; operationally a ~0 probability event — see the
+   * persistence delta spec in `add-http-session-lifecycle`).
+   */
+  ensure(input: EnsureSessionInput): EnsureSessionResult {
+    if (!SESSION_ID_RE.test(input.id)) {
+      throw new DomainError(
+        'invalid_input',
+        `sessions.ensure: id must match ${SESSION_ID_RE.source}`,
+      );
+    }
+    const existing = this.getById(input.id);
+    if (existing) {
+      if (existing.tokenId !== input.tokenId) {
+        throw new DomainError(
+          'id_collision',
+          `sessions.ensure: id '${input.id}' is already in use by a different token`,
+        );
+      }
+      return { session: existing, created: false };
+    }
+    const ts = this.now();
+    const row = this.db
+      .insert(agentSessions)
+      .values({
+        id: input.id,
+        tokenId: input.tokenId,
+        projectId: input.projectId,
+        agent: input.agent,
+        description: input.description ?? null,
+        startedAt: ts,
+        endedAt: null,
+        summary: null,
+        status: 'active',
+      })
+      .returning()
+      .get();
+    if (!row) throw new DomainError('conflict', 'sessions.ensure: insert returned no row');
+    return { session: row, created: true };
   }
 
   end(sessionId: string, input: EndSessionInput): AgentSession {

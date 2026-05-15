@@ -9,9 +9,11 @@ import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 
 import { type McpTransportManager } from '../mcp/index.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { TokensService } from '../services/tokens.js';
 
+import { createApiRouter } from './api-router.js';
 import { AuthError, authenticate } from './auth.js';
 import { createDashboardRouter, type DashboardDeps } from './dashboard-router.js';
 import type { RateLimiter } from './rate-limit.js';
@@ -38,6 +40,7 @@ export interface CreateHttpServerOptions {
   tokens: TokensService;
   projects: ProjectsService;
   dashboard: DashboardDeps;
+  agentSessions: AgentSessionsService;
   /** Optional per-token rate limiter applied before MCP transport handoff. */
   rateLimiter?: RateLimiter | null;
   /**
@@ -63,6 +66,20 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
   honoApp.get('/', (c) => c.redirect('/dashboard'));
 
   honoApp.route('/dashboard', createDashboardRouter(opts.dashboard));
+
+  // HTTP session-lifecycle API. Used by the Claude Code / Codex plugin's
+  // `command`-type hooks to create/summarize/end sessions without going
+  // through MCP. Auth is identical to `/mcp` — same bearer token, same
+  // `authenticate()` helper. See `api-router.ts` and the
+  // `http-api` capability spec.
+  honoApp.route(
+    '/api',
+    createApiRouter({
+      agentSessions: opts.agentSessions,
+      tokens: opts.tokens,
+      projects: opts.projects,
+    }),
+  );
 
   // Admin endpoints. Require an admin-scope bearer token. Only one for
   // now: trigger a consolidation pass. Kept off the MCP surface because

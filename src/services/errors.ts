@@ -20,7 +20,8 @@ export type DomainErrorCode =
   | 'token_revoked'
   | 'token_expired'
   | 'admin_token_required'
-  | 'conflict';
+  | 'conflict'
+  | 'id_collision';
 
 export class DomainError extends Error {
   constructor(
