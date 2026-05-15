@@ -7,11 +7,11 @@ Memory for Claude Code, backed by your self-hosted [Rembric](https://github.com/
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
 - **A tiny stdio bridge** (`bin/rembric-bridge.mjs`, ~80 LOC) that reads `PROJECT_SLUG` from a `.rembric` file at the project root and path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the correct project on connect. No agent-side `project.use` call, no router-fallback codepath.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
-- **Four lifecycle hooks**:
-  - `SessionStart` nudges the agent to load recent context.
+- **Four lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
+  - `SessionStart` reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent). Also nudges the agent to load recent context.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
-  - `PreCompact` calls `memory.session_summary` server-side as a side effect, so compaction never silently loses session state.
-  - `PostCompact` nudges the agent to reload context after compaction.
+  - `PreCompact` POSTs the compact transcript to `/api/<slug>/sessions/<id>/summary` so compaction never silently loses session state.
+  - `Stop` POSTs `/api/<slug>/sessions/<id>/end` (async) when the agent stops, closing the session row cleanly.
 
 Proactive memory protocol ("save after decisions, fixes, conventions, preferences, discoveries") is delivered server-side via the Rembric MCP `initialize.instructions` handshake — it applies to every MCP client (Claude Code plugin, Codex CLI, Cursor, …) automatically, with no per-client skill needed.
 
@@ -72,7 +72,7 @@ Pick something stable, lowercase, hyphen-separated (`acme-foo`, `my-app-api`). F
 | SessionStart nudge     | ~ 20 tok | once per session             |
 | UserPromptSubmit nudge | ~ 20 tok | per matched prompt           |
 | PreCompact             | 0 tok    | side effect; no model output |
-| PostCompact nudge      | ~ 20 tok | per compaction               |
+| Stop                   | 0 tok    | side effect; async           |
 
 The proactive-save protocol travels via the MCP `initialize.instructions` (~500 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
 
