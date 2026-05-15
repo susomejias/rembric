@@ -60,19 +60,38 @@ echo "PROJECT_SLUG=my-app" > .rembric
 
 Without that file the bridge connects path-less (`/mcp`) and operates in global scope.
 
-#### Credentials
+#### Credentials — REQUIRED: shell env vars
 
-Codex's plugin manifest does not have a `userConfig` keychain prompt like Claude Code, and Codex does NOT substitute `${user_config.*}` placeholders in plugin manifests (verified against `developers.openai.com/codex/plugins/build`). Provide `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as environment variables in the shell that launches `codex`:
+Codex does **not** have a `userConfig` keychain prompt like Claude Code, and Codex does **not** substitute `${user_config.*}` placeholders in plugin manifests (verified against `developers.openai.com/codex/plugins/build` and `/codex/hooks`). The plugin therefore reads its credentials from process env.
+
+You **must** `export` the following in the shell that launches `codex`:
 
 ```bash
-export REMBRIC_SERVER_URL="https://memory.example.com"
-export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"
-codex
+# in ~/.zshrc (or .bashrc, etc.) — required for the Codex plugin to work
+export REMBRIC_SERVER_URL="https://memory.example.com"     # no trailing slash, no /mcp suffix
+export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token from `rembric token create`
 ```
 
-These envs are inherited by both the MCP bridge (via the shared `plugin/mcp.json`) and by the lifecycle hooks (`SessionStart`, `PreCompact`, `Stop`) so sessions show up in `/dashboard/sessions` and PreCompact summaries get persisted. Without them, hooks emit `[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` to stderr and silently no-op — visible via `codex --debug`.
+Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
 
-> Note for Claude Code users: this shell-export step is NOT needed. The Claude Code plugin substitutes `${user_config.*}` directly into hook commands, so the install wizard's keychain values reach the hooks automatically. See `plugin/README.md`.
+- The **MCP bridge** (`plugin/mcp.json` reads them via env interpolation that does NOT require `${user_config.*}` — it inherits process env).
+- The **lifecycle hooks** (`SessionStart`, `PreCompact`, `Stop`) so sessions appear in `/dashboard/sessions` and PreCompact persists a summary.
+
+Symptoms of missing envs:
+
+- `/dashboard/sessions` stays empty even when MCP tool calls work fine.
+- `codex --debug` shows `[rembric-bridge] Missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` (bridge) or `[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST /api/...` (hooks).
+
+#### Using both Claude Code and Codex on the same machine
+
+The two clients pick up credentials from different places — keep both configured:
+
+| Client          | Where to put credentials                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Claude Code** | Install wizard (`/plugin install rembric@rembric`) → keychain. Hooks pick them up automatically via `${user_config.*}` substitution. **No shell exports required.** |
+| **Codex CLI**   | `export REMBRIC_SERVER_URL=…` and `export REMBRIC_API_TOKEN=…` in your shell rc. Bridge and hooks both read process env. **No wizard exists.**                      |
+
+If you only use one client, set up just that one. If you use both, you need both — the wizard input does NOT propagate to Codex's process, and the shell exports are NOT consumed by Claude Code's hooks (Claude Code substitutes from the keychain, not from `process.env`). Same Rembric server, same token, two configuration surfaces.
 
 ### Codex CLI (manual config.toml, no plugin)
 
