@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/susomejias/rembric/compare/v0.7.0...v0.8.0) (2026-05-15)
+
+
+### Features
+
+* **dashboard:** brutalist redesign with layered design system ([c159dd0](https://github.com/susomejias/rembric/commit/c159dd0d36e9d0ab0dc227774f7d50fd36f5acee))
+* **dashboard:** render timestamps in viewer-local timezone ([f3e2ab3](https://github.com/susomejias/rembric/commit/f3e2ab3f026ed6b95be66d6b9a3eabce84504834))
+
+
+### Documentation
+
+* add Rembric banner image referenced by README ([ca1dbf5](https://github.com/susomejias/rembric/commit/ca1dbf50c81b335f71f020a3e79d5a824d27dd0e))
+* **design:** add Google-spec DESIGN.md + dashboard-ui skill ([ad0d0e1](https://github.com/susomejias/rembric/commit/ad0d0e193046885af6ee0ed908ea0d25023c7241))
+* document official plugin update flow + bump-version rule ([d507f65](https://github.com/susomejias/rembric/commit/d507f65371cf7bc9a6881c02b5fc7c4068e3fa78))
+
 ## [0.7.0](https://github.com/susomejias/rembric/compare/v0.6.0...v0.7.0) (2026-05-15)
 
 
