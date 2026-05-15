@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/susomejias/rembric/compare/v0.4.0...v0.5.0) (2026-05-15)
+
+
+### Features
+
+* **plugin:** add Codex marketplace, manifest, and hooks ([08aac16](https://github.com/susomejias/rembric/commit/08aac16e4fe3a046b0605082f79033a40c8701f0))
+* **plugin:** switch slug source to .rembric dotenv (PROJECT_SLUG=) ([cda7fd9](https://github.com/susomejias/rembric/commit/cda7fd9589a5f003a862f9aa6993ba08aa021023))
+
+
+### Documentation
+
+* pivot Codex install to plugin marketplace; codify plugin dev rules ([8d67ddb](https://github.com/susomejias/rembric/commit/8d67ddb6dad73f71ec00c879a31360af5577708e))
+* slim README and docs, recommend plugin, drop examples/ ([802f39e](https://github.com/susomejias/rembric/commit/802f39e02935e7953199e5ddda77993c5fce4b66))
+
 ## [0.4.0](https://github.com/susomejias/rembric/compare/v0.3.3...v0.4.0) (2026-05-15)
 
 
