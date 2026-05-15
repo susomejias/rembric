@@ -102,9 +102,20 @@ Without that file the bridge connects path-less (`/mcp`) and operates in global 
 
 Full plugin docs: [`plugin/README.md`](./plugin/README.md).
 
+## Hooking up Codex CLI
+
+Codex CLI installs the same `plugin/` directory via its native marketplace, alongside its own `.codex-plugin/plugin.json` manifest and a Codex-specific `hooks.codex.json`. One source tree, both clients:
+
+```bash
+codex plugin marketplace add git@github.com:susomejias/rembric.git
+codex plugin install rembric
+```
+
+Codex's plugin manifest has no keychain prompt — set `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as env vars in the shell that launches `codex`. Drop `.rembric` files per project to path-scope the slug automatically (same flow as the Claude Code plugin). Full details and the manual config.toml fallback: [docs/agents.md](./docs/agents.md).
+
 ## Hooking up other MCP clients
 
-Codex CLI, Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all speak Streamable HTTP. The shape is identical:
+Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all speak Streamable HTTP. The shape is identical:
 
 ```json
 {

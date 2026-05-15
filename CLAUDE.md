@@ -54,6 +54,22 @@ src/
                   orphan-promotion (LLM judge over old pending judgments).
   llm/       OpenAI-compatible client (works against Ollama, LM Studio, vLLM, etc.).
   cli/       commander-based CLI subcommands.
+
+plugin/      Shared plugin tree for BOTH Claude Code and Codex CLI marketplaces.
+             plugin/.claude-plugin/plugin.json   Claude Code manifest
+             plugin/.codex-plugin/plugin.json    Codex manifest
+             plugin/mcp.json                     shared MCP server config
+                                                 (bundled bridge via
+                                                 ${CLAUDE_PLUGIN_ROOT})
+             plugin/hooks/hooks.json             Claude Code hooks
+             plugin/hooks/hooks.codex.json       Codex hooks (subset; cmd-only)
+             plugin/scripts/                     shared hook scripts (both
+                                                 clients honour ${CLAUDE_PLUGIN_ROOT})
+             plugin/bin/rembric-bridge.mjs       bundled stdio↔HTTP bridge
+
+.claude-plugin/marketplace.json   marketplace for `claude plugin install`
+.codex-plugin/marketplace.json    marketplace for `codex plugin install`
+                                  (git-subdir source against ./plugin)
 ```
 
 ### Load-bearing invariants (do NOT violate without an OpenSpec change)
@@ -110,6 +126,18 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 - `import type` for types, value imports otherwise; imports ordered builtin → external → internal → relative (auto-fixed).
 - Co-located tests: `src/**/*.test.ts` next to the module.
 - Invariant tests under `src/**/__tests__/invariants/` are sacred.
+- **Default to no comments.** Write a comment only when its absence would cost a future reader real time: magic numbers/constants, non-obvious invariants, workarounds for library quirks, hidden side-effects, or public-API docstrings. Do NOT restate what the code does, reference the current task/PR, or leave TODO/FIXME without a tracked link. When in doubt, delete the comment and let names + structure speak.
+
+## Plugin development discipline
+
+Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplaces (Claude Code, Codex CLI, future Cursor/Windsurf/etc.). To keep cross-client support sustainable:
+
+- **Shared logic lives in shared paths.** `plugin/mcp.json`, `plugin/scripts/`, `plugin/skills/`, and `plugin/bin/` are consumed by every per-client manifest via `${CLAUDE_PLUGIN_ROOT}`. Add new scripts there, not under any client's manifest directory.
+- **Per-client divergence ONLY when the platform forces it.** Different hooks files (`hooks/hooks.json` vs `hooks/hooks.codex.json`) are acceptable because Codex hooks are command-only and the supported event set differs. Different implementations of the same behavioural intent (e.g. Claude's `mcp_tool` PreCompact vs Codex's stdout-nudge PreCompact) are acceptable for the same reason.
+- **Per-client manifests stay thin.** Each `.<client>-plugin/plugin.json` declares only what differs (paths to its hooks file, client-specific UI metadata). Anything that would also be true for another client gets factored into `plugin/`.
+- **Quick sanity check.** `git ls-files plugin/` should show ONE copy of each shared resource. Two paths with near-identical content = sync bug to fix.
+
+The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Both Claude Code and Codex spawn it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` from `plugin/mcp.json`. Edit in place; commit the file directly.
 
 ## Running locally
 

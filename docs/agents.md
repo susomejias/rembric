@@ -36,21 +36,56 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 }
 ```
 
-### Codex CLI
+### Codex CLI (recommended: bundled plugin)
 
-`~/.codex/mcp.json`:
+Use the Codex marketplace install — the plugin ships from the same `plugin/` directory as the Claude Code plugin (one source tree, two manifests):
 
-```json
-{
-  "servers": {
-    "rembric": {
-      "transport": "streamable-http",
-      "url": "https://memory.example.com/mcp/my-app",
-      "headers": { "Authorization": "Bearer codex-token-XXXXXXXX" }
-    }
-  }
-}
+```bash
+codex plugin marketplace add git@github.com:susomejias/rembric.git
+codex plugin install rembric
 ```
+
+The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the repo subtree on install. Repo access (SSH key / PAT) gates discovery, exactly like the Claude Code plugin.
+
+What the plugin registers for Codex:
+
+- The same `rembric` MCP server (via `plugin/.mcp.json`) that Claude Code uses, invoking the bundled bridge at `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs`.
+- A four-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. Codex hooks are command-only, so `PreCompact` is wired as a stdout nudge instead of a direct `mcp_tool` call (see `plugin/scripts/pre-compact-codex.sh`).
+
+After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
+
+```bash
+echo "PROJECT_SLUG=my-app" > .rembric
+```
+
+Without that file the bridge connects path-less (`/mcp`) and operates in global scope.
+
+#### Credentials
+
+Codex's plugin manifest does not have a `userConfig` keychain prompt like Claude Code. Provide `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as environment variables in the shell that launches `codex`:
+
+```bash
+export REMBRIC_SERVER_URL="https://memory.example.com"
+export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"
+codex
+```
+
+If `${user_config.server_url}` / `${user_config.api_token}` interpolation works in your Codex build, the plugin's shared `mcp.json` will pick those up automatically — try the plugin install without setting env vars first and fall back to exporting them if you see `[rembric-bridge] Missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` in the Codex logs.
+
+### Codex CLI (manual config.toml, no plugin)
+
+If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.rembric]
+transport = "streamable-http"
+url = "https://memory.example.com/mcp/my-app"
+headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
+```
+
+> Heads-up: the manual path has no Codex hooks, so compaction recovery depends entirely on the server-side `initialize.instructions` and the agent's discipline to call `memory.session_summary` before "done". The plugin install is the recommended path.
 
 ## Any other MCP client
 
