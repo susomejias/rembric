@@ -62,7 +62,7 @@ Without that file the bridge connects path-less (`/mcp`) and operates in global 
 
 #### Credentials
 
-Codex's plugin manifest does not have a `userConfig` keychain prompt like Claude Code. Provide `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as environment variables in the shell that launches `codex`:
+Codex's plugin manifest does not have a `userConfig` keychain prompt like Claude Code, and Codex does NOT substitute `${user_config.*}` placeholders in plugin manifests (verified against `developers.openai.com/codex/plugins/build`). Provide `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as environment variables in the shell that launches `codex`:
 
 ```bash
 export REMBRIC_SERVER_URL="https://memory.example.com"
@@ -70,7 +70,9 @@ export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"
 codex
 ```
 
-If `${user_config.server_url}` / `${user_config.api_token}` interpolation works in your Codex build, the plugin's shared `mcp.json` will pick those up automatically — try the plugin install without setting env vars first and fall back to exporting them if you see `[rembric-bridge] Missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` in the Codex logs.
+These envs are inherited by both the MCP bridge (via the shared `plugin/mcp.json`) and by the lifecycle hooks (`SessionStart`, `PreCompact`, `Stop`) so sessions show up in `/dashboard/sessions` and PreCompact summaries get persisted. Without them, hooks emit `[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` to stderr and silently no-op — visible via `codex --debug`.
+
+> Note for Claude Code users: this shell-export step is NOT needed. The Claude Code plugin substitutes `${user_config.*}` directly into hook commands, so the install wizard's keychain values reach the hooks automatically. See `plugin/README.md`.
 
 ### Codex CLI (manual config.toml, no plugin)
 
