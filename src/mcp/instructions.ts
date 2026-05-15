@@ -24,7 +24,7 @@ Call memory.session_summary before saying "done" (Goal, Discoveries, Accomplishe
 const PATH_SCOPED_NOTE = (slug: string) =>
   `\n\nThis connection is path-scoped to '${slug}'. scope='global' is rejected; open /mcp for user-wide memory.`;
 
-const UNSCOPED_NOTE = `\n\nProject scope: auto-detected from your client's MCP roots when supported. Otherwise call project.use({slug}) to pin. project.current reports the active project.`;
+const UNSCOPED_NOTE = `\n\nProject scope: auto-detected from your client's MCP roots when supported. Otherwise call project.use({slug, create:true}) to pin (and create on first use). project.current reports the active project.`;
 
 export function buildInstructions(ctx: InstructionsContext): string {
   return ctx.requestedSlug ? BASE + PATH_SCOPED_NOTE(ctx.requestedSlug) : BASE + UNSCOPED_NOTE;

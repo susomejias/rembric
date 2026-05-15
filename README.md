@@ -148,6 +148,24 @@ front (see [`examples/`](./examples/)).
 
 Add to your MCP-capable agent's config (Claude Code, Codex, ...).
 
+### Claude Code plugin (easiest)
+
+If you use Claude Code, install the bundled plugin instead of editing `.mcp.json`
+by hand. The plugin ships the MCP server config, a memory-usage skill, four
+`/rembric:*` commands, and lifecycle hooks that fire memory ops without the
+model having to remember them. See [`plugin/README.md`](./plugin/README.md) for
+the algorithm details and token budget.
+
+```bash
+claude plugin marketplace add git@github.com:susomejias/rembric.git
+claude plugin install rembric@rembric
+```
+
+You'll be prompted for your server URL and API token at install time. The
+token is stored in your system keychain, never in `settings.json`.
+
+### Manual config (any MCP client)
+
 **Path-scoped (recommended)** — every memory saved or searched is automatically
 scoped to the project named in the URL slug:
 

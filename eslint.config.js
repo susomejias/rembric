@@ -11,6 +11,7 @@ export default tseslint.config(
       'coverage/**',
       'examples/**',
       'scripts/**',
+      'plugin/**',
       'src/dashboard/public/**',
       '**/*.d.ts',
     ],
