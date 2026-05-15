@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.0](https://github.com/susomejias/rembric/compare/v0.6.0...v0.7.0) (2026-05-15)
+
+
+### Features
+
+* **plugin:** hooks read credentials via user_config substitution ([c18c912](https://github.com/susomejias/rembric/commit/c18c912696e7c9f294c1646ae31cd8158fbe6330))
+
+
+### Bug Fixes
+
+* **plugin:** hook scripts now reach the API and stamp the agent ([2b32096](https://github.com/susomejias/rembric/commit/2b3209691e4baf2ce3240869fd0b5940cea3d5ce))
+* **plugin:** revert user_config substitution in hooks.codex.json ([4c6fe2f](https://github.com/susomejias/rembric/commit/4c6fe2ff210a8e7f389a2903da7c13f3bea4c43c))
+
+
+### Documentation
+
+* document required shell envs for plugin hooks ([a43fa3c](https://github.com/susomejias/rembric/commit/a43fa3cdbfe3d6dd2bcb1ad2b739259fe598c0b8))
+* spell out the dual-client credential setup explicitly ([25f579f](https://github.com/susomejias/rembric/commit/25f579f9aad045f3fceb89081537f8bc8170bc32))
+
 ## [0.6.0](https://github.com/susomejias/rembric/compare/v0.5.0...v0.6.0) (2026-05-15)
 
 
