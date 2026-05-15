@@ -75,7 +75,7 @@ When a request hits `/mcp` or `/mcp/<slug>`:
 4. `project.use` writes the chosen project into `SessionRouter` (in-memory, keyed by `(tokenId, mcpSessionId)`), NOT into the context.
 5. Tools that need the effective project must consult BOTH sources. Precedence: `ctx.project` first, then `SessionRouter.get(...).projectId`. The helpers that do this:
    - `src/mcp/tools.ts` → `resolveEffectiveProject(deps)` for `memory.{save,search,get,confirm}`.
-   - `src/mcp/sessions-tools.ts` → inline in `handleSessionStart`.
+   - `src/mcp/sessions-tools.ts` → inline in `handleSessionStart`; `scopeFromContext(deps)` for `memory.{context,timeline,stats,save_prompt,capture_passive}`.
    - `src/mcp/project-tools.ts` → inline in `handleCurrent`.
 
 **If you add a new MCP tool that needs project scope, follow this pattern — do not read `ctx.project` in isolation.** Path-scoped (`/mcp/<slug>`) connections still have `ctx.project` set, so the router fallback short-circuits cleanly. The fallback is gated on `ctx.requestedSlug === null` to preserve path-scoping semantics.

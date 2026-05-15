@@ -1,0 +1,360 @@
+import { eq } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { tokens as tokensSchema, type Token } from '../db/schema/tokens.js';
+import { runWithContext, type RequestContext } from '../server/request-context.js';
+import { SessionRouter } from '../server/session-router.js';
+import { AgentSessionsService } from '../services/agent-sessions.js';
+import { MemoryService } from '../services/memory.js';
+import { ProjectsService } from '../services/projects.js';
+import { PromptsService } from '../services/prompts.js';
+import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
+import { TokensService, type TokenScope } from '../services/tokens.js';
+import { createTestDb, type TestDb } from '../test/index.js';
+
+import { buildSessionsHandlers } from './sessions-tools.js';
+
+/**
+ * Regression coverage for the scope-resolution fix in
+ * `scopeFromContext`. Before the fix, every session-tool handler that
+ * called `scopeFromContext()` ignored the `SessionRouter`, so a
+ * path-less `/mcp` agent that pinned a project via `project.use`
+ * silently saw global scope from `memory.context`, `memory.timeline`,
+ * `memory.stats`, `memory.save_prompt`, and `memory.capture_passive`.
+ *
+ * The fix mirrors the precedence in `resolveEffectiveProject`
+ * (tools.ts) and the inline resolution in `handleSessionStart`:
+ *   1. ctx.project          → path-scoped connection
+ *   2. SessionRouter entry  → path-less connection with prior project.use
+ *   3. SCOPE_GLOBAL         → no resolution
+ */
+
+const MCP_SESSION_ID = 'mcp-sess-scope-test';
+const SCOPE: TokenScope = '*';
+
+let db: TestDb;
+let projects: ProjectsService;
+let memory: MemoryService;
+let router: SessionRouter;
+let agentSessions: AgentSessionsService;
+let prompts: PromptsService;
+let tokens: TokensService;
+let adminToken: Token;
+let otherToken: Token;
+let handlers: ReturnType<typeof buildSessionsHandlers>;
+
+function makeContext(token: Token, overrides: Partial<RequestContext> = {}): RequestContext {
+  return {
+    token,
+    scope: SCOPE,
+    project: null,
+    requestedSlug: null,
+    mcpSessionId: MCP_SESSION_ID,
+    ...overrides,
+  };
+}
+
+interface McpResp {
+  content: { type: 'text'; text: string }[];
+  isError?: boolean;
+}
+
+function decode(resp: unknown): { isError: boolean; payload: Record<string, unknown> } {
+  const r = resp as McpResp;
+  const text = r.content[0]?.text ?? '';
+  return { isError: r.isError === true, payload: JSON.parse(text) as Record<string, unknown> };
+}
+
+beforeEach(() => {
+  db = createTestDb();
+  projects = new ProjectsService(db.handle.db);
+  memory = new MemoryService(db.handle.db);
+  router = new SessionRouter();
+  agentSessions = new AgentSessionsService(db.handle.db);
+  prompts = new PromptsService(db.handle.db);
+  tokens = new TokensService(db.handle.db);
+  tokens.bootstrapAdmin('scope-resolution-test-admin-zzz');
+  adminToken = db.handle.db
+    .select()
+    .from(tokensSchema)
+    .where(eq(tokensSchema.name, 'admin'))
+    .get()!;
+  const created = tokens.create({ name: 'other', scope: SCOPE });
+  otherToken = created.token;
+  handlers = buildSessionsHandlers({
+    db: db.handle.db,
+    agentSessions,
+    memory,
+    projects,
+    prompts,
+    router,
+    doctor: () => ({
+      db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
+      llm: { reachable: false, lastPingAt: null },
+      embeddings: { enabled: false, backlog: 0 },
+      consolidation: { lastRunAt: null, lastRunOps: {} },
+      sessions: { active: 0 },
+      warnings: [],
+    }),
+  });
+});
+
+afterEach(() => db.cleanup());
+
+describe('scopeFromContext — path-less /mcp with router pin', () => {
+  it('memory.context returns the router-pinned project scope, not global', async () => {
+    const project = projects.create({ slug: 'foo', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        content: 'a project-scoped memory of foo',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(project.id),
+    );
+
+    // Pin the project for this (tokenId, mcpSessionId) pair, as
+    // `project.use` would.
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe(`project:${project.id}`);
+    const recent = payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.length).toBeGreaterThan(0);
+    expect(recent[0]?.snippet).toContain('project-scoped memory of foo');
+  });
+
+  it('memory.timeline succeeds when called with the router-pinned scope', async () => {
+    // The scope resolution is shared by every session-tool handler via
+    // scopeFromContext. The router-fallback branch is exhaustively
+    // covered by the other tests in this suite (context, stats,
+    // save_prompt, capture_passive). For timeline we just confirm that
+    // calling it with a project-scoped target does not error out.
+    const project = projects.create({ slug: 'bar', displayName: null });
+    const target = memory.save(
+      {
+        type: 'project',
+        content: 'a timeline anchor in bar',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(project.id),
+    );
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.timeline({ memoryId: target.id })),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    const t = payload.target as { id: string };
+    expect(t?.id).toBe(target.id);
+  });
+
+  it('memory.stats counts the pinned project, not the global scope', async () => {
+    const project = projects.create({ slug: 'baz', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        content: 'baz one',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(project.id),
+    );
+    memory.save(
+      {
+        type: 'reference',
+        content: 'baz two',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(project.id),
+    );
+    // Add a global memory that must NOT leak into the stats for project baz.
+    memory.save(
+      {
+        type: 'reference',
+        content: 'global noise that must not leak',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      SCOPE_GLOBAL,
+    );
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.stats({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    const byStatus = payload.memoriesByStatus as Record<string, number>;
+    expect(byStatus.active).toBe(2);
+  });
+
+  it('memory.save_prompt persists with the router-pinned project_id', async () => {
+    const project = projects.create({ slug: 'qux', displayName: null });
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.savePrompt({ content: 'remember this' })),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.ok).toBe(true);
+
+    // The persisted prompt SHOULD be scoped to the pinned project.
+    const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
+    expect(recents.length).toBe(1);
+    expect(recents[0]?.content).toBe('remember this');
+  });
+
+  it('memory.capture_passive writes into the router-pinned project scope', async () => {
+    const project = projects.create({ slug: 'cap', displayName: null });
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(
+        handlers.capturePassive({
+          text: '## Key Learnings:\n- one learning to capture\n',
+        }),
+      ),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.saved).toBe(1);
+
+    // Confirm via memory.context that the captured row landed in the
+    // pinned project, not in global.
+    const ctx = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const decoded = decode(ctx);
+    expect(decoded.payload.scope).toBe(`project:${project.id}`);
+    const recent = decoded.payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.some((m) => m.snippet.includes('one learning to capture'))).toBe(true);
+  });
+});
+
+describe('scopeFromContext — fallback to SCOPE_GLOBAL', () => {
+  it('path-less /mcp with empty router → memory.context returns global', async () => {
+    memory.save(
+      {
+        type: 'reference',
+        content: 'a global note',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      SCOPE_GLOBAL,
+    );
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe('global');
+    const recent = payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.some((m) => m.snippet.includes('a global note'))).toBe(true);
+  });
+
+  it('does not leak across tokens — other token sees no project pin from admin', async () => {
+    const project = projects.create({ slug: 'admin-only', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        content: 'admin-only memory',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(project.id),
+    );
+    // Pin under admin token, NOT under the other token.
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+    // Other token, same mcpSessionId string — but the router keys on
+    // (tokenId, mcpSessionId), so they SHALL not collide.
+    const r = await runWithContext(makeContext(otherToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe('global');
+    const recent = payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.some((m) => m.snippet.includes('admin-only memory'))).toBe(false);
+  });
+});
+
+describe('scopeFromContext — path-scoped connections override router', () => {
+  it('ctx.requestedSlug set + ctx.project null → returns global, ignores router pin', async () => {
+    // Simulate a path-scoped request to a slug whose project does NOT
+    // exist (e.g., archived or deleted). Auth would not populate
+    // ctx.project, but a leftover router entry from a previous session
+    // might still exist. The session-tool surface MUST NOT fall back to
+    // the stale router entry — that would silently leak data from a
+    // different project.
+    const leftoverProject = projects.create({ slug: 'leftover', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        content: 'leftover memory that must not leak',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(leftoverProject.id),
+    );
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, leftoverProject.id, 'tool-explicit');
+
+    const r = await runWithContext(
+      makeContext(adminToken, { requestedSlug: 'nonexistent', project: null }),
+      () => Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe('global');
+    const recent = payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.some((m) => m.snippet.includes('leftover memory that must not leak'))).toBe(
+      false,
+    );
+  });
+
+  it('ctx.project set (path-scoped, valid slug) → uses ctx.project regardless of router', async () => {
+    const pathProject = projects.create({ slug: 'pathy', displayName: null });
+    const routerProject = projects.create({ slug: 'router-pinned', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        content: 'pathy memory',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(pathProject.id),
+    );
+    memory.save(
+      {
+        type: 'project',
+        content: 'router-pinned memory',
+        source: { tokenName: adminToken.name, agent: 'test' },
+      },
+      projectScope(routerProject.id),
+    );
+    // Router has a different project pinned than ctx.project — ctx wins.
+    router.setActiveProject(adminToken.id, MCP_SESSION_ID, routerProject.id, 'tool-explicit');
+
+    const r = await runWithContext(
+      makeContext(adminToken, { requestedSlug: 'pathy', project: pathProject }),
+      () => Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe(`project:${pathProject.id}`);
+    const recent = payload.recentMemories as Array<{ snippet: string }>;
+    expect(recent.some((m) => m.snippet.includes('pathy memory'))).toBe(true);
+    expect(recent.some((m) => m.snippet.includes('router-pinned memory'))).toBe(false);
+  });
+});

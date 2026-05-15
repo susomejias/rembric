@@ -90,9 +90,32 @@ function ok(payload: unknown) {
   };
 }
 
-function scopeFromContext(): Scope {
+/**
+ * Resolve the effective scope for a session-tool call.
+ *
+ * Precedence (mirrors `resolveEffectiveProject` in `tools.ts` and the
+ * inline resolution in `handleSessionStart`):
+ *   1. `ctx.project` — set when the connection is path-scoped (`/mcp/<slug>`).
+ *   2. For path-less `/mcp` connections (`ctx.requestedSlug === null`), fall
+ *      back to the `SessionRouter` entry populated by a prior `project.use`
+ *      or roots-based discovery.
+ *   3. Global scope when neither source resolves a project.
+ *
+ * Without step (2), tools that call this helper (`memory.context`,
+ * `memory.timeline`, `memory.stats`, `memory.save_prompt`,
+ * `memory.capture_passive`) silently return global scope even when the
+ * agent has pinned a project via `project.use`, violating the invariant
+ * documented in `CLAUDE.md`.
+ */
+function scopeFromContext(deps: Pick<SessionsToolDeps, 'router'>): Scope {
   const ctx = getRequestContext();
-  return ctx.project ? projectScope(ctx.project.id) : SCOPE_GLOBAL;
+  if (ctx.project) return projectScope(ctx.project.id);
+  if (ctx.requestedSlug !== null) return SCOPE_GLOBAL;
+  if (ctx.mcpSessionId) {
+    const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
+    if (entry?.projectId) return projectScope(entry.projectId);
+  }
+  return SCOPE_GLOBAL;
 }
 
 function routerKey(): { tokenId: string; mcpSessionId: string } | null {
@@ -117,7 +140,7 @@ export function buildSessionsHandlers(deps: SessionsToolDeps) {
 
 function handleSavePrompt(deps: SessionsToolDeps, args: { content: string }) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext();
+  const scope = scopeFromContext(deps);
   const sessionId = resolveSessionId(deps, undefined);
   try {
     const row = deps.prompts.save({
@@ -316,7 +339,7 @@ function handleContext(
     includeArchived?: boolean;
   },
 ) {
-  const scope = scopeFromContext();
+  const scope = scopeFromContext(deps);
   const sessionsLimit = clamp(args.sessions ?? 5, 0, 25);
   const memoriesLimit = clamp(args.memories ?? 20, 0, 100);
   const clamped =
@@ -398,7 +421,7 @@ function handleTimeline(
       'memory.timeline: before + after exceeds 50; for larger windows use memory.search',
     );
   }
-  const scope = scopeFromContext();
+  const scope = scopeFromContext(deps);
   const target = deps.memory.get(args.memoryId, scope);
   if (!target) {
     return mcpError('not_found', `memory '${args.memoryId}' not found in this scope`);
@@ -487,7 +510,7 @@ export function parseKeyLearnings(text: string): string[] {
 
 function handleCapturePassive(deps: SessionsToolDeps, args: { text: string; sessionId?: string }) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext();
+  const scope = scopeFromContext(deps);
   const items = parseKeyLearnings(args.text);
   if (items.length === 0) {
     return ok({ saved: 0, ids: [] as string[] });
@@ -520,7 +543,7 @@ function handleDoctor(deps: SessionsToolDeps, _args: Record<string, never>) {
 
 function handleStats(deps: SessionsToolDeps, _args: Record<string, never>) {
   void _args;
-  const scope = scopeFromContext();
+  const scope = scopeFromContext(deps);
   const scopeFilter =
     scope.kind === 'project'
       ? sql`scope = 'project' AND project_id = ${scope.projectId}`
