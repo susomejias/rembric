@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/susomejias/rembric/compare/v0.3.3...v0.4.0) (2026-05-15)
+
+
+### Features
+
+* **plugin:** add Claude Code plugin with stdio bridge ([25c31c8](https://github.com/susomejias/rembric/commit/25c31c83e6ec6046e90ea384dd0b0f3b146c53bb))
+
+
+### Bug Fixes
+
+* **mcp:** scopeFromContext consults router for path-less /mcp connections ([70fcb74](https://github.com/susomejias/rembric/commit/70fcb7449594a6b8728d727f86f1034c39111e31))
+
 ## [0.3.3](https://github.com/susomejias/rembric/compare/v0.3.2...v0.3.3) (2026-05-14)
 
 
