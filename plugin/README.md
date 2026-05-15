@@ -34,6 +34,26 @@ You will be prompted for two values at install time, both required:
   - No trailing slash.
 - **Rembric API token** — issued by `rembric token create` on the server. Stored in your system keychain (not in `settings.json`).
 
+### Required: shell env vars for hooks
+
+The plugin's `userConfig` flows into the MCP server (the bridge) but NOT into hook scripts — Claude Code hooks run as sibling subprocesses and inherit your shell environment, not the bridge's. For the session lifecycle hooks (`SessionStart`, `PreCompact`, `Stop`) to reach the Rembric HTTP API, export the same two values in the shell that launches `claude`:
+
+```bash
+# in ~/.zshrc or equivalent
+export REMBRIC_SERVER_URL="https://memory.example.com"      # match userConfig
+export REMBRIC_API_TOKEN="$(cat ~/.rembric/claude-token)"   # match userConfig
+```
+
+Restart Claude Code after exporting. **Without these envs, hooks fail silently** (`_api.sh` exits 0 with a stderr diagnostic), MCP traffic still works fine, but `/dashboard/sessions` stays empty and PreCompact never persists a summary.
+
+You can verify with:
+
+```bash
+echo '{"session_id":"smoke-001","cwd":"'$PWD'"}' | bash ~/.claude/plugins/cache/rembric/rembric/*/scripts/session-start.sh
+# Expected: only the nudge line on stdout, nothing on stderr.
+# If you see "missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN", the envs are not exported.
+```
+
 ### As the plugin author (local iteration)
 
 ```bash
