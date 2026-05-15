@@ -178,6 +178,42 @@ export interface ShellOptions {
   flash?: { kind: 'error' | 'success'; text: string };
 }
 
+const TS_UPGRADER = `
+(function(){
+  function upgrade(root){
+    var scope = root && root.querySelectorAll ? root : document;
+    var nodes = scope.querySelectorAll('time[data-rembric-ts][datetime]');
+    if (!nodes.length) return;
+    var fmt;
+    try {
+      fmt = new Intl.DateTimeFormat(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      });
+    } catch (_) { return; }
+    for (var i = 0; i < nodes.length; i++) {
+      var iso = nodes[i].getAttribute('datetime');
+      var d = new Date(iso);
+      if (!isNaN(d.getTime())) nodes[i].textContent = fmt.format(d);
+    }
+  }
+  function bind(){
+    upgrade(document);
+    if (document.body) {
+      document.body.addEventListener('htmx:afterSwap', function(e){
+        upgrade(e && e.target ? e.target : document);
+      });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+})();
+`;
+
 const NAV = [
   { key: 'home', label: 'Home', href: '/dashboard' },
   { key: 'memories', label: 'Memories', href: '/dashboard/memories' },
@@ -203,6 +239,7 @@ export function shell(body: SafeHtml, opts: ShellOptions): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escape(opts.title)} · Rembric</title>
   <style>${STYLE}</style>
+  <script>${TS_UPGRADER}</script>
 </head>
 <body>
   <header>
@@ -228,11 +265,13 @@ export function scopePill(scope: string): SafeHtml {
   return raw(`<span class="pill ${escape(scope)}">${escape(scope)}</span>`);
 }
 
-export function formatTs(d: Date | string | number | null | undefined): string {
-  if (d === null || d === undefined) return '—';
+export function formatTs(d: Date | string | number | null | undefined): SafeHtml {
+  if (d === null || d === undefined) return raw('—');
   const date = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  if (Number.isNaN(date.getTime())) return raw('—');
+  const iso = date.toISOString();
+  const fallback = iso.replace('T', ' ').slice(0, 19) + ' UTC';
+  return raw(`<time datetime="${iso}" data-rembric-ts>${escape(fallback)}</time>`);
 }
 
 export function shortId(id: string | null | undefined): string {

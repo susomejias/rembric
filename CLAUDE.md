@@ -119,6 +119,11 @@ Slash commands available in this repo (via `.claude/commands/`):
 
 Before changing a load-bearing invariant or adding a new MCP tool, open an OpenSpec change first.
 
+## Dashboard conventions
+
+- **Timestamps MUST go through `formatTs`** (`src/dashboard/templates.ts`). The helper emits `<time datetime="…Z" data-rembric-ts>YYYY-MM-DD HH:MM:SS UTC</time>`; a tiny inline script in the layout shell upgrades the visible text to the viewer's local timezone via `Intl.DateTimeFormat` on `DOMContentLoaded` and after every `htmx:afterSwap`. Never hand-write `toISOString()`, `toLocaleString()`, or ad-hoc date strings in templates — that bypasses the upgrader and forces operators back into UTC. SQLite, the service layer, and MCP serialization stay UTC; only the dashboard HTML localises.
+- The upgrader element marker is `data-rembric-ts`. Anything emitting a `<time>` element for a different purpose MUST omit that attribute so the upgrader leaves it alone.
+
 ## Code style highlights (from CONTRIBUTING.md)
 
 - TypeScript strict; no `any` / `as unknown as T` without a justifying comment.
