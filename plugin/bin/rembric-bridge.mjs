@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 // rembric-bridge — minimal stdio↔HTTP MCP bridge for the Rembric plugin.
 //
-// Reads `.rembric-slug` from CLAUDE_PROJECT_DIR (falling back to cwd) and
-// path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the
-// correct project on connect — eliminating the need for an agent-side
-// `project.use` call and avoiding the path-less roots-discovery codepath
-// entirely.
+// Reads `.rembric` (dotenv-style KEY=VALUE) from CLAUDE_PROJECT_DIR
+// (falling back to cwd) and path-scopes the MCP URL to `/mcp/<slug>` so
+// the Rembric server pins the correct project on connect — eliminating
+// the need for an agent-side `project.use` call and avoiding the
+// path-less roots-discovery codepath entirely.
 //
 // The bridge does NOT auto-derive a slug from manifest files or git. The
-// user is explicit: drop a one-line `.rembric-slug` in the project root
-// (gitignored or committed, your choice).
+// user is explicit: drop a `.rembric` file in the project root
+// containing `PROJECT_SLUG=<slug>` (gitignored or committed, your
+// choice).
 //
-// If `.rembric-slug` is missing or invalid the bridge falls back to
-// path-less `/mcp` and writes a diagnostic to stderr. The session still
-// works; the agent will operate in global scope (or whatever
-// `project.use` it chooses to make) but the plugin does not break.
+// If `.rembric` is missing, unparseable, or PROJECT_SLUG is invalid the
+// bridge falls back to path-less `/mcp` and writes a diagnostic to
+// stderr. The session still works; the agent will operate in global
+// scope (or whatever `project.use` it chooses to make) but the plugin
+// does not break.
 //
 // All MCP wire-protocol handling is delegated to `npx -y mcp-remote`.
 // This bridge is a thin URL-building entrypoint.
@@ -35,24 +37,47 @@ if (!baseUrl || !token) {
   process.exit(1);
 }
 
+function parseDotenv(content) {
+  const out = {};
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
-const slugFile = path.join(projectDir, '.rembric-slug');
+const configFile = path.join(projectDir, '.rembric');
 
 let scopedPath = '/mcp';
-if (existsSync(slugFile)) {
-  const raw = readFileSync(slugFile, 'utf8').split(/\r?\n/, 1)[0].trim();
-  if (SLUG_RE.test(raw)) {
-    scopedPath = `/mcp/${raw}`;
+if (existsSync(configFile)) {
+  const cfg = parseDotenv(readFileSync(configFile, 'utf8'));
+  const slug = cfg.PROJECT_SLUG;
+  if (slug && SLUG_RE.test(slug)) {
+    scopedPath = `/mcp/${slug}`;
+  } else if (slug) {
+    process.stderr.write(
+      `[rembric-bridge] PROJECT_SLUG="${slug}" in ${configFile} does not match ${SLUG_RE.source}; ` +
+        'falling back to path-less /mcp.\n',
+    );
   } else {
     process.stderr.write(
-      `[rembric-bridge] Slug "${raw}" in ${slugFile} does not match ${SLUG_RE.source}; ` +
+      `[rembric-bridge] ${configFile} present but no PROJECT_SLUG defined; ` +
         'falling back to path-less /mcp.\n',
     );
   }
 } else {
   process.stderr.write(
-    `[rembric-bridge] No .rembric-slug in ${projectDir}; using path-less /mcp. ` +
-      'Create the file with the desired project slug to pin scope automatically.\n',
+    `[rembric-bridge] No .rembric in ${projectDir}; using path-less /mcp. ` +
+      'Create one with `PROJECT_SLUG=<slug>` to pin scope automatically.\n',
   );
 }
 
