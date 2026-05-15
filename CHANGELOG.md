@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.1](https://github.com/susomejias/rembric/compare/v0.8.0...v0.8.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **codex:** use HTTPS for marketplace plugin source ([46c3efe](https://github.com/susomejias/rembric/commit/46c3efe54d7039928a42cfca3397d4ea9261ea8c))
+
+
+### Documentation
+
+* recommend HTTPS marketplace URL for both clients ([391a77f](https://github.com/susomejias/rembric/commit/391a77f6abe442441b707c26b4263b85a720d499))
+
 ## [0.8.0](https://github.com/susomejias/rembric/compare/v0.7.0...v0.8.0) (2026-05-15)
 
 
