@@ -1,70 +1,37 @@
 # Backup strategy
 
-Rembric's entire state is a single SQLite file (plus its WAL sidecar) under `$REMBRIC_DATA_DIR` (default `~/.rembric/`). Three strategies are supported, from least to most operationally complex.
+Rembric's entire state is one SQLite file (+ WAL sidecar) under `$REMBRIC_DATA_DIR` (default `~/.rembric/`).
 
-## TL;DR
+| Strategy           | RPO           | Setup    | Best for                          |
+| ------------------ | ------------- | -------- | --------------------------------- |
+| `sqlite3 .backup`  | minutes-hours | trivial  | single-machine deployments        |
+| Periodic snapshots | hours-day     | trivial  | dev / personal use                |
+| litestream         | seconds       | moderate | multi-machine / cloud deployments |
 
-| Strategy           | Recovery point | Recovery time | Setup cost | Best for                          |
-| ------------------ | -------------- | ------------- | ---------- | --------------------------------- |
-| `rsync` + cron     | minutes-hours  | seconds       | trivial    | single-machine deployments        |
-| Periodic snapshots | hours-day      | seconds       | trivial    | dev / personal use                |
-| litestream         | seconds        | seconds-mins  | moderate   | multi-machine / cloud deployments |
+> **Append-only is a backup ally.** Rows are never DELETEd and `content` is never overwritten. Older snapshots are missing rows, never corrupted.
 
-> **Append-only is a backup ally.** Because rembric never DELETEs from `memory` and never overwrites `content`, even partial backups are useful: an older snapshot is missing rows, never corrupted by overwrites. The same property holds for `memory_relations` (the judgment graph) and the `sessions` table — both are append-only with status FSMs.
-
----
-
-## 1. `rsync` + cron (recommended for single-machine)
-
-Add a cron entry that copies the data dir to a separate disk or remote host. Always stop the server (or use `.backup` checkpoint) before copying — copying a live WAL-mode SQLite file is safe **only** with the `.backup` API.
+## `sqlite3 .backup` + cron
 
 ```cron
-# Every 30 minutes, snapshot to /var/backups/rembric/
 */30 * * * * /usr/bin/sqlite3 /home/rembric/.rembric/data.db ".backup '/var/backups/rembric/data.db'"
 ```
 
-Restore: stop rembric, copy the backup over `$REMBRIC_DATA_DIR/data.db`, restart. Migrations run automatically on startup; the schema version is recorded in the file itself.
+Restore: stop rembric, copy the backup over `$REMBRIC_DATA_DIR/data.db`, restart. Migrations run automatically; the schema version lives in the file itself.
 
-## 2. Periodic snapshots
-
-The simplest possible setup:
+## Periodic snapshots
 
 ```bash
 sqlite3 ~/.rembric/data.db ".backup '/path/to/snapshots/$(date +%Y-%m-%dT%H).db'"
 ```
 
-Run from a daily cron. Keep snapshots for whatever retention window suits you — the file is small (typically <50 MB even with thousands of memories).
+The file is small (typically <50 MB).
 
-## 3. litestream (streaming replication)
+## litestream
 
-For deployments where minutes-level data loss is unacceptable. [Litestream](https://litestream.io) reads the SQLite WAL continuously and ships it to S3 / GCS / SFTP.
-
-Minimal `litestream.yml`:
-
-```yaml
-dbs:
-  - path: /home/rembric/.rembric/data.db
-    replicas:
-      - type: s3
-        bucket: my-rembric-backup
-        path: rembric/
-        region: us-east-1
-        access-key-id: AKIA...
-        secret-access-key: ...
-```
-
-Run litestream alongside rembric (a systemd unit pair is the simplest setup; see `examples/systemd/`). Recovery:
-
-```bash
-litestream restore -o /home/rembric/.rembric/data.db s3://my-rembric-backup/rembric/
-```
-
-Then restart rembric. Migrations are idempotent; the restored DB is immediately usable.
-
----
+For deployments where minutes-level data loss is unacceptable. [Litestream](https://litestream.io) tails the SQLite WAL and ships to S3 / GCS / SFTP. See its docs for the YAML; point `dbs[].path` at your `data.db`. Run it alongside rembric under whatever supervisor you use. Recovery: `litestream restore -o $REMBRIC_DATA_DIR/data.db <replica-url>`, then restart.
 
 ## What NOT to do
 
-- **Don't copy `data.db-wal` and `data.db-shm` by themselves.** They're meaningless without the matching `data.db` and you'll likely end up with a corrupt restore.
-- **Don't copy the file while rembric is running** unless you use `sqlite3 .backup` or litestream. A naive `cp data.db backup.db` can capture a partially-flushed WAL state.
-- **Don't try to merge backups from two live rembric instances.** The append-only model means you can union the row sets in principle, but you'll need a custom dedup pass on `id` and you'll lose the consolidation journal. If you need multi-host writes, file an issue; HA is out of scope for v0.
+- Don't copy `data.db-wal` / `data.db-shm` alone — they're meaningless without `data.db` and will likely corrupt the restore.
+- Don't `cp` the file while rembric is running. Use `sqlite3 .backup` or litestream.
+- Don't merge backups from two live instances. HA is out of scope for v0.

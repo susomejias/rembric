@@ -119,4 +119,4 @@ pnpm run dev    # tsc --watch
 pnpm start      # run the built server
 ```
 
-MCP at `http://127.0.0.1:8787/mcp`, dashboard at `http://127.0.0.1:8787/dashboard`. Server binds to `127.0.0.1` only — put a reverse proxy in front for remote access (see `examples/`).
+MCP at `http://127.0.0.1:8787/mcp`, dashboard at `http://127.0.0.1:8787/dashboard`. Server binds to `127.0.0.1` only; remote exposure is the operator's responsibility (not shipped).
