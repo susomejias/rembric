@@ -99,6 +99,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     db: opts.db,
     router: opts.router,
     projects: opts.projects,
+    agentSessions: opts.agentSessions,
     getServer: () => server,
   });
   server.registerTool(

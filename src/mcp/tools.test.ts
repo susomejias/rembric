@@ -4,6 +4,7 @@ import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
@@ -438,5 +439,137 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
     const { memories } = parseText<{ memories: { id: string; projectId: string | null }[] }>(r);
     expect(memories.some((m) => m.id === saved.id)).toBe(true);
     expect(memories.every((m) => m.projectId === projectA.id)).toBe(true);
+  });
+});
+
+describe('memory.save — session attachment via HTTP-created sessions', () => {
+  // Verifies the bridge that makes `POST /api/<slug>/sessions` (hook) and
+  // subsequent `memory.save` (MCP) cohere: when no SessionRouter entry
+  // exists, the save attaches to the most-recently-active session for
+  // `(tokenId, projectId)`.
+
+  let agentSessions: AgentSessionsService;
+  let fallbackHandlers: ReturnType<typeof buildHandlers>;
+  let realTokenId: string;
+  let ctxWithRealToken: (project: Project | null) => RequestContext;
+
+  beforeEach(async () => {
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { TokensService } = await import('../services/tokens.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { eq } = await import('drizzle-orm');
+
+    agentSessions = new AgentSessionsService(db.handle.db);
+    const tokens = new TokensService(db.handle.db);
+    tokens.bootstrapAdmin('attachment-test-token-with-enough-entropy');
+    const admin = db.handle.db
+      .select()
+      .from(tokensSchema)
+      .where(eq(tokensSchema.name, 'admin'))
+      .get();
+    realTokenId = admin!.id;
+    ctxWithRealToken = (project) => ({
+      ...fakeContext(project),
+      token: { ...fakeContext(project).token, id: realTokenId },
+    });
+    fallbackHandlers = buildHandlers({ memory, projects, agentSessions });
+  });
+
+  it('attaches a memory to the session created via agentSessions.ensure', async () => {
+    agentSessions.ensure({
+      id: 'sess-http-created-1',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'plugin-hook',
+    });
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        content: 'memory saved after HTTP session create',
+      }),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-http-created-1');
+  });
+
+  it('attaches to the MOST recent active session when multiple exist', async () => {
+    agentSessions.ensure({
+      id: 'sess-older',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'older',
+    });
+    // Force a later started_at by waiting a tick (clock granularity is ms).
+    await new Promise((res) => setTimeout(res, 5));
+    agentSessions.ensure({
+      id: 'sess-newer',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'newer',
+    });
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        content: 'attaches to newer',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-newer');
+  });
+
+  it('saves with session_id=null when no active session exists', async () => {
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        content: 'no session active',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBeNull();
+  });
+
+  it('SessionRouter entry takes precedence over the DB fallback', async () => {
+    const router = new SessionRouter();
+    const MCP_SESSION = 'mcp-sess-precedence';
+    // DB has a session for the (token, project).
+    agentSessions.ensure({
+      id: 'sess-db-fallback',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'db',
+    });
+    // Router explicitly points at a different session.
+    agentSessions.ensure({
+      id: 'sess-router-explicit',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'router',
+    });
+    router.setActiveSession(realTokenId, MCP_SESSION, 'sess-router-explicit');
+
+    const handlersWithRouter = buildHandlers({ memory, projects, agentSessions, router });
+    const ctxWithSession: RequestContext = {
+      ...ctxWithRealToken(projectA),
+      mcpSessionId: MCP_SESSION,
+    };
+    const r = await runWithContext(ctxWithSession, () =>
+      handlersWithRouter.save({
+        scope: 'project',
+        type: 'project',
+        content: 'router precedence',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-router-explicit');
   });
 });

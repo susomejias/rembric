@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db/client.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -84,6 +85,14 @@ export interface ToolDeps {
   /** Optional — required to evaluate the project-suggestion gate on save. */
   projects?: ProjectsService;
   /**
+   * Optional — when present, `memory.save` attaches the most-recently-
+   * active session row for `(tokenId, projectId)` to the memory when the
+   * SessionRouter has no entry. This is the bridge that makes
+   * HTTP-driven sessions (the plugin's hooks POSTing `/api/<slug>/sessions`)
+   * show up as `memory.session_id` on subsequent MCP-side saves.
+   */
+  agentSessions?: AgentSessionsService;
+  /**
    * Optional — provides access to the active `McpServer` so handlers can
    * await (or trigger) roots discovery when no project is resolved yet.
    * Set by `createMcpServer` after construction.
@@ -142,6 +151,36 @@ async function resolveEffectiveProject(
   const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
   if (!entry?.projectId) return null;
   return deps.projects.getById(entry.projectId) ?? null;
+}
+
+/**
+ * Resolve the active Rembric session id for a memory write.
+ *
+ * Sources, in order of precedence:
+ *   1. The `SessionRouter` entry for `(tokenId, mcpSessionId)` — set by
+ *      an explicit `memory.session_start` call over MCP.
+ *   2. The most recently-started `status='active'` row for `(tokenId,
+ *      projectId)` — captures sessions created out-of-band by the plugin's
+ *      HTTP hooks (`POST /api/<slug>/sessions`).
+ *
+ * Returns null when no active session can be resolved (the memory is
+ * saved with `session_id = NULL`, the back-compat path for clients that
+ * neither run the plugin nor call `memory.session_start`).
+ */
+function resolveActiveSessionId(deps: ToolDeps, projectId: string | null): string | null {
+  const ctx = getRequestContext();
+  if (ctx.mcpSessionId && deps.router) {
+    const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
+    if (entry?.rembricSessionId) return entry.rembricSessionId;
+  }
+  if (deps.agentSessions) {
+    const row = deps.agentSessions.findActiveForTransport({
+      tokenId: ctx.token.id,
+      projectId,
+    });
+    if (row) return row.id;
+  }
+  return null;
 }
 
 async function handleSave(
@@ -216,11 +255,19 @@ async function handleSave(
     return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${scope.kind} memories`);
   }
 
+  const resolvedSessionId = resolveActiveSessionId(
+    deps,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   const input: SaveMemoryInput = {
     type: args.type,
     content: args.content,
     tags: args.tags,
-    source: { tokenName: ctx.token.name },
+    source: {
+      tokenName: ctx.token.name,
+      ...(resolvedSessionId ? { sessionId: resolvedSessionId } : {}),
+    },
+    sessionId: resolvedSessionId,
     topicKey: args.topic_key ?? null,
   };
 
