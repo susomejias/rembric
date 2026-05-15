@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/susomejias/rembric/compare/v0.5.0...v0.6.0) (2026-05-15)
+
+
+### Features
+
+* **mcp:** attach memories to most-recent active session ([9e2f89f](https://github.com/susomejias/rembric/commit/9e2f89f6c538b555d15669831fad7fd9423a1c3b))
+* **plugin:** drive session lifecycle via HTTP hooks ([a78971a](https://github.com/susomejias/rembric/commit/a78971a1e1a6f03ec0bdcd54ee4932c205ce6b44))
+* **server:** expose /api/&lt;slug&gt;/sessions HTTP endpoints ([37a0c43](https://github.com/susomejias/rembric/commit/37a0c43e513d5734b3ddb2a93b41f18dfba4e055))
+
+
+### Documentation
+
+* document HTTP-driven session lifecycle ([b92a04e](https://github.com/susomejias/rembric/commit/b92a04e5be5f8b16d4528042499ecf685c84edfb))
+
 ## [0.5.0](https://github.com/susomejias/rembric/compare/v0.4.0...v0.5.0) (2026-05-15)
 
 
