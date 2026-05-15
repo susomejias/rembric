@@ -133,11 +133,19 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplaces (Claude Code, Codex CLI, future Cursor/Windsurf/etc.). To keep cross-client support sustainable:
 
 - **Shared logic lives in shared paths.** `plugin/mcp.json`, `plugin/scripts/`, `plugin/skills/`, and `plugin/bin/` are consumed by every per-client manifest via `${CLAUDE_PLUGIN_ROOT}`. Add new scripts there, not under any client's manifest directory.
-- **Per-client divergence ONLY when the platform forces it.** Different hooks files (`hooks/hooks.json` vs `hooks/hooks.codex.json`) are acceptable because Codex hooks are command-only and the supported event set differs. Different implementations of the same behavioural intent (e.g. Claude's `mcp_tool` PreCompact vs Codex's stdout-nudge PreCompact) are acceptable for the same reason.
+- **Per-client divergence ONLY when the platform forces it.** Different hooks files (`hooks/hooks.json` vs `hooks/hooks.codex.json`) are acceptable because the manifest format and supported event set differ. The scripts they invoke are SHARED — `session-start.sh`, `pre-compact.sh`, `session-stop.sh`, and the helper `_api.sh` work identically under Claude Code and Codex. Per-client script variants (`*-codex.sh`, `*-claude.sh`) are forbidden unless the script itself genuinely needs platform-specific logic.
 - **Per-client manifests stay thin.** Each `.<client>-plugin/plugin.json` declares only what differs (paths to its hooks file, client-specific UI metadata). Anything that would also be true for another client gets factored into `plugin/`.
 - **Quick sanity check.** `git ls-files plugin/` should show ONE copy of each shared resource. Two paths with near-identical content = sync bug to fix.
 
 The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Both Claude Code and Codex spawn it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` from `plugin/mcp.json`. Edit in place; commit the file directly.
+
+### Session lifecycle: HTTP, not MCP
+
+Session creation/summary/end is driven by the plugin's `command` hooks POSTing to Rembric's `/api/<slug>/sessions(*)` HTTP endpoints (see `src/server/api-router.ts` and the `http-api` capability spec). The MCP tools `memory.session_start`, `memory.session_end`, `memory.session_summary` remain available for clients that don't run the plugin, but the canonical path is HTTP. This is why:
+
+- `plugin/scripts/_api.sh` is the shared helper sourced by every script that talks to the API. Exposes `rembric_post`, `rembric_read_project_slug`, `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, and `rembric_json_escape`. Single canonical file — both clients pick up edits.
+- `memory.save` automatically attaches `session_id` to the most-recently-active session for `(token, project)` via `resolveActiveSessionId` in `src/mcp/tools.ts`. Agents never need to thread a session id manually.
+- Session ids stay globally unique (`sessions.id TEXT PRIMARY KEY` unchanged from migration `0003`). Cross-token collisions are theoretical (UUID/ULID space) and are rejected at the service layer with `id_collision`.
 
 ## Running locally
 

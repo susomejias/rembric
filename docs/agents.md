@@ -50,7 +50,7 @@ The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the
 What the plugin registers for Codex:
 
 - The same `rembric` MCP server (via `plugin/.mcp.json`) that Claude Code uses, invoking the bundled bridge at `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs`.
-- A four-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. Codex hooks are command-only, so `PreCompact` is wired as a stdout nudge instead of a direct `mcp_tool` call (see `plugin/scripts/pre-compact-codex.sh`).
+- A four-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact, and end-on-stop.
 
 After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
 
@@ -85,7 +85,7 @@ url = "https://memory.example.com/mcp/my-app"
 headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 ```
 
-> Heads-up: the manual path has no Codex hooks, so compaction recovery depends entirely on the server-side `initialize.instructions` and the agent's discipline to call `memory.session_summary` before "done". The plugin install is the recommended path.
+> Heads-up: the manual path has no Codex hooks, so session lifecycle (creation, summary-on-compact, end-on-stop) depends entirely on the agent's discipline to call `memory.session_start` / `memory.session_summary` / `memory.session_end` over MCP. The plugin install is the recommended path — its hooks POST to `/api/<slug>/sessions(*)` automatically, so sessions are tracked regardless of agent diligence.
 
 ## Any other MCP client
 
