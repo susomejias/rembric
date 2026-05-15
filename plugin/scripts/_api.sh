@@ -61,12 +61,16 @@ rembric_post() {
     printf '[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST %s\n' "$path" >&2
     return 0
   fi
+  # Avoid the ${body:-{}} parameter-expansion trap: bash treats the literal
+  # `{}` in the default branch as a single `{` followed by the closing `}`
+  # of the expansion, leaving a stray `}` in the final string.
+  [ -z "$body" ] && body='{}'
   local url="${REMBRIC_SERVER_URL%/}${path}"
   curl -sf -X POST \
     -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
     -H "Content-Type: application/json" \
     --max-time 3 \
-    -d "${body:-{}}" \
+    -d "$body" \
     "$url" > /dev/null 2>&1
   return 0
 }
