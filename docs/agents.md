@@ -49,7 +49,7 @@ The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the
 
 What the plugin registers for Codex:
 
-- The same `rembric` MCP server (via `plugin/.mcp.json`) that Claude Code uses, invoking the bundled bridge at `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs`.
+- The `rembric` MCP server (declared by `plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `plugin/.claude-plugin/mcp.json`), invoking the bundled bridge at `plugin_root/bin/rembric-bridge.mjs` (resolved via the manifest's `cwd: "."` + relative args).
 - A four-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact, and end-on-stop.
 
 After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
@@ -74,7 +74,7 @@ export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token from `rembric
 
 Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
 
-- The **MCP bridge** (`plugin/mcp.json` reads them via env interpolation that does NOT require `${user_config.*}` — it inherits process env).
+- The **MCP bridge** — `plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The same manifest also uses `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` to anchor the bridge path to the plugin root — `${CLAUDE_PLUGIN_ROOT}` substitution does NOT work in MCP args under Codex (only in hook commands), so future contributors should not "simplify" the path back to the Claude Code form.
 - The **lifecycle hooks** (`SessionStart`, `PreCompact`, `Stop`) so sessions appear in `/dashboard/sessions` and PreCompact persists a summary.
 
 Symptoms of missing envs:

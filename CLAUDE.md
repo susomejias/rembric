@@ -57,10 +57,12 @@ src/
 
 plugin/      Shared plugin tree for BOTH Claude Code and Codex CLI marketplaces.
              plugin/.claude-plugin/plugin.json   Claude Code manifest
+             plugin/.claude-plugin/mcp.json      Claude Code MCP config
+                                                 (env: ${user_config.*}; args:
+                                                 ${CLAUDE_PLUGIN_ROOT}/bin/...)
              plugin/.codex-plugin/plugin.json    Codex manifest
-             plugin/mcp.json                     shared MCP server config
-                                                 (bundled bridge via
-                                                 ${CLAUDE_PLUGIN_ROOT})
+             plugin/.codex-plugin/mcp.json       Codex MCP config (cwd: "."
+                                                 + relative args; env_vars: [...])
              plugin/hooks/hooks.json             Claude Code hooks
              plugin/hooks/hooks.codex.json       Codex hooks (subset; cmd-only)
              plugin/scripts/                     shared hook scripts (both
@@ -146,12 +148,19 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 
 Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplaces (Claude Code, Codex CLI, future Cursor/Windsurf/etc.). To keep cross-client support sustainable:
 
-- **Shared logic lives in shared paths.** `plugin/mcp.json`, `plugin/scripts/`, `plugin/skills/`, and `plugin/bin/` are consumed by every per-client manifest via `${CLAUDE_PLUGIN_ROOT}`. Add new scripts there, not under any client's manifest directory.
-- **Per-client divergence ONLY when the platform forces it.** Different hooks files (`hooks/hooks.json` vs `hooks/hooks.codex.json`) are acceptable because the manifest format and supported event set differ. The scripts they invoke are SHARED — `session-start.sh`, `pre-compact.sh`, `session-stop.sh`, and the helper `_api.sh` work identically under Claude Code and Codex. Per-client script variants (`*-codex.sh`, `*-claude.sh`) are forbidden unless the script itself genuinely needs platform-specific logic.
-- **Per-client manifests stay thin.** Each `.<client>-plugin/plugin.json` declares only what differs (paths to its hooks file, client-specific UI metadata). Anything that would also be true for another client gets factored into `plugin/`.
-- **Quick sanity check.** `git ls-files plugin/` should show ONE copy of each shared resource. Two paths with near-identical content = sync bug to fix.
+- **Shared logic lives in shared paths.** `plugin/scripts/`, `plugin/skills/`, and `plugin/bin/` are consumed by every per-client manifest via `${CLAUDE_PLUGIN_ROOT}`. Add new scripts there, not under any client's manifest directory.
+- **Per-client divergence ONLY when the platform forces it.** Two files diverge today, both because the platforms have different supported syntax/event sets — not for cosmetic reasons:
+  - **Hooks**: `hooks/hooks.json` (Claude Code) vs `hooks/hooks.codex.json` (Codex). Claude Code's manifest format inlines `${user_config.*}` env prefixes; Codex's hook schema doesn't support that interpolation and uses a smaller event set.
+  - **MCP server config**: `mcp.json` (Claude Code) vs `.codex-plugin/mcp.json` (Codex). Two independent platform deltas force the split:
+    - **Path substitution.** Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` in `args`. Codex does not — `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` resolves only the `cwd` field against `plugin_root`; `command` and `args` pass verbatim to the spawn (`LocalStdioServerLauncher::launch_server` in `stdio_server_launcher.rs` is a direct `Command::new`, no shell expansion). Codex's manifest therefore uses `cwd: "."` (normalised to the plugin root) plus `args: ["./bin/rembric-bridge.mjs"]` so node resolves the bridge path against the spawned cwd.
+    - **Env injection.** Claude Code reads keychain values via `env: { … "${user_config.*}" }` interpolation. Codex passes `env` map values verbatim AND clears the subprocess env (`Command::env_clear()` in `launch_server`) — the subprocess only sees `DEFAULT_ENV_VARS` + names listed in `env_vars` + literal `env` overrides (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex's manifest therefore uses `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]` to forward those names from the user's shell at spawn time, NOT an `env` map.
 
-The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Both Claude Code and Codex spawn it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` from `plugin/mcp.json`. Edit in place; commit the file directly.
+  The scripts they invoke remain SHARED — `session-start.sh`, `pre-compact.sh`, `session-stop.sh`, and the helper `_api.sh` work identically under Claude Code and Codex. Per-client script variants (`*-codex.sh`, `*-claude.sh`) are forbidden unless the script itself genuinely needs platform-specific logic.
+
+- **Per-client manifests stay thin.** Each `.<client>-plugin/plugin.json` declares only what differs (paths to its hooks file, paths to its MCP config file, client-specific UI metadata). Anything that would also be true for another client gets factored into `plugin/`.
+- **Quick sanity check.** `git ls-files plugin/` should show ONE copy of each shared resource. The `mcp.json` files inside each client dir and the two `hooks/hooks*.json` files are the only legitimate near-duplicates — they carry per-client env/syntax that cannot be merged. Anything else with two paths and near-identical content is a sync bug.
+
+The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Claude Code reaches it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` declared in `plugin/.claude-plugin/mcp.json`. Codex reaches it via `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` declared in `plugin/.codex-plugin/mcp.json`. Edit in place; commit the file directly.
 
 ### Releasing a new plugin version — MUST bump `version` in both manifests
 

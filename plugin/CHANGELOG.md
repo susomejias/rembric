@@ -4,6 +4,21 @@ All notable changes to the Rembric Claude Code plugin.
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.2.1] — unreleased
+
+### Fixed
+
+- **Codex bridge: path resolution.** Under Codex the bridge previously failed at module resolution with `Cannot find module '…${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs'`. Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in MCP server `args` — `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` only resolves the `cwd` field against `plugin_root`; `command` and `args` pass verbatim. The new Codex-specific MCP config uses `cwd: "."` (normalised to the plugin root) + `args: ["./bin/rembric-bridge.mjs"]` so node resolves the bridge path against the spawned cwd.
+- **Codex bridge: credential injection.** The shared MCP config used `env: { REMBRIC_*: "${user_config.*}" }` — Claude-Code-specific interpolation. Codex passes `env` map values verbatim AND calls `Command::env_clear()` on the subprocess (`codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`), so shell env is NOT inherited. The new Codex-specific MCP config uses `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]` — Codex's documented mechanism for forwarding shell env vars to MCP subprocesses (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). The Claude Code plugin path is unchanged.
+
+### Changed
+
+- **MCP config files relocated.** `plugin/mcp.json` moves to `plugin/.claude-plugin/mcp.json`. The new `plugin/.codex-plugin/mcp.json` ships alongside it. Each client's MCP config now lives next to its plugin manifest. Manifests reference them via `mcpServers: "./.claude-plugin/mcp.json"` and `mcpServers: "./.codex-plugin/mcp.json"` respectively (Codex requires `./`-prefixed paths relative to `plugin_root` per `resolve_manifest_path` in `codex-rs/core-plugins/src/manifest.rs`; Claude Code accepts the same form).
+
+### Notes
+
+- Existing Codex users who saw `Cannot find module` errors: `codex plugin marketplace upgrade rembric` followed by re-launching `codex` will pull `0.2.1` and resolve the issue (provided `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are exported in the launching shell).
+
 ## [0.2.0] — unreleased
 
 ### Changed
