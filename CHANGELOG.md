@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/susomejias/rembric/compare/v0.8.1...v0.8.2) (2026-05-15)
+
+
+### Bug Fixes
+
+* **codex:** split MCP config per client; use cwd + env_vars ([2d8c54f](https://github.com/susomejias/rembric/commit/2d8c54f3aa05ec1eb1f182babf99c3291f5b3f6d))
+
 ## [0.8.1](https://github.com/susomejias/rembric/compare/v0.8.0...v0.8.1) (2026-05-15)
 
 
