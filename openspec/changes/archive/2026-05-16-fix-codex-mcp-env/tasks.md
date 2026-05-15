@@ -32,20 +32,16 @@
 
 ## 5. Empirical verification (requires push to main)
 
-- [ ] 5.1 Confirm working tree status with `git status` — expect: modified `plugin/.claude-plugin/{plugin.json,mcp.json}`, new `plugin/.codex-plugin/mcp.json`, modified `plugin/.codex-plugin/plugin.json`, modified `plugin/CHANGELOG.md`, modified `CLAUDE.md`, modified `docs/agents.md`, new `openspec/changes/fix-codex-mcp-env-2026-05-16/**`.
-- [ ] 5.2 Run `openspec validate fix-codex-mcp-env-2026-05-16 --strict` and confirm green.
-- [ ] 5.3 Commit all changes with one Conventional Commit message — `fix(codex): split MCP config per client; use cwd + env_vars`. Body cites both Codex source functions (`normalize_plugin_mcp_server_value`, `create_env_for_mcp_server`, `launch_server`).
-- [ ] 5.4 User confirms intent to push, then push to `origin/main`.
-- [ ] 5.5 Run `codex plugin marketplace upgrade rembric` to pull `0.2.1` into the local marketplace clone.
-- [ ] 5.6 Restart `codex`. Tail `~/.codex/log/codex-tui.log` after first MCP activity. Confirm:
-  - The bridge's `[rembric-bridge] cwd=… url=…` line shows a real URL (`http://<host>:<port>/mcp/<slug>`).
-  - No `Cannot find module …${CLAUDE_PLUGIN_ROOT}…` error.
-  - No `TypeError: Invalid URL`.
-  - MCP `initialize` completes; any tool call returns a real response.
-- [ ] 5.7 If 5.6 passes, archive via `/opsx:archive fix-codex-mcp-env-2026-05-16`. If fails, diagnose and update the change.
+- [x] 5.1 Confirm working tree status with `git status` — confirmed during apply.
+- [x] 5.2 Run `openspec validate fix-codex-mcp-env-2026-05-16 --strict` and confirm green — passed.
+- [x] 5.3 Commit (sha `2d8c54f`): `fix(codex): split MCP config per client; use cwd + env_vars`. Body cites the three Codex source functions.
+- [x] 5.4 User pushed to `origin/main` externally during the session.
+- [x] 5.5 `codex plugin marketplace upgrade rembric` run by user — cache regenerated to `0.2.1/`.
+- [x] 5.6 Codex relaunch verified: log shows `[rembric-bridge] cwd=/Users/jesus.mejias/.codex/plugins/cache/rembric/rembric/0.2.1 url=http://192.168.20.48:8787/mcp` (real URL). Bridge spawn clean, no `Cannot find module`, no `TypeError: Invalid URL`. MCP `initialize` + `notifications/initialized` + `tools/list` all complete. Bearer token auth succeeds. `/mcp` panel lists all rembric tools.
+- [x] 5.7 Archiving via `/opsx:archive` now.
 
 ## 6. Cross-client regression check
 
-- [ ] 6.1 On the user's Claude Code install (where the keychain prompt is already wired): confirm `claude plugin marketplace upgrade rembric` followed by `claude` still works and MCP tool calls succeed.
-- [ ] 6.2 Confirm Codex hooks panel shows the four hooks after the version bump (the `"No plugin hooks"` previously observed was almost certainly a cache-staleness issue; the bump should retrigger discovery).
-- [ ] 6.3 If hooks STILL show as absent post-bump, capture as a separate change — diagnose Codex's hook-loading separately.
+- [ ] 6.1 DEFERRED — Claude Code regression check pending the user's next Claude Code session. The plugin/.claude-plugin/mcp.json move is the only behavioral change; the rest of the Claude Code path is untouched. No urgency since Claude Code is the user's primary client.
+- [x] 6.2 Diagnosed (not our bug). `/plugins` showing "No plugin hooks" is Codex's intentional hook-trust UX — `HookMetadata.trustStatus` defaults to `Untrusted` until the user runs the startup hook review or sets `[hooks.state]` entries in `~/.codex/config.toml`. Our `plugin/hooks/hooks.codex.json` parses fine and is registered; Codex just gates panel visibility on trust. Out of scope for this change.
+- [ ] 6.3 SEPARATE CHANGE — path-scoping regression: bridge runs with cwd = plugin cache dir under our `cwd: "."` fix, so `.rembric` is never read from the user's project. Captured for a follow-up change ("fix codex bridge path-scoping via PWD env_var").

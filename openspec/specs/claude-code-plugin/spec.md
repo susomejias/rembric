@@ -10,7 +10,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
   - `server_url`: `type: "string"`, `required: true`. Base URL of the user's Rembric deployment WITHOUT the `/mcp` suffix. The plugin appends `/mcp` itself.
   - `api_token`: `type: "string"`, `required: true`, `sensitive: true`. Stored in the system keychain, never in `settings.json`.
 - The manifest SHALL NOT declare a `project_slug` userConfig field. The active project is signalled per directory via a `.rembric` config file (see [Project slug selection](#project-slug-selection)).
-- The manifest SHALL declare `mcpServers: "./mcp.json"` and SHALL NOT inline server configuration in `plugin.json`.
+- The manifest SHALL declare `mcpServers: "./.claude-plugin/mcp.json"` and SHALL NOT inline server configuration in `plugin.json`.
 
 ## Marketplace declaration
 
@@ -20,7 +20,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ## MCP server declaration
 
-- `plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
+- `plugin/.claude-plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
 - The server entry SHALL use `command: "node"` with `args: ["${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs"]`, spawning the local bridge as a stdio MCP server.
 - The bridge SHALL receive `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` via `env`, sourced from `${user_config.server_url}` and `${user_config.api_token}` respectively.
 - The plugin SHALL NOT use a direct `type: "http"` MCP server entry; the bridge mediates traffic so that the URL can be path-scoped with the slug read from `.rembric` at session start.

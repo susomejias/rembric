@@ -12,7 +12,7 @@ The repository SHALL host a Codex plugin manifest at `plugin/.codex-plugin/plugi
 
 - **WHEN** `plugin/.codex-plugin/plugin.json` is loaded
 - **THEN** it contains `name: "rembric"`, a `version`, a `description`, `license: "MIT"`, `repository`, `homepage`, and an `author` block matching the Claude Code manifest
-- **AND** it declares `mcpServers: "./mcp.json"` referencing the shared MCP config used by the Claude Code plugin
+- **AND** it declares `mcpServers: "./.codex-plugin/mcp.json"` referencing the Codex-specific MCP config (NOT the Claude Code `mcp.json`)
 - **AND** it declares `hooks: "./hooks/hooks.codex.json"` referencing the Codex-specific hook file
 
 #### Scenario: No skills declaration
@@ -97,29 +97,68 @@ If Codex passes the id under a different key (e.g. `sessionId`), the scripts SHA
 - **THEN** the server SHALL respond `400 invalid_input`
 - **AND** the script SHALL exit `0` (failure is silent at the hook level)
 
-## Shared MCP server configuration
+## Codex-specific MCP server configuration
 
-### Requirement: Shared MCP server configuration
+### Requirement: Codex-specific MCP server configuration
 
-The Codex plugin SHALL reuse the existing `plugin/mcp.json` (declared by the Claude Code plugin) without duplication.
+The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `plugin/.claude-plugin/mcp.json`. The two files diverge in path resolution and env injection mechanism because Codex and Claude Code expose different MCP loader contracts (Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in `args`, and `Command::env_clear()` strips parent-env inheritance — see `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` and `codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`).
 
-#### Scenario: Bridge invocation under Codex
+#### Scenario: Codex MCP config file declares stdio bridge with plugin-root anchoring
 
-- **WHEN** Codex spawns the `rembric` MCP server per `plugin/mcp.json`
-- **THEN** the spawn command resolves `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` against Codex's plugin-root resolver (which honours the same variable name)
-- **AND** the bridge process inherits `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from either `${user_config.server_url}` / `${user_config.api_token}` interpolation (when Codex supports it) or from the shell environment of the process that launched `codex` (when interpolation is unavailable)
+- **WHEN** `plugin/.codex-plugin/mcp.json` is loaded
+- **THEN** the top-level object contains exactly one entry `mcpServers.rembric`
+- **AND** the entry declares `command: "node"`
+- **AND** the entry declares `args: ["./bin/rembric-bridge.mjs"]` — a relative path under the plugin root
+- **AND** the entry declares `cwd: "."` so Codex's `normalize_plugin_mcp_server_value` resolves the working directory to the plugin root (`plugin_root.join(".") = plugin_root`)
+- **AND** the entry declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`
+- **AND** the entry SHALL NOT declare an `env` field — Codex would treat any literal map values as opaque overrides that clobber `env_vars` reads
+
+#### Scenario: Bridge resolves under Codex via plugin-root cwd
+
+- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json`
+- **THEN** `LocalStdioServerLauncher::launch_server` SHALL set `current_dir` on the spawned `Command` to the plugin root (resolved from `cwd: "."`)
+- **AND** node SHALL receive `./bin/rembric-bridge.mjs` as its script argument and resolve it relative to the cwd → `plugin_root/bin/rembric-bridge.mjs`
+- **AND** the bridge SHALL start without `Cannot find module` errors
+
+#### Scenario: env*vars forwards REMBRIC*\* from the launching shell to the bridge
+
+- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json`
+- **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env (the shell that launched `codex`)
+- **AND** the curated env passed to the bridge subprocess (after `Command::env_clear()`) SHALL contain those names with the user-supplied values
+- **AND** the bridge SHALL build a real URL — e.g. `http://192.168.20.48:8787/mcp/<slug>` — not a placeholder literal
+
+#### Scenario: Bridge surfaces a useful error when env vars are missing
+
+- **WHEN** the user launches `codex` without exporting `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN`
+- **THEN** Codex's `env_vars` mechanism silently skips names it cannot find (per `env::var_os(var).map(...)`)
+- **AND** the bridge SHALL exit non-zero with a clear stderr message instructing the user to export the variables — preserving the diagnostic contract from the `claude-code-plugin` spec's "MCP bridge contract" requirement
+
+#### Scenario: Claude Code MCP config is unaffected
+
+- **WHEN** the Claude Code plugin loads
+- **THEN** it SHALL continue to load `plugin/.claude-plugin/mcp.json` (unchanged behaviour)
+- **AND** Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution in args SHALL keep working
+- **AND** Claude Code's keychain-driven `${user_config.*}` substitution into the `env` map SHALL remain the canonical credential path under Claude Code
+
+#### Scenario: Both plugin manifests version-bump in lockstep on every mcp config change
+
+- **WHEN** either `plugin/.claude-plugin/mcp.json` or `plugin/.codex-plugin/mcp.json` is modified
+- **THEN** the `version` field in BOTH `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` SHALL be bumped in the same commit
+- **AND** `plugin/CHANGELOG.md` SHALL gain a matching `[X.Y.Z] — <date>` heading describing the change
+- **AND** the bump SHALL follow SemVer: patch for bug fixes, minor for new behaviour, major for breaking changes to the credential or transport contract
 
 ## Credential flow
 
 ### Requirement: End-user credential flow
 
-Codex install material SHALL document the credential flow given Codex's lack of a `userConfig` keychain prompt.
+Codex install material SHALL document the credential flow given Codex's lack of a `userConfig` keychain prompt and Codex's `env_clear` behaviour on MCP subprocesses.
 
-#### Scenario: Documented env-var fallback
+#### Scenario: Documented env-var requirement
 
 - **WHEN** a user reads `docs/agents.md`'s Codex section
-- **THEN** the doc SHALL state that Codex users export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that launches `codex` if Codex's `${user_config.X}` interpolation does not resolve under the plugin
+- **THEN** the doc SHALL state that Codex users MUST export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that launches `codex` — this is the canonical path under Codex, not a fallback
 - **AND** the doc SHALL provide a literal `export REMBRIC_SERVER_URL=...; export REMBRIC_API_TOKEN=...` snippet
+- **AND** the doc SHALL explain that the plugin's `env_vars` field is what forwards those vars to the bridge subprocess (citing `create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs` so future readers can verify), AND that Codex's `env_clear()` semantics make `env_vars` mandatory — there is no implicit inheritance from the parent shell
 
 ## Documentation
 
