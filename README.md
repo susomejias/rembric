@@ -1,4 +1,6 @@
-<h1 align="center">Rembric</h1>
+<p align="center">
+  <img src="./docs/banner.png" alt="Rembric" width="100%">
+</p>
 
 <p align="center">
   <b>Self-hosted memory layer for AI coding agents</b>
