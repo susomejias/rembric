@@ -50,6 +50,34 @@ export REMBRIC_API_TOKEN="$(security find-generic-password -s rembric -w 2>/dev/
 
 Restart Claude Code and try again. If sessions now appear with the shell exports but not without, the plugin's `${user_config.*}` substitution is misbehaving — open an issue with the Claude Code version. Either way the hook scripts emit a one-line stderr diagnostic (`[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST ...`) when credentials are missing; `claude --debug` shows them.
 
+### Updating to a new version
+
+Claude Code caches plugins by version. When we ship a new `version` in `plugin/.claude-plugin/plugin.json` (e.g. `0.1.0` → `0.2.0`), follow the official update flow:
+
+```shell
+# 1. Refresh the marketplace catalog so Claude Code sees the new version
+/plugin marketplace update rembric
+
+# 2. Update the installed plugin
+/plugin update rembric@rembric
+
+# 3. Apply the new hooks/scripts without restarting
+/reload-plugins
+```
+
+If `/reload-plugins` is not enough (e.g. when the MCP bridge or `bin/*` changed), restart Claude Code fully so the bridge re-spawns from the new cache.
+
+Third-party marketplaces have **auto-update disabled by default**. To opt in, run `/plugin` → **Marketplaces** tab → select rembric → **Enable auto-update**. Then Claude Code refreshes the catalog and updated installed plugins on startup, prompting `/reload-plugins` when something changed.
+
+If the version field hasn't been bumped but you know new code shipped (or your environment refuses to pick it up), force a clean reinstall:
+
+```shell
+/plugin uninstall rembric@rembric
+/plugin install rembric@rembric
+```
+
+You can also blow away the cache directly: `rm -rf ~/.claude/plugins/cache` (Claude Code rebuilds it on next install).
+
 ### As the plugin author (local iteration)
 
 ```bash

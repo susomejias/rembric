@@ -139,6 +139,20 @@ Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplace
 
 The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Both Claude Code and Codex spawn it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` from `plugin/mcp.json`. Edit in place; commit the file directly.
 
+### Releasing a new plugin version — MUST bump `version` in both manifests
+
+Both `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` declare a `version` field. Claude Code uses it as the cache key for `/plugin update` (official docs: `code.claude.com/docs/en/plugins-reference#version-management`) and Codex stores plugins under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`. If you ship changes WITHOUT bumping the version, both clients will keep serving the cached old code and `/plugin update` will report "already at the latest version" — users have to manually uninstall + reinstall to recover.
+
+**Rule**: any time you change something in `plugin/` that users need to see (scripts, hooks, mcp.json, bin/, manifests themselves), bump BOTH manifest versions in the same commit. Use SemVer:
+
+- **patch** (`0.2.0` → `0.2.1`): bug fixes in hook scripts, helper functions, doc tweaks visible at runtime.
+- **minor** (`0.2.0` → `0.3.0`): new behaviour (new hook, new endpoint touched, additional manifest field).
+- **major** (`0.2.0` → `1.0.0`): breaking changes (renamed userConfig field, removed hook event, incompatible script CLI).
+
+Mirror the same version in `plugin/CHANGELOG.md` (the `[X.Y.Z] — unreleased` heading). When the change merges to `main`, downstream users get the new version via the official update flow documented in `plugin/README.md` ("Updating to a new version") and `docs/agents.md` ("Updating the plugin"). Without the bump, those instructions silently no-op.
+
+If you genuinely want every commit to auto-invalidate the cache (during heavy iteration), omit the `version` field entirely — Claude Code falls back to the git commit SHA per its docs. Re-add `version` before merging so end users have stable release semantics.
+
 ### Session lifecycle: HTTP, not MCP
 
 Session creation/summary/end is driven by the plugin's `command` hooks POSTing to Rembric's `/api/<slug>/sessions(*)` HTTP endpoints (see `src/server/api-router.ts` and the `http-api` capability spec). The MCP tools `memory.session_start`, `memory.session_end`, `memory.session_summary` remain available for clients that don't run the plugin, but the canonical path is HTTP. This is why:

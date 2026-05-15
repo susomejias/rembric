@@ -93,6 +93,22 @@ The two clients pick up credentials from different places — keep both configur
 
 If you only use one client, set up just that one. If you use both, you need both — the wizard input does NOT propagate to Codex's process, and the shell exports are NOT consumed by Claude Code's hooks (Claude Code substitutes from the keychain, not from `process.env`). Same Rembric server, same token, two configuration surfaces.
 
+#### Updating the plugin
+
+Codex caches plugins by `version` under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`, so the cache invalidates when we bump `plugin/.codex-plugin/plugin.json`. Official commands (`developers.openai.com/codex/plugins`):
+
+```shell
+# refresh ALL configured marketplaces
+codex plugin marketplace upgrade
+
+# or refresh a specific one
+codex plugin marketplace upgrade rembric
+```
+
+After the marketplace catalog refresh, Codex picks up the new version on the next plugin load. If Codex reports it's still on the cached version, fall back to a clean cycle from inside Codex's `/plugins` panel: select the plugin, **Uninstall plugin**, then **Install plugin** again (the docs do not yet expose a per-plugin `update` command — this is the supported alternative).
+
+Restart `codex` after the update so the bridge and hooks re-spawn from the new cache path.
+
 ### Codex CLI (manual config.toml, no plugin)
 
 If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.
