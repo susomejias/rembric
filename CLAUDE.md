@@ -124,6 +124,15 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 - **Timestamps MUST go through `formatTs`** (`src/dashboard/templates.ts`). The helper emits `<time datetime="…Z" data-rembric-ts>YYYY-MM-DD HH:MM:SS UTC</time>`; a tiny inline script in the layout shell upgrades the visible text to the viewer's local timezone via `Intl.DateTimeFormat` on `DOMContentLoaded` and after every `htmx:afterSwap`. Never hand-write `toISOString()`, `toLocaleString()`, or ad-hoc date strings in templates — that bypasses the upgrader and forces operators back into UTC. SQLite, the service layer, and MCP serialization stay UTC; only the dashboard HTML localises.
 - The upgrader element marker is `data-rembric-ts`. Anything emitting a `<time>` element for a different purpose MUST omit that attribute so the upgrader leaves it alone.
 
+### Design system
+
+- **All dashboard CSS lives in `src/dashboard/styles/`** — never inline `<style>` in templates. The split is mechanical: `styles/core/{tokens,base,atoms,layout,patterns}.css` is loaded on every page; `styles/views/<view>.css` is loaded only by that view via the build-time manifest at `dist/dashboard/public/assets/styles/manifest.json`. `scripts/build-css.mjs` (invoked by `pnpm run build` and `pnpm run build:css`) minifies via `lightningcss`, content-hashes, and emits the manifest.
+- **Brutalist tokens are locked**: `--bg #0a0a0a`, `--lime #c6f24e`, font stack (Space Grotesk + Inter + JetBrains Mono), spacing scale `--s-1..--s-8`. Changing any of these requires an OpenSpec change — the design contract is published in `openspec/specs/dashboard/spec.md`. No light theme, no theme switcher.
+- **Fonts are self-hosted**: woff2 files belong in `src/dashboard/public/assets/fonts/`. Never reference Google Fonts or any other font CDN at runtime — that's a spec violation.
+- **Adding a new dashboard view**: create `src/dashboard/styles/views/<view>.css` (even if empty), pass `view: '<view>'` to `shell()` via `renderPage`. Build emits the file automatically. `renderPage` (in `src/dashboard/page-shell.ts`) is the canonical entry point for authenticated dashboard pages — it threads the cookie-driven sidebar collapse state, CSRF token, and counters into `shell()` for you.
+- **HTML is whitespace-collapsed in production** by `minifyHtml()` inside `shell()`. Anything inside `<pre>`, `<textarea>`, or `<script>` is preserved verbatim; everywhere else, runs of inter-tag whitespace are stripped. This affects "view source" readability — DevTools pretty-print still works.
+- **Sidebar collapse** is server-driven via the `rbr-sb-collapsed` cookie. The toggle is a CSRF-protected `POST /dashboard/_sidebar/toggle`. Do not introduce localStorage-based UI state for the same surface — the cookie path is what guarantees no FOUC on first paint.
+
 ## Code style highlights (from CONTRIBUTING.md)
 
 - TypeScript strict; no `any` / `as unknown as T` without a justifying comment.

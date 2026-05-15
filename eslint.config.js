@@ -10,6 +10,7 @@ export default tseslint.config(
       'node_modules/**',
       'coverage/**',
       'examples/**',
+      'example-design/**',
       'scripts/**',
       'plugin/**',
       'src/dashboard/public/**',

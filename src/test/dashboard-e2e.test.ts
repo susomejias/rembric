@@ -384,4 +384,38 @@ describe('dashboard E2E', () => {
     const body = await res.text();
     expect(body).toContain('csrf_invalid');
   });
+
+  it('sidebar toggle flips the rbr-sb-collapsed cookie via POST /_sidebar/toggle', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const homeBody = await (await get(baseUrl, '/dashboard', jar)).text();
+    const csrf = extractCsrf(homeBody, '/dashboard/_sidebar/toggle');
+    expect(csrf).toBeTruthy();
+
+    // First toggle: no rbr-sb-collapsed cookie sent → handler treats as
+    // expanded → sets rbr-sb-collapsed=1.
+    const first = await postForm(baseUrl, '/dashboard/_sidebar/toggle', jar, { csrf: csrf! });
+    expect(first.status).toBe(302);
+    expect(first.headers.get('set-cookie') ?? '').toContain('rbr-sb-collapsed=1');
+
+    // Second toggle: we send rbr-sb-collapsed=1 alongside the session
+    // cookie → handler flips it to 0.
+    const jarWithCollapsed: CookieJar = {
+      cookie: `${jar.cookie}; rbr-sb-collapsed=1`,
+    };
+    const second = await postForm(baseUrl, '/dashboard/_sidebar/toggle', jarWithCollapsed, {
+      csrf: csrf!,
+    });
+    expect(second.status).toBe(302);
+    expect(second.headers.get('set-cookie') ?? '').toContain('rbr-sb-collapsed=0');
+  });
+
+  it('sidebar toggle rejects POST without CSRF token (403)', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const res = await postForm(baseUrl, '/dashboard/_sidebar/toggle', jar, {});
+    expect(res.status).toBe(403);
+    const body = await res.text();
+    expect(body).toContain('csrf_invalid');
+  });
 });

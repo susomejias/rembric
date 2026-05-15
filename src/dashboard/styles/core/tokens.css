@@ -1,0 +1,110 @@
+/* ═══════════════════════════════════════════════════════════════════
+   REMBRIC · DASHBOARD · DESIGN TOKENS
+   Brutalist editorial · dark + lime · locked by spec
+   ─────────────────────────────────────────────────────────────────── */
+
+/* Self-hosted font faces. Files vendored at /dashboard/assets/fonts/.
+   If the woff2 files are absent, the system-ui fallback kicks in
+   silently. */
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/space-grotesk-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/space-grotesk-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/space-grotesk-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/space-grotesk-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/inter-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/jetbrains-mono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/dashboard/assets/fonts/jetbrains-mono-600.woff2') format('woff2');
+}
+
+:root {
+  /* ─── Palette ─── */
+  --bg: #0a0a0a;
+  --bg-elev: #141414;
+  --bg-row-hover: #15170d;
+  --fg: #f2f2f2;
+  --fg-dim: #9a9a9a;
+  --fg-faint: #2a2a2a;
+
+  --lime: #c6f24e;
+  --lime-ink: #0a0a0a;
+  --lime-bar: #c6f24e;
+
+  --warn: #ff8c00;
+  --danger: #ff3344;
+
+  /* ─── Type ─── */
+  --f-display: 'Space Grotesk', system-ui, sans-serif;
+  --f-sans: 'Inter', system-ui, sans-serif;
+  --f-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* ─── Spacing scale (8-ish grid) ─── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+}

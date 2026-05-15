@@ -1,99 +1,4 @@
-# dashboard Specification
-
-## Purpose
-
-Defines the server-rendered web dashboard that lets operators authenticate, browse memories, inspect consolidation runs, and manage tokens — without a frontend build pipeline.
-
-## Requirements
-
-### Requirement: The dashboard MUST be served at `/dashboard`
-
-The server SHALL serve a server-side rendered web dashboard at the `/dashboard` path of the same process and port as the MCP endpoint. Static assets (HTMX and Pico.css) SHALL be served from `/dashboard/assets/` and SHALL be bundled inside the npm package; no CDN dependency at runtime.
-
-#### Scenario: Dashboard home is reachable
-
-- **WHEN** an authenticated operator navigates to `/dashboard`
-- **THEN** the server SHALL return an HTML page with the layout, stats summary, and navigation rendered server-side
-
-### Requirement: Dashboard access MUST require authentication
-
-The dashboard SHALL require a valid signed session cookie to access any route other than `/dashboard/login`. The login route SHALL accept the admin token submitted via a form, validate it against the `tokens` table, and on success SHALL set an httpOnly, SameSite=Lax, signed cookie referencing a row in `dashboard_sessions`.
-
-#### Scenario: Unauthenticated access redirects to login
-
-- **WHEN** an unauthenticated request hits `/dashboard/memories`
-- **THEN** the server SHALL respond with a 302 redirect to `/dashboard/login`
-
-#### Scenario: Login with admin token
-
-- **WHEN** the operator submits the admin token at `/dashboard/login`
-- **THEN** the server SHALL validate the token, create a `dashboard_sessions` row, set the signed cookie, and redirect to `/dashboard`
-
-#### Scenario: Logout
-
-- **WHEN** the operator triggers logout
-- **THEN** the corresponding `dashboard_sessions` row SHALL be deleted and the cookie SHALL be cleared
-
-### Requirement: Memory browsing MUST support filters and pagination
-
-The `/dashboard/memories` view SHALL support filtering by project, type, status, and free-text search, and SHALL paginate results. All filtering SHALL be performed server-side; the form SHALL be progressively enhanced with HTMX so it updates without a full page reload.
-
-#### Scenario: Filtering by status
-
-- **WHEN** the operator selects `status = 'archived'` in the filter form
-- **THEN** the resulting page SHALL show only memories with `status = 'archived'`, respecting the current project filter
-
-#### Scenario: Pagination
-
-- **WHEN** the operator clicks "next page"
-- **THEN** the page SHALL reload with the next `limit` rows offset, preserving all active filters
-
-### Requirement: Memory detail MUST display the history chain
-
-The `/dashboard/memories/:id` view SHALL display the memory's content, status, tags, scope, project, source, current confirmation count, and a visualization of the `replaces` chain showing all predecessors with their content snapshots and timestamps.
-
-#### Scenario: Viewing a merged memory
-
-- **WHEN** the operator opens the detail view for a merged memory M
-- **THEN** the page SHALL show M's content, M's predecessor ids and content snapshots ordered chronologically, and an "Archive" action
-
-### Requirement: Consolidation runs MUST be inspectable and reversible from the dashboard
-
-The dashboard SHALL list consolidation runs at `/dashboard/consolidation` and SHALL show per-run details at `/dashboard/consolidation/:id` including each op with its LLM reasoning. Each op SHALL have an "Undo" action; each run SHALL have an "Undo entire run" action.
-
-#### Scenario: Undoing an op from the dashboard
-
-- **WHEN** the operator clicks "Undo" on a merge op
-- **THEN** the server SHALL execute the undo, the page SHALL update to show the op as reverted, and the affected memories SHALL be visible at `/dashboard/memories` in their restored state
-
-#### Scenario: Reverted run is marked
-
-- **GIVEN** every op of a run has been undone
-- **WHEN** the operator visits `/dashboard/consolidation`
-- **THEN** the run SHALL be visually marked as reverted in the listing
-
-### Requirement: Tokens MUST be manageable from the dashboard
-
-The `/dashboard/tokens` view SHALL list existing tokens (name, scope, project, created_at, revoked_at, expires_at) and SHALL allow creating a new token (shown in plaintext exactly once) and revoking an existing token (setting `revoked_at`).
-
-#### Scenario: Creating a token
-
-- **WHEN** the operator submits the new-token form
-- **THEN** the server SHALL generate a token, store its hash in `tokens`, and render the plaintext token exactly once in a one-time-view component
-
-#### Scenario: Revoking a token
-
-- **WHEN** the operator clicks "Revoke" on a token
-- **THEN** the corresponding row SHALL have `revoked_at` set; subsequent MCP requests using that token SHALL be rejected
-
-### Requirement: Mutating dashboard requests MUST be CSRF-protected
-
-Every mutating dashboard form or HTMX action SHALL include a CSRF token bound to the current session, and the server SHALL reject any mutating request missing a valid CSRF token.
-
-#### Scenario: Missing CSRF token
-
-- **WHEN** a `POST /dashboard/tokens` arrives without a valid CSRF token
-- **THEN** the server SHALL respond with `403 Forbidden` and SHALL NOT create a token
+## MODIFIED Requirements
 
 ### Requirement: No frontend build pipeline SHALL be required
 
@@ -114,70 +19,7 @@ The dashboard SHALL be implemented with HTMX and server-side template literals. 
 - **WHEN** a contributor inspects the repository for client-side JS
 - **THEN** the only JavaScript executing in the browser SHALL be HTMX (vendored) plus inline scripts smaller than 2 KB each, embedded by the SSR shell for the timestamp upgrader and the sidebar toggle progressive enhancement
 
-### Requirement: The dashboard MUST surface a sessions list view at `/dashboard/sessions`
-
-A logged-in dashboard user SHALL see a list of recent sessions for the active project (or globally when no project is selected). The list SHALL include columns for session id, agent, started_at, ended_at, status, and a memory count (number of `memory` rows with that `session_id`).
-
-#### Scenario: A dashboard user navigates to `/dashboard/sessions`
-
-- **WHEN** the user is authenticated with an admin token and visits `/dashboard/sessions`
-- **THEN** the server SHALL return a paginated list of the 50 most recent sessions ordered by `started_at DESC`, with each row linking to `/dashboard/sessions/:id`
-
-#### Scenario: A dashboard user opens a session detail page
-
-- **WHEN** the user navigates to `/dashboard/sessions/:id` for an accessible session
-- **THEN** the page SHALL display: the session metadata (agent, project, token name, started_at, ended_at, status), the verbatim `summary` text, and a table of memories whose `session_id` matches, linking to each memory's detail page
-
-#### Scenario: A session was created by a now-revoked token
-
-- **WHEN** the underlying token has been revoked but the session row still exists
-- **THEN** the detail page SHALL still render and SHALL show the token name with a "(revoked)" suffix; the session SHALL not be hidden from the list
-
-### Requirement: The dashboard home page MUST include a sessions counter
-
-The `/dashboard` overview page SHALL surface a "Sessions (active)" stat card alongside the existing counters.
-
-#### Scenario: The home page is rendered after sessions exist
-
-- **WHEN** the user lands on `/dashboard` and one or more sessions have `status = 'active'`
-- **THEN** the stat grid SHALL include a `Sessions (active)` card whose value is the count
-
-### Requirement: Dashboard timestamps MUST render in the viewer's local timezone
-
-Every timestamp surfaced by the dashboard (memories list and detail, sessions list and detail, the soft-delete banner, prompts, consolidation runs and operations, projects list, tokens list, relations list, and the `replaces` chain on memory detail) SHALL be rendered through a single helper that emits a `<time>` element with:
-
-- A `datetime` attribute set to the ISO-8601 UTC representation (suffix `Z`) of the underlying timestamp.
-- A `data-rembric-ts` attribute marking it as a Rembric-managed timestamp.
-- A visible text content that, before any client script runs, equals the UTC string `YYYY-MM-DD HH:MM:SS UTC`.
-
-A small inline script bundled in the dashboard layout (`<head>`) SHALL upgrade every `<time data-rembric-ts>` element in place after the document is parsed and after every HTMX content swap, replacing its `textContent` with a `Intl.DateTimeFormat`-formatted string using the browser's timezone and default locale.
-
-The SQLite storage, the service-layer `new Date()` writes, and the MCP serialization of timestamps SHALL remain UTC; only the dashboard HTML changes.
-
-#### Scenario: SSR renders UTC fallback
-
-- **WHEN** the dashboard returns an HTML page containing a timestamp
-- **THEN** the response body SHALL contain a `<time datetime="…Z" data-rembric-ts>YYYY-MM-DD HH:MM:SS UTC</time>` element for that timestamp, with no JS execution required to produce the fallback text
-
-#### Scenario: Client upgrades the visible text to local time
-
-- **WHEN** a browser with `Intl.DateTimeFormat` support loads any dashboard page after the change
-- **THEN** every `<time data-rembric-ts>` element's `textContent` SHALL be replaced with the formatted-local-time representation of its `datetime` attribute, using the browser's timezone
-
-#### Scenario: HTMX swap re-applies the upgrade
-
-- **WHEN** an HTMX swap injects new `<time data-rembric-ts>` elements into the page (e.g. the memories filter form's partial response)
-- **THEN** the upgrader SHALL run again on the newly inserted nodes so they also display local time
-
-#### Scenario: Null or invalid timestamp renders an em-dash
-
-- **WHEN** a dashboard page calls the timestamp helper with `null`, `undefined`, or a value that does not parse to a valid date
-- **THEN** the rendered output SHALL be the literal em-dash `—` and SHALL NOT contain a `<time>` element
-
-#### Scenario: Dashboard layout includes the upgrader script exactly once
-
-- **WHEN** any dashboard page is rendered through the layout shell
-- **THEN** the HTML `<head>` SHALL include exactly one inline `<script>` whose responsibility is to upgrade `<time data-rembric-ts>` elements
+## ADDED Requirements
 
 ### Requirement: Dashboard CSS MUST be organised as a layered design system
 
@@ -252,7 +94,7 @@ Changing any of these tokens SHALL require a new OpenSpec change. The dashboard 
 
 ### Requirement: Dashboard fonts MUST be self-hosted
 
-The dashboard SHALL serve Space Grotesk (weights 400, 500, 600, 700), Inter (weights 400, 500, 600), and JetBrains Mono (weights 400, 500, 600) as woff2 files from `/dashboard/assets/fonts/`. The dashboard SHALL NOT reference Google Fonts or any other font CDN at runtime. Font files SHALL be served with `Cache-Control: public, max-age=31536000, immutable`.
+The dashboard SHALL serve Space Grotesk (weights 400, 500, 600, 700, 800), Inter (weights 400, 500, 600), and JetBrains Mono (weights 400, 500, 600) as woff2 files from `/dashboard/assets/fonts/`. The dashboard SHALL NOT reference Google Fonts or any other font CDN at runtime. Font files SHALL be served with `Cache-Control: public, max-age=31536000, immutable`.
 
 #### Scenario: No external font requests
 
@@ -270,7 +112,7 @@ The dashboard SHALL render its primary navigation as a left-hand vertical sideba
 
 The collapse state SHALL be persisted in an HTTP cookie named `rbr-sb-collapsed` (value `1` collapsed, `0` or absent expanded), scoped to `Path=/dashboard`, with `SameSite=Lax`. The server SHALL read this cookie when rendering any dashboard page and SHALL set the root container's class accordingly so the SSR HTML matches the persisted state on first paint.
 
-The toggle SHALL work without JavaScript via a `POST /dashboard/_sidebar/toggle` form submission protected by the existing CSRF mechanism; a small inline script MAY progressively enhance the toggle to apply the collapsed class client-side (so the CSS width transition plays) while it `fetch()`es the same endpoint to persist the cookie.
+The toggle SHALL work without JavaScript via a `POST /dashboard/_sidebar/toggle` form submission protected by the existing CSRF mechanism; the same endpoint MAY be HTMX-enhanced for no-reload toggling when `HX-Request: true` is present.
 
 #### Scenario: Collapsed state survives reload
 
@@ -295,7 +137,7 @@ Every dashboard route SHALL render correctly and remain fully usable from a view
 - **≥1281 px (full desktop)**: full-width sidebar (~196 px), multi-column grids at their maximum density (`.grid-7` shows 7 columns, `.grid-6` shows 6, `.kv-grid` shows 6).
 - **≤1280 px (compact desktop)**: `.main` padding reduced; `.grid-7` reflows to 4 columns; `.grid-6` reflows to 3 columns.
 - **≤980 px (tablet / mobile drawer)**: sidebar collapses into a sticky `.mob-bar` at the top of the viewport with a `☰ MENU` toggle that opens a full-width drawer; multi-column grids stack to 2-3 columns; `.row-2` and `.row-3` collapse to single column; tables remain horizontally scrollable inside `.tbl-host`; `.filters` becomes one-per-row; `.action-bar` wraps with action hint on its own row.
-- **≤640 px (phone)**: `.grid-7` and `.grid-6` show 2 columns; `.kv-grid` shows 2 columns; `.health` stacks to 1 column; `.login-stage` keeps both panes stacked vertically (no longer hides the identity pane); `.view-head h1` reduces to ~1.8rem; table minimum width drops; `.stat-v` shrinks to ~2.4rem.
+- **≤640 px (phone)**: `.grid-7` and `.grid-6` show 2 columns; `.kv-grid` shows 2 columns; `.health` stacks to 1 column; `.login-stage` hides its left identity pane and shows the right-pane form full-width; `.view-head h1` reduces to ~1.7rem; table minimum width drops; `.stat-v` shrinks to ~2.4rem.
 
 At every viewport, the page SHALL NOT introduce horizontal page-level scrolling (only `.tbl-host` and code blocks may scroll horizontally). Interactive controls (buttons, pager items, sidebar items, form fields) SHALL have a touch target of at least 44 × 44 CSS pixels at viewports ≤980 px.
 
@@ -318,3 +160,12 @@ At every viewport, the page SHALL NOT introduce horizontal page-level scrolling 
 
 - **WHEN** a table wider than the viewport is rendered at ≤640 px
 - **THEN** the table SHALL be wrapped in `.tbl-host` and SHALL scroll horizontally within that container without expanding the page width
+
+### Requirement: Dashboard MUST surface numbered editorial section labels
+
+Each top-level dashboard route SHALL render a `viewHead` block containing a section number (`§ 01` through `§ NN`) computed deterministically from the route's position in the navigation order, alongside the section title and a meta strip. Section numbering is presentational and SHALL NOT appear in URLs or affect routing.
+
+#### Scenario: Section number reflects nav order
+
+- **WHEN** the operator opens `/dashboard/memories`
+- **THEN** the page SHALL display `§ 02 / 07` (or the equivalent denominator if the nav order changes) in the view header

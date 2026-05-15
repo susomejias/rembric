@@ -1,0 +1,40 @@
+/* TOKENS — plaintext one-shot banner */
+
+.token-shot {
+  border: 1px solid var(--warn);
+  background: var(--bg-elev);
+  padding: var(--s-5);
+  margin-bottom: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.token-shot .pre {
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--warn);
+  font-weight: 600;
+}
+.token-shot .val {
+  font-family: var(--f-mono);
+  font-size: 0.95rem;
+  color: var(--fg);
+  word-break: break-all;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--fg-faint);
+  background: var(--bg);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .token-shot .val {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+  }
+}

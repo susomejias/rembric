@@ -10,8 +10,10 @@ import type { MemoryService } from '../services/memory.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
+import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
-import { escape, formatTs, html, raw, scopePill, shell, shortId, statusPill } from './templates.js';
+import { renderPage } from './page-shell.js';
+import { escape, formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface MemoriesDeps {
@@ -19,8 +21,6 @@ export interface MemoriesDeps {
   memory: MemoryService;
   sessions: SessionsService;
 }
-
-const PAGE_SIZE = 25;
 
 function getSession(c: Context): ResolvedSession | null {
   return (c.get('session') as ResolvedSession | undefined) ?? null;
@@ -104,7 +104,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         ? (projectById.get(m.projectId)?.slug ?? shortId(m.projectId))
         : '—';
       return html`
-        <tr>
+        <tr data-href="/dashboard/memories/${m.id}">
           <td class="mono"><a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a></td>
           <td>${scopePill(m.scope)}</td>
           <td>${projectLabel}</td>
@@ -139,53 +139,85 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     ];
 
     const body = html`
-      <h1>Memories</h1>
-      <form class="filters" method="get">
-        <select name="project">
-          ${projectOptions}
-        </select>
-        <select name="status">
-          ${statusOptions}
-        </select>
-        <select name="type">
-          ${typeOptions}
-        </select>
-        <input type="search" name="q" value="${query}" placeholder="FTS keyword" />
-        <button type="submit">Filter</button>
-        <a class="small" href="/dashboard/memories">clear</a>
-      </form>
+      ${viewHead({
+        num: '02',
+        title: 'Rembric Memories.',
+        hl: 'Rembric',
+        meta: [
+          { k: 'TOTAL', v: String(rows.length) },
+          { k: 'SHOWING', v: `${visible.length} ROWS` },
+        ],
+      })}
 
-      <table>
-        <thead>
-          <tr>
-            <th>id</th>
-            <th>scope</th>
-            <th>project</th>
-            <th>type</th>
-            <th>content</th>
-            <th>status</th>
-            <th>created</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${visible.length === 0
-            ? html`<tr>
-                <td colspan="7" class="muted">No memories match this filter.</td>
-              </tr>`
-            : rowsHtml}
-        </tbody>
-      </table>
-
-      <div class="pager">
-        <span class="small">page ${page + 1}</span>
+      <div class="append-only-banner">
+        <span class="lab">APPEND-ONLY</span>
         <span>
-          ${page > 0 ? html`<a href="${urlWithPage(c.req.url, page - 1)}">← prev</a>` : raw('')}
-          ${hasMore ? html` <a href="${urlWithPage(c.req.url, page + 1)}">next →</a>` : raw('')}
+          Memories are <u><b>never deleted or edited</b></u
+          >. Lifecycle is <b>active</b> · supersede via new save · <b>archive</b>.
         </span>
       </div>
+
+      <form class="filters" method="get">
+        <span class="group">
+          <span class="k">SCOPE</span>
+          <select name="project">
+            ${projectOptions}
+          </select>
+        </span>
+        <span class="group">
+          <span class="k">STATUS</span>
+          <select name="status">
+            ${statusOptions}
+          </select>
+        </span>
+        <span class="group">
+          <span class="k">TYPE</span>
+          <select name="type">
+            ${typeOptions}
+          </select>
+        </span>
+        <span class="group search">
+          <span class="k">SEARCH</span>
+          <input type="search" name="q" value="${query}" placeholder="FTS5 keyword, tag, topic" />
+        </span>
+        <span class="acts">
+          <button class="btn primary" type="submit">FILTER</button>
+          <a class="clear" href="/dashboard/memories">CLEAR</a>
+        </span>
+      </form>
+
+      <div class="tbl-host">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>scope</th>
+              <th>project</th>
+              <th>type</th>
+              <th>content</th>
+              <th>status</th>
+              <th>created</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${visible.length === 0
+              ? html`<tr>
+                  <td colspan="7" class="muted">No memories match this filter.</td>
+                </tr>`
+              : rowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      ${pager({
+        page,
+        hasMore,
+        pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+        totalLabel: `${visible.length} ROWS`,
+      })}
     `;
 
-    return c.html(shell(body, { title: 'Memories', activeNav: 'memories' }));
+    return c.html(renderPage(c, deps.sessions, body, { title: 'Memories', activeNav: 'memories' }));
   });
 
   app.get('/:id', (c) => {
@@ -196,7 +228,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const row = deps.memory.unsafeGetById(id);
     if (!row) {
       return c.html(
-        shell(html`<p class="flash error">Memory not found.</p>`, {
+        renderPage(c, deps.sessions, html`<p class="flash error">Memory not found.</p>`, {
           title: 'Memory',
           activeNav: 'memories',
         }),
@@ -224,7 +256,14 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const archiveButton =
       row.status === 'active'
         ? html`
-            <form action="/dashboard/memories/${row.id}/archive" method="post" class="inline">
+            <form
+              action="/dashboard/memories/${row.id}/archive"
+              method="post"
+              class="inline"
+              data-confirm="Archive this memory? It will stop appearing in active recall. You can re-save the topic later to bring it back."
+              data-confirm-label="ARCHIVE"
+              data-confirm-tone="warn"
+            >
               ${csrfInput(session.session, deps.sessions, 'memory.archive')}
               <button class="warn" type="submit">Archive</button>
             </form>
@@ -236,30 +275,32 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         ? raw('')
         : html`
             <h2>Predecessors (${predecessors.length})</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>status</th>
-                  <th>content</th>
-                  <th>created</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${predecessors.map(
-                  (p) => html`
-                    <tr>
-                      <td class="mono">
-                        <a href="/dashboard/memories/${p.id}">${shortId(p.id)}</a>
-                      </td>
-                      <td>${statusPill(p.status)}</td>
-                      <td>${truncate(p.content, 120)}</td>
-                      <td class="muted">${formatTs(p.createdAt)}</td>
-                    </tr>
-                  `,
-                )}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>status</th>
+                    <th>content</th>
+                    <th>created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${predecessors.map(
+                    (p) => html`
+                      <tr data-href="/dashboard/memories/${p.id}">
+                        <td class="mono">
+                          <a href="/dashboard/memories/${p.id}">${shortId(p.id)}</a>
+                        </td>
+                        <td>${statusPill(p.status)}</td>
+                        <td>${truncate(p.content, 120)}</td>
+                        <td class="muted">${formatTs(p.createdAt)}</td>
+                      </tr>
+                    `,
+                  )}
+                </tbody>
+              </table>
+            </div>
           `;
 
     const tagsHtml =
@@ -268,7 +309,16 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         : row.tags.map((t) => raw(`<span class="pill">${escape(t)}</span> `));
 
     const body = html`
-      <h1>Memory <code>${shortId(row.id)}</code></h1>
+      ${viewHead({
+        num: '02',
+        title: `Rembric Memory ${shortId(row.id)}.`,
+        hl: 'Rembric',
+        meta: [
+          { k: 'STATUS', v: row.status.toUpperCase() },
+          { k: 'SCOPE', v: row.scope.toUpperCase() },
+        ],
+      })}
+      ${backLink({ href: '/dashboard/memories', label: 'BACK TO MEMORIES' })}
       <div class="stat-grid">
         <div class="stat-card">
           <div class="label">Status</div>
@@ -310,7 +360,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       <h2>Actions</h2>
       <p>${archiveButton}</p>
     `;
-    return c.html(shell(body, { title: `Memory ${shortId(row.id)}`, activeNav: 'memories' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: `Memory ${shortId(row.id)}`,
+        activeNav: 'memories',
+      }),
+    );
   });
 
   app.post('/:id/archive', async (c) => {
@@ -331,7 +386,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     } catch (err) {
       if (err instanceof DomainError) {
         return c.html(
-          shell(html`<p class="flash error">${err.message}</p>`, {
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
             title: 'Memory',
             activeNav: 'memories',
           }),
@@ -366,10 +421,4 @@ function clientSideFilter(
     return m.scope === 'project' && m.projectId === p?.id;
   }
   return true;
-}
-
-function urlWithPage(currentUrl: string, page: number): string {
-  const u = new URL(currentUrl);
-  u.searchParams.set('page', String(page));
-  return u.pathname + u.search;
 }

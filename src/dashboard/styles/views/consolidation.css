@@ -1,0 +1,45 @@
+/* CONSOLIDATION — per-op rows with reasoning + undo */
+
+.ops {
+  border: 1px solid var(--fg-faint);
+}
+.ops-row {
+  border-bottom: 1px solid var(--fg-faint);
+  padding: var(--s-4) var(--s-5);
+  display: grid;
+  grid-template-columns: 100px 140px 1fr 200px;
+  gap: var(--s-4);
+  align-items: flex-start;
+}
+.ops-row:last-child { border-bottom: 0; }
+.ops-row .reasoning {
+  font-size: 0.85rem;
+  color: var(--fg);
+  line-height: 1.45;
+}
+.ops-row .reasoning .label {
+  display: block;
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.ops-row.is-reverted { opacity: 0.55; }
+.ops-row .ids {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+}
+.ops-row .ids b { color: var(--fg); }
+
+@media (max-width: 980px) {
+  .ops-row {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+}

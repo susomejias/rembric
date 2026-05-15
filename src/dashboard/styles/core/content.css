@@ -1,0 +1,408 @@
+/* ═══════════════════════════════════════════════════════════════════
+   CONTENT — element-level brutalist defaults inside `.main`.
+   Authenticated dashboard pages emit raw HTML (h1/p/input/button/table)
+   straight from the route handlers; this layer makes those bare
+   elements look right without each handler having to opt in to atoms.
+
+   Login (no `.main` wrapper) is intentionally excluded — its layout
+   is fully class-driven by `views/login.css`.
+   ─────────────────────────────────────────────────────────────────── */
+
+/* headings — scoped to direct children of .main so they don't override
+   `.view-head h1` (the brutalist hero) inside a viewHead wrapper. */
+.main > h1 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 2.4rem;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin-bottom: var(--s-5);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--fg-faint);
+  text-transform: uppercase;
+}
+
+.main h2 {
+  font-family: var(--f-mono);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg);
+  margin-top: var(--s-6);
+  margin-bottom: var(--s-4);
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--fg-faint);
+}
+
+.main h3 {
+  font-family: var(--f-mono);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-dim);
+  margin: var(--s-5) 0 var(--s-3);
+}
+
+/* paragraphs + small text */
+.main p {
+  margin-bottom: var(--s-4);
+  color: var(--fg);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.main p.small,
+.main .small {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+}
+.main .muted,
+.main td.muted {
+  color: var(--fg-dim);
+}
+
+/* inline + block code */
+.main code {
+  font-family: var(--f-mono);
+  font-size: 0.85em;
+  color: var(--lime);
+  background: var(--bg-elev);
+  padding: 1px 6px;
+  border: 1px solid var(--fg-faint);
+}
+.main pre {
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-4);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: var(--s-4);
+}
+.main pre code {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+/* form labels (legacy form.stack uses `<label>One thing <input/></label>`) */
+.main label {
+  display: grid;
+  gap: var(--s-2);
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+}
+
+/* bare inputs / selects / textareas */
+.main input[type='text'],
+.main input[type='password'],
+.main input[type='search'],
+.main input[type='email'],
+.main input[type='url'],
+.main input[type='number'],
+.main input:not([type]),
+.main select,
+.main textarea {
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  color: var(--fg);
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  padding: 10px 12px;
+  min-height: 44px;
+  caret-color: var(--lime);
+}
+.main input::placeholder,
+.main select::placeholder,
+.main textarea::placeholder {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+}
+.main input:focus,
+.main select:focus,
+.main textarea:focus {
+  border-color: var(--lime);
+  outline: none;
+}
+
+.main select {
+  appearance: none;
+  padding-right: 32px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%),
+    linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 18px,
+    calc(100% - 12px) 18px;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* bare buttons (route handlers use <button class="primary|warn|danger">) */
+.main button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 10px 16px;
+  min-height: 44px;
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  border: 1px solid var(--fg-faint);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.main button:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+.main button[disabled],
+.main button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.main button.primary {
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-color: var(--lime);
+}
+.main button.primary:hover {
+  background: transparent;
+  color: var(--lime);
+}
+.main button.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.main button.warn:hover {
+  background: var(--warn);
+  color: var(--lime-ink);
+}
+.main button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.main button.danger:hover {
+  background: var(--danger);
+  color: var(--lime-ink);
+}
+.main button.subtle {
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+.main button.subtle:hover {
+  color: var(--lime);
+  border-color: transparent;
+}
+
+/* row hover slightly stronger so clickable rows read as such */
+.main tbody tr:hover {
+  background: #181a10;
+}
+.main tbody tr[data-href] {
+  cursor: pointer;
+}
+/* links inside tables render in lime so the ID column feels clickable */
+.main table a {
+  color: var(--lime);
+}
+.main table a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* in-row action buttons (and the matching link-styled buttons) shrink so
+   they don't dominate. Applies to <button> AND <a class="btn"> inside any
+   table cell or .actions container. Inputs in the same cells match the
+   compact height so rename/inline forms line up cleanly. */
+.main td button,
+.main td .btn,
+.main .actions button,
+.main .actions .btn {
+  padding: 5px 10px;
+  min-height: 28px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+.main td input[type='text'],
+.main td input[type='password'],
+.main td input[type='search'],
+.main td input:not([type]),
+.main td select {
+  padding: 4px 10px;
+  min-height: 28px;
+  font-size: 0.72rem;
+}
+
+/* bare tables — same look as .tbl atom. Wrap tables in `.tbl-host` for
+   horizontal scroll on narrow viewports. */
+.main table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  border: 1px solid var(--fg-faint);
+  margin-bottom: var(--s-5);
+}
+.main .tbl-host {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: var(--s-5);
+}
+.main .tbl-host > table {
+  min-width: 720px;
+  margin-bottom: 0;
+}
+@media (max-width: 640px) {
+  .main .tbl-host > table { min-width: 580px; }
+}
+.main thead th {
+  text-align: left;
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--fg-faint);
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg);
+  white-space: nowrap;
+}
+.main thead th.right {
+  text-align: right;
+}
+.main tbody td {
+  border-bottom: 1px solid var(--fg-faint);
+  padding: var(--s-3) var(--s-4);
+  vertical-align: middle;
+}
+.main tbody tr:last-child td {
+  border-bottom: 0;
+}
+.main tbody tr:hover {
+  background: var(--bg-row-hover);
+}
+.main td.mono,
+.main td.right {
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+}
+.main td.right,
+.main th.right {
+  text-align: right;
+}
+
+/* `.filters` (the brutalist compact bar) is styled in patterns.css;
+   no overrides here. */
+
+/* legacy stat-grid + stat-card (used by home route's pre-redesign markup
+   and a couple of detail pages) */
+.main .stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0;
+  border: 1px solid var(--fg-faint);
+  margin-bottom: var(--s-5);
+}
+.main .stat-grid > .stat-card {
+  background: var(--bg-elev);
+  border: 0;
+  border-right: 1px solid var(--fg-faint);
+  padding: var(--s-4) var(--s-5);
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.main .stat-grid > .stat-card:last-child {
+  border-right: 0;
+}
+.main .stat-card .label {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-dim);
+}
+.main .stat-card .value {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 1.8rem;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+}
+
+/* legacy `<details>` collapsible (some routes use it) */
+.main details {
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-3);
+}
+.main details summary {
+  cursor: pointer;
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* legacy `<form class="stack">` used by token-create / project-create */
+.main form.stack {
+  display: grid;
+  gap: var(--s-3);
+  max-width: 480px;
+}
+.main form.inline {
+  display: inline;
+}
+
+/* legacy `.one-shot` plaintext banner (tokens) — brutalist look */
+.main .one-shot {
+  border: 1px solid var(--warn);
+  background: var(--bg-elev);
+  padding: var(--s-4) var(--s-5);
+  margin-bottom: var(--s-5);
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  word-break: break-all;
+  color: var(--fg);
+}
+
+/* legacy `.pager` (already styled by patterns.css; just ensure pager link
+   contents inherit the right body text size) */
+.main .pager .small {
+  font-size: 0.7rem;
+}
+
+/* phone tweaks: tighten paddings + headings */
+@media (max-width: 640px) {
+  .main > h1 {
+    font-size: 1.8rem;
+    padding-bottom: var(--s-3);
+    margin-bottom: var(--s-4);
+  }
+  .main h2 {
+    margin-top: var(--s-5);
+  }
+}

@@ -6,8 +6,10 @@ import type { Db } from '../db/client.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import type { SessionsService } from '../services/sessions.js';
 
+import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
-import { formatTs, html, raw, shell, shortId } from './templates.js';
+import { renderPage } from './page-shell.js';
+import { formatTs, html, raw, shortId } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface ConsolidationDeps {
@@ -26,12 +28,19 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const runs = deps.db
+    const url = new URL(c.req.url);
+    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const offset = page * PAGE_SIZE;
+
+    const runsRaw = deps.db
       .select()
       .from(consolidationRuns)
       .orderBy(desc(consolidationRuns.startedAt))
-      .limit(50)
+      .limit(PAGE_SIZE + 1)
+      .offset(offset)
       .all();
+    const hasMore = runsRaw.length > PAGE_SIZE;
+    const runs = runsRaw.slice(0, PAGE_SIZE);
 
     const opCountByRun = new Map<string, { total: number; reverted: number }>();
     for (const run of runs) {
@@ -62,7 +71,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
               : raw(`<span class="pill active">${counts.total} ops</span>`);
 
       return html`
-        <tr>
+        <tr data-href="/dashboard/consolidation/${r.id}">
           <td class="mono"><a href="/dashboard/consolidation/${r.id}">${shortId(r.id)}</a></td>
           <td class="muted">${formatTs(r.startedAt)}</td>
           <td class="muted">${formatTs(r.finishedAt)}</td>
@@ -74,31 +83,48 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     });
 
     const body = html`
-      <h1>Consolidation runs</h1>
+      ${viewHead({
+        num: '05',
+        title: 'Rembric Consolidation.',
+        hl: 'Rembric',
+        meta: [{ k: 'RUNS', v: String(runs.length) }],
+      })}
       ${runs.length === 0
         ? html`<p class="muted">
             No runs yet. The cron will fire at <code>CONSOLIDATION_CRON</code>; trigger one manually
             with <code>rembric consolidation run-now</code> once that command lands.
           </p>`
         : html`
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>started</th>
-                  <th>finished</th>
-                  <th>scope</th>
-                  <th>model</th>
-                  <th>status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>started</th>
+                    <th>finished</th>
+                    <th>scope</th>
+                    <th>model</th>
+                    <th>status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows}
+                </tbody>
+              </table>
+            </div>
           `}
+      ${runs.length > 0 || page > 0
+        ? pager({
+            page,
+            hasMore,
+            pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+            totalLabel: `${runs.length} ROWS`,
+          })
+        : raw('')}
     `;
-    return c.html(shell(body, { title: 'Consolidation', activeNav: 'consolidation' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, { title: 'Consolidation', activeNav: 'consolidation' }),
+    );
   });
 
   app.get('/:id', (c) => {
@@ -109,7 +135,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const run = deps.db.select().from(consolidationRuns).where(eq(consolidationRuns.id, id)).get();
     if (!run) {
       return c.html(
-        shell(html`<p class="flash error">Run not found.</p>`, {
+        renderPage(c, deps.sessions, html`<p class="flash error">Run not found.</p>`, {
           title: 'Consolidation',
           activeNav: 'consolidation',
         }),
@@ -129,7 +155,14 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       const undoForm = isReverted
         ? raw('<span class="muted small">reverted</span>')
         : html`
-            <form action="/dashboard/consolidation/op/${op.id}/undo" method="post" class="inline">
+            <form
+              action="/dashboard/consolidation/op/${op.id}/undo"
+              method="post"
+              class="inline"
+              data-confirm="Revert this consolidation op? Affected memories will return to their pre-op status. This is journaled and itself reversible."
+              data-confirm-label="UNDO OP"
+              data-confirm-tone="warn"
+            >
               ${csrfInput(session.session, deps.sessions, 'op.undo')}
               <button class="warn" type="submit">Undo this op</button>
             </form>
@@ -158,7 +191,14 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const hasAnyActiveOps = ops.some((o) => o.revertedAt === null);
     const undoRunForm = hasAnyActiveOps
       ? html`
-          <form action="/dashboard/consolidation/${run.id}/undo" method="post" class="inline">
+          <form
+            action="/dashboard/consolidation/${run.id}/undo"
+            method="post"
+            class="inline"
+            data-confirm="Revert every op in this run? All affected memories will return to their pre-run status."
+            data-confirm-label="UNDO ENTIRE RUN"
+            data-confirm-tone="danger"
+          >
             ${csrfInput(session.session, deps.sessions, 'run.undo')}
             <button class="danger" type="submit">Undo entire run</button>
           </form>
@@ -166,7 +206,13 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       : raw('<span class="muted small">all ops reverted</span>');
 
     const body = html`
-      <h1>Run <code>${shortId(run.id)}</code></h1>
+      ${viewHead({
+        num: '05',
+        title: `Rembric Run ${shortId(run.id)}.`,
+        hl: 'Rembric',
+        meta: [{ k: 'OPS', v: String(ops.length) }],
+      })}
+      ${backLink({ href: '/dashboard/consolidation', label: 'BACK TO CONSOLIDATION' })}
       <div class="stat-grid">
         <div class="stat-card">
           <div class="label">Started</div>
@@ -197,28 +243,35 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       ${ops.length === 0
         ? html`<p class="muted">No operations were recorded for this run.</p>`
         : html`
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>type</th>
-                  <th>affected</th>
-                  <th>created</th>
-                  <th>reasoning</th>
-                  <th>applied</th>
-                  <th>action</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${opsHtml}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>type</th>
+                    <th>affected</th>
+                    <th>created</th>
+                    <th>reasoning</th>
+                    <th>applied</th>
+                    <th>action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${opsHtml}
+                </tbody>
+              </table>
+            </div>
           `}
 
       <h2>Run actions</h2>
       <p>${undoRunForm}</p>
     `;
-    return c.html(shell(body, { title: `Run ${shortId(run.id)}`, activeNav: 'consolidation' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: `Run ${shortId(run.id)}`,
+        activeNav: 'consolidation',
+      }),
+    );
   });
 
   app.post('/:id/undo', async (c) => {
@@ -232,7 +285,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.html(
-        shell(html`<p class="flash error">${message}</p>`, {
+        renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
           title: 'Consolidation',
           activeNav: 'consolidation',
         }),
@@ -254,7 +307,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.html(
-        shell(html`<p class="flash error">${message}</p>`, {
+        renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
           title: 'Consolidation',
           activeNav: 'consolidation',
         }),

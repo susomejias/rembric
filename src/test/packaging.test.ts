@@ -84,7 +84,12 @@ describe('npm pack tarball shape', () => {
     const files = loadPackaged();
     expect(files).toContain('dist/db/migrations/0000_initial_tables.sql');
     expect(files).toContain('dist/dashboard/public/assets/htmx.min.js');
-    expect(files).toContain('dist/dashboard/public/assets/pico.min.css');
+    // CSS now comes from content-hashed bundles emitted by build-css.mjs.
+    const cssBundles = files.filter((f) =>
+      /^dist\/dashboard\/public\/assets\/styles\/core\.[0-9a-f]+\.css$/.test(f),
+    );
+    expect(cssBundles.length).toBeGreaterThanOrEqual(1);
+    expect(files).toContain('dist/dashboard/public/assets/styles/manifest.json');
   });
 
   it('package.json `bin` points at a file that the tarball actually contains', () => {

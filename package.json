@@ -37,7 +37,8 @@
   ],
   "scripts": {
     "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
-    "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && pnpm run build:css",
+    "build:css": "node scripts/build-css.mjs",
     "dev": "tsc -p tsconfig.build.json --watch",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
@@ -77,6 +78,7 @@
     "eslint-plugin-import": "^2.31.0",
     "fast-check": "^3.22.0",
     "husky": "^9.1.0",
+    "lightningcss": "^1.32.0",
     "lint-staged": "^15.2.0",
     "prettier": "^3.3.0",
     "typescript": "^5.6.0",

@@ -1,0 +1,56 @@
+/* MEMORIES — list/detail view extensions */
+
+.replaces-strip {
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+.replaces-strip b {
+  color: var(--fg);
+}
+
+/* Append-only fact banner shown above the filters. Lime border + lime
+   bullet + thin underline accent on the key phrase. */
+.append-only-banner {
+  border: 1px solid var(--lime);
+  padding: var(--s-4) var(--s-5);
+  margin-bottom: var(--s-5);
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+.append-only-banner .lab {
+  color: var(--lime);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+}
+.append-only-banner .lab::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--lime);
+  display: inline-block;
+}
+.append-only-banner u {
+  text-decoration-color: var(--lime);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 2px;
+}
+.append-only-banner b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+

@@ -55,12 +55,20 @@ export function createAssetsMiddleware(): MiddlewareHandler {
     const ext = extname(target).toLowerCase();
     const mime = MIME_TYPES[ext] ?? 'application/octet-stream';
 
-    // Long-lived but revalidate-able: assets are vendored, name-stable, and
-    // small enough that we don't bother with content hashing yet.
     c.header('Content-Type', mime);
-    c.header('Cache-Control', 'public, max-age=3600');
+    c.header('Cache-Control', cacheControlFor(relRaw));
     return c.body(body);
   };
+}
+
+// Files emitted by `scripts/build-css.mjs` carry an 8-hex content hash
+// between the basename and the extension (e.g. `core.5b370f1b.css`).
+// They are safe to cache forever — a CSS edit produces a different hash
+// and therefore a different URL.
+const HASHED_RE = /\.[0-9a-f]{8}\.(?:css|js|woff2?)$/;
+
+function cacheControlFor(relPath: string): string {
+  return HASHED_RE.test(relPath) ? 'public, max-age=31536000, immutable' : 'public, max-age=3600';
 }
 
 /** Exposed so tests can reach into the resolved root. */

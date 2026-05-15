@@ -5,8 +5,10 @@ import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 import { type TokensService, type TokenScope } from '../services/tokens.js';
 
+import { viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
-import { escape, formatTs, html, raw, type SafeHtml, shell } from './templates.js';
+import { renderPage } from './page-shell.js';
+import { escape, formatTs, html, raw, type SafeHtml } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface TokensDeps {
@@ -49,9 +51,16 @@ export function createTokensRouter(deps: TokensDeps): Hono {
             ${t.revokedAt
               ? raw('<span class="muted small">—</span>')
               : html`
-                  <form action="/dashboard/tokens/${t.name}/revoke" method="post" class="inline">
+                  <form
+                    action="/dashboard/tokens/${t.name}/revoke"
+                    method="post"
+                    class="inline"
+                    data-confirm='Revoke token "${t.name}"? This is IRREVERSIBLE. Any agent using this token will lose access immediately.'
+                    data-confirm-label="REVOKE TOKEN"
+                    data-confirm-tone="danger"
+                  >
                     ${csrfInput(session.session, deps.sessions, 'token.revoke')}
-                    <button class="warn" type="submit">Revoke</button>
+                    <button class="danger" type="submit">Revoke</button>
                   </form>
                 `}
           </td>
@@ -76,28 +85,35 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       : raw('');
 
     const body = html`
-      <h1>Tokens</h1>
+      ${viewHead({
+        num: '07',
+        title: 'Rembric Tokens.',
+        hl: 'Rembric',
+        meta: [{ k: 'TOTAL', v: String(tokens.length) }],
+      })}
       ${oneShot}
 
       <h2>Existing</h2>
       ${tokens.length === 0
         ? html`<p class="muted">No tokens yet.</p>`
         : html`
-            <table>
-              <thead>
-                <tr>
-                  <th>name</th>
-                  <th>scope</th>
-                  <th>created</th>
-                  <th>expires</th>
-                  <th>state</th>
-                  <th>actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>name</th>
+                    <th>scope</th>
+                    <th>created</th>
+                    <th>expires</th>
+                    <th>state</th>
+                    <th>actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows}
+                </tbody>
+              </table>
+            </div>
           `}
 
       <h2>Create a new token</h2>
@@ -131,7 +147,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
         <button class="primary" type="submit">Create</button>
       </form>
     `;
-    return c.html(shell(body, { title: 'Tokens', activeNav: 'tokens' }));
+    return c.html(renderPage(c, deps.sessions, body, { title: 'Tokens', activeNav: 'tokens' }));
   });
 
   app.post('/', async (c) => {
@@ -145,7 +161,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const scopeOverride = readStringField(form, 'scope').trim();
     const expiresInput = readStringField(form, 'expires').trim();
 
-    if (!name) return errorResponse(c, 'Name is required.');
+    if (!name) return errorResponse(c, deps.sessions, 'Name is required.');
 
     let projectSlug: string | null = null;
     if (projectInput) {
@@ -158,7 +174,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
         projectSlug = p.slug;
       } catch (err) {
         if (err instanceof DomainError) {
-          return errorResponse(c, err.message);
+          return errorResponse(c, deps.sessions, err.message);
         }
         throw err;
       }
@@ -167,7 +183,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     let scope: TokenScope;
     if (scopeOverride) {
       if (scopeOverride !== '*' && scopeOverride !== 'read:*') {
-        return errorResponse(c, "Override scope must be '*' or 'read:*'.");
+        return errorResponse(c, deps.sessions, "Override scope must be '*' or 'read:*'.");
       }
       scope = scopeOverride;
     } else {
@@ -178,7 +194,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     if (expiresInput) {
       const parsed = new Date(expiresInput);
       if (Number.isNaN(parsed.getTime())) {
-        return errorResponse(c, `Invalid expires timestamp '${expiresInput}'.`);
+        return errorResponse(c, deps.sessions, `Invalid expires timestamp '${expiresInput}'.`);
       }
       expiresAt = parsed;
     }
@@ -195,7 +211,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       return c.redirect(url.pathname + url.search);
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, err.message);
+        return errorResponse(c, deps.sessions, err.message);
       }
       throw err;
     }
@@ -210,7 +226,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       deps.tokens.revoke(c.req.param('name'));
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, err.message);
+        return errorResponse(c, deps.sessions, err.message);
       }
       throw err;
     }
@@ -231,9 +247,9 @@ function scopeBadge(scope: TokenScope): SafeHtml {
   return raw(`<code>${escape(scope)}</code>`);
 }
 
-function errorResponse(c: Context, message: string): Response {
+function errorResponse(c: Context, sessions: SessionsService, message: string): Response {
   return c.html(
-    shell(html`<p class="flash error">${message}</p>`, {
+    renderPage(c, sessions, html`<p class="flash error">${message}</p>`, {
       title: 'Tokens',
       activeNav: 'tokens',
     }),

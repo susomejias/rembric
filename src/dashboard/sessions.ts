@@ -10,8 +10,10 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';
 
+import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
-import { formatTs, html, raw, scopePill, shell, shortId, statusPill } from './templates.js';
+import { renderPage } from './page-shell.js';
+import { formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface SessionsDeps {
@@ -35,6 +37,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const justDeleted = url.searchParams.get('deleted');
     const justRestored = url.searchParams.get('restored');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
+    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const offset = page * PAGE_SIZE;
 
     const baseQuery = () =>
       deps.db
@@ -54,12 +58,17 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
         .leftJoin(projects, eq(projects.id, agentSessions.projectId))
         .orderBy(desc(agentSessions.startedAt))
-        .limit(50);
+        .limit(PAGE_SIZE + 1)
+        .offset(offset);
 
-    const visibleRows = baseQuery().where(isNull(agentSessions.deletedAt)).all();
-    const deletedRows = includeDeleted
+    const visibleRowsRaw = baseQuery().where(isNull(agentSessions.deletedAt)).all();
+    const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
+    const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
+    const deletedRowsRaw = includeDeleted
       ? baseQuery().where(isNotNull(agentSessions.deletedAt)).all()
       : [];
+    const deletedHasMore = deletedRowsRaw.length > PAGE_SIZE;
+    const deletedRows = deletedRowsRaw.slice(0, PAGE_SIZE);
 
     // Per-session memory counts in one query.
     const countRows = deps.db
@@ -76,7 +85,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     void memory;
 
     const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => html`
-      <tr>
+      <tr data-href="/dashboard/sessions/${r.id}">
         <td class="mono">
           <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
         </td>
@@ -90,7 +99,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         <td class="muted">${formatTs(r.endedAt)}</td>
         <td>${statusPill(r.status)}</td>
         <td class="right">${countRows[r.id] ?? 0}</td>
-        <td>
+        <td class="actions">
           ${opts.deleted
             ? html`
                 <form action="/dashboard/sessions/${r.id}/undelete" method="post" class="inline">
@@ -99,9 +108,16 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                 </form>
               `
             : html`
-                <form action="/dashboard/sessions/${r.id}/delete" method="post" class="inline">
+                <form
+                  action="/dashboard/sessions/${r.id}/delete"
+                  method="post"
+                  class="inline"
+                  data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
+                  data-confirm-label="DELETE SESSION"
+                  data-confirm-tone="danger"
+                >
                   ${csrfInput(session.session, deps.sessions, 'session.delete')}
-                  <button class="warn" type="submit">Delete</button>
+                  <button class="danger" type="submit">Delete</button>
                 </form>
               `}
         </td>
@@ -119,7 +135,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         : raw('');
 
     const body = html`
-      <h1>Sessions</h1>
+      ${viewHead({
+        num: '03',
+        title: 'Rembric Sessions.',
+        hl: 'Rembric',
+        meta: [{ k: 'TOTAL', v: String(visibleRows.length) }],
+      })}
       ${flash}
       ${includeDeleted
         ? raw(
@@ -128,54 +149,66 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         : raw(
             '<p class="small muted"><a href="/dashboard/sessions?include_deleted=1">Show deleted</a></p>',
           )}
-      <h2>Active (${visibleRows.length})</h2>
+      <h2>Sessions (${visibleRows.length})</h2>
       ${visibleRows.length === 0
         ? html`<p class="muted">No agent sessions yet.</p>`
         : html`
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>agent</th>
-                  <th>project</th>
-                  <th>token</th>
-                  <th>started</th>
-                  <th>ended</th>
-                  <th>status</th>
-                  <th>memories</th>
-                  <th>actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${visibleRows.map((r) => renderRow(r, { deleted: false }))}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>agent</th>
+                    <th>project</th>
+                    <th>token</th>
+                    <th>started</th>
+                    <th>ended</th>
+                    <th>status</th>
+                    <th>memories</th>
+                    <th>actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${visibleRows.map((r) => renderRow(r, { deleted: false }))}
+                </tbody>
+              </table>
+            </div>
           `}
       ${includeDeleted && deletedRows.length > 0
         ? html`
             <h2>Deleted (${deletedRows.length})</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>agent</th>
-                  <th>project</th>
-                  <th>token</th>
-                  <th>started</th>
-                  <th>ended</th>
-                  <th>status</th>
-                  <th>memories</th>
-                  <th>actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${deletedRows.map((r) => renderRow(r, { deleted: true }))}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>agent</th>
+                    <th>project</th>
+                    <th>token</th>
+                    <th>started</th>
+                    <th>ended</th>
+                    <th>status</th>
+                    <th>memories</th>
+                    <th>actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${deletedRows.map((r) => renderRow(r, { deleted: true }))}
+                </tbody>
+              </table>
+            </div>
           `
         : raw('')}
+      ${visibleRows.length > 0 || page > 0
+        ? pager({
+            page,
+            hasMore: visibleHasMore || (includeDeleted && deletedHasMore),
+            pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+            totalLabel: `${visibleRows.length} ROWS`,
+          })
+        : raw('')}
     `;
-    return c.html(shell(body, { title: 'Sessions', activeNav: 'sessions' }));
+    return c.html(renderPage(c, deps.sessions, body, { title: 'Sessions', activeNav: 'sessions' }));
   });
 
   app.get('/:id', (c) => {
@@ -206,7 +239,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
     if (!row) {
       return c.html(
-        shell(html`<p class="flash error">Session not found.</p>`, {
+        renderPage(c, deps.sessions, html`<p class="flash error">Session not found.</p>`, {
           title: 'Session',
           activeNav: 'sessions',
         }),
@@ -229,14 +262,27 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           </form>
         `
       : html`
-          <form action="/dashboard/sessions/${row.id}/delete" method="post" class="inline">
+          <form
+            action="/dashboard/sessions/${row.id}/delete"
+            method="post"
+            class="inline"
+            data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
+            data-confirm-label="DELETE SESSION"
+            data-confirm-tone="danger"
+          >
             ${csrfInput(session.session, deps.sessions, 'session.delete')}
-            <button class="warn" type="submit">Delete</button>
+            <button class="danger" type="submit">Delete</button>
           </form>
         `;
 
     const body = html`
-      <h1>Session <code>${shortId(row.id)}</code></h1>
+      ${viewHead({
+        num: '03',
+        title: `Rembric Session ${shortId(row.id)}.`,
+        hl: 'Rembric',
+        meta: [{ k: 'STATUS', v: row.status.toUpperCase() }],
+      })}
+      ${backLink({ href: '/dashboard/sessions', label: 'BACK TO SESSIONS' })}
       ${row.deletedAt
         ? html`<p class="flash error">
             This session is soft-deleted (at ${formatTs(row.deletedAt)}). Memories that reference it
@@ -287,35 +333,42 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       ${memories.length === 0
         ? html`<p class="muted">No memories anchored to this session.</p>`
         : html`
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>type</th>
-                  <th>content</th>
-                  <th>status</th>
-                  <th>created</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${memories.map(
-                  (m) => html`
-                    <tr>
-                      <td class="mono">
-                        <a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a>
-                      </td>
-                      <td>${m.type}</td>
-                      <td>${truncate(m.content, 120)}</td>
-                      <td>${statusPill(m.status)}</td>
-                      <td class="muted">${formatTs(m.createdAt)}</td>
-                    </tr>
-                  `,
-                )}
-              </tbody>
-            </table>
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>type</th>
+                    <th>content</th>
+                    <th>status</th>
+                    <th>created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${memories.map(
+                    (m) => html`
+                      <tr data-href="/dashboard/memories/${m.id}">
+                        <td class="mono">
+                          <a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a>
+                        </td>
+                        <td>${m.type}</td>
+                        <td>${truncate(m.content, 120)}</td>
+                        <td>${statusPill(m.status)}</td>
+                        <td class="muted">${formatTs(m.createdAt)}</td>
+                      </tr>
+                    `,
+                  )}
+                </tbody>
+              </table>
+            </div>
           `}
     `;
-    return c.html(shell(body, { title: `Session ${shortId(row.id)}`, activeNav: 'sessions' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: `Session ${shortId(row.id)}`,
+        activeNav: 'sessions',
+      }),
+    );
   });
 
   app.post('/:id/delete', async (c) => {
@@ -329,7 +382,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     } catch (err) {
       if (err instanceof DomainError) {
         return c.html(
-          shell(html`<p class="flash error">${err.message}</p>`, {
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
             title: 'Sessions',
             activeNav: 'sessions',
           }),
@@ -352,7 +405,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     } catch (err) {
       if (err instanceof DomainError) {
         return c.html(
-          shell(html`<p class="flash error">${err.message}</p>`, {
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
             title: 'Sessions',
             activeNav: 'sessions',
           }),

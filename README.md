@@ -1,9 +1,27 @@
-# Rembric
+<h1 align="center">Rembric</h1>
 
-A self-hosted MCP memory server for AI agents. One npm package, one process,
-one SQLite file. Multi-client memory shared across Claude Code, Codex CLI,
-and any other MCP-capable tool. Background consolidation keeps the memory
-clean using a configurable LLM endpoint (local Ollama by default).
+<p align="center">
+  <b>Self-hosted memory layer for AI coding agents</b>
+</p>
+
+<p align="center">
+  <i>One npm package, one process, one SQLite file. Multi-client by construction, reversible by design.</i>
+</p>
+
+<p align="center">
+  <a href="#architecture">Architecture</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#hooking-up-claude-code-recommended">Claude Code</a> ·
+  <a href="#hooking-up-codex-cli">Codex CLI</a> ·
+  <a href="#hooking-up-other-mcp-clients">Other Clients</a> ·
+  <a href="#cli-operations">CLI</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
+
+---
+
+> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory layer beneath your agents. One brain, shared across every MCP-capable tool — Claude Code, Codex CLI, Cursor, and beyond.
 
 ## Architecture
 

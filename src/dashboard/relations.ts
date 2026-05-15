@@ -5,8 +5,10 @@ import type { Db } from '../db/client.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
+import { PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
-import { formatTs, html, raw, shell, shortId, statusPill } from './templates.js';
+import { renderPage } from './page-shell.js';
+import { formatTs, html, raw, shortId, statusPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface RelationsDeps {
@@ -18,7 +20,6 @@ function getSession(c: Context): ResolvedSession | null {
   return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
-const PAGE_SIZE = 50;
 const VALID_STATUSES = new Set(['pending', 'judged', 'orphaned']);
 
 export function createRelationsRouter(deps: RelationsDeps): Hono {
@@ -80,30 +81,38 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
 
     const filtersBar = html`
       <form class="filters" method="get">
-        <select name="status">
-          <option value="" ${statusFilter === '' ? 'selected' : ''}>all statuses</option>
-          <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>pending</option>
-          <option value="judged" ${statusFilter === 'judged' ? 'selected' : ''}>judged</option>
-          <option value="orphaned" ${statusFilter === 'orphaned' ? 'selected' : ''}>
-            orphaned
-          </option>
-        </select>
-        <select name="kind">
-          <option value="" ${kindFilter === '' ? 'selected' : ''}>all kinds</option>
-          ${[
-            'supersedes',
-            'conflicts_with',
-            'related',
-            'compatible',
-            'scoped',
-            'not_conflict',
-            'pending',
-          ].map((k) =>
-            raw(`<option value="${k}"${kindFilter === k ? ' selected' : ''}>${k}</option>`),
-          )}
-        </select>
-        <button type="submit">Filter</button>
-        <a class="small" href="/dashboard/relations">clear</a>
+        <span class="group">
+          <span class="k">STATUS</span>
+          <select name="status">
+            <option value="" ${statusFilter === '' ? 'selected' : ''}>all statuses</option>
+            <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>pending</option>
+            <option value="judged" ${statusFilter === 'judged' ? 'selected' : ''}>judged</option>
+            <option value="orphaned" ${statusFilter === 'orphaned' ? 'selected' : ''}>
+              orphaned
+            </option>
+          </select>
+        </span>
+        <span class="group">
+          <span class="k">KIND</span>
+          <select name="kind">
+            <option value="" ${kindFilter === '' ? 'selected' : ''}>all kinds</option>
+            ${[
+              'supersedes',
+              'conflicts_with',
+              'related',
+              'compatible',
+              'scoped',
+              'not_conflict',
+              'pending',
+            ].map((k) =>
+              raw(`<option value="${k}"${kindFilter === k ? ' selected' : ''}>${k}</option>`),
+            )}
+          </select>
+        </span>
+        <span class="acts">
+          <button class="btn primary" type="submit">FILTER</button>
+          <a class="clear" href="/dashboard/relations">CLEAR</a>
+        </span>
       </form>
     `;
 
@@ -120,6 +129,9 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
                       action="/dashboard/relations/${r.judgmentId}/orphan"
                       method="post"
                       class="inline"
+                      data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
+                      data-confirm-label="MARK ORPHANED"
+                      data-confirm-tone="danger"
                     >
                       ${csrfInput(session.session, deps.sessions, 'relation.orphan')}
                       <button class="warn" type="submit">Mark orphaned</button>
@@ -143,33 +155,41 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
           });
 
     const body = html`
-      <h1>Relations</h1>
+      ${viewHead({
+        num: '04',
+        title: 'Rembric Relations.',
+        hl: 'Rembric',
+        meta: [{ k: 'SHOWING', v: `${rows.length} ROWS` }],
+      })}
       ${filtersBar}
-      <table>
-        <thead>
-          <tr>
-            <th>id</th>
-            <th>status</th>
-            <th>relation</th>
-            <th>source → target</th>
-            <th>actor</th>
-            <th>created</th>
-            <th>actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableBody}
-        </tbody>
-      </table>
-      <div class="pager">
-        <span class="small">page ${page + 1}</span>
-        <span>
-          ${page > 0 ? html`<a href="?page=${page - 1}">← prev</a>` : raw('')}
-          ${hasMore ? html` <a href="?page=${page + 1}">next →</a>` : raw('')}
-        </span>
+      <div class="tbl-host">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>status</th>
+              <th>relation</th>
+              <th>source → target</th>
+              <th>actor</th>
+              <th>created</th>
+              <th>actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableBody}
+          </tbody>
+        </table>
       </div>
+      ${pager({
+        page,
+        hasMore,
+        pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+        totalLabel: `${visible.length} ROWS`,
+      })}
     `;
-    return c.html(shell(body, { title: 'Relations', activeNav: 'relations' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, { title: 'Relations', activeNav: 'relations' }),
+    );
   });
 
   app.post('/:judgmentId/orphan', async (c) => {
@@ -186,10 +206,15 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
       .run();
     if (result.changes === 0) {
       return c.html(
-        shell(html`<p class="flash error">Relation not found or already closed.</p>`, {
-          title: 'Relations',
-          activeNav: 'relations',
-        }),
+        renderPage(
+          c,
+          deps.sessions,
+          html`<p class="flash error">Relation not found or already closed.</p>`,
+          {
+            title: 'Relations',
+            activeNav: 'relations',
+          },
+        ),
         404,
       );
     }

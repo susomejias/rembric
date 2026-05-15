@@ -1,15 +1,20 @@
 /**
- * Minimal server-side rendering helpers for the dashboard.
+ * SSR helpers for the dashboard.
  *
- * `html` is a tagged template literal that HTML-escapes every interpolated
- * value by default. To inject pre-rendered HTML (typically the output of
- * another `html\`\`` call), use the marker objects it returns directly —
- * they pass through unescaped.
+ * `html` escapes every interpolated value by default. Use `raw` to opt
+ * out (for pre-rendered HTML produced by another `html` call).
  *
- * Why not use a templating library: this dashboard is small, server-side,
- * no client framework. A tagged template + a stable CSS rules block is
- * enough and has zero install / upgrade surface.
+ * The brutalist visual identity ships as compiled CSS bundles under
+ * `dist/dashboard/public/assets/styles/` — emitted by
+ * `scripts/build-css.mjs` from `src/dashboard/styles/`. `shell()` reads
+ * the build-time manifest to inject the right per-page `<link>` tags.
  */
+
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { renderMobileBar, type NavKey } from './components.js';
 
 export interface SafeHtml {
   readonly __html: string;
@@ -43,8 +48,6 @@ function renderValue(value: unknown): string {
   if (value instanceof Date) return escape(value.toISOString());
   if (isSafeHtml(value)) return value.__html;
   if (Array.isArray(value)) return value.map(renderValue).join('');
-  // Defensive fallback: never let an arbitrary object stringify to
-  // '[object Object]' inside HTML. JSON-stringify and escape instead.
   return escape(JSON.stringify(value));
 }
 
@@ -57,126 +60,41 @@ export function escape(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/* ─────────────────────────────────────────────────────────────────────── */
+/* ─── manifest (built-CSS lookup) ──────────────────────────────────── */
 
-const STYLE = `
-  :root {
-    color-scheme: light dark;
-    --fg: #1c1f23;
-    --muted: #6b7280;
-    --bg: #fafaf9;
-    --card: #ffffff;
-    --border: #e5e7eb;
-    --accent: #2563eb;
-    --warn: #c2410c;
-    --danger: #b91c1c;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --fg: #e5e7eb;
-      --muted: #9ca3af;
-      --bg: #0c0e12;
-      --card: #15181d;
-      --border: #2a2f37;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-    color: var(--fg);
-    background: var(--bg);
-    margin: 0;
-    line-height: 1.5;
-  }
-  header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: .75rem 1.25rem;
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-  }
-  header .brand { font-weight: 700; font-size: 1.05rem; }
-  header nav { display: flex; gap: 1rem; flex: 1; }
-  header nav a { color: var(--muted); text-decoration: none; padding: .25rem 0; }
-  header nav a.active, header nav a:hover { color: var(--fg); }
-  main { max-width: 1100px; margin: 1.25rem auto; padding: 0 1.25rem; }
-  h1 { margin: .25rem 0 1rem 0; font-size: 1.4rem; }
-  h2 { margin-top: 2rem; font-size: 1.1rem; }
-  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--border); font-size: .92rem; vertical-align: top; }
-  tr:last-child td { border-bottom: 0; }
-  th { background: var(--bg); font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
-  td.mono, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
-  td.muted, .muted { color: var(--muted); }
-  td.right, th.right { text-align: right; }
-  form.inline { display: inline; }
-  input, select, button, textarea {
-    font: inherit;
-    color: inherit;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: .4rem .65rem;
-  }
-  input[type=text], input[type=password], input[type=search], select { min-width: 12ch; }
-  button {
-    cursor: pointer;
-    background: var(--card);
-  }
-  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
-  button.danger  { background: var(--danger); color: white; border-color: var(--danger); }
-  button.warn    { background: var(--warn);   color: white; border-color: var(--warn); }
-  button.subtle  { color: var(--muted); }
-  .filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0 1rem; }
-  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
-  .pill { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .75rem; border: 1px solid var(--border); }
-  .pill.active     { color: #166534; background: #dcfce7; border-color: #bbf7d0; }
-  .pill.archived   { color: #6b7280; background: #f3f4f6; border-color: #e5e7eb; }
-  .pill.superseded { color: #92400e; background: #fef3c7; border-color: #fde68a; }
-  .pill.global     { color: #1e3a8a; background: #dbeafe; border-color: #bfdbfe; }
-  .pill.project    { color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }
-  .pill.scope-star { color: #b91c1c; background: #fee2e2; border-color: #fecaca; }
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
-  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: .8rem 1rem; }
-  .stat-card .label { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
-  .stat-card .value { font-size: 1.4rem; font-weight: 600; margin-top: .25rem; }
-  .flash { padding: .75rem 1rem; border-radius: 6px; margin-bottom: 1rem; border: 1px solid var(--border); }
-  .flash.error { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
-  .flash.success { color: #166534; background: #dcfce7; border-color: #bbf7d0; }
-  details { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: .5rem 1rem; margin-bottom: .75rem; }
-  details summary { cursor: pointer; font-weight: 500; }
-  pre { background: var(--bg); border: 1px solid var(--border); padding: .75rem; border-radius: 6px; overflow: auto; font-size: .82rem; }
-  form.stack { display: grid; gap: .65rem; max-width: 480px; }
-  label { display: grid; gap: .25rem; font-size: .9rem; }
-  .small { font-size: .82rem; color: var(--muted); }
-  .one-shot { border: 1px dashed var(--warn); padding: 1rem; border-radius: 6px; background: #fff7ed; color: #7c2d12; word-break: break-all; }
-  @media (prefers-color-scheme: dark) {
-    .one-shot { background: #1f1408; color: #fed7aa; }
-    .pill.active { color: #bbf7d0; background: #052e16; border-color: #14532d; }
-    .pill.archived { color: #d1d5db; background: #1f2937; border-color: #374151; }
-    .pill.superseded { color: #fde68a; background: #451a03; border-color: #78350f; }
-    .pill.global { color: #bfdbfe; background: #0c1a3a; border-color: #1e3a8a; }
-    .pill.project { color: #ddd6fe; background: #1e1245; border-color: #4c1d95; }
-    .pill.scope-star { color: #fecaca; background: #3a0d0d; border-color: #7f1d1d; }
-    .flash.error { background: #2a0a0a; color: #fecaca; }
-    .flash.success { background: #052e16; color: #bbf7d0; }
-    .one-shot { background: #1f1408; color: #fed7aa; }
-  }
-`;
-
-export interface ShellOptions {
-  title: string;
-  activeNav?:
-    | 'home'
-    | 'memories'
-    | 'sessions'
-    | 'relations'
-    | 'consolidation'
-    | 'projects'
-    | 'tokens';
-  flash?: { kind: 'error' | 'success'; text: string };
+interface CssManifest {
+  core: string | null;
+  views: Record<string, string>;
 }
+
+const EMPTY_MANIFEST: CssManifest = { core: null, views: {} };
+
+let cachedManifest: CssManifest | null = null;
+
+function manifestPath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, 'public/assets/styles/manifest.json');
+}
+
+function loadManifest(): CssManifest {
+  if (cachedManifest) return cachedManifest;
+  const p = manifestPath();
+  if (!existsSync(p)) {
+    cachedManifest = EMPTY_MANIFEST;
+    return cachedManifest;
+  }
+  try {
+    const text = readFileSync(p, 'utf8');
+    const parsed = JSON.parse(text) as CssManifest;
+    cachedManifest = parsed;
+    return parsed;
+  } catch {
+    cachedManifest = EMPTY_MANIFEST;
+    return cachedManifest;
+  }
+}
+
+/* ─── upgrader script (timestamps) ─────────────────────────────────── */
 
 const TS_UPGRADER = `
 (function(){
@@ -214,55 +132,303 @@ const TS_UPGRADER = `
 })();
 `;
 
-const NAV = [
-  { key: 'home', label: 'Home', href: '/dashboard' },
-  { key: 'memories', label: 'Memories', href: '/dashboard/memories' },
-  { key: 'sessions', label: 'Sessions', href: '/dashboard/sessions' },
-  { key: 'relations', label: 'Relations', href: '/dashboard/relations' },
-  { key: 'consolidation', label: 'Consolidation', href: '/dashboard/consolidation' },
-  { key: 'projects', label: 'Projects', href: '/dashboard/projects' },
-  { key: 'tokens', label: 'Tokens', href: '/dashboard/tokens' },
-] as const;
+// Desktop sidebar collapse with animation. The form normally POSTs to
+// /_sidebar/toggle and reloads the page; this enhancement toggles the
+// `.is-collapsed` class on `.app` instantly so the CSS width transition
+// plays, then persists the new state via background fetch.
+const SB_COLLAPSE = `
+(function(){
+  function bind(){
+    var form = document.querySelector('form[action="/dashboard/_sidebar/toggle"]');
+    var app = document.querySelector('.app');
+    if (!form || !app) return;
+    var sb = app.querySelector('.sb');
+    form.addEventListener('submit', function(e){
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+      e.preventDefault();
+      var nowCollapsed = !app.classList.contains('is-collapsed');
+      // Toggle on both .app (layout width) and .sb (label visibility)
+      // so the existing CSS rules fire together — toggling just one
+      // leaves overflowing labels.
+      app.classList.toggle('is-collapsed', nowCollapsed);
+      if (sb) sb.classList.toggle('is-collapsed', nowCollapsed);
+      var data = new FormData(form);
+      fetch(form.action, { method: 'POST', body: data, credentials: 'same-origin' }).catch(function(){});
+      var glyph = form.querySelector('.glyph');
+      var label = form.querySelector('.sb-collapse .label');
+      if (glyph) glyph.textContent = nowCollapsed ? '››' : '‹‹';
+      if (label) label.textContent = nowCollapsed ? 'EXPAND' : 'COLLAPSE';
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+})();
+`;
 
-export function shell(body: SafeHtml, opts: ShellOptions): string {
-  const nav = NAV.map(
-    (n) =>
-      `<a href="${n.href}" class="${opts.activeNav === n.key ? 'active' : ''}">${escape(n.label)}</a>`,
-  ).join('');
-  const flash = opts.flash
-    ? `<div class="flash ${opts.flash.kind === 'error' ? 'error' : 'success'}">${escape(opts.flash.text)}</div>`
-    : '';
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escape(opts.title)} · Rembric</title>
-  <style>${STYLE}</style>
-  <script>${TS_UPGRADER}</script>
-</head>
-<body>
-  <header>
-    <span class="brand">Rembric</span>
-    <nav>${nav}</nav>
-    <form action="/dashboard/logout" method="post" class="inline">
-      <button type="submit" class="subtle">Logout</button>
-    </form>
-  </header>
-  <main>
-    ${flash}
-    ${body.__html}
-  </main>
-</body>
-</html>`;
+const MOB_TOGGLE = `
+(function(){
+  function bind(){
+    var btn = document.querySelector('.mob-toggle');
+    var sb = document.querySelector('.app > .sb');
+    var closeBtn = document.querySelector('.sb-mob-close');
+    if (!btn || !sb) return;
+    function setOpen(open){
+      sb.classList.toggle('is-open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.textContent = open ? '✕ CLOSE' : '☰ MENU';
+    }
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      setOpen(!sb.classList.contains('is-open'));
+    });
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function(e){
+        e.preventDefault();
+        setOpen(false);
+      });
+    }
+    // Close when clicking a nav item that doesn't navigate elsewhere is
+    // handled by the page reload itself; nav items inside the drawer
+    // already navigate, so no extra handler is needed there.
+    // Allow Escape to close.
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && sb.classList.contains('is-open')) {
+        setOpen(false);
+      }
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+})();
+`;
+
+// Confirm-before-submit for destructive forms. Any <form data-confirm="msg">
+// (with optional data-confirm-label / data-confirm-tone) opens the global
+// dialog before letting the submit through. Tone defaults to 'danger'.
+const CONFIRM = `
+(function(){
+  function bind(root){
+    var scope = root && root.querySelectorAll ? root : document;
+    var forms = scope.querySelectorAll('form[data-confirm]');
+    var dlg = document.getElementById('rbr-confirm');
+    if (!dlg) return;
+    for (var i = 0; i < forms.length; i++) {
+      var f = forms[i];
+      if (f.__rbrConfirmBound) continue;
+      f.__rbrConfirmBound = true;
+      f.addEventListener('submit', function(e){
+        if (this.__rbrConfirmed) return;
+        e.preventDefault();
+        var msg = this.getAttribute('data-confirm') || 'Are you sure?';
+        var label = this.getAttribute('data-confirm-label') || 'CONFIRM';
+        var tone = this.getAttribute('data-confirm-tone') || 'danger';
+        dlg.setAttribute('data-tone', tone);
+        dlg.querySelector('.modal-head .lab').textContent =
+          tone === 'danger' ? 'CONFIRM DESTRUCTIVE ACTION' :
+          tone === 'warn' ? 'CONFIRM ACTION' : 'CONFIRM';
+        dlg.querySelector('.modal-body').textContent = msg;
+        var confirmBtn = dlg.querySelector('button[value="confirm"]');
+        confirmBtn.textContent = label;
+        var form = this;
+        dlg.returnValue = '';
+        dlg.showModal();
+        dlg.addEventListener('close', function onClose(){
+          dlg.removeEventListener('close', onClose);
+          if (dlg.returnValue === 'confirm') {
+            form.__rbrConfirmed = true;
+            form.submit();
+          }
+        });
+      });
+    }
+  }
+  function start(){
+    bind(document);
+    if (document.body) {
+      document.body.addEventListener('htmx:afterSwap', function(e){
+        bind(e && e.target ? e.target : document);
+      });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+`;
+
+// Whole-row navigation for tables: any <tr data-href> sends the user to that
+// URL on click. The handler bails out when the click target is an
+// interactive element (a, button, input, form, label) so action buttons —
+// DELETE, REVOKE, JUDGE, etc. — keep working.
+const ROW_LINK = `
+(function(){
+  function isInteractive(el){
+    while (el && el.nodeType === 1) {
+      var tag = el.tagName;
+      if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' ||
+          tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'LABEL' ||
+          tag === 'FORM') return true;
+      el = el.parentNode;
+    }
+    return false;
+  }
+  function bind(root){
+    var scope = root && root.querySelectorAll ? root : document;
+    var rows = scope.querySelectorAll('tr[data-href]');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].__rbrBound) continue;
+      rows[i].__rbrBound = true;
+      rows[i].addEventListener('click', function(e){
+        if (isInteractive(e.target)) return;
+        var href = this.getAttribute('data-href');
+        if (href) window.location.href = href;
+      });
+    }
+  }
+  function start(){
+    bind(document);
+    if (document.body) {
+      document.body.addEventListener('htmx:afterSwap', function(e){
+        bind(e && e.target ? e.target : document);
+      });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+`;
+
+/* ─── shell ─────────────────────────────────────────────────────────── */
+
+export interface ShellOptions {
+  title: string;
+  activeNav?: NavKey;
+  view?: string;
+  collapsed?: boolean;
+  flash?: { kind: 'error' | 'success'; text: string };
+  counters?: { pendingJudgments?: number };
+  /** Pre-rendered sidebar (with CSRF). When omitted, the shell renders
+   *  without a sidebar — used for the login page. */
+  sidebar?: SafeHtml;
 }
 
+export function shell(body: SafeHtml, opts: ShellOptions): string {
+  const manifest = loadManifest();
+  const viewKey = opts.view ?? opts.activeNav ?? null;
+  const viewHref = viewKey ? manifest.views[viewKey] : undefined;
+
+  const links: string[] = [];
+  if (manifest.core) {
+    links.push(`<link rel="stylesheet" href="/dashboard/assets/styles/${manifest.core}">`);
+  }
+  if (viewHref) {
+    links.push(`<link rel="stylesheet" href="/dashboard/assets/styles/${viewHref}">`);
+  }
+
+  const flashHtml = opts.flash
+    ? `<div class="flash ${opts.flash.kind === 'error' ? 'error' : 'success'}"><span class="lab">${opts.flash.kind === 'error' ? 'ERROR' : 'OK'}</span><span>${escape(opts.flash.text)}</span></div>`
+    : '';
+
+  const collapsed = opts.collapsed ?? false;
+
+  const shellBody = opts.sidebar
+    ? `<div class="app${collapsed ? ' is-collapsed' : ''}">
+${opts.sidebar.__html}
+${renderMobileBar(opts.activeNav ?? null).__html}
+<main class="main">
+${flashHtml}
+${body.__html}
+</main>
+</div>`
+    : `<main>
+${flashHtml}
+${body.__html}
+</main>`;
+
+  const out = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escape(opts.title)} · Rembric</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/dashboard/assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/dashboard/assets/favicon-16.png">
+<link rel="shortcut icon" href="/dashboard/assets/favicon.png">
+<link rel="apple-touch-icon" href="/dashboard/assets/favicon.png">
+${links.join('\n')}
+<script>${TS_UPGRADER}</script>
+<script>${MOB_TOGGLE}</script>
+<script>${SB_COLLAPSE}</script>
+<script>${ROW_LINK}</script>
+<script>${CONFIRM}</script>
+</head>
+<body>
+${shellBody}
+<dialog id="rbr-confirm" class="modal" data-tone="danger">
+  <form method="dialog">
+    <div class="modal-head">
+      <span class="bn"></span>
+      <span class="lab">CONFIRM DESTRUCTIVE ACTION</span>
+    </div>
+    <div class="modal-body">Are you sure?</div>
+    <div class="modal-foot">
+      <button type="submit" value="cancel">CANCEL</button>
+      <button type="submit" value="confirm">CONFIRM</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>`;
+
+  return minifyHtml(out);
+}
+
+/* ─── HTML whitespace-collapse minifier ────────────────────────────── */
+
+const SKIP_RE = /<(pre|textarea|script)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const PLACEHOLDER = ' ';
+
+export function minifyHtml(s: string): string {
+  // Carve out skip-zones so we never collapse inside <pre>/<textarea>/<script>.
+  const stash: string[] = [];
+  const stashed = s.replace(SKIP_RE, (match) => {
+    stash.push(match);
+    return `${PLACEHOLDER}${stash.length - 1}${PLACEHOLDER}`;
+  });
+
+  const collapsed = stashed
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/>\s+</g, '><')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return collapsed.replace(new RegExp(`${PLACEHOLDER}(\\d+)${PLACEHOLDER}`, 'g'), (_, idx) => {
+    return stash[Number(idx)] ?? '';
+  });
+}
+
+/* ─── pills + timestamp helper ─────────────────────────────────────── */
+
 export function statusPill(status: string): SafeHtml {
-  return raw(`<span class="pill ${escape(status)}">${escape(status)}</span>`);
+  const cls = escape(status);
+  return raw(`<span class="pill ${cls}">${cls}</span>`);
 }
 
 export function scopePill(scope: string): SafeHtml {
-  return raw(`<span class="pill ${escape(scope)}">${escape(scope)}</span>`);
+  const cls = escape(scope);
+  const label = scope === 'global' ? 'GLOBAL' : 'PROJECT';
+  return raw(`<span class="pill ${cls}">${label}</span>`);
 }
 
 export function formatTs(d: Date | string | number | null | undefined): SafeHtml {
