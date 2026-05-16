@@ -66,7 +66,7 @@ The plugin's hook catalog SHALL declare four entries: `SessionStart`, `UserPromp
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge (see `plugin/bin/rembric-bridge.mjs`).
 - When a valid slug is resolved, the script SHALL issue `POST ${REMBRIC_SERVER_URL}/api/<slug>/sessions` with `Authorization: Bearer ${REMBRIC_API_TOKEN}` and body `{ "id": "<session_id>", "cwd": "<cwd>" }`. The script SHALL discard the response body and SHALL NOT block on slow networks (`--max-time 3`).
 - When no valid slug is resolvable, the script SHALL skip the POST and write a one-line stderr diagnostic; no session row is created (the agent can still operate path-less).
-- After the POST attempt (success or skip), the script SHALL emit the generic nudge `[rembric] If this is a continuation of recent work, call memory.context before responding.` to stdout.
+- After the POST attempt (success or skip), the script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout. The nudge string SHALL NOT begin with `{` or `[` — Codex's hook output parser (`codex-rs/hooks/src/engine/output_parser.rs::looks_like_json`) treats stdout starting with those characters as a malformed JSON attempt and fails the hook with `invalid session start JSON output`. The `rembric:` prefix is the canonical badge.
 - Output cap: ≤30 tokens.
 - The script SHALL exit `0` on any internal error (`trap 'exit 0' ERR`) so plugin failure NEVER aborts a Claude Code session.
 
@@ -75,7 +75,7 @@ The plugin's hook catalog SHALL declare four entries: `SessionStart`, `UserPromp
 - Type: `command`.
 - Matcher: `remember|recall|acordate|qué hicimos|what did we do` (case-insensitive).
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh`.
-- The script SHALL emit a single short nudge line instructing the agent to call `memory.search` with the user's keywords before responding.
+- The script SHALL emit a single short nudge line instructing the agent to call `memory.search` with the user's keywords before responding. The current canonical line is `rembric: User intent: recall. Call memory.search with the user keywords before responding.` The line SHALL NOT begin with `{` or `[` (same rationale as SessionStart).
 - Output cap: ≤30 tokens.
 
 #### PreCompact
@@ -102,7 +102,7 @@ The plugin's hook catalog SHALL declare four entries: `SessionStart`, `UserPromp
 - **WHEN** Claude Code fires the `SessionStart` hook with stdin `{"session_id": "claude-sess-abc12345", "cwd": "/home/u/foo"}`
 - **THEN** the script SHALL POST to `${REMBRIC_SERVER_URL}/api/foo/sessions` with body `{"id": "claude-sess-abc12345", "cwd": "/home/u/foo"}`
 - **AND** the server SHALL insert a row for `(token_id, 'claude-sess-abc12345')`
-- **AND** the script SHALL still emit the `[rembric] If this is a continuation...` nudge on stdout
+- **AND** the script SHALL still emit the `rembric: If this is a continuation...` nudge on stdout
 - **AND** `/dashboard/sessions` SHALL list the new active session
 
 #### Scenario: SessionStart hook with missing .rembric
@@ -167,6 +167,7 @@ Hook scripts are intentionally minimal (`echo` + `exit 0`) rather than full MCP 
 - Every hook script SHALL use `#!/usr/bin/env bash` and `set -u`.
 - Every script SHALL trap errors (`trap 'exit 0' ERR`) and ensure `exit 0` with empty stdout on any failure. Plugin-side failure SHALL NOT break a Claude Code session.
 - Every script SHALL be executable (mode 755).
+- The first non-whitespace character of a hook script's stdout SHALL NOT be `{` or `[`, UNLESS the script intentionally emits a well-formed JSON object matching the relevant Codex hook event schema (`codex-rs/hooks/src/engine/output_parser.rs::parse_session_start` and siblings). Codex's `looks_like_json` heuristic treats stdout starting with those characters as a JSON attempt; a malformed leading character (e.g. the former `[rembric]` badge prefix) fails the hook with `invalid ... JSON output`. Today every Rembric hook emits either empty stdout or a plain-text nudge prefixed with `rembric:` — neither triggers the heuristic.
 
 ## Project slug selection
 
