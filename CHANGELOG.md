@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/susomejias/rembric/compare/v0.10.1...v0.11.0) (2026-05-16)
+
+
+### Features
+
+* **dashboard:** add /maintenance with operator-triggered physical purges ([8475844](https://github.com/susomejias/rembric/commit/84758444e1432673935090c974128ecc6899bd0c))
+
+
+### Bug Fixes
+
+* **dashboard:** resolve DB file path so DB SIZE is shown in production ([522ff32](https://github.com/susomejias/rembric/commit/522ff3237b7b3c81342f2e2dfe1189ec34d6b717))
+* **hermes:** on_session_switch closes the cached session on /reset too ([dd547b6](https://github.com/susomejias/rembric/commit/dd547b6c0564095441c1097ae07c539d8212d62e))
+
 ## [0.10.1](https://github.com/susomejias/rembric/compare/v0.10.0...v0.10.1) (2026-05-16)
 
 ### Bug Fixes
