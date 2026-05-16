@@ -2,6 +2,8 @@
 
 Memory for Claude Code, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server.
 
+> **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 4 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+
 ## What you get
 
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.

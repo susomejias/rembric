@@ -188,6 +188,8 @@ Session creation/summary/end is driven by the plugin's `command` hooks POSTing t
 - `memory.save` automatically attaches `session_id` to the most-recently-active session for `(token, project)` via `resolveActiveSessionId` in `src/mcp/tools.ts`. Agents never need to thread a session id manually.
 - Session ids stay globally unique (`sessions.id TEXT PRIMARY KEY` unchanged from migration `0003`). Cross-token collisions are theoretical (UUID/ULID space) and are rejected at the service layer with `id_collision`.
 
+**Codex-specific gotcha: `plugin_hooks` is `under development` in `codex-cli 0.130.0`.** `codex features list` reports `plugin_hooks  under development  false` — Codex ships this feature OFF by default in this CLI release. With the flag off, `load_plugin_hooks` is short-circuited inside `if plugin_hooks_enabled { ... }` in `codex-rs/core/src/session/mod.rs` and no warning is emitted; the plugin's `hooks.codex.json` parses fine and lives in the cache but the hook handlers never register. Symptom is a silently empty `/dashboard/sessions` and a `/plugins` panel showing "No plugin hooks". Even after enabling the feature, Codex enforces a per-hook trust review at startup (`codex-rs/tui/src/startup_hooks_review.rs`) — users have to open `/hooks` and approve each handler before they fire. Codex's `main` branch source (read 2026-05-16) already promotes the feature to `Stable` / `default_enabled: true`, so this gotcha will likely disappear in a future Codex release. Until then: when triaging "Codex hooks not firing" reports, run `codex features list` first; if `plugin_hooks` is `false`, point the user at the [enablement instructions in `docs/agents.md`](./docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+
 ## Running locally
 
 ```bash

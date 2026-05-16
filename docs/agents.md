@@ -82,6 +82,32 @@ Symptoms of missing envs:
 - `/dashboard/sessions` stays empty even when MCP tool calls work fine.
 - `codex --debug` shows `[rembric-bridge] Missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN` (bridge) or `[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST /api/...` (hooks).
 
+#### Enable plugin_hooks and trust hooks (REQUIRED)
+
+MCP authenticates after install + env exports. For lifecycle hooks (session creation, summary-on-compact, end-on-stop) to actually fire under Codex, **two extra one-time steps are mandatory** as of `codex-cli 0.130.0`. Skip them and `/dashboard/sessions` stays empty no matter how many Codex sessions you run.
+
+**Step 1 — enable the `plugin_hooks` feature.** Codex ships this feature as `under development` and disabled by default in `0.130.0`. Verify and enable from any shell:
+
+```bash
+codex features list | grep plugin_hooks     # confirms current state
+codex features enable plugin_hooks          # writes [features] plugin_hooks = true to ~/.codex/config.toml
+```
+
+Newer Codex releases may default this feature on — run `codex features list` first to confirm you actually need the step. If it already reports `plugin_hooks  stable  true`, skip.
+
+**Step 2 — trust the hooks inside Codex.** Restart Codex after step 1. On startup Codex shows a banner of the form _"4 hooks need review before they can run. Open `/hooks` to review them."_ Open `/hooks` from inside Codex and approve each of the four Rembric hooks (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`). The trust persists in `~/.codex/config.toml` under `[hooks.state]`, so this is a one-time-per-hook step — subsequent Codex launches do not re-prompt.
+
+After both steps, the `/plugins` panel for `rembric` shows `Hooks: PreCompact (1), SessionStart (1), UserPromptSubmit (1), Stop (1)` and the first new Codex session will POST to `/api/<slug>/sessions` against the Rembric server (visible at `/dashboard/sessions`).
+
+##### Symptom → cause table
+
+| Symptom in Codex                                                                                                                | Cause                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/dashboard/sessions` stays empty after Codex sessions                                                                          | `plugin_hooks` feature is off (Step 1) **OR** hooks have not been approved via `/hooks` (Step 2). MCP can still work while hooks silently no-op.                                                       |
+| `/plugins` panel shows `Hooks: No plugin hooks`                                                                                 | `plugin_hooks` feature is off. The plugin's `hooks.codex.json` is parsed only when the feature is enabled.                                                                                             |
+| Startup banner _"N hooks need review"_ keeps appearing across launches                                                          | Step 2 not completed for some hooks. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                  |
+| Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`) | Known plugin bug, separate change. Codex requires hook stdout to be JSON `{ hookSpecificOutput: { additionalContext: "..." } }`; plugin scripts currently emit plain text. Tracked for plugin `0.2.3`. |
+
 #### Using both Claude Code and Codex on the same machine
 
 The two clients pick up credentials from different places — keep both configured:
