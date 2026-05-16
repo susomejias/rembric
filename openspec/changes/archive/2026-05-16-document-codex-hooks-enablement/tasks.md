@@ -39,5 +39,5 @@
 ## 6. Commit + push
 
 - [x] 6.1 Commit `f077d2b` — `docs(codex): document plugin_hooks feature flag + /hooks trust review`. Body cites `codex features list` output and the relevant Codex source files (`codex-rs/core/src/session/mod.rs` for the feature gate, `codex-rs/tui/src/startup_hooks_review.rs` for the trust review).
-- [ ] 6.2 User confirms intent to push. Then push to `origin/main`.
-- [ ] 6.3 Archive this change folder via `/opsx:archive` (syncs the spec delta into `openspec/specs/codex-distribution/spec.md`).
+- [x] 6.2 User pushed `f077d2b` and `e2c59a1` to `origin/main`.
+- [x] 6.3 Archiving now via `/opsx:archive`. Spec delta synced into `openspec/specs/codex-distribution/spec.md` (3 new scenarios appended to "docs/agents.md recommends the plugin install as primary" requirement).

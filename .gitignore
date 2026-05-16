@@ -35,3 +35,22 @@ yarn-error.log*
 *.swo
 .claude/
 .claude/settings.local.json
+
+# Codex CLI auto-generated companion (equivalent to CLAUDE.md, per-user)
+AGENTS.md
+
+# Runtime-materialized skill scaffolds. The tracked .agents/skills/<name>/
+# directories (bun, find-skills, mcp-builder, plugin-creator,
+# plugin-settings, plugin-structure) are intentional reference content.
+# These four `openspec-*` and four `source-command-opsx-*` directories
+# are written by the Claude Code runtime when /opsx:* skills are invoked
+# — they're regenerated per-session and would otherwise produce noise
+# diffs every time a contributor uses the opsx workflow.
+.agents/skills/openspec-apply-change/
+.agents/skills/openspec-archive-change/
+.agents/skills/openspec-explore/
+.agents/skills/openspec-propose/
+.agents/skills/source-command-opsx-apply/
+.agents/skills/source-command-opsx-archive/
+.agents/skills/source-command-opsx-explore/
+.agents/skills/source-command-opsx-propose/
