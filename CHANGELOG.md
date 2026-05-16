@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/susomejias/rembric/compare/v0.10.0...v0.10.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* **plugin:** split transcript parser per agent (claude_code vs codex_cli) ([86fa83f](https://github.com/susomejias/rembric/commit/86fa83fa65850504469cb45cd40d1763dc139eb7))
+
 ## [0.10.0](https://github.com/susomejias/rembric/compare/v0.9.0...v0.10.0) (2026-05-16)
 
 
