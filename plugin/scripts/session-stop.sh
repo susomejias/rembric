@@ -77,8 +77,8 @@ SLUG="$(rembric_read_project_slug "$CWD")"
 } >> "$DIAG" 2>/dev/null || true
 
 if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  SUMMARY="$(rembric_format_transcript "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-  TITLE="$(rembric_extract_first_assistant "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
   echo "[POST path] summary_len=${#SUMMARY} title=[${TITLE}]" >> "$DIAG" 2>/dev/null || true
   if [ -n "$SUMMARY" ]; then
     SUMMARY_ESC="$(rembric_json_escape "$SUMMARY")"

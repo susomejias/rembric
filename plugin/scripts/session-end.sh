@@ -44,8 +44,8 @@ fi
 SUMMARY=""
 TITLE=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  SUMMARY="$(rembric_format_transcript "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-  TITLE="$(rembric_extract_first_assistant "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
 fi
 
 if [ -n "$SUMMARY" ]; then
