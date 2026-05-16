@@ -4,6 +4,19 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.3.1] — unreleased
+
+### Documentation
+
+- **Hermes plugin: `~/.rembric/.env` is now the recommended credential path** (was previously listed as Option B alongside shell exports). Verified live in a Hermes LXC install (2026-05-16): Hermes does NOT consistently propagate shell env to the Python provider subprocess, so `export REMBRIC_*` in `~/.zshrc` could leave `initialize()` running with an empty env and silently skipping every session POST. The `.env` preload via `os.environ.setdefault` at module import time is bulletproof regardless of how Hermes is launched (systemd, tmux, plain shell). Documented in `plugin/.hermes-plugin/README.md::Where to put the values` and the matching `docs/agents.md::Credentials` section.
+- **New troubleshooting row in both READMEs** for the "MCP works but `/dashboard/sessions` never gets a row" symptom — root cause is almost always the env-propagation issue above, fix is the `.env` file.
+- **New troubleshooting row** for `[rembric] POST /sessions failed: HTTPError 404` — root cause is `REMBRIC_SERVER_URL` accidentally path-scoped (ending in `/mcp/<slug>`). Documented why provider needs the bare base URL while the bridge needs the full path-scoped URL, and how to keep them separate.
+- **Updated `Where to put the values`** in `plugin/.hermes-plugin/README.md` to lead with the `.env` recommendation instead of presenting it as an alternative.
+
+### No code changes
+
+`__init__.py`, `install.sh`, `plugin.yaml` (other than the version bump), and `plugin/scripts/*` are unchanged. This is a docs-only release; the env-propagation behavior was always present, just under-documented.
+
 ## [0.3.0] — unreleased
 
 ### Added

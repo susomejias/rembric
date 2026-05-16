@@ -176,23 +176,25 @@ memory:
   provider: rembric
 ```
 
-#### Credentials — set in shell env or `~/.rembric/.env`
+#### Credentials — use `~/.rembric/.env` (recommended)
 
-Same two env vars Codex uses, same `rembric token create` token. Two ways to set them:
+Same two env vars Codex uses, same `rembric token create` token. **The recommended path is `~/.rembric/.env`** — Hermes does NOT consistently propagate parent-shell env to the Python provider subprocess, so `export` in `~/.zshrc` may leave the provider seeing an empty env and silently skipping every session POST. The `.env` file is read at module import via `os.environ.setdefault`, which guarantees the values are present when `initialize()` fires regardless of how Hermes was launched (systemd, tmux, plain shell).
 
 ```bash
-# Option A — in ~/.zshrc or ~/.bashrc
-export REMBRIC_SERVER_URL="https://memory.example.com"
-export REMBRIC_API_TOKEN="$(cat ~/.rembric/hermes-token)"
-
-# Option B — in ~/.rembric/.env (read at plugin import via os.environ.setdefault)
+mkdir -p ~/.rembric
 cat > ~/.rembric/.env <<'EOF'
-REMBRIC_SERVER_URL=https://memory.example.com
-REMBRIC_API_TOKEN=hm-XXXXXXXX
+REMBRIC_SERVER_URL=http://192.168.20.48:8787
+REMBRIC_API_TOKEN=<token-from-rembric-token-create>
+REMBRIC_PROJECT_SLUG=<your-slug>
 EOF
+chmod 600 ~/.rembric/.env
 ```
 
-Shell exports ALWAYS win over `~/.rembric/.env` (`setdefault` semantics) — Option B is useful when the Rembric server is launched by systemd with its own EnvironmentFile and those values never reach an interactive shell (parity with agentmemory's #250 fix). Option A is the simplest path for a single-user install.
+Restart Hermes after creating the file. Within seconds of the next session start, a row should appear in `/dashboard/sessions` with `agent=hermes`.
+
+Shell exports DO still take precedence over `~/.rembric/.env` (`setdefault` semantics) — use them only if you have a specific reason to override the file value temporarily.
+
+> **Symptom check**: if MCP tool calls work (memory.save / memory.search round-trip in the dashboard) but `/dashboard/sessions` never gets a row with `agent=hermes`, this is almost always the env-not-propagated issue. The fix is the `.env` file above. Verified live in a Hermes LXC install (2026-05-16).
 
 #### Project slug resolution
 
@@ -208,13 +210,15 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pic
 
 #### Symptom → cause table
 
-| Symptom in Hermes                                                                                | Cause                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty         | Server unreachable, token wrong, or no slug resolved. Run `curl -fsS -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz` and check the provider's stderr.   |
-| MCP tools work but sessions never appear                                                          | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                              |
-| stderr shows `[rembric] no project slug for session …; skipping session POST`                    | None of the five cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` or drop a `.rembric` file in the working dir.                                                          |
-| Provider tracks slug `A`, MCP bridge tracks slug `B`                                              | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.   |
-| `hermes plugins update rembric` reports nothing to update                                        | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                            |
+| Symptom in Hermes                                                                                | Cause                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **MCP tool calls work but `/dashboard/sessions` never gets a row with `agent=hermes`**           | **Most common cause.** Hermes did not propagate shell env to the Python provider subprocess. **Fix: create `~/.rembric/.env`** (see "Credentials" above) and restart Hermes.                                                                                       |
+| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty        | Token doesn't have `write` permission for the project (`rembric token list` to check — `read` alone returns 403 on session POST, which the provider logs to stderr only). Reissue via `rembric token create --scope project --slug <slug>` (write is the default). |
+| stderr shows `[rembric] no project slug for session …; skipping session POST`                    | None of the five cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` in `~/.rembric/.env`.                                                                                                                                                                  |
+| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                                    | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                    |
+| MCP tools fail and `hermes memory status` reports `rembric: Missing`                             | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                                                                                                              |
+| Provider tracks slug `A`, MCP bridge tracks slug `B`                                              | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.                                                                                  |
+| `hermes plugins update rembric` reports nothing to update                                        | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                                                                                                            |
 
 #### Using Hermes alongside Claude Code or Codex on the same machine
 

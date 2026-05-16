@@ -79,10 +79,22 @@ memory:
 
 ### Where to put the values
 
-Pick whichever fits your setup. They're checked in this order at every Hermes launch:
+**Recommended: `~/.rembric/.env`.** This is the path validated against real Hermes deployments. Hermes does NOT consistently propagate parent-shell env vars to the Python subprocess that loads memory providers — so even if you `export REMBRIC_SERVER_URL=...` in your `~/.zshrc`, the provider may not see it and silently skip every session POST. The plugin reads `~/.rembric/.env` at module-import time via `os.environ.setdefault`, which means the values are guaranteed to be in `os.environ` when `initialize()` fires — without depending on how Hermes invokes the subprocess.
 
-1. **Shell env** (e.g. `export REMBRIC_SERVER_URL=...` in `~/.zshrc`) — always wins.
-2. **`~/.rembric/.env`** — preloaded by the plugin at import time (via `os.environ.setdefault`). Useful when Rembric is launched by systemd with its own EnvironmentFile and the values never reach an interactive shell.
+```sh
+mkdir -p ~/.rembric
+cat > ~/.rembric/.env <<'EOF'
+REMBRIC_SERVER_URL=http://your-server:8787
+REMBRIC_API_TOKEN=<token-from-rembric-token-create>
+REMBRIC_PROJECT_SLUG=<your-slug>
+EOF
+chmod 600 ~/.rembric/.env
+```
+
+Other sources (in case the `.env` file doesn't fit your workflow), checked in this order at every Hermes launch:
+
+1. **Shell env** (e.g. `export REMBRIC_SERVER_URL=...` in `~/.zshrc`) — always wins when the value reaches the provider's process. Suitable for interactive development; risky for `hermes` launched by systemd, tmux, or any wrapper that may not propagate env.
+2. **`~/.rembric/.env`** — preloaded by the plugin at module import via `os.environ.setdefault`. Bulletproof regardless of how Hermes is launched. **Use this unless you have a specific reason not to.**
 3. **Hermes's own config prompt** — `hermes plugins config rembric` runs `get_config_schema()` and stores the answers in `~/.hermes/rembric.json`. The plugin reads it for `project_slug` only; URL and token still come from env.
 
 ## Project slug resolution
@@ -117,13 +129,15 @@ The other `MemoryProvider` methods (`prefetch`, `system_prompt_block`, `sync_tur
 
 ## Troubleshooting
 
-| Symptom                                                                                   | Likely cause                                                                                                                                                                       |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hermes memory status` shows `rembric` as available but `/dashboard/sessions` stays empty | Server unreachable, or token wrong. Run `curl -fsS -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz` to check.                                            |
-| stderr shows `[rembric] no project slug for session ...; skipping session POST`           | None of the five cascade sources produced a valid slug. Set `REMBRIC_PROJECT_SLUG` in your env or drop a `.rembric` file in the project.                                           |
-| MCP works but sessions never appear in `/dashboard`                                       | The provider isn't loaded. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml` AND `hermes plugins enable rembric` was run after install.                             |
-| Provider sends sessions to slug X, but MCP tool calls land in slug Y                      | Bridge and provider read slug from different places. Pin the slug explicitly with `REMBRIC_PROJECT_SLUG` (read by both) or align the URL (`/mcp/<slug>`) with the `.rembric` file. |
-| `~/.rembric/.env` exists but the values aren't applied                                    | Shell-set env vars win over the file. `unset REMBRIC_SERVER_URL` in the shell, restart Hermes.                                                                                     |
+| Symptom                                                                                   | Likely cause                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **MCP tool calls work but `/dashboard/sessions` never shows a row with `agent=hermes`**   | **Most common cause.** Hermes did not propagate the shell's `REMBRIC_*` env to the Python provider subprocess, so `initialize()` runs with empty env and skips the session POST silently. **Fix: create `~/.rembric/.env`** with `REMBRIC_SERVER_URL`, `REMBRIC_API_TOKEN`, and `REMBRIC_PROJECT_SLUG` (see "Where to put the values" above), then restart Hermes. |
+| `hermes memory status` shows `rembric` as available but `/dashboard/sessions` stays empty | Token doesn't have `write` permission for the project (`rembric token list` to check). Re-issue with `rembric token create --scope project --slug <slug>` (write is the default).                                                                                                                                                                                  |
+| stderr shows `[rembric] no project slug for session ...; skipping session POST`           | None of the five cascade sources produced a valid slug. Set `REMBRIC_PROJECT_SLUG` in your `~/.rembric/.env`.                                                                                                                                                                                                                                                      |
+| MCP works but `hermes memory status` reports `rembric: Missing`                           | The provider isn't loaded. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml` AND `hermes plugins enable rembric` was run after install.                                                                                                                                                                                                             |
+| Provider sends sessions to slug X, but MCP tool calls land in slug Y                      | Bridge and provider read slug from different places. Pin the slug explicitly with `REMBRIC_PROJECT_SLUG` (read by both) or hardcode the same `/mcp/<slug>` in both the YAML `args` and the `.env` file.                                                                                                                                                            |
+| `~/.rembric/.env` exists but the values aren't applied                                    | Shell-set env vars win over the file (`os.environ.setdefault` semantics). `unset REMBRIC_SERVER_URL` in the shell, restart Hermes. Useful if you want to override a `.env` value temporarily without editing the file.                                                                                                                                             |
+| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                             | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider builds HTTP URLs by appending paths to the base, so the base must be the bare server URL (`http://host:8787`). Use `REMBRIC_PROJECT_SLUG` for slug resolution, NOT the URL.                                                                                                         |
 
 For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Hermes's docs at <https://hermes-agent.nousresearch.com/docs>.
 
