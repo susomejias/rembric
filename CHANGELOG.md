@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.0](https://github.com/susomejias/rembric/compare/v0.9.0...v0.10.0) (2026-05-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sessions:** persist summary+title across all plugin clients
+
+### Bug Fixes
+
+* **sessions:** persist summary+title across all plugin clients ([274fe1c](https://github.com/susomejias/rembric/commit/274fe1c7efc49493244459a46b038457f9a5c977))
+
+
+### Refactor
+
+* **hermes:** use requires_env so ~/.hermes/.env is single source of truth ([bc64d7e](https://github.com/susomejias/rembric/commit/bc64d7e150865beb725efc13d4cbb5ee2324d24d))
+
+
+### Documentation
+
+* **hermes:** lead with ~/.rembric/.env to avoid silent session loss ([88bd3f1](https://github.com/susomejias/rembric/commit/88bd3f17dd763ad2c16a522ea54dd1df668c89ea))
+
 ## [0.9.0](https://github.com/susomejias/rembric/compare/v0.8.2...v0.9.0) (2026-05-16)
 
 
