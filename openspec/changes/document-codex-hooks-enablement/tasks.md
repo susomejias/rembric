@@ -13,6 +13,7 @@
 - [x] 2.1 Open `plugin/README.md` and find any "Codex" mention in the install/quick-start section. (If the README does not currently have a Codex section, scope is just the docs link in the install section.)
 - [x] 2.2 Add a 2-3 line note after the Codex install command: "Codex requires two additional one-time steps for hooks to fire: run `codex features enable plugin_hooks`, then approve hooks via `/hooks` inside Codex. See [docs/agents.md](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required) for the full walk-through."
 - [x] 2.3 Do NOT replicate the full table — README stays brief; link to docs/agents.md for the canonical troubleshooting.
+- [x] 2.4 ALSO update the **root** `README.md` "Hooking up Codex CLI" section: same brief note as plugin/README.md, mentioning the `codex features enable plugin_hooks` + `/hooks` review requirement with a link to the anchor in `docs/agents.md`. Caught during review — the root README is the more visible install entry point.
 
 ## 3. CLAUDE.md maintainer note
 
@@ -37,6 +38,6 @@
 
 ## 6. Commit + push
 
-- [ ] 6.1 Commit with a single Conventional Commit: `docs(codex): document plugin_hooks feature flag + /hooks trust review`. Body cites `codex features list` output, the relevant Codex source files (`codex-rs/core/src/session/mod.rs` for the feature gate, `codex-rs/tui/src/startup_hooks_review.rs` for the trust review), and confirms no plugin runtime files are touched.
+- [x] 6.1 Commit `f077d2b` — `docs(codex): document plugin_hooks feature flag + /hooks trust review`. Body cites `codex features list` output and the relevant Codex source files (`codex-rs/core/src/session/mod.rs` for the feature gate, `codex-rs/tui/src/startup_hooks_review.rs` for the trust review).
 - [ ] 6.2 User confirms intent to push. Then push to `origin/main`.
 - [ ] 6.3 Archive this change folder via `/opsx:archive` (syncs the spec delta into `openspec/specs/codex-distribution/spec.md`).

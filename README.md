@@ -131,7 +131,11 @@ codex plugin marketplace add https://github.com/susomejias/rembric.git
 codex plugin install rembric
 ```
 
-Codex's plugin manifest has no keychain prompt — set `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as env vars in the shell that launches `codex`. Drop `.rembric` files per project to path-scope the slug automatically (same flow as the Claude Code plugin). Full details and the manual config.toml fallback: [docs/agents.md](./docs/agents.md).
+Codex's plugin manifest has no keychain prompt — set `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as env vars in the shell that launches `codex`. Drop `.rembric` files per project to path-scope the slug automatically (same flow as the Claude Code plugin).
+
+> **Extra Codex-only steps for hooks to fire** (as of `codex-cli 0.130.0`): after the install + env exports, run `codex features enable plugin_hooks` and then approve the 4 hooks via `/hooks` inside Codex. Without these two one-time steps, MCP works but `/dashboard/sessions` stays empty. Full walk-through (including the symptom-vs-cause troubleshooting table) in [docs/agents.md](./docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+
+Full details and the manual config.toml fallback: [docs/agents.md](./docs/agents.md).
 
 ## Hooking up other MCP clients
 
