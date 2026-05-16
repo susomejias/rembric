@@ -4,6 +4,22 @@ All notable changes to the Rembric Claude Code plugin.
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.2.2] — unreleased
+
+### Fixed
+
+- **Bridge path-scoping under Codex.** Bridge `projectDir` resolution chain now includes `PWD` between `CLAUDE_PROJECT_DIR` and `process.cwd()` — under Codex, `CLAUDE_PROJECT_DIR` is never set and `process.cwd()` is the plugin cache dir (consequence of the manifest's `cwd: "."`), so the bridge fell back to path-less `/mcp` and ignored `.rembric`. With `PWD` forwarded from the user's shell, path-scoping works again when `codex` is launched from a directory containing a valid `.rembric`.
+- **Empty-string env vars no longer trip the resolution chain.** The bridge now uses `||` instead of `??` to skip empty `CLAUDE_PROJECT_DIR=""` (latent bug — previously produced a buggy relative `.rembric` lookup against process cwd).
+
+### Changed
+
+- **Bridge startup diagnostic.** `[rembric-bridge] cwd=<dir> url=<url>` becomes `[rembric-bridge] projectDir=<dir> (from <CLAUDE_PROJECT_DIR|PWD|process.cwd()>) url=<url>` — names the source step that won the precedence chain, useful for debugging path-scoping issues.
+- **`plugin/.codex-plugin/mcp.json:env_vars`** gains `"PWD"` so Codex (which `env_clear`s the subprocess) forwards the user's shell `PWD` to the bridge. Claude Code's `plugin/.claude-plugin/mcp.json` is unchanged.
+
+### Notes
+
+- Codex users on `0.2.1` who saw `No .rembric in /Users/.../.codex/plugins/cache/...`: `codex plugin marketplace upgrade rembric` followed by a Codex restart from the project root (where `.rembric` lives) will pick up `0.2.2` and resolve path-scoping correctly.
+
 ## [0.2.1] — unreleased
 
 ### Fixed

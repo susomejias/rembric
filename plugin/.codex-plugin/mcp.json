@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["./bin/rembric-bridge.mjs"],
       "cwd": ".",
-      "env_vars": ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]
+      "env_vars": ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN", "PWD"]
     }
   }
 }

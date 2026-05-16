@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // rembric-bridge — minimal stdio↔HTTP MCP bridge for the Rembric plugin.
 //
-// Reads `.rembric` (dotenv-style KEY=VALUE) from CLAUDE_PROJECT_DIR
-// (falling back to cwd) and path-scopes the MCP URL to `/mcp/<slug>` so
-// the Rembric server pins the correct project on connect — eliminating
+// Reads `.rembric` (dotenv-style KEY=VALUE) from a resolution chain of
+// CLAUDE_PROJECT_DIR > PWD > process.cwd() and path-scopes the MCP URL
+// to `/mcp/<slug>` so the Rembric server pins the correct project on
+// connect — eliminating
 // the need for an agent-side `project.use` call and avoiding the
 // path-less roots-discovery codepath entirely.
 //
@@ -25,7 +26,18 @@ import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+let projectDir;
+let projectDirSource;
+if (process.env.CLAUDE_PROJECT_DIR) {
+  projectDir = process.env.CLAUDE_PROJECT_DIR;
+  projectDirSource = 'CLAUDE_PROJECT_DIR';
+} else if (process.env.PWD) {
+  projectDir = process.env.PWD;
+  projectDirSource = 'PWD';
+} else {
+  projectDir = process.cwd();
+  projectDirSource = 'process.cwd()';
+}
 const baseUrl = process.env.REMBRIC_SERVER_URL;
 const token = process.env.REMBRIC_API_TOKEN;
 
@@ -82,7 +94,9 @@ if (existsSync(configFile)) {
 }
 
 const url = `${baseUrl.replace(/\/+$/, '')}${scopedPath}`;
-process.stderr.write(`[rembric-bridge] cwd=${projectDir} url=${url}\n`);
+process.stderr.write(
+  `[rembric-bridge] projectDir=${projectDir} (from ${projectDirSource}) url=${url}\n`,
+);
 
 // `mcp-remote` requires HTTPS by default and rejects plain HTTP (except
 // for localhost). Rembric is commonly deployed on a LAN VPS reached over
