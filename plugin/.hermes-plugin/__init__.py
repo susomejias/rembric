@@ -337,6 +337,12 @@ class RembricMemoryProvider(MemoryProvider):
         return ""
 
     def on_session_end(self, messages: list, **kwargs: Any) -> None:
+        del kwargs
+        _stderr(
+            f"[rembric] on_session_end: session={self._session_id!r} "
+            f"messages_count={len(messages) if messages else 0} "
+            f"initialized={self._initialized} slug={self._slug!r}"
+        )
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return
         transcript = _format_transcript(messages)
@@ -367,18 +373,29 @@ class RembricMemoryProvider(MemoryProvider):
         # /reset, /new — any path that reassigns AIAgent.session_id without
         # tearing the provider down. Without overriding, self._session_id
         # becomes stale and every subsequent lifecycle POST hits the wrong
-        # row. We close the old row (when there's a continuation lineage)
-        # and register the new one.
-        del reset  # not used yet — semantic difference may matter later
+        # row.
+        #
+        # Close the previously-cached session in ALL cases, not just when
+        # Hermes passes a populated parent_session_id. /reset and /new use
+        # parent_session_id="" by upstream contract (clean restart, no
+        # continuation lineage) — if we keyed off parent_session_id alone,
+        # the old session would stay `active` forever and never accumulate
+        # its summary. Trust our own cached id instead.
         del kwargs
+        _stderr(
+            f"[rembric] on_session_switch: new={new_session_id} "
+            f"parent={parent_session_id!r} reset={reset} "
+            f"cached_session={self._session_id!r} "
+            f"initialized={self._initialized}"
+        )
         if not self._initialized:
             return
         old_id = self._session_id
-        if self._slug and self._base and parent_session_id and parent_session_id == old_id:
+        if self._slug and self._base and old_id and old_id != new_session_id:
             _api_post(
                 self._base,
                 self._slug,
-                f"/sessions/{parent_session_id}/end",
+                f"/sessions/{old_id}/end",
                 {},
             )
         self._session_id = new_session_id

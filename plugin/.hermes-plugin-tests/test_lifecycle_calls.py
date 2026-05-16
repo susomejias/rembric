@@ -162,20 +162,27 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(provider._session_id, "01NEW")
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_on_session_switch_reset_skips_old_close(
+    def test_on_session_switch_reset_closes_cached_session(
         self, mock_urlopen: MagicMock
     ) -> None:
         mock_urlopen.return_value = _FakeResponse()
         provider = self._provider()
         provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
-        # No parent_session_id supplied — /reset case.
+        # Hermes passes parent_session_id="" on /reset by upstream contract
+        # (clean restart, no continuation lineage). Trust the cached id to
+        # know which session to close — otherwise the old row stays active
+        # forever and never accumulates its summary.
         provider.on_session_switch("01NEW", reset=True)
-        # Only the new /sessions registration fires; no /end.
-        self.assertEqual(mock_urlopen.call_count, 1)
-        url_new, body_new, _ = _captured_post(mock_urlopen, idx=0)
+        # Both /end (for the cached id) AND /sessions (for the new id) fire.
+        self.assertEqual(mock_urlopen.call_count, 2)
+        url_end, body_end, _ = _captured_post(mock_urlopen, idx=0)
+        self.assertTrue(url_end.endswith("/sessions/01OLD/end"))
+        self.assertEqual(body_end, {})
+        url_new, body_new, _ = _captured_post(mock_urlopen, idx=1)
         self.assertTrue(url_new.endswith("/sessions"))
         self.assertEqual(body_new["id"], "01NEW")
+        self.assertEqual(provider._session_id, "01NEW")
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_no_slug_skips_all_posts(self, mock_urlopen: MagicMock) -> None:
