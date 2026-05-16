@@ -114,11 +114,3 @@ Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript
 
 - **WHEN** the helper is called with a malformed JSONL file
 - **THEN** the helper SHALL extract what it can (best-effort `role`/`content` parse) and emit empty string if nothing parsable was found, exiting `0`
-
-## REMOVED Requirements
-
-### Requirement: The plugin SHALL ship exactly four hooks (prior version)
-
-**Reason**: replaced by the new five-hook layout (SessionStart × 2 matchers, UserPromptSubmit, SessionEnd). The prior version wired `Stop` (which fires per-turn, not per-session — semantic bug) and `PreCompact` (whose stdout doesn't reach the model and whose POST body was hook metadata, not the transcript). Both removed.
-
-**Migration**: existing plugin installations that have already pulled an older `plugin.json` version will continue to wire the old hooks until they update. Behaviour stays the current (broken) state until the plugin version bump in this change reaches them. After update, the old hook scripts (`session-stop.sh`, `pre-compact.sh`) SHALL be deleted from the repo so they cannot be re-invoked accidentally.

@@ -1,8 +1,10 @@
 # codex-distribution
 
+## Purpose
+
 Distribution and configuration of Rembric for Codex CLI. Defines the dual-manifest layout that lets one `plugin/` source tree serve both the Claude Code and Codex marketplaces, the Codex-specific hook subset, the marketplace declaration, and the credential flow given Codex's lack of a keychain-style `userConfig` prompt.
 
-## Codex plugin manifest
+## Requirements
 
 ### Requirement: Codex plugin manifest
 
@@ -20,8 +22,6 @@ The repository SHALL host a Codex plugin manifest at `plugin/.codex-plugin/plugi
 - **WHEN** the Codex manifest is loaded
 - **THEN** it SHALL NOT declare a `skills` field — protocol guidance is delivered server-side via `initialize.instructions`, matching the Claude Code plugin's behaviour
 
-## Marketplace declaration
-
 ### Requirement: Codex marketplace declaration
 
 The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketplace.json` at the repo root, installable via `codex plugin marketplace add <repo>`.
@@ -38,35 +38,59 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 - **WHEN** the marketplace is loaded
 - **THEN** the top-level object contains `name: "rembric"` and `interface.displayName: "Rembric"`
 
-## Hook configuration
-
 ### Requirement: Codex hook configuration
 
-The repository SHALL host Codex hook configuration at `plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `plugin/hooks/hooks.json`, declaring the four Codex-supported events the plugin wires.
+The repository SHALL host Codex hook configuration at `plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `plugin/hooks/hooks.json`, declaring the three Codex-supported events the plugin wires.
+
+Codex's hook surface differs from Claude Code's in ways the platform forces:
+
+- Codex has no `SessionEnd` event (verified against `developers.openai.com/codex/hooks`).
+- Codex has no `PreCompact` or `PostCompact` event.
+- Codex's `SessionStart` matcher does not include `"compact"` — only `startup|resume|clear`.
+- Codex's `Stop` hook REQUIRES JSON on stdout: "Stop expects JSON on stdout when it exits 0. Plain text output is invalid for this event." Per official docs.
+
+Therefore Codex's mapping of lifecycle events to HTTP endpoints diverges from Claude Code's by necessity, NOT by choice. Codex sessions stay `active` until the `abandonStale` job flips them to `abandoned`; this is the steady state for Codex sessions.
 
 #### Scenario: Hook event coverage
 
 - **WHEN** `plugin/hooks/hooks.codex.json` is loaded
-- **THEN** the `hooks` object declares entries for `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`
+- **THEN** the `hooks` object SHALL declare entries for `SessionStart`, `UserPromptSubmit`, and `Stop`
+- **AND** the `hooks` object SHALL NOT contain `PreCompact`, `PostCompact`, or `SessionEnd` (Codex does not support these events)
 - **AND** every hook entry SHALL be `type: "command"` — Codex does not support `type: "mcp_tool"` for hooks
-- **AND** the `SessionStart` hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh` (reused from the Claude Code plugin, which now performs the HTTP session create — Codex inherits that behavior automatically)
-- **AND** the `UserPromptSubmit` hook SHALL declare the matcher `remember|recall|acordate|qué hicimos|what did we do` and invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh` (reused from the Claude Code plugin)
+- **AND** the `SessionStart` hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh codex-cli` (reused from the Claude Code plugin; the `agent` arg differs)
+- **AND** the `UserPromptSubmit` hook SHALL declare the matcher `remember|recall|acordate|qué hicimos|what did we do` and invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh` (reused)
 
-#### Scenario: Codex PreCompact wires to a HTTP-summary script
+#### Scenario: Codex Stop wires to a per-turn summary writer
 
-- **WHEN** the `PreCompact` hook fires
-- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.sh` (the SAME script as Claude Code, reused — no separate `pre-compact-codex.sh`)
-- **AND** the script SHALL read `session_id` and the compact transcript from stdin, parse `.rembric` for the slug, and POST `/api/<slug>/sessions/<session_id>/summary` against the Rembric HTTP API
-- **AND** the script SHALL exit zero even on internal error (`trap 'exit 0' ERR`) so a hook failure never aborts compaction
-- **AND** the prior `plugin/scripts/pre-compact-codex.sh` SHALL be deleted (its stdout-nudge approach is obsoleted by the HTTP path that works identically for Claude Code and Codex)
+- **WHEN** the `Stop` hook fires (which it does once per agent turn under Codex semantics)
+- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-stop.sh codex-cli` (Codex-only — Claude Code does NOT wire `Stop` in this version)
+- **AND** the script SHALL read `session_id`, `cwd`, and `transcript_path` from stdin
+- **AND** SHALL read `${cwd}/.rembric` for the slug
+- **AND** SHALL read `transcript_path` if readable, format it via `_transcript.sh`, derive a title from the first non-empty assistant message (≤100 chars)
+- **AND** SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/summary` with body `{"summary": "<formatted>", "title": "<derived>", "final": false}` — note: `/summary` NOT `/end`, because Codex Stop is per-turn and the session must stay `active` for the next turn to keep updating
+- **AND** SHALL emit `'{}'` to stdout (Codex requires JSON on Stop stdout; plain text is invalid per docs)
+- **AND** SHALL exit zero even on internal error
 
-#### Scenario: Codex Stop wires to a HTTP-end script
+#### Scenario: Codex sessions remain active until abandoned by sweep
 
-- **WHEN** the `Stop` hook fires
-- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-stop.sh` (the SAME script as Claude Code — no separate `stop-codex.sh`)
-- **AND** the script SHALL POST `/api/<slug>/sessions/<session_id>/end`
-- **AND** the script SHALL exit zero even on internal error
-- **AND** the prior `plugin/scripts/stop-codex.sh` SHALL be deleted
+- **GIVEN** a Codex session where Stop has fired N times
+- **WHEN** the user closes Codex CLI
+- **THEN** the session row SHALL remain `status='active'` (no SessionEnd signal to transition it)
+- **AND** the `abandonStale` job (running per `SESSION_ABANDON_AFTER_MS`, default 24h) SHALL eventually flip the row to `status='abandoned'`
+- **AND** the row's `summary` and `title` SHALL reflect the most recent Stop's POST (the latest transcript)
+
+#### Scenario: Codex Stop output without JSON would fail the hook
+
+- **GIVEN** a script that POSTs `/summary` correctly but emits plain text to stdout
+- **WHEN** Codex receives that stdout
+- **THEN** Codex SHALL flag the hook output as invalid (per the "Stop expects JSON" contract) and the hook SHALL be considered failed for that turn
+
+#### Scenario: pre-compact-codex.sh deletion
+
+- **WHEN** the repository is at HEAD after this change
+- **THEN** the file `plugin/scripts/pre-compact-codex.sh` SHALL NOT exist
+- **AND** the file `plugin/scripts/pre-compact.sh` SHALL NOT exist (deleted from Claude Code spec as well)
+- **AND** no Codex hook entry SHALL reference either file
 
 ### Requirement: Codex hooks MUST receive `session_id` from stdin in the same JSON shape as Claude Code
 
@@ -96,8 +120,6 @@ If Codex passes the id under a different key (e.g. `sessionId`), the scripts SHA
 - **WHEN** Codex passes an id that contains characters outside `[A-Za-z0-9_-]` (theoretical; should not happen in practice)
 - **THEN** the server SHALL respond `400 invalid_input`
 - **AND** the script SHALL exit `0` (failure is silent at the hook level)
-
-## Codex-specific MCP server configuration
 
 ### Requirement: Codex-specific MCP server configuration
 
@@ -155,8 +177,6 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 - **AND** `plugin/CHANGELOG.md` SHALL gain a matching `[X.Y.Z] — <date>` heading describing the change
 - **AND** the bump SHALL follow SemVer: patch for bug fixes, minor for new behaviour, major for breaking changes to the credential or transport contract
 
-## Credential flow
-
 ### Requirement: End-user credential flow
 
 Codex install material SHALL document the credential flow given Codex's lack of a `userConfig` keychain prompt and Codex's `env_clear` behaviour on MCP subprocesses.
@@ -167,8 +187,6 @@ Codex install material SHALL document the credential flow given Codex's lack of 
 - **THEN** the doc SHALL state that Codex users MUST export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that launches `codex` — this is the canonical path under Codex, not a fallback
 - **AND** the doc SHALL provide a literal `export REMBRIC_SERVER_URL=...; export REMBRIC_API_TOKEN=...` snippet
 - **AND** the doc SHALL explain that the plugin's `env_vars` field is what forwards those vars to the bridge subprocess (citing `create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs` so future readers can verify), AND that Codex's `env_clear()` semantics make `env_vars` mandatory — there is no implicit inheritance from the parent shell
-
-## Documentation
 
 ### Requirement: `docs/agents.md` recommends the plugin install as primary
 

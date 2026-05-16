@@ -43,7 +43,7 @@ The server SHALL respond `200 OK` on both insert and upsert paths with body `{ o
 - **WHEN** a client POSTs to `/api/sessions` (no slug segment)
 - **THEN** the server SHALL respond `404` `{ ok: false, code: 'not_found' }`
 
-### Requirement: `POST /api/<slug>/sessions/:id/summary` MUST write summary/title without transitioning status
+### Requirement: `POST /api/<slug>/sessions/:id/summary` MUST write a summary and close the session
 
 The endpoint SHALL accept a JSON body `{ summary: string, title?: string, final?: boolean }`. The `summary` field SHALL be a string of length ≥1 and ≤20,000 chars. The `title` field SHALL be a string of length ≤100 chars (when present, length ≥1). The `final` field SHALL default to `false`.
 
@@ -97,7 +97,7 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 - **WHEN** a client POSTs a summary for a row whose `deleted_at IS NOT NULL`
 - **THEN** the server SHALL respond `409` with `{ ok: false, code: 'session_deleted' }`
 
-### Requirement: `POST /api/<slug>/sessions/:id/end` MUST close a session and optionally write summary/title
+### Requirement: `POST /api/<slug>/sessions/:id/end` MUST close a session without a summary
 
 The endpoint SHALL accept a JSON body `{ summary?: string, title?: string, final?: boolean }`. All fields are optional; an empty body `{}` is valid. The same length and `final` precedence rules as `/summary` apply when those fields are provided.
 
