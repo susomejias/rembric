@@ -4,6 +4,20 @@ All notable changes to the Rembric Claude Code plugin.
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.2.3] — unreleased
+
+### Fixed
+
+- **Codex SessionStart and UserPromptSubmit hooks no longer fail.** Previously both fired with `error: hook returned invalid session start JSON output` (and the matching UserPromptSubmit variant). Root cause: the `[rembric]` badge prefix in hook stdout triggered Codex's `looks_like_json` heuristic (`codex-rs/hooks/src/engine/output_parser.rs`) — anything starting with `{` or `[` is treated as a JSON attempt, and our plain-text nudges aren't valid JSON. Codex's per-event handler (`codex-rs/hooks/src/events/session_start.rs` and siblings) then raised the misleading "invalid JSON output" error. Switching the badge from `[rembric]` to `rembric:` keeps the visual marker while staying in Codex's plain-text branch — stdout is now injected as `additional_context` into the agent's turn.
+
+### Changed
+
+- **Hook stdout prefix is `rembric:` (was `[rembric]`).** Visible in `claude --debug` and `~/.codex/log/codex-tui.log`. Same content, ASCII-only, no leading `[` so Codex doesn't try to parse it.
+
+### Notes
+
+- Codex users on `0.2.2` who saw `invalid ... JSON output` errors: `codex plugin marketplace upgrade rembric` followed by a Codex restart will pull `0.2.3` and the hooks succeed. Claude Code users: `claude plugin update rembric@rembric`; the nudge text changes prefix but behaviour is unchanged.
+
 ## [0.2.2] — unreleased
 
 ### Fixed

@@ -41,5 +41,5 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
     "{\"id\":\"${ID_ESC}\",\"cwd\":\"${CWD_ESC}\",\"agent\":\"${AGENT_ESC}\"}"
 fi
 
-echo '[rembric] If this is a continuation of recent work, call memory.context before responding.'
+echo 'rembric: If this is a continuation of recent work, call memory.context before responding.'
 exit 0
