@@ -156,7 +156,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
     <aside class="sb${opts.collapsed ? ' is-collapsed' : ''}">
       <button type="button" class="sb-mob-close" aria-label="Close menu">✕</button>
       <a class="sb-brand" href="/dashboard" title="REMBRIC · Go to overview">
-        <span class="bullet"></span>
+        <img class="brand-logo" src="/dashboard/assets/logo-transparent.png" alt="" />
         <div class="label-stack">
           <div>REMBRIC</div>
           <small>SELF-HOSTED</small>
@@ -190,7 +190,7 @@ export function renderMobileBar(_active: NavKey | null): SafeHtml {
   return html`
     <div class="mob-bar">
       <a class="brand" href="/dashboard">
-        <span class="bullet"></span>
+        <img class="brand-logo" src="/dashboard/assets/logo-transparent.png" alt="" />
         <div class="label-stack">
           <div>REMBRIC</div>
           <small>SELF-HOSTED</small>

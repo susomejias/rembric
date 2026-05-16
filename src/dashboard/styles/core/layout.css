@@ -79,13 +79,12 @@
   text-decoration: none;
 }
 .sb-brand:hover { color: var(--lime); }
-.sb-brand:hover .bullet { background: var(--lime); }
-.sb-brand .bullet {
-  width: 10px;
-  height: 10px;
-  background: var(--lime);
+.sb-brand .brand-logo {
+  width: 28px;
+  height: 28px;
   display: inline-block;
   flex-shrink: 0;
+  object-fit: contain;
 }
 .sb-brand .label-stack { min-width: 0; }
 .sb-brand small {
@@ -248,12 +247,12 @@
   flex: 1 1 auto;
 }
 .mob-bar .brand:hover { color: var(--lime); }
-.mob-bar .brand .bullet {
-  width: 10px;
-  height: 10px;
-  background: var(--lime);
+.mob-bar .brand .brand-logo {
+  width: 24px;
+  height: 24px;
   display: inline-block;
   flex-shrink: 0;
+  object-fit: contain;
 }
 .mob-bar .brand .label-stack {
   min-width: 0;
