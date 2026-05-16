@@ -22,6 +22,13 @@
 # Claude Code does NOT wire this script (Claude has the proper
 # SessionEnd event and uses session-end.sh instead).
 set -u
+
+# TEMP DIAGNOSTIC — confirms whether Codex 0.130.0 actually invokes Stop
+# hooks under the `plugin_hooks` (under-development) feature flag.
+# Logs to /tmp/codex-hooks-fire.log on every invocation. Remove once we
+# diagnose the missing-summary issue.
+echo "$(date -u +%FT%T) session-stop.sh fired argv=$* pid=$$ stdin_len=${#}" >> /tmp/codex-hooks-fire.log 2>/dev/null || true
+
 trap '_emit_json' ERR
 
 _emit_json() {

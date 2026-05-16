@@ -17,6 +17,10 @@
 set -u
 trap 'exit 0' ERR
 
+# TEMP DIAGNOSTIC — pair with the one in session-stop.sh to confirm which
+# hooks Codex 0.130.0 actually executes. Remove once diagnosed.
+echo "$(date -u +%FT%T) session-start.sh fired argv=$* pid=$$" >> /tmp/codex-hooks-fire.log 2>/dev/null || true
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh
 source "${SCRIPT_DIR}/_api.sh"
