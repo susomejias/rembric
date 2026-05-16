@@ -135,6 +135,99 @@ After the marketplace catalog refresh, Codex picks up the new version on the nex
 
 Restart `codex` after the update so the bridge and hooks re-spawn from the new cache path.
 
+### Hermes Agent (memory provider plugin)
+
+Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `plugin/.hermes-plugin/`. Two pieces compose:
+
+| Piece                            | What it does                                                | Wired via                                                                  |
+| -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **`memory.provider: rembric`**   | Auto session create / summary-on-compact / end-on-close     | The Python provider plugin (this section)                                  |
+| **`mcp_servers.rembric`**        | Full memory tool surface (save/search/get/context/judge/…)  | The shared `bin/rembric-bridge.mjs` invoked as a stdio MCP server          |
+
+Install with one shell command — no `git clone` of rembric required:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+hermes plugins enable rembric
+```
+
+The script drops three files (`plugin.yaml`, `__init__.py`, `README.md`) into `${HERMES_HOME:-$HOME/.hermes}/plugins/rembric/`. Inspect before running with `curl … | less`. Developers iterating locally: same script, `PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh`.
+
+**Private repo?** Set a GitHub PAT (`repo` scope) in your env and add the auth header to the outer curl — the installer reuses the token for the three internal fetches automatically (`GH_PAT`, `GH_TOKEN`, or `GITHUB_TOKEN`, first non-empty wins):
+
+```sh
+export GH_PAT=ghp_xxxxxxxx
+curl -fsSL -H "Authorization: Bearer $GH_PAT" \
+  https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+hermes plugins enable rembric
+```
+
+> **Why curl-pipe-sh, not `hermes plugins install`?** Hermes's installer (`hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x) accepts only `owner/repo` shorthand or a full Git URL — it does NOT support monorepo subpaths. Cloning the whole rembric repo into `~/.hermes/plugins/rembric/` to extract three files would mean tens of MB of unrelated TS source. The curl-installer ships the right artifacts and nothing else.
+
+Then drop this block into `~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  rembric:
+    command: npx
+    args: ["-y", "mcp-remote@latest", "${REMBRIC_SERVER_URL}/mcp", "--header", "Authorization: Bearer ${REMBRIC_API_TOKEN}", "--allow-http"]
+
+memory:
+  provider: rembric
+```
+
+#### Credentials — set in shell env or `~/.rembric/.env`
+
+Same two env vars Codex uses, same `rembric token create` token. Two ways to set them:
+
+```bash
+# Option A — in ~/.zshrc or ~/.bashrc
+export REMBRIC_SERVER_URL="https://memory.example.com"
+export REMBRIC_API_TOKEN="$(cat ~/.rembric/hermes-token)"
+
+# Option B — in ~/.rembric/.env (read at plugin import via os.environ.setdefault)
+cat > ~/.rembric/.env <<'EOF'
+REMBRIC_SERVER_URL=https://memory.example.com
+REMBRIC_API_TOKEN=hm-XXXXXXXX
+EOF
+```
+
+Shell exports ALWAYS win over `~/.rembric/.env` (`setdefault` semantics) — Option B is useful when the Rembric server is launched by systemd with its own EnvironmentFile and those values never reach an interactive shell (parity with agentmemory's #250 fix). Option A is the simplest path for a single-user install.
+
+#### Project slug resolution
+
+The provider needs a project slug for every session-lifecycle POST. Cascade, first valid match wins:
+
+1. `REMBRIC_PROJECT_SLUG` env var.
+2. `${HERMES_HOME:-$HOME/.hermes}/rembric.json` → `"project_slug"` (written by `hermes plugins config rembric`).
+3. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>` (same dotenv format as the Claude/Codex plugins).
+4. Trailing path segment of `REMBRIC_SERVER_URL` if it ends in `/mcp/<slug>`.
+5. No slug → all session POSTs skip silently (`[rembric] no project slug …` stderr diagnostic once).
+
+Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pick whichever source matches your workflow — solo / single-project users go with step 1 or 2, multi-project users with `.rembric` files, path-scoped URL users get step 4 automatically.
+
+#### Symptom → cause table
+
+| Symptom in Hermes                                                                                | Cause                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty         | Server unreachable, token wrong, or no slug resolved. Run `curl -fsS -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz` and check the provider's stderr.   |
+| MCP tools work but sessions never appear                                                          | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                              |
+| stderr shows `[rembric] no project slug for session …; skipping session POST`                    | None of the five cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` or drop a `.rembric` file in the working dir.                                                          |
+| Provider tracks slug `A`, MCP bridge tracks slug `B`                                              | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.   |
+| `hermes plugins update rembric` reports nothing to update                                        | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                            |
+
+#### Using Hermes alongside Claude Code or Codex on the same machine
+
+Credentials, slug source, and update flow are independent per client. The Rembric server side is identical — same token, same `/api/<slug>/sessions(*)` endpoints. The clients just configure their adapters differently:
+
+| Client          | Credentials from                                  | Slug from                                                          | Update                                                                                        |
+| --------------- | ------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **Claude Code** | Wizard → keychain (`${user_config.*}`)             | `.rembric` file via the bridge                                     | `/plugin update rembric@rembric`                                                              |
+| **Codex CLI**   | Shell env (`export REMBRIC_*`)                     | `.rembric` file via the bridge                                     | `codex plugin marketplace upgrade rembric` + restart                                          |
+| **Hermes Agent**| Shell env OR `~/.rembric/.env` preload             | Cascade (env / `rembric.json` / `.rembric` / URL parse)            | Re-run the curl-installer                                                                     |
+
+Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).
+
 ### Codex CLI (manual config.toml, no plugin)
 
 If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.

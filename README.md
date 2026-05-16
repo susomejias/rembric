@@ -15,6 +15,7 @@
   <a href="#quickstart">Quickstart</a> ·
   <a href="#hooking-up-claude-code-recommended">Claude Code</a> ·
   <a href="#hooking-up-codex-cli">Codex CLI</a> ·
+  <a href="#hooking-up-hermes-agent">Hermes Agent</a> ·
   <a href="#hooking-up-other-mcp-clients">Other Clients</a> ·
   <a href="#cli-operations">CLI</a> ·
   <a href="#configuration">Configuration</a> ·
@@ -136,6 +137,37 @@ Codex's plugin manifest has no keychain prompt — set `REMBRIC_SERVER_URL` and 
 > **Extra Codex-only steps for hooks to fire** (as of `codex-cli 0.130.0`): after the install + env exports, run `codex features enable plugin_hooks` and then approve the 4 hooks via `/hooks` inside Codex. Without these two one-time steps, MCP works but `/dashboard/sessions` stays empty. Full walk-through (including the symptom-vs-cause troubleshooting table) in [docs/agents.md](./docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
 
 Full details and the manual config.toml fallback: [docs/agents.md](./docs/agents.md).
+
+## Hooking up Hermes Agent
+
+[Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) has a native Python `MemoryProvider` ABC, so Rembric ships as a memory-provider plugin from `plugin/.hermes-plugin/`. One-line install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+hermes plugins enable rembric
+```
+
+Then add to `~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  rembric:
+    command: npx
+    args:
+      [
+        '-y',
+        'mcp-remote@latest',
+        '${REMBRIC_SERVER_URL}/mcp',
+        '--header',
+        'Authorization: Bearer ${REMBRIC_API_TOKEN}',
+        '--allow-http',
+      ]
+
+memory:
+  provider: rembric
+```
+
+The provider gives you lifecycle (session create / summary-on-compact / end-on-close), the MCP bridge gives you the full tool surface. Wire both. Full docs (slug cascade, env vars, troubleshooting): [`plugin/.hermes-plugin/README.md`](./plugin/.hermes-plugin/README.md).
 
 ## Hooking up other MCP clients
 

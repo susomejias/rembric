@@ -1,8 +1,27 @@
 # Changelog
 
-All notable changes to the Rembric Claude Code plugin.
+All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent).
 
-The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+
+## [0.3.0] — unreleased
+
+### Added
+
+- **Hermes Agent plugin** at `plugin/.hermes-plugin/` — a Python `MemoryProvider` implementation that POSTs session lifecycle (`initialize`, `on_pre_compress`, `on_session_end`) to Rembric's existing HTTP API. Tool surface is delegated to the bundled bridge via `mcp_servers.rembric` in `~/.hermes/config.yaml` (no native tools on the provider — `get_tool_schemas() → []`), so the dual-channel setup matches the lifecycle+MCP UX Claude Code and Codex users get.
+- **Curl-pipe-sh installer** at `plugin/.hermes-plugin/install.sh`. Honours `PLUGIN_SRC` so the same script covers both casual users (remote fetch from `raw.githubusercontent.com`) and developers with a local rembric clone (`PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh …`). The choice avoids cloning the entire rembric monorepo into `~/.hermes/plugins/rembric/` (Hermes's `hermes plugins install owner/repo` does not support monorepo subpaths in v0.4.x — verified against `hermes_cli/plugins_cmd.py::_resolve_git_url`).
+- **`~/.rembric/.env` preload** (Hermes provider) — fills missing env values via `os.environ.setdefault` at plugin import, parity with agentmemory's fix for issue #250 (Rembric server launched by systemd never propagates env to the Hermes CLI shell).
+- **Project slug resolution cascade** in the Hermes provider: `REMBRIC_PROJECT_SLUG` env → `<hermes_home>/rembric.json` (via `save_config`) → `<cwd>/.rembric` `PROJECT_SLUG` → trailing segment of `REMBRIC_SERVER_URL` if it ends in `/mcp/<slug>` → degraded silent skip.
+
+### Changed
+
+- **Version-bump rule extended to three manifests.** Any client-visible change in `plugin/` now bumps the `version` field in `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, AND `plugin/.hermes-plugin/plugin.yaml` in the same commit. Documented in `CLAUDE.md::Plugin development discipline::Releasing a new plugin version`.
+- **`README.md` (root + plugin)** and **`docs/agents.md`** updated to list Hermes Agent alongside Claude Code and Codex CLI under "Supported clients" / "Hooking up …".
+- **Shared-logic invariant reformulated** in `CLAUDE.md`: the anchor is now the HTTP API contract in `src/server/api-router.ts`, not "shared shell scripts" — per-client adapters MAY be in any language (bash for Claude/Codex, Python for Hermes are siblings). No runtime behaviour change; the wording catches up to the Python provider's existence.
+
+### Unchanged (intentionally)
+
+- `plugin/bin/rembric-bridge.mjs`, `plugin/scripts/*`, `plugin/hooks/*`, `plugin/.claude-plugin/mcp.json`, `plugin/.codex-plugin/mcp.json` — Hermes consumes the same bridge for tool surface (via `mcp_servers.rembric` in user-side `~/.hermes/config.yaml`) and the same HTTP session endpoints. No bash, hook, or server changes ship with this release.
 
 ## [0.2.3] — unreleased
 
