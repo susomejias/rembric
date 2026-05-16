@@ -12,11 +12,14 @@ import { DomainError } from './errors.js';
  * Append-only contract:
  *   - Never DELETE a row
  *   - Never UPDATE `agent`, `token_id`, `project_id`, `started_at`
- *   - Only flip `status` and write `ended_at` / `summary` once
+ *   - Only flip `status` and write `ended_at` once
+ *   - `summary` and `title` are mutable subject to `final`-flag precedence:
+ *     a `final:true` write locks the column; subsequent `final:false`
+ *     writes are no-ops; subsequent `final:true` writes replace
  *
- * Cross-token access is rejected by `end` and `summarize` (the same
- * token that opened the session must close it) to prevent a misbehaving
- * token from closing another agent's session.
+ * Cross-token access is rejected by `end`, `summarize`, and `writeSummary`
+ * (the same token that opened the session must close it) to prevent a
+ * misbehaving token from closing another agent's session.
  */
 
 export interface StartSessionInput {
@@ -24,6 +27,8 @@ export interface StartSessionInput {
   projectId: string | null;
   agent: string;
   description?: string | null;
+  /** Optional cwd used to compute the placeholder title. */
+  cwd?: string | null;
 }
 
 /**
@@ -40,6 +45,8 @@ export interface EnsureSessionInput {
   projectId: string | null;
   agent: string;
   description?: string | null;
+  /** Optional cwd used to compute the placeholder title. */
+  cwd?: string | null;
 }
 
 export interface EnsureSessionResult {
@@ -49,14 +56,29 @@ export interface EnsureSessionResult {
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+const TITLE_MAX_LENGTH = 100;
 
 export interface EndSessionInput {
   tokenId: string;
+  /** Optional summary to write atomically with the transition. */
+  summary?: string;
+  /** Optional title to write atomically with the transition. */
+  title?: string;
+  /** Precedence flag for summary/title writes. Defaults to false. */
+  final?: boolean;
 }
 
 export interface SummarizeSessionInput {
   tokenId: string;
   summary: string;
+}
+
+export interface WriteSummaryInput {
+  tokenId: string;
+  summary?: string;
+  title?: string;
+  /** Precedence flag. Defaults to false. */
+  final?: boolean;
 }
 
 export interface RecentForContextInput {
@@ -81,9 +103,12 @@ export class AgentSessionsService {
         projectId: input.projectId,
         agent: input.agent,
         description: input.description ?? null,
+        title: computePlaceholderTitle(input.cwd ?? null, ts),
         startedAt: ts,
         endedAt: null,
         summary: null,
+        summaryFinal: false,
+        titleFinal: false,
         status: 'active',
       })
       .returning()
@@ -99,8 +124,7 @@ export class AgentSessionsService {
    * Idempotent: when `(id)` already exists for the same token, returns the
    * existing row with `created: false`. When it exists for a different
    * token, rejects with `id_collision` (theoretically possible with non-
-   * UUID/ULID ids; operationally a ~0 probability event — see the
-   * persistence delta spec in `add-http-session-lifecycle`).
+   * UUID/ULID ids; operationally a ~0 probability event).
    */
   ensure(input: EnsureSessionInput): EnsureSessionResult {
     if (!SESSION_ID_RE.test(input.id)) {
@@ -128,9 +152,12 @@ export class AgentSessionsService {
         projectId: input.projectId,
         agent: input.agent,
         description: input.description ?? null,
+        title: computePlaceholderTitle(input.cwd ?? null, ts),
         startedAt: ts,
         endedAt: null,
         summary: null,
+        summaryFinal: false,
+        titleFinal: false,
         status: 'active',
       })
       .returning()
@@ -139,15 +166,179 @@ export class AgentSessionsService {
     return { session: row, created: true };
   }
 
-  end(sessionId: string, input: EndSessionInput): AgentSession {
-    return this.transitionToEnded(sessionId, input.tokenId, null);
+  /**
+   * Write summary/title without transitioning status. Used by the
+   * MCP `memory.session_summary` tool (always final:true) and by the
+   * Codex per-turn `Stop` HTTP hook (always final:false).
+   *
+   * Writes are subject to the per-field final precedence: a column whose
+   * `_final` flag is already true ignores incoming `final:false` writes
+   * and is replaced by incoming `final:true` writes (last-final-wins).
+   */
+  writeSummary(sessionId: string, input: WriteSummaryInput): AgentSession {
+    if (input.summary !== undefined && input.summary.trim().length === 0) {
+      throw new DomainError('invalid_input', 'sessions.writeSummary: summary must be non-empty');
+    }
+    if (input.title !== undefined) {
+      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
+        throw new DomainError(
+          'invalid_input',
+          `sessions.writeSummary: title must be 1..${TITLE_MAX_LENGTH} chars`,
+        );
+      }
+    }
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.tokenId !== input.tokenId) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.status !== 'active') {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' is already ${existing.status}`,
+      );
+    }
+    const incomingFinal = input.final ?? false;
+    const summaryUpdate = applyPrecedence(
+      existing.summary,
+      existing.summaryFinal,
+      input.summary,
+      incomingFinal,
+    );
+    const titleUpdate = applyPrecedence(
+      existing.title,
+      existing.titleFinal,
+      input.title,
+      incomingFinal,
+    );
+    const set: Partial<typeof agentSessions.$inferInsert> = {};
+    if (summaryUpdate.changed) {
+      set.summary = summaryUpdate.value;
+      set.summaryFinal = summaryUpdate.final;
+    }
+    if (titleUpdate.changed) {
+      set.title = titleUpdate.value;
+      set.titleFinal = titleUpdate.final;
+    }
+    if (Object.keys(set).length === 0) {
+      return existing;
+    }
+    const updated = this.db
+      .update(agentSessions)
+      .set(set)
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
+      .returning()
+      .get();
+    if (!updated) {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' was concurrently ended`,
+      );
+    }
+    return updated;
   }
 
+  end(sessionId: string, input: EndSessionInput): AgentSession {
+    if (input.summary !== undefined && input.summary.trim().length === 0) {
+      throw new DomainError('invalid_input', 'sessions.end: summary must be non-empty');
+    }
+    if (input.title !== undefined) {
+      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
+        throw new DomainError(
+          'invalid_input',
+          `sessions.end: title must be 1..${TITLE_MAX_LENGTH} chars`,
+        );
+      }
+    }
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.tokenId !== input.tokenId) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.status === 'abandoned') {
+      throw new DomainError('session_already_ended', `session '${sessionId}' is already abandoned`);
+    }
+    const incomingFinal = input.final ?? false;
+    const summaryUpdate = applyPrecedence(
+      existing.summary,
+      existing.summaryFinal,
+      input.summary,
+      incomingFinal,
+    );
+    const titleUpdate = applyPrecedence(
+      existing.title,
+      existing.titleFinal,
+      input.title,
+      incomingFinal,
+    );
+    if (existing.status === 'ended') {
+      const set: Partial<typeof agentSessions.$inferInsert> = {};
+      if (summaryUpdate.changed) {
+        set.summary = summaryUpdate.value;
+        set.summaryFinal = summaryUpdate.final;
+      }
+      if (titleUpdate.changed) {
+        set.title = titleUpdate.value;
+        set.titleFinal = titleUpdate.final;
+      }
+      if (Object.keys(set).length === 0) {
+        return existing;
+      }
+      const updated = this.db
+        .update(agentSessions)
+        .set(set)
+        .where(eq(agentSessions.id, sessionId))
+        .returning()
+        .get();
+      return updated ?? existing;
+    }
+    const ts = this.now();
+    const set: Partial<typeof agentSessions.$inferInsert> = {
+      status: 'ended',
+      endedAt: ts,
+    };
+    if (summaryUpdate.changed) {
+      set.summary = summaryUpdate.value;
+      set.summaryFinal = summaryUpdate.final;
+    }
+    if (titleUpdate.changed) {
+      set.title = titleUpdate.value;
+      set.titleFinal = titleUpdate.final;
+    }
+    const updated = this.db
+      .update(agentSessions)
+      .set(set)
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
+      .returning()
+      .get();
+    if (!updated) {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' was concurrently ended`,
+      );
+    }
+    return updated;
+  }
+
+  /**
+   * Back-compat wrapper. New callers SHOULD use `writeSummary` (no
+   * transition) followed by `end` (transition) instead. This wrapper
+   * stays for in-tree callers that still expect the old combined
+   * behaviour; remove in a follow-up change once those are migrated.
+   */
   summarize(sessionId: string, input: SummarizeSessionInput): AgentSession {
     if (input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.summarize: summary must be non-empty');
     }
-    return this.transitionToEnded(sessionId, input.tokenId, input.summary);
+    return this.end(sessionId, {
+      tokenId: input.tokenId,
+      summary: input.summary,
+      final: true,
+    });
   }
 
   getById(sessionId: string): AgentSession | undefined {
@@ -166,6 +357,10 @@ export class AgentSessionsService {
     const conditions = [
       eq(agentSessions.tokenId, input.tokenId),
       eq(agentSessions.status, 'active'),
+      // Soft-deleted sessions must NOT be surfaced as "the active session
+      // for transport" — callers that auto-resolve a sessionId would
+      // otherwise stamp memories onto a deleted row.
+      isNull(agentSessions.deletedAt),
     ];
     if (input.projectId === null) {
       conditions.push(isNull(agentSessions.projectId));
@@ -331,51 +526,58 @@ export class AgentSessionsService {
     ) as { v: number } | undefined;
     return row?.v ?? 0;
   }
+}
 
-  /**
-   * Common helper for `end` + `summarize`. Validates ownership, ensures
-   * the session is still active, and writes the transition atomically.
-   */
-  private transitionToEnded(
-    sessionId: string,
-    tokenId: string,
-    summary: string | null,
-  ): AgentSession {
-    const existing = this.getById(sessionId);
-    if (!existing) {
-      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
-    }
-    // Cross-token access leaks no information about session existence in
-    // user-facing errors; we mask with the same code.
-    if (existing.tokenId !== tokenId) {
-      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
-    }
-    if (existing.status !== 'active') {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' is already ${existing.status}`,
-      );
-    }
-    const ts = this.now();
-    const updated = this.db
-      .update(agentSessions)
-      .set({
-        status: 'ended',
-        endedAt: ts,
-        ...(summary !== null ? { summary } : {}),
-      })
-      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
-      .returning()
-      .get();
-    if (!updated) {
-      // Race: another writer ended the session between read and update.
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' was concurrently ended`,
-      );
-    }
-    return updated;
+interface PrecedenceResult {
+  /** True if the caller should write this field (value/final changed). */
+  changed: boolean;
+  value: string | null;
+  final: boolean;
+}
+
+/**
+ * Apply the final-flag precedence for a single column.
+ *
+ * - No incoming value → no change (changed: false).
+ * - Incoming non-final write blocked by existing final → no change.
+ * - Otherwise → write the new value, lift `_final` to incoming flag's level.
+ *   When existing _final=true and incoming final=true, the new value
+ *   replaces (last-final-wins).
+ */
+function applyPrecedence(
+  currentValue: string | null,
+  currentFinal: boolean,
+  incomingValue: string | undefined,
+  incomingFinal: boolean,
+): PrecedenceResult {
+  if (incomingValue === undefined) {
+    return { changed: false, value: currentValue, final: currentFinal };
   }
+  if (currentFinal && !incomingFinal) {
+    return { changed: false, value: currentValue, final: currentFinal };
+  }
+  return { changed: true, value: incomingValue, final: incomingFinal };
+}
+
+/**
+ * Build the placeholder title written at row insert.
+ *
+ * Format: `${basename(cwd) || 'session'} · HH:MM UTC`.
+ * Used by `ensure` (HTTP) and `start` (MCP).
+ */
+export function computePlaceholderTitle(cwd: string | null, now: Date): string {
+  const base = cwdBasename(cwd) || 'session';
+  const hh = now.getUTCHours().toString().padStart(2, '0');
+  const mm = now.getUTCMinutes().toString().padStart(2, '0');
+  return `${base} · ${hh}:${mm} UTC`;
+}
+
+function cwdBasename(cwd: string | null): string {
+  if (!cwd) return '';
+  const trimmed = cwd.replace(/\/+$/, '');
+  if (trimmed.length === 0) return '';
+  const idx = trimmed.lastIndexOf('/');
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
 }
 
 function clamp(value: number, min: number, max: number): number {

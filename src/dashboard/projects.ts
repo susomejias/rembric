@@ -98,9 +98,7 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
       })}
       <p class="small muted">
         A project is identified by its slug (the value passed via
-        <code>/mcp/&lt;slug&gt;</code> or <code>project.use({slug})</code>). New slugs must match
-        <code>[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?</code>. Legacy slugs (from v0.1) keep working but
-        are flagged. The display name is cosmetic.
+        <code>/mcp/&lt;slug&gt;</code> or <code>project.use({slug})</code>).
       </p>
 
       ${justCreated

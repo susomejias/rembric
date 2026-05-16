@@ -1,0 +1,28 @@
+/* Sessions list view — title column with ellipsis truncation. */
+.rbr-session-title {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rbr-session-title a {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+@media (max-width: 980px) {
+  .rbr-session-title {
+    max-width: 200px;
+  }
+}
+
+@media (max-width: 640px) {
+  .rbr-session-title {
+    max-width: 140px;
+  }
+}

@@ -19,7 +19,7 @@ const BASE = `Rembric memory.
 
 Call memory.save right after: bug fix · decision · discovery · config change · pattern · user preference. If the same topic is evolving, pass topic_key (or call memory.suggest_topic_key first) so the previous row supersedes atomically. When save returns candidates[], close each with memory.judge.
 Call memory.search when the user references past work or asks "what did we do".
-Call memory.session_summary before saying "done" (Goal, Discoveries, Accomplished, Next Steps, Files).`;
+Call memory.session_summary({title, summary}) before saying "done": title ≤100 chars describing what was actually worked on; summary covers Goal · Discoveries · Accomplished · Next Steps · Files.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>
   `\n\nThis connection is path-scoped to '${slug}'. scope='global' is rejected; open /mcp for user-wide memory.`;

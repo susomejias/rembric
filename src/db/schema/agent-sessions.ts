@@ -15,11 +15,15 @@ import { tokens } from './tokens.js';
  * Append-only contract:
  *
  *   - immutable: id, token_id, project_id, agent, started_at
- *   - mutable:   status (FSM), ended_at, summary
+ *   - mutable status FSM: active → ended | abandoned (terminal)
+ *   - mutable once: ended_at
+ *   - mutable with `final`-flag precedence: summary, title
+ *     (a `final:true` write locks the value; subsequent `final:false`
+ *      writes are ignored; subsequent `final:true` writes replace)
  *
  * Status transitions:
  *
- *   active    -> ended       (memory.session_end / memory.session_summary)
+ *   active    -> ended       (memory.session_end / POST /end)
  *   active    -> abandoned   (startup sweep for stale rows)
  *   ended     -> (terminal)
  *   abandoned -> (terminal)
@@ -44,10 +48,26 @@ export const agentSessions = sqliteTable(
     agent: text('agent').notNull(),
     /** Optional seed goal supplied at start time. */
     description: text('description'),
+    /**
+     * Human-readable label shown in the dashboard list. Initial value is
+     * a placeholder `basename(cwd) · HH:MM UTC` written at row insert.
+     * Overwritten by model `memory.session_summary({title})` (final:true)
+     * or bash hook fallback at SessionEnd (final:false). Cascade in the
+     * dashboard: `row.title ?? row.description ?? shortId(row.id)`.
+     */
+    title: text('title'),
     startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
     endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
-    /** Structured summary populated by memory.session_summary. */
+    /**
+     * Structured summary populated by memory.session_summary (final:true)
+     * or by hook fallbacks (final:false). Mutable subject to the
+     * `summary_final` precedence flag.
+     */
     summary: text('summary'),
+    /** Lock flag for `summary`. Once true, only final writes overwrite. */
+    summaryFinal: integer('summary_final', { mode: 'boolean' }).notNull().default(false),
+    /** Lock flag for `title`. Same semantics as `summary_final`. */
+    titleFinal: integer('title_final', { mode: 'boolean' }).notNull().default(false),
     status: text('status', { enum: AGENT_SESSION_STATUSES }).notNull().default('active'),
     /**
      * Soft-delete timestamp. NULL means visible. Set by operators via

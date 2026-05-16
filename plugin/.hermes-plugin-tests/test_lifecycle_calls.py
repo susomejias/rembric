@@ -85,7 +85,10 @@ class LifecycleTest(unittest.TestCase):
             url,
             "http://server.example.com:8787/api/myproj/sessions/01XYZ/summary",
         )
-        self.assertEqual(body, {"summary": "user: first message\nassistant: ack"})
+        self.assertEqual(
+            body,
+            {"summary": "user: first message\nassistant: ack", "final": False},
+        )
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_pre_compress_truncates_at_20k(self, mock_urlopen: MagicMock) -> None:
@@ -100,7 +103,9 @@ class LifecycleTest(unittest.TestCase):
         self.assertTrue(body["summary"].endswith("x" * 20_000))
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_session_end_posts_empty_body(self, mock_urlopen: MagicMock) -> None:
+    def test_session_end_with_empty_messages_posts_empty_body(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         mock_urlopen.return_value = _FakeResponse()
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
@@ -109,7 +114,68 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/end"
         )
+        # No transcript → no summary/title to write; degraded end.
         self.assertEqual(body, {})
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_session_end_with_messages_posts_summary_and_title(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        provider.on_session_end(
+            [
+                {"role": "user", "content": "hola"},
+                {"role": "assistant", "content": "Fixed the bug"},
+                {"role": "user", "content": "thx"},
+            ]
+        )
+        url, body, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertEqual(
+            url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/end"
+        )
+        self.assertEqual(body["title"], "Fixed the bug")
+        self.assertIn("Fixed the bug", body["summary"])
+        self.assertEqual(body["final"], False)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_on_session_switch_closes_old_and_opens_new(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+        provider.on_session_switch(
+            "01NEW", parent_session_id="01OLD", reset=False
+        )
+        # Expect two POSTs: /end old, /sessions new.
+        self.assertEqual(mock_urlopen.call_count, 2)
+        url_end, body_end, _ = _captured_post(mock_urlopen, idx=0)
+        self.assertTrue(url_end.endswith("/sessions/01OLD/end"))
+        self.assertEqual(body_end, {})
+        url_new, body_new, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertTrue(url_new.endswith("/sessions"))
+        self.assertEqual(body_new["id"], "01NEW")
+        self.assertEqual(body_new["agent"], "hermes")
+        self.assertEqual(provider._session_id, "01NEW")
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_on_session_switch_reset_skips_old_close(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+        # No parent_session_id supplied — /reset case.
+        provider.on_session_switch("01NEW", reset=True)
+        # Only the new /sessions registration fires; no /end.
+        self.assertEqual(mock_urlopen.call_count, 1)
+        url_new, body_new, _ = _captured_post(mock_urlopen, idx=0)
+        self.assertTrue(url_new.endswith("/sessions"))
+        self.assertEqual(body_new["id"], "01NEW")
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_no_slug_skips_all_posts(self, mock_urlopen: MagicMock) -> None:
@@ -133,7 +199,11 @@ class LifecycleTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
-        self.assertEqual(provider.system_prompt_block(), "")
+        # system_prompt_block is now non-empty (protocol nudge) but issues
+        # no HTTP. Just verify it doesn't trigger urlopen.
+        block = provider.system_prompt_block()
+        self.assertIn("memory.session_summary", block)
+        self.assertIn("title", block)
         self.assertEqual(provider.prefetch("anything"), "")
         self.assertIsNone(provider.queue_prefetch("anything"))
         self.assertIsNone(provider.sync_turn("u", "a"))

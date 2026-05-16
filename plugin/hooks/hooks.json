@@ -2,10 +2,20 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume|clear",
         "hooks": [
           {
             "type": "command",
             "command": "REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-start.sh claude-code"
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' \"${CLAUDE_PLUGIN_ROOT}\"/scripts/post-compact.sh claude-code"
           }
         ]
       }
@@ -21,23 +31,12 @@
         ]
       }
     ],
-    "PreCompact": [
+    "SessionEnd": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' \"${CLAUDE_PLUGIN_ROOT}\"/scripts/pre-compact.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-stop.sh",
-            "async": true
+            "command": "REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-end.sh"
           }
         ]
       }

@@ -21,22 +21,12 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/pre-compact.sh"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-stop.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-stop.sh codex-cli"
           }
         ]
       }

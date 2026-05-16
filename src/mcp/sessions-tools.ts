@@ -39,6 +39,7 @@ export const sessionEndSchema = {
 export const sessionSummarySchema = {
   sessionId: z.string().min(1).optional(),
   summary: z.string().min(1).max(20_000),
+  title: z.string().min(1).max(100).optional(),
 };
 
 export const contextSchema = {
@@ -214,16 +215,31 @@ async function handleSessionStart(
     projectId = found.id;
   }
 
-  let session;
-  try {
-    session = deps.agentSessions.start({
-      tokenId: ctx.token.id,
-      projectId,
-      agent: args.agent ?? 'unknown',
-      description: args.description ?? null,
-    });
-  } catch (err) {
-    return errToMcp(err);
+  // Idempotency on (token, project): if a session is already active for
+  // this scope (typically because the plugin's SessionStart hook created
+  // one via the HTTP /api/.../sessions path), return that one instead of
+  // minting a new ULID-based row. Prevents the duplicate-session bug
+  // where the model defensively calls memory.session_start on top of the
+  // hook-driven row, ending up with two parallel sessions.
+  let session = deps.agentSessions.findActiveForTransport({
+    tokenId: ctx.token.id,
+    projectId,
+  });
+  let reused = false;
+  if (session) {
+    reused = true;
+  } else {
+    try {
+      session = deps.agentSessions.start({
+        tokenId: ctx.token.id,
+        projectId,
+        agent: args.agent ?? 'unknown',
+        description: args.description ?? null,
+        cwd: typeof process !== 'undefined' ? process.cwd() : null,
+      });
+    } catch (err) {
+      return errToMcp(err);
+    }
   }
 
   if (key) {
@@ -245,14 +261,33 @@ async function handleSessionStart(
     scope: projectId ? 'project' : 'global',
     projectId,
     startedAt: session.startedAt,
+    title: session.title,
+    reused,
   });
 }
 
 function resolveSessionId(deps: SessionsToolDeps, explicit: string | undefined): string | null {
   if (explicit) return explicit;
+  const ctx = getRequestContext();
   const key = routerKey();
-  if (!key) return null;
-  return deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId ?? null;
+  if (key) {
+    const routerHit = deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId;
+    if (routerHit) return routerHit;
+  }
+  // Fallback when the SessionRouter has no entry: pick the most recently
+  // active session for (tokenId, projectId). This is what makes
+  // memory.session_summary / memory.session_end land on the session
+  // created via the HTTP hook path (SessionStart bash script) instead of
+  // returning session_not_found and pushing the agent to invent a new
+  // session via memory.session_start (the cause of the duplicate-session
+  // bug observed during testing v0.5.0).
+  const scope = scopeFromContext(deps);
+  const projectId = scope.kind === 'project' ? scope.projectId : null;
+  const active = deps.agentSessions.findActiveForTransport({
+    tokenId: ctx.token.id,
+    projectId,
+  });
+  return active?.id ?? null;
 }
 
 function handleSessionEnd(deps: SessionsToolDeps, args: { sessionId?: string }) {
@@ -278,7 +313,7 @@ function handleSessionEnd(deps: SessionsToolDeps, args: { sessionId?: string }) 
 
 function handleSessionSummary(
   deps: SessionsToolDeps,
-  args: { sessionId?: string; summary: string },
+  args: { sessionId?: string; summary: string; title?: string },
 ) {
   const ctx = getRequestContext();
   const sessionId = resolveSessionId(deps, args.sessionId);
@@ -291,13 +326,20 @@ function handleSessionSummary(
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
   if (blocked) return blocked;
   try {
-    const summed = deps.agentSessions.summarize(sessionId, {
+    const updated = deps.agentSessions.writeSummary(sessionId, {
       tokenId: ctx.token.id,
       summary: args.summary,
+      title: args.title,
+      final: true,
     });
-    const key = routerKey();
-    if (key) deps.router.clearSession(key.tokenId, key.mcpSessionId);
-    return ok({ ok: true, sessionId: summed.id, endedAt: summed.endedAt });
+    return ok({
+      ok: true,
+      sessionId: updated.id,
+      summary: updated.summary,
+      title: updated.title,
+      summaryFinal: updated.summaryFinal,
+      titleFinal: updated.titleFinal,
+    });
   } catch (err) {
     return errToMcp(err);
   }

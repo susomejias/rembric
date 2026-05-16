@@ -243,6 +243,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._base: str | None = None
         self._slug: str | None = None
         self._session_id: str | None = None
+        self._cwd: str | None = None
         self._initialized: bool = False
 
     @property
@@ -264,6 +265,7 @@ class RembricMemoryProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         self._base = os.environ.get("REMBRIC_SERVER_URL")
         cwd = kwargs.get("cwd") or os.getcwd()
+        self._cwd = cwd
         self._slug = _resolve_slug(cwd)
         self._session_id = session_id
         self._initialized = True
@@ -298,7 +300,15 @@ class RembricMemoryProvider(MemoryProvider):
         )
 
     def system_prompt_block(self) -> str:
-        return ""
+        # Permanent nudge so the model knows to write a structured summary
+        # before declaring work done. Parity with the MCP server's
+        # initialize.instructions block served to Claude Code / Codex CLI.
+        return (
+            "Rembric: before declaring work done, call "
+            "memory.session_summary({title, summary}). Title ≤100 chars "
+            "describing what was actually worked on. Summary covers Goal · "
+            "Discoveries · Accomplished · Next Steps · Files."
+        )
 
     def prefetch(self, query: str, **kwargs: Any) -> str:
         return ""
@@ -309,28 +319,80 @@ class RembricMemoryProvider(MemoryProvider):
     def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
         return None
 
-    def on_pre_compress(self, messages: list, **kwargs: Any) -> None:
+    def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
+        # Returning "" is the documented no-contribution signal; the
+        # important effect is the side-effect POST below. Hermes feeds the
+        # return value into the compressor prompt; we choose not to.
         if not self._initialized or not self._slug or not self._base or not self._session_id:
-            return
+            return ""
         transcript = _format_transcript(messages)
         if not transcript:
-            return
+            return ""
         _api_post(
             self._base,
             self._slug,
             f"/sessions/{self._session_id}/summary",
-            {"summary": transcript},
+            {"summary": transcript, "final": False},
         )
+        return ""
 
     def on_session_end(self, messages: list, **kwargs: Any) -> None:
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return
+        transcript = _format_transcript(messages)
+        title = _derive_title_from_messages(messages)
+        body: dict[str, Any] = {}
+        if transcript:
+            body["summary"] = transcript
+            body["final"] = False
+        if title:
+            body["title"] = title
+            body.setdefault("final", False)
         _api_post(
             self._base,
             self._slug,
             f"/sessions/{self._session_id}/end",
-            {},
+            body,
         )
+
+    def on_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        # Hermes fires this on context compression, /resume, /branch,
+        # /reset, /new — any path that reassigns AIAgent.session_id without
+        # tearing the provider down. Without overriding, self._session_id
+        # becomes stale and every subsequent lifecycle POST hits the wrong
+        # row. We close the old row (when there's a continuation lineage)
+        # and register the new one.
+        del reset  # not used yet — semantic difference may matter later
+        del kwargs
+        if not self._initialized:
+            return
+        old_id = self._session_id
+        if self._slug and self._base and parent_session_id and parent_session_id == old_id:
+            _api_post(
+                self._base,
+                self._slug,
+                f"/sessions/{parent_session_id}/end",
+                {},
+            )
+        self._session_id = new_session_id
+        if self._slug and self._base and new_session_id:
+            _api_post(
+                self._base,
+                self._slug,
+                "/sessions",
+                {
+                    "id": new_session_id,
+                    "cwd": self._cwd or os.getcwd(),
+                    "agent": "hermes",
+                },
+            )
 
     def on_memory_write(
         self, action: str, target: str, content: str, **kwargs: Any
@@ -363,6 +425,38 @@ def _format_transcript(messages: list) -> str:
     if len(transcript) > _SUMMARY_MAX_CHARS:
         transcript = transcript[-_SUMMARY_MAX_CHARS:]
     return transcript
+
+
+_TITLE_MAX_CHARS = 100
+
+
+def _derive_title_from_messages(messages: list) -> str:
+    """Return the first non-empty assistant message (≤100 chars) as a title.
+
+    Used by on_session_end to seed a non-final title write. Returns empty
+    string when no assistant message is found.
+    """
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "")).strip()
+        if role != "assistant":
+            continue
+        content = msg.get("content", "")
+        if not isinstance(content, str):
+            try:
+                content = json.dumps(content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                content = repr(content)
+        text = content.strip()
+        if not text:
+            continue
+        # Collapse newlines / tabs to spaces — titles are single-line.
+        text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+        if len(text) > _TITLE_MAX_CHARS:
+            text = text[:_TITLE_MAX_CHARS]
+        return text
+    return ""
 
 
 # ---------------------------------------------------------------------------

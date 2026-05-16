@@ -4,6 +4,48 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.5.0] — unreleased
+
+### Fixed
+
+- **Sessions now always end with a non-null `summary`.** Three composing bugs are gone:
+  1. `pre-compact.sh` used to POST the hook event metadata blob (`{session_id, transcript_path, hook_event_name, trigger}`) as the summary body. Script deleted; replaced by a `SessionStart matcher:"compact"` hook (`post-compact.sh`) that injects an imperative directing the model to call `memory.session_summary`. SessionStart is one of the three Claude Code events whose stdout enters the model's context (verified against `code.claude.com/docs/en/hooks`).
+  2. Claude Code's `Stop` hook fires per agent turn, not per session. Wiring it to `POST /end` transitioned every session to `ended` on turn 1 and silently failed every subsequent call. `Stop` is gone from `hooks.json`; the new `SessionEnd` hook (`session-end.sh`) is the canonical per-session terminator. SessionEnd reads `transcript_path`, formats the JSONL conversation, derives a title from the first assistant message, and POSTs `/end {summary, title, final:false}`.
+  3. Short sessions that never compact still get a summary via the `SessionEnd` fallback above. No more "agent forgot to call session_summary → row stays `summary=null` forever".
+- **Codex sessions now refresh summary every turn via the `Stop` hook.** Codex has no `SessionEnd` event and no PostCompact equivalent; `Stop` is the only signal. The new `session-stop.sh` POSTs `/summary {transcript, title, final:false}` every turn (session stays `active`) and emits the required `{}` JSON on stdout per the Codex docs ("Stop expects JSON on stdout when it exits 0. Plain text output is invalid for this event."). Codex sessions remain `active` until the daily `abandonStale` sweep flips them to `abandoned` — expected steady state.
+- **Hermes provider rotates session ids cleanly on context compression.** New `on_session_switch` override closes the OLD session row (`POST /end`) and registers the NEW one (`POST /sessions`). Before this fix, the provider's `self._session_id` went stale post-compression and every subsequent lifecycle POST hit the wrong row.
+
+### Added
+
+- **New `title` column in the dashboard sessions list.** Cascade fallback: `row.title ?? row.description ?? shortId(row.id)`. Title is written at row insert as a placeholder `basename(cwd) · HH:MM UTC` and overwritten by either the model's `memory.session_summary({title})` (final:true, locked against bash fallback) or by the bash hook fallback at SessionEnd / Codex Stop (final:false, derived from first assistant message).
+- **`memory.session_summary` accepts an optional `title`** (≤100 chars). When provided, it's persisted with `title_final = true`.
+
+### Changed (BREAKING — server contract)
+
+- **`POST /api/<slug>/sessions/<id>/summary` no longer transitions status.** Body shape extended to `{summary, title?, final?: boolean}`. Writes summary/title only; the row stays `active`. Useful for the Codex per-turn `Stop` writer and for the model wanting to checkpoint without ending.
+- **`POST /api/<slug>/sessions/<id>/end` is the sole transition.** Body shape extended to `{summary?, title?, final?: boolean}`. Atomically writes summary/title (subject to precedence) AND transitions to `ended`. Idempotent on already-ended rows (returns the existing row; honours summary/title writes subject to precedence).
+- **Write precedence: `final: true` locks a field against subsequent `final: false` writes.** Model writes via `memory.session_summary` always send `final:true`; bash/Python hook fallbacks always send `final:false`. Last-final-wins among final writes; last-write-wins among non-final writes. This is how a high-quality model summary beats a noisy raw-transcript fallback even when both arrive.
+- **`memory.session_summary` (MCP) no longer ends the session.** Use `memory.session_end` for the transition. Existing in-tree callers updated; no third-party callers known.
+
+### Changed (plugin layout)
+
+- `plugin/hooks/hooks.json`: removed `Stop` entry; removed `PreCompact` entry; split `SessionStart` into two matcher groups (`startup|resume|clear` → existing `session-start.sh`, new `compact` → new `post-compact.sh`); added `SessionEnd` entry → new `session-end.sh`.
+- `plugin/hooks/hooks.codex.json`: removed `PreCompact` entry (Codex has no equivalent); `Stop` now invokes the new Codex-only `session-stop.sh` which POSTs `/summary` and emits required JSON.
+- `plugin/scripts/pre-compact.sh`: DELETED.
+- `plugin/scripts/session-stop.sh`: REWRITTEN — now Codex-only (Claude Code does not invoke it).
+- `plugin/scripts/post-compact.sh`: NEW.
+- `plugin/scripts/session-end.sh`: NEW.
+- `plugin/scripts/_transcript.sh`: NEW shared helper for parsing transcript JSONL.
+- `plugin/scripts/_api.sh`: gains `rembric_transcript_path_from_stdin_json`.
+- `plugin/.hermes-plugin/plugin.yaml`: `hooks:` adds `on_session_switch`.
+- `plugin/.hermes-plugin/__init__.py`: `on_session_end` posts summary+title; `on_pre_compress` posts with explicit `final:false`; `system_prompt_block` returns a non-empty protocol nudge; new `on_session_switch` override; new `_derive_title_from_messages` helper.
+
+### Versions
+
+- `plugin/.claude-plugin/plugin.json`: `0.4.0` → `0.5.0`
+- `plugin/.codex-plugin/plugin.json`: `0.4.0` → `0.5.0`
+- `plugin/.hermes-plugin/plugin.yaml`: `0.4.0` → `0.5.0`
+
 ## [0.4.0] — unreleased
 
 ### Changed (Hermes plugin)

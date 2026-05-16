@@ -85,10 +85,16 @@ describe('AgentSessionsService', () => {
     );
   });
 
-  it('refuses double-end with session_already_ended', () => {
+  it('double-end is idempotent on already-ended sessions', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    sessions.end(s.id, { tokenId });
-    expect(() => sessions.end(s.id, { tokenId })).toThrow(/already/i);
+    const first = sessions.end(s.id, { tokenId });
+    expect(first.status).toBe('ended');
+    const firstEndedAt = first.endedAt?.getTime();
+    // Second end returns the existing row unchanged — no throw, no
+    // re-write of ended_at.
+    const second = sessions.end(s.id, { tokenId });
+    expect(second.status).toBe('ended');
+    expect(second.endedAt?.getTime()).toBe(firstEndedAt);
   });
 
   it('summarize rejects an empty summary string', () => {

@@ -215,7 +215,7 @@ describe('MCP protocol conformance', () => {
     await expect(connect({ token: 'definitely-not-valid' })).rejects.toThrow();
   });
 
-  it('session lifecycle: start → save (stamps session_id) → summary → context returns it', async () => {
+  it('session lifecycle: start → save (stamps session_id) → summary → end → context returns it', async () => {
     const client = await connect();
 
     // 1. Start a session.
@@ -239,14 +239,22 @@ describe('MCP protocol conformance', () => {
     expect(saved.isError).toBeFalsy();
     const savedPayload = readJson(saved) as { id: string };
 
-    // 3. Summarise the session.
+    // 3. Summarise the session (writes summary but does NOT end the session
+    //    under the new contract — session stays `active`).
     const summarised = (await client.callTool({
       name: 'memory.session_summary',
-      arguments: { summary: 'Goal: wire test. Accomplished: done.' },
+      arguments: { summary: 'Goal: wire test. Accomplished: done.', title: 'Wire test' },
     })) as ToolResult;
     expect(summarised.isError).toBeFalsy();
 
-    // 4. memory.context should include the session as recent.
+    // 4. Explicitly end the session — sole transition path.
+    const ended = (await client.callTool({
+      name: 'memory.session_end',
+      arguments: {},
+    })) as ToolResult;
+    expect(ended.isError).toBeFalsy();
+
+    // 5. memory.context should include the session as recent and `ended`.
     const ctx = (await client.callTool({
       name: 'memory.context',
       arguments: { sessions: 5, memories: 5 },

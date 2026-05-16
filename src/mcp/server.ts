@@ -157,7 +157,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_summary',
     {
       description:
-        'Save the end-of-session summary. Call this BEFORE saying "done"/"listo". Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Closes the session.',
+        'Save the end-of-session summary AND a short title. Call this BEFORE saying "done"/"listo". Args: { summary, title? (<=100 chars, descriptive of work done) }. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.',
       inputSchema: sessionSummarySchema,
     },
     sessions.sessionSummary,

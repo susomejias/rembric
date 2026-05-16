@@ -1,11 +1,12 @@
 name: rembric
-version: '0.4.0'
+version: '0.5.0'
 description: 'Memory for Hermes Agent, backed by your self-hosted Rembric server.'
 author: 'rembric contributors'
 homepage: 'https://github.com/susomejias/rembric'
 hooks:
   - on_session_end
   - on_pre_compress
+  - on_session_switch
 requires_env:
   - name: REMBRIC_SERVER_URL
     description: 'Rembric server base URL (WITHOUT /mcp suffix). Example: https://memory.example.com — no trailing slash.'

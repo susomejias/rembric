@@ -46,4 +46,16 @@ describe('MCP initialize instructions', () => {
       expect(text).not.toContain('X-Rembric-Project');
     }
   });
+
+  it('teaches the session-close protocol with title in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('memory.session_summary');
+      expect(text).toContain('title');
+      expect(text).toContain('before');
+    }
+  });
 });

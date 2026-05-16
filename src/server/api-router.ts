@@ -44,6 +44,14 @@ const sessionPostSchema = z.object({
 
 const sessionSummarySchema = z.object({
   summary: z.string().min(1).max(20_000),
+  title: z.string().min(1).max(100).optional(),
+  final: z.boolean().optional(),
+});
+
+const sessionEndSchema = z.object({
+  summary: z.string().min(1).max(20_000).optional(),
+  title: z.string().min(1).max(100).optional(),
+  final: z.boolean().optional(),
 });
 
 export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
@@ -75,6 +83,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         projectId: ctx.project.id,
         agent: parsed.data.agent ?? 'unknown',
         description: parsed.data.description ?? null,
+        cwd: parsed.data.cwd ?? null,
       });
       return c.json({
         ok: true,
@@ -82,6 +91,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         scope: 'project' as const,
         projectId: ctx.project.id,
         startedAt: result.session.startedAt.toISOString(),
+        title: result.session.title,
         created: result.created,
       });
     } catch (err) {
@@ -105,21 +115,26 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
     }
     try {
-      const updated = deps.agentSessions.summarize(sessionId, {
+      const updated = deps.agentSessions.writeSummary(sessionId, {
         tokenId: ctx.token.id,
         summary: parsed.data.summary,
+        title: parsed.data.title,
+        final: parsed.data.final,
       });
       return c.json({
         ok: true,
         sessionId: updated.id,
-        endedAt: updated.endedAt?.toISOString() ?? null,
+        summary: updated.summary,
+        title: updated.title,
+        summaryFinal: updated.summaryFinal,
+        titleFinal: updated.titleFinal,
       });
     } catch (err) {
       return domainErr(c, err);
     }
   });
 
-  app.post('/:slug/sessions/:id/end', (c) => {
+  app.post('/:slug/sessions/:id/end', async (c) => {
     const ctx = c.get('rembricCtx');
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
@@ -129,12 +144,24 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (blocked) {
       return c.json(blocked.body, blocked.status);
     }
+    const body = await readJson(c);
+    const parsed = sessionEndSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
+    }
     try {
-      const updated = deps.agentSessions.end(sessionId, { tokenId: ctx.token.id });
+      const updated = deps.agentSessions.end(sessionId, {
+        tokenId: ctx.token.id,
+        summary: parsed.data.summary,
+        title: parsed.data.title,
+        final: parsed.data.final,
+      });
       return c.json({
         ok: true,
         sessionId: updated.id,
         endedAt: updated.endedAt?.toISOString() ?? null,
+        summary: updated.summary,
+        title: updated.title,
       });
     } catch (err) {
       return domainErr(c, err);

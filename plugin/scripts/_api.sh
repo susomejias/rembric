@@ -94,6 +94,15 @@ rembric_cwd_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
+# Extract `transcript_path` from a hook stdin JSON blob. Returns empty
+# when missing or null. Used by session-end.sh (Claude Code) and
+# session-stop.sh (Codex) to find the JSONL conversation log on disk.
+rembric_transcript_path_from_stdin_json() {
+  local input="${1:-}"
+  [ -z "$input" ] && return 0
+  printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
+}
+
 # Escape a string for embedding in a JSON value: backslashes, double quotes,
 # and control chars (\n \r \t). Good enough for transcripts captured from
 # hook stdin; not a general-purpose JSON encoder.

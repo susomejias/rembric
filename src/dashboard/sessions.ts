@@ -45,6 +45,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         .select({
           id: agentSessions.id,
           agent: agentSessions.agent,
+          title: agentSessions.title,
+          description: agentSessions.description,
           startedAt: agentSessions.startedAt,
           endedAt: agentSessions.endedAt,
           status: agentSessions.status,
@@ -84,45 +86,51 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       }, {});
     void memory;
 
-    const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => html`
-      <tr data-href="/dashboard/sessions/${r.id}">
-        <td class="mono">
-          <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
-        </td>
-        <td>${r.agent}</td>
-        <td>${r.projectSlug ? raw(`<code>${r.projectSlug}</code>`) : scopePill('global')}</td>
-        <td class="small">
-          ${r.tokenName ?? '—'}
-          ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
-        </td>
-        <td class="muted">${formatTs(r.startedAt)}</td>
-        <td class="muted">${formatTs(r.endedAt)}</td>
-        <td>${statusPill(r.status)}</td>
-        <td class="right">${countRows[r.id] ?? 0}</td>
-        <td class="actions">
-          ${opts.deleted
-            ? html`
-                <form action="/dashboard/sessions/${r.id}/undelete" method="post" class="inline">
-                  ${csrfInput(session.session, deps.sessions, 'session.undelete')}
-                  <button type="submit">Undelete</button>
-                </form>
-              `
-            : html`
-                <form
-                  action="/dashboard/sessions/${r.id}/delete"
-                  method="post"
-                  class="inline"
-                  data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
-                  data-confirm-label="DELETE SESSION"
-                  data-confirm-tone="danger"
-                >
-                  ${csrfInput(session.session, deps.sessions, 'session.delete')}
-                  <button class="danger" type="submit">Delete</button>
-                </form>
-              `}
-        </td>
-      </tr>
-    `;
+    const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => {
+      const displayTitle = titleCascade(r.title, r.description, r.id);
+      return html`
+        <tr data-href="/dashboard/sessions/${r.id}">
+          <td class="rbr-session-title" title="${displayTitle}">
+            <a href="/dashboard/sessions/${r.id}">${displayTitle}</a>
+          </td>
+          <td class="mono">
+            <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
+          </td>
+          <td>${r.agent}</td>
+          <td>${r.projectSlug ? raw(`<code>${r.projectSlug}</code>`) : scopePill('global')}</td>
+          <td class="small">
+            ${r.tokenName ?? '—'}
+            ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
+          </td>
+          <td class="muted">${formatTs(r.startedAt)}</td>
+          <td class="muted">${formatTs(r.endedAt)}</td>
+          <td>${statusPill(r.status)}</td>
+          <td class="right">${countRows[r.id] ?? 0}</td>
+          <td class="actions">
+            ${opts.deleted
+              ? html`
+                  <form action="/dashboard/sessions/${r.id}/undelete" method="post" class="inline">
+                    ${csrfInput(session.session, deps.sessions, 'session.undelete')}
+                    <button type="submit">Undelete</button>
+                  </form>
+                `
+              : html`
+                  <form
+                    action="/dashboard/sessions/${r.id}/delete"
+                    method="post"
+                    class="inline"
+                    data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
+                    data-confirm-label="DELETE SESSION"
+                    data-confirm-tone="danger"
+                  >
+                    ${csrfInput(session.session, deps.sessions, 'session.delete')}
+                    <button class="danger" type="submit">Delete</button>
+                  </form>
+                `}
+          </td>
+        </tr>
+      `;
+    };
 
     const flash = justDeleted
       ? html`<p class="flash success">
@@ -157,6 +165,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
               <table>
                 <thead>
                   <tr>
+                    <th>title</th>
                     <th>id</th>
                     <th>agent</th>
                     <th>project</th>
@@ -181,6 +190,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
               <table>
                 <thead>
                   <tr>
+                    <th>title</th>
                     <th>id</th>
                     <th>agent</th>
                     <th>project</th>
@@ -220,6 +230,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       .select({
         id: agentSessions.id,
         agent: agentSessions.agent,
+        title: agentSessions.title,
         description: agentSessions.description,
         startedAt: agentSessions.startedAt,
         endedAt: agentSessions.endedAt,
@@ -275,11 +286,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           </form>
         `;
 
+    const detailTitle = titleCascade(row.title, row.description, row.id);
     const body = html`
       ${viewHead({
         num: '03',
-        title: `Rembric Session ${shortId(row.id)}.`,
-        hl: 'Rembric',
+        title: `${detailTitle}.`,
+        hl: '',
         meta: [{ k: 'STATUS', v: row.status.toUpperCase() }],
       })}
       ${backLink({ href: '/dashboard/sessions', label: 'BACK TO SESSIONS' })}
@@ -423,6 +435,24 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + '…';
+}
+
+/**
+ * Derive a human-readable label for a session row.
+ *
+ * Cascade: explicit title → description (seed goal) → shortId fallback.
+ * The cascade does NOT short-circuit placeholder titles (e.g. `rembric ·
+ * 22:14 UTC`) — they count as real titles for display because they are
+ * still more informative than the bare shortId.
+ */
+function titleCascade(
+  title: string | null | undefined,
+  description: string | null | undefined,
+  id: string,
+): string {
+  if (title && title.length > 0) return title;
+  if (description && description.length > 0) return description;
+  return shortId(id);
 }
 
 // Maintained import to keep `and` available if future filters compose.

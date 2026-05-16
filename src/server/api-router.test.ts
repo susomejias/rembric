@@ -187,7 +187,7 @@ describe('createApiRouter', () => {
   });
 
   describe('POST /:slug/sessions/:id/summary', () => {
-    it('persists summary and ends the session', async () => {
+    it('persists summary without transitioning status', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -200,8 +200,27 @@ describe('createApiRouter', () => {
       expect(r.status).toBe(200);
       expect(r.body.ok).toBe(true);
       const row = agentSessions.getById('sess-sum-1');
-      expect(row?.status).toBe('ended');
+      // /summary writes summary but does NOT transition — use /end for that.
+      expect(row?.status).toBe('active');
       expect(row?.summary).toContain('Goal: x');
+      expect(row?.summaryFinal).toBe(false);
+    });
+
+    it('persists title alongside summary with final:true precedence', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-sum-title' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-sum-title/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'Goal', title: 'Fix bug', final: true },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-sum-title');
+      expect(row?.title).toBe('Fix bug');
+      expect(row?.summaryFinal).toBe(true);
+      expect(row?.titleFinal).toBe(true);
     });
 
     it('400 on empty summary', async () => {
@@ -241,7 +260,7 @@ describe('createApiRouter', () => {
       expect(r.body.code).toBe('session_not_found');
     });
 
-    it('409 session_already_ended on second summary', async () => {
+    it('non-final write is silently blocked when summary_final is true', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -249,11 +268,31 @@ describe('createApiRouter', () => {
       });
       await call(app, 'POST', `/${projectSlug}/sessions/sess-twice/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'first' },
+        body: { summary: 'final-first', final: true },
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-twice/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'second' },
+        body: { summary: 'non-final-second', final: false },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-twice');
+      // First (final:true) write wins; non-final overwrite is ignored.
+      expect(row?.summary).toBe('final-first');
+      expect(row?.summaryFinal).toBe(true);
+    });
+
+    it('409 session_already_ended on summary write to an ended session', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-already-ended' },
+      });
+      await call(app, 'POST', `/${projectSlug}/sessions/sess-already-ended/end`, {
+        token: adminToken.plaintext,
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-already-ended/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'after-end' },
       });
       expect(r.status).toBe(409);
       expect(r.body.code).toBe('session_already_ended');
@@ -292,20 +331,63 @@ describe('createApiRouter', () => {
       expect(row?.summary).toBeNull();
     });
 
-    it('409 on double-end', async () => {
+    it('double-end is idempotent (no error, returns the already-ended row)', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
         body: { id: 'sess-end-2' },
       });
-      await call(app, 'POST', `/${projectSlug}/sessions/sess-end-2/end`, {
+      const first = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-2/end`, {
         token: adminToken.plaintext,
       });
+      const firstEnd = first.body.endedAt;
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-2/end`, {
         token: adminToken.plaintext,
       });
-      expect(r.status).toBe(409);
-      expect(r.body.code).toBe('session_already_ended');
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.endedAt).toBe(firstEnd);
+    });
+
+    it('end accepts summary and title atomically (final:false precedence)', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-with-summary' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-with-summary/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'transcript dump', title: 'Bug fix', final: false },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-end-with-summary');
+      expect(row?.status).toBe('ended');
+      expect(row?.summary).toBe('transcript dump');
+      expect(row?.title).toBe('Bug fix');
+      expect(row?.summaryFinal).toBe(false);
+    });
+
+    it('end on already-ended session preserves final summary against non-final overwrite', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-protected' },
+      });
+      // Model writes a final summary first.
+      await call(app, 'POST', `/${projectSlug}/sessions/sess-end-protected/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'model wrote', title: 'Real title', final: true },
+      });
+      // Bash hook then ends with a non-final fallback.
+      await call(app, 'POST', `/${projectSlug}/sessions/sess-end-protected/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'raw transcript', title: 'fallback title', final: false },
+      });
+      const row = agentSessions.getById('sess-end-protected');
+      // Model values preserved through the end transition.
+      expect(row?.status).toBe('ended');
+      expect(row?.summary).toBe('model wrote');
+      expect(row?.title).toBe('Real title');
     });
   });
 });
