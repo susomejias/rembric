@@ -26,18 +26,19 @@
 
 ## 5. Empirical verification (post-push)
 
-- [ ] 5.1 Commit all the above with a single Conventional Commit: `fix(codex): restore bridge path-scoping via PWD fallback`. Body cites `Command::env_clear()` in `stdio_server_launcher.rs` and the bridge resolution chain change.
-- [ ] 5.2 User confirms intent to push, then `git push origin main`.
-- [ ] 5.3 Confirm `${repo_root}/.rembric` exists with a valid `PROJECT_SLUG=rembric` line (current state — verify with `cat .rembric`).
-- [ ] 5.4 Run `codex plugin marketplace upgrade rembric` to pull `0.2.2`.
-- [ ] 5.5 Cold-restart `codex` from the repo root with `REMBRIC_*` exported in the shell.
-- [ ] 5.6 Tail `~/.codex/log/codex-tui.log` after first MCP activity. Confirm:
-  - The bridge stderr line shows `projectDir=/Users/jesus.mejias/Desktop/rembric (from PWD)`.
-  - The URL is `http://<host>:<port>/mcp/rembric` (path-scoped, NOT path-less `/mcp`).
-  - The server logs (`/dashboard/sessions` or whichever surface) show activity attributed to the `rembric` project, not global scope.
-- [ ] 5.7 If 5.6 passes, archive via `/opsx:archive fix-codex-bridge-path-scoping`. If fails, capture exact stderr, diagnose, update the change before archiving.
+- [x] 5.1 Commit sha `f1313bd` — `fix(codex): restore bridge path-scoping via PWD fallback`. Body cites `Command::env_clear()` in `stdio_server_launcher.rs` and the bridge resolution chain change.
+- [x] 5.2 Push to `origin/main` confirmed (local + remote both at `f1313bd`).
+- [x] 5.3 Confirmed: `.rembric` exists with `PROJECT_SLUG=rembric`.
+- [x] 5.4 Cache regenerated to `0.2.2/` (verified `~/.codex/plugins/cache/rembric/rembric/0.2.2/.codex-plugin/{plugin.json,mcp.json}` have new content).
+- [x] 5.5 Codex relaunched from repo root with `REMBRIC_*` exported.
+- [x] 5.6 Log confirms all three checks:
+  - `[rembric-bridge] projectDir=/Users/jesus.mejias/Desktop/rembric (from PWD) url=http://192.168.20.48:8787/mcp/rembric` ✓
+  - URL path-scoped to `/mcp/rembric` (verified via `Connecting to remote server: http://192.168.20.48:8787/mcp/rembric` line) ✓
+  - MCP handshake completes (`Local→Remote initialize` → `Remote→Local 0` → `notifications/initialized` → `tools/list` → `Remote→Local 1`) ✓
+  - Server-side `/dashboard/sessions` attribution pending: needs user to trigger a tool call to confirm.
+- [x] 5.7 5.6 passed end-to-end. Verified by user: agent inside Codex called `rembric.project.current({})` and got `{"slug": "rembric", "source": "url-path"}` — the `source: "url-path"` field proves the bridge built `/mcp/rembric` correctly and the server pinned the project from the URL slug. `memory.context` returned real project-scoped data. Archiving now.
 
 ## 6. Cross-client regression check
 
-- [ ] 6.1 In a subsequent Claude Code session against this repo: confirm Claude Code MCP still authenticates, tool calls succeed, and the bridge stderr (under `claude --debug`) shows `projectDir=<workspace> (from CLAUDE_PROJECT_DIR)`.
-- [ ] 6.2 Confirm no unrelated bridge tests / typecheck / lint regressions before pushing — run `pnpm run typecheck` and `pnpm run lint`.
+- [ ] 6.1 DEFERRED — Claude Code regression check pending the user's next Claude Code session. Risk surface is small: only the bridge's `projectDir` resolution chain changed (CLAUDE_PROJECT_DIR keeps winning under Claude Code), `plugin/.claude-plugin/mcp.json` is unchanged, no test infra exists. To validate when next using Claude Code: `claude --debug` and look for `projectDir=<workspace> (from CLAUDE_PROJECT_DIR)` in the bridge stderr.
+- [x] 6.2 Pre-commit hooks (`tsc --noEmit --incremental`, lint-staged Prettier+ESLint) ran on the apply commit `f1313bd` and passed. No regressions caught.

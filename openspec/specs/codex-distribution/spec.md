@@ -101,7 +101,7 @@ If Codex passes the id under a different key (e.g. `sessionId`), the scripts SHA
 
 ### Requirement: Codex-specific MCP server configuration
 
-The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `plugin/.claude-plugin/mcp.json`. The two files diverge in path resolution and env injection mechanism because Codex and Claude Code expose different MCP loader contracts (Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in `args`, and `Command::env_clear()` strips parent-env inheritance — see `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` and `codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`).
+The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `plugin/.claude-plugin/mcp.json`. The two files diverge in path resolution and env injection mechanism because Codex and Claude Code expose different MCP loader contracts (Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in `args`, and `Command::env_clear()` strips parent-env inheritance — see `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` and `codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`). The Codex-specific `env_vars` list also forwards the user's shell `PWD` so the bridge can resolve the user's project directory (Codex's spawn semantics put `process.cwd()` at the plugin cache dir, which is not the project).
 
 #### Scenario: Codex MCP config file declares stdio bridge with plugin-root anchoring
 
@@ -110,7 +110,7 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 - **AND** the entry declares `command: "node"`
 - **AND** the entry declares `args: ["./bin/rembric-bridge.mjs"]` — a relative path under the plugin root
 - **AND** the entry declares `cwd: "."` so Codex's `normalize_plugin_mcp_server_value` resolves the working directory to the plugin root (`plugin_root.join(".") = plugin_root`)
-- **AND** the entry declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`
+- **AND** the entry declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN", "PWD"]`
 - **AND** the entry SHALL NOT declare an `env` field — Codex would treat any literal map values as opaque overrides that clobber `env_vars` reads
 
 #### Scenario: Bridge resolves under Codex via plugin-root cwd
@@ -126,6 +126,14 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 - **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env (the shell that launched `codex`)
 - **AND** the curated env passed to the bridge subprocess (after `Command::env_clear()`) SHALL contain those names with the user-supplied values
 - **AND** the bridge SHALL build a real URL — e.g. `http://192.168.20.48:8787/mcp/<slug>` — not a placeholder literal
+
+#### Scenario: env_vars forwards PWD so the bridge can resolve the user's project directory
+
+- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json` AND the shell that launched `codex` has `PWD` set (POSIX shell convention — `bash`, `zsh`, `fish` all set it)
+- **THEN** `create_env_for_mcp_server` SHALL read `PWD` from Codex's own process env
+- **AND** the curated env passed to the bridge subprocess SHALL contain `PWD` with the shell's working directory
+- **AND** the bridge's project-directory resolution (per the `claude-code-plugin` capability's MCP bridge contract) SHALL pick `PWD` as the `projectDir` (since Codex never sets `CLAUDE_PROJECT_DIR`)
+- **AND** path-scoping via `${projectDir}/.rembric` SHALL function correctly when the user has launched `codex` from their project root
 
 #### Scenario: Bridge surfaces a useful error when env vars are missing
 
