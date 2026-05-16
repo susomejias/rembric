@@ -1,20 +1,4 @@
-# hermes-agent-plugin Specification
-
-## Purpose
-
-TBD - created by archiving change add-hermes-agent-plugin. Update Purpose after archive.
-
-## Requirements
-
-### Requirement: Plugin source location
-
-The plugin SHALL live in this monorepo at `plugin/.hermes-plugin/`, sibling to `plugin/.claude-plugin/` and `plugin/.codex-plugin/`. The directory SHALL contain exactly four files: `plugin.yaml`, `__init__.py`, `install.sh`, `README.md`. No subdirectories.
-
-#### Scenario: Plugin tree contains the four files
-
-- **WHEN** the repository is at HEAD
-- **THEN** `ls plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, and `README.md`
-- **AND** there are no nested directories under `plugin/.hermes-plugin/`
+## MODIFIED Requirements
 
 ### Requirement: Plugin manifest declares lifecycle hooks
 
@@ -32,24 +16,6 @@ Declaring `requires_env` triggers Hermes's documented install-time prompt: `herm
 - **THEN** it sees `hooks: [on_session_end, on_pre_compress]` and surfaces no other hook bindings
 - **AND** it sees `requires_env: [REMBRIC_SERVER_URL, REMBRIC_API_TOKEN, REMBRIC_PROJECT_SLUG]` and prompts the user for any of those not already set in the parent shell env
 - **AND** answered values land in `${HERMES_HOME:-~/.hermes}/.env` (Hermes's standard env file) and become available to the plugin module at import time and to all `mcp_servers.*` subprocesses Hermes spawns
-
-### Requirement: Provider class implements the MemoryProvider ABC
-
-`plugin/.hermes-plugin/__init__.py` SHALL define a class `RembricMemoryProvider` extending `agent.memory_provider.MemoryProvider`. The file SHALL guard the import with `try: from agent.memory_provider import MemoryProvider / except ImportError:` falling back to a local stub ABC defining the same method names, so the file is importable for tests and linting without Hermes installed.
-
-The file SHALL expose a module-level `register(ctx)` function that calls `ctx.register_memory_provider(RembricMemoryProvider())`. No other registrations.
-
-#### Scenario: Plugin loads under Hermes
-
-- **WHEN** Hermes loads the plugin from `~/.hermes/plugins/rembric/`
-- **THEN** `register(ctx)` runs and registers the provider via `ctx.register_memory_provider`
-- **AND** no other registration (tools, hooks, skills, commands, CLI subcommands) occurs
-
-#### Scenario: Plugin file is importable without Hermes
-
-- **WHEN** the file is imported in a Python environment that lacks the `agent.memory_provider` module
-- **THEN** the `try/except ImportError` branch defines a local stub ABC and the import succeeds
-- **AND** the file's classes and helper functions can be unit-tested
 
 ### Requirement: Provider lifecycle method behavior
 
@@ -157,58 +123,6 @@ The resolved slug SHALL be validated against the slug regex; non-matching candid
 - **THEN** the provider's resolved slug is `None`
 - **AND** all session-related POSTs in subsequent lifecycle calls are skipped silently
 
-### Requirement: Distribution via curl-installer
-
-The plugin SHALL be installable through a single shell script hosted at `plugin/.hermes-plugin/install.sh` in the rembric monorepo. The script SHALL:
-
-- Default to `PLUGIN_SRC="https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin"`.
-- Honour an overriding `PLUGIN_SRC` environment variable that points at any local directory (for developers with a cloned monorepo) or any other reachable URL prefix.
-- Honour `HERMES_HOME` (default `${HOME}/.hermes`).
-- Honour `GH_PAT`, `GH_TOKEN`, or `GITHUB_TOKEN` (in that precedence; first non-empty wins) as a GitHub Personal Access Token used for HTTPS fetches. When set, the script SHALL include `Authorization: Bearer <token>` on every internal `curl` call so the same script works against private `raw.githubusercontent.com` URLs without further command-line plumbing.
-- Create the target directory `${HERMES_HOME}/plugins/rembric/` if it does not exist.
-- Copy or fetch exactly three files into the target directory: `plugin.yaml`, `__init__.py`, `README.md`. When `PLUGIN_SRC` resolves to a local path that contains these files, the script SHALL prefer local `cp`; otherwise the script SHALL `curl -fsSL` from the prefix.
-- Exit non-zero on any unrecoverable error (target directory cannot be created; all sources for a required file fail). Print a clear `[rembric] error: <reason>` line to stderr before exiting. When a fetch fails AND no auth token was set, the stderr line SHALL include the hint `(private repo? set GH_PAT)` so the user gets a single useful diagnostic.
-- Print a one-line success message identifying the install location and the next step to stdout: `✓ rembric installed at <path>\n  enable: hermes plugins enable rembric`.
-
-The recommended public install command in `README.md` SHALL be:
-
-```
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
-```
-
-The plugin's README and docs SHALL NOT recommend a `git clone + cp -r` two-step install as a parallel path. The curl-installer with `PLUGIN_SRC` covers both the casual-user and the developer-with-clone case.
-
-#### Scenario: Default install fetches the three files via curl
-
-- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh` in a fresh shell with `HERMES_HOME` unset
-- **THEN** the script creates `${HOME}/.hermes/plugins/rembric/` and writes `plugin.yaml`, `__init__.py`, `README.md` into it
-- **AND** stdout includes `✓ rembric installed at` followed by the resolved path
-
-#### Scenario: Developer install reads from local clone
-
-- **WHEN** a developer with a clone of rembric runs `PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh`
-- **THEN** the three files in the target directory are byte-identical to the files in the local source
-- **AND** no network request is issued by the script
-
-#### Scenario: Missing remote file fails loudly
-
-- **WHEN** the script runs with the default `PLUGIN_SRC` and the upstream `plugin.yaml` returns HTTP 404
-- **THEN** the script writes `[rembric] error:` to stderr and exits with a non-zero status
-- **AND** the target directory may exist but does not contain a half-written `plugin.yaml`
-
-#### Scenario: GH_PAT is forwarded to every internal fetch
-
-- **WHEN** the user runs `export GH_PAT=ghp_xxx; curl -fsSL -H "Authorization: Bearer $GH_PAT" .../install.sh | sh` against a private `raw.githubusercontent.com` URL prefix
-- **THEN** the piped `sh` subprocess inherits `GH_PAT` from the parent shell
-- **AND** the script's three internal `curl` calls each include `Authorization: Bearer ghp_xxx`
-- **AND** the install succeeds without further user intervention
-
-#### Scenario: Anonymous private-repo fetch hints at GH_PAT
-
-- **WHEN** the script runs with the default `PLUGIN_SRC`, no `GH_PAT`/`GH_TOKEN`/`GITHUB_TOKEN` is set, and the upstream `plugin.yaml` returns HTTP 404 (private repo masking)
-- **THEN** the stderr line includes the substring `(private repo? set GH_PAT)`
-- **AND** the script exits non-zero
-
 ### Requirement: User documentation
 
 The plugin's `README.md` SHALL include, in this order:
@@ -234,31 +148,16 @@ The repository's root `README.md` SHALL be updated to list Hermes Agent under "S
 - **AND** the prose preceding the block explicitly notes that lifecycle (provider) and tool access (bridge) are complementary, not redundant
 - **AND** the README contains no reference to `~/.rembric/.env` or `get_config_schema`
 
-### Requirement: Version coupling with other client manifests
+## REMOVED Requirements
 
-The `version` field in `plugin/.hermes-plugin/plugin.yaml` SHALL stay numerically equal to `plugin/.claude-plugin/plugin.json::version` and `plugin/.codex-plugin/plugin.json::version`. The "Releasing a new plugin version" rule in `CLAUDE.md` SHALL be extended in the same commit so that the version-bump rule covers all three manifests.
+### Requirement: Provider config schema
 
-#### Scenario: All three manifests bump together
+**Reason**: The `get_config_schema()` + `save_config()` mechanism was the wrong abstraction for Rembric's credentials. Those three env vars need to reach both the in-process provider AND the bridge subprocess Hermes spawns from `mcp_servers.rembric`. Hermes's `requires_env:` manifest field handles both consumers via `~/.hermes/.env`; the plugin's `get_config_schema()` only reached the in-process side. With `requires_env:` declared, the provider no longer needs to manage credential storage at all.
 
-- **WHEN** any client-visible change in `plugin/` is committed (scripts, hooks, mcp.json, bin/, or any of the manifests themselves)
-- **THEN** the same commit bumps the `version` field in all three of `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, and `plugin/.hermes-plugin/plugin.yaml`
-- **AND** `plugin/CHANGELOG.md` gains a corresponding `[X.Y.Z]` entry
+**Migration**: not externally exposed (0.3.x not in production use). `~/.hermes/rembric.json` is no longer read; safe to delete.
 
-### Requirement: No modification to existing plugin assets
+### Requirement: Configuration preload from `~/.rembric/.env`
 
-This change SHALL NOT modify any of:
+**Reason**: The custom dotenv preload was a workaround for the absence of `requires_env:` in the manifest. With `requires_env:` declared, Hermes loads `~/.hermes/.env` into `os.environ` before plugins import — the same vars are available to the provider directly with no preload helper. The `~/.rembric/.env` file is now obsolete and silently ignored.
 
-- `plugin/bin/rembric-bridge.mjs`
-- `plugin/scripts/_api.sh`, `plugin/scripts/session-start.sh`, `plugin/scripts/session-stop.sh`, `plugin/scripts/pre-compact.sh`, `plugin/scripts/prompt-search.sh`
-- `plugin/hooks/hooks.json`, `plugin/hooks/hooks.codex.json`
-- `plugin/.claude-plugin/mcp.json`, `plugin/.codex-plugin/mcp.json`
-- `src/server/api-router.ts` (endpoints, schemas, auth)
-- DB schema or migrations
-- Existing capability specs in `openspec/specs/` other than the documentation-only edit to `CLAUDE.md` invariant wording (which is project guidance, not a spec).
-
-The Hermes plugin consumes the **existing** HTTP session endpoints in `src/server/api-router.ts` and the **existing** bridge entry point. No new server-side runtime dependencies are introduced.
-
-#### Scenario: Bridge and bash scripts are byte-identical post-change
-
-- **WHEN** the change is applied
-- **THEN** `git diff` against `plugin/bin/rembric-bridge.mjs` and every file under `plugin/scripts/`, `plugin/hooks/`, `plugin/.claude-plugin/`, `plugin/.codex-plugin/` shows no modifications
+**Migration**: not externally exposed (0.3.x not in production use). `~/.rembric/.env` is no longer read; safe to delete.

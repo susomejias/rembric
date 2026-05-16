@@ -4,6 +4,24 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.4.0] — unreleased
+
+### Changed (Hermes plugin)
+
+- **Credentials now live exclusively in `${HERMES_HOME:-~/.hermes}/.env`.** `plugin/.hermes-plugin/plugin.yaml` declares `requires_env: [REMBRIC_SERVER_URL, REMBRIC_API_TOKEN, REMBRIC_PROJECT_SLUG]` (token marked `secret: true`). Running `hermes plugins install rembric` now prompts for the three values and writes them via Hermes's standard `save_env_value` to `~/.hermes/.env`. Hermes loads that file into `os.environ` AND propagates the same env to `mcp_servers.*` subprocesses — the bundled MCP bridge sees the credentials the same way the in-process provider does. Single source of truth, no parallel files. Verified live in the author's Hermes LXC install: removing `~/.rembric/.env` and re-running `hermes plugins install rembric` produces a working setup that the previous `get_config_schema` flow could not.
+- **Slug resolution cascade is now four steps (was five).** Step 2 — reading `<hermes_home>/rembric.json` written by `save_config` — is gone because `save_config` no longer exists. New cascade: `REMBRIC_PROJECT_SLUG` env → `<cwd>/.rembric` → trailing `/mcp/<slug>` of `REMBRIC_SERVER_URL` → degraded silent skip. Same coverage for every documented setup, simpler mental model.
+
+### Removed (Hermes plugin)
+
+- **`RembricMemoryProvider.get_config_schema()`** — the wrong abstraction. It only reached the in-process provider; the MCP bridge subprocess was left without env. `requires_env:` covers both consumers via Hermes's standard mechanism. Default no-op (`[]`) inherits from the ABC.
+- **`RembricMemoryProvider.save_config()`** — companion to `get_config_schema`. Hermes manages credential storage now; the plugin no longer writes `~/.hermes/rembric.json`.
+- **`_preload_rembric_dotenv()` helper + `~/.rembric/.env` / `${XDG_CONFIG_HOME}/rembric/.env` candidate paths.** Workaround for the missing `requires_env:`. With Hermes loading `~/.hermes/.env` before the plugin module imports, the preload is redundant.
+- **`_slug_from_stored_config()` cascade step.** Tied to the removed `save_config`.
+
+### Other client manifests
+
+- **Versions bumped to 0.4.0** in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` per the lock-step rule. No behavior change in those clients.
+
 ## [0.3.1] — unreleased
 
 ### Documentation

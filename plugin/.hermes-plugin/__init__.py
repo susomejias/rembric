@@ -3,6 +3,7 @@
 Install with:
 
     curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+    hermes plugins install rembric   # answers requires_env prompts, writes ~/.hermes/.env
     hermes plugins enable rembric
 
 Lifecycle (`initialize`, `on_pre_compress`, `on_session_end`) talks to
@@ -11,9 +12,14 @@ through the bundled MCP bridge registered separately in
 ``~/.hermes/config.yaml`` under ``mcp_servers.rembric`` — this provider
 intentionally exposes no native tools so the surface cannot drift.
 
-Resolves project slug via cascade: ``REMBRIC_PROJECT_SLUG`` env →
-``<hermes_home>/rembric.json`` (written by ``save_config``) →
-``<cwd>/.rembric`` ``PROJECT_SLUG`` → trailing path segment of
+Credentials live in ``${HERMES_HOME:-~/.hermes}/.env``, written by
+Hermes itself via the manifest's ``requires_env`` flow at install time.
+Hermes pre-loads that file into ``os.environ`` before the plugin module
+imports AND into every subprocess it spawns from ``mcp_servers.*`` —
+single source of truth for both the in-process provider and the bridge.
+
+Project slug cascade (first valid match wins): ``REMBRIC_PROJECT_SLUG``
+env → ``<cwd>/.rembric`` ``PROJECT_SLUG`` → trailing path segment of
 ``REMBRIC_SERVER_URL`` if it ends in ``/mcp/<slug>`` → degraded silent
 skip. Failures degrade silently (single-line stderr diagnostic) and
 never abort the host session.
@@ -23,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -90,15 +97,9 @@ except ImportError:  # pragma: no cover - exercised only outside Hermes
             pass
 
 
-# ---------------------------------------------------------------------------
-# Module-level constants
-# ---------------------------------------------------------------------------
-
 # Mirror of the slug regex enforced by ``plugin/bin/rembric-bridge.mjs`` and
 # Rembric's project-slug validation: lowercase letters/digits/hyphens, 1–64
 # chars, must not start or end with a hyphen.
-import re  # noqa: E402
-
 _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
 _SUMMARY_MAX_CHARS = 20_000
 _API_TIMEOUT_SEC = 3
@@ -106,7 +107,7 @@ _HEALTHZ_TIMEOUT_SEC = 2
 
 
 # ---------------------------------------------------------------------------
-# Dotenv preload (issue #250 parity with agentmemory)
+# Dotenv parsing — used by `.rembric` files (per-cwd slug pinning)
 # ---------------------------------------------------------------------------
 
 
@@ -126,33 +127,6 @@ def _parse_dotenv(text: str) -> dict[str, str]:
     return out
 
 
-def _preload_rembric_dotenv() -> None:
-    """Pre-populate missing env values from ``~/.rembric/.env`` (best-effort).
-
-    Uses ``os.environ.setdefault`` so a shell-set value ALWAYS wins. Silent
-    on any failure (missing file, unreadable, malformed) — the provider
-    falls back to whatever the process env carries.
-    """
-    candidates: list[Path] = []
-    home = os.environ.get("HOME")
-    if home:
-        candidates.append(Path(home) / ".rembric" / ".env")
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
-        candidates.append(Path(xdg) / "rembric" / ".env")
-    for path in candidates:
-        try:
-            if not path.is_file():
-                continue
-            for key, value in _parse_dotenv(path.read_text(encoding="utf-8")).items():
-                os.environ.setdefault(key, value)
-        except (OSError, UnicodeDecodeError):
-            continue
-
-
-_preload_rembric_dotenv()
-
-
 # ---------------------------------------------------------------------------
 # Slug resolution cascade
 # ---------------------------------------------------------------------------
@@ -166,20 +140,6 @@ def _valid_slug(candidate: str | None) -> str | None:
 
 def _slug_from_env() -> str | None:
     return _valid_slug(os.environ.get("REMBRIC_PROJECT_SLUG"))
-
-
-def _slug_from_stored_config() -> str | None:
-    hermes_home = os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
-    config_path = Path(hermes_home) / "rembric.json"
-    try:
-        if not config_path.is_file():
-            return None
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    return _valid_slug(data.get("project_slug"))
 
 
 def _slug_from_dotrembric(cwd: str) -> str | None:
@@ -208,10 +168,9 @@ def _slug_from_url() -> str | None:
 
 
 def _resolve_slug(cwd: str) -> str | None:
-    """Cascade through the five sources, returning the first valid slug."""
+    """Cascade through the four sources, returning the first valid slug."""
     for source in (
         _slug_from_env,
-        _slug_from_stored_config,
         lambda: _slug_from_dotrembric(cwd),
         _slug_from_url,
     ):
@@ -271,8 +230,13 @@ class RembricMemoryProvider(MemoryProvider):
     Sessions: initialize → POST /api/<slug>/sessions; on_pre_compress → POST
     /sessions/<id>/summary; on_session_end → POST /sessions/<id>/end.
     Memory-touching lifecycle methods (``prefetch``, ``system_prompt_block``,
-    ``sync_turn``, ``on_memory_write``) are no-ops in v1 — the agent uses the
+    ``sync_turn``, ``on_memory_write``) are no-ops — the agent uses the
     MCP bridge for memory tool access.
+
+    Credentials come exclusively from ``os.environ``, which Hermes populates
+    from ``${HERMES_HOME:-~/.hermes}/.env`` before this module imports (via
+    the ``requires_env`` install flow). The provider does not manage
+    credential storage — no ``get_config_schema``, no ``save_config``.
     """
 
     def __init__(self) -> None:
@@ -332,39 +296,6 @@ class RembricMemoryProvider(MemoryProvider):
                 ),
             }
         )
-
-    def get_config_schema(self) -> list[dict]:
-        return [
-            {
-                "key": "server_url",
-                "description": "Rembric server base URL (WITHOUT /mcp suffix)",
-                "env_var": "REMBRIC_SERVER_URL",
-                "required": True,
-            },
-            {
-                "key": "api_token",
-                "description": "Bearer token issued by 'rembric token create'",
-                "env_var": "REMBRIC_API_TOKEN",
-                "secret": True,
-                "required": True,
-            },
-            {
-                "key": "project_slug",
-                "description": (
-                    "Default project slug; overridden by REMBRIC_PROJECT_SLUG "
-                    "env or <cwd>/.rembric if present"
-                ),
-                "env_var": "REMBRIC_PROJECT_SLUG",
-                "required": False,
-            },
-        ]
-
-    def save_config(self, values: dict, hermes_home: str) -> None:
-        config_path = Path(hermes_home) / "rembric.json"
-        try:
-            config_path.write_text(json.dumps(values, indent=2), encoding="utf-8")
-        except OSError as err:
-            _stderr(f"[rembric] failed to write {config_path}: {err}")
 
     def system_prompt_block(self) -> str:
         return ""

@@ -27,12 +27,16 @@ class HandleToolCallDefensiveTest(unittest.TestCase):
         provider = self.mod.RembricMemoryProvider()
         self.assertEqual(provider.name, "rembric")
 
-    def test_config_schema_shape(self) -> None:
+    def test_provider_does_not_override_get_config_schema(self) -> None:
+        # The default no-op from the ABC stub returns [].
+        # Confirm the provider has not re-introduced a custom override.
         provider = self.mod.RembricMemoryProvider()
-        schema = provider.get_config_schema()
-        self.assertEqual([e["key"] for e in schema], ["server_url", "api_token", "project_slug"])
-        self.assertTrue(schema[1]["secret"])
-        self.assertFalse(schema[2]["required"])
+        self.assertEqual(provider.get_config_schema(), [])
+
+    def test_provider_does_not_override_save_config(self) -> None:
+        # Default no-op returns None and writes nothing.
+        provider = self.mod.RembricMemoryProvider()
+        self.assertIsNone(provider.save_config({"server_url": "x"}, "/tmp"))
 
 
 if __name__ == "__main__":
