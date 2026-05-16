@@ -23,13 +23,9 @@
 # SessionEnd event and uses session-end.sh instead).
 set -u
 
-# TEMP DIAGNOSTIC — full stdin + parsed vars dump. Remove once diagnosed.
-DIAG=/tmp/codex-stop-diag2.log
-
 trap '_emit_json' ERR
 
 _emit_json() {
-  echo "[ERR trap fired] $(date -u +%FT%T)" >> "$DIAG" 2>/dev/null || true
   printf '{}'
   exit 0
 }
@@ -50,53 +46,20 @@ TRANSCRIPT_PATH="$(rembric_transcript_path_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
 SLUG="$(rembric_read_project_slug "$CWD")"
 
-{
-  echo "========== $(date -u +%FT%T.%NZ) =========="
-  echo "argv: $*"
-  echo "REMBRIC_SERVER_URL=${REMBRIC_SERVER_URL:-<unset>}"
-  echo "REMBRIC_API_TOKEN(len)=${#REMBRIC_API_TOKEN}"
-  echo "-- STDIN (${#INPUT} chars) --"
-  printf '%s\n' "$INPUT"
-  echo "-- end stdin --"
-  echo "SESSION_ID=[${SESSION_ID}]"
-  echo "CWD=[${CWD}]"
-  echo "TRANSCRIPT_PATH=[${TRANSCRIPT_PATH}]"
-  if [ -n "$TRANSCRIPT_PATH" ]; then
-    if [ -f "$TRANSCRIPT_PATH" ]; then
-      echo "TRANSCRIPT_FILE: exists, size=$(wc -c < "$TRANSCRIPT_PATH")"
-      echo "-- first 3 lines --"
-      head -3 "$TRANSCRIPT_PATH" 2>/dev/null
-      echo "-- end head --"
-    else
-      echo "TRANSCRIPT_FILE: missing on disk"
-    fi
-  else
-    echo "TRANSCRIPT_PATH: empty (Codex did not provide it)"
-  fi
-  echo "SLUG=[${SLUG}]"
-} >> "$DIAG" 2>/dev/null || true
-
 if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
   TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-  echo "[POST path] summary_len=${#SUMMARY} title=[${TITLE}]" >> "$DIAG" 2>/dev/null || true
   if [ -n "$SUMMARY" ]; then
     SUMMARY_ESC="$(rembric_json_escape "$SUMMARY")"
     if [ -n "$TITLE" ]; then
       TITLE_ESC="$(rembric_json_escape "$TITLE")"
       rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/summary" \
         "{\"summary\":\"${SUMMARY_ESC}\",\"title\":\"${TITLE_ESC}\",\"final\":false}"
-      echo "[POSTED with title]" >> "$DIAG" 2>/dev/null || true
     else
       rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/summary" \
         "{\"summary\":\"${SUMMARY_ESC}\",\"final\":false}"
-      echo "[POSTED no title]" >> "$DIAG" 2>/dev/null || true
     fi
-  else
-    echo "[skip POST: empty summary]" >> "$DIAG" 2>/dev/null || true
   fi
-else
-  echo "[skip POST: precondition failed]" >> "$DIAG" 2>/dev/null || true
 fi
 
 # Codex Stop MUST emit JSON on stdout — plain text is rejected.
