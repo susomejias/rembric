@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.0](https://github.com/susomejias/rembric/compare/v0.8.2...v0.9.0) (2026-05-16)
+
+
+### Features
+
+* **dashboard:** swap sidebar brand bullet for transparent logo ([4529316](https://github.com/susomejias/rembric/commit/4529316e154329cbadf520f9ceb1c0a716306346))
+* **plugin:** add Hermes Agent memory provider ([93aae7f](https://github.com/susomejias/rembric/commit/93aae7f38ee58198e9977dec4001a09c6dcd1d1c))
+
+
+### Bug Fixes
+
+* **codex:** drop leading [ from hook stdout so looks_like_json passes ([0cc9f73](https://github.com/susomejias/rembric/commit/0cc9f73bcc8a70d5fe01f50ee06431e3f8916a27))
+* **codex:** restore bridge path-scoping via PWD fallback ([f1313bd](https://github.com/susomejias/rembric/commit/f1313bd9a834ba62336211a936ec4ca5a3c96dbd))
+
+
+### Documentation
+
+* **codex:** add hook enablement note to root README too ([e2c59a1](https://github.com/susomejias/rembric/commit/e2c59a1107587f85330f4bda1bb1122b07598d87))
+* **codex:** document plugin_hooks feature flag + /hooks trust review ([f077d2b](https://github.com/susomejias/rembric/commit/f077d2bd4798d92b9f8dcdbf87637f5346492a21))
+
 ## [0.8.2](https://github.com/susomejias/rembric/compare/v0.8.1...v0.8.2) (2026-05-15)
 
 
