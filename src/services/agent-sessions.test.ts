@@ -261,4 +261,113 @@ describe('AgentSessionsService', () => {
       }
     });
   });
+
+  describe('purgeEmpty', () => {
+    /** Helper: end a session and backdate its ended_at past the grace period. */
+    function endAndBackdate(sessionId: string, ageMs: number): void {
+      sessions.end(sessionId, { tokenId });
+      db.handle.raw
+        .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+        .run(Date.now() - ageMs, sessionId);
+    }
+
+    it('purges ended sessions with no referencing rows past the grace period', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'empty' });
+      endAndBackdate(s.id, 2 * 60 * 60 * 1000);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).toContain(s.id);
+      expect(sessions.getById(s.id)).toBeUndefined();
+    });
+
+    it('writes a session_purge op to consolidation_ops with the deleted ids', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'journal' });
+      endAndBackdate(s.id, 2 * 60 * 60 * 1000);
+
+      sessions.purgeEmpty({ adminBypass: true });
+
+      const ops = db.handle.raw
+        .prepare(`SELECT op_type, affected_ids, reasoning FROM consolidation_ops`)
+        .all() as { op_type: string; affected_ids: string; reasoning: string }[];
+      const purgeOp = ops.find((o) => o.op_type === 'session_purge');
+      expect(purgeOp).toBeDefined();
+      const affected = JSON.parse(purgeOp!.affected_ids) as string[];
+      expect(affected).toContain(s.id);
+      expect(purgeOp!.reasoning).toMatch(/operator purge of empty sessions/);
+    });
+
+    it('skips sessions still within the 1-hour grace period', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'fresh' });
+      endAndBackdate(s.id, 10 * 60 * 1000);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+      expect(sessions.getById(s.id)).toBeDefined();
+    });
+
+    it('skips sessions that are still active', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'active' });
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+      expect(sessions.getById(s.id)?.status).toBe('active');
+    });
+
+    it('skips soft-deleted sessions (operator intent preserved)', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'soft-deleted' });
+      endAndBackdate(s.id, 2 * 60 * 60 * 1000);
+      sessions.softDelete(s.id, { adminBypass: true });
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+      expect(sessions.getById(s.id)).toBeDefined();
+    });
+
+    it('skips sessions with a summary written', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'with-summary' });
+      sessions.summarize(s.id, { tokenId, summary: 'this session did something' });
+      db.handle.raw
+        .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+        .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+    });
+
+    it('skips sessions referenced by a memory row', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'with-memory' });
+      // Stamp a memory row referencing this session.
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+        )
+        .run('mem-purge-test-001', projectId, Date.now(), s.id);
+      endAndBackdate(s.id, 2 * 60 * 60 * 1000);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+    });
+
+    it('returns an empty list when nothing is eligible (no-op)', () => {
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).toEqual([]);
+    });
+
+    it('writes no consolidation_ops row on a zero-delete call', () => {
+      sessions.purgeEmpty({ adminBypass: true });
+      const ops = db.handle.raw
+        .prepare(`SELECT COUNT(*) AS v FROM consolidation_ops WHERE op_type = 'session_purge'`)
+        .get() as { v: number };
+      expect(ops.v).toBe(0);
+    });
+
+    it('throws forbidden when adminBypass is not strictly true', () => {
+      expect(() => sessions.purgeEmpty({ adminBypass: false as unknown as true })).toThrow(
+        /adminBypass:true required/,
+      );
+      expect(() => sessions.purgeEmpty({} as unknown as { adminBypass: true })).toThrow(
+        /adminBypass:true required/,
+      );
+    });
+  });
 });

@@ -16,19 +16,38 @@ import { describe, expect, it } from 'vitest';
  * haven't yet covered with unit tests. The check scans every .ts file
  * under src/ (except this file and migrations) and fails if forbidden
  * SQL fragments appear.
+ *
+ * Allow-list exception: the operator-only maintenance purge paths
+ * (`src/services/memory.ts::purgeDisconnectedArchived` and
+ * `src/services/agent-sessions.ts::purgeEmpty`) MAY emit `DELETE FROM
+ * memory` and `DELETE FROM sessions` respectively. The check pins the
+ * allowance to those exact files; introducing the same DELETE elsewhere
+ * fails the build.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, '..');
 
-const FORBIDDEN: { pattern: RegExp; description: string }[] = [
+interface ForbiddenRule {
+  pattern: RegExp;
+  description: string;
+  /**
+   * Source files (relative to `srcRoot`) where the pattern is permitted.
+   * Empty array means the pattern is forbidden everywhere.
+   */
+  allow?: readonly string[];
+}
+
+const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /delete\s*\(\s*memory\s*\)/i,
     description: 'Drizzle `db.delete(memory)` is forbidden — memory is append-only',
   },
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
-    description: 'raw `DELETE FROM memory` is forbidden — memory is append-only',
+    description:
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in services/memory.ts',
+    allow: ['services/memory.ts'],
   },
   {
     pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -44,7 +63,9 @@ const FORBIDDEN: { pattern: RegExp; description: string }[] = [
   },
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
-    description: 'raw `DELETE FROM sessions` is forbidden — sessions are append-only',
+    description:
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in services/agent-sessions.ts',
+    allow: ['services/agent-sessions.ts'],
   },
   {
     pattern:
@@ -102,10 +123,14 @@ describe('append-only invariants (static grep)', () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  for (const { pattern, description } of FORBIDDEN) {
+  for (const rule of FORBIDDEN) {
+    const { pattern, description, allow } = rule;
     it(`forbids: ${description}`, () => {
       const offenders: { file: string; line: number; text: string }[] = [];
+      const allowed = new Set((allow ?? []).map((p) => p.replace(/\\/g, '/')));
       for (const file of files) {
+        const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+        if (allowed.has(rel)) continue;
         const lines = readFileSync(file, 'utf8').split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
@@ -116,7 +141,7 @@ describe('append-only invariants (static grep)', () => {
             continue;
           }
           if (pattern.test(line)) {
-            offenders.push({ file, line: i + 1, text: line.trim() });
+            offenders.push({ file: rel, line: i + 1, text: line.trim() });
           }
         }
       }
@@ -126,6 +151,23 @@ describe('append-only invariants (static grep)', () => {
       }
     });
   }
+
+  // Positive assertion: the two allow-listed files MUST actually contain
+  // their respective DELETE statements. Otherwise a future refactor could
+  // silently remove the purge implementation while keeping the allow-list
+  // in place — invariant relaxation without enforcement is worse than no
+  // allow-list at all.
+  it('allow-list anchors: services/memory.ts contains DELETE FROM memory', () => {
+    const file = join(srcRoot, 'services/memory.ts');
+    const src = readFileSync(file, 'utf8');
+    expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
+  });
+
+  it('allow-list anchors: services/agent-sessions.ts contains DELETE FROM sessions', () => {
+    const file = join(srcRoot, 'services/agent-sessions.ts');
+    const src = readFileSync(file, 'utf8');
+    expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
+  });
 });
 
 /**

@@ -111,6 +111,17 @@ Path-scoping contract enforced in `tools.ts`:
 
 `src/consolidation/scheduler.ts` runs on `CONSOLIDATION_CRON` (default 03:00 daily). Triggered manually via `POST /admin/consolidation/run` (admin token required) or `rembric consolidation run-now`. The embedding worker runs every 30s + pre-consolidation. Both are wired in `src/server/bootstrap.ts`.
 
+### Maintenance: physical-purge escape hatches (manual, admin-only)
+
+The dashboard exposes `/dashboard/maintenance` for two operator-triggered physical purges that narrow the otherwise append-only contract:
+
+- **`AgentSessionsService.purgeEmpty({ adminBypass: true })`** (only `src/services/agent-sessions.ts` may emit `DELETE FROM sessions`). Predicate: `status ∈ {ended, abandoned}` AND `deleted_at IS NULL` AND `summary IS NULL` AND `title_final = 0` AND `ended_at < now − 1h` AND zero referencing rows in `memory`, `prompts`, `confirmations`.
+- **`MemoryService.purgeDisconnectedArchived({ adminBypass: true })`** (only `src/services/memory.ts` may emit `DELETE FROM memory`). Predicate: `status = 'archived'` AND no other row references this id via `memory.replaces`, `consolidation_ops.affected_ids`, `consolidation_ops.created_id`, `memory_relations.{source,target}_id`, or `confirmations.memory_id`. Drops the matching `memory_vec` and `memory_fts` shadow rows in the same transaction.
+
+Both write a journal row to `consolidation_ops` with `op_type = 'session_purge'` or `'archived_memory_purge'`. **Consolidator reversibility is narrowed**: `undoOp` throws `PurgedRowMissingError` when any `affected_ids` row has been physically removed, and `NotUndoableError` on the two purge `op_type`s themselves. The dashboard surfaces both errors inline.
+
+`src/test/invariants.test.ts` pins these as the ONLY files allowed to emit those DELETEs and asserts positively that they actually contain them — the allow-list cannot silently expire.
+
 ## OpenSpec workflow
 
 Behavioral changes are spec-driven. Specs live in `openspec/specs/<area>/` (auth, consolidation, dashboard, mcp-api, memory, persistence, projects, sessions). Active proposals live in `openspec/changes/<name>/`; archived under `openspec/changes/archive/`.
@@ -134,6 +145,33 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 - **Adding a new dashboard view**: create `src/dashboard/styles/views/<view>.css` (even if empty), pass `view: '<view>'` to `shell()` via `renderPage`. Build emits the file automatically. `renderPage` (in `src/dashboard/page-shell.ts`) is the canonical entry point for authenticated dashboard pages — it threads the cookie-driven sidebar collapse state, CSRF token, and counters into `shell()` for you.
 - **HTML is whitespace-collapsed in production** by `minifyHtml()` inside `shell()`. Anything inside `<pre>`, `<textarea>`, or `<script>` is preserved verbatim; everywhere else, runs of inter-tag whitespace are stripped. This affects "view source" readability — DevTools pretty-print still works.
 - **Sidebar collapse** is server-driven via the `rbr-sb-collapsed` cookie. The toggle is a CSRF-protected `POST /dashboard/_sidebar/toggle`. Do not introduce localStorage-based UI state for the same surface — the cookie path is what guarantees no FOUC on first paint.
+
+### Destructive actions MUST use the `data-confirm` modal
+
+Any dashboard surface that triggers an action with destructive or hard-to-reverse effect — soft-delete, hard-delete/purge, revoke, archive, undo of a journaled op, anything that can't be silently undone with a refresh — MUST gate its submit behind the inline confirmation modal. The mechanism is already shipped in `src/dashboard/templates.ts::shell()` (the `CONFIRM` inline JS); you just declare three attributes on the `<form>` element:
+
+```html
+<form
+  action="..."
+  method="post"
+  data-confirm="Plain-language sentence ending in a question. State the count when relevant, and say 'irreversible' / 'journaled' / 'reversible' explicitly so the operator knows the shape of the action."
+  data-confirm-label="VERB N TARGET"
+  data-confirm-tone="danger"  <!-- 'warn' for reversible-but-risky; 'danger' for irreversible -->
+>
+  {csrfInput(...)}
+  <button type="submit">…</button>
+</form>
+```
+
+Rules that are easy to get wrong:
+
+- **The attributes go on the `<form>`, not on the `<button>`.** The handler binds with `document.querySelectorAll('form[data-confirm]')`; attributes on the button are silently ignored and the form submits without prompting. Verified in `src/dashboard/templates.ts::CONFIRM`.
+- **Tone choice maps to undoability**: `warn` for actions the operator can revert (soft-delete, archive, undo-of-undo); `danger` for hard-deletes/revokes/purges that cannot be unwound from the UI.
+- **Copy must name the count + the consequence.** "Purge 12 empty session row(s)? This is irreversible. The deletion is journaled in consolidation_ops for audit." beats "Are you sure?". Operators reading the modal at 11pm need enough context to stop themselves.
+- **`data-confirm-label` is the CONFIRM button copy.** Use uppercase verb + count + noun ("PURGE 12 SESSIONS", "REVOKE TOKEN", "UNDO ENTIRE RUN"). It mirrors the action being taken, not a generic "OK".
+- **htmx swaps are covered**: the binder re-runs on `htmx:afterSwap`, so forms injected after initial render also get the modal. Do not hand-roll a `confirm()` fallback.
+
+Existing call sites to mirror (form-level attributes): `src/dashboard/sessions.ts` (soft-delete), `src/dashboard/tokens.ts` (revoke), `src/dashboard/projects.ts` (archive project), `src/dashboard/memories.ts` (archive memory), `src/dashboard/consolidation.ts` (undo op / undo run), `src/dashboard/maintenance.ts` (purge sessions / purge archived).
 
 ## Code style highlights (from CONTRIBUTING.md)
 

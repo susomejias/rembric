@@ -17,6 +17,7 @@ import {
 } from '../dashboard/components.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
+import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
 import { createRelationsRouter } from '../dashboard/relations.js';
@@ -511,6 +512,16 @@ ${ascBars(activity)}</pre
   app.route(
     '/tokens',
     createTokensRouter({ tokens: deps.tokens, projects: deps.projects, sessions: deps.sessions }),
+  );
+  app.route(
+    '/maintenance',
+    createMaintenanceRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      agentSessions: deps.agentSessions,
+      memory: deps.memory,
+      tokens: deps.tokens,
+    }),
   );
 
   return app;

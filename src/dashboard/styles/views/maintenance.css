@@ -1,0 +1,108 @@
+/* MAINTENANCE — operator purge actions */
+
+.maint-grid {
+  display: grid;
+  gap: var(--s-5);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 900px) {
+  .maint-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.maint-card {
+  border: 1px solid var(--fg-faint);
+  background: var(--bg-elev);
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.maint-card .head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+
+.maint-card .head h3 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.maint-card .count {
+  font-family: var(--f-mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--lime);
+}
+
+.maint-card .count.zero {
+  color: var(--fg-dim);
+}
+
+.maint-card .body {
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  line-height: 1.55;
+}
+
+.maint-card .body ul {
+  margin: var(--s-2) 0 0;
+  padding-left: var(--s-5);
+}
+
+.maint-card .body li {
+  margin-bottom: var(--s-1);
+}
+
+.maint-card .actions {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: auto;
+}
+
+.maint-breakdown {
+  border: 1px solid var(--fg-faint);
+  background: var(--bg-elev);
+  padding: var(--s-5);
+  margin-bottom: var(--s-5);
+}
+
+.maint-breakdown h3 {
+  margin: 0 0 var(--s-3);
+  font-family: var(--f-display);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.maint-breakdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+}
+
+.maint-breakdown td {
+  padding: var(--s-1) var(--s-3) var(--s-1) 0;
+  border-bottom: 1px solid var(--bg);
+}
+
+.maint-breakdown td:last-child {
+  text-align: right;
+  color: var(--fg-dim);
+}
+
+.maint-breakdown tr.total td {
+  border-top: 1px solid var(--fg-faint);
+  padding-top: var(--s-3);
+  color: var(--lime);
+  font-weight: 600;
+}

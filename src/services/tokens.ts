@@ -95,6 +95,10 @@ export class TokensService {
     return this.db.select().from(tokens).where(eq(tokens.name, name)).get();
   }
 
+  findById(id: string): Token | undefined {
+    return this.db.select().from(tokens).where(eq(tokens.id, id)).get();
+  }
+
   revoke(name: string): void {
     const ts = this.now();
     const result = this.db

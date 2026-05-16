@@ -241,14 +241,83 @@ export function recordOrphanPromote(
 }
 
 /**
+ * Error raised by `undoOp` when one or more rows referenced by the op
+ * have been physically removed by the maintenance purge paths. The
+ * dashboard surfaces this with a structured copy listing the missing
+ * ids; the op stays in its current state.
+ */
+export class PurgedRowMissingError extends Error {
+  readonly code = 'purged_row_missing';
+  readonly missing: readonly string[];
+  constructor(missing: readonly string[]) {
+    super(
+      `undoOp: ${missing.length} memory row(s) referenced by this op have been purged; ` +
+        `undo cannot reconstruct them. Missing ids: ${missing.join(', ')}`,
+    );
+    this.missing = missing;
+  }
+}
+
+export class NotUndoableError extends Error {
+  readonly code = 'not_undoable';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
  * Undo a previously applied consolidation op. Re-activates the affected memories
  * and (for merges) archives the consolidated row so it no longer surfaces
  * in active retrieval.
+ *
+ * Throws `PurgedRowMissingError` when one or more rows referenced by
+ * `affected_ids` (or `created_id` for merge ops) have been physically
+ * removed by `MemoryService.purgeDisconnectedArchived` or
+ * `AgentSessionsService.purgeEmpty`. The op stays in its current state.
+ *
+ * Throws `NotUndoableError` for purge-op types — their effect cannot be
+ * reversed because the rows are gone.
  */
 export function undoOp(db: Db, opId: string): void {
   const op = db.select().from(consolidationOps).where(eq(consolidationOps.id, opId)).get();
   if (!op) throw new Error(`undoOp: ${opId} not found`);
   if (op.revertedAt) throw new Error(`undoOp: ${opId} already reverted`);
+
+  if (op.opType === 'session_purge' || op.opType === 'archived_memory_purge') {
+    throw new NotUndoableError(
+      `undoOp: ${op.opType} ops are terminal — purged rows cannot be reconstructed`,
+    );
+  }
+
+  // Block undo when any affected row has been physically purged. We only
+  // check ops that operate on memory rows (merge/supersede/decay/archive).
+  // `orphan_promote` operates on relation rows, which are append-only and
+  // unaffected by the purge paths.
+  if (
+    op.opType === 'merge' ||
+    op.opType === 'supersede' ||
+    op.opType === 'decay' ||
+    op.opType === 'archive'
+  ) {
+    const expected = new Set<string>(op.affectedIds);
+    if (op.opType === 'merge' && op.createdId) expected.add(op.createdId);
+
+    const existing =
+      expected.size > 0
+        ? new Set(
+            db
+              .select({ id: memory.id })
+              .from(memory)
+              .where(inArray(memory.id, Array.from(expected)))
+              .all()
+              .map((r) => r.id),
+          )
+        : new Set<string>();
+    const missing = [...expected].filter((id) => !existing.has(id));
+    if (missing.length > 0) {
+      throw new PurgedRowMissingError(missing);
+    }
+  }
 
   const now = new Date();
 

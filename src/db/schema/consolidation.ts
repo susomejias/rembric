@@ -7,7 +7,16 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
  * consolidation_ops. Every op is reversible; reversal sets `revertedAt`.
  */
 
-export type ConsolidationOpType = 'merge' | 'supersede' | 'archive' | 'decay' | 'noop' | 'failed';
+export type ConsolidationOpType =
+  | 'merge'
+  | 'supersede'
+  | 'archive'
+  | 'decay'
+  | 'noop'
+  | 'failed'
+  | 'orphan_promote'
+  | 'session_purge'
+  | 'archived_memory_purge';
 
 export const consolidationRuns = sqliteTable(
   'consolidation_runs',
@@ -34,7 +43,17 @@ export const consolidationOps = sqliteTable(
       .notNull()
       .references(() => consolidationRuns.id),
     opType: text('op_type', {
-      enum: ['merge', 'supersede', 'archive', 'decay', 'noop', 'failed', 'orphan_promote'],
+      enum: [
+        'merge',
+        'supersede',
+        'archive',
+        'decay',
+        'noop',
+        'failed',
+        'orphan_promote',
+        'session_purge',
+        'archived_memory_purge',
+      ],
     }).notNull(),
     /** Memory ids touched by this op (predecessors, archived ones). */
     affectedIds: text('affected_ids', { mode: 'json' }).$type<string[]>().notNull(),

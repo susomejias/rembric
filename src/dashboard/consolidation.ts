@@ -1,7 +1,12 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import { undoOp as runUndoOp, undoRun as runUndoRun } from '../consolidation/operations.js';
+import {
+  NotUndoableError,
+  PurgedRowMissingError,
+  undoOp as runUndoOp,
+  undoRun as runUndoRun,
+} from '../consolidation/operations.js';
 import type { Db } from '../db/client.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import type { SessionsService } from '../services/sessions.js';
@@ -150,27 +155,32 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       .orderBy(consolidationOps.appliedAt)
       .all();
 
+    const isPurgeOp = (t: string) => t === 'session_purge' || t === 'archived_memory_purge';
+
     const opsHtml = ops.map((op) => {
       const isReverted = op.revertedAt !== null;
+      const pillTone = isPurgeOp(op.opType) ? 'archived' : '';
       const undoForm = isReverted
         ? raw('<span class="muted small">reverted</span>')
-        : html`
-            <form
-              action="/dashboard/consolidation/op/${op.id}/undo"
-              method="post"
-              class="inline"
-              data-confirm="Revert this consolidation op? Affected memories will return to their pre-op status. This is journaled and itself reversible."
-              data-confirm-label="UNDO OP"
-              data-confirm-tone="warn"
-            >
-              ${csrfInput(session.session, deps.sessions, 'op.undo')}
-              <button class="warn" type="submit">Undo this op</button>
-            </form>
-          `;
+        : isPurgeOp(op.opType)
+          ? raw('<span class="muted small">terminal (not undoable)</span>')
+          : html`
+              <form
+                action="/dashboard/consolidation/op/${op.id}/undo"
+                method="post"
+                class="inline"
+                data-confirm="Revert this consolidation op? Affected memories will return to their pre-op status. This is journaled and itself reversible."
+                data-confirm-label="UNDO OP"
+                data-confirm-tone="warn"
+              >
+                ${csrfInput(session.session, deps.sessions, 'op.undo')}
+                <button class="warn" type="submit">Undo this op</button>
+              </form>
+            `;
       return html`
         <tr>
           <td class="mono">${shortId(op.id)}</td>
-          <td><span class="pill">${op.opType}</span></td>
+          <td><span class="pill ${pillTone}">${op.opType}</span></td>
           <td class="mono small">
             ${op.affectedIds.map((m) =>
               raw(`<a href="/dashboard/memories/${m}">${shortId(m)}</a>`),
@@ -274,6 +284,46 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     );
   });
 
+  function renderUndoError(c: Context, err: unknown): Response {
+    if (err instanceof PurgedRowMissingError) {
+      return c.html(
+        renderPage(
+          c,
+          deps.sessions,
+          html`<p class="flash error">
+            <b>Undo blocked.</b> ${err.missing.length} memory row(s) referenced by this op have been
+            purged after the op ran; their state cannot be reconstructed. Missing ids:
+            <code>${err.missing.join(', ')}</code>.
+          </p>`,
+          { title: 'Consolidation', activeNav: 'consolidation' },
+        ),
+        409,
+      );
+    }
+    if (err instanceof NotUndoableError) {
+      return c.html(
+        renderPage(
+          c,
+          deps.sessions,
+          html`<p class="flash">
+            <b>Not undoable.</b> Purge operations are terminal — the rows they removed cannot be
+            reconstructed.
+          </p>`,
+          { title: 'Consolidation', activeNav: 'consolidation' },
+        ),
+        409,
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return c.html(
+      renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
+        title: 'Consolidation',
+        activeNav: 'consolidation',
+      }),
+      400,
+    );
+  }
+
   app.post('/:id/undo', async (c) => {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
@@ -283,14 +333,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     try {
       runUndoRun(deps.db, id);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return c.html(
-        renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
-          title: 'Consolidation',
-          activeNav: 'consolidation',
-        }),
-        400,
-      );
+      return renderUndoError(c, err);
     }
     return c.redirect(`/dashboard/consolidation/${id}`);
   });
@@ -305,14 +348,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     try {
       runUndoOp(deps.db, opId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return c.html(
-        renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
-          title: 'Consolidation',
-          activeNav: 'consolidation',
-        }),
-        400,
-      );
+      return renderUndoError(c, err);
     }
     return c.redirect(`/dashboard/consolidation/${op?.consolidationId ?? ''}`);
   });

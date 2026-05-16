@@ -7,7 +7,15 @@ import { ProjectsService } from '../services/projects.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
-import { applyDecay, applyMerge, applySupersede, undoOp, undoRun } from './operations.js';
+import {
+  applyDecay,
+  applyMerge,
+  applySupersede,
+  NotUndoableError,
+  PurgedRowMissingError,
+  undoOp,
+  undoRun,
+} from './operations.js';
 
 let db: TestDb;
 let projects: ProjectsService;
@@ -186,5 +194,83 @@ describe('undoOp / undoRun', () => {
     expect(reverted.length).toBe(2);
     expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
     expect(memoryService.unsafeGetById(c.id)!.status).toBe('active');
+  });
+});
+
+describe('undoOp with purged rows', () => {
+  it('blocks undo with PurgedRowMissingError listing the missing ids', () => {
+    const c = memoryService.save(
+      { type: 'user', content: 'will-be-purged' },
+      projectScope(projectId),
+    );
+    applyDecay(db.handle.db, { consolidationId: runId, ids: [c.id], reasoning: 'r' });
+
+    const opId = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.consolidationId, runId))
+      .get()!.id;
+
+    // Physically purge the archived row to simulate a maintenance purge.
+    db.handle.raw.prepare(`DELETE FROM memory WHERE id = ?`).run(c.id);
+
+    let thrown: unknown;
+    try {
+      undoOp(db.handle.db, opId);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(PurgedRowMissingError);
+    expect((thrown as PurgedRowMissingError).missing).toEqual([c.id]);
+    expect((thrown as PurgedRowMissingError).code).toBe('purged_row_missing');
+
+    // Op stays unreverted.
+    const op = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.id, opId))
+      .get();
+    expect(op?.revertedAt).toBeNull();
+  });
+
+  it('rejects undo of a session_purge op as NotUndoableError', () => {
+    db.handle.db
+      .insert(consolidationOps)
+      .values({
+        id: 'purge-op-1',
+        consolidationId: runId,
+        opType: 'session_purge',
+        affectedIds: ['some-session'],
+        createdId: null,
+        reasoning: 'test',
+        appliedAt: clock.value,
+      })
+      .run();
+
+    let thrown: unknown;
+    try {
+      undoOp(db.handle.db, 'purge-op-1');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(NotUndoableError);
+    expect((thrown as NotUndoableError).code).toBe('not_undoable');
+  });
+
+  it('rejects undo of an archived_memory_purge op as NotUndoableError', () => {
+    db.handle.db
+      .insert(consolidationOps)
+      .values({
+        id: 'purge-op-2',
+        consolidationId: runId,
+        opType: 'archived_memory_purge',
+        affectedIds: ['some-mem'],
+        createdId: null,
+        reasoning: 'test',
+        appliedAt: clock.value,
+      })
+      .run();
+
+    expect(() => undoOp(db.handle.db, 'purge-op-2')).toThrow(NotUndoableError);
   });
 });

@@ -200,6 +200,17 @@ Drop `/my-app` from the URL for global scope. Per-client config-file locations a
 
 Projects are also creatable from `/dashboard/projects`.
 
+## Dashboard maintenance (manual purges)
+
+The dashboard exposes `/dashboard/maintenance` for two **irreversible**, **operator-triggered** physical purges. Both are gated to dashboard sessions whose underlying token has scope `*` (admin):
+
+- **Purge empty sessions** — removes `ended` / `abandoned` session rows that have no summary, no manual title, no referencing memories/prompts/confirmations, are not operator-soft-deleted, and ended over 1 hour ago.
+- **Purge disconnected archived memories** — removes `archived` memory rows whose ids are referenced by NO other row in the graph (`memory.replaces`, `consolidation_ops.affected_ids` / `created_id`, `memory_relations.{source,target}_id`, `confirmations.memory_id`). The matching `memory_vec` and `memory_fts` shadow rows are dropped in the same transaction.
+
+Each click shows a count and a confirmation modal. The deletion is journaled in `consolidation_ops` (`op_type = 'session_purge'` or `'archived_memory_purge'`) so the operator can audit what was removed even after the rows are gone. **Consolidation undo on operations whose rows have been purged returns a structured error** — the dashboard surfaces it inline naming the missing ids.
+
+To reclaim file-level disk after a large purge, run `VACUUM` against the SQLite file. The maintenance page surfaces the freelist size so you know how much would be reclaimed.
+
 ## Configuration
 
 All config via environment variables. Required on first run: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).

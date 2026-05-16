@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import type { Db } from '../db/client.js';
 import { confirmations } from '../db/schema/confirmations.js';
+import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import {
   memory,
   type Memory,
@@ -13,6 +14,8 @@ import {
 
 import { DomainError } from './errors.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
+
+const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
 
 /**
  * Domain service for the memory lifecycle.
@@ -296,6 +299,130 @@ export class MemoryService {
       .set({ status: 'archived', lastSeenAt: ts })
       .where(and(eq(memory.id, id), eq(memory.status, 'active')))
       .run();
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  //  Operator-only physical purge.
+  //
+  //  The ONE escape hatch in the otherwise append-only contract for the
+  //  `memory` table. The invariant test white-lists ONLY this file for
+  //  `DELETE FROM memory`. Predicate MUST stay in lock-step with
+  //  `countPurgeableDisconnectedArchived` and with the spec at
+  //  `openspec/specs/memory/spec.md::"Memories MAY be physically purged
+  //  when archived and disconnected"`.
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Count rows that match the disconnected-archived purge predicate.
+   *
+   * Predicate (in lock-step with `purgeDisconnectedArchived`):
+   *   - status = 'archived'
+   *   - no other memory row references this id in its `replaces` JSON
+   *   - no consolidation_ops row references this id via `affected_ids`
+   *     or `created_id`
+   *   - no memory_relations row references this id as source or target
+   *   - no confirmations row references this id as `memory_id`
+   */
+  countPurgeableDisconnectedArchived(): number {
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v FROM memory m
+       WHERE m.status = 'archived'
+         AND NOT EXISTS (
+             SELECT 1 FROM memory m2, json_each(m2.replaces) je
+              WHERE je.value = m.id)
+         AND NOT EXISTS (
+             SELECT 1 FROM consolidation_ops co
+              WHERE co.created_id = m.id
+                 OR EXISTS (
+                     SELECT 1 FROM json_each(co.affected_ids) je2
+                      WHERE je2.value = m.id))
+         AND NOT EXISTS (
+             SELECT 1 FROM memory_relations r
+              WHERE r.source_id = m.id OR r.target_id = m.id)
+         AND NOT EXISTS (
+             SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
+  /**
+   * Physically delete archived memories whose ids are referenced by NO
+   * other row in the graph. Drops the embedding (`memory_vec`) and FTS
+   * (`memory_fts`) shadow rows in the same transaction. Journals the
+   * deletion as `consolidation_ops.op_type='archived_memory_purge'`.
+   *
+   * The base-row deletion runs LAST so the FTS/vec triggers don't observe
+   * a half-deleted state.
+   */
+  purgeDisconnectedArchived(input: { adminBypass: true }): { deletedIds: string[] } {
+    if (input?.adminBypass !== true) {
+      throw new DomainError(
+        'forbidden',
+        'memory.purgeDisconnectedArchived: adminBypass:true required (admin-only operation)',
+      );
+    }
+    const ts = this.now();
+
+    return this.db.transaction((tx): { deletedIds: string[] } => {
+      const eligible = tx.all<{ id: string }>(sql`
+        SELECT m.id FROM memory m
+         WHERE m.status = 'archived'
+           AND NOT EXISTS (
+               SELECT 1 FROM memory m2, json_each(m2.replaces) je
+                WHERE je.value = m.id)
+           AND NOT EXISTS (
+               SELECT 1 FROM consolidation_ops co
+                WHERE co.created_id = m.id
+                   OR EXISTS (
+                       SELECT 1 FROM json_each(co.affected_ids) je2
+                        WHERE je2.value = m.id))
+           AND NOT EXISTS (
+               SELECT 1 FROM memory_relations r
+                WHERE r.source_id = m.id OR r.target_id = m.id)
+           AND NOT EXISTS (
+               SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)
+      `);
+      const deletedIds = eligible.map((r) => r.id);
+      if (deletedIds.length === 0) {
+        return { deletedIds: [] };
+      }
+
+      const placeholders = sql.join(
+        deletedIds.map((id) => sql`${id}`),
+        sql.raw(', '),
+      );
+      // Drop derived data first; the base-row DELETE fires the FTS/vec
+      // triggers only on rows that already have their shadow rows gone,
+      // avoiding a half-deleted intermediate state.
+      tx.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
+      tx.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
+
+      const runId = ulid(ts.getTime());
+      tx.insert(consolidationRuns)
+        .values({
+          id: runId,
+          startedAt: ts,
+          finishedAt: ts,
+          llmProvider: null,
+          llmModel: null,
+          scope: 'maintenance',
+          summary: JSON.stringify({ kind: 'archived_memory_purge', deleted: deletedIds.length }),
+        })
+        .run();
+      tx.insert(consolidationOps)
+        .values({
+          id: ulid(ts.getTime()),
+          consolidationId: runId,
+          opType: 'archived_memory_purge',
+          affectedIds: deletedIds,
+          createdId: null,
+          reasoning: ARCHIVED_MEMORY_PURGE_REASONING,
+          appliedAt: ts,
+        })
+        .run();
+
+      return { deletedIds };
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────

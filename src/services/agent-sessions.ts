@@ -3,8 +3,12 @@ import { ulid } from 'ulid';
 
 import type { Db } from '../db/client.js';
 import { agentSessions, type AgentSession } from '../db/schema/agent-sessions.js';
+import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 
 import { DomainError } from './errors.js';
+
+const SESSION_PURGE_GRACE_MS = 3_600_000;
+const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
 
 /**
  * Service for the agent (MCP) session lifecycle.
@@ -525,6 +529,109 @@ export class AgentSessionsService {
       sql`SELECT COUNT(*) AS v FROM memory WHERE session_id = ${sessionId}`,
     ) as { v: number } | undefined;
     return row?.v ?? 0;
+  }
+
+  /**
+   * Count rows that match the empty-session purge predicate.
+   *
+   * Predicate (in lock-step with `purgeEmpty`):
+   *   - status ∈ {ended, abandoned}
+   *   - deleted_at IS NULL (operator soft-delete is respected)
+   *   - summary IS NULL AND title_final = 0
+   *   - ended_at < now − 1h (grace for late summary writes)
+   *   - no referencing rows in memory, prompts, confirmations
+   */
+  countPurgeableEmpty(): number {
+    const cutoff = this.now().getTime() - SESSION_PURGE_GRACE_MS;
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v FROM sessions s
+       WHERE s.status IN ('ended','abandoned')
+         AND s.deleted_at IS NULL
+         AND s.summary IS NULL
+         AND s.title_final = 0
+         AND s.ended_at IS NOT NULL
+         AND s.ended_at < ${cutoff}
+         AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
+  /**
+   * Physically delete sessions matching the empty-session predicate.
+   *
+   * This is the ONE escape hatch in the otherwise append-only contract
+   * for `sessions`. The invariant test (`src/test/invariants.test.ts`)
+   * white-lists ONLY this file for `DELETE FROM sessions`. The predicate
+   * here MUST stay in lock-step with `countPurgeableEmpty` and with the
+   * spec at `openspec/specs/sessions/spec.md::"Sessions MAY be physically
+   * purged when empty"`.
+   *
+   * Journals the deletion in `consolidation_ops` with
+   * `op_type='session_purge'` in the same transaction, so the audit trail
+   * survives even though the rows themselves are gone.
+   */
+  purgeEmpty(input: { adminBypass: true }): { deletedIds: string[] } {
+    if (input?.adminBypass !== true) {
+      throw new DomainError(
+        'forbidden',
+        'sessions.purgeEmpty: adminBypass:true required (admin-only operation)',
+      );
+    }
+    const ts = this.now();
+    const cutoff = ts.getTime() - SESSION_PURGE_GRACE_MS;
+
+    return this.db.transaction((tx): { deletedIds: string[] } => {
+      const eligible = tx.all<{ id: string }>(sql`
+        SELECT s.id FROM sessions s
+         WHERE s.status IN ('ended','abandoned')
+           AND s.deleted_at IS NULL
+           AND s.summary IS NULL
+           AND s.title_final = 0
+           AND s.ended_at IS NOT NULL
+           AND s.ended_at < ${cutoff}
+           AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
+           AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
+           AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
+      `);
+      const deletedIds = eligible.map((r) => r.id);
+      if (deletedIds.length === 0) {
+        return { deletedIds: [] };
+      }
+
+      const placeholders = sql.join(
+        deletedIds.map((id) => sql`${id}`),
+        sql.raw(', '),
+      );
+      tx.run(sql`DELETE FROM sessions WHERE id IN (${placeholders})`);
+
+      const runId = ulid(ts.getTime());
+      tx.insert(consolidationRuns)
+        .values({
+          id: runId,
+          startedAt: ts,
+          finishedAt: ts,
+          llmProvider: null,
+          llmModel: null,
+          scope: 'maintenance',
+          summary: JSON.stringify({ kind: 'session_purge', deleted: deletedIds.length }),
+        })
+        .run();
+      tx.insert(consolidationOps)
+        .values({
+          id: ulid(ts.getTime()),
+          consolidationId: runId,
+          opType: 'session_purge',
+          affectedIds: deletedIds,
+          createdId: null,
+          reasoning: SESSION_PURGE_REASONING,
+          appliedAt: ts,
+        })
+        .run();
+
+      return { deletedIds };
+    });
   }
 }
 

@@ -28,6 +28,7 @@ export const NAV_ICONS = Object.freeze({
   consolidation: `${SVG_OPEN}<rect x="1" y="1" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3.5" y="4" width="9" height="1.2"/><rect x="3.5" y="7.4" width="9" height="1.2"/><rect x="3.5" y="10.8" width="9" height="1.2"/>${SVG_CLOSE}`,
   projects: `${SVG_OPEN}<rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.5"/>${SVG_CLOSE}`,
   tokens: `${SVG_OPEN}<rect x="0" y="7" width="7" height="2"/><rect x="8" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="7" width="2" height="2"/>${SVG_CLOSE}`,
+  maintenance: `${SVG_OPEN}<rect x="1.5" y="11.5" width="13" height="3"/><rect x="3" y="6" width="2.5" height="5.5"/><rect x="6.5" y="3" width="2.5" height="8.5"/><rect x="10" y="6" width="2.5" height="5.5"/>${SVG_CLOSE}`,
 } as const);
 
 /* ── nav model ─────────────────────────────────────────────────────── */
@@ -39,7 +40,8 @@ export type NavKey =
   | 'relations'
   | 'consolidation'
   | 'projects'
-  | 'tokens';
+  | 'tokens'
+  | 'maintenance';
 
 export interface NavEntry {
   key: NavKey;
@@ -107,6 +109,14 @@ export const NAV: readonly NavEntry[] = Object.freeze([
     iconKey: 'tokens',
     label: 'TOKENS',
     href: '/dashboard/tokens',
+    group: 'ADMIN',
+  },
+  {
+    key: 'maintenance',
+    num: '08',
+    iconKey: 'maintenance',
+    label: 'MAINTENANCE',
+    href: '/dashboard/maintenance',
     group: 'ADMIN',
   },
 ]);
