@@ -11,7 +11,9 @@
   gap: var(--s-4);
   align-items: flex-start;
 }
-.ops-row:last-child { border-bottom: 0; }
+.ops-row:last-child {
+  border-bottom: 0;
+}
 .ops-row .reasoning {
   font-size: 0.85rem;
   color: var(--fg);
@@ -26,7 +28,9 @@
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
-.ops-row.is-reverted { opacity: 0.55; }
+.ops-row.is-reverted {
+  opacity: 0.55;
+}
 .ops-row .ids {
   display: flex;
   flex-direction: column;
@@ -35,7 +39,9 @@
   font-size: 0.7rem;
   color: var(--fg-dim);
 }
-.ops-row .ids b { color: var(--fg); }
+.ops-row .ids b {
+  color: var(--fg);
+}
 
 @media (max-width: 980px) {
   .ops-row {

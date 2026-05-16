@@ -2,175 +2,149 @@
 
 ## [0.10.1](https://github.com/susomejias/rembric/compare/v0.10.0...v0.10.1) (2026-05-16)
 
-
 ### Bug Fixes
 
-* **plugin:** split transcript parser per agent (claude_code vs codex_cli) ([86fa83f](https://github.com/susomejias/rembric/commit/86fa83fa65850504469cb45cd40d1763dc139eb7))
+- **plugin:** split transcript parser per agent (claude_code vs codex_cli) ([86fa83f](https://github.com/susomejias/rembric/commit/86fa83fa65850504469cb45cd40d1763dc139eb7))
 
 ## [0.10.0](https://github.com/susomejias/rembric/compare/v0.9.0...v0.10.0) (2026-05-16)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **sessions:** persist summary+title across all plugin clients
+- **sessions:** persist summary+title across all plugin clients
 
 ### Bug Fixes
 
-* **sessions:** persist summary+title across all plugin clients ([274fe1c](https://github.com/susomejias/rembric/commit/274fe1c7efc49493244459a46b038457f9a5c977))
-
+- **sessions:** persist summary+title across all plugin clients ([274fe1c](https://github.com/susomejias/rembric/commit/274fe1c7efc49493244459a46b038457f9a5c977))
 
 ### Refactor
 
-* **hermes:** use requires_env so ~/.hermes/.env is single source of truth ([bc64d7e](https://github.com/susomejias/rembric/commit/bc64d7e150865beb725efc13d4cbb5ee2324d24d))
-
+- **hermes:** use requires_env so ~/.hermes/.env is single source of truth ([bc64d7e](https://github.com/susomejias/rembric/commit/bc64d7e150865beb725efc13d4cbb5ee2324d24d))
 
 ### Documentation
 
-* **hermes:** lead with ~/.rembric/.env to avoid silent session loss ([88bd3f1](https://github.com/susomejias/rembric/commit/88bd3f17dd763ad2c16a522ea54dd1df668c89ea))
+- **hermes:** lead with ~/.rembric/.env to avoid silent session loss ([88bd3f1](https://github.com/susomejias/rembric/commit/88bd3f17dd763ad2c16a522ea54dd1df668c89ea))
 
 ## [0.9.0](https://github.com/susomejias/rembric/compare/v0.8.2...v0.9.0) (2026-05-16)
 
-
 ### Features
 
-* **dashboard:** swap sidebar brand bullet for transparent logo ([4529316](https://github.com/susomejias/rembric/commit/4529316e154329cbadf520f9ceb1c0a716306346))
-* **plugin:** add Hermes Agent memory provider ([93aae7f](https://github.com/susomejias/rembric/commit/93aae7f38ee58198e9977dec4001a09c6dcd1d1c))
-
+- **dashboard:** swap sidebar brand bullet for transparent logo ([4529316](https://github.com/susomejias/rembric/commit/4529316e154329cbadf520f9ceb1c0a716306346))
+- **plugin:** add Hermes Agent memory provider ([93aae7f](https://github.com/susomejias/rembric/commit/93aae7f38ee58198e9977dec4001a09c6dcd1d1c))
 
 ### Bug Fixes
 
-* **codex:** drop leading [ from hook stdout so looks_like_json passes ([0cc9f73](https://github.com/susomejias/rembric/commit/0cc9f73bcc8a70d5fe01f50ee06431e3f8916a27))
-* **codex:** restore bridge path-scoping via PWD fallback ([f1313bd](https://github.com/susomejias/rembric/commit/f1313bd9a834ba62336211a936ec4ca5a3c96dbd))
-
+- **codex:** drop leading [ from hook stdout so looks_like_json passes ([0cc9f73](https://github.com/susomejias/rembric/commit/0cc9f73bcc8a70d5fe01f50ee06431e3f8916a27))
+- **codex:** restore bridge path-scoping via PWD fallback ([f1313bd](https://github.com/susomejias/rembric/commit/f1313bd9a834ba62336211a936ec4ca5a3c96dbd))
 
 ### Documentation
 
-* **codex:** add hook enablement note to root README too ([e2c59a1](https://github.com/susomejias/rembric/commit/e2c59a1107587f85330f4bda1bb1122b07598d87))
-* **codex:** document plugin_hooks feature flag + /hooks trust review ([f077d2b](https://github.com/susomejias/rembric/commit/f077d2bd4798d92b9f8dcdbf87637f5346492a21))
+- **codex:** add hook enablement note to root README too ([e2c59a1](https://github.com/susomejias/rembric/commit/e2c59a1107587f85330f4bda1bb1122b07598d87))
+- **codex:** document plugin_hooks feature flag + /hooks trust review ([f077d2b](https://github.com/susomejias/rembric/commit/f077d2bd4798d92b9f8dcdbf87637f5346492a21))
 
 ## [0.8.2](https://github.com/susomejias/rembric/compare/v0.8.1...v0.8.2) (2026-05-15)
 
-
 ### Bug Fixes
 
-* **codex:** split MCP config per client; use cwd + env_vars ([2d8c54f](https://github.com/susomejias/rembric/commit/2d8c54f3aa05ec1eb1f182babf99c3291f5b3f6d))
+- **codex:** split MCP config per client; use cwd + env_vars ([2d8c54f](https://github.com/susomejias/rembric/commit/2d8c54f3aa05ec1eb1f182babf99c3291f5b3f6d))
 
 ## [0.8.1](https://github.com/susomejias/rembric/compare/v0.8.0...v0.8.1) (2026-05-15)
 
-
 ### Bug Fixes
 
-* **codex:** use HTTPS for marketplace plugin source ([46c3efe](https://github.com/susomejias/rembric/commit/46c3efe54d7039928a42cfca3397d4ea9261ea8c))
-
+- **codex:** use HTTPS for marketplace plugin source ([46c3efe](https://github.com/susomejias/rembric/commit/46c3efe54d7039928a42cfca3397d4ea9261ea8c))
 
 ### Documentation
 
-* recommend HTTPS marketplace URL for both clients ([391a77f](https://github.com/susomejias/rembric/commit/391a77f6abe442441b707c26b4263b85a720d499))
+- recommend HTTPS marketplace URL for both clients ([391a77f](https://github.com/susomejias/rembric/commit/391a77f6abe442441b707c26b4263b85a720d499))
 
 ## [0.8.0](https://github.com/susomejias/rembric/compare/v0.7.0...v0.8.0) (2026-05-15)
 
-
 ### Features
 
-* **dashboard:** brutalist redesign with layered design system ([c159dd0](https://github.com/susomejias/rembric/commit/c159dd0d36e9d0ab0dc227774f7d50fd36f5acee))
-* **dashboard:** render timestamps in viewer-local timezone ([f3e2ab3](https://github.com/susomejias/rembric/commit/f3e2ab3f026ed6b95be66d6b9a3eabce84504834))
-
+- **dashboard:** brutalist redesign with layered design system ([c159dd0](https://github.com/susomejias/rembric/commit/c159dd0d36e9d0ab0dc227774f7d50fd36f5acee))
+- **dashboard:** render timestamps in viewer-local timezone ([f3e2ab3](https://github.com/susomejias/rembric/commit/f3e2ab3f026ed6b95be66d6b9a3eabce84504834))
 
 ### Documentation
 
-* add Rembric banner image referenced by README ([ca1dbf5](https://github.com/susomejias/rembric/commit/ca1dbf50c81b335f71f020a3e79d5a824d27dd0e))
-* **design:** add Google-spec DESIGN.md + dashboard-ui skill ([ad0d0e1](https://github.com/susomejias/rembric/commit/ad0d0e193046885af6ee0ed908ea0d25023c7241))
-* document official plugin update flow + bump-version rule ([d507f65](https://github.com/susomejias/rembric/commit/d507f65371cf7bc9a6881c02b5fc7c4068e3fa78))
+- add Rembric banner image referenced by README ([ca1dbf5](https://github.com/susomejias/rembric/commit/ca1dbf50c81b335f71f020a3e79d5a824d27dd0e))
+- **design:** add Google-spec DESIGN.md + dashboard-ui skill ([ad0d0e1](https://github.com/susomejias/rembric/commit/ad0d0e193046885af6ee0ed908ea0d25023c7241))
+- document official plugin update flow + bump-version rule ([d507f65](https://github.com/susomejias/rembric/commit/d507f65371cf7bc9a6881c02b5fc7c4068e3fa78))
 
 ## [0.7.0](https://github.com/susomejias/rembric/compare/v0.6.0...v0.7.0) (2026-05-15)
 
-
 ### Features
 
-* **plugin:** hooks read credentials via user_config substitution ([c18c912](https://github.com/susomejias/rembric/commit/c18c912696e7c9f294c1646ae31cd8158fbe6330))
-
+- **plugin:** hooks read credentials via user_config substitution ([c18c912](https://github.com/susomejias/rembric/commit/c18c912696e7c9f294c1646ae31cd8158fbe6330))
 
 ### Bug Fixes
 
-* **plugin:** hook scripts now reach the API and stamp the agent ([2b32096](https://github.com/susomejias/rembric/commit/2b3209691e4baf2ce3240869fd0b5940cea3d5ce))
-* **plugin:** revert user_config substitution in hooks.codex.json ([4c6fe2f](https://github.com/susomejias/rembric/commit/4c6fe2ff210a8e7f389a2903da7c13f3bea4c43c))
-
+- **plugin:** hook scripts now reach the API and stamp the agent ([2b32096](https://github.com/susomejias/rembric/commit/2b3209691e4baf2ce3240869fd0b5940cea3d5ce))
+- **plugin:** revert user_config substitution in hooks.codex.json ([4c6fe2f](https://github.com/susomejias/rembric/commit/4c6fe2ff210a8e7f389a2903da7c13f3bea4c43c))
 
 ### Documentation
 
-* document required shell envs for plugin hooks ([a43fa3c](https://github.com/susomejias/rembric/commit/a43fa3cdbfe3d6dd2bcb1ad2b739259fe598c0b8))
-* spell out the dual-client credential setup explicitly ([25f579f](https://github.com/susomejias/rembric/commit/25f579f9aad045f3fceb89081537f8bc8170bc32))
+- document required shell envs for plugin hooks ([a43fa3c](https://github.com/susomejias/rembric/commit/a43fa3cdbfe3d6dd2bcb1ad2b739259fe598c0b8))
+- spell out the dual-client credential setup explicitly ([25f579f](https://github.com/susomejias/rembric/commit/25f579f9aad045f3fceb89081537f8bc8170bc32))
 
 ## [0.6.0](https://github.com/susomejias/rembric/compare/v0.5.0...v0.6.0) (2026-05-15)
 
-
 ### Features
 
-* **mcp:** attach memories to most-recent active session ([9e2f89f](https://github.com/susomejias/rembric/commit/9e2f89f6c538b555d15669831fad7fd9423a1c3b))
-* **plugin:** drive session lifecycle via HTTP hooks ([a78971a](https://github.com/susomejias/rembric/commit/a78971a1e1a6f03ec0bdcd54ee4932c205ce6b44))
-* **server:** expose /api/&lt;slug&gt;/sessions HTTP endpoints ([37a0c43](https://github.com/susomejias/rembric/commit/37a0c43e513d5734b3ddb2a93b41f18dfba4e055))
-
+- **mcp:** attach memories to most-recent active session ([9e2f89f](https://github.com/susomejias/rembric/commit/9e2f89f6c538b555d15669831fad7fd9423a1c3b))
+- **plugin:** drive session lifecycle via HTTP hooks ([a78971a](https://github.com/susomejias/rembric/commit/a78971a1e1a6f03ec0bdcd54ee4932c205ce6b44))
+- **server:** expose /api/&lt;slug&gt;/sessions HTTP endpoints ([37a0c43](https://github.com/susomejias/rembric/commit/37a0c43e513d5734b3ddb2a93b41f18dfba4e055))
 
 ### Documentation
 
-* document HTTP-driven session lifecycle ([b92a04e](https://github.com/susomejias/rembric/commit/b92a04e5be5f8b16d4528042499ecf685c84edfb))
+- document HTTP-driven session lifecycle ([b92a04e](https://github.com/susomejias/rembric/commit/b92a04e5be5f8b16d4528042499ecf685c84edfb))
 
 ## [0.5.0](https://github.com/susomejias/rembric/compare/v0.4.0...v0.5.0) (2026-05-15)
 
-
 ### Features
 
-* **plugin:** add Codex marketplace, manifest, and hooks ([08aac16](https://github.com/susomejias/rembric/commit/08aac16e4fe3a046b0605082f79033a40c8701f0))
-* **plugin:** switch slug source to .rembric dotenv (PROJECT_SLUG=) ([cda7fd9](https://github.com/susomejias/rembric/commit/cda7fd9589a5f003a862f9aa6993ba08aa021023))
-
+- **plugin:** add Codex marketplace, manifest, and hooks ([08aac16](https://github.com/susomejias/rembric/commit/08aac16e4fe3a046b0605082f79033a40c8701f0))
+- **plugin:** switch slug source to .rembric dotenv (PROJECT_SLUG=) ([cda7fd9](https://github.com/susomejias/rembric/commit/cda7fd9589a5f003a862f9aa6993ba08aa021023))
 
 ### Documentation
 
-* pivot Codex install to plugin marketplace; codify plugin dev rules ([8d67ddb](https://github.com/susomejias/rembric/commit/8d67ddb6dad73f71ec00c879a31360af5577708e))
-* slim README and docs, recommend plugin, drop examples/ ([802f39e](https://github.com/susomejias/rembric/commit/802f39e02935e7953199e5ddda77993c5fce4b66))
+- pivot Codex install to plugin marketplace; codify plugin dev rules ([8d67ddb](https://github.com/susomejias/rembric/commit/8d67ddb6dad73f71ec00c879a31360af5577708e))
+- slim README and docs, recommend plugin, drop examples/ ([802f39e](https://github.com/susomejias/rembric/commit/802f39e02935e7953199e5ddda77993c5fce4b66))
 
 ## [0.4.0](https://github.com/susomejias/rembric/compare/v0.3.3...v0.4.0) (2026-05-15)
 
-
 ### Features
 
-* **plugin:** add Claude Code plugin with stdio bridge ([25c31c8](https://github.com/susomejias/rembric/commit/25c31c83e6ec6046e90ea384dd0b0f3b146c53bb))
-
+- **plugin:** add Claude Code plugin with stdio bridge ([25c31c8](https://github.com/susomejias/rembric/commit/25c31c83e6ec6046e90ea384dd0b0f3b146c53bb))
 
 ### Bug Fixes
 
-* **mcp:** scopeFromContext consults router for path-less /mcp connections ([70fcb74](https://github.com/susomejias/rembric/commit/70fcb7449594a6b8728d727f86f1034c39111e31))
+- **mcp:** scopeFromContext consults router for path-less /mcp connections ([70fcb74](https://github.com/susomejias/rembric/commit/70fcb7449594a6b8728d727f86f1034c39111e31))
 
 ## [0.3.3](https://github.com/susomejias/rembric/compare/v0.3.2...v0.3.3) (2026-05-14)
 
-
 ### Bug Fixes
 
-* **mcp:** drop eager oninitialized roots discovery, shorten timeout ([36e136e](https://github.com/susomejias/rembric/commit/36e136e202e971b0e272be11cdddde17802264f4))
+- **mcp:** drop eager oninitialized roots discovery, shorten timeout ([36e136e](https://github.com/susomejias/rembric/commit/36e136e202e971b0e272be11cdddde17802264f4))
 
 ## [0.3.2](https://github.com/susomejias/rembric/compare/v0.3.1...v0.3.2) (2026-05-14)
 
-
 ### Bug Fixes
 
-* **mcp:** eager roots discovery so first memory.save resolves project ([1379c93](https://github.com/susomejias/rembric/commit/1379c937b090649f2b0161047ed65193064486c5))
-
+- **mcp:** eager roots discovery so first memory.save resolves project ([1379c93](https://github.com/susomejias/rembric/commit/1379c937b090649f2b0161047ed65193064486c5))
 
 ### Documentation
 
-* add CLAUDE.md for Claude Code guidance ([bae431e](https://github.com/susomejias/rembric/commit/bae431ee38ab6090a1150dfbecf186a7d580e9e6))
+- add CLAUDE.md for Claude Code guidance ([bae431e](https://github.com/susomejias/rembric/commit/bae431ee38ab6090a1150dfbecf186a7d580e9e6))
 
 ## [0.3.1](https://github.com/susomejias/rembric/compare/v0.3.0...v0.3.1) (2026-05-14)
 
-
 ### Bug Fixes
 
-* **mcp:** resolve router-activated project in memory.* handlers ([7b5dd3d](https://github.com/susomejias/rembric/commit/7b5dd3d0dfc822391890074c08178a295a5f03cc))
-
+- **mcp:** resolve router-activated project in memory.\* handlers ([7b5dd3d](https://github.com/susomejias/rembric/commit/7b5dd3d0dfc822391890074c08178a295a5f03cc))
 
 ### Documentation
 
-* **agents:** broaden setup coverage + memory protocol snippet ([dff71d5](https://github.com/susomejias/rembric/commit/dff71d5722e2e7f1d59cc274b63b00794cc40f2f))
+- **agents:** broaden setup coverage + memory protocol snippet ([dff71d5](https://github.com/susomejias/rembric/commit/dff71d5722e2e7f1d59cc274b63b00794cc40f2f))
 
 ## [0.3.0](https://github.com/susomejias/rembric/compare/v0.2.1...v0.3.0) (2026-05-14)
 

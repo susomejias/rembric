@@ -273,7 +273,9 @@
   margin-bottom: 0;
 }
 @media (max-width: 640px) {
-  .main .tbl-host > table { min-width: 580px; }
+  .main .tbl-host > table {
+    min-width: 580px;
+  }
 }
 .main thead th {
   text-align: left;

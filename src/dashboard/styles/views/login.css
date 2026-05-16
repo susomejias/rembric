@@ -42,7 +42,9 @@
 
 /* ── tablet + small desktop: collapse to single column ───────────── */
 @media (max-width: 980px) {
-  .login-stage { grid-template-columns: 1fr; }
+  .login-stage {
+    grid-template-columns: 1fr;
+  }
   .login-stage .left {
     border-right: 0;
     border-bottom: 1px solid var(--fg-faint);
@@ -52,7 +54,9 @@
   .login-stage .right {
     padding: var(--s-6) var(--s-5);
   }
-  .login-stage h1 { font-size: 3.2rem; }
+  .login-stage h1 {
+    font-size: 3.2rem;
+  }
 }
 
 /* ── phone: compact header on top, form below ────────────────────── */
@@ -70,5 +74,7 @@
   }
   /* On the smallest screens, drop the second-tier client list — the
      primary message + tagline are what matter. */
-  .login-stage .left .clients { display: none; }
+  .login-stage .left .clients {
+    display: none;
+  }
 }
