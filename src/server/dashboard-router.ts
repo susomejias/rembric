@@ -1,4 +1,6 @@
 import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { sql } from 'drizzle-orm';
 import { Hono, type Context, type Next } from 'hono';
@@ -45,6 +47,8 @@ export interface DashboardDeps {
   projects: ProjectsService;
   memory: MemoryService;
   getStats: () => DashboardStats;
+  /** Resolved data directory (from `config.dataDir`). */
+  dataDir: string;
 }
 
 export interface DashboardStats {
@@ -246,15 +250,16 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       LIMIT 1
     `)[0] ?? null;
 
-    const dbPath = process.env.REMBRIC_DATA_DIR
-      ? `${process.env.REMBRIC_DATA_DIR}/data.db`
-      : '~/.rembric/data.db';
+    const dbPath = join(deps.dataDir, 'data.db');
+    const dbPathDisplay = displayPath(dbPath);
     let dbSize = '—';
     try {
       const stat = statSync(dbPath);
-      dbSize = `${(stat.size / (1024 * 1024)).toFixed(2)} MB`;
+      const walStat = safeStat(`${dbPath}-wal`);
+      const totalBytes = Number(stat.size) + Number(walStat?.size ?? 0);
+      dbSize = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
     } catch {
-      /* ignore */
+      /* ignore — file not yet created, show '—' */
     }
 
     const host = `${process.env.REMBRIC_HOST ?? '127.0.0.1'}:${process.env.REMBRIC_PORT ?? '8787'}`;
@@ -470,7 +475,7 @@ ${ascBars(activity)}</pre
             <span>SQLITE · NODE · MCP</span>
           </div>
           <div class="card-body" style="display:flex;flex-direction:column;gap:var(--s-3)">
-            ${systemRow('DB FILE', dbPath, 'lime')} ${systemRow('DB SIZE', dbSize, 'fg')}
+            ${systemRow('DB FILE', dbPathDisplay, 'lime')} ${systemRow('DB SIZE', dbSize, 'fg')}
             ${systemRow('FTS INDEX', 'memory_fts · contentless', 'fg')}
             ${systemRow('MCP SERVER', host, 'lime')}
             ${systemRow('NODE', `${process.versions.node}`, 'fg')}
@@ -603,6 +608,22 @@ function truncate(s: string, max: number): string {
 function pctOfTotal(n: number, total: number): SafeHtml {
   const pct = total > 0 ? Math.round((n / total) * 100) : 0;
   return html`<span>${pct}%</span><span>OF TOTAL</span>`;
+}
+
+function safeStat(path: string): ReturnType<typeof statSync> | null {
+  try {
+    return statSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function displayPath(absolute: string): string {
+  const home = homedir();
+  if (absolute === home || absolute.startsWith(home + '/')) {
+    return '~' + absolute.slice(home.length);
+  }
+  return absolute;
 }
 
 function systemRow(label: string, value: string, tone: 'fg' | 'lime'): SafeHtml {
