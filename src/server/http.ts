@@ -49,8 +49,9 @@ export interface CreateHttpServerOptions {
   rateLimiter?: RateLimiter | null;
   /**
    * Triggers a consolidation pass on demand. Wired by the bootstrapper
-   * to the in-process ConsolidationRunner; exposed over HTTP to support
-   * `rembric consolidation run-now` against a running server.
+   * to the in-process ConsolidationRunner; exposed over HTTP via
+   * `POST /admin/consolidation/run` (also the dashboard button at
+   * `/dashboard/consolidation`).
    */
   triggerConsolidation?: (opts: { orphansOnly?: boolean }) => Promise<unknown>;
 }

@@ -41,7 +41,7 @@ export class ConsolidationScheduler {
     }
   }
 
-  /** Trigger an out-of-cycle run; used by `rembric consolidation run-now`. */
+  /** Trigger an out-of-cycle run; used by `POST /admin/consolidation/run`. */
   async triggerNow(): Promise<void> {
     await this.opts.runner.runAll();
   }

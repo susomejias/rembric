@@ -2,51 +2,45 @@
 
 ## [0.13.0](https://github.com/susomejias/rembric/compare/v0.12.1...v0.13.0) (2026-05-17)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **docker:** GET /healthz now requires Authorization: Bearer <token>. Hermes plugin must be on 0.6.0+ to keep is_available() returning true against Rembric 0.13.0+. Claude Code / Codex hooks unaffected (they never called /healthz directly).
+- **docker:** GET /healthz now requires Authorization: Bearer <token>. Hermes plugin must be on 0.6.0+ to keep is_available() returning true against Rembric 0.13.0+. Claude Code / Codex hooks unaffected (they never called /healthz directly).
 
 ### Features
 
-* **docker:** make Docker the canonical distribution + harden /healthz ([7f9da83](https://github.com/susomejias/rembric/commit/7f9da838ec197d5ed37de2e69da821c5751bac7a))
+- **docker:** make Docker the canonical distribution + harden /healthz ([7f9da83](https://github.com/susomejias/rembric/commit/7f9da838ec197d5ed37de2e69da821c5751bac7a))
 
 ## [0.12.1](https://github.com/susomejias/rembric/compare/v0.12.0...v0.12.1) (2026-05-17)
 
-
 ### Bug Fixes
 
-* **dashboard:** exclude soft-deleted sessions from active-session counter ([ba693ce](https://github.com/susomejias/rembric/commit/ba693ce5c0f33b70f89b4bc9636572358ae730d0))
+- **dashboard:** exclude soft-deleted sessions from active-session counter ([ba693ce](https://github.com/susomejias/rembric/commit/ba693ce5c0f33b70f89b4bc9636572358ae730d0))
 
 ## [0.12.0](https://github.com/susomejias/rembric/compare/v0.11.0...v0.12.0) (2026-05-17)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **dashboard:** refresh presentation layer
+- **dashboard:** refresh presentation layer
 
 ### Features
 
-* **dashboard:** refresh presentation layer ([388f7d6](https://github.com/susomejias/rembric/commit/388f7d6a8f61e119934ff4354013410f9fc54319))
-
+- **dashboard:** refresh presentation layer ([388f7d6](https://github.com/susomejias/rembric/commit/388f7d6a8f61e119934ff4354013410f9fc54319))
 
 ### Documentation
 
-* **claude:** explain judgments-vs-relations naming boundary ([a867d11](https://github.com/susomejias/rembric/commit/a867d1108314b3f7fab38e2284f0688d2d7497ab))
-* **openspec:** archive refresh-dashboard-presentation ([b91348c](https://github.com/susomejias/rembric/commit/b91348c5c8362788555273f72caa12d10f453f14))
+- **claude:** explain judgments-vs-relations naming boundary ([a867d11](https://github.com/susomejias/rembric/commit/a867d1108314b3f7fab38e2284f0688d2d7497ab))
+- **openspec:** archive refresh-dashboard-presentation ([b91348c](https://github.com/susomejias/rembric/commit/b91348c5c8362788555273f72caa12d10f453f14))
 
 ## [0.11.0](https://github.com/susomejias/rembric/compare/v0.10.1...v0.11.0) (2026-05-16)
 
-
 ### Features
 
-* **dashboard:** add /maintenance with operator-triggered physical purges ([8475844](https://github.com/susomejias/rembric/commit/84758444e1432673935090c974128ecc6899bd0c))
-
+- **dashboard:** add /maintenance with operator-triggered physical purges ([8475844](https://github.com/susomejias/rembric/commit/84758444e1432673935090c974128ecc6899bd0c))
 
 ### Bug Fixes
 
-* **dashboard:** resolve DB file path so DB SIZE is shown in production ([522ff32](https://github.com/susomejias/rembric/commit/522ff3237b7b3c81342f2e2dfe1189ec34d6b717))
-* **hermes:** on_session_switch closes the cached session on /reset too ([dd547b6](https://github.com/susomejias/rembric/commit/dd547b6c0564095441c1097ae07c539d8212d62e))
+- **dashboard:** resolve DB file path so DB SIZE is shown in production ([522ff32](https://github.com/susomejias/rembric/commit/522ff3237b7b3c81342f2e2dfe1189ec34d6b717))
+- **hermes:** on_session_switch closes the cached session on /reset too ([dd547b6](https://github.com/susomejias/rembric/commit/dd547b6c0564095441c1097ae07c539d8212d62e))
 
 ## [0.10.1](https://github.com/susomejias/rembric/compare/v0.10.0...v0.10.1) (2026-05-16)
 

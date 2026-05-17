@@ -24,7 +24,7 @@ This repo uses **pnpm** (pinned via `packageManager` in `package.json`). Enable 
 | DB migration check  | `pnpm run db:check`                                                                                                 |
 | Dev stack (Docker)  | `pnpm run dev:docker:up` (foreground; wipes+reseeds every up; Ctrl-C stops) — see `docs/docker.md::Local dev stack` |
 
-The CLI exposes subcommands once built: `rembric project create|list`, `rembric session list|delete`, `rembric token create|revoke`. See README "Operating the CLI".
+Operator work happens in the dashboard (`/dashboard/tokens`, `/dashboard/projects`, `/dashboard/sessions`, `/dashboard/consolidation`, `/dashboard/maintenance`). There is no operator CLI — the Docker image runs the server only.
 
 ### Dev stack (one-command Docker)
 
@@ -35,7 +35,7 @@ pnpm run build:css                       # writes dist/dashboard/public/assets/s
 node scripts/copy-assets.mjs             # mirrors src/dashboard/public/* (fonts, logo) → dist/
 tsx src/scripts/seed-dev.ts --reset      # ALWAYS wipes ./data-dev/ + reseeds ~30 thematic rows + 3 fresh tokens
                                          # (plaintext tokens printed in every boot's stderr — capture from logs)
-exec tsx watch src/cli.ts start
+exec tsx watch src/server-entrypoint.ts
 ```
 
 Port `127.0.0.1:8788` (loopback, dev-only). Volume bind-mount `./data-dev:/data` (gitignored). Source bind-mount `./src:/app/src` feeds tsx watch — saved `src/**/*.ts` edits reload the Node child sub-second without a container restart. Edits to `src/dashboard/styles/*.css` or `src/scripts/seed-dev.ts` require Ctrl-C + `pnpm run dev:docker:up` to re-run the boot chain.
@@ -128,7 +128,7 @@ Path-scoping contract enforced in `tools.ts`:
 
 ### Background workers
 
-`src/consolidation/scheduler.ts` runs on `CONSOLIDATION_CRON` (default 03:00 daily). Triggered manually via `POST /admin/consolidation/run` (admin token required) or `rembric consolidation run-now`. The embedding worker runs every 30s + pre-consolidation. Both are wired in `src/server/bootstrap.ts`.
+`src/consolidation/scheduler.ts` runs on `CONSOLIDATION_CRON` (default 03:00 daily). Triggered manually via `POST /admin/consolidation/run` (admin token required) or the dashboard button at `/dashboard/consolidation`. The embedding worker runs every 30s + pre-consolidation. Both are wired in `src/server/bootstrap.ts`.
 
 ### Maintenance: physical-purge escape hatches (manual, admin-only)
 

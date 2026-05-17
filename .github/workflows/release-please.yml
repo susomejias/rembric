@@ -27,56 +27,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  publish:
-    # Publishing in the same workflow run sidesteps the "GITHUB_TOKEN events
-    # do not trigger other workflows" restriction.
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event.inputs.force_publish == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name || github.ref }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://npm.pkg.github.com'
-
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint + typecheck + test
-        run: |
-          pnpm run lint
-          pnpm run typecheck
-          pnpm test
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Publish to GitHub Packages
-        run: pnpm publish --no-git-checks --access restricted
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   publish-docker:
     # Reusable workflow call — `release.created` events from GITHUB_TOKEN
     # don't trigger other workflows, so we invoke docker-publish.yml in the
     # same workflow run via workflow_call (which IS permitted with the
-    # auto-issued token). Mirrors the npm publish pattern above.
+    # auto-issued token).
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' || github.event.inputs.force_publish == 'true' }}
     uses: ./.github/workflows/docker-publish.yml

@@ -17,7 +17,7 @@ import { createTestDb } from './db.js';
  * healthy /healthz endpoint.
  *
  * If a 60s run is required for the release pipeline, an additional CI
- * job can shell out to `node dist/cli.js` with the same env.
+ * job can shell out to `node dist/server-entrypoint.js` with the same env.
  */
 
 async function findFreePort(): Promise<number> {

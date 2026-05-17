@@ -42,7 +42,7 @@ You will be prompted for two values at install time, both required:
   - ✓ Good: `https://memory.example.com`, `http://192.168.1.10:8787`
   - ✗ Bad: `https://memory.example.com/mcp`
   - No trailing slash.
-- **Rembric API token** — issued by `rembric token create` on the server. Stored in your system keychain (not in `settings.json`).
+- **Rembric API token** — issued from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Stored in your system keychain (not in `settings.json`).
 
 That's it — the `userConfig` values flow to both the MCP bridge AND the lifecycle hooks via Claude Code's `${user_config.*}` substitution in the hook manifest. No shell exports required.
 

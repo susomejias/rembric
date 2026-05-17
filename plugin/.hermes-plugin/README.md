@@ -15,7 +15,7 @@ hermes plugins enable rembric
 `hermes plugins install rembric` prompts for the three values the plugin needs (declared in `plugin.yaml::requires_env`) and writes them to `${HERMES_HOME:-~/.hermes}/.env`:
 
 - **`REMBRIC_SERVER_URL`** — base URL of your deployment, **without** the `/mcp` suffix. The bridge appends `/mcp/<slug>` itself when you wire it.
-- **`REMBRIC_API_TOKEN`** — Bearer token issued by `rembric token create`. Marked `secret: true` in the manifest so the prompt hides the input.
+- **`REMBRIC_API_TOKEN`** — Bearer token minted from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Marked `secret: true` in the manifest so the prompt hides the input.
 - **`REMBRIC_PROJECT_SLUG`** — default project slug for session-lifecycle POSTs.
 
 If the three vars are already exported in the shell that launches `hermes`, the install skips the corresponding prompts.
@@ -84,7 +84,7 @@ The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes
 | Variable               | Required | Description                                                                                                                   |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `REMBRIC_SERVER_URL`   | ✓        | Base URL of your Rembric deployment, **without** the `/mcp` suffix. Example: `https://memory.example.com`. No trailing slash. |
-| `REMBRIC_API_TOKEN`    | ✓        | Bearer token issued by `rembric token create`.                                                                                |
+| `REMBRIC_API_TOKEN`    | ✓        | Bearer token minted from the Rembric dashboard at `/dashboard/tokens`.                                                        |
 | `REMBRIC_PROJECT_SLUG` | ✓        | Default project slug. Overridden per-cwd if a `.rembric` file is present.                                                     |
 | `HERMES_HOME`          | —        | Override Hermes's home dir (default `~/.hermes`). Honoured by the installer.                                                  |
 
@@ -131,7 +131,7 @@ The other `MemoryProvider` methods (`prefetch`, `system_prompt_block`, `sync_tur
 | `hermes memory status` shows `rembric: Missing` after install                        | Plugin not enabled. Run `hermes plugins enable rembric` and restart Hermes.                                                                                                                                                                                           |
 | `hermes plugins install rembric` didn't prompt for the env vars                      | The three `REMBRIC_*` vars are already set in the parent shell, so Hermes skipped the prompts (this is by design). Verify via `env \| grep REMBRIC_`. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install. |
 | stderr shows `[rembric] no project slug for session ...; skipping session POST`      | None of the four cascade sources produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                                          |
-| stderr shows `[rembric] POST /sessions failed: HTTPError 403`                        | Token doesn't have `write` permission for the project. `rembric token list` on the server to check; reissue via `rembric token create --scope project --slug <slug>` (write is the default).                                                                          |
+| stderr shows `[rembric] POST /sessions failed: HTTPError 403`                        | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                    |
 | stderr shows `[rembric] POST /sessions failed: HTTPError 404`                        | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                |
 | MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded OR the install never wrote credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then `cat ~/.hermes/.env \| grep REMBRIC_` to verify the three vars are present.                                                  |
 | You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                 |

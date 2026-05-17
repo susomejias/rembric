@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> If your symptom isn't here, run `rembric status` and check the server logs (structured JSON on stderr). The startup banner dumps env vars with secrets redacted.
+> If your symptom isn't here, probe `curl -sS -H "Authorization: Bearer $REMBRIC_ADMIN_TOKEN" http://127.0.0.1:8787/healthz` (200 + `{"ok":true,...}` = liveness + DB ping passed) and check the server logs (structured JSON on stderr). The startup banner dumps env vars with secrets redacted.
 
 ## Startup
 
@@ -10,10 +10,10 @@ On a fresh data dir, set the env var before launching:
 
 ```bash
 export REMBRIC_ADMIN_TOKEN=$(openssl rand -hex 32)
-npx rembric
+docker compose up -d
 ```
 
-Once a row exists, the env var is ignored on subsequent runs. Rotate via the dashboard (`/dashboard/tokens`) or `rembric token create` + revoke.
+Once a row exists, the env var is ignored on subsequent runs. Rotate via the dashboard at `/dashboard/tokens`.
 
 ### `Invalid configuration: OPENAI_API_KEY is required …`
 
@@ -25,13 +25,19 @@ Another process holds the port. `lsof -i :8787` to find it, or set `REMBRIC_PORT
 
 ## LLM endpoint
 
-### `rembric llm ping` reports `network` / `timeout`
+Probe the configured endpoint directly:
 
-`OPENAI_BASE_URL` is unreachable. Curl `$OPENAI_BASE_URL/chat/completions` from the same host to confirm. If that works, double-check `OPENAI_BASE_URL` ends in `/v1`.
+```bash
+curl -sS -H "Authorization: Bearer $OPENAI_API_KEY" "$OPENAI_BASE_URL/models"
+```
 
-### `rembric llm ping` reports `auth`
+### Connection refused / timeout
 
-For OpenAI proper, the key is wrong or revoked. For Ollama / LM Studio, the upstream rejected the model name. `curl $OPENAI_BASE_URL/models` should list `OPENAI_MODEL`.
+`OPENAI_BASE_URL` is unreachable from the rembric host. If running rembric inside Docker against an Ollama / LM Studio on the host, the URL must be reachable from inside the container (use `host.docker.internal` on Mac/Windows or the host's LAN IP on Linux, not `127.0.0.1`). Confirm `OPENAI_BASE_URL` ends in `/v1`.
+
+### `401` / `403` on `/models`
+
+For OpenAI proper, the key is wrong or revoked. For Ollama / LM Studio, the upstream is rejecting the request — the `/models` listing should include the value configured in `OPENAI_MODEL`.
 
 ### Consolidation runs are very slow
 
@@ -81,7 +87,7 @@ Three possibilities:
 
 1. **Scope mismatch.** `/mcp` connections see only global; `/mcp/<slug>` sees only that project. Crossed scopes return empty by design.
 2. **FTS5 query syntax.** Default tokenizer treats `-`, `:`, `.` as separators. `agent-name` searches as two tokens.
-3. **Decay archived it.** Check `rembric status` archived count or the dashboard with `status=archived`.
+3. **Decay archived it.** Check the dashboard with `status=archived` (overview counters at `/dashboard` show archived totals too).
 
 ### `code: scope_locked`
 

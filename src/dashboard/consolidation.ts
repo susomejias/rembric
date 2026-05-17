@@ -97,7 +97,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       ${runs.length === 0
         ? html`<p class="muted">
             No runs yet. The cron will fire at <code>CONSOLIDATION_CRON</code>; trigger one manually
-            with <code>rembric consolidation run-now</code> once that command lands.
+            via <code>POST /admin/consolidation/run</code> with the admin bearer token.
           </p>`
         : html`
             <div class="tbl-host">

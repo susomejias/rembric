@@ -16,7 +16,7 @@ Header: Authorization: Bearer <agent-token>
 - `/mcp` → global scope. The agent operates user-wide until it calls `project.use({slug})`.
 - `/mcp/<slug>` → path-scoped. The agent is locked to that project; `scope=global` saves are rejected with `code: scope_locked`.
 
-Mint per-agent tokens from the dashboard (`/dashboard/tokens`) or `rembric token create <name>`. Plaintext shown exactly once.
+Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
 The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` (Claude Code, Codex CLI) inject it into the system prompt. Other clients still get the same protocol via each tool's description.
 
@@ -71,7 +71,7 @@ You **must** `export` the following in the shell that launches `codex`:
 ```bash
 # in ~/.zshrc (or .bashrc, etc.) — required for the Codex plugin to work
 export REMBRIC_SERVER_URL="https://memory.example.com"     # no trailing slash, no /mcp suffix
-export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token from `rembric token create`
+export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token minted from /dashboard/tokens
 ```
 
 Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
@@ -220,7 +220,7 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pic
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `hermes plugins install rembric` skipped the env prompts                                          | The three `REMBRIC_*` vars are already set in the parent shell. This is by design — Hermes only prompts for vars not in env. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install.                       |
 | MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`                    | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` AND `cat ~/.hermes/.env \| grep REMBRIC_` shows all three vars.                                                                |
-| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty        | Token doesn't have `write` permission for the project (`rembric token list` to check — `read` alone returns 403 on session POST, which the provider logs to stderr only). Reissue via `rembric token create --scope project --slug <slug>` (write is the default). |
+| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty        | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission. |
 | stderr shows `[rembric] no project slug for session …; skipping session POST`                    | None of the four cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` in `~/.hermes/.env` (or re-run `hermes plugins install rembric` to be prompted).                                                                                                       |
 | stderr shows `[rembric] POST /sessions failed: HTTPError 404`                                    | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                    |
 | MCP tools fail and `hermes memory status` reports `rembric: Missing`                             | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                                                                                                              |
@@ -298,4 +298,4 @@ After registering, ask the agent to list its tools — you should see the `memor
 
 - Tool surface and parameters: each tool's MCP description (call `tools/list` from your client).
 - Relation graph and `memory.judge` cadence: [docs/relations.md](./relations.md).
-- Session deletion / undelete: dashboard `/dashboard/sessions`, CLI `rembric session list --include-deleted`.
+- Session deletion / undelete: dashboard `/dashboard/sessions` (toggle `?include_deleted=1` to surface soft-deleted rows).

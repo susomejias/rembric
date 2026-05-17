@@ -169,7 +169,7 @@ claude plugin install rembric@rembric
 You'll be prompted for two values at install time:
 
 - **Rembric server URL** — base URL **without** `/mcp` (e.g. `https://memory.example.com`). The plugin appends the path itself.
-- **API token** — issued by `rembric token create <name>`. Stored in your system keychain.
+- **API token** — issued from the dashboard at `/dashboard/tokens` (plaintext shown exactly once). Stored in your system keychain.
 
 To pin a project per repo, drop a `.rembric` file at the root:
 
@@ -245,20 +245,9 @@ Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all 
 
 Drop `/my-app` from the URL for global scope. Per-client config-file locations and validation status: [docs/agents.md](./docs/agents.md).
 
-## CLI operations
+## Operating Rembric
 
-The CLI is invoked inside the running container with `docker compose exec`:
-
-| Command                                                                      | Purpose                                                               |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `docker compose exec rembric rembric project create <slug> [--name <name>]`  | Mint a project. Slug must match `[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?`. |
-| `docker compose exec rembric rembric project list [--all] [--table]`         | List projects (JSON default; `--table` for humans).                   |
-| `docker compose exec rembric rembric session list [--include-deleted]`       | Inspect agent sessions.                                               |
-| `docker compose exec rembric rembric session delete <id>`                    | Soft-delete (audit trail preserved).                                  |
-| `docker compose exec rembric rembric token create <name> [--project <slug>]` | Mint a bearer token. Plaintext shown exactly once.                    |
-| `docker compose exec rembric rembric token revoke <name>`                    | Revoke a token (effective immediately).                               |
-
-If you prefer the native CLI on the host (Node 20+ required), see "Development" below for the npm install path. Projects are also creatable from `/dashboard/projects`.
+Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (port `8788` in the dev stack). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
 
 ## Dashboard maintenance (manual purges)
 
@@ -332,20 +321,6 @@ Controls how `memory.save` surfaces conflict candidates to the agent for fresh-c
 | `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                               |
 
 ## Development
-
-### Running without Docker (power users only)
-
-If you already have Node 20+ and want the native CLI on the host (e.g. `rembric token create` invoked directly), the npm package keeps working:
-
-```bash
-export REMBRIC_ADMIN_TOKEN=$(openssl rand -hex 32)
-
-pnpm dlx rembric                 # one-shot
-# or:
-pnpm add -g rembric && rembric
-```
-
-The npm path is **secondary**. Docker is the canonical install everyone else gets pointed at; npm stays available during a dual-publish window so the native CLI doesn't disappear overnight. It will be sunset eventually — see `openspec/changes/make-docker-primary-distribution/design.md::Decision 10`.
 
 ### Hacking on Rembric itself
 

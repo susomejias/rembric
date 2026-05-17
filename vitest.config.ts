@@ -10,9 +10,7 @@ export default defineConfig({
       reporter: ['text', 'html', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: [
-        'src/cli.ts',
-        'src/cli/**',
-        'src/index.ts',
+        'src/server-entrypoint.ts',
         'src/test/**',
         'src/**/*.test.ts',
         'src/db/migrations/**',

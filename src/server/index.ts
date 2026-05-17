@@ -1,6 +1,8 @@
 /**
- * Server entrypoints. `createServer` is for library embedding; `startCli`
- * is what `npx rembric` calls and wires signal handling for clean shutdown.
+ * Server entrypoints. `createServer` is the internal test-harness factory
+ * (used by the E2E tests in src/test/ to spin a server with an injected env);
+ * `startCli` is what `src/server-entrypoint.ts` invokes and wires signal
+ * handling for clean shutdown.
  */
 
 import { bootstrap, type BootstrappedServer } from './bootstrap.js';

@@ -71,8 +71,8 @@ export const agentSessions = sqliteTable(
     status: text('status', { enum: AGENT_SESSION_STATUSES }).notNull().default('active'),
     /**
      * Soft-delete timestamp. NULL means visible. Set by operators via
-     * `rembric session delete` (CLI) or `/dashboard/sessions/:id/delete`
-     * (dashboard). The row is never physically deleted; `session_id`
+     * `POST /dashboard/sessions/:id/delete` (the dashboard list view's
+     * inline form). The row is never physically deleted; `session_id`
      * references from `memory` and `confirmations` remain valid.
      */
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),

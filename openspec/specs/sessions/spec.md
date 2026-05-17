@@ -250,26 +250,6 @@ The `agent_sessions` table SHALL gain a nullable column `deleted_at TIMESTAMP`. 
 - **WHEN** session `<S>` is soft-deleted
 - **THEN** the memory's `session_id` SHALL remain unchanged and SHALL continue to point at `<S>`
 
-### Requirement: The CLI MUST expose `rembric session delete <id>` and `--include-deleted`
-
-The CLI SHALL gain:
-
-- `rembric session delete <id>`: soft-deletes the session by calling `softDelete(id, {adminBypass: true})`. SHALL print the updated row as JSON on success. SHALL exit with non-zero status and a stderr message when the session is not found.
-- `rembric session list --include-deleted`: surfaces soft-deleted rows alongside active ones. The `--table` rendering SHALL include a `(deleted)` annotation in the status column for deleted rows.
-
-#### Scenario: session delete soft-deletes the row
-
-- **GIVEN** a Rembric database containing a session with `id = <S>` whose `deleted_at` is NULL
-- **WHEN** the operator runs `rembric session delete <S>`
-- **THEN** the command SHALL exit `0` and print JSON containing `id = <S>` and a non-null `deletedAt`
-- **AND** the row SHALL NOT appear in a subsequent `rembric session list`
-- **AND** the row SHALL appear in a subsequent `rembric session list --include-deleted`
-
-#### Scenario: session delete on an unknown id exits non-zero
-
-- **WHEN** the operator runs `rembric session delete not-a-real-ulid`
-- **THEN** the command SHALL exit with a non-zero status and stderr SHALL contain a message naming the missing id
-
 ### Requirement: The dashboard MUST surface Delete + Undelete actions per session
 
 The list view at `/dashboard/sessions` SHALL render an inline `<form action="/dashboard/sessions/<id>/delete" method="post">` per active row with a CSRF input and a `class="warn"` `Delete` button. The handler SHALL call `softDelete(id, {adminBypass: true})` and redirect to `/dashboard/sessions?deleted=<id>`. The list view SHALL render `?deleted=<id>` as a `flash success` containing an inline `Undelete` action.

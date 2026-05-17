@@ -46,9 +46,6 @@ jobs:
       - name: Build (artifact sanity)
         run: pnpm run build
 
-      - name: Smoke test (install tarball + npx rembric llm ping)
-        run: node scripts/smoke-pack.mjs
-
   docker-build-check:
     # Catches Dockerfile / dependency / native-module regressions before
     # they reach a release publish. Single-arch (linux/amd64 native on

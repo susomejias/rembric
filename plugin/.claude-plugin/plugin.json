@@ -20,7 +20,7 @@
     "api_token": {
       "type": "string",
       "title": "Rembric API token",
-      "description": "Bearer token issued by `rembric token create`. Stored in the system keychain.",
+      "description": "Bearer token issued from the Rembric dashboard at /dashboard/tokens (plaintext shown exactly once). Stored in the system keychain.",
       "sensitive": true,
       "required": true
     }

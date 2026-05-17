@@ -50,8 +50,7 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s \
   CMD node -e "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["node", "/app/dist/cli.js"]
-CMD ["start"]
+ENTRYPOINT ["node", "/app/dist/server-entrypoint.js"]
 
 
 # Dev stage — used only by docker-compose.dev.yml via `target: dev`.
@@ -108,4 +107,4 @@ ENTRYPOINT []
 #   4. tsx watch       — exec'd so it owns PID 1 and handles SIGTERM properly.
 #                        Reloads src/**/*.ts on host edits; CSS / seed
 #                        require a container restart to re-run.
-CMD ["sh", "-c", "pnpm run build:css && node scripts/copy-assets.mjs && tsx src/scripts/seed-dev.ts --reset && exec tsx watch src/cli.ts start"]
+CMD ["sh", "-c", "pnpm run build:css && node scripts/copy-assets.mjs && tsx src/scripts/seed-dev.ts --reset && exec tsx watch src/server-entrypoint.ts"]

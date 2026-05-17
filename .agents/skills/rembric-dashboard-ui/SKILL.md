@@ -144,7 +144,7 @@ For visual verification with the running dev server:
 # server already booted on :18787 with admin token in /tmp/rembric-dev-token.txt
 pnpm run build:css   # regenerate hashed CSS bundles + manifest.json
 # kill + restart the start process if you changed any handler:
-pkill -f 'node dist/cli.js'
+pkill -f 'node dist/server-entrypoint.js'
 REMBRIC_ADMIN_TOKEN=$(cat /tmp/rembric-dev-token.txt) \
   REMBRIC_PORT=18787 \
   REMBRIC_DATA_DIR=$(cat /tmp/rembric-dev.env | cut -d= -f2) \
