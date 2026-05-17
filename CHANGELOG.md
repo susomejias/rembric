@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/susomejias/rembric/compare/v0.14.1...v0.14.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* **docker:** publish runtime stage and add data-loss defenses ([1d955ff](https://github.com/susomejias/rembric/commit/1d955ffecd3504a6d899d5240a64fb6d1f70d128))
+
 ## [0.14.1](https://github.com/susomejias/rembric/compare/v0.14.0...v0.14.1) (2026-05-17)
 
 
