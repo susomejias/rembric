@@ -108,42 +108,48 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           <td>${statusPill(r.status)}</td>
           <td class="right">${countRows[r.id] ?? 0}</td>
           <td class="actions">
-            ${opts.deleted
-              ? html`
-                  <form action="/dashboard/sessions/${r.id}/undelete" method="post" class="inline">
-                    ${csrfInput(session.session, deps.sessions, 'session.undelete')}
-                    <button type="submit">Undelete</button>
-                  </form>
-                `
-              : html`
-                  ${r.status === 'active'
-                    ? html`
-                        <form
-                          action="/dashboard/sessions/${r.id}/abandon"
-                          method="post"
-                          class="inline"
-                          data-confirm="Mark this session as abandoned? Its ${countRows[r.id] ??
-                          0} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
-                          data-confirm-label="ABANDON SESSION"
-                          data-confirm-tone="warn"
-                        >
-                          ${csrfInput(session.session, deps.sessions, 'session.abandon')}
-                          <button class="warn" type="submit">Abandon</button>
-                        </form>
-                      `
-                    : raw('')}
-                  <form
-                    action="/dashboard/sessions/${r.id}/delete"
-                    method="post"
-                    class="inline"
-                    data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
-                    data-confirm-label="DELETE SESSION"
-                    data-confirm-tone="danger"
-                  >
-                    ${csrfInput(session.session, deps.sessions, 'session.delete')}
-                    <button class="danger" type="submit">Delete</button>
-                  </form>
-                `}
+            <div class="actions-stack">
+              ${opts.deleted
+                ? html`
+                    <form
+                      action="/dashboard/sessions/${r.id}/undelete"
+                      method="post"
+                      class="inline"
+                    >
+                      ${csrfInput(session.session, deps.sessions, 'session.undelete')}
+                      <button type="submit">Undelete</button>
+                    </form>
+                  `
+                : html`
+                    ${r.status === 'active'
+                      ? html`
+                          <form
+                            action="/dashboard/sessions/${r.id}/abandon"
+                            method="post"
+                            class="inline"
+                            data-confirm="Mark this session as abandoned? Its ${countRows[r.id] ??
+                            0} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
+                            data-confirm-label="ABANDON SESSION"
+                            data-confirm-tone="warn"
+                          >
+                            ${csrfInput(session.session, deps.sessions, 'session.abandon')}
+                            <button class="warn" type="submit">Abandon</button>
+                          </form>
+                        `
+                      : raw('')}
+                    <form
+                      action="/dashboard/sessions/${r.id}/delete"
+                      method="post"
+                      class="inline"
+                      data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
+                      data-confirm-label="DELETE SESSION"
+                      data-confirm-tone="danger"
+                    >
+                      ${csrfInput(session.session, deps.sessions, 'session.delete')}
+                      <button class="danger" type="submit">Delete</button>
+                    </form>
+                  `}
+            </div>
           </td>
         </tr>
       `;
@@ -290,38 +296,42 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const memoriesCount = memories.length;
     const actionForm = row.deletedAt
       ? html`
-          <form action="/dashboard/sessions/${row.id}/undelete" method="post" class="inline">
-            ${csrfInput(session.session, deps.sessions, 'session.undelete')}
-            <button class="primary" type="submit">Undelete</button>
-          </form>
+          <div class="actions-stack">
+            <form action="/dashboard/sessions/${row.id}/undelete" method="post" class="inline">
+              ${csrfInput(session.session, deps.sessions, 'session.undelete')}
+              <button class="primary" type="submit">Undelete</button>
+            </form>
+          </div>
         `
       : html`
-          ${row.status === 'active'
-            ? html`
-                <form
-                  action="/dashboard/sessions/${row.id}/abandon"
-                  method="post"
-                  class="inline"
-                  data-confirm="Mark this session as abandoned? Its ${memoriesCount} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
-                  data-confirm-label="ABANDON SESSION"
-                  data-confirm-tone="warn"
-                >
-                  ${csrfInput(session.session, deps.sessions, 'session.abandon')}
-                  <button class="warn" type="submit">Abandon</button>
-                </form>
-              `
-            : raw('')}
-          <form
-            action="/dashboard/sessions/${row.id}/delete"
-            method="post"
-            class="inline"
-            data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
-            data-confirm-label="DELETE SESSION"
-            data-confirm-tone="danger"
-          >
-            ${csrfInput(session.session, deps.sessions, 'session.delete')}
-            <button class="danger" type="submit">Delete</button>
-          </form>
+          <div class="actions-stack">
+            ${row.status === 'active'
+              ? html`
+                  <form
+                    action="/dashboard/sessions/${row.id}/abandon"
+                    method="post"
+                    class="inline"
+                    data-confirm="Mark this session as abandoned? Its ${memoriesCount} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
+                    data-confirm-label="ABANDON SESSION"
+                    data-confirm-tone="warn"
+                  >
+                    ${csrfInput(session.session, deps.sessions, 'session.abandon')}
+                    <button class="warn" type="submit">Abandon</button>
+                  </form>
+                `
+              : raw('')}
+            <form
+              action="/dashboard/sessions/${row.id}/delete"
+              method="post"
+              class="inline"
+              data-confirm="Soft-delete this session? Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
+              data-confirm-label="DELETE SESSION"
+              data-confirm-tone="danger"
+            >
+              ${csrfInput(session.session, deps.sessions, 'session.delete')}
+              <button class="danger" type="submit">Delete</button>
+            </form>
+          </div>
         `;
 
     const detailTitle = titleCascade(row.title, row.description, row.id);
