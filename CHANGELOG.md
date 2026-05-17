@@ -14,6 +14,7 @@
 
 ### Documentation
 
+* **claude:** explain judgments-vs-relations naming boundary ([a867d11](https://github.com/susomejias/rembric/commit/a867d1108314b3f7fab38e2284f0688d2d7497ab))
 * **openspec:** archive refresh-dashboard-presentation ([b91348c](https://github.com/susomejias/rembric/commit/b91348c5c8362788555273f72caa12d10f453f14))
 
 ## [0.11.0](https://github.com/susomejias/rembric/compare/v0.10.1...v0.11.0) (2026-05-16)
