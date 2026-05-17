@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/susomejias/rembric/compare/v0.12.0...v0.12.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **dashboard:** exclude soft-deleted sessions from active-session counter ([ba693ce](https://github.com/susomejias/rembric/commit/ba693ce5c0f33b70f89b4bc9636572358ae730d0))
+
 ## [0.12.0](https://github.com/susomejias/rembric/compare/v0.11.0...v0.12.0) (2026-05-17)
 
 
