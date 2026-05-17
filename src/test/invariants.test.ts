@@ -178,6 +178,67 @@ describe('append-only invariants (static grep)', () => {
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
     expect(/DELETE\s+FROM\s+memory_relations\b/i.test(src)).toBe(true);
   });
+
+  it('seed-dev.ts gates --reset behind REMBRIC_ALLOW_DESTRUCTIVE_SEED before invoking the wipe helper', () => {
+    const file = join(srcRoot, 'scripts/seed-dev.ts');
+    const src = readFileSync(file, 'utf8');
+    const gateIdx = src.search(/env\[['"]REMBRIC_ALLOW_DESTRUCTIVE_SEED['"]\]/);
+    const wipeCallIdx = src.search(/\bwipe\s*\(\s*deps\.handle\s*\)/);
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(wipeCallIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeLessThan(wipeCallIdx);
+  });
+});
+
+const repoRoot = join(srcRoot, '..');
+
+describe('image packaging invariants', () => {
+  it('Dockerfile: the LAST `FROM ... AS <name>` stage is `runtime`', () => {
+    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const stages = [...dockerfile.matchAll(/^FROM\s+\S+\s+AS\s+(\w+)/gim)].map((m) => m[1]);
+    expect(stages.length).toBeGreaterThan(1);
+    expect(stages[stages.length - 1]).toBe('runtime');
+  });
+
+  it('Dockerfile: the `runtime` stage declares LABEL rembric.stage=runtime', () => {
+    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
+    expect(runtimeIdx).toBeGreaterThan(-1);
+    const runtimeBlock = dockerfile.slice(runtimeIdx);
+    expect(/LABEL\s+rembric\.stage=runtime\b/.test(runtimeBlock)).toBe(true);
+  });
+
+  it('Dockerfile: the `dev` stage declares LABEL rembric.stage=dev', () => {
+    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const devIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+dev\b/m);
+    const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
+    expect(devIdx).toBeGreaterThan(-1);
+    expect(runtimeIdx).toBeGreaterThan(devIdx);
+    const devBlock = dockerfile.slice(devIdx, runtimeIdx);
+    expect(/LABEL\s+rembric\.stage=dev\b/.test(devBlock)).toBe(true);
+  });
+
+  it('docker-publish.yml: `Build and push` step uses target: runtime', () => {
+    const yml = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    expect(/target:\s*runtime\b/.test(yml)).toBe(true);
+  });
+
+  it('docker-publish.yml: post-publish smoke test references all three signals', () => {
+    const yml = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    expect(/seed-dev/.test(yml)).toBe(true);
+    expect(/tsx watch/.test(yml)).toBe(true);
+    expect(/rembric\.stage/.test(yml)).toBe(true);
+    expect(/MAX_MB|800/.test(yml)).toBe(true);
+  });
+
+  it('bootstrap.ts calls assertDataLossGuard before startHttpServer', () => {
+    const src = readFileSync(join(srcRoot, 'server/bootstrap.ts'), 'utf8');
+    const guardIdx = src.search(/\bassertDataLossGuard\s*\(/);
+    const startIdx = src.search(/\bstartHttpServer\s*\(/);
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(startIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(startIdx);
+  });
 });
 
 /**

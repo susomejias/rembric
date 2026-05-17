@@ -18,8 +18,16 @@ import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { SessionsService } from '../services/sessions.js';
 import { deriveSessionKey, TokensService } from '../services/tokens.js';
+import { REMBRIC_VERSION } from '../version.js';
 
 import type { DashboardStats } from './dashboard-router.js';
+import {
+  assertDataLossGuard,
+  DataLossGuardError,
+  queryCounts,
+  writeStateMarker,
+  type DataCounts,
+} from './data-loss-guard.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
 import { RateLimiter } from './rate-limit.js';
 import { SessionRouter } from './session-router.js';
@@ -178,6 +186,30 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       })
     : null;
 
+  try {
+    assertDataLossGuard({ dataDir: config.dataDir, db: dbHandle.db, env });
+  } catch (err) {
+    if (err instanceof DataLossGuardError) {
+      dbHandle.close();
+      process.exit(78);
+    }
+    throw err;
+  }
+
+  printBootstrapBanner(config, queryCounts(dbHandle.db));
+
+  const markerTimer = setInterval(() => {
+    try {
+      writeStateMarker(config.dataDir, queryCounts(dbHandle.db));
+    } catch (err) {
+      console.error(
+        'state marker refresh failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }, 60_000);
+  markerTimer.unref?.();
+
   const http = await startHttpServer({
     host: config.host,
     port: config.port,
@@ -219,6 +251,15 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     http,
     dbHandle,
     shutdown: async () => {
+      clearInterval(markerTimer);
+      try {
+        writeStateMarker(config.dataDir, queryCounts(dbHandle.db));
+      } catch (err) {
+        console.error(
+          'state marker write on shutdown failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
       if (embedTimer) clearInterval(embedTimer);
       scheduler.stop();
       await http.close();
@@ -239,7 +280,16 @@ function printStartupBanner(config: Config): void {
   console.error(lines.join('\n'));
 }
 
+function printBootstrapBanner(config: Config, counts: DataCounts): void {
+  console.error(`[bootstrap] rembric v${REMBRIC_VERSION} ready`);
+  console.error(`[bootstrap] data_dir=${config.dataDir}`);
+  console.error(
+    `[bootstrap] counts: memory=${counts.memory} projects=${counts.projects} sessions=${counts.sessions} tokens=${counts.tokens} prompts=${counts.prompts}`,
+  );
+}
+
 function printReadyBanner(url: string, firstRun: boolean): void {
+  console.error(`[bootstrap] listening on ${url}`);
   console.error(`  ✓ MCP endpoint:  ${url}/mcp`);
   console.error(`  ✓ Dashboard:     ${url}/dashboard`);
   console.error(`  ✓ Healthcheck:   ${url}/healthz (bearer token required)`);

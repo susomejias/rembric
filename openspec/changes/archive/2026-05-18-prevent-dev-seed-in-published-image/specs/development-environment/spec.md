@@ -1,48 +1,4 @@
-# development-environment Specification
-
-## Purpose
-
-Defines the repo's parallel development stack: a Docker-based dev instance with hot-reload that coexists with a canonical prod instance on the same host, an idempotent seed script that produces a predictable thematic baseline on every boot, a single `pnpm` entry point that brings the stack up with data loaded, and CI gates that protect both Dockerfile stages from regression. The dev stack is isolated from prod by compose project name, container name, host port, and bind-mount directory; every `up` produces a fresh canvas with the same baseline counts (fresh plaintext tokens emitted to stderr per boot) so operators iterate against a known-good state without preserving cruft from previous sessions.
-
-## Requirements
-
-### Requirement: The repo MUST provide a parallel dev stack via `docker-compose.dev.yml` with hot-reload
-
-The repo SHALL ship a `docker-compose.dev.yml` at the root that, when combined with the canonical `docker-compose.yml` via `docker compose -f docker-compose.yml -f docker-compose.dev.yml`, brings up a development-grade instance of the server that does NOT collide with a parallel prod instance on the same host. The dev compose SHALL:
-
-- Declare `name: rembric-dev` (distinct compose project name).
-- Override `container_name` to `rembric-dev`.
-- Build the image from local source via `build: { context: ., dockerfile: Dockerfile, target: dev }` — targeting the dev stage defined in the Dockerfile.
-- Use a distinct bind-mount: `./data-dev:/data` (not `./data:/data`).
-- Bind-mount `./src:/app/src` so the container's `tsx watch` sees host-side edits and restarts the Node child sub-second.
-- Bind the host port at `127.0.0.1:8788:8787` (loopback-only, distinct from the canonical 8787).
-- Set `LOG_LEVEL=debug` and `restart: 'no'` (crash visibility).
-- Inherit `env_file: .env` from the canonical compose (no duplicated secrets).
-
-The Dockerfile SHALL contain a `dev` stage (in addition to the existing `builder` and `runtime` stages) that keeps the full dev-deps install (NO prune) and sets `ENTRYPOINT ["tsx", "watch"]` with `CMD ["src/cli.ts", "start"]`. The prod `runtime` stage SHALL remain unchanged and SHALL continue to be the implicit final target for canonical `docker build`.
-
-#### Scenario: Dev and prod stacks coexist on the same host
-
-- **GIVEN** the canonical stack is running via `docker compose up -d` (container `rembric`, volume `./data/`, port `:8787` on all interfaces)
-- **WHEN** the operator runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`
-- **THEN** a second container named `rembric-dev` starts on `127.0.0.1:8788`
-- **AND** the second container uses `./data-dev/` exclusively, never reading or writing to `./data/`
-- **AND** both containers are visible in `docker compose ls` as distinct projects (`rembric` and `rembric-dev`)
-
-#### Scenario: Dev stack is loopback-only by default
-
-- **WHEN** the operator brings up the dev stack on a host accessible from the LAN
-- **THEN** the port `:8788` SHALL respond only to requests originating from `127.0.0.1` on that host
-- **AND** requests from other LAN hosts SHALL be unable to reach `:8788`
-
-#### Scenario: Editing source triggers hot-reload
-
-- **GIVEN** the dev stack is running (container `rembric-dev` in `healthy` state)
-- **WHEN** the operator saves a file under `./src/**/*.ts` on the host
-- **THEN** `tsx watch` inside the container SHALL detect the change within ~1 second
-- **AND** the Node child process SHALL be killed and respawned with the updated source
-- **AND** the container itself SHALL NOT restart (the tsx watch parent process stays alive)
-- **AND** the healthcheck SHALL recover within the configured `start-period` (20s) without flipping the container to `unhealthy`
+## MODIFIED Requirements
 
 ### Requirement: The repo MUST provide a dev seed script with `--reset` semantics
 

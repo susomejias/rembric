@@ -84,26 +84,102 @@ jobs:
             exit 1
           fi
 
-      - name: Extract Docker metadata (tag matrix)
-        id: meta
+      - name: Extract Docker metadata (immutable tags)
+        id: meta_immutable
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/rembric
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
-            type=match,pattern=^(\d+\.\d+)\.\d+$,group=1,value=${{ steps.version.outputs.version }}
-            type=match,pattern=^(\d+)\.\d+\.\d+$,group=1,value=${{ steps.version.outputs.version }}
-            type=raw,value=latest
             type=sha,format=short,prefix=sha-
 
-      - name: Build and push (linux/amd64, linux/arm64)
+      - name: Build and push immutable tags (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
+          target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta_immutable.outputs.tags }}
+          labels: ${{ steps.meta_immutable.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke test published image (three independent signals)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rembric
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Pull the just-pushed immutable tag (linux/amd64 on the runner).
+          docker pull "$IMAGE:$VERSION"
+
+          CMD_JSON=$(docker inspect "$IMAGE:$VERSION" --format '{{json .Config.Cmd}}')
+          ENT_JSON=$(docker inspect "$IMAGE:$VERSION" --format '{{json .Config.Entrypoint}}')
+          LABEL=$(docker inspect "$IMAGE:$VERSION" --format '{{ index .Config.Labels "rembric.stage" }}')
+          SIZE_BYTES=$(docker inspect "$IMAGE:$VERSION" --format '{{.Size}}')
+          SIZE_MB=$(( SIZE_BYTES / 1024 / 1024 ))
+
+          echo "Cmd:        $CMD_JSON"
+          echo "Entrypoint: $ENT_JSON"
+          echo "Label:      rembric.stage=$LABEL"
+          echo "Size:       ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
+          echo ""
+
+          fail=0
+
+          if echo "$CMD_JSON $ENT_JSON" | grep -q 'seed-dev'; then
+            echo "::error::Signal 1 FAILED: 'seed-dev' found in Cmd or Entrypoint." >&2
+            fail=1
+          fi
+          if echo "$CMD_JSON $ENT_JSON" | grep -q 'tsx watch'; then
+            echo "::error::Signal 1 FAILED: 'tsx watch' found in Cmd or Entrypoint." >&2
+            fail=1
+          fi
+          if ! echo "$ENT_JSON" | grep -q 'dist/server-entrypoint.js'; then
+            echo "::error::Signal 1 FAILED: Entrypoint does not include 'dist/server-entrypoint.js'." >&2
+            fail=1
+          fi
+
+          if [ "$LABEL" != "runtime" ]; then
+            echo "::error::Signal 2 FAILED: rembric.stage label is '$LABEL' (expected 'runtime')." >&2
+            fail=1
+          fi
+
+          MAX_MB=800
+          if [ "$SIZE_MB" -gt "$MAX_MB" ]; then
+            echo "::error::Signal 3 FAILED: image size ${SIZE_MB} MB exceeds ${MAX_MB} MB threshold." >&2
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "" >&2
+            echo "::error::Smoke test FAILED. Immutable tags ($IMAGE:$VERSION, sha-...) remain in the registry as forensic evidence. Alias tags (:latest, major/minor) WILL NOT be promoted." >&2
+            exit 1
+          fi
+          echo "✓ All three smoke-test signals passed; safe to promote alias tags."
+
+      - name: Extract Docker metadata (alias tags — only promoted after smoke test)
+        id: meta_aliases
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/rembric
+          tags: |
+            type=match,pattern=^(\d+\.\d+)\.\d+$,group=1,value=${{ steps.version.outputs.version }}
+            type=match,pattern=^(\d+)\.\d+\.\d+$,group=1,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      - name: Promote alias tags (:latest, major, minor)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rembric
+          VERSION: ${{ steps.version.outputs.version }}
+          ALIAS_TAGS: ${{ steps.meta_aliases.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r TAG; do
+            [ -z "$TAG" ] && continue
+            echo "Promoting alias: $TAG -> $IMAGE:$VERSION"
+            docker buildx imagetools create -t "$TAG" "$IMAGE:$VERSION"
+          done <<< "$ALIAS_TAGS"

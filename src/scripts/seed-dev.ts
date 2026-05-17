@@ -36,12 +36,25 @@ export interface SeedDeps {
    * random plaintext and prints it like the other project-scoped tokens.
    */
   adminTokenPlaintext?: string;
+  /**
+   * Environment used to gate the destructive `--reset` path. When `reset`
+   * is true, this map MUST contain `REMBRIC_ALLOW_DESTRUCTIVE_SEED=1` or
+   * the seed will refuse to wipe and return early. Defaults to
+   * `process.env`. Tests inject a controlled map.
+   */
+  env?: NodeJS.ProcessEnv;
   /** Output sink for the operator-facing summary. Defaults to console.error. */
   log?: (line: string) => void;
 }
 
 export interface SeedResult {
   skipped: boolean;
+  /**
+   * True when `--reset` was requested but the destructive-action env gate
+   * (`REMBRIC_ALLOW_DESTRUCTIVE_SEED=1`) was missing. The seed performed
+   * no wipe and no insert. `main()` uses this to exit with code 1.
+   */
+  refused?: boolean;
   counts?: {
     projects: number;
     tokens: number;
@@ -57,6 +70,18 @@ export interface SeedResult {
 
 export function runSeed(deps: SeedDeps): SeedResult {
   const log = deps.log ?? ((l) => console.error(l));
+  const env = deps.env ?? process.env;
+
+  // Destructive-action gate. The dev compose sets
+  // REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 inline; the prod compose does NOT.
+  // This stops the script from ever wiping a directory it shouldn't —
+  // including when a dev-stage image ends up running with a prod
+  // bind-mount, or when an operator runs `--reset` from the wrong shell.
+  if (deps.reset && env['REMBRIC_ALLOW_DESTRUCTIVE_SEED'] !== '1') {
+    log('[seed-dev] --reset requires REMBRIC_ALLOW_DESTRUCTIVE_SEED=1; refusing to wipe');
+    return { skipped: true, refused: true };
+  }
+
   const projectsSvc = new ProjectsService(deps.handle.db);
 
   const existing = projectsSvc.findBySlug(DEMO_SLUG);
@@ -365,7 +390,10 @@ function main(): void {
   const adminTokenPlaintext = process.env.REMBRIC_ADMIN_TOKEN;
   const handle = createDb({ dataDir });
   try {
-    runSeed({ handle, reset, adminTokenPlaintext });
+    const result = runSeed({ handle, reset, adminTokenPlaintext });
+    if (result.refused) {
+      process.exit(1);
+    }
   } finally {
     handle.close();
   }
