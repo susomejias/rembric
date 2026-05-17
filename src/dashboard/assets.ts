@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -80,17 +80,21 @@ function resolveDashboardPublicDir(): string {
   // ESM-compatible __dirname; works both pre-build (TS-via-tsx) and after
   // build (compiled to dist/dashboard/assets.js next to dist/dashboard/public).
   const here = fileURLToPath(new URL('.', import.meta.url));
-  // tsx mode (dev container at `<repo>/src/dashboard/`): the built CSS
-  // bundles + copied fonts/logo live in the sibling `dist/dashboard/public/`,
-  // not in `src/dashboard/public/`. The dev container's startup chains
-  // `pnpm run build:css && node scripts/copy-assets.mjs` to populate it.
+  // tsx mode (`<repo>/src/dashboard/`, dev container or vitest):
+  // prefer the sibling `dist/dashboard/public/` when it exists (the dev
+  // container's startup chain populates it via build:css + copy-assets).
+  // When dist/ has not been built yet (e.g. CI runs `pnpm test` before
+  // `pnpm run build`), fall back to `src/dashboard/public/` — fonts and
+  // logo live there in src too, only the built CSS bundles are missing
+  // and shell() already tolerates that via EMPTY_MANIFEST.
   if (
     here.endsWith('/src/dashboard') ||
     here.endsWith('/src/dashboard/') ||
     here.endsWith('\\src\\dashboard') ||
     here.endsWith('\\src\\dashboard\\')
   ) {
-    return resolve(here, '../../dist/dashboard/public');
+    const distPath = resolve(here, '../../dist/dashboard/public');
+    if (existsSync(distPath)) return distPath;
   }
   return resolve(here, 'public');
 }
