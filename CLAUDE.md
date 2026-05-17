@@ -137,6 +137,17 @@ Before changing a load-bearing invariant or adding a new MCP tool, open an OpenS
 - **Timestamps MUST go through `formatTs`** (`src/dashboard/templates.ts`). The helper emits `<time datetime="…Z" data-rembric-ts>YYYY-MM-DD HH:MM:SS UTC</time>`; a tiny inline script in the layout shell upgrades the visible text to the viewer's local timezone via `Intl.DateTimeFormat` on `DOMContentLoaded` and after every `htmx:afterSwap`. Never hand-write `toISOString()`, `toLocaleString()`, or ad-hoc date strings in templates — that bypasses the upgrader and forces operators back into UTC. SQLite, the service layer, and MCP serialization stay UTC; only the dashboard HTML localises.
 - The upgrader element marker is `data-rembric-ts`. Anything emitting a `<time>` element for a different purpose MUST omit that attribute so the upgrader leaves it alone.
 
+### Nomenclature: `judgments` (presentation) vs `relations` (entity)
+
+The same SQL row is named differently across layers, **on purpose**:
+
+- **Presentation says `judgments`.** URL `/dashboard/judgments`, file `src/dashboard/judgments.ts`, sidebar label `JUDGMENTS`, page title `Rembric Judgments.`, column header `verdict`, CSRF action `judgment.orphan`, `NavKey = 'judgments'`. This is what the operator does on the page: judge pending candidates and audit past verdicts.
+- **DB / services / MCP say `relations`.** Table `memory_relations`, service `RelationsService`, MCP tool family `mcp/relations-tools.ts`, view type `RelationView`. This is the entity that persists: a directed `(source_id, target_id, kind)` edge between two `memory` rows.
+
+The two words are not synonyms used inconsistently — they refer to two distinct concepts that happen to share a row: the **entity** (an edge that exists in the graph, with a `judgment_id` field on it) and the **lifecycle event** over that entity (judging a pending candidate). The same row participates in both.
+
+When you add a new dashboard surface that touches this data, use `judgments` in UI text, URLs, file names, and CSRF actions. When you touch the DB layer, services, or MCP tools, use `relations`. Do NOT propose a rename of the table or the MCP tool to "unify" them — the boundary is intentional, and changing the DB/MCP side requires migrations, plugin major bumps across three marketplaces, and deltas across `memory`, `mcp-api`, `persistence`, `dashboard` specs. The cost-benefit landed clearly on "keep the divergence" — recorded in `openspec/changes/archive/2026-05-17-refresh-dashboard-presentation/design.md` (Decision 1).
+
 ### Design system
 
 - **All dashboard CSS lives in `src/dashboard/styles/`** — never inline `<style>` in templates. The split is mechanical: `styles/core/{tokens,base,atoms,layout,patterns}.css` is loaded on every page; `styles/views/<view>.css` is loaded only by that view via the build-time manifest at `dist/dashboard/public/assets/styles/manifest.json`. `scripts/build-css.mjs` (invoked by `pnpm run build` and `pnpm run build:css`) minifies via `lightningcss`, content-hashes, and emits the manifest.
