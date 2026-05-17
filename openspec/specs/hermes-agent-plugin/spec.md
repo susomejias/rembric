@@ -58,7 +58,7 @@ The file SHALL expose a module-level `register(ctx)` function that calls `ctx.re
 `RembricMemoryProvider` SHALL implement the `MemoryProvider` ABC with these behaviors:
 
 - `name` returns `"rembric"`.
-- `is_available` performs `GET ${REMBRIC_SERVER_URL}/healthz` with a 2-second timeout, returning `True` only on HTTP 200. It SHALL return `False` if `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` are unset, or if the request fails for any reason.
+- `is_available` performs `GET ${REMBRIC_SERVER_URL}/healthz` with `Authorization: Bearer ${REMBRIC_API_TOKEN}` and a 2-second timeout, returning `True` only on HTTP 200. It SHALL return `False` if `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` are unset, or if the request fails for any reason (including HTTP 401 when the token is invalid and HTTP 503 when the server's database is unavailable).
 - `initialize(session_id, **kwargs)` SHALL:
   - Resolve the project slug via the cascade defined in "Slug resolution cascade".
   - When a valid slug is resolved, `POST ${REMBRIC_SERVER_URL}/api/<slug>/sessions` with `Authorization: Bearer ${REMBRIC_API_TOKEN}`, `Content-Type: application/json`, and body `{"id": session_id, "cwd": kwargs.get("cwd", os.getcwd()), "agent": "hermes"}`. Timeout 3 seconds. Discard response body. The server writes the placeholder title.
@@ -77,6 +77,34 @@ The file SHALL expose a module-level `register(ctx)` function that calls `ctx.re
 - `shutdown(**kwargs)` SHALL be a no-op.
 
 The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentials live in `~/.hermes/.env`. The provider SHALL NOT preload any plugin-specific dotenv file.
+
+#### Scenario: is_available with both envs set and a healthy server returns True
+
+- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
+- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `200`
+- **WHEN** Hermes calls `provider.is_available()`
+- **THEN** the provider SHALL return `True`
+
+#### Scenario: is_available with a missing token returns False without making a request
+
+- **GIVEN** `REMBRIC_SERVER_URL` is set but `REMBRIC_API_TOKEN` is unset
+- **WHEN** Hermes calls `provider.is_available()`
+- **THEN** the provider SHALL return `False`
+- **AND** the provider SHALL NOT issue any HTTP request
+
+#### Scenario: is_available with an invalid token returns False
+
+- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
+- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `401`
+- **WHEN** Hermes calls `provider.is_available()`
+- **THEN** the provider SHALL return `False`
+
+#### Scenario: is_available with the server's database unavailable returns False
+
+- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
+- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `503`
+- **WHEN** Hermes calls `provider.is_available()`
+- **THEN** the provider SHALL return `False`
 
 #### Scenario: Session initialize POSTs to the sessions endpoint with agent: hermes
 
