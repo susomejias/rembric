@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/susomejias/rembric/compare/v0.12.1...v0.13.0) (2026-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **docker:** GET /healthz now requires Authorization: Bearer <token>. Hermes plugin must be on 0.6.0+ to keep is_available() returning true against Rembric 0.13.0+. Claude Code / Codex hooks unaffected (they never called /healthz directly).
+
+### Features
+
+* **docker:** make Docker the canonical distribution + harden /healthz ([7f9da83](https://github.com/susomejias/rembric/commit/7f9da838ec197d5ed37de2e69da821c5751bac7a))
+
 ## [0.12.1](https://github.com/susomejias/rembric/compare/v0.12.0...v0.12.1) (2026-05-17)
 
 
