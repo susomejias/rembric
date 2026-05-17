@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/susomejias/rembric/compare/v0.13.0...v0.14.0) (2026-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* the `rembric` CLI no longer exists. Any scripts invoking `docker compose exec rembric rembric <subcommand>` will fail. Migration: use the dashboard for interactive ops, MCP tools (project.*, memory.*) for programmatic agent ops, or the HTTP /admin/* and /api/<slug>/* endpoints for shell scripts. The @susomejias/rembric npm package will not receive further releases; pull
+
+### Features
+
+* **dashboard:** allow operators to abandon active sessions ([d06fe03](https://github.com/susomejias/rembric/commit/d06fe03162edf7141a4f42e17a44f6ced3c46163))
+* **docker:** add one-command dev stack with hot-reload + auto-seed ([206330c](https://github.com/susomejias/rembric/commit/206330c9a02666334a8f5b2dfe50500bf2c700ce))
+* remove operator CLI and npm distribution; consolidate on Docker ([1ed39ce](https://github.com/susomejias/rembric/commit/1ed39ceb75bc558e9ed3a18bd7f0dc1d2029f1d6))
+
+
+### Bug Fixes
+
+* **dashboard:** fall back to src/dashboard/public when dist/ is absent ([c18603a](https://github.com/susomejias/rembric/commit/c18603a9ee6f4cb6661f936684e34111fa05c956))
+* **docker:** publish port on all interfaces by default ([075becc](https://github.com/susomejias/rembric/commit/075becc29fb3d3522a85f815cdf4fc7df45817e0))
+
 ## [0.13.0](https://github.com/susomejias/rembric/compare/v0.12.1...v0.13.0) (2026-05-17)
 
 ### ⚠ BREAKING CHANGES
