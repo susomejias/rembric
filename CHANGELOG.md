@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0](https://github.com/susomejias/rembric/compare/v0.11.0...v0.12.0) (2026-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **dashboard:** refresh presentation layer
+
+### Features
+
+* **dashboard:** refresh presentation layer ([388f7d6](https://github.com/susomejias/rembric/commit/388f7d6a8f61e119934ff4354013410f9fc54319))
+
+
+### Documentation
+
+* **openspec:** archive refresh-dashboard-presentation ([b91348c](https://github.com/susomejias/rembric/commit/b91348c5c8362788555273f72caa12d10f453f14))
+
 ## [0.11.0](https://github.com/susomejias/rembric/compare/v0.10.1...v0.11.0) (2026-05-16)
 
 
