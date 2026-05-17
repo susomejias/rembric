@@ -2,6 +2,8 @@
 
 For **Claude Code**, use the bundled plugin — see [`plugin/README.md`](../plugin/README.md). The rest of this doc is for everything else.
 
+> **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
+
 ## Connection shape
 
 Every MCP client uses the same two values:
@@ -138,6 +140,9 @@ Restart `codex` after the update so the bridge and hooks re-spawn from the new c
 ### Hermes Agent (memory provider plugin)
 
 Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `plugin/.hermes-plugin/`. Two pieces compose:
+
+> **Plugin `0.6.0+` required against Rembric `0.13.0+`.** The provider's `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` to `/healthz` (the server made the endpoint bearer-gated in `0.13.0`). The env var was already required for every other call; this just tightens an existing requirement. Running plugin `0.5.x` against server `0.13+` will silently disable the memory provider — upgrade in lock-step.
+
 
 | Piece                            | What it does                                                | Wired via                                                                  |
 | -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------- |

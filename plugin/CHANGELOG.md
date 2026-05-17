@@ -4,6 +4,17 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server (`@susomejias/rembric` on npm). Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.6.0] — unreleased
+
+### Changed
+
+- **Hermes provider: `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` on its `GET /healthz` probe.** This matches the server's new `/healthz` auth contract (Rembric `0.13.0`): the endpoint requires a bearer token, runs a `SELECT 1` against SQLite, and returns `200 { ok, version }` on success or `503 { ok:false, code:"db_unavailable" }` if the DB is down. Without the header the server responds `401` and the Hermes provider degrades to `is_available() = False`, silently disabling the memory provider for that session.
+- **No script or hook changes for Claude Code / Codex CLI.** Those plugins never called `/healthz` directly — their lifecycle posts go to `/api/<slug>/sessions(*)` and always carried the bearer header. They get the version bump for lock-step manifest discipline, nothing else.
+
+### Compatibility
+
+- **Operators upgrading from `0.5.x` MUST update the Rembric server AND the plugin together.** Running `0.5.x` Hermes against Rembric `0.13+` silently disables the memory provider (`is_available` returns `False` because the unauth probe is rejected). Running `0.6.x` Hermes against Rembric `<0.13` still works — the server tolerates the bearer header on the legacy unauth endpoint.
+
 ## [0.5.0] — unreleased
 
 ### Fixed

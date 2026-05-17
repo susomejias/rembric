@@ -1,0 +1,31 @@
+services:
+  rembric:
+    image: ghcr.io/susomejias/rembric:${REMBRIC_VERSION:-latest}
+    container_name: rembric
+    restart: unless-stopped
+
+    ports:
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+
+    volumes:
+      - ./data:/data
+
+    env_file:
+      - .env
+
+    # `host.docker.internal` is a no-op on Mac/Win (resolved natively) and
+    # provides the host-gateway alias on Linux, where it isn't built-in.
+    # Useful when the LLM endpoint (Ollama, LM Studio) lives on the host.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

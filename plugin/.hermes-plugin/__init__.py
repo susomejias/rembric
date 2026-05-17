@@ -256,8 +256,13 @@ class RembricMemoryProvider(MemoryProvider):
         if not base or not token:
             return False
         url = f"{base.rstrip('/')}/healthz"
+        req = Request(
+            url,
+            method="GET",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         try:
-            with urlopen(Request(url, method="GET"), timeout=_HEALTHZ_TIMEOUT_SEC) as resp:
+            with urlopen(req, timeout=_HEALTHZ_TIMEOUT_SEC) as resp:
                 return 200 <= resp.status < 300
         except Exception:
             return False
