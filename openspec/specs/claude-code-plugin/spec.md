@@ -171,6 +171,28 @@ Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript
 - **WHEN** the helper is called with a malformed JSONL file
 - **THEN** the helper SHALL extract what it can (best-effort `role`/`content` parse) and emit empty string if nothing parsable was found, exiting `0`
 
+### Requirement: The plugin MUST NOT implement migration or coexistence behaviors with other agent memory systems
+
+This capability SHALL NOT specify migration prompts, import flows, side-by-side coexistence rules, or compatibility shims with other agent memory systems. Rembric is positioned as the sole memory layer for any agent it is enabled on; the plugin's hook scripts, MCP bridge, skill content, and command catalogue SHALL be authored under the assumption that no second memory system is active on the same agent. Operators with another memory tool installed SHALL be guided (via the plugin's README) to uninstall it before enabling this plugin, but the plugin itself SHALL NOT attempt detection, warning, or graceful coexistence with such tools.
+
+#### Scenario: Plugin hook scripts do not check for or interoperate with other memory systems
+
+- **WHEN** the plugin's hook scripts (`session-start.sh`, `pre-compact.sh`, `session-stop.sh`) and the bundled MCP bridge (`bin/rembric-bridge.mjs`) are inspected
+- **THEN** none SHALL contain logic that detects, warns about, defers to, or imports state from any agent memory tool other than Rembric
+- **AND** none SHALL name a specific third-party memory tool in their output, comments, or stderr diagnostics
+
+#### Scenario: Skill content does not instruct the agent to migrate from or compare with other memory systems
+
+- **WHEN** the plugin's skill content (markdown files under `plugin/skills/`) is read
+- **THEN** the skill SHALL NOT direct the agent to import from, deduplicate against, prefer Rembric over, or otherwise reason about parallel memory tools
+- **AND** the skill SHALL describe Rembric's memory protocol on its own terms, without comparison to other agent memory systems
+
+#### Scenario: README warns about parallel installations without naming alternatives
+
+- **WHEN** the plugin README is rendered (e.g. on GitHub)
+- **THEN** the operator guidance about parallel-tool drift SHALL state that this plugin is the sole memory layer and SHALL warn against having another memory tool installed
+- **AND** the guidance SHALL NOT name any specific third-party memory tool by name
+
 ## Hook script invariants
 
 - Every hook script SHALL use `#!/usr/bin/env bash` and `set -u`.
@@ -230,6 +252,5 @@ This capability does not specify:
 
 - A stdio→HTTP bridge for filesystem-side slug resolution. Considered and rejected for v1; possible opt-in in a future change.
 - A local stdio mode for Rembric. The plugin is a configuration layer for the existing HTTP server.
-- Migration prompts or coexistence behavior with engram, agentmemory, or other memory tools. Rembric is positioned as the sole memory layer.
 - A public plugin marketplace. The plugin remains private to the monorepo's audience; a future change may extract it via `git subtree split` for public distribution.
 - Server-side changes to `deriveSlugFromUri` or other Rembric internals. The plugin sits entirely on the client side.

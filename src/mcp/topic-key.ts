@@ -5,8 +5,8 @@
  * then derive a slug from the title (or content fallback), then return
  * `family/slug`. Same input always produces the same output.
  *
- * Families match Engram's convention so prompts that work against
- * either tool emit comparable keys:
+ * Families are scoped by memory `type` so the same fact produces
+ * the same key regardless of which agent is saving it:
  *
  *   type           family
  *   --------       ---------

@@ -139,7 +139,7 @@ The proactive-save protocol travels via the MCP `initialize.instructions` (~500 
 
 ## Notes
 
-- This plugin **replaces** other memory tools (engram, agentmemory, etc.); it does not coexist with them. The author's setup intentionally drops them.
+- This plugin is designed to be the **sole memory layer** for the agent. It does not migrate from or coexist with other memory tools — if one is already installed, uninstall it before enabling this plugin to avoid cross-tool drift.
 - The plugin is **client-side only** — it does not modify Rembric's server code.
 - Hook scripts are designed to **never block a session**: any error exits 0 with empty stdout.
 

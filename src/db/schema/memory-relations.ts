@@ -25,8 +25,9 @@ import { memory } from './memory.js';
  * Source and target MUST share `(scope, project_id)` — enforced at the
  * service layer (`RelationsService`) and asserted by tests.
  *
- * `relation` values match the Engram taxonomy so an agent prompted for
- * either tool emits the same vocabulary:
+ * The six `relation` values cover the full space of verdicts an agent
+ * can issue over a candidate–target pair. The set is closed: new
+ * verdict kinds require an OpenSpec change to `memory`:
  *   supersedes      → target is replaced by source; target row goes
  *                     `status='superseded'`, source's `replaces[]` is
  *                     extended with the target id
