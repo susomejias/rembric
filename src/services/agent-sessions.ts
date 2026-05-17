@@ -505,6 +505,50 @@ export class AgentSessionsService {
   }
 
   /**
+   * Flip a single `status='active'` row to `abandoned` with `ended_at=now()`.
+   *
+   * Operator-facing per-id verb (the bulk counterpart is `abandonStale`).
+   * Idempotent on already-abandoned rows. Rejects ended rows — the reverse
+   * `ended → abandoned` transition is not allowed. Cross-token rule:
+   * without `adminBypass`, the caller's `tokenId` must match the row's
+   * `token_id`.
+   */
+  markAbandoned(
+    sessionId: string,
+    input: { tokenId?: string; adminBypass?: boolean } = {},
+  ): AgentSession {
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (!input.adminBypass) {
+      if (!input.tokenId || existing.tokenId !== input.tokenId) {
+        throw new DomainError('forbidden', `session '${sessionId}' belongs to a different token`);
+      }
+    }
+    if (existing.status === 'abandoned') {
+      return existing;
+    }
+    if (existing.status === 'ended') {
+      throw new DomainError('session_already_ended', `session '${sessionId}' is already ended`);
+    }
+    const ts = this.now();
+    const updated = this.db
+      .update(agentSessions)
+      .set({ status: 'abandoned', endedAt: ts })
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
+      .returning()
+      .get();
+    if (!updated) {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' was concurrently transitioned`,
+      );
+    }
+    return updated;
+  }
+
+  /**
    * Count sessions by status for `memory.stats` / dashboard cards.
    *
    * Excludes soft-deleted rows (`deleted_at IS NOT NULL`) so the overview

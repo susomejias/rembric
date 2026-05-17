@@ -318,6 +318,58 @@ describe('dashboard E2E', () => {
     expect(await res.text()).toContain('csrf_invalid');
   });
 
+  it('sessions abandon flips an active row to abandoned and surfaces the flash banner', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const { createDb } = await import('../db/index.js');
+    const { ProjectsService } = await import('../services/projects.js');
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { eq } = await import('drizzle-orm');
+    const dataDir = server.config.dataDir;
+    const handle = createDb({ dataDir });
+    const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
+    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-abandon-proj' });
+    const agentSessions = new AgentSessionsService(handle.db);
+    const sess = agentSessions.start({
+      tokenId: admin!.id,
+      projectId: proj.id,
+      agent: 'e2e',
+    });
+    handle.close();
+
+    const list = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(list.status).toBe(200);
+    const listBody = await list.text();
+    const csrf = extractCsrf(listBody, `/dashboard/sessions/${sess.id}/abandon`);
+    expect(csrf).toBeTruthy();
+
+    const abandoned = await postForm(baseUrl, `/dashboard/sessions/${sess.id}/abandon`, jar, {
+      csrf: csrf!,
+    });
+    expect(abandoned.status).toBe(302);
+    expect(abandoned.headers.get('location')).toContain(`abandoned=${sess.id}`);
+
+    const after = await get(baseUrl, `/dashboard/sessions?abandoned=${sess.id}`, jar);
+    const afterBody = await after.text();
+    expect(afterBody).toContain('marked as abandoned');
+
+    const handle2 = createDb({ dataDir });
+    const row = new AgentSessionsService(handle2.db).getById(sess.id);
+    handle2.close();
+    expect(row?.status).toBe('abandoned');
+    expect(row?.endedAt).toBeInstanceOf(Date);
+  });
+
+  it('sessions abandon without csrf returns 403', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const res = await postForm(baseUrl, '/dashboard/sessions/anything/abandon', jar, {});
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('csrf_invalid');
+  });
+
   it('judgments list view renders after login', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });

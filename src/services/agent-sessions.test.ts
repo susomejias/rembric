@@ -204,6 +204,50 @@ describe('AgentSessionsService', () => {
     });
   });
 
+  describe('markAbandoned', () => {
+    it('flips an active row to abandoned with ended_at', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'to-abandon' });
+      const abandoned = sessions.markAbandoned(s.id, { tokenId });
+      expect(abandoned.status).toBe('abandoned');
+      expect(abandoned.endedAt).toBeInstanceOf(Date);
+    });
+
+    it('is idempotent on already-abandoned rows', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'idempotent-abandon' });
+      const first = sessions.markAbandoned(s.id, { tokenId });
+      const second = sessions.markAbandoned(s.id, { tokenId });
+      expect(second.id).toBe(first.id);
+      expect(second.endedAt?.getTime()).toBe(first.endedAt?.getTime());
+    });
+
+    it('rejects ended sessions with session_already_ended', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'already-ended' });
+      sessions.end(s.id, { tokenId });
+      expect(() => sessions.markAbandoned(s.id, { tokenId })).toThrow(/already ended/);
+    });
+
+    it('rejects cross-token callers without adminBypass', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'cross-token' });
+      expect(() => sessions.markAbandoned(s.id, { tokenId: otherTokenId })).toThrow(
+        /belongs to a different token/,
+      );
+      expect(sessions.getById(s.id)?.status).toBe('active');
+    });
+
+    it('accepts cross-token callers when adminBypass is true', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'admin-abandon' });
+      const abandoned = sessions.markAbandoned(s.id, { adminBypass: true });
+      expect(abandoned.status).toBe('abandoned');
+      expect(abandoned.endedAt).toBeInstanceOf(Date);
+    });
+
+    it('throws session_not_found for unknown ids', () => {
+      expect(() => sessions.markAbandoned('does-not-exist', { adminBypass: true })).toThrow(
+        /not found/,
+      );
+    });
+  });
+
   describe('ensure (client-provided id)', () => {
     it('inserts a new row with the provided id and returns created: true', () => {
       const { session, created } = sessions.ensure({

@@ -36,6 +36,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const url = new URL(c.req.url);
     const justDeleted = url.searchParams.get('deleted');
     const justRestored = url.searchParams.get('restored');
+    const justAbandoned = url.searchParams.get('abandoned');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
@@ -115,6 +116,22 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                   </form>
                 `
               : html`
+                  ${r.status === 'active'
+                    ? html`
+                        <form
+                          action="/dashboard/sessions/${r.id}/abandon"
+                          method="post"
+                          class="inline"
+                          data-confirm="Mark this session as abandoned? Its ${countRows[r.id] ??
+                          0} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
+                          data-confirm-label="ABANDON SESSION"
+                          data-confirm-tone="warn"
+                        >
+                          ${csrfInput(session.session, deps.sessions, 'session.abandon')}
+                          <button class="warn" type="submit">Abandon</button>
+                        </form>
+                      `
+                    : raw('')}
                   <form
                     action="/dashboard/sessions/${r.id}/delete"
                     method="post"
@@ -140,7 +157,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         </p>`
       : justRestored
         ? html`<p class="flash success">Session <code>${justRestored}</code> restored.</p>`
-        : raw('');
+        : justAbandoned
+          ? html`<p class="flash success">
+              Session <code>${justAbandoned}</code> marked as abandoned.
+              <a href="/dashboard/sessions/${justAbandoned}">View</a>.
+            </p>`
+          : raw('');
 
     const body = html`
       ${viewHead({
@@ -265,6 +287,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       .orderBy(memory.createdAt)
       .all();
 
+    const memoriesCount = memories.length;
     const actionForm = row.deletedAt
       ? html`
           <form action="/dashboard/sessions/${row.id}/undelete" method="post" class="inline">
@@ -273,6 +296,21 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           </form>
         `
       : html`
+          ${row.status === 'active'
+            ? html`
+                <form
+                  action="/dashboard/sessions/${row.id}/abandon"
+                  method="post"
+                  class="inline"
+                  data-confirm="Mark this session as abandoned? Its ${memoriesCount} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
+                  data-confirm-label="ABANDON SESSION"
+                  data-confirm-tone="warn"
+                >
+                  ${csrfInput(session.session, deps.sessions, 'session.abandon')}
+                  <button class="warn" type="submit">Abandon</button>
+                </form>
+              `
+            : raw('')}
           <form
             action="/dashboard/sessions/${row.id}/delete"
             method="post"
@@ -427,6 +465,29 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       throw err;
     }
     return c.redirect(`/dashboard/sessions?restored=${encodeURIComponent(id)}`);
+  });
+
+  app.post('/:id/abandon', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'session.abandon');
+    if (form instanceof Response) return form;
+    const id = c.req.param('id');
+    try {
+      deps.agentSessions.markAbandoned(id, { adminBypass: true });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
+            title: 'Sessions',
+            activeNav: 'sessions',
+          }),
+          err.code === 'session_not_found' ? 404 : 400,
+        );
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/sessions?abandoned=${encodeURIComponent(id)}`);
   });
 
   return app;
