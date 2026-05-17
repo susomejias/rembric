@@ -318,13 +318,13 @@ describe('dashboard E2E', () => {
     expect(await res.text()).toContain('csrf_invalid');
   });
 
-  it('relations list view renders after login', async () => {
+  it('judgments list view renders after login', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
-    const res = await get(baseUrl, '/dashboard/relations', jar);
+    const res = await get(baseUrl, '/dashboard/judgments', jar);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('Relations');
+    expect(body).toContain('Judgments');
   });
 
   it('projects page renders a create form and a POST mints the project', async () => {

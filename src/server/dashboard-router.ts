@@ -19,10 +19,10 @@ import {
 } from '../dashboard/components.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
+import { createJudgmentsRouter } from '../dashboard/judgments.js';
 import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
-import { createRelationsRouter } from '../dashboard/relations.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
 import { escape, html, raw, shell, statusPill, type SafeHtml } from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
@@ -269,7 +269,6 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         num: '01',
         title: 'Rembric Overview.',
         hl: 'Rembric',
-        meta: [{ k: 'BUILD', v: 'REMBRIC · LOCAL' }],
       })}
 
       <div class="grid-7" style="margin-bottom:var(--s-6)">
@@ -320,7 +319,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           v: stats.pendingJudgments,
           tone: stats.pendingJudgments > 0 ? 'warn' : 'lime',
           sub: html`<span>${orphanedJ}</span><span>ORPHANED</span>`,
-          href: '/dashboard/relations?status=pending',
+          href: '/dashboard/judgments?status=pending',
         })}
       </div>
 
@@ -330,7 +329,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
             name: 'PENDING JUDGMENTS',
             meta: 'QUEUE / OLDEST FIRST',
             more: raw(
-              '<a href="/dashboard/relations?status=pending" style="color:var(--lime)">OPEN ALL ›</a>',
+              '<a href="/dashboard/judgments?status=pending" style="color:var(--lime)">OPEN ALL ›</a>',
             ),
           })}
           ${pendingRows.length === 0
@@ -366,7 +365,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                             variant: 'primary',
                             size: 'sm',
                             label: 'JUDGE',
-                            href: `/dashboard/relations`,
+                            href: `/dashboard/judgments`,
                           })}
                         </div>
                       </div>
@@ -508,7 +507,7 @@ ${ascBars(activity)}</pre
       agentSessions: deps.agentSessions,
     }),
   );
-  app.route('/relations', createRelationsRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route('/judgments', createJudgmentsRouter({ db: deps.db, sessions: deps.sessions }));
   app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
   app.route(
     '/projects',
@@ -650,16 +649,21 @@ function renderLogin(error: string | null): string {
   const body = html`
     <div class="login-stage">
       <div class="left">
-        <div>
-          <div class="t-mono-up fg-dim" style="display:flex;align-items:center;gap:12px">
-            <span class="bn"></span> REMBRIC
+        <div class="login-brand">
+          <img
+            class="login-logo"
+            src="/dashboard/assets/logo-transparent.png"
+            alt=""
+            aria-hidden="true"
+          />
+          <div>
+            <div class="t-mono-up fg-dim">REMBRIC</div>
+            <div class="t-mono-up fg-dim" style="margin-top:6px">SELF-HOSTED</div>
           </div>
-          <div class="t-mono-up fg-dim" style="margin-top:8px">SELF-HOSTED · APPEND-ONLY</div>
         </div>
         <div>
-          <div class="t-mono-up fg-dim" style="margin-bottom:16px">§ 00 / ACCESS</div>
           <h1>
-            <span class="hl-lime">OPERATOR</span><br />
+            <span class="hl-lime">REMBRIC</span><br />
             DASHBOARD<span style="color:var(--lime)">.</span>
           </h1>
           <p class="t-body" style="color:var(--fg-dim);max-width:560px;margin-top:16px">
@@ -671,11 +675,11 @@ function renderLogin(error: string | null): string {
         <div class="clients t-mono-up fg-dim" style="display:flex;gap:24px;flex-wrap:wrap">
           <span><span class="bn"></span> CLAUDE CODE</span>
           <span><span class="bn"></span> CODEX CLI</span>
+          <span><span class="bn"></span> HERMES</span>
           <span><span class="bn"></span> MCP CLIENTS</span>
         </div>
       </div>
       <div class="right">
-        <div class="t-mono-up fg-dim">■ ADMIN TOKEN</div>
         <form
           action="/dashboard/login"
           method="post"
@@ -697,11 +701,6 @@ function renderLogin(error: string | null): string {
           </div>
           <div style="display:flex;gap:12px">
             ${btn({ variant: 'primary', label: 'SIGN IN →', type: 'submit' })}
-          </div>
-          <div class="t-mono-up fg-dim" style="font-size:0.66rem;line-height:1.6">
-            ■ ADMIN-SCOPED TOKENS ONLY (<code style="color:var(--lime)">*</code>)<br />
-            ■ STORED IN HTTPONLY COOKIE · NEVER IN LOCAL STORAGE<br />
-            ■ PLAINTEXT SHOWN ONLY ONCE IN /TOKENS
           </div>
         </form>
       </div>

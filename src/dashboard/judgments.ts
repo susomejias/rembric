@@ -11,7 +11,7 @@ import { renderPage } from './page-shell.js';
 import { formatTs, html, raw, shortId, statusPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
-export interface RelationsDeps {
+export interface JudgmentsDeps {
   db: Db;
   sessions: SessionsService;
 }
@@ -22,7 +22,7 @@ function getSession(c: Context): ResolvedSession | null {
 
 const VALID_STATUSES = new Set(['pending', 'judged', 'orphaned']);
 
-export function createRelationsRouter(deps: RelationsDeps): Hono {
+export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
   const app = new Hono();
 
   app.get('/', (c) => {
@@ -111,7 +111,7 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
         </span>
         <span class="acts">
           <button class="btn primary" type="submit">FILTER</button>
-          <a class="clear" href="/dashboard/relations">CLEAR</a>
+          <a class="clear" href="/dashboard/judgments">CLEAR</a>
         </span>
       </form>
     `;
@@ -119,21 +119,21 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
     const tableBody =
       visible.length === 0
         ? html`<tr>
-            <td colspan="7" class="muted">No relations match this filter.</td>
+            <td colspan="7" class="muted">No judgments match this filter.</td>
           </tr>`
         : visible.map((r) => {
             const orphanForm =
               r.status === 'pending'
                 ? html`
                     <form
-                      action="/dashboard/relations/${r.judgmentId}/orphan"
+                      action="/dashboard/judgments/${r.judgmentId}/orphan"
                       method="post"
                       class="inline"
                       data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
                       data-confirm-label="MARK ORPHANED"
                       data-confirm-tone="danger"
                     >
-                      ${csrfInput(session.session, deps.sessions, 'relation.orphan')}
+                      ${csrfInput(session.session, deps.sessions, 'judgment.orphan')}
                       <button class="warn" type="submit">Mark orphaned</button>
                     </form>
                   `
@@ -157,7 +157,7 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
     const body = html`
       ${viewHead({
         num: '04',
-        title: 'Rembric Relations.',
+        title: 'Rembric Judgments.',
         hl: 'Rembric',
         meta: [{ k: 'SHOWING', v: `${rows.length} ROWS` }],
       })}
@@ -168,7 +168,7 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
             <tr>
               <th>id</th>
               <th>status</th>
-              <th>relation</th>
+              <th>verdict</th>
               <th>source → target</th>
               <th>actor</th>
               <th>created</th>
@@ -188,14 +188,14 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
       })}
     `;
     return c.html(
-      renderPage(c, deps.sessions, body, { title: 'Relations', activeNav: 'relations' }),
+      renderPage(c, deps.sessions, body, { title: 'Judgments', activeNav: 'judgments' }),
     );
   });
 
   app.post('/:judgmentId/orphan', async (c) => {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
-    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'relation.orphan');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'judgment.orphan');
     if (form instanceof Response) return form;
 
     const judgmentId = c.req.param('judgmentId');
@@ -209,16 +209,16 @@ export function createRelationsRouter(deps: RelationsDeps): Hono {
         renderPage(
           c,
           deps.sessions,
-          html`<p class="flash error">Relation not found or already closed.</p>`,
+          html`<p class="flash error">Judgment not found or already closed.</p>`,
           {
-            title: 'Relations',
-            activeNav: 'relations',
+            title: 'Judgments',
+            activeNav: 'judgments',
           },
         ),
         404,
       );
     }
-    return c.redirect('/dashboard/relations');
+    return c.redirect('/dashboard/judgments');
   });
 
   return app;

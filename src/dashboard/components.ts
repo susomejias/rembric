@@ -22,13 +22,13 @@ const SVG_CLOSE = '</svg>';
 
 export const NAV_ICONS = Object.freeze({
   overview: `${SVG_OPEN}<rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/>${SVG_CLOSE}`,
-  memories: `${SVG_OPEN}<rect x="2" y="2" width="12" height="12"/>${SVG_CLOSE}`,
-  sessions: `${SVG_OPEN}<rect x="1" y="3" width="14" height="1.6"/><rect x="1" y="7.2" width="10" height="1.6"/><rect x="1" y="11.4" width="12" height="1.6"/>${SVG_CLOSE}`,
-  relations: `${SVG_OPEN}<rect x="0" y="4" width="5" height="8"/><rect x="11" y="4" width="5" height="8"/><rect x="5" y="7.2" width="6" height="1.6"/>${SVG_CLOSE}`,
-  consolidation: `${SVG_OPEN}<rect x="1" y="1" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3.5" y="4" width="9" height="1.2"/><rect x="3.5" y="7.4" width="9" height="1.2"/><rect x="3.5" y="10.8" width="9" height="1.2"/>${SVG_CLOSE}`,
-  projects: `${SVG_OPEN}<rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.5"/>${SVG_CLOSE}`,
-  tokens: `${SVG_OPEN}<rect x="0" y="7" width="7" height="2"/><rect x="8" y="4" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="7" width="2" height="2"/>${SVG_CLOSE}`,
-  maintenance: `${SVG_OPEN}<rect x="1.5" y="11.5" width="13" height="3"/><rect x="3" y="6" width="2.5" height="5.5"/><rect x="6.5" y="3" width="2.5" height="8.5"/><rect x="10" y="6" width="2.5" height="5.5"/>${SVG_CLOSE}`,
+  memories: `<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5C6 1.5 3.5 2 3 4C1.5 4 1 6 2.5 7C1 8 1.5 10.5 3 10.5C2.5 13 5 14 7 13L8 13"/><path d="M8 2.5C10 1.5 12.5 2 13 4C14.5 4 15 6 13.5 7C15 8 14.5 10.5 13 10.5C13.5 13 11 14 9 13L8 13"/><line x1="8" y1="2.5" x2="8" y2="13"/><path d="M5 5.8C6.2 6.4 5 7.6 6.2 8.2"/><path d="M5 9.2C6.2 9.8 5 11 6.2 11.6"/><path d="M11 5.8C9.8 6.4 11 7.6 9.8 8.2"/><path d="M11 9.2C9.8 9.8 11 11 9.8 11.6"/></svg>`,
+  sessions: `${SVG_OPEN}<rect x="6" y="1" width="9" height="6" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="6" width="10" height="7"/><rect x="2" y="13" width="2" height="2"/>${SVG_CLOSE}`,
+  judgments: `${SVG_OPEN}<rect x="6.5" y="1" width="3" height="1"/><rect x="7.4" y="2" width="1.2" height="10"/><rect x="1" y="4" width="14" height="1"/><rect x="3.4" y="5" width="1.2" height="2"/><rect x="1" y="7" width="6" height="1.2"/><rect x="11.4" y="5" width="1.2" height="2"/><rect x="9" y="7" width="6" height="1.2"/><rect x="3" y="12" width="10" height="1.4"/>${SVG_CLOSE}`,
+  consolidation: `${SVG_OPEN}<polygon points="1,1 3,1 9,7 9,9 7,9 1,3"/><polygon points="13,1 15,1 15,3 9,9 7,9 7,7"/><rect x="7" y="9" width="2" height="4"/><polygon points="5,13 11,13 8,16"/>${SVG_CLOSE}`,
+  projects: `${SVG_OPEN}<rect x="1" y="2.5" width="6" height="2.5"/><rect x="1" y="5" width="14" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="3.5" y="9" width="9" height="1"/>${SVG_CLOSE}`,
+  tokens: `${SVG_OPEN}<rect x="1" y="5" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="3" y="7" width="2" height="2"/><rect x="7" y="7" width="8" height="2"/><rect x="11" y="9" width="1.5" height="2"/><rect x="13.5" y="9" width="1.5" height="2"/>${SVG_CLOSE}`,
+  maintenance: `${SVG_OPEN}<rect x="1" y="7" width="9" height="2"/><rect x="8" y="3.5" width="6.5" height="2"/><rect x="8" y="5.5" width="2.5" height="5"/><rect x="8" y="10.5" width="6.5" height="2"/>${SVG_CLOSE}`,
 } as const);
 
 /* ── nav model ─────────────────────────────────────────────────────── */
@@ -37,7 +37,7 @@ export type NavKey =
   | 'home'
   | 'memories'
   | 'sessions'
-  | 'relations'
+  | 'judgments'
   | 'consolidation'
   | 'projects'
   | 'tokens'
@@ -79,11 +79,11 @@ export const NAV: readonly NavEntry[] = Object.freeze([
     group: 'MAIN',
   },
   {
-    key: 'relations',
+    key: 'judgments',
     num: '04',
-    iconKey: 'relations',
+    iconKey: 'judgments',
     label: 'JUDGMENTS',
-    href: '/dashboard/relations',
+    href: '/dashboard/judgments',
     group: 'MAIN',
     badgeKey: 'pendingJudgments',
   },
