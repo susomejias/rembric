@@ -137,6 +137,18 @@ describe('AgentSessionsService', () => {
     expect(counts.abandoned).toBe(0);
   });
 
+  it('countByStatus excludes soft-deleted rows to match list() visibility', () => {
+    const visible = sessions.start({ tokenId, projectId, agent: 'visible' });
+    const hidden = sessions.start({ tokenId, projectId, agent: 'hidden' });
+    sessions.softDelete(hidden.id, { adminBypass: true });
+
+    const counts = sessions.countByStatus();
+    expect(counts.active).toBe(1);
+    expect(counts.ended).toBe(0);
+    expect(counts.abandoned).toBe(0);
+    expect(visible.id).toBeDefined();
+  });
+
   describe('soft-delete', () => {
     it('softDelete sets deleted_at and hides the row from default list', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'to-delete' });

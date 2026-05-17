@@ -504,11 +504,20 @@ export class AgentSessionsService {
     return { abandoned: result.changes };
   }
 
-  /** Count sessions by status for `memory.stats` / dashboard cards. */
+  /**
+   * Count sessions by status for `memory.stats` / dashboard cards.
+   *
+   * Excludes soft-deleted rows (`deleted_at IS NOT NULL`) so the overview
+   * counters stay in lock-step with `list()`, which hides them by default.
+   * Without this filter, an operator who soft-deletes an `active` session
+   * still sees it counted in `ACTIVE SESSIONS` even though it no longer
+   * appears in `/dashboard/sessions`.
+   */
   countByStatus(): Record<'active' | 'ended' | 'abandoned', number> {
     const rows = this.db
       .select({ status: agentSessions.status, count: sql<number>`count(*)` })
       .from(agentSessions)
+      .where(isNull(agentSessions.deletedAt))
       .groupBy(agentSessions.status)
       .all();
     const out: Record<'active' | 'ended' | 'abandoned', number> = {
