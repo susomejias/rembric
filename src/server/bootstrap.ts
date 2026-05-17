@@ -185,6 +185,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     tokens,
     projects,
     agentSessions: agentSessionsSvc,
+    db: dbHandle,
     rateLimiter,
     triggerConsolidation: async (opts) => {
       if (opts?.orphansOnly) {
@@ -241,7 +242,7 @@ function printStartupBanner(config: Config): void {
 function printReadyBanner(url: string, firstRun: boolean): void {
   console.error(`  ✓ MCP endpoint:  ${url}/mcp`);
   console.error(`  ✓ Dashboard:     ${url}/dashboard`);
-  console.error(`  ✓ Healthcheck:   ${url}/healthz`);
+  console.error(`  ✓ Healthcheck:   ${url}/healthz (bearer token required)`);
   if (firstRun) {
     console.error('');
     console.error('  First run detected. Sign in to the dashboard with REMBRIC_ADMIN_TOKEN');

@@ -6,12 +6,14 @@ import {
 } from 'node:http';
 
 import { getRequestListener } from '@hono/node-server';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 
+import type { DbHandle } from '../db/client.js';
 import { type McpTransportManager } from '../mcp/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { TokensService } from '../services/tokens.js';
+import { REMBRIC_VERSION } from '../version.js';
 
 import { createApiRouter } from './api-router.js';
 import { AuthError, authenticate } from './auth.js';
@@ -41,6 +43,8 @@ export interface CreateHttpServerOptions {
   projects: ProjectsService;
   dashboard: DashboardDeps;
   agentSessions: AgentSessionsService;
+  /** Database handle; used by `/healthz` to ping with `SELECT 1`. */
+  db: DbHandle;
   /** Optional per-token rate limiter applied before MCP transport handoff. */
   rateLimiter?: RateLimiter | null;
   /**
@@ -62,7 +66,10 @@ export interface HttpServerHandle {
 export async function startHttpServer(opts: CreateHttpServerOptions): Promise<HttpServerHandle> {
   const honoApp = new Hono();
 
-  honoApp.get('/healthz', (c) => c.json({ ok: true }));
+  honoApp.get(
+    '/healthz',
+    createHealthzHandler({ tokens: opts.tokens, projects: opts.projects, db: opts.db }),
+  );
   honoApp.get('/', (c) => c.redirect('/dashboard'));
 
   honoApp.route('/dashboard', createDashboardRouter(opts.dashboard));
@@ -136,6 +143,39 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
         opts.mcp.close();
         server.close((err) => (err ? reject(err) : resolve()));
       }),
+  };
+}
+
+export interface HealthzDeps {
+  tokens: TokensService;
+  projects: ProjectsService;
+  db: DbHandle;
+}
+
+export function createHealthzHandler(deps: HealthzDeps) {
+  return (c: Context) => {
+    const authz = c.req.header('authorization');
+    if (authz === undefined) {
+      return c.json(
+        { ok: false, code: 'missing_token' as const, message: 'missing Authorization header' },
+        401,
+      );
+    }
+    try {
+      authenticate({
+        authorization: authz,
+        pathSlug: undefined,
+        tokens: deps.tokens,
+        projects: deps.projects,
+      });
+      deps.db.raw.prepare('SELECT 1').get();
+      return c.json({ ok: true, version: REMBRIC_VERSION });
+    } catch (err) {
+      if (err instanceof AuthError) {
+        return c.json({ ok: false, code: err.code, message: err.message }, err.status);
+      }
+      return c.json({ ok: false, code: 'db_unavailable' as const }, 503);
+    }
   };
 }
 

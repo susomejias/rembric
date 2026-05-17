@@ -16,6 +16,9 @@ __pycache__/
 .env.*
 !.env.example
 
+# Local-only personal notes (not for the repo)
+*.local.*
+
 # Local SQLite (dev / testing)
 *.db
 *.db-journal

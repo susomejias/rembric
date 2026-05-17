@@ -38,6 +38,8 @@ async function findFreePort(): Promise<number> {
   });
 }
 
+const SMOKE_ADMIN_TOKEN = 'smoke-test-token-with-enough-entropy-xx';
+
 describe('smoke test — full server boot/shutdown cycle', () => {
   let server: BootstrappedServer;
   let baseUrl: string;
@@ -55,7 +57,7 @@ describe('smoke test — full server boot/shutdown cycle', () => {
       REMBRIC_HOST: '127.0.0.1',
       REMBRIC_PORT: String(port),
       REMBRIC_DATA_DIR: tmp.dataDir,
-      REMBRIC_ADMIN_TOKEN: 'smoke-test-token-with-enough-entropy-xx',
+      REMBRIC_ADMIN_TOKEN: SMOKE_ADMIN_TOKEN,
       CONSOLIDATION_ENABLED: 'false',
       EMBEDDING_ENABLED: 'false',
       OPENAI_API_KEY: 'sk-test',
@@ -70,11 +72,23 @@ describe('smoke test — full server boot/shutdown cycle', () => {
     }
   });
 
-  it('GET /healthz returns 200 with ok:true', async () => {
-    const res = await fetch(baseUrl + '/healthz');
+  it('GET /healthz returns 200 with ok:true and version when authenticated', async () => {
+    const res = await fetch(baseUrl + '/healthz', {
+      headers: { authorization: `Bearer ${SMOKE_ADMIN_TOKEN}` },
+    });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
+    const body = (await res.json()) as { ok: boolean; version: string };
     expect(body.ok).toBe(true);
+    expect(typeof body.version).toBe('string');
+    expect(body.version.length).toBeGreaterThan(0);
+  });
+
+  it('GET /healthz returns 401 without a bearer token', async () => {
+    const res = await fetch(baseUrl + '/healthz');
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { ok: boolean; code: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe('missing_token');
   });
 
   it('GET / redirects to the dashboard', async () => {

@@ -1,0 +1,15 @@
+# Override that builds the image from local source instead of pulling
+# from ghcr.io. Compose merges this with docker-compose.yml when both
+# are passed via -f flags:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Used for development and for the multi-arch CI verification step;
+# the canonical operator path is `docker compose up -d` against the
+# published image.
+
+services:
+  rembric:
+    build:
+      context: .
+      dockerfile: Dockerfile

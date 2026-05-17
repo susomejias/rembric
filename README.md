@@ -76,6 +76,8 @@
                    └────────────────────────────────────────┘
 ```
 
+Single Node process, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`); the `pnpm dlx rembric` path stays available as a power-user fallback during the dual-publish window.
+
 Four load-bearing invariants:
 
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible.
@@ -85,19 +87,68 @@ Four load-bearing invariants:
 
 See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 
-## Quickstart
+## Quickstart (Docker)
+
+Docker is the canonical install path. The image bundles Node 20 and the native modules (`better-sqlite3`, `sqlite-vec`) pre-built for `linux/amd64` and `linux/arm64`, so the only requirement on your host is Docker.
 
 ```bash
-export REMBRIC_ADMIN_TOKEN=$(openssl rand -hex 32)
+git clone https://github.com/susomejias/rembric.git && cd rembric
 
-pnpm dlx rembric              # one-shot
-# or:
-pnpm add -g rembric && rembric
+cp .env.example .env
+# edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`)
+#             confirm OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL
+
+docker compose up -d
+docker compose logs -f rembric
 ```
 
 MCP at `http://127.0.0.1:8787/mcp`, dashboard at `http://127.0.0.1:8787/dashboard`.
 
-The server binds to `127.0.0.1` by default. Remote exposure is up to you; how you host it is out of scope here.
+### Running on the same host as your agent
+
+The compose file binds `127.0.0.1:8787` on the host — accessible only from loopback. Point Claude Code / Codex / Hermes at `http://127.0.0.1:8787` and you're done. Nothing else to expose.
+
+### Running on a remote host (LXC, NAS, server)
+
+If Rembric lives on a different machine than your agent client, edit `docker-compose.yml` to bind `0.0.0.0:8787:8787` (or use a `docker-compose.override.yml` so the canonical file stays untouched) and reach it via Tailscale, WireGuard, or your VPN of choice. **Don't expose port 8787 directly to the public internet.** Then point the plugin at `http://<host-ip>:8787` or `http://rembric.tailnet:8787`.
+
+The auth model is unchanged: every endpoint requires a bearer token. The single-line config is the only difference between local and remote.
+
+### Upgrading
+
+Docker manages versions for you. With `REMBRIC_VERSION` unset in `.env`, the compose file pulls `:latest`:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Portainer / Arcane detect the new digest automatically and offer a "Recreate container" button — one click. For reproducible deploys, pin a specific version in `.env`:
+
+```ini
+REMBRIC_VERSION=0.13.0
+```
+
+### Rolling back
+
+Bump `REMBRIC_VERSION` to a previous tag in `.env` and re-run `docker compose up -d`. The bind-mounted `./data/` directory is untouched, so your memory stays intact across version flips.
+
+See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR auth, named-volume vs bind-mount, host-on-Linux `host.docker.internal` notes, troubleshooting).
+
+### Backups
+
+```bash
+# while the container is running (WAL-safe online backup):
+docker compose exec rembric sqlite3 /data/data.db ".backup /data/backup-$(date +%Y%m%d).db"
+mv ./data/backup-*.db ./backups/
+
+# or stop + copy for a cold backup:
+docker compose down
+cp ./data/data.db ./backups/data-$(date +%Y%m%d).db
+docker compose up -d
+```
+
+**Do not bind-mount `./data/` onto NFS / SMB / network filesystems** — SQLite's POSIX locking guarantees don't hold there, and you'll eventually corrupt the DB.
 
 ## Hooking up Claude Code (recommended)
 
@@ -189,16 +240,18 @@ Drop `/my-app` from the URL for global scope. Per-client config-file locations a
 
 ## CLI operations
 
-| Command                                          | Purpose                                                               |
-| ------------------------------------------------ | --------------------------------------------------------------------- |
-| `rembric project create <slug> [--name <name>]`  | Mint a project. Slug must match `[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?`. |
-| `rembric project list [--all] [--table]`         | List projects (JSON default; `--table` for humans).                   |
-| `rembric session list [--include-deleted]`       | Inspect agent sessions.                                               |
-| `rembric session delete <id>`                    | Soft-delete (audit trail preserved).                                  |
-| `rembric token create <name> [--project <slug>]` | Mint a bearer token. Plaintext shown exactly once.                    |
-| `rembric token revoke <name>`                    | Revoke a token (effective immediately).                               |
+The CLI is invoked inside the running container with `docker compose exec`:
 
-Projects are also creatable from `/dashboard/projects`.
+| Command                                                                      | Purpose                                                               |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `docker compose exec rembric rembric project create <slug> [--name <name>]`  | Mint a project. Slug must match `[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?`. |
+| `docker compose exec rembric rembric project list [--all] [--table]`         | List projects (JSON default; `--table` for humans).                   |
+| `docker compose exec rembric rembric session list [--include-deleted]`       | Inspect agent sessions.                                               |
+| `docker compose exec rembric rembric session delete <id>`                    | Soft-delete (audit trail preserved).                                  |
+| `docker compose exec rembric rembric token create <name> [--project <slug>]` | Mint a bearer token. Plaintext shown exactly once.                    |
+| `docker compose exec rembric rembric token revoke <name>`                    | Revoke a token (effective immediately).                               |
+
+If you prefer the native CLI on the host (Node 20+ required), see "Development" below for the npm install path. Projects are also creatable from `/dashboard/projects`.
 
 ## Dashboard maintenance (manual purges)
 
@@ -213,16 +266,16 @@ To reclaim file-level disk after a large purge, run `VACUUM` against the SQLite 
 
 ## Configuration
 
-All config via environment variables. Required on first run: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).
+All config via environment variables. With Docker, these live in `.env` and are loaded automatically by `docker compose up`. Required: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).
 
 ### Server
 
-| Variable           | Default      | Description                          |
-| ------------------ | ------------ | ------------------------------------ |
-| `REMBRIC_HOST`     | `127.0.0.1`  | Bind address.                        |
-| `REMBRIC_PORT`     | `8787`       | Bind port.                           |
-| `REMBRIC_DATA_DIR` | `~/.rembric` | Where the SQLite file lives.         |
-| `LOG_LEVEL`        | `info`       | `debug` / `info` / `warn` / `error`. |
+| Variable           | Default                           | Description                                                                                                   |
+| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `REMBRIC_HOST`     | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker. |
+| `REMBRIC_PORT`     | `8787`                            | Bind port.                                                                                                    |
+| `REMBRIC_DATA_DIR` | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.    |
+| `LOG_LEVEL`        | `info`                            | `debug` / `info` / `warn` / `error`.                                                                          |
 
 ### LLM provider (chat + embeddings)
 
@@ -238,20 +291,75 @@ Provider selection uses generic vars; per-provider config lives under that provi
 
 ### Consolidation
 
-| Variable                   | Default     | Description                                                 |
-| -------------------------- | ----------- | ----------------------------------------------------------- |
-| `CONSOLIDATION_ENABLED`    | `true`      | Background consolidation toggle.                            |
-| `CONSOLIDATION_CRON`       | `0 3 * * *` | Cron schedule.                                              |
-| `JUDGMENT_ORPHAN_AFTER_MS` | `86400000`  | Age past which pending judgments are sent to the LLM judge. |
+| Variable                   | Default     | Description                                                                                |
+| -------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| `CONSOLIDATION_ENABLED`    | `true`      | Background consolidation toggle.                                                           |
+| `CONSOLIDATION_CRON`       | `0 3 * * *` | Cron schedule.                                                                             |
+| `CONSOLIDATION_BATCH_SIZE` | `50`        | Maximum candidate pairs evaluated per consolidation run. Higher = more LLM cost per night. |
+| `JUDGMENT_ORPHAN_AFTER_MS` | `86400000`  | Age (ms) past which pending judgments are sent to the LLM judge. Default 24h; max 30 days. |
 
-## Backups
+### Rate limiting
 
-The DB is one SQLite file in `REMBRIC_DATA_DIR` (`~/.rembric/data.db` by default). Cold backup: stop the server, copy the file. Live backup: use SQLite's online backup API or `litestream`. Recipes: [docs/backup.md](./docs/backup.md).
+Per-token token-bucket limiter on `/mcp` requests. Disabled by default — single-user localhost deployments don't need it. Enable when exposing the server to multiple agents that might burst-call.
+
+| Variable             | Default | Description                                                                                                |
+| -------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `RATE_LIMIT_ENABLED` | `false` | Master toggle. `true` activates the limiter; misbehaving tokens get `429 rate_limited` with `Retry-After`. |
+| `RATE_LIMIT_RPS`     | `10`    | Refill rate per token, in requests per second.                                                             |
+| `RATE_LIMIT_BURST`   | `30`    | Burst capacity per token. The first N requests after a quiet period are free; beyond that, RPS applies.    |
+
+### Sessions
+
+| Variable                   | Default    | Description                                                                                                                                                    |
+| -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_ABANDON_AFTER_MS` | `86400000` | At server startup, sessions with `status='active'` whose `started_at` is older than this are flipped to `abandoned`. Default 24h; floor 1min, ceiling 30 days. |
+
+### Candidate detection (save-time judgment)
+
+Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
+
+| Variable                  | Default | Description                                                                                                             |
+| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted for nightly). |
+| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                      |
+| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                               |
+
+## Development
+
+### Running without Docker (power users only)
+
+If you already have Node 20+ and want the native CLI on the host (e.g. `rembric token create` invoked directly), the npm package keeps working:
+
+```bash
+export REMBRIC_ADMIN_TOKEN=$(openssl rand -hex 32)
+
+pnpm dlx rembric                 # one-shot
+# or:
+pnpm add -g rembric && rembric
+```
+
+The npm path is **secondary**. Docker is the canonical install everyone else gets pointed at; npm stays available during a dual-publish window so the native CLI doesn't disappear overnight. It will be sunset eventually — see `openspec/changes/make-docker-primary-distribution/design.md::Decision 10`.
+
+### Hacking on Rembric itself
+
+```bash
+pnpm install
+pnpm run dev          # tsc --watch
+pnpm test             # full vitest suite + Hermes Python tests
+pnpm run typecheck    # tsc --noEmit
+pnpm run lint
+```
+
+For a clean Docker build from source:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 ## More docs
 
+- [docs/docker.md](./docs/docker.md) — Docker operator guide (topologies, private GHCR auth, upgrade/rollback, troubleshooting).
 - [docs/agents.md](./docs/agents.md) — per-client MCP config (Codex, Cursor, Windsurf, VS Code, Gemini, …).
-- [docs/backup.md](./docs/backup.md) — backup strategies.
 - [docs/troubleshooting.md](./docs/troubleshooting.md) — common errors and recovery.
 
 ## Contributing
