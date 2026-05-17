@@ -25,6 +25,7 @@ __pycache__/
 *.db-wal
 *.db-shm
 data/
+data-dev/
 
 # OS
 .DS_Store

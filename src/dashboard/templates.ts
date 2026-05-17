@@ -73,6 +73,14 @@ let cachedManifest: CssManifest | null = null;
 
 function manifestPath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
+  // Compiled mode (`<repo>/dist/dashboard/`): manifest lives next door.
+  // tsx mode (`<repo>/src/dashboard/`, used by the dev container):
+  // `build:css` writes only to `dist/`, so redirect the lookup to the
+  // sibling dist tree. See docs/docker.md::Local dev stack for the
+  // chained build:css + copy-assets startup that populates it.
+  if (here.endsWith('/src/dashboard') || here.endsWith('\\src\\dashboard')) {
+    return resolve(here, '../../dist/dashboard/public/assets/styles/manifest.json');
+  }
   return resolve(here, 'public/assets/styles/manifest.json');
 }
 

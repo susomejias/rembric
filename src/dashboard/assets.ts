@@ -80,5 +80,17 @@ function resolveDashboardPublicDir(): string {
   // ESM-compatible __dirname; works both pre-build (TS-via-tsx) and after
   // build (compiled to dist/dashboard/assets.js next to dist/dashboard/public).
   const here = fileURLToPath(new URL('.', import.meta.url));
+  // tsx mode (dev container at `<repo>/src/dashboard/`): the built CSS
+  // bundles + copied fonts/logo live in the sibling `dist/dashboard/public/`,
+  // not in `src/dashboard/public/`. The dev container's startup chains
+  // `pnpm run build:css && node scripts/copy-assets.mjs` to populate it.
+  if (
+    here.endsWith('/src/dashboard') ||
+    here.endsWith('/src/dashboard/') ||
+    here.endsWith('\\src\\dashboard') ||
+    here.endsWith('\\src\\dashboard\\')
+  ) {
+    return resolve(here, '../../dist/dashboard/public');
+  }
   return resolve(here, 'public');
 }

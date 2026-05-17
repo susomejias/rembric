@@ -48,3 +48,38 @@ jobs:
 
       - name: Smoke test (install tarball + npx rembric llm ping)
         run: node scripts/smoke-pack.mjs
+
+  docker-build-check:
+    # Catches Dockerfile / dependency / native-module regressions before
+    # they reach a release publish. Single-arch (linux/amd64 native on
+    # ubuntu-latest) — multi-arch is validated only at release publish
+    # time via .github/workflows/docker-publish.yml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime (prod) target
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=docker-build-check-runtime
+          cache-to: type=gha,mode=max,scope=docker-build-check-runtime
+
+      - name: Build dev target
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: dev
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=docker-build-check-dev
+          cache-to: type=gha,mode=max,scope=docker-build-check-dev

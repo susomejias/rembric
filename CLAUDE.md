@@ -6,24 +6,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repo uses **pnpm** (pinned via `packageManager` in `package.json`). Enable via `corepack enable`.
 
-| Task                | Command                                                                     |
-| ------------------- | --------------------------------------------------------------------------- |
-| Install             | `pnpm install`                                                              |
-| Build               | `pnpm run build` (clean + `tsc -p tsconfig.build.json` + copy assets)       |
-| Watch build         | `pnpm run dev`                                                              |
-| Run built server    | `pnpm start` (requires `REMBRIC_ADMIN_TOKEN`)                               |
-| Typecheck           | `pnpm run typecheck` (`tsc --noEmit`)                                       |
-| Lint                | `pnpm run lint` / `pnpm run lint:fix`                                       |
-| Format              | `pnpm run format` / `pnpm run format:check`                                 |
-| Test (full)         | `pnpm test`                                                                 |
-| Test (watch)        | `pnpm run test:watch`                                                       |
-| Test (coverage)     | `pnpm run test:coverage` (gated: ≥90% stmts, ≥85% branches/functions/lines) |
-| Single test file    | `pnpm vitest run path/to/file.test.ts`                                      |
-| Single test by name | `pnpm vitest run -t "partial name"`                                         |
-| DB schema gen       | `pnpm run db:generate` (drizzle-kit)                                        |
-| DB migration check  | `pnpm run db:check`                                                         |
+| Task                | Command                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Install             | `pnpm install`                                                                                                      |
+| Build               | `pnpm run build` (clean + `tsc -p tsconfig.build.json` + copy assets)                                               |
+| Watch build         | `pnpm run dev`                                                                                                      |
+| Run built server    | `pnpm start` (requires `REMBRIC_ADMIN_TOKEN`)                                                                       |
+| Typecheck           | `pnpm run typecheck` (`tsc --noEmit`)                                                                               |
+| Lint                | `pnpm run lint` / `pnpm run lint:fix`                                                                               |
+| Format              | `pnpm run format` / `pnpm run format:check`                                                                         |
+| Test (full)         | `pnpm test`                                                                                                         |
+| Test (watch)        | `pnpm run test:watch`                                                                                               |
+| Test (coverage)     | `pnpm run test:coverage` (gated: ≥90% stmts, ≥85% branches/functions/lines)                                         |
+| Single test file    | `pnpm vitest run path/to/file.test.ts`                                                                              |
+| Single test by name | `pnpm vitest run -t "partial name"`                                                                                 |
+| DB schema gen       | `pnpm run db:generate` (drizzle-kit)                                                                                |
+| DB migration check  | `pnpm run db:check`                                                                                                 |
+| Dev stack (Docker)  | `pnpm run dev:docker:up` (foreground; wipes+reseeds every up; Ctrl-C stops) — see `docs/docker.md::Local dev stack` |
 
 The CLI exposes subcommands once built: `rembric project create|list`, `rembric session list|delete`, `rembric token create|revoke`. See README "Operating the CLI".
+
+### Dev stack (one-command Docker)
+
+`pnpm run dev:docker:up` builds the dev image (Dockerfile `dev` target), starts the `rembric-dev` container in the foreground, and runs this boot chain before the server listens:
+
+```
+pnpm run build:css                       # writes dist/dashboard/public/assets/styles/manifest.json + bundles
+node scripts/copy-assets.mjs             # mirrors src/dashboard/public/* (fonts, logo) → dist/
+tsx src/scripts/seed-dev.ts --reset      # ALWAYS wipes ./data-dev/ + reseeds ~30 thematic rows + 3 fresh tokens
+                                         # (plaintext tokens printed in every boot's stderr — capture from logs)
+exec tsx watch src/cli.ts start
+```
+
+Port `127.0.0.1:8788` (loopback, dev-only). Volume bind-mount `./data-dev:/data` (gitignored). Source bind-mount `./src:/app/src` feeds tsx watch — saved `src/**/*.ts` edits reload the Node child sub-second without a container restart. Edits to `src/dashboard/styles/*.css` or `src/scripts/seed-dev.ts` require Ctrl-C + `pnpm run dev:docker:up` to re-run the boot chain.
+
+**Every `up` produces a fresh canvas.** The dev contract is "predictable baseline every boot": any rows the operator added manually via the dashboard / MCP during a session are wiped on the next `up`. If you need to preserve manual state between sessions, run the seed manually without `--reset` instead (`docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric tsx src/scripts/seed-dev.ts`) and use `docker compose ... start` instead of `up`.
+
+Full operator guide: `docs/docker.md::Local dev stack`.
 
 Git hooks (run automatically; do not bypass with `--no-verify`):
 

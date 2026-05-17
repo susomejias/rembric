@@ -46,8 +46,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
     description:
-      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in services/memory.ts',
-    allow: ['services/memory.ts'],
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in services/memory.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['services/memory.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -64,8 +64,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
     description:
-      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in services/agent-sessions.ts',
-    allow: ['services/agent-sessions.ts'],
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in services/agent-sessions.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['services/agent-sessions.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern:
@@ -89,7 +89,9 @@ const FORBIDDEN: ForbiddenRule[] = [
   },
   {
     pattern: /DELETE\s+FROM\s+memory_relations\b/i,
-    description: 'raw `DELETE FROM memory_relations` is forbidden — relations are append-only',
+    description:
+      'raw `DELETE FROM memory_relations` is forbidden — relations are append-only, except in the dev seed reset (scripts/seed-dev.ts)',
+    allow: ['scripts/seed-dev.ts'],
   },
   {
     pattern:
@@ -167,6 +169,14 @@ describe('append-only invariants (static grep)', () => {
     const file = join(srcRoot, 'services/agent-sessions.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
+  });
+
+  it('allow-list anchors: scripts/seed-dev.ts contains DELETE FROM memory / sessions / memory_relations', () => {
+    const file = join(srcRoot, 'scripts/seed-dev.ts');
+    const src = readFileSync(file, 'utf8');
+    expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
+    expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
+    expect(/DELETE\s+FROM\s+memory_relations\b/i.test(src)).toBe(true);
   });
 });
 

@@ -1,0 +1,39 @@
+# Dev stack override for local iteration.
+#
+# Compose this with the canonical file:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Or via the pnpm wrappers (recommended):
+#   pnpm run dev:docker:up | down | logs | seed
+#
+# See docs/docker.md::Local dev stack for the full operator guide.
+
+name: rembric-dev
+
+services:
+  rembric:
+    container_name: rembric-dev
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+
+    # Loopback-only on a distinct host port so prod (8787) and dev (8788)
+    # coexist on the same host without LAN exposure for the dev build.
+    ports: !override
+      - '127.0.0.1:8788:8787'
+
+    # Parallel volume: dev DB lives in ./data-dev (gitignored), prod stays
+    # in ./data. Source bind-mount feeds host edits into tsx watch inside
+    # the container for sub-second hot-reload.
+    volumes: !override
+      - ./data-dev:/data
+      - ./src:/app/src
+
+    environment:
+      LOG_LEVEL: debug
+      REMBRIC_PORT: '8787'
+
+    # Crash visibility is the point of the dev stack.
+    restart: 'no'
