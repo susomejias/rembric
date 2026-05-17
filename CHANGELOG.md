@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/susomejias/rembric/compare/v0.14.0...v0.14.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **dashboard:** respect spacing between Abandon and Delete buttons ([6ca936e](https://github.com/susomejias/rembric/commit/6ca936e54b55fc9ce03cd36e04af9de28b48c5fc))
+
 ## [0.14.0](https://github.com/susomejias/rembric/compare/v0.13.0...v0.14.0) (2026-05-17)
 
 
