@@ -102,17 +102,24 @@ docker compose up -d
 docker compose logs -f rembric
 ```
 
-MCP at `http://127.0.0.1:8787/mcp`, dashboard at `http://127.0.0.1:8787/dashboard`.
+MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
 
-### Running on the same host as your agent
+### Running on a remote host (LXC, NAS, server) — the canonical case
 
-The compose file binds `127.0.0.1:8787` on the host — accessible only from loopback. Point Claude Code / Codex / Hermes at `http://127.0.0.1:8787` and you're done. Nothing else to expose.
+The compose file publishes port `8787` on **all interfaces** of the host so your agent on another machine can reach it. Point the plugin at `http://<host-ip>:8787` (LAN) or `http://rembric.tailnet:8787` (Tailscale). Don't expose port 8787 directly to the public internet — front it with Tailscale, WireGuard, or your reverse proxy of choice. The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`.
 
-### Running on a remote host (LXC, NAS, server)
+### Running on the same host as your agent — loopback override
 
-If Rembric lives on a different machine than your agent client, edit `docker-compose.yml` to bind `0.0.0.0:8787:8787` (or use a `docker-compose.override.yml` so the canonical file stays untouched) and reach it via Tailscale, WireGuard, or your VPN of choice. **Don't expose port 8787 directly to the public internet.** Then point the plugin at `http://<host-ip>:8787` or `http://rembric.tailnet:8787`.
+If you want to restrict the published port to loopback (stricter posture, same-host dev only), drop a `docker-compose.override.yml` next to the canonical compose:
 
-The auth model is unchanged: every endpoint requires a bearer token. The single-line config is the only difference between local and remote.
+```yaml
+services:
+  rembric:
+    ports: !override
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+```
+
+Compose auto-merges the override on every `up`. Point your agent at `http://127.0.0.1:8787`. See [`docs/docker.md`](./docs/docker.md) for the full topology guide.
 
 ### Upgrading
 

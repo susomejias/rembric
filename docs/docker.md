@@ -6,9 +6,32 @@ The canonical install for Rembric. Versioned image at `ghcr.io/susomejias/rembri
 
 Rembric supports two deployment shapes; the only difference is one line of compose config and where you point the plugin URL.
 
-### Same host as your agent
+### Remote host (LXC, NAS, server) — the canonical case
 
-Loopback-only, single machine. Plugin → server is `http://127.0.0.1:8787`.
+Server lives on a different machine than your agent. The compose file ships configured for this — port `8787` is published on **all interfaces** of the host so the agent on your laptop can reach it. Don't expose 8787 to the public internet though — front it with Tailscale, WireGuard, or your VPN.
+
+```
+┌─ your laptop ──────────────────┐    ┌─ LXC / NAS / server ──────────────────┐
+│ Claude Code / Codex / Hermes   │    │ docker container "rembric"            │
+│       │                        │    │   bind: 0.0.0.0:8787:8787 (default)   │
+│       │ Tailscale / VPN / LAN  │ ─► │   volume: ./data → /data              │
+│       │                        │    │   env_file: .env                      │
+│       ▼                        │    │                                       │
+│ http://rembric.tailnet:8787    │    │                                       │
+└────────────────────────────────┘    └───────────────────────────────────────┘
+```
+
+Set `REMBRIC_SERVER_URL` on the plugin side to the reachable hostname:
+
+- Tailscale: `http://rembric.your-tailnet.ts.net:8787`
+- LAN: `http://192.168.x.x:8787` (only if your LAN is trusted)
+- Reverse proxy with TLS: `https://memory.example.com` (then drop `:8787` if behind 443)
+
+The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`. Belt-and-suspenders defenses (firewall the port to your trust boundary, Tailscale ACLs, reverse-proxy with mTLS, etc.) are operator's call.
+
+### Same host as your agent — loopback override
+
+If Rembric and your agent live on the same machine and you want the stricter posture, restrict the publish to loopback via an override file. **This is opt-in** — the default compose binds to all interfaces.
 
 ```
 ┌─ your laptop / dev box ───────────────────────────┐
@@ -20,50 +43,23 @@ Loopback-only, single machine. Plugin → server is `http://127.0.0.1:8787`.
 │  http://127.0.0.1:8787/mcp/<slug>                 │
 │                                                   │
 │  ┌─ docker container "rembric" ───────────────┐   │
-│  │  bind: 127.0.0.1:8787:8787                 │   │
+│  │  bind: 127.0.0.1:8787:8787 (via override)  │   │
 │  │  volume: ./data → /data                    │   │
 │  │  env_file: .env                            │   │
 │  └────────────────────────────────────────────┘   │
 └───────────────────────────────────────────────────┘
 ```
 
-`docker-compose.yml` ships configured for this case out of the box.
+Drop a `docker-compose.override.yml` next to the canonical compose:
 
-### Remote host (LXC, NAS, server)
-
-Server lives on a different machine than your agent. Don't expose 8787 to the public internet — front it with Tailscale, WireGuard, or your VPN.
-
-```
-┌─ your laptop ──────────────────┐    ┌─ LXC / NAS / server ──────────────────┐
-│ Claude Code / Codex            │    │ docker container "rembric"            │
-│       │                        │    │   bind: 0.0.0.0:8787:8787             │
-│       │ Tailscale / VPN        │ ─► │   volume: ./data → /data              │
-│       │                        │    │   env_file: .env                      │
-│       ▼                        │    │                                       │
-│ http://rembric.tailnet:8787    │    │                                       │
-└────────────────────────────────┘    └───────────────────────────────────────┘
+```yaml
+services:
+  rembric:
+    ports: !override
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
 ```
 
-Two config tweaks:
-
-1. **Bind address.** Edit `docker-compose.yml`:
-   ```yaml
-   ports:
-     - '0.0.0.0:8787:8787'
-   ```
-   Or use a `docker-compose.override.yml` (gitignored) so the canonical file stays untouched:
-   ```yaml
-   services:
-     rembric:
-       ports: !override
-         - '0.0.0.0:8787:8787'
-   ```
-2. **Plugin URL.** Set `REMBRIC_SERVER_URL` to the reachable hostname:
-   - Tailscale: `http://rembric.your-tailnet.ts.net:8787`
-   - LAN: `http://192.168.x.x:8787` (only if your LAN is trusted)
-   - Reverse proxy with TLS: `https://memory.example.com` (then drop `:8787` if behind 443)
-
-The auth model is identical: every endpoint requires a bearer token.
+Compose auto-merges `docker-compose.override.yml` on every `up`. The `!override` tag replaces the ports list rather than appending — without it you'd get two bindings (`0.0.0.0:8787` AND `127.0.0.1:8787`) and the loopback one would be redundant.
 
 ## Private GHCR access (during the closed-repo phase)
 

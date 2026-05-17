@@ -5,7 +5,17 @@ services:
     restart: unless-stopped
 
     ports:
-      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+      # Default: bind on all interfaces — the bearer token is the real
+      # security boundary, and the common selfhost case (server on a
+      # separate host, plugin reaches it over LAN / Tailscale) needs
+      # this. To restrict to loopback-only (same-host dev or stricter
+      # posture), drop a `docker-compose.override.yml` next to this
+      # file with:
+      #   services:
+      #     rembric:
+      #       ports: !override
+      #         - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+      - '${REMBRIC_PORT:-8787}:8787'
 
     volumes:
       - ./data:/data
