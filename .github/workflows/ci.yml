@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -24,13 +24,23 @@ jobs:
         run: corepack enable
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
+      # Install with --frozen-lockfile. pnpm 11 enforces three independent
+      # invariants in this step that cover the lockfile-injection attack
+      # class (practice #5 of lirantal/npm-security-best-practices):
+      #   1. Lockfile must exactly match package.json (no silent updates).
+      #   2. Every tarball's integrity hash must match what the lockfile
+      #      claims (defends against URL swap + content tampering).
+      #   3. blockExoticSubdeps in pnpm-workspace.yaml refuses non-registry
+      #      transitive sources (git URLs, off-registry tarballs).
+      # (lockfile-lint v4.x doesn't support pnpm-lock.yaml; the npm-native
+      # defenses + blockExoticSubdeps cover the same threat model.)
       - name: Install
         run: pnpm install --frozen-lockfile
 
@@ -54,13 +64,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build runtime (prod) target
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -71,7 +81,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker-build-check-runtime
 
       - name: Build dev target
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile

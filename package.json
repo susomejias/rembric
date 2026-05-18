@@ -7,15 +7,9 @@
   "author": "rembric contributors",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
-  "packageManager": "pnpm@9.12.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "sqlite-vec"
-    ]
-  },
+  "packageManager": "pnpm@11.1.2",
   "scripts": {
     "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && pnpm run build:css",
@@ -50,6 +44,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
     "@commitlint/config-conventional": "^19.5.0",
+    "@eslint/js": "^9.13.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.7.0",
     "@vitest/coverage-v8": "^2.1.0",

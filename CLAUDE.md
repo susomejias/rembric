@@ -212,6 +212,10 @@ Existing call sites to mirror (form-level attributes): `src/dashboard/sessions.t
 - Invariant tests under `src/**/__tests__/invariants/` are sacred.
 - **Default to no comments.** Write a comment only when its absence would cost a future reader real time: magic numbers/constants, non-obvious invariants, workarounds for library quirks, hidden side-effects, or public-API docstrings. Do NOT restate what the code does, reference the current task/PR, or leave TODO/FIXME without a tracked link. When in doubt, delete the comment and let names + structure speak.
 
+## Supply-chain hygiene
+
+Before adding any dependency or editing install-time configuration (`package.json`, `.npmrc`, `pnpm-workspace.yaml`, the lockfile, the CI install step, the Dockerfile install layers), consult `.agents/skills/npm-security-best-practices/SKILL.md`. The repo enforces a default-deny lifecycle-script policy (`.npmrc::ignore-scripts=true`) with an explicit `pnpm-workspace.yaml::allowBuilds` map permitting `husky: true`, `better-sqlite3: true`, `sqlite-vec: true` (and denying everything else, e.g., `esbuild: false`), refuses transitive deps from exotic sources (`blockExoticSubdeps: true`), refuses install-time of versions younger than 3 days (`minimumReleaseAge: 4320`), and runs `lockfile-lint` in CI before any tarball is fetched. Any new dep that wants a postinstall must be added to `allowBuilds` with `true` in the same PR. Escape hatch for genuine security patches: temporarily lower `minimumReleaseAge` to 0 (or add the package to `minimumReleaseAgeExclude`) and re-tighten in a follow-up PR.
+
 ## Plugin development discipline
 
 Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplaces (Claude Code, Codex CLI, Hermes Agent, future Cursor/Windsurf/etc.). To keep cross-client support sustainable:

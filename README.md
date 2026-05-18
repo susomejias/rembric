@@ -89,7 +89,7 @@ See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 
 ## Quickstart (Docker)
 
-Docker is the canonical install path. The image bundles Node 20 and the native modules (`better-sqlite3`, `sqlite-vec`) pre-built for `linux/amd64` and `linux/arm64`, so the only requirement on your host is Docker.
+Docker is the canonical install path. The image bundles Node 22 and the native modules (`better-sqlite3`, `sqlite-vec`) pre-built for `linux/amd64` and `linux/arm64`, so the only requirement on your host is Docker.
 
 ```bash
 git clone https://github.com/susomejias/rembric.git && cd rembric
