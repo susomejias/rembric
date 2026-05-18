@@ -60,9 +60,10 @@
 
 - [x] 8.1 Create `plugin/.openclaw-plugin/memory-capability.mjs` exporting `registerMemorySurface(api, httpClient, config)`.
 - [x] 8.2 Inside, build a capability object whose recall/store/list adapters route through the HTTP client. Confirm the capability interface at implementation by reading `/tmp/openclaw/src/plugins/types.ts` plus `/tmp/agentmemory/integrations/openclaw/plugin.mjs` (search for `registerMemoryCapability`). Call `api.registerMemoryCapability(capability)`.
-- [x] 8.3 When `config.autoRecall === true`, build a prompt-section builder that calls `httpClient.memorySearch` against the current prompt text and returns a context block sized to `config.tokenBudget`. Call `api.registerMemoryPromptSection(builder)`.
-- [x] 8.4 When `config.autoRecall === false`, SKIP the `registerMemoryPromptSection` call entirely.
+- [x] 8.3 When `config.autoRecall === true`, register a typed `before_prompt_build` hook that calls `memory.search` against the current prompt text and returns `{ prependContext }` sized to `config.tokenBudget`.
+- [x] 8.4 When `config.autoRecall === false`, SKIP the `before_prompt_build` auto-recall hook entirely. Do not use `registerMemoryPromptSection` for async recall; OpenClaw's memory prompt section is synchronous `string[]` guidance only.
 - [x] 8.5 The plugin SHALL NEVER call `httpClient.memorySave` from `agent_end` or any compaction hook when `config.autoCapture` is falsy. Add a test asserting this: a fake `agent_end` event with `autoCapture: false` → zero saves observed on the fake client.
+- [x] 8.6 Create `plugin/.openclaw-plugin/tool-guards.mjs` registering `before_tool_call` to block OpenClaw `MEMORY.md` / `memory/*.md` writes and tell the agent to call `memory_save` instead. Add tests that the guard blocks file-backed memory paths but never blocks Rembric `memory_*` tools.
 
 ## 9. Wire the `/rembric` slash command (`commands.mjs`)
 

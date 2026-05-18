@@ -16,7 +16,7 @@ The repository SHALL host a native OpenClaw plugin manifest at `plugin/.openclaw
 - **THEN** `configSchema` SHALL be a JSON Schema object with `type: "object"` declaring at least these properties:
   - `server_url` (string, required) — Rembric server base URL without `/mcp` suffix
   - `api_token` (string, required) — Rembric bearer token from `/dashboard/tokens`
-  - `autoRecall` (boolean, default `true`) — whether the registered prompt-section auto-injects memories
+  - `autoRecall` (boolean, default `true`) — whether the typed `before_prompt_build` hook auto-injects memories
   - `autoCapture` (boolean, default `false`) — whether `agent_end` auto-writes a memory
   - `tokenBudget` (number, default documented) — token budget for the auto-recall section
 - **AND** `configSchema.additionalProperties` SHALL be `false` so unknown fields are rejected
@@ -34,7 +34,7 @@ The repository SHALL host a native OpenClaw plugin manifest at `plugin/.openclaw
 - **THEN** `plugin/.openclaw-plugin/` SHALL NOT contain a `.mcp.json`, a `hooks.json`, or any other Claude/Codex-style bundle marker
 - **AND** OpenClaw SHALL identify the plugin via the native manifest (not via Codex/Claude bundle detection)
 
-### Requirement: Plugin entry point registers tools, hooks, interactive matcher, memory capability, and prompt section programmatically
+### Requirement: Plugin entry point registers tools, hooks, memory capability, auto-recall, and guardrails programmatically
 
 The plugin SHALL provide a plain ESM `.mjs` entry point at `plugin/.openclaw-plugin/plugin.mjs` that exports a `register(api)` function (or the default export the OpenClaw host expects — confirmed at implementation against the agentmemory reference). The entry SHALL register all integration surfaces via the `OpenClawPluginApi` instance the host injects. The entry SHALL NOT rely on file-based hook discovery (`HOOK.md + handler.ts`), Claude-style `hooks.json`, or Codex-style hook layouts — those are not executed by OpenClaw for native plugins. The entry SHALL NOT depend on `@openclaw/plugin-sdk` as an installed npm package (the SDK ships as `workspace:*` only and is not resolvable from outside the OpenClaw monorepo).
 
@@ -67,12 +67,21 @@ The plugin SHALL provide a plain ESM `.mjs` entry point at `plugin/.openclaw-plu
 - **THEN** `api.registerMemoryCapability(capability)` SHALL be called with a capability object exposing the recall/store/list adapters required by OpenClaw's memory-slot contract (consult `/tmp/openclaw/src/plugins/types.ts` at implementation; the capability adapters MUST resolve through the HTTP client, not a local cache)
 - **AND** when `~/.openclaw/openclaw.json::plugins.slots.memory !== 'rembric'`, the plugin SHALL emit a structured warning via `api.logger` indicating that another plugin owns the slot and Rembric's auto-recall integration is inactive
 
-#### Scenario: Auto-recall prompt section is registered when `autoRecall: true`
+#### Scenario: Auto-recall hook is registered when `autoRecall: true`
 
 - **GIVEN** the user's config has `autoRecall: true` (the default)
 - **WHEN** the plugin's `register(api)` runs
-- **THEN** `api.registerMemoryPromptSection(builder)` SHALL be called with a builder that queries `memory.search` against the current prompt and returns a context block sized to `tokenBudget`
-- **AND** when `autoRecall: false`, `registerMemoryPromptSection` SHALL NOT be called
+- **THEN** `api.on('before_prompt_build', handler)` SHALL be called with a handler that queries `memory.search` against the current prompt and returns `{ prependContext }` sized to `tokenBudget`
+- **AND** `api.registerMemoryPromptSection` SHALL NOT be used for async recall because OpenClaw's memory prompt-section builder is synchronous and only accepts `string[]`
+- **AND** when `autoRecall: false`, the `before_prompt_build` auto-recall hook SHALL NOT be registered
+
+#### Scenario: Memory-file writes are blocked when Rembric owns memory
+
+- **WHEN** the plugin's `register(api)` runs
+- **THEN** `api.on('before_tool_call', handler)` SHALL be called
+- **AND** when a file-editing tool call targets OpenClaw's file-backed memory paths (`MEMORY.md` or `memory/*.md`), the handler SHALL return `{ block: true, blockReason }`
+- **AND** the block reason SHALL instruct the agent to call `memory_save` instead, so durable writes go to Rembric rather than OpenClaw's local memory files
+- **AND** Rembric's own `memory_*` tools SHALL NOT be blocked by this guard
 
 #### Scenario: Auto-capture is off by default
 

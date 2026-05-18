@@ -6,7 +6,8 @@
 //   - tool registrations (17 memory_* / project_* tools → MCP wire)
 //   - session lifecycle hooks (session_start/end, before/after_compaction → HTTP /api)
 //   - memory capability (claims OpenClaw memory slot)
-//   - memory prompt section (auto-recall, gated on config.autoRecall)
+//   - before_prompt_build auto-recall hook (gated on config.autoRecall)
+//   - before_tool_call guardrails (block OpenClaw MEMORY.md writes)
 //   - interactive handler (remember|recall|... matcher)
 //   - /rembric slash command
 //
@@ -18,6 +19,7 @@ import { createHttpClient, readProjectSlug } from './http-client.mjs';
 import { registerTools } from './tools.mjs';
 import { registerHooks } from './hooks.mjs';
 import { registerMemorySurface } from './memory-capability.mjs';
+import { registerToolGuards } from './tool-guards.mjs';
 import { registerCommands } from './commands.mjs';
 
 const PLUGIN_ID = 'rembric';
@@ -176,6 +178,7 @@ const plugin = {
       registerHooks(api, httpClient, { projectSlug: config.projectSlug }),
     );
     safeStage('registerMemorySurface', () => registerMemorySurface(api, mcpClient, config));
+    safeStage('registerToolGuards', () => registerToolGuards(api));
     safeStage('registerCommands', () =>
       registerCommands(api, {
         serverUrl: config.serverUrl,

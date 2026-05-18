@@ -41,10 +41,10 @@ Restart OpenClaw. Run `/rembric status` inside an OpenClaw session to verify slo
 ## What the plugin does
 
 - **Claims OpenClaw's memory slot** (`registerMemoryCapability`) — one active memory plugin per OpenClaw instance; collisions are logged at register time.
-- **Auto-recall** (`registerMemoryPromptSection`, gated on `autoRecall`) — calls `memory.search` against the current prompt on every turn and prepends the result up to `tokenBudget` tokens.
+- **Auto-recall** (`before_prompt_build`, gated on `autoRecall`) — calls `memory.search` against the current prompt on every turn and prepends the result up to `tokenBudget` tokens.
 - **17 memory tools** (`api.registerTool × 17`) — full `memory_*` and `project_*` surface, mirroring Rembric's MCP tools but consumed natively by OpenClaw (no separate `mcpServers` config required).
+- **Memory-file write guard** (`before_tool_call`) — blocks OpenClaw `MEMORY.md` / `memory/*.md` writes when Rembric owns the memory slot, forcing durable writes through `memory_save`.
 - **Session lifecycle hooks** — `session_start` / `session_end` / `before_compaction` / `after_compaction` POST to Rembric's `/api/<slug>/sessions(*)` HTTP API. Session ids appear in `/dashboard/sessions` with `agent=openclaw`.
-- **Interactive matcher** — phrases matching `remember|recall|acordate|qué hicimos|what did we do` trigger an explicit memory search.
 - **`/rembric status` slash command** — operator visibility into server URL, masked token, and slot ownership.
 
 ## Architecture
@@ -58,7 +58,8 @@ Restart OpenClaw. Run `/rembric status` inside an OpenClaw session to verify slo
 | `http-client.mjs`       | Rembric `/api/<slug>/sessions(*)` HTTP client + `.rembric` slug parser |
 | `tools.mjs`             | 17 `api.registerTool` wrappers forwarding to MCP                       |
 | `hooks.mjs`             | Session lifecycle hooks                                                |
-| `memory-capability.mjs` | Memory slot + prompt section + interactive matcher                     |
+| `memory-capability.mjs` | Memory slot + `before_prompt_build` auto-recall                        |
+| `tool-guards.mjs`       | `before_tool_call` guard for OpenClaw file-backed memory paths         |
 | `commands.mjs`          | `/rembric status` slash command                                        |
 
 Plain ESM JavaScript, no TypeScript, no build step. The OpenClaw plugin SDK (`@openclaw/plugin-sdk`) is `workspace:*` upstream and not installable as an npm package outside the OpenClaw monorepo, so the third-party path is hand-authored ESM. Rationale documented in the `add-openclaw-plugin/design.md` change archive.

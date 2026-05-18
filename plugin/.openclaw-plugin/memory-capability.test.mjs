@@ -12,6 +12,10 @@ function buildApi(overrides = {}) {
     registerMemoryPromptSection: (builder) => {
       registrations.promptSection = builder;
     },
+    on: (event, handler) => {
+      registrations.hooks ??= {};
+      registrations.hooks[event] = handler;
+    },
     registerInteractiveHandler: (entry) => {
       registrations.interactive = entry;
     },
@@ -36,24 +40,28 @@ describe('registerMemorySurface', () => {
     expect(typeof api._registrations.capability.promptBuilder).toBe('function');
     const lines = api._registrations.capability.promptBuilder({});
     expect(Array.isArray(lines)).toBe(true);
-    expect(lines.join(' ')).toMatch(/Rembric/);
+    const text = lines.join(' ');
+    expect(text).toMatch(/Rembric/);
+    expect(text).toContain('memory_save');
+    expect(text).toContain('do not edit OpenClaw MEMORY.md');
   });
 
-  it('registers a prompt section when autoRecall is true', () => {
+  it('registers a before_prompt_build hook when autoRecall is true', () => {
     const api = buildApi();
     const client = { callTool: async () => ({ ok: true, data: { content: [] } }) };
     registerMemorySurface(api, client, DEFAULT_CONFIG);
-    expect(api._registrations.promptSection).toBeDefined();
-  });
-
-  it('SKIPS the prompt section when autoRecall is false', () => {
-    const api = buildApi();
-    const client = { callTool: async () => ({ ok: true, data: { content: [] } }) };
-    registerMemorySurface(api, client, { ...DEFAULT_CONFIG, autoRecall: false });
+    expect(api._registrations.hooks?.before_prompt_build).toBeDefined();
     expect(api._registrations.promptSection).toBeUndefined();
   });
 
-  it('prompt-section returns prependContext with memory.search results', async () => {
+  it('SKIPS the before_prompt_build hook when autoRecall is false', () => {
+    const api = buildApi();
+    const client = { callTool: async () => ({ ok: true, data: { content: [] } }) };
+    registerMemorySurface(api, client, { ...DEFAULT_CONFIG, autoRecall: false });
+    expect(api._registrations.hooks?.before_prompt_build).toBeUndefined();
+  });
+
+  it('before_prompt_build hook returns prependContext with memory.search results', async () => {
     const api = buildApi();
     const client = {
       callTool: async (name, args) => {
@@ -66,22 +74,35 @@ describe('registerMemorySurface', () => {
       },
     };
     registerMemorySurface(api, client, DEFAULT_CONFIG);
-    const builder = api._registrations.promptSection;
-    const out = await builder({ prompt: 'what should I do next' });
+    const hook = api._registrations.hooks.before_prompt_build;
+    const out = await hook({ prompt: 'what should I do next' });
     expect(out?.prependContext).toMatch(/Relevant Rembric memories/);
     expect(out?.prependContext).toMatch(/memory A/);
   });
 
-  it('prompt-section returns null when search fails', async () => {
+  it('before_prompt_build hook returns null when search fails', async () => {
     const api = buildApi();
     const client = {
       callTool: async () => ({ ok: false, code: 'network_error', message: 'down' }),
     };
     registerMemorySurface(api, client, DEFAULT_CONFIG);
-    const builder = api._registrations.promptSection;
-    const out = await builder({ prompt: 'x' });
+    const hook = api._registrations.hooks.before_prompt_build;
+    const out = await hook({ prompt: 'x' });
     expect(out).toBe(null);
     expect(api._logs.some(([l, m]) => l === 'warn' && m.includes('autoRecall'))).toBe(true);
+  });
+
+  it('keeps the memory capability promptBuilder synchronous when autoRecall is enabled', () => {
+    const api = buildApi({
+      registerMemoryPromptSection: () => {
+        throw new Error('registerMemoryPromptSection should not be used for async recall');
+      },
+    });
+    const client = { callTool: async () => ({ ok: true, data: { content: [] } }) };
+    registerMemorySurface(api, client, DEFAULT_CONFIG);
+    const lines = api._registrations.capability.promptBuilder({});
+    expect(Array.isArray(lines)).toBe(true);
+    expect(lines.join(' ')).toContain('memory_save');
   });
 
   it('does NOT register an interactive handler (the SDK shape is incompatible with regex matching)', () => {

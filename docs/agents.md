@@ -292,13 +292,13 @@ Restart OpenClaw. Verify with `/rembric status` inside an OpenClaw session — t
 
 #### Memory-slot collision (only one active at a time)
 
-OpenClaw routes auto-recall and the memory-capability prompt through whichever plugin owns `plugins.slots.memory`. If you previously configured a different memory plugin:
+OpenClaw routes the memory-capability prompt through whichever plugin owns `plugins.slots.memory`; Rembric's runtime auto-recall is wired through the typed `before_prompt_build` hook and Rembric blocks OpenClaw file-backed `MEMORY.md` / `memory/*.md` writes via `before_tool_call`. If you previously configured a different memory plugin:
 
 ```jsonc
 // Before:
 { "plugins": { "slots": { "memory": "memory-lancedb" } } }
 
-// After (Rembric takes over auto-recall + prompt section):
+// After (Rembric takes over auto-recall + memory prompt guidance):
 { "plugins": { "slots": { "memory": "rembric" } } }
 ```
 
@@ -318,7 +318,9 @@ Unlike memory-lancedb, Rembric's `autoCapture` defaults `false`. Rembric's appen
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/rembric status` shows `memory slot: <other> (INACTIVE)`                     | Another plugin owns `plugins.slots.memory`. Update `~/.openclaw/openclaw.json` per the snippet above and restart OpenClaw.                                                          |
 | Auto-recall isn't injecting memories                                          | Either `autoRecall: false`, the slot is INACTIVE, or `memory.search` is failing. Check the log: the plugin warns on every failed search via `api.logger.warn`.                       |
-| `/dashboard/sessions` stays empty when running OpenClaw                       | The current cwd has no `.rembric::PROJECT_SLUG=<slug>` file. Lifecycle hooks skip the POST when slug cannot be resolved (global scope cannot upsert a session row). Add the file.    |
+| A tool call is blocked with "Do not write MEMORY.md or memory/\*.md"          | Rembric owns the memory slot, so OpenClaw's file-backed memory write path is intentionally blocked. Use `memory_save` so the memory is stored in Rembric.                              |
+| `openclaw plugins inspect rembric` shows no Tools/Hooks                       | The default inspect path is manifest-only. Use `openclaw plugins inspect rembric --runtime` to force runtime registration and see typed hooks/tools.                                  |
+| `/dashboard/sessions` stays empty when running OpenClaw                       | No project slug resolved. Set `plugins.entries.rembric.config.project_slug` or add `.rembric::PROJECT_SLUG=<slug>` in the working directory; lifecycle hooks skip POSTs without it.   |
 | Tool calls return errors like `mcp_error — token_invalid`                     | `api_token` in the config is wrong or revoked. Mint a new one at `/dashboard/tokens` and update the config.                                                                          |
 | Tool calls return `mcp_init_failed`                                           | The plugin can't reach the Rembric server. Check `server_url`; the plugin retries `initialize` once per call, but a persistent network/DNS issue surfaces as `mcp_init_failed`.     |
 
