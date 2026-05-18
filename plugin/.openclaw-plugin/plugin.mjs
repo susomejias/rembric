@@ -132,17 +132,32 @@ const plugin = {
       logger: api.logger,
     });
 
-    registerTools(api, mcpClient);
-    registerHooks(api, httpClient, { projectSlug: config.projectSlug });
-    registerMemorySurface(api, mcpClient, config);
-    registerCommands(api, {
-      serverUrl: config.serverUrl,
-      apiToken: config.apiToken,
-      autoRecall: config.autoRecall,
-      autoCapture: config.autoCapture,
-      tokenBudget: config.tokenBudget,
-      projectSlug: config.projectSlug,
-    });
+    // Each stage is wrapped independently — one bad SDK-shape mismatch
+    // shouldn't tear down the whole plugin's registration. Specific
+    // failures are logged so the user can run `openclaw plugins logs
+    // rembric` and see which surface broke.
+    function safeStage(name, fn) {
+      try {
+        fn();
+      } catch (err) {
+        api.logger?.warn?.(`rembric: stage "${name}" failed: ${String(err)}`);
+      }
+    }
+    safeStage('registerTools', () => registerTools(api, mcpClient));
+    safeStage('registerHooks', () =>
+      registerHooks(api, httpClient, { projectSlug: config.projectSlug }),
+    );
+    safeStage('registerMemorySurface', () => registerMemorySurface(api, mcpClient, config));
+    safeStage('registerCommands', () =>
+      registerCommands(api, {
+        serverUrl: config.serverUrl,
+        apiToken: config.apiToken,
+        autoRecall: config.autoRecall,
+        autoCapture: config.autoCapture,
+        tokenBudget: config.tokenBudget,
+        projectSlug: config.projectSlug,
+      }),
+    );
 
     api.logger?.info?.(
       `rembric: registered (server=${config.serverUrl}, projectSlug=${config.projectSlug ?? '<from .rembric>'}, autoRecall=${config.autoRecall}, autoCapture=${config.autoCapture})`,

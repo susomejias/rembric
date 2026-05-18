@@ -84,37 +84,10 @@ describe('registerMemorySurface', () => {
     expect(api._logs.some(([l, m]) => l === 'warn' && m.includes('autoRecall'))).toBe(true);
   });
 
-  it('interactive handler registered with regex matching recall trigger phrases', async () => {
+  it('does NOT register an interactive handler (the SDK shape is incompatible with regex matching)', () => {
     const api = buildApi();
-    const client = {
-      callTool: async () => ({
-        ok: true,
-        data: { content: [{ type: 'text', text: 'recalled stuff' }] },
-      }),
-    };
+    const client = { callTool: async () => ({ ok: true, data: { content: [] } }) };
     registerMemorySurface(api, client, DEFAULT_CONFIG);
-    expect(api._registrations.interactive).toBeDefined();
-    const pattern = api._registrations.interactive.pattern;
-    expect(pattern.test('please recall the design')).toBe(true);
-    expect(pattern.test('do you remember the spec?')).toBe(true);
-    expect(pattern.test('acordate del bug')).toBe(true);
-    expect(pattern.test('qué hicimos ayer')).toBe(true);
-    expect(pattern.test('what did we do')).toBe(true);
-    expect(pattern.test('just a normal message')).toBe(false);
-  });
-
-  it('interactive handler returns prependContext with recall block', async () => {
-    const api = buildApi();
-    const client = {
-      callTool: async () => ({
-        ok: true,
-        data: { content: [{ type: 'text', text: 'memory X' }] },
-      }),
-    };
-    registerMemorySurface(api, client, DEFAULT_CONFIG);
-    const handler = api._registrations.interactive.handler;
-    const out = await handler({ prompt: 'recall the design' });
-    expect(out?.prependContext).toMatch(/Rembric recall/);
-    expect(out?.prependContext).toMatch(/memory X/);
+    expect(api._registrations.interactive).toBeUndefined();
   });
 });

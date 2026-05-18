@@ -48,6 +48,10 @@ function pickTitle(event) {
 }
 
 export function registerHooks(api, httpClient, { projectSlug = null } = {}) {
+  if (typeof api.on !== 'function') {
+    api.logger?.warn?.('rembric: api.on unavailable, skipping lifecycle hook registrations');
+    return 0;
+  }
   // Resolution order: explicit config.project_slug > per-cwd .rembric file.
   // The explicit config wins because it's a deliberate operator choice;
   // the .rembric fallback covers the multi-project workflow.
@@ -55,8 +59,17 @@ export function registerHooks(api, httpClient, { projectSlug = null } = {}) {
     if (projectSlug) return projectSlug;
     return cwd ? httpClient.readProjectSlug(cwd) : null;
   }
+  let registered = 0;
+  function safeOn(event, handler) {
+    try {
+      api.on(event, handler);
+      registered++;
+    } catch (err) {
+      api.logger?.warn?.(`rembric: api.on(${event}) failed: ${String(err)}`);
+    }
+  }
 
-  api.on('session_start', async (event) => {
+  safeOn('session_start', async (event) => {
     try {
       const id = pickSessionId(event);
       const cwd = pickCwd(event);
@@ -77,7 +90,7 @@ export function registerHooks(api, httpClient, { projectSlug = null } = {}) {
     }
   });
 
-  api.on('session_end', async (event) => {
+  safeOn('session_end', async (event) => {
     try {
       const id = pickSessionId(event);
       const cwd = pickCwd(event);
@@ -118,6 +131,7 @@ export function registerHooks(api, httpClient, { projectSlug = null } = {}) {
     }
   };
 
-  api.on('before_compaction', compactionHandler);
-  api.on('after_compaction', compactionHandler);
+  safeOn('before_compaction', compactionHandler);
+  safeOn('after_compaction', compactionHandler);
+  return registered;
 }

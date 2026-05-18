@@ -11,30 +11,35 @@ export function registerCommands(api, config) {
     api.logger?.debug?.('rembric: api.registerCommand unavailable, skipping /rembric');
     return;
   }
-  api.registerCommand({
-    name: 'rembric',
-    description: 'Rembric plugin operator commands.',
-    handler: async (args) => {
-      const sub = args?.[0] || 'status';
-      if (sub !== 'status') {
-        return {
-          ok: false,
-          message: `unknown subcommand: ${sub}. Try: /rembric status`,
-        };
-      }
-      const slotOwner = api.config?.plugins?.slots?.memory ?? '<unset>';
-      const slotActive = slotOwner === 'rembric';
-      const lines = [
-        '# Rembric status',
-        `server_url:   ${config.serverUrl}`,
-        `api_token:    ${maskToken(config.apiToken)}`,
-        `project_slug: ${config.projectSlug ?? '<from .rembric per cwd>'}`,
-        `autoRecall:   ${config.autoRecall}`,
-        `autoCapture:  ${config.autoCapture}`,
-        `tokenBudget:  ${config.tokenBudget}`,
-        `memory slot:  ${slotOwner} ${slotActive ? '(active)' : '(INACTIVE — set plugins.slots.memory to "rembric")'}`,
-      ];
-      return { ok: true, message: lines.join('\n') };
-    },
-  });
+  try {
+    api.registerCommand({
+      name: 'rembric',
+      description: 'Rembric plugin operator commands.',
+      acceptsArgs: true,
+      handler: async (args) => {
+        const sub = args?.[0] || 'status';
+        if (sub !== 'status') {
+          return {
+            ok: false,
+            message: `unknown subcommand: ${sub}. Try: /rembric status`,
+          };
+        }
+        const slotOwner = api.config?.plugins?.slots?.memory ?? '<unset>';
+        const slotActive = slotOwner === 'rembric';
+        const lines = [
+          '# Rembric status',
+          `server_url:   ${config.serverUrl}`,
+          `api_token:    ${maskToken(config.apiToken)}`,
+          `project_slug: ${config.projectSlug ?? '<from .rembric per cwd>'}`,
+          `autoRecall:   ${config.autoRecall}`,
+          `autoCapture:  ${config.autoCapture}`,
+          `tokenBudget:  ${config.tokenBudget}`,
+          `memory slot:  ${slotOwner} ${slotActive ? '(active)' : '(INACTIVE — set plugins.slots.memory to "rembric")'}`,
+        ];
+        return { ok: true, message: lines.join('\n') };
+      },
+    });
+  } catch (err) {
+    api.logger?.warn?.(`rembric: api.registerCommand failed: ${String(err)}`);
+  }
 }

@@ -35,7 +35,7 @@ describe('registerTools', () => {
     expect(registered).toEqual(declared);
   });
 
-  it('memory_save handler forwards to mcp memory.save', async () => {
+  it('memory_save execute forwards to mcp memory.save', async () => {
     const calls = [];
     const client = {
       callTool: async (name, args) => {
@@ -46,12 +46,12 @@ describe('registerTools', () => {
     const api = recordingApi();
     registerTools(api, client);
     const tool = api._tools.get('memory_save');
-    const result = await tool.handler({ type: 'project', content: 'hello' });
+    const result = await tool.execute('tool-call-1', { type: 'project', content: 'hello' });
     expect(calls).toEqual([['memory.save', { type: 'project', content: 'hello' }]]);
     expect(result).toEqual({ id: 'mem-1', candidates: [] });
   });
 
-  it('memory_search forwards query + limit', async () => {
+  it('memory_search execute forwards query + limit', async () => {
     const calls = [];
     const client = {
       callTool: async (name, args) => {
@@ -62,7 +62,7 @@ describe('registerTools', () => {
     const api = recordingApi();
     registerTools(api, client);
     const tool = api._tools.get('memory_search');
-    await tool.handler({ query: 'foo', limit: 5 });
+    await tool.execute('tool-call-1', { query: 'foo', limit: 5 });
     expect(calls).toEqual([['memory.search', { query: 'foo', limit: 5 }]]);
   });
 
@@ -73,13 +73,37 @@ describe('registerTools', () => {
     const api = recordingApi();
     registerTools(api, client);
     const tool = api._tools.get('memory_save');
-    await expect(tool.handler({ type: 'project', content: 'x' })).rejects.toThrow(/mcp_error/);
+    await expect(tool.execute('tool-call-1', { type: 'project', content: 'x' })).rejects.toThrow(
+      /mcp_error/,
+    );
   });
 
-  it('every tool has a non-empty inputSchema (object)', () => {
+  it('every tool has a non-empty parameters object', () => {
     for (const def of TOOL_DEFINITIONS) {
-      expect(def.inputSchema?.type).toBe('object');
+      expect(def.parameters?.type).toBe('object');
     }
+  });
+
+  it('registerTools returns the count of successfully registered tools', () => {
+    const api = recordingApi();
+    const client = { callTool: async () => ({ ok: true, data: {} }) };
+    const count = registerTools(api, client);
+    expect(count).toBe(TOOL_DEFINITIONS.length);
+  });
+
+  it('registerTools surfaces SDK shape mismatches via api.logger and continues', () => {
+    const logs = [];
+    const api = {
+      registerTool: () => {
+        throw new TypeError("Cannot read properties of undefined (reading 'trim')");
+      },
+      logger: { warn: (m) => logs.push(m) },
+    };
+    const client = { callTool: async () => ({ ok: true, data: {} }) };
+    const count = registerTools(api, client);
+    expect(count).toBe(0);
+    expect(logs.length).toBe(TOOL_DEFINITIONS.length);
+    expect(logs[0]).toMatch(/api\.registerTool failed/);
   });
 
   it('every tool maps to a dot-form MCP name', () => {

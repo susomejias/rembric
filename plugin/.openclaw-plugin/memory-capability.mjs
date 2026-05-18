@@ -1,13 +1,21 @@
-// Memory-slot claim, prompt section (auto-recall), and interactive
-// matcher for the `remember|recall|acordate|...` trigger phrases.
+// Memory-slot claim and prompt section (auto-recall).
 //
-// All three surfaces converge on `memory.search` over the MCP wire to
-// Rembric. The capability is registered unconditionally (we claim
-// kind: "memory"); the prompt section is gated on `autoRecall`; the
-// interactive handler is always wired so explicit recall trigger
-// phrases work regardless of `autoRecall`.
-
-const RECALL_PATTERN = /\b(remember|recall|acordate|qu[eé] hicimos|what did we do)\b/i;
+// `api.registerMemoryCapability` claims the `kind: "memory"` slot;
+// `api.registerMemoryPromptSection` is the exclusive-slot prompt
+// builder (gated on `autoRecall`). Both call `memory.search` over the
+// MCP wire to Rembric.
+//
+// NOTE: explicit `remember|recall|acordate` matcher is NOT wired here.
+// `api.registerInteractiveHandler` is an inter-plugin RPC channel, not
+// a user-prompt regex matcher (per /tmp/openclaw/src/plugins/types.ts
+// — its shape is { channel, namespace, handler }, no pattern). To
+// match user phrases, a follow-up change can detect the regex inside
+// the `before_prompt_build` hook and inject extra context when it
+// hits. For v1 the auto-recall prompt section covers the dominant
+// use case (memories auto-injected every turn when autoRecall=true).
+const RECALL_PATTERN_NOT_YET_WIRED =
+  /\b(remember|recall|acordate|qu[eé] hicimos|what did we do)\b/i;
+void RECALL_PATTERN_NOT_YET_WIRED;
 
 const PROMPT_BUILDER_LINES = [
   'Long-term memory provider: Rembric.',
@@ -42,68 +50,48 @@ function searchResultToBlock(result, { tokenBudget }) {
 
 export function registerMemorySurface(api, mcpClient, config) {
   if (typeof api.registerMemoryCapability === 'function') {
-    api.registerMemoryCapability({
-      promptBuilder: (_params) => PROMPT_BUILDER_LINES,
-    });
+    try {
+      api.registerMemoryCapability({
+        promptBuilder: (_params) => PROMPT_BUILDER_LINES,
+      });
+    } catch (err) {
+      api.logger?.warn?.(`rembric: registerMemoryCapability failed: ${String(err)}`);
+    }
   } else {
     api.logger?.debug?.('rembric: api.registerMemoryCapability not available; slot not claimed');
   }
 
   if (config.autoRecall && typeof api.registerMemoryPromptSection === 'function') {
-    api.registerMemoryPromptSection(async (params) => {
-      const prompt =
-        typeof params?.prompt === 'string'
-          ? params.prompt.trim()
-          : Array.isArray(params?.messages)
-            ? (() => {
-                for (const m of [...params.messages].reverse()) {
-                  if (m?.role === 'user') return extractTextFromContent(m.content);
-                }
-                return '';
-              })()
-            : '';
-      if (!prompt) return null;
-      const result = await mcpClient.callTool('memory.search', {
-        query: prompt,
-        limit: 5,
-      });
-      if (!result.ok) {
-        api.logger?.warn?.(`rembric autoRecall: ${result.code} — ${result.message}`);
-        return null;
-      }
-      const block = searchResultToBlock(result.data, { tokenBudget: config.tokenBudget });
-      if (!block) return null;
-      return {
-        prependContext: `Relevant Rembric memories:\n${block}`,
-      };
-    });
-  }
-
-  if (typeof api.registerInteractiveHandler === 'function') {
-    api.registerInteractiveHandler({
-      pattern: RECALL_PATTERN,
-      handler: async (event) => {
-        const text =
-          typeof event?.prompt === 'string'
-            ? event.prompt
-            : typeof event?.text === 'string'
-              ? event.text
+    try {
+      api.registerMemoryPromptSection(async (params) => {
+        const prompt =
+          typeof params?.prompt === 'string'
+            ? params.prompt.trim()
+            : Array.isArray(params?.messages)
+              ? (() => {
+                  for (const m of [...params.messages].reverse()) {
+                    if (m?.role === 'user') return extractTextFromContent(m.content);
+                  }
+                  return '';
+                })()
               : '';
-        if (!text) return null;
+        if (!prompt) return null;
         const result = await mcpClient.callTool('memory.search', {
-          query: text,
-          limit: 8,
+          query: prompt,
+          limit: 5,
         });
         if (!result.ok) {
-          api.logger?.warn?.(`rembric recall handler: ${result.code} — ${result.message}`);
+          api.logger?.warn?.(`rembric autoRecall: ${result.code} — ${result.message}`);
           return null;
         }
         const block = searchResultToBlock(result.data, { tokenBudget: config.tokenBudget });
         if (!block) return null;
         return {
-          prependContext: `Rembric recall for "${text.slice(0, 80)}":\n${block}`,
+          prependContext: `Relevant Rembric memories:\n${block}`,
         };
-      },
-    });
+      });
+    } catch (err) {
+      api.logger?.warn?.(`rembric: registerMemoryPromptSection failed: ${String(err)}`);
+    }
   }
 }
