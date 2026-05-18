@@ -1,0 +1,28 @@
+# See docs/docker.md::Local dev stack.
+
+name: rembric-dev
+
+services:
+  rembric:
+    container_name: rembric-dev
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+
+    ports: !override
+      - '127.0.0.1:8788:8787'
+
+    volumes: !override
+      - ./data-dev:/data
+      - ./src:/app/src
+
+    environment:
+      LOG_LEVEL: debug
+      REMBRIC_PORT: '8787'
+      # Dev-only opt-ins. The canonical docker-compose.yml MUST NOT set these.
+      REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1'
+      REMBRIC_ALLOW_DATA_SHRINKAGE: '1'
+
+    restart: 'no'

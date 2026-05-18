@@ -1,0 +1,475 @@
+/* ═══════════════════════════════════════════════════════════════════
+   ATOMS — single-class building blocks
+   ─────────────────────────────────────────────────────────────────── */
+
+/* bullet ■ */
+.bn {
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  background: var(--lime);
+  margin-right: 0.5em;
+  vertical-align: 0.06em;
+}
+.bn.warn {
+  background: var(--warn);
+}
+.bn.danger {
+  background: var(--danger);
+}
+.bn.dim {
+  background: var(--fg-dim);
+}
+
+/* pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 3px 8px 3px 6px;
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg);
+  border: 1px solid var(--fg-faint);
+  background: transparent;
+  white-space: nowrap;
+}
+.pill::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--fg-dim);
+  display: inline-block;
+}
+.pill.active::before {
+  background: var(--lime);
+}
+.pill.active {
+  color: var(--lime);
+  border-color: color-mix(in oklab, var(--lime), transparent 70%);
+}
+.pill.superseded::before {
+  background: var(--warn);
+}
+.pill.superseded {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn), transparent 70%);
+}
+.pill.archived::before {
+  background: var(--fg-dim);
+}
+.pill.archived {
+  color: var(--fg-dim);
+}
+.pill.pending {
+  border-style: dashed;
+  color: var(--fg-dim);
+}
+.pill.pending::before {
+  background: var(--fg-dim);
+}
+.pill.judged::before {
+  background: var(--lime);
+}
+.pill.judged {
+  color: var(--lime);
+  border-color: color-mix(in oklab, var(--lime), transparent 70%);
+}
+.pill.orphaned::before {
+  background: var(--danger);
+}
+.pill.orphaned {
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger), transparent 70%);
+}
+.pill.global::before {
+  background: var(--fg);
+}
+.pill.scope::before {
+  background: var(--lime);
+}
+.pill.project::before {
+  background: var(--lime);
+}
+.pill.legacy::before {
+  background: var(--warn);
+}
+.pill.legacy {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn), transparent 70%);
+}
+.pill.starred::before {
+  background: var(--lime);
+}
+.pill.admin {
+  color: var(--lime-ink);
+  background: var(--lime);
+  border-color: var(--lime);
+}
+.pill.admin::before {
+  display: none;
+}
+.pill.revoked::before {
+  background: var(--danger);
+}
+.pill.revoked {
+  color: var(--danger);
+}
+.pill.expired::before {
+  background: var(--warn);
+}
+.pill.expired {
+  color: var(--warn);
+}
+
+/* type pills (memory type) */
+.pill.t-user::before {
+  background: var(--lime);
+}
+.pill.t-feedback::before {
+  background: var(--warn);
+}
+.pill.t-project::before {
+  background: var(--fg);
+}
+.pill.t-reference::before {
+  background: var(--fg-dim);
+}
+
+/* relation kind */
+.pill.k-supersedes::before {
+  background: var(--warn);
+}
+.pill.k-conflicts_with::before {
+  background: var(--danger);
+}
+.pill.k-related::before {
+  background: var(--fg-dim);
+}
+.pill.k-compatible::before {
+  background: var(--lime);
+}
+.pill.k-scoped::before {
+  background: var(--fg);
+}
+.pill.k-not_conflict::before {
+  background: var(--lime);
+}
+.pill.k-pending {
+  border-style: dashed;
+  color: var(--fg-dim);
+}
+
+/* buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 10px 16px;
+  min-height: 44px;
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn.primary {
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-color: var(--lime);
+}
+.btn.primary:hover {
+  background: transparent;
+  color: var(--lime);
+}
+.btn.secondary {
+  border-color: var(--fg-faint);
+  color: var(--fg);
+}
+.btn.secondary:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+.btn.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.btn.warn:hover {
+  background: var(--warn);
+  color: var(--lime-ink);
+}
+.btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn.danger:hover {
+  background: var(--danger);
+  color: var(--lime-ink);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.sm {
+  padding: 6px 10px;
+  font-size: 0.62rem;
+  min-height: 32px;
+}
+
+/* inputs */
+.inp,
+.sel {
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  color: var(--fg);
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  padding: 10px 12px;
+  min-height: 44px;
+  caret-color: var(--lime);
+}
+.inp::placeholder,
+.sel::placeholder {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+}
+.inp:focus,
+.sel:focus {
+  border-color: var(--lime);
+  outline: none;
+}
+.sel {
+  appearance: none;
+  padding-right: 32px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%),
+    linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 18px,
+    calc(100% - 12px) 18px;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.inp.lg,
+.sel.lg {
+  font-size: 0.85rem;
+  padding: 12px 14px;
+}
+
+/* tags */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.tag {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border: 1px solid var(--fg-faint);
+  color: var(--fg-dim);
+}
+.tag:hover {
+  color: var(--lime);
+  border-color: var(--lime);
+}
+
+/* flash / banner */
+.flash {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  border: 1px solid var(--fg-faint);
+  background: var(--bg-elev);
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--s-5);
+}
+.flash .lab {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+}
+.flash.warn {
+  border-color: var(--warn);
+}
+.flash.warn .lab {
+  color: var(--warn);
+}
+.flash.danger {
+  border-color: var(--danger);
+}
+.flash.danger .lab {
+  color: var(--danger);
+}
+.flash.lime {
+  border-color: var(--lime);
+}
+.flash.lime .lab {
+  color: var(--lime);
+}
+.flash.error {
+  border-color: var(--danger);
+}
+.flash.error .lab {
+  color: var(--danger);
+}
+.flash.success {
+  border-color: var(--lime);
+}
+.flash.success .lab {
+  color: var(--lime);
+}
+
+/* underline link / phrase */
+.u-lime {
+  border-bottom: 3px solid var(--lime);
+  text-underline-offset: 0.2em;
+  padding-bottom: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   MODAL — native <dialog>, brutalist treatment.
+   Trigger forms add `data-confirm="message"` and a small script in the
+   shell hooks them to this single global dialog.
+   ───────────────────────────────────────────────────────────────── */
+dialog.modal {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--lime);
+  padding: 0;
+  width: min(520px, calc(100vw - 2 * var(--s-4)));
+  margin: auto;
+}
+dialog.modal::backdrop {
+  background: rgba(10, 10, 10, 0.75);
+}
+dialog.modal[data-tone='danger'] {
+  border-color: var(--danger);
+}
+dialog.modal[data-tone='warn'] {
+  border-color: var(--warn);
+}
+
+dialog.modal .modal-head {
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--fg-faint);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-dim);
+}
+dialog.modal .modal-head .lab {
+  color: var(--lime);
+  font-weight: 600;
+}
+dialog.modal[data-tone='danger'] .modal-head .lab {
+  color: var(--danger);
+}
+dialog.modal[data-tone='warn'] .modal-head .lab {
+  color: var(--warn);
+}
+dialog.modal .modal-head .bn {
+  width: 8px;
+  height: 8px;
+  background: var(--lime);
+  display: inline-block;
+}
+dialog.modal[data-tone='danger'] .modal-head .bn {
+  background: var(--danger);
+}
+dialog.modal[data-tone='warn'] .modal-head .bn {
+  background: var(--warn);
+}
+
+dialog.modal .modal-body {
+  padding: var(--s-5);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--fg);
+}
+dialog.modal .modal-foot {
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--fg-faint);
+  display: flex;
+  gap: var(--s-3);
+  justify-content: flex-end;
+}
+dialog.modal .modal-foot button {
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  border: 1px solid var(--fg-faint);
+  background: transparent;
+  color: var(--fg);
+  padding: 8px 14px;
+  min-height: 36px;
+  cursor: pointer;
+}
+dialog.modal .modal-foot button:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+dialog.modal .modal-foot button[value='confirm'] {
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-color: var(--lime);
+}
+dialog.modal[data-tone='danger'] .modal-foot button[value='confirm'] {
+  background: var(--danger);
+  color: var(--lime-ink);
+  border-color: var(--danger);
+}
+dialog.modal[data-tone='warn'] .modal-foot button[value='confirm'] {
+  background: var(--warn);
+  color: var(--lime-ink);
+  border-color: var(--warn);
+}
+dialog.modal .modal-foot button[value='confirm']:hover {
+  background: transparent;
+  color: var(--lime);
+}
+dialog.modal[data-tone='danger'] .modal-foot button[value='confirm']:hover {
+  background: transparent;
+  color: var(--danger);
+}
+dialog.modal[data-tone='warn'] .modal-foot button[value='confirm']:hover {
+  background: transparent;
+  color: var(--warn);
+}
+
+/* highlight phrase */
+.hl-lime {
+  background: var(--lime);
+  color: var(--lime-ink);
+  padding: 0 0.25em 0.05em 0.25em;
+}
+
+/* ASCII spark / timeline cells */
+.spark {
+  font-family: var(--f-mono);
+  font-size: 0.75rem;
+  color: var(--lime);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}

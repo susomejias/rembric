@@ -1,0 +1,274 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+This repo uses **pnpm** (pinned via `packageManager` in `package.json`). Enable via `corepack enable`.
+
+| Task                | Command                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Install             | `pnpm install`                                                                                                      |
+| Build               | `pnpm run build` (clean + `tsc -p tsconfig.build.json` + copy assets)                                               |
+| Watch build         | `pnpm run dev`                                                                                                      |
+| Run built server    | `pnpm start` (requires `REMBRIC_ADMIN_TOKEN`)                                                                       |
+| Typecheck           | `pnpm run typecheck` (`tsc --noEmit`)                                                                               |
+| Lint                | `pnpm run lint` / `pnpm run lint:fix`                                                                               |
+| Format              | `pnpm run format` / `pnpm run format:check`                                                                         |
+| Test (full)         | `pnpm test`                                                                                                         |
+| Test (watch)        | `pnpm run test:watch`                                                                                               |
+| Test (coverage)     | `pnpm run test:coverage` (gated: ≥90% stmts, ≥85% branches/functions/lines)                                         |
+| Single test file    | `pnpm vitest run path/to/file.test.ts`                                                                              |
+| Single test by name | `pnpm vitest run -t "partial name"`                                                                                 |
+| DB schema gen       | `pnpm run db:generate` (drizzle-kit)                                                                                |
+| DB migration check  | `pnpm run db:check`                                                                                                 |
+| Dev stack (Docker)  | `pnpm run dev:docker:up` (foreground; wipes+reseeds every up; Ctrl-C stops) — see `docs/docker.md::Local dev stack` |
+
+Operator work happens in the dashboard (`/dashboard/tokens`, `/dashboard/projects`, `/dashboard/sessions`, `/dashboard/consolidation`, `/dashboard/maintenance`). There is no operator CLI — the Docker image runs the server only.
+
+### Dev stack (one-command Docker)
+
+`pnpm run dev:docker:up` builds the dev image (Dockerfile `dev` target), starts the `rembric-dev` container in the foreground, and runs this boot chain before the server listens:
+
+```
+pnpm run build:css                       # writes dist/dashboard/public/assets/styles/manifest.json + bundles
+node scripts/copy-assets.mjs             # mirrors src/dashboard/public/* (fonts, logo) → dist/
+tsx src/scripts/seed-dev.ts --reset      # ALWAYS wipes ./data-dev/ + reseeds ~30 thematic rows + 3 fresh tokens
+                                         # (plaintext tokens printed in every boot's stderr — capture from logs)
+exec tsx watch src/server-entrypoint.ts
+```
+
+Port `127.0.0.1:8788` (loopback, dev-only). Volume bind-mount `./data-dev:/data` (gitignored). Source bind-mount `./src:/app/src` feeds tsx watch — saved `src/**/*.ts` edits reload the Node child sub-second without a container restart. Edits to `src/dashboard/styles/*.css` or `src/scripts/seed-dev.ts` require Ctrl-C + `pnpm run dev:docker:up` to re-run the boot chain.
+
+**Every `up` produces a fresh canvas.** The dev contract is "predictable baseline every boot": any rows the operator added manually via the dashboard / MCP during a session are wiped on the next `up`. If you need to preserve manual state between sessions, run the seed manually without `--reset` instead (`docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric tsx src/scripts/seed-dev.ts`) and use `docker compose ... start` instead of `up`.
+
+Full operator guide: `docs/docker.md::Local dev stack`.
+
+Git hooks (run automatically; do not bypass with `--no-verify`):
+
+- **pre-commit**: `lint-staged` (Prettier + ESLint on staged files) then `tsc --noEmit --incremental`.
+- **commit-msg**: `commitlint` (Conventional Commits required — `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`, `style`, `revert`).
+- **pre-push**: full `pnpm test`.
+
+## Architecture
+
+Single Node process, single SQLite file. The README has the full diagram; this section calls out invariants and cross-file flows that you can't see from one file.
+
+### Layered structure
+
+```
+src/
+  server/    HTTP (Node http + Hono for /dashboard, raw IncomingMessage for /mcp)
+             auth.ts → request-context.ts (AsyncLocalStorage) → session-router.ts
+  mcp/       MCP tool handlers — thin wrappers over services, called via the
+             SDK's StreamableHTTP transport. tools.ts owns memory.*; sessions-tools.ts
+             owns memory.session_*, memory.context, memory.timeline, etc.;
+             project-tools.ts owns project.*; relations-tools.ts owns judge/compare.
+  dashboard/ SSR HTML + HTMX (Hono). One module per page.
+  services/  Domain logic. MemoryService, RelationsService, ProjectsService,
+             TokensService, AgentSessionsService, PromptsService, scope.ts.
+             Scope is enforced at the SQL level here so handlers can't leak.
+  db/        Drizzle schema + client + migrations. Append-only.
+  consolidation/  Background workers — decay (deterministic) and
+                  orphan-promotion (LLM judge over old pending judgments).
+  llm/       OpenAI-compatible client (works against Ollama, LM Studio, vLLM, etc.).
+  cli/       commander-based CLI subcommands.
+
+plugin/      Shared plugin tree for BOTH Claude Code and Codex CLI marketplaces.
+             plugin/.claude-plugin/plugin.json   Claude Code manifest
+             plugin/.claude-plugin/mcp.json      Claude Code MCP config
+                                                 (env: ${user_config.*}; args:
+                                                 ${CLAUDE_PLUGIN_ROOT}/bin/...)
+             plugin/.codex-plugin/plugin.json    Codex manifest
+             plugin/.codex-plugin/mcp.json       Codex MCP config (cwd: "."
+                                                 + relative args; env_vars: [...])
+             plugin/hooks/hooks.json             Claude Code hooks
+             plugin/hooks/hooks.codex.json       Codex hooks (subset; cmd-only)
+             plugin/scripts/                     shared hook scripts (both
+                                                 clients honour ${CLAUDE_PLUGIN_ROOT})
+             plugin/bin/rembric-bridge.mjs       bundled stdio↔HTTP bridge
+
+.claude-plugin/marketplace.json   marketplace for `claude plugin install`
+.codex-plugin/marketplace.json    marketplace for `codex plugin install`
+                                  (git-subdir source against ./plugin)
+```
+
+### Load-bearing invariants (do NOT violate without an OpenSpec change)
+
+- **Append-only memory.** Rows are never `DELETE`d; `content` is never `UPDATE`d. Lifecycle is `status` flips (`active` → `superseded` | `archived`) plus `replaces` links. Every consolidation op is journaled and reversible.
+- **Scope is enforced in the service layer.** Every `MemoryService` query filters by `Scope` (`SCOPE_GLOBAL` or `projectScope(id)`). Cross-scope reads return `not_found`, not the row. Tools resolve scope once and thread it down; they never query DB directly.
+- **Convergent topics via `topic_key`.** On `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically inside `saveWithTopicKey`.
+- **Fresh-context judgment.** Candidate conflicts surface synchronously in `memory.save.candidates[]`. The agent that produced the conflict judges it via `memory.judge`. Nightly consolidator only does decay + orphan promotion of pending rows older than `JUDGMENT_ORPHAN_AFTER_MS`.
+
+These invariants have dedicated tests; do not weaken them.
+
+### Scope resolution (the trickiest cross-file flow)
+
+When a request hits `/mcp` or `/mcp/<slug>`:
+
+1. `server/http.ts` extracts the URL slug and calls `authenticate()` from `server/auth.ts`.
+2. `authenticate()` returns a `RequestContext` carrying `project` (resolved from URL slug only) and `requestedSlug` (the literal slug, regardless of whether it resolved). This context is stashed in `AsyncLocalStorage` via `runWithContext`.
+3. Tool handlers read the context via `getRequestContext()`. **`ctx.project` is the URL-derived project — it does NOT reflect `project.use({slug})` calls.**
+4. `project.use` writes the chosen project into `SessionRouter` (in-memory, keyed by `(tokenId, mcpSessionId)`), NOT into the context.
+5. Tools that need the effective project must consult BOTH sources. Precedence: `ctx.project` first, then `SessionRouter.get(...).projectId`. The helpers that do this:
+   - `src/mcp/tools.ts` → `resolveEffectiveProject(deps)` for `memory.{save,search,get,confirm}`.
+   - `src/mcp/sessions-tools.ts` → inline in `handleSessionStart`; `scopeFromContext(deps)` for `memory.{context,timeline,stats,save_prompt,capture_passive}`.
+   - `src/mcp/project-tools.ts` → inline in `handleCurrent`.
+
+**If you add a new MCP tool that needs project scope, follow this pattern — do not read `ctx.project` in isolation.** Path-scoped (`/mcp/<slug>`) connections still have `ctx.project` set, so the router fallback short-circuits cleanly. The fallback is gated on `ctx.requestedSlug === null` to preserve path-scoping semantics.
+
+Path-scoping contract enforced in `tools.ts`:
+
+- `/mcp/<slug>`: `scope='global'` save → `scope_locked`; `scope='project'` → saved to that project; cross-scope `get/confirm` → `not_found`.
+- `/mcp`: `scope='project'` without an active project (URL or router) → `project_required`; `scope='global'` → saved as global.
+
+### MCP server registration
+
+`src/mcp/server.ts` (`createMcpServer`) registers every tool against the SDK. The factory closes over `requestedSlug` so `initialize.instructions` matches connection scope. `src/mcp/transport.ts` (`McpTransportManager`) is keyed by `mcp-session-id` header — each transport gets its own `McpServer` instance.
+
+### Background workers
+
+`src/consolidation/scheduler.ts` runs on `CONSOLIDATION_CRON` (default 03:00 daily). Triggered manually via `POST /admin/consolidation/run` (admin token required) or the dashboard button at `/dashboard/consolidation`. The embedding worker runs every 30s + pre-consolidation. Both are wired in `src/server/bootstrap.ts`.
+
+### Maintenance: physical-purge escape hatches (manual, admin-only)
+
+The dashboard exposes `/dashboard/maintenance` for two operator-triggered physical purges that narrow the otherwise append-only contract:
+
+- **`AgentSessionsService.purgeEmpty({ adminBypass: true })`** (only `src/services/agent-sessions.ts` may emit `DELETE FROM sessions`). Predicate: `status ∈ {ended, abandoned}` AND `deleted_at IS NULL` AND `summary IS NULL` AND `title_final = 0` AND `ended_at < now − 1h` AND zero referencing rows in `memory`, `prompts`, `confirmations`.
+- **`MemoryService.purgeDisconnectedArchived({ adminBypass: true })`** (only `src/services/memory.ts` may emit `DELETE FROM memory`). Predicate: `status = 'archived'` AND no other row references this id via `memory.replaces`, `consolidation_ops.affected_ids`, `consolidation_ops.created_id`, `memory_relations.{source,target}_id`, or `confirmations.memory_id`. Drops the matching `memory_vec` and `memory_fts` shadow rows in the same transaction.
+
+Both write a journal row to `consolidation_ops` with `op_type = 'session_purge'` or `'archived_memory_purge'`. **Consolidator reversibility is narrowed**: `undoOp` throws `PurgedRowMissingError` when any `affected_ids` row has been physically removed, and `NotUndoableError` on the two purge `op_type`s themselves. The dashboard surfaces both errors inline.
+
+`src/test/invariants.test.ts` pins these as the ONLY files allowed to emit those DELETEs and asserts positively that they actually contain them — the allow-list cannot silently expire.
+
+## OpenSpec workflow
+
+Behavioral changes are spec-driven. Specs live in `openspec/specs/<area>/` (auth, consolidation, dashboard, mcp-api, memory, persistence, projects, sessions). Active proposals live in `openspec/changes/<name>/`; archived under `openspec/changes/archive/`.
+
+Slash commands available in this repo (via `.claude/commands/`):
+
+- `/opsx:propose`, `/opsx:explore`, `/opsx:apply`, `/opsx:archive`
+
+Before changing a load-bearing invariant or adding a new MCP tool, open an OpenSpec change first.
+
+## Dashboard conventions
+
+- **Timestamps MUST go through `formatTs`** (`src/dashboard/templates.ts`). The helper emits `<time datetime="…Z" data-rembric-ts>YYYY-MM-DD HH:MM:SS UTC</time>`; a tiny inline script in the layout shell upgrades the visible text to the viewer's local timezone via `Intl.DateTimeFormat` on `DOMContentLoaded` and after every `htmx:afterSwap`. Never hand-write `toISOString()`, `toLocaleString()`, or ad-hoc date strings in templates — that bypasses the upgrader and forces operators back into UTC. SQLite, the service layer, and MCP serialization stay UTC; only the dashboard HTML localises.
+- The upgrader element marker is `data-rembric-ts`. Anything emitting a `<time>` element for a different purpose MUST omit that attribute so the upgrader leaves it alone.
+
+### Nomenclature: `judgments` (presentation) vs `relations` (entity)
+
+The same SQL row is named differently across layers, **on purpose**:
+
+- **Presentation says `judgments`.** URL `/dashboard/judgments`, file `src/dashboard/judgments.ts`, sidebar label `JUDGMENTS`, page title `Rembric Judgments.`, column header `verdict`, CSRF action `judgment.orphan`, `NavKey = 'judgments'`. This is what the operator does on the page: judge pending candidates and audit past verdicts.
+- **DB / services / MCP say `relations`.** Table `memory_relations`, service `RelationsService`, MCP tool family `mcp/relations-tools.ts`, view type `RelationView`. This is the entity that persists: a directed `(source_id, target_id, kind)` edge between two `memory` rows.
+
+The two words are not synonyms used inconsistently — they refer to two distinct concepts that happen to share a row: the **entity** (an edge that exists in the graph, with a `judgment_id` field on it) and the **lifecycle event** over that entity (judging a pending candidate). The same row participates in both.
+
+When you add a new dashboard surface that touches this data, use `judgments` in UI text, URLs, file names, and CSRF actions. When you touch the DB layer, services, or MCP tools, use `relations`. Do NOT propose a rename of the table or the MCP tool to "unify" them — the boundary is intentional, and changing the DB/MCP side requires migrations, plugin major bumps across three marketplaces, and deltas across `memory`, `mcp-api`, `persistence`, `dashboard` specs. The cost-benefit landed clearly on "keep the divergence" — recorded in `openspec/changes/archive/2026-05-17-refresh-dashboard-presentation/design.md` (Decision 1).
+
+### Design system
+
+- **All dashboard CSS lives in `src/dashboard/styles/`** — never inline `<style>` in templates. The split is mechanical: `styles/core/{tokens,base,atoms,layout,patterns}.css` is loaded on every page; `styles/views/<view>.css` is loaded only by that view via the build-time manifest at `dist/dashboard/public/assets/styles/manifest.json`. `scripts/build-css.mjs` (invoked by `pnpm run build` and `pnpm run build:css`) minifies via `lightningcss`, content-hashes, and emits the manifest.
+- **Brutalist tokens are locked**: `--bg #0a0a0a`, `--lime #c6f24e`, font stack (Space Grotesk + Inter + JetBrains Mono), spacing scale `--s-1..--s-8`. Changing any of these requires an OpenSpec change — the design contract is published in `openspec/specs/dashboard/spec.md`. No light theme, no theme switcher.
+- **Fonts are self-hosted**: woff2 files belong in `src/dashboard/public/assets/fonts/`. Never reference Google Fonts or any other font CDN at runtime — that's a spec violation.
+- **Adding a new dashboard view**: create `src/dashboard/styles/views/<view>.css` (even if empty), pass `view: '<view>'` to `shell()` via `renderPage`. Build emits the file automatically. `renderPage` (in `src/dashboard/page-shell.ts`) is the canonical entry point for authenticated dashboard pages — it threads the cookie-driven sidebar collapse state, CSRF token, and counters into `shell()` for you.
+- **HTML is whitespace-collapsed in production** by `minifyHtml()` inside `shell()`. Anything inside `<pre>`, `<textarea>`, or `<script>` is preserved verbatim; everywhere else, runs of inter-tag whitespace are stripped. This affects "view source" readability — DevTools pretty-print still works.
+- **Sidebar collapse** is server-driven via the `rbr-sb-collapsed` cookie. The toggle is a CSRF-protected `POST /dashboard/_sidebar/toggle`. Do not introduce localStorage-based UI state for the same surface — the cookie path is what guarantees no FOUC on first paint.
+
+### Destructive actions MUST use the `data-confirm` modal
+
+Any dashboard surface that triggers an action with destructive or hard-to-reverse effect — soft-delete, hard-delete/purge, revoke, archive, undo of a journaled op, anything that can't be silently undone with a refresh — MUST gate its submit behind the inline confirmation modal. The mechanism is already shipped in `src/dashboard/templates.ts::shell()` (the `CONFIRM` inline JS); you just declare three attributes on the `<form>` element:
+
+```html
+<form
+  action="..."
+  method="post"
+  data-confirm="Plain-language sentence ending in a question. State the count when relevant, and say 'irreversible' / 'journaled' / 'reversible' explicitly so the operator knows the shape of the action."
+  data-confirm-label="VERB N TARGET"
+  data-confirm-tone="danger"  <!-- 'warn' for reversible-but-risky; 'danger' for irreversible -->
+>
+  {csrfInput(...)}
+  <button type="submit">…</button>
+</form>
+```
+
+Rules that are easy to get wrong:
+
+- **The attributes go on the `<form>`, not on the `<button>`.** The handler binds with `document.querySelectorAll('form[data-confirm]')`; attributes on the button are silently ignored and the form submits without prompting. Verified in `src/dashboard/templates.ts::CONFIRM`.
+- **Tone choice maps to undoability**: `warn` for actions the operator can revert (soft-delete, archive, undo-of-undo); `danger` for hard-deletes/revokes/purges that cannot be unwound from the UI.
+- **Copy must name the count + the consequence.** "Purge 12 empty session row(s)? This is irreversible. The deletion is journaled in consolidation_ops for audit." beats "Are you sure?". Operators reading the modal at 11pm need enough context to stop themselves.
+- **`data-confirm-label` is the CONFIRM button copy.** Use uppercase verb + count + noun ("PURGE 12 SESSIONS", "REVOKE TOKEN", "UNDO ENTIRE RUN"). It mirrors the action being taken, not a generic "OK".
+- **htmx swaps are covered**: the binder re-runs on `htmx:afterSwap`, so forms injected after initial render also get the modal. Do not hand-roll a `confirm()` fallback.
+
+Existing call sites to mirror (form-level attributes): `src/dashboard/sessions.ts` (soft-delete), `src/dashboard/tokens.ts` (revoke), `src/dashboard/projects.ts` (archive project), `src/dashboard/memories.ts` (archive memory), `src/dashboard/consolidation.ts` (undo op / undo run), `src/dashboard/maintenance.ts` (purge sessions / purge archived).
+
+## Code style highlights (from CONTRIBUTING.md)
+
+- TypeScript strict; no `any` / `as unknown as T` without a justifying comment.
+- No floating promises (ESLint enforces).
+- `import type` for types, value imports otherwise; imports ordered builtin → external → internal → relative (auto-fixed).
+- Co-located tests: `src/**/*.test.ts` next to the module.
+- Invariant tests under `src/**/__tests__/invariants/` are sacred.
+- **Default to no comments.** Write a comment only when its absence would cost a future reader real time: magic numbers/constants, non-obvious invariants, workarounds for library quirks, hidden side-effects, or public-API docstrings. Do NOT restate what the code does, reference the current task/PR, or leave TODO/FIXME without a tracked link. When in doubt, delete the comment and let names + structure speak.
+
+## Supply-chain hygiene
+
+Before adding any dependency or editing install-time configuration (`package.json`, `.npmrc`, `pnpm-workspace.yaml`, the lockfile, the CI install step, the Dockerfile install layers), consult `.agents/skills/npm-security-best-practices/SKILL.md`. The repo enforces a default-deny lifecycle-script policy (`.npmrc::ignore-scripts=true`) with an explicit `pnpm-workspace.yaml::allowBuilds` map permitting `husky: true`, `better-sqlite3: true`, `sqlite-vec: true` (and denying everything else, e.g., `esbuild: false`), refuses transitive deps from exotic sources (`blockExoticSubdeps: true`), refuses install-time of versions younger than 3 days (`minimumReleaseAge: 4320`), and runs `lockfile-lint` in CI before any tarball is fetched. Any new dep that wants a postinstall must be added to `allowBuilds` with `true` in the same PR. Escape hatch for genuine security patches: temporarily lower `minimumReleaseAge` to 0 (or add the package to `minimumReleaseAgeExclude`) and re-tighten in a follow-up PR.
+
+## Plugin development discipline
+
+Rembric ships one plugin tree (`plugin/`) consumed by multiple agent marketplaces (Claude Code, Codex CLI, Hermes Agent, future Cursor/Windsurf/etc.). To keep cross-client support sustainable:
+
+- **Shared logic lives in the HTTP API contract.** The anchor is `src/server/api-router.ts` (capability `http-api`). Per-client adapters MAY be written in any language — bash for the shell-hook clients (Claude Code, Codex CLI) and Python for the in-process clients (Hermes Agent's `MemoryProvider`) are siblings, NOT duplicates. They implement the same set of POSTs against the same endpoints and SHALL stay in lock-step on payload shape and failure semantics. Shell-only assets (`plugin/scripts/`, `plugin/bin/`) remain shared across the shell-hook clients via `${CLAUDE_PLUGIN_ROOT}`; the Hermes provider lives at `plugin/.hermes-plugin/` and reads the same API contract via Python `urllib`.
+- **Per-client divergence ONLY when the platform forces it.** Two near-duplicate file pairs and one whole-cloth Python tree diverge today, all because the platforms have different supported syntax/event sets — not for cosmetic reasons:
+  - **Hooks (Claude vs Codex)**: `hooks/hooks.json` vs `hooks/hooks.codex.json`. Claude Code's manifest format inlines `${user_config.*}` env prefixes; Codex's hook schema doesn't support that interpolation and uses a smaller event set.
+  - **MCP server config (Claude vs Codex)**: `mcp.json` (Claude Code) vs `.codex-plugin/mcp.json` (Codex). Two independent platform deltas force the split:
+    - **Path substitution.** Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` in `args`. Codex does not — `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` resolves only the `cwd` field against `plugin_root`; `command` and `args` pass verbatim to the spawn (`LocalStdioServerLauncher::launch_server` in `stdio_server_launcher.rs` is a direct `Command::new`, no shell expansion). Codex's manifest therefore uses `cwd: "."` (normalised to the plugin root) plus `args: ["./bin/rembric-bridge.mjs"]` so node resolves the bridge path against the spawned cwd.
+    - **Env injection.** Claude Code reads keychain values via `env: { … "${user_config.*}" }` interpolation. Codex passes `env` map values verbatim AND clears the subprocess env (`Command::env_clear()` in `launch_server`) — the subprocess only sees `DEFAULT_ENV_VARS` + names listed in `env_vars` + literal `env` overrides (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex's manifest therefore uses `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]` to forward those names from the user's shell at spawn time, NOT an `env` map.
+  - **Hermes provider tree**: `plugin/.hermes-plugin/{plugin.yaml, __init__.py, install.sh, README.md}`. Whole-cloth different from the shell-hook clients — Hermes runs the provider in-process, not via shell subprocesses, so reusing the bash scripts is impossible. The Python provider talks to the SAME `src/server/api-router.ts` HTTP endpoints; the contract is the API, not the file. No `.hermes-plugin/mcp.json` ships in this tree — Hermes's MCP config lives in the user's `~/.hermes/config.yaml` global (Hermes does not consume a per-plugin MCP file), so the bundled bridge gets registered there by the user, not by the manifest.
+
+  The scripts the Claude/Codex hooks invoke remain SHARED between those two clients — `session-start.sh`, `pre-compact.sh`, `session-stop.sh`, and the helper `_api.sh` work identically under Claude Code and Codex. Per-client script variants (`*-codex.sh`, `*-claude.sh`) are forbidden unless the script itself genuinely needs platform-specific logic.
+
+- **Per-client manifests stay thin.** Each `.<client>-plugin/plugin.json` (or `plugin.yaml` for Hermes) declares only what differs (paths to its hooks file, paths to its MCP config file, client-specific UI metadata, lifecycle hook list for Hermes). Anything that would also be true for another client gets factored into `plugin/`.
+- **Quick sanity check.** `git ls-files plugin/` should show ONE copy of each shared resource. The `mcp.json` files inside each shell-hook client dir, the two `hooks/hooks*.json` files, and the `.hermes-plugin/*` Python tree are the only legitimate divergences — they carry per-client env/syntax/runtime that cannot be merged. Anything else with two paths and near-identical content is a sync bug.
+
+The bundled `plugin/bin/rembric-bridge.mjs` is the canonical bridge source. Claude Code reaches it via `${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` declared in `plugin/.claude-plugin/mcp.json`. Codex reaches it via `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` declared in `plugin/.codex-plugin/mcp.json`. Edit in place; commit the file directly.
+
+### Releasing a new plugin version — MUST bump `version` in ALL THREE manifests
+
+`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, AND `plugin/.hermes-plugin/plugin.yaml` declare a `version` field. Claude Code uses it as the cache key for `/plugin update` (official docs: `code.claude.com/docs/en/plugins-reference#version-management`) and Codex stores plugins under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`. Hermes does not cache by version (the plugin ships via `plugin/.hermes-plugin/install.sh`, idempotent re-fetch), but keeping its `version:` in lock-step keeps `plugin/CHANGELOG.md` and operator-facing diagnostics meaningful. If you ship changes WITHOUT bumping the version, both shell-hook clients will keep serving the cached old code and `/plugin update` will report "already at the latest version" — users have to manually uninstall + reinstall to recover.
+
+**Rule**: any time you change something in `plugin/` that users need to see (scripts, hooks, mcp.json, bin/, the Hermes provider, manifests themselves), bump ALL THREE manifest versions in the same commit. Use SemVer:
+
+- **patch** (`0.2.0` → `0.2.1`): bug fixes in hook scripts, helper functions, doc tweaks visible at runtime.
+- **minor** (`0.2.0` → `0.3.0`): new behaviour (new hook, new endpoint touched, additional manifest field).
+- **major** (`0.2.0` → `1.0.0`): breaking changes (renamed userConfig field, removed hook event, incompatible script CLI).
+
+Mirror the same version in `plugin/CHANGELOG.md` (the `[X.Y.Z] — unreleased` heading). When the change merges to `main`, downstream users get the new version via the official update flow documented in `plugin/README.md` ("Updating to a new version") and `docs/agents.md` ("Updating the plugin"). Without the bump, those instructions silently no-op.
+
+If you genuinely want every commit to auto-invalidate the cache (during heavy iteration), omit the `version` field entirely — Claude Code falls back to the git commit SHA per its docs. Re-add `version` before merging so end users have stable release semantics.
+
+### Session lifecycle: HTTP, not MCP
+
+Session creation/summary/end is driven by the plugin's `command` hooks POSTing to Rembric's `/api/<slug>/sessions(*)` HTTP endpoints (see `src/server/api-router.ts` and the `http-api` capability spec). The MCP tools `memory.session_start`, `memory.session_end`, `memory.session_summary` remain available for clients that don't run the plugin, but the canonical path is HTTP. This is why:
+
+- `plugin/scripts/_api.sh` is the shared helper sourced by every script that talks to the API. Exposes `rembric_post`, `rembric_read_project_slug`, `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, and `rembric_json_escape`. Single canonical file — both clients pick up edits.
+- **Hook env vars: per-client divergence forced by the platform.** Claude Code hooks run as sibling subprocesses of the MCP bridge and do NOT inherit `mcp.json:env`. The two clients differ in what they support:
+  - **Claude Code** substitutes `${user_config.*}` in hook `command` strings (documented at `code.claude.com/docs/en/hooks`). `plugin/hooks/hooks.json` inline-prefixes each lifecycle hook with `REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}'`, so the install wizard's keychain values flow to the hooks automatically — users don't have to export anything in their shell.
+  - **Codex** does NOT substitute `${user_config.*}` (verified against `developers.openai.com/codex/plugins/build`) and has no `userConfig` schema. `plugin/hooks/hooks.codex.json` therefore stays unprefixed — Codex users export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that launches `codex`, the same way they already do for the bridge (per `docs/agents.md` Codex section).
+  - The shared scripts (`_api.sh`, `session-start.sh`, `pre-compact.sh`, `session-stop.sh`) stay client-agnostic: they read the envs from process env regardless of how they got there. When envs are missing entirely, `_api.sh` writes a `[rembric] missing REMBRIC_*` diagnostic to stderr and exits 0.
+- `memory.save` automatically attaches `session_id` to the most-recently-active session for `(token, project)` via `resolveActiveSessionId` in `src/mcp/tools.ts`. Agents never need to thread a session id manually.
+- Session ids stay globally unique (`sessions.id TEXT PRIMARY KEY` unchanged from migration `0003`). Cross-token collisions are theoretical (UUID/ULID space) and are rejected at the service layer with `id_collision`.
+
+**Codex-specific gotcha: `plugin_hooks` is `under development` in `codex-cli 0.130.0`.** `codex features list` reports `plugin_hooks  under development  false` — Codex ships this feature OFF by default in this CLI release. With the flag off, `load_plugin_hooks` is short-circuited inside `if plugin_hooks_enabled { ... }` in `codex-rs/core/src/session/mod.rs` and no warning is emitted; the plugin's `hooks.codex.json` parses fine and lives in the cache but the hook handlers never register. Symptom is a silently empty `/dashboard/sessions` and a `/plugins` panel showing "No plugin hooks". Even after enabling the feature, Codex enforces a per-hook trust review at startup (`codex-rs/tui/src/startup_hooks_review.rs`) — users have to open `/hooks` and approve each handler before they fire. Codex's `main` branch source (read 2026-05-16) already promotes the feature to `Stable` / `default_enabled: true`, so this gotcha will likely disappear in a future Codex release. Until then: when triaging "Codex hooks not firing" reports, run `codex features list` first; if `plugin_hooks` is `false`, point the user at the [enablement instructions in `docs/agents.md`](./docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+
+## Running locally
+
+```bash
+export REMBRIC_ADMIN_TOKEN=$(openssl rand -hex 32)
+pnpm run dev    # tsc --watch
+pnpm start      # run the built server
+```
+
+MCP at `http://127.0.0.1:8787/mcp`, dashboard at `http://127.0.0.1:8787/dashboard`. Server binds to `127.0.0.1` only; remote exposure is the operator's responsibility (not shipped).

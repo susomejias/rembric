@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/susomejias/rembric/security/advisories/new
+    about: Report a security issue privately via GitHub Security Advisories. Do NOT open a public issue.
+  - name: Operator question / setup help
+    url: https://github.com/susomejias/rembric/blob/main/docs/troubleshooting.md
+    about: Common errors and recovery recipes. Check here before opening an issue.

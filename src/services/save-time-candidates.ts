@@ -1,0 +1,155 @@
+import { sql } from 'drizzle-orm';
+
+import type { Db } from '../db/client.js';
+import type { Memory } from '../db/schema/memory.js';
+
+/**
+ * Save-time candidate detector for `memory.save`.
+ *
+ * Runs two passes, deduplicates by target id, ranks by max(vec, fts),
+ * returns the top N.
+ *
+ *   1. Vec kNN (when an embedding for the just-saved row already
+ *      exists; otherwise this pass is a no-op for THIS save and the
+ *      consolidator's orphan-promotion picks up the slack later).
+ *   2. FTS5 BM25 query against the row's content.
+ *
+ * Scope isolation: the SQL filters by `(scope, project_id)` matching
+ * the just-saved row. Rows already linked to it via `replaces` are
+ * excluded.
+ *
+ * The detector NEVER inserts rows — it only proposes pairs. The caller
+ * (in `MemoryService.save`) decides which to surface to the agent and
+ * which to leave to the consolidator.
+ */
+
+export interface CandidateOptions {
+  vecThreshold: number;
+  ftsThreshold: number;
+  perSaveMax: number;
+  /** Internal candidate pool size before the cap is applied; default 20. */
+  poolSize?: number;
+}
+
+export interface SaveCandidate {
+  targetId: string;
+  /** 0..1, normalized */
+  similarity: number;
+  /** Which detector surfaced this match. */
+  source: 'vec' | 'fts';
+  snippet: string;
+}
+
+export function findSaveTimeCandidates(
+  db: Db,
+  saved: Memory,
+  opts: CandidateOptions,
+): SaveCandidate[] {
+  const poolSize = opts.poolSize ?? 20;
+  const scopeWhere =
+    saved.scope === 'project'
+      ? sql`scope = 'project' AND project_id = ${saved.projectId}`
+      : sql`scope = 'global' AND project_id IS NULL`;
+
+  // --- 1. vec kNN ----------------------------------------------------
+  // Only useful when the just-saved row has an embedding (the worker
+  // may not have processed it yet). When the row has no embedding the
+  // vec pass produces nothing — the FTS pass picks up the slack.
+  const vecRows = db.all<{ id: string; distance: number; content: string }>(
+    sql`
+      SELECT m.id AS id, vec_distance_cosine(v_self.embedding, v_other.embedding) AS distance, m.content AS content
+      FROM memory_vec v_self
+        JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
+        JOIN memory m ON m.id = v_other.memory_id
+      WHERE v_self.memory_id = ${saved.id}
+        AND ${scopeWhere}
+        AND m.status = 'active'
+        AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(saved.replaces)}))
+      ORDER BY distance ASC
+      LIMIT ${poolSize}
+    `,
+  );
+  const vecPool: SaveCandidate[] = vecRows
+    .map((r) => ({
+      targetId: r.id,
+      similarity: 1 - Math.max(0, Math.min(1, r.distance)),
+      source: 'vec' as const,
+      snippet: snippet(r.content, 200),
+    }))
+    .filter((c) => c.similarity >= opts.vecThreshold);
+
+  // --- 2. FTS5 lexical -----------------------------------------------
+  // BM25 returns lower-is-better; normalize via 1/(1+|rank|) to a [0,1]
+  // proxy, then keep matches above the configured threshold.
+  const matchExpr = escapeFts(saved.content);
+  const ftsPool: SaveCandidate[] = [];
+  if (matchExpr.length > 0) {
+    const ftsRows = db.all<{ id: string; rank: number; content: string }>(
+      sql`
+        SELECT m.id AS id, memory_fts.rank AS rank, m.content AS content
+        FROM memory_fts
+          JOIN memory m ON m.rowid = memory_fts.rowid
+        WHERE memory_fts MATCH ${matchExpr}
+          AND m.id != ${saved.id}
+          AND ${scopeWhere}
+          AND m.status = 'active'
+          AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(saved.replaces)}))
+        ORDER BY rank
+        LIMIT ${poolSize}
+      `,
+    );
+    for (const r of ftsRows) {
+      const sim = 1 / (1 + Math.abs(r.rank));
+      if (sim >= opts.ftsThreshold) {
+        ftsPool.push({
+          targetId: r.id,
+          similarity: sim,
+          source: 'fts',
+          snippet: snippet(r.content, 200),
+        });
+      }
+    }
+  }
+
+  // --- 3. Merge + dedupe ----------------------------------------------
+  // For each unique target id, keep the higher-scoring source (vec wins
+  // ties because vec is semantic, fts is lexical).
+  const byId = new Map<string, SaveCandidate>();
+  for (const c of [...vecPool, ...ftsPool]) {
+    const prev = byId.get(c.targetId);
+    if (!prev || c.similarity > prev.similarity) byId.set(c.targetId, c);
+  }
+  const all = [...byId.values()].sort((a, b) => b.similarity - a.similarity);
+  return all.slice(0, opts.perSaveMax);
+}
+
+function snippet(content: string, max: number): string {
+  if (content.length <= max) return content;
+  return content.slice(0, max - 1) + '…';
+}
+
+/**
+ * Build an FTS5 MATCH expression from user-supplied content.
+ *
+ * Strategy: extract alphanumeric tokens, drop very short / noise tokens,
+ * uniquify, cap at 16 terms, then OR them together. We avoid a phrase
+ * match because it requires the exact ngram to appear verbatim in the
+ * indexed document; for candidate detection we want "any overlap" with
+ * BM25 ranking those that overlap more.
+ *
+ * Returns an empty string when no usable tokens are found; the caller
+ * skips the query in that case (no candidates is the right answer).
+ */
+function escapeFts(text: string): string {
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const raw of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (raw.length < 3) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    tokens.push(`"${raw}"`);
+    if (tokens.length >= 16) break;
+  }
+  if (tokens.length === 0) return '';
+  return tokens.join(' OR ');
+}

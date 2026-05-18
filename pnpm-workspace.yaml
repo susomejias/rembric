@@ -1,0 +1,24 @@
+# pnpm workspace + supply-chain policy.
+# See .agents/skills/npm-security-best-practices/ for the full rationale.
+
+# Allowlist of dependencies permitted to run lifecycle scripts.
+# Everything else is blocked via .npmrc::ignore-scripts=true.
+# Adding an entry here is a security-relevant decision; review carefully.
+# pnpm 11+ uses an explicit per-package boolean map (replaces the old
+# onlyBuiltDependencies list from pnpm 10).
+allowBuilds:
+  husky: true # registers git hooks via prepare
+  better-sqlite3: true # native binding postinstall fetches prebuilt
+  sqlite-vec: true # native binding postinstall fetches prebuilt
+  esbuild: false # transitive of vitest; explicitly DENY (no native binary needed at install time)
+
+# Refuse transitive deps fetched from git URLs, tarball URLs, or any non-registry source.
+# Practice #2 (lirantal/npm-security-best-practices). Requires pnpm ≥ 10.26.
+blockExoticSubdeps: true
+
+# Install cooldown: refuse dep versions younger than 3 days (in minutes).
+# Practice #3 — gives the community time to detect compromised publishes.
+# Escape hatch for genuine security patches: lower this value temporarily
+# (e.g., to 0) and re-tighten in a follow-up PR, OR add the offending package
+# to minimumReleaseAgeExclude below.
+minimumReleaseAge: 4320

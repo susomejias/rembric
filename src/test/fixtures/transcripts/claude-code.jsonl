@@ -1,0 +1,17 @@
+{"type":"last-prompt","prompt":"Hola"}
+{"type":"permission-mode","mode":"acceptEdits"}
+{"type":"attachment","data":{"path":"/tmp/some-file","kind":"file"}}
+{"type":"file-history-snapshot","snapshot":{"files":[],"trackedFiles":[]}}
+{"type":"user","message":{"role":"user","content":"Hola, dame la hora"},"timestamp":"2026-05-16T22:14:00Z","uuid":"00000000-0000-0000-0000-000000000001"}
+{"type":"attachment","data":{"kind":"diagnostic"}}
+{"type":"ai-title","title":"hola time"}
+{"type":"assistant","message":{"role":"assistant","content":"Son las 2026-05-16; no tengo acceso a la hora exacta."},"timestamp":"2026-05-16T22:14:01Z","uuid":"00000000-0000-0000-0000-000000000002"}
+{"type":"system","message":{"role":"system","content":""}}
+{"type":"system","message":{"role":"system","content":"some-system-noise"}}
+{"type":"user","message":{"role":"user","content":"Lista los archivos del directorio src/"},"timestamp":"2026-05-16T22:14:30Z","uuid":"00000000-0000-0000-0000-000000000003"}
+{"type":"assistant","message":{"role":"assistant","content":""},"timestamp":"2026-05-16T22:14:31Z"}
+{"type":"assistant","message":{"role":"assistant","content":"   "},"timestamp":"2026-05-16T22:14:32Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Contenido de src/: cli.ts, config.ts, index.ts"}]},"timestamp":"2026-05-16T22:15:00Z","uuid":"00000000-0000-0000-0000-000000000004"}
+{"type":"queue-operation","op":"flush"}
+{"type":"user","message":{"role":"user","content":"Cuántos tests"},"timestamp":"2026-05-16T22:15:30Z","uuid":"00000000-0000-0000-0000-000000000005"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"368 tests pasando."},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},"timestamp":"2026-05-16T22:16:00Z","uuid":"00000000-0000-0000-0000-000000000006"}

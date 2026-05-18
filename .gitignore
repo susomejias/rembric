@@ -1,0 +1,49 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Python (Hermes plugin tests run via `python -m unittest`)
+__pycache__/
+*.pyc
+*.pyo
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Local-only personal notes (not for the repo)
+*.local.*
+
+# Local SQLite (dev / testing)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+data-dev/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/
+.claude/settings.local.json
+
+# Codex CLI auto-generated companion (equivalent to CLAUDE.md, per-user)
+AGENTS.md

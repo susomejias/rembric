@@ -1,0 +1,42 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Force publish the current main even if no release was created'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-docker:
+    # Reusable workflow call — `release.created` events from GITHUB_TOKEN
+    # don't trigger other workflows, so we invoke docker-publish.yml in the
+    # same workflow run via workflow_call (which IS permitted with the
+    # auto-issued token).
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event.inputs.force_publish == 'true' }}
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: read
+      packages: write

@@ -1,0 +1,57 @@
+// Devcontainer for Rembric — VSCode / GitHub Codespaces editor-side toolchain.
+//
+// This is NOT a replacement for `pnpm run dev:docker:up` (which is the canonical
+// way to run a SERVER instance via docker-compose.dev.yml against ./data-dev/).
+// This devcontainer exists so a contributor opening the repo in VSCode →
+// "Reopen in Container" gets the language toolchain (Node 22 + pnpm via corepack)
+// ready to typecheck / lint / test without polluting their host.
+//
+// Port allocation:
+//   - This devcontainer forwards :8787 (forwarded into the workspace container)
+//   - `pnpm run dev:docker:up` binds 127.0.0.1:8788 → container 8787
+// The two coexist on different host ports; you can run both simultaneously.
+//
+// Practice #10 of .agents/skills/npm-security-best-practices/.
+{
+  "name": "rembric",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm",
+
+  // Run as non-root for blast-radius reduction. The base image creates the
+  // `node` user with UID 1000.
+  "remoteUser": "node",
+
+  // Defense in depth alongside the .npmrc `ignore-scripts=true` policy.
+  // Even if a malicious postinstall somehow runs, no-new-privileges prevents
+  // privilege escalation within the container.
+  "runArgs": ["--security-opt=no-new-privileges:true"],
+
+  // After the container is created, bootstrap the toolchain. This honors
+  // .npmrc + pnpm-workspace.yaml, so the install runs no third-party
+  // lifecycle scripts beyond the workspace allowlist.
+  "postCreateCommand": "corepack enable && pnpm install --frozen-lockfile",
+
+  // Forward the dashboard port. The MCP endpoint is on the same port.
+  "forwardPorts": [8787],
+  "portsAttributes": {
+    "8787": {
+      "label": "rembric server",
+      "onAutoForward": "silent"
+    }
+  },
+
+  // Bake the editor side: TypeScript + ESLint + Prettier preinstalled.
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  }
+}

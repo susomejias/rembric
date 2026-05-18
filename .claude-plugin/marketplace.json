@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "rembric",
+  "owner": {
+    "name": "susomejias",
+    "url": "https://github.com/susomejias"
+  },
+  "plugins": [
+    {
+      "name": "rembric",
+      "description": "Automatic memory for Claude Code, backed by your self-hosted Rembric server.",
+      "source": "./plugin"
+    }
+  ]
+}

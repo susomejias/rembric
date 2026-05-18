@@ -1,0 +1,713 @@
+import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+import { sql } from 'drizzle-orm';
+import { Hono, type Context, type Next } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+
+import { createAssetsMiddleware } from '../dashboard/assets.js';
+import {
+  btn,
+  flash,
+  NAV,
+  renderSidebar,
+  sectionBar,
+  sparkline,
+  statCard,
+  viewHead,
+} from '../dashboard/components.js';
+import { createConsolidationRouter } from '../dashboard/consolidation.js';
+import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
+import { createJudgmentsRouter } from '../dashboard/judgments.js';
+import { createMaintenanceRouter } from '../dashboard/maintenance.js';
+import { createMemoriesRouter } from '../dashboard/memories.js';
+import { createProjectsRouter } from '../dashboard/projects.js';
+import { createSessionsRouter } from '../dashboard/sessions.js';
+import { escape, html, raw, shell, statusPill, type SafeHtml } from '../dashboard/templates.js';
+import { createTokensRouter } from '../dashboard/tokens.js';
+import type { ResolvedSession } from '../dashboard/types.js';
+import type { Db } from '../db/client.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { DomainError } from '../services/errors.js';
+import type { MemoryService } from '../services/memory.js';
+import type { ProjectsService } from '../services/projects.js';
+import type { SessionsService } from '../services/sessions.js';
+import type { TokensService } from '../services/tokens.js';
+
+const COOKIE_NAME = 'rembric_session';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const SIDEBAR_COOKIE = 'rbr-sb-collapsed';
+
+export interface DashboardDeps {
+  db: Db;
+  tokens: TokensService;
+  sessions: SessionsService;
+  agentSessions: AgentSessionsService;
+  projects: ProjectsService;
+  memory: MemoryService;
+  getStats: () => DashboardStats;
+  /** Resolved data directory (from `config.dataDir`). */
+  dataDir: string;
+}
+
+export interface DashboardStats {
+  totalMemories: number;
+  activeMemories: number;
+  archivedMemories: number;
+  projects: number;
+  lastConsolidationAt: Date | null;
+  activeSessions: number;
+  pendingJudgments: number;
+}
+
+function sidebarCollapsed(c: Context): boolean {
+  return getCookie(c, SIDEBAR_COOKIE) === '1';
+}
+
+export function createDashboardRouter(deps: DashboardDeps): Hono {
+  const app = new Hono();
+
+  // ── static assets ────────────────────────────────────────────────
+  app.get('/assets/:path{.+}', createAssetsMiddleware());
+
+  // ── login / logout (anonymous) ───────────────────────────────────
+  app.get('/login', (c) => c.html(renderLogin(null)));
+
+  app.post('/login', async (c) => {
+    const form = await c.req.formData();
+    const r = form.get('token');
+    const tokenPlain = typeof r === 'string' ? r : '';
+    if (tokenPlain.length === 0) {
+      return c.html(renderLogin('Token is required.'), 400);
+    }
+    try {
+      const resolved = deps.tokens.authenticate(tokenPlain);
+      if (resolved.scope !== '*') {
+        return c.html(renderLogin('Only admin-scoped tokens can access the dashboard.'), 403);
+      }
+      const { cookie } = deps.sessions.create(resolved.token.id);
+      setCookie(c, COOKIE_NAME, cookie, {
+        httpOnly: true,
+        sameSite: 'Lax',
+        path: '/dashboard',
+        maxAge: SESSION_TTL_SECONDS,
+      });
+      return c.redirect('/dashboard');
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(renderLogin('Invalid token.'), 401);
+      }
+      throw err;
+    }
+  });
+
+  app.post('/logout', (c) => {
+    const cookie = getCookie(c, COOKIE_NAME);
+    if (cookie) {
+      const sessionId = cookie.split('.')[0];
+      if (sessionId) deps.sessions.destroy(sessionId);
+    }
+    setCookie(c, COOKIE_NAME, '', {
+      httpOnly: true,
+      sameSite: 'Lax',
+      path: '/dashboard',
+      maxAge: 0,
+    });
+    return c.redirect('/dashboard/login');
+  });
+
+  // ── auth middleware ─────────────────────────────────────────────
+  app.use('*', async (c: Context, next: Next) => {
+    const p = c.req.path;
+    if (
+      p === '/login' ||
+      p === '/logout' ||
+      p === '/dashboard/login' ||
+      p === '/dashboard/logout' ||
+      p.startsWith('/dashboard/assets/') ||
+      p.startsWith('/assets/')
+    ) {
+      return next();
+    }
+    const cookie = getCookie(c, COOKIE_NAME);
+    if (!cookie) return c.redirect('/dashboard/login');
+    const ctx = deps.sessions.resolve(cookie);
+    if (!ctx) return c.redirect('/dashboard/login');
+
+    const resolved: ResolvedSession = {
+      session: ctx.session,
+      sessions: deps.sessions,
+      tokenId: ctx.tokenId,
+    };
+    c.set('session', resolved);
+    return next();
+  });
+
+  // ── sidebar collapse toggle ─────────────────────────────────────
+  app.post('/_sidebar/toggle', async (c) => {
+    const session = (c.get('session' as never) as ResolvedSession | undefined) ?? undefined;
+    if (!session) return c.redirect('/dashboard/login');
+    const result = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'sidebar.toggle');
+    if (result instanceof Response) return result;
+    const next = sidebarCollapsed(c) ? '0' : '1';
+    setCookie(c, SIDEBAR_COOKIE, next, {
+      sameSite: 'Lax',
+      path: '/dashboard',
+      maxAge: 365 * 24 * 60 * 60,
+    });
+    const back = c.req.header('referer') ?? '/dashboard';
+    return c.redirect(back);
+  });
+
+  // ── home ────────────────────────────────────────────────────────
+  app.get('/', (c) => {
+    const session = c.get('session' as never) as ResolvedSession;
+    const stats = deps.getStats();
+    const collapsed = sidebarCollapsed(c);
+    const counters = { pendingJudgments: stats.pendingJudgments };
+    const csrf = csrfInput(session.session, deps.sessions, 'sidebar.toggle');
+    const sidebar = renderSidebar({ active: 'home', counters, collapsed, csrf });
+
+    const supersededMemories = Math.max(
+      0,
+      stats.totalMemories - stats.activeMemories - stats.archivedMemories,
+    );
+
+    const supersededColor = supersededMemories > 0 ? 'warn' : 'lime';
+
+    const archivedProjects =
+      deps.db.all<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM projects WHERE archived_at IS NOT NULL`,
+      )[0]?.n ?? 0;
+
+    const orphanedJ =
+      deps.db.all<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM memory_relations WHERE status = 'orphaned'`,
+      )[0]?.n ?? 0;
+
+    const activity = sevenDayActivity(deps.db);
+
+    const pendingRows = deps.db.all<{
+      id: string;
+      judgment_id: string;
+      created_at: number;
+      source_id: string;
+      target_id: string;
+      source_content: string;
+      target_content: string;
+    }>(sql`
+      SELECT r.id, r.judgment_id, r.created_at,
+             r.source_id, r.target_id,
+             ms.content AS source_content,
+             mt.content AS target_content
+      FROM memory_relations r
+      JOIN memory ms ON ms.id = r.source_id
+      JOIN memory mt ON mt.id = r.target_id
+      WHERE r.status = 'pending'
+      ORDER BY r.created_at ASC
+      LIMIT 4
+    `);
+
+    const recentSessions = deps.db.all<{
+      id: string;
+      agent: string;
+      started_at: number;
+      ended_at: number | null;
+      status: string;
+      project_slug: string | null;
+      summary: string | null;
+      mem_count: number;
+    }>(sql`
+      SELECT s.id, s.agent, s.started_at, s.ended_at, s.status,
+             p.slug AS project_slug,
+             s.summary,
+             (SELECT COUNT(*) FROM memory m WHERE m.session_id = s.id) AS mem_count
+      FROM sessions s
+      LEFT JOIN projects p ON p.id = s.project_id
+      WHERE s.deleted_at IS NULL
+      ORDER BY s.started_at DESC
+      LIMIT 5
+    `);
+
+    const lastRun =
+      deps.db.all<{
+        id: string;
+        started_at: number;
+        finished_at: number | null;
+        llm_model: string | null;
+        scope: string | null;
+        total_ops: number;
+        reverted_ops: number;
+      }>(sql`
+      SELECT r.id, r.started_at, r.finished_at, r.llm_model, r.scope,
+             (SELECT COUNT(*) FROM consolidation_ops o
+              WHERE o.consolidation_id = r.id) AS total_ops,
+             (SELECT COUNT(*) FROM consolidation_ops o
+              WHERE o.consolidation_id = r.id AND o.reverted_at IS NOT NULL) AS reverted_ops
+      FROM consolidation_runs r
+      ORDER BY r.started_at DESC
+      LIMIT 1
+    `)[0] ?? null;
+
+    const dbPath = join(deps.dataDir, 'data.db');
+    const dbPathDisplay = displayPath(dbPath);
+    let dbSize = '—';
+    try {
+      const stat = statSync(dbPath);
+      const walStat = safeStat(`${dbPath}-wal`);
+      const totalBytes = Number(stat.size) + Number(walStat?.size ?? 0);
+      dbSize = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+    } catch {
+      /* ignore — file not yet created, show '—' */
+    }
+
+    const host = `${process.env.REMBRIC_HOST ?? '127.0.0.1'}:${process.env.REMBRIC_PORT ?? '8787'}`;
+
+    const body = html`
+      ${viewHead({
+        num: '01',
+        title: 'Rembric Overview.',
+        hl: 'Rembric',
+      })}
+
+      <div class="grid-7" style="margin-bottom:var(--s-6)">
+        ${statCard({
+          k: 'TOTAL',
+          v: stats.totalMemories,
+          tone: 'fg',
+          sub: html`${sparkline(activity)}<span>7D</span>`,
+          href: '/dashboard/memories',
+        })}
+        ${statCard({
+          k: 'ACTIVE',
+          v: stats.activeMemories,
+          tone: 'lime',
+          sub: pctOfTotal(stats.activeMemories, stats.totalMemories),
+          href: '/dashboard/memories?status=active',
+        })}
+        ${statCard({
+          k: 'SUPERSEDED',
+          v: supersededMemories,
+          tone: supersededColor,
+          sub: html`<span>SAFE TO ARCHIVE</span><span>›</span>`,
+          href: '/dashboard/memories?status=superseded',
+        })}
+        ${statCard({
+          k: 'ARCHIVED',
+          v: stats.archivedMemories,
+          tone: 'dim',
+          sub: html`<span>DECAYED</span><span>›</span>`,
+          href: '/dashboard/memories?status=archived',
+        })}
+        ${statCard({
+          k: 'PROJECTS',
+          v: stats.projects,
+          tone: 'lime',
+          sub: html`<span>${archivedProjects}</span><span>ARCHIVED</span>`,
+          href: '/dashboard/projects',
+        })}
+        ${statCard({
+          k: 'ACTIVE SESSIONS',
+          v: stats.activeSessions,
+          tone: stats.activeSessions > 0 ? 'lime' : 'fg',
+          sub: html`<span>NOW</span><span>›</span>`,
+          href: '/dashboard/sessions',
+        })}
+        ${statCard({
+          k: 'PENDING JUDGMENTS',
+          v: stats.pendingJudgments,
+          tone: stats.pendingJudgments > 0 ? 'warn' : 'lime',
+          sub: html`<span>${orphanedJ}</span><span>ORPHANED</span>`,
+          href: '/dashboard/judgments?status=pending',
+        })}
+      </div>
+
+      <div class="row-2" style="margin-bottom:var(--s-6)">
+        <div>
+          ${sectionBar({
+            name: 'PENDING JUDGMENTS',
+            meta: 'QUEUE / OLDEST FIRST',
+            more: raw(
+              '<a href="/dashboard/judgments?status=pending" style="color:var(--lime)">OPEN ALL ›</a>',
+            ),
+          })}
+          ${pendingRows.length === 0
+            ? html`<div class="tbl-empty">NO PENDING JUDGMENTS YET</div>`
+            : html`
+                <div class="jq">
+                  ${pendingRows.map(
+                    (r) => html`
+                      <div class="jq-item">
+                        <div class="pair">
+                          <div class="met">
+                            <span class="pill k-pending">PENDING</span>
+                            <span>${shortDisplayId(r.id)}</span>
+                            <span>·</span>
+                            <span>${relTime(r.created_at)}</span>
+                          </div>
+                          <div class="mem">
+                            <span class="t-mono fg-dim">${shortDisplayId(r.source_id)}</span>
+                            <span class="txt fg-dim" style="flex:1"
+                              >${truncate(r.source_content, 70)}</span
+                            >
+                          </div>
+                          <div class="mem">
+                            <span class="arrow">↳</span>
+                            <span class="t-mono fg-dim">${shortDisplayId(r.target_id)}</span>
+                            <span class="txt fg-dim" style="flex:1"
+                              >${truncate(r.target_content, 70)}</span
+                            >
+                          </div>
+                        </div>
+                        <div class="acts">
+                          ${btn({
+                            variant: 'primary',
+                            size: 'sm',
+                            label: 'JUDGE',
+                            href: `/dashboard/judgments`,
+                          })}
+                        </div>
+                      </div>
+                    `,
+                  )}
+                </div>
+              `}
+        </div>
+
+        <div>
+          ${sectionBar({
+            name: 'RECENT SESSIONS',
+            meta: 'TIMELINE / NEWEST FIRST',
+            more: raw('<a href="/dashboard/sessions" style="color:var(--lime)">OPEN ALL ›</a>'),
+          })}
+          ${recentSessions.length === 0
+            ? html`<div class="tbl-empty">NO SESSIONS YET</div>`
+            : html`
+                <div class="tl" style="border:1px solid var(--fg-faint)">
+                  ${recentSessions.map(
+                    (s) => html`
+                      <a
+                        href="/dashboard/sessions/${s.id}"
+                        class="tl-item"
+                        style="text-decoration:none;color:inherit"
+                      >
+                        <div class="when">${relTime(s.started_at)}</div>
+                        <div class="who">
+                          <span class="agent">▸ ${s.agent}</span>
+                          ${s.project_slug
+                            ? html`<span class="proj">/ ${s.project_slug}</span>`
+                            : raw('<span class="pill global">GLOBAL</span>')}
+                          <span class="desc">${truncate(s.summary ?? '—', 60)}</span>
+                        </div>
+                        <div class="right">
+                          <span><b>${s.mem_count}</b> MEM</span>
+                          ${statusPill(s.status === 'active' ? 'active' : 'judged')}
+                        </div>
+                      </a>
+                    `,
+                  )}
+                </div>
+              `}
+        </div>
+      </div>
+
+      ${sectionBar({
+        name: 'CONSOLIDATION HEALTH',
+        meta: lastRun ? `LAST RUN · ${shortDisplayId(lastRun.id)}` : 'NO RUN YET',
+        more: lastRun
+          ? raw(
+              `<a href="/dashboard/consolidation/${escape(lastRun.id)}" style="color:var(--lime)">OPEN RUN ›</a>`,
+            )
+          : raw(''),
+      })}
+      <div class="health" style="margin-bottom:var(--s-6)">
+        <div class="cell">
+          <span class="lab"><span class="bn"></span> LAST RUN</span>
+          <span class="val ${lastRun ? 'lime' : 'dim'}">${lastRun ? 'OK' : '—'}</span>
+          <span class="sub"
+            >${lastRun
+              ? html`${relTime(lastRun.finished_at ?? lastRun.started_at)} ·
+                ${lastRun.scope ?? 'global'}`
+              : 'NEVER'}</span
+          >
+        </div>
+        <div class="cell">
+          <span class="lab"><span class="bn"></span> OPS APPLIED</span>
+          <span class="val">${lastRun?.total_ops ?? 0}</span>
+          <span class="sub">${lastRun?.reverted_ops ?? 0} REVERTED</span>
+        </div>
+        <div class="cell">
+          <span class="lab"><span class="bn warn"></span> ORPHANED PENDINGS</span>
+          <span class="val ${orphanedJ > 0 ? 'warn' : 'lime'}">${orphanedJ}</span>
+          <span class="sub">AUTO-PROMOTED FROM PENDING &gt; 96H</span>
+        </div>
+        <div class="cell">
+          <span class="lab"><span class="bn"></span> NEXT RUN</span>
+          <span class="val" style="font-family:var(--f-mono);font-size:0.9rem"
+            >${process.env.CONSOLIDATION_CRON ?? '03:00 UTC'}</span
+          >
+          <span class="sub">MODEL ${lastRun?.llm_model ?? '—'}</span>
+        </div>
+      </div>
+
+      <div class="row-2">
+        <div class="card">
+          <div class="card-head">
+            <span><span class="bn"></span> <b>ACTIVITY · 7 DAYS</b></span>
+            <span>MEMORIES CREATED · PER DAY</span>
+          </div>
+          <div
+            class="card-body"
+            style="display:flex;align-items:center;justify-content:center;overflow-x:auto;min-height:220px;padding:var(--s-6) var(--s-5)"
+          >
+            <pre
+              style="font-family:var(--f-mono);font-size:0.98rem;line-height:1.65;color:var(--fg-dim);margin:0;white-space:pre;text-align:left"
+            >
+${ascBars(activity)}</pre
+            >
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span><span class="bn"></span> <b>SYSTEM</b></span>
+            <span>SQLITE · NODE · MCP</span>
+          </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:var(--s-3)">
+            ${systemRow('DB FILE', dbPathDisplay, 'lime')} ${systemRow('DB SIZE', dbSize, 'fg')}
+            ${systemRow('FTS INDEX', 'memory_fts · contentless', 'fg')}
+            ${systemRow('MCP SERVER', host, 'lime')}
+            ${systemRow('NODE', `${process.versions.node}`, 'fg')}
+          </div>
+        </div>
+      </div>
+    `;
+    return c.html(
+      shell(body, {
+        title: 'Overview',
+        activeNav: 'home',
+        view: 'home',
+        sidebar,
+        collapsed,
+        counters,
+      }),
+    );
+  });
+
+  // ── resource routers ────────────────────────────────────────────
+  app.route(
+    '/memories',
+    createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
+  );
+  app.route(
+    '/sessions',
+    createSessionsRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      agentSessions: deps.agentSessions,
+    }),
+  );
+  app.route('/judgments', createJudgmentsRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route(
+    '/projects',
+    createProjectsRouter({ projects: deps.projects, sessions: deps.sessions }),
+  );
+  app.route(
+    '/tokens',
+    createTokensRouter({ tokens: deps.tokens, projects: deps.projects, sessions: deps.sessions }),
+  );
+  app.route(
+    '/maintenance',
+    createMaintenanceRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      agentSessions: deps.agentSessions,
+      memory: deps.memory,
+      tokens: deps.tokens,
+    }),
+  );
+
+  return app;
+}
+
+/* ── helpers used by the Overview body ─────────────────────────── */
+
+function sevenDayActivity(db: Db): number[] {
+  // Bucket the last 7 days into integer-day keys; SQLite stores ms.
+  const todayMs = startOfUtcDay(Date.now());
+  const sevenAgo = todayMs - 6 * 24 * 60 * 60 * 1000;
+  const rows = db.all<{ day: number; n: number }>(sql`
+    SELECT (created_at / 86400000) AS day, COUNT(*) AS n
+    FROM memory
+    WHERE created_at >= ${sevenAgo}
+    GROUP BY day
+    ORDER BY day
+  `);
+  const map = new Map<number, number>();
+  for (const r of rows) map.set(r.day, r.n);
+  const out: number[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const day = Math.floor((todayMs - i * 24 * 60 * 60 * 1000) / 86400000);
+    out.push(map.get(day) ?? 0);
+  }
+  return out;
+}
+
+function startOfUtcDay(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function ascBars(data: number[]): string {
+  const max = Math.max(...data, 1);
+  const days = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+  const widthMax = 54;
+  // Map weekday (Mon..Sun) by reading the day-of-week of each entry.
+  // `data` is in chronological order (oldest first → today last). We label
+  // each bar with the weekday it represents.
+  const today = new Date();
+  const labels: string[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    labels.push(days[(d.getUTCDay() + 6) % 7] ?? '');
+  }
+  const lines = data.map((v, i) => {
+    const w = Math.round((v / max) * widthMax);
+    return `${labels[i]}  ${'█'.repeat(w)} ${String(v).padStart(3)}`;
+  });
+  return lines.join('\n');
+}
+
+function relTime(input: number | Date): string {
+  const ms = typeof input === 'number' ? input : input.getTime();
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return 'NOW';
+  const m = Math.floor(diff / 60_000);
+  if (m < 60) return `${m}M AGO`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}H AGO`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}D AGO`;
+  const mo = Math.floor(d / 30);
+  return `${mo}MO AGO`;
+}
+
+function shortDisplayId(id: string): string {
+  if (!id) return '—';
+  return id.length > 12 ? id.slice(0, 8) + '…' + id.slice(-3) : id;
+}
+
+function truncate(s: string, max: number): string {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
+}
+
+function pctOfTotal(n: number, total: number): SafeHtml {
+  const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+  return html`<span>${pct}%</span><span>OF TOTAL</span>`;
+}
+
+function safeStat(path: string): ReturnType<typeof statSync> | null {
+  try {
+    return statSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function displayPath(absolute: string): string {
+  const home = homedir();
+  if (absolute === home || absolute.startsWith(home + '/')) {
+    return '~' + absolute.slice(home.length);
+  }
+  return absolute;
+}
+
+function systemRow(label: string, value: string, tone: 'fg' | 'lime'): SafeHtml {
+  const bulletTone = tone === 'lime' ? '' : 'dim';
+  const color = tone === 'lime' ? 'var(--lime)' : 'var(--fg)';
+  return html`
+    <div
+      style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--fg-faint);padding:6px 0;gap:var(--s-4);min-width:0"
+    >
+      <span class="t-mono-up fg-dim" style="flex:0 0 auto;white-space:nowrap"
+        ><span class="bn ${bulletTone}"></span>${label}</span
+      >
+      <span
+        class="t-mono"
+        style="color:${color};text-align:right;word-break:break-all;overflow-wrap:anywhere;min-width:0;flex:1 1 auto"
+        >${value}</span
+      >
+    </div>
+  `;
+}
+
+function renderLogin(error: string | null): string {
+  const errorHtml = error ? flash({ tone: 'danger', label: 'ERROR', body: error }) : raw('');
+  const body = html`
+    <div class="login-stage">
+      <div class="left">
+        <div class="login-brand">
+          <img
+            class="login-logo"
+            src="/dashboard/assets/logo-transparent.png"
+            alt=""
+            aria-hidden="true"
+          />
+          <div>
+            <div class="t-mono-up fg-dim">REMBRIC</div>
+            <div class="t-mono-up fg-dim" style="margin-top:6px">SELF-HOSTED</div>
+          </div>
+        </div>
+        <div>
+          <h1>
+            <span class="hl-lime">REMBRIC</span><br />
+            DASHBOARD<span style="color:var(--lime)">.</span>
+          </h1>
+          <p class="t-body" style="color:var(--fg-dim);max-width:560px;margin-top:16px">
+            Persistent memory layer for your agents. Single user, single SQLite file, single control
+            window. No onboarding — only the
+            <span class="u-lime">admin token</span> with scope <code>*</code>.
+          </p>
+        </div>
+        <div class="clients t-mono-up fg-dim" style="display:flex;gap:24px;flex-wrap:wrap">
+          <span><span class="bn"></span> CLAUDE CODE</span>
+          <span><span class="bn"></span> CODEX CLI</span>
+          <span><span class="bn"></span> HERMES</span>
+          <span><span class="bn"></span> MCP CLIENTS</span>
+        </div>
+      </div>
+      <div class="right">
+        <form
+          action="/dashboard/login"
+          method="post"
+          class="stack"
+          style="max-width:none;width:100%"
+        >
+          ${errorHtml}
+          <div class="field">
+            <label>Admin token</label>
+            <input
+              name="token"
+              type="password"
+              class="inp lg"
+              autocomplete="off"
+              required
+              autofocus
+              placeholder="rbr_********************"
+            />
+          </div>
+          <div style="display:flex;gap:12px">
+            ${btn({ variant: 'primary', label: 'SIGN IN →', type: 'submit' })}
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  return shell(body, { title: 'Login', view: 'login' });
+}
+
+// Re-export NAV so external code (tests) can introspect the nav order.
+export { NAV };

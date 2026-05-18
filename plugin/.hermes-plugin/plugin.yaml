@@ -1,0 +1,17 @@
+name: rembric
+version: '0.6.0'
+description: 'Memory for Hermes Agent, backed by your self-hosted Rembric server.'
+author: 'rembric contributors'
+homepage: 'https://github.com/susomejias/rembric'
+hooks:
+  - on_session_end
+  - on_pre_compress
+  - on_session_switch
+requires_env:
+  - name: REMBRIC_SERVER_URL
+    description: 'Rembric server base URL (WITHOUT /mcp suffix). Example: https://memory.example.com — no trailing slash.'
+  - name: REMBRIC_API_TOKEN
+    description: 'Bearer token issued from the Rembric dashboard at /dashboard/tokens.'
+    secret: true
+  - name: REMBRIC_PROJECT_SLUG
+    description: 'Default project slug. Overridden per-cwd if a .rembric file is present, or by the trailing /mcp/<slug> segment of REMBRIC_SERVER_URL.'

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "rembric",
+  "version": "0.6.0",
+  "description": "Memory for Claude Code, backed by your self-hosted Rembric server.",
+  "author": {
+    "name": "rembric contributors",
+    "url": "https://github.com/susomejias/rembric"
+  },
+  "repository": "https://github.com/susomejias/rembric",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "rembric", "agent-memory"],
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Rembric server URL",
+      "description": "Base URL of your Rembric deployment WITHOUT the /mcp suffix. Good: https://memory.example.com or http://192.168.1.10:8787. Bad: https://memory.example.com/mcp (the plugin appends /mcp itself). No trailing slash.",
+      "required": true
+    },
+    "api_token": {
+      "type": "string",
+      "title": "Rembric API token",
+      "description": "Bearer token issued from the Rembric dashboard at /dashboard/tokens (plaintext shown exactly once). Stored in the system keychain.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "mcpServers": "./.claude-plugin/mcp.json"
+}

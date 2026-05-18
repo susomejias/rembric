@@ -1,0 +1,104 @@
+/* LOGIN — full-screen brutalist split */
+
+.login-stage {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 480px;
+}
+.login-stage .left {
+  border-right: 1px solid var(--fg-faint);
+  padding: var(--s-7);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--s-6);
+}
+.login-stage .right {
+  padding: var(--s-7);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s-5);
+  position: relative;
+}
+.login-stage .login-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.login-stage .login-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 18px rgb(198 242 78 / 0.18));
+  user-select: none;
+  pointer-events: none;
+}
+.login-stage h1 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 5rem;
+  letter-spacing: -0.035em;
+  line-height: 1.35;
+}
+.login-stage .lead-meta {
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--fg-dim);
+}
+.login-stage .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+/* ── tablet + small desktop: collapse to single column ───────────── */
+@media (max-width: 980px) {
+  .login-stage {
+    grid-template-columns: 1fr;
+  }
+  .login-stage .left {
+    border-right: 0;
+    border-bottom: 1px solid var(--fg-faint);
+    padding: var(--s-6) var(--s-5);
+    gap: var(--s-4);
+  }
+  .login-stage .right {
+    padding: var(--s-6) var(--s-5);
+  }
+  .login-stage h1 {
+    font-size: 3.2rem;
+    line-height: 1.3;
+  }
+  .login-stage .login-logo {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* ── phone: compact header on top, form below ────────────────────── */
+@media (max-width: 640px) {
+  .login-stage .left {
+    padding: var(--s-5) var(--s-4) var(--s-4);
+    gap: var(--s-3);
+  }
+  .login-stage .right {
+    padding: var(--s-5) var(--s-4) var(--s-6);
+  }
+  .login-stage h1 {
+    font-size: 2.2rem;
+    line-height: 1.3;
+  }
+  .login-stage .login-logo {
+    width: 40px;
+    height: 40px;
+  }
+  /* On the smallest screens, drop the second-tier client list — the
+     primary message + tagline are what matter. */
+  .login-stage .left .clients {
+    display: none;
+  }
+}
