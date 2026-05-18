@@ -51,6 +51,7 @@ describe('openclaw.plugin.json invariants', () => {
     expect(props.autoRecall?.default).toBe(true);
     expect(props.autoCapture?.default).toBe(false);
     expect(typeof props.tokenBudget?.default).toBe('number');
+    expect(props.project_slug?.type).toBe('string');
   });
 
   it('marks api_token as secret via configContracts.secretInputs', () => {

@@ -28,6 +28,7 @@ export function registerCommands(api, config) {
         '# Rembric status',
         `server_url:   ${config.serverUrl}`,
         `api_token:    ${maskToken(config.apiToken)}`,
+        `project_slug: ${config.projectSlug ?? '<from .rembric per cwd>'}`,
         `autoRecall:   ${config.autoRecall}`,
         `autoCapture:  ${config.autoCapture}`,
         `tokenBudget:  ${config.tokenBudget}`,

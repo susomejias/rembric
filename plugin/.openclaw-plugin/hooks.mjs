@@ -47,7 +47,15 @@ function pickTitle(event) {
   return null;
 }
 
-export function registerHooks(api, httpClient) {
+export function registerHooks(api, httpClient, { projectSlug = null } = {}) {
+  // Resolution order: explicit config.project_slug > per-cwd .rembric file.
+  // The explicit config wins because it's a deliberate operator choice;
+  // the .rembric fallback covers the multi-project workflow.
+  function resolveSlug(cwd) {
+    if (projectSlug) return projectSlug;
+    return cwd ? httpClient.readProjectSlug(cwd) : null;
+  }
+
   api.on('session_start', async (event) => {
     try {
       const id = pickSessionId(event);
@@ -56,9 +64,11 @@ export function registerHooks(api, httpClient) {
         api.logger?.debug?.('rembric session_start: missing sessionId, skipping');
         return;
       }
-      const slug = cwd ? httpClient.readProjectSlug(cwd) : null;
+      const slug = resolveSlug(cwd);
       if (!slug) {
-        api.logger?.debug?.(`rembric session_start: no .rembric slug in ${cwd}, skipping POST`);
+        api.logger?.debug?.(
+          `rembric session_start: no slug (config or .rembric in ${cwd}), skipping POST`,
+        );
         return;
       }
       await httpClient.createSession({ slug, id, cwd, agent: AGENT });
@@ -72,7 +82,7 @@ export function registerHooks(api, httpClient) {
       const id = pickSessionId(event);
       const cwd = pickCwd(event);
       if (!id) return;
-      const slug = cwd ? httpClient.readProjectSlug(cwd) : null;
+      const slug = resolveSlug(cwd);
       if (!slug) return;
       const summary = pickTranscript(event);
       const title = pickTitle(event);
@@ -93,7 +103,7 @@ export function registerHooks(api, httpClient) {
       const id = pickSessionId(event);
       const cwd = pickCwd(event);
       if (!id) return;
-      const slug = cwd ? httpClient.readProjectSlug(cwd) : null;
+      const slug = resolveSlug(cwd);
       if (!slug) return;
       const summary = pickTranscript(event);
       if (!summary) return;

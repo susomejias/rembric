@@ -36,7 +36,8 @@
       "api_token": { "type": "string" },
       "autoRecall": { "type": "boolean", "default": true },
       "autoCapture": { "type": "boolean", "default": false },
-      "tokenBudget": { "type": "number", "default": 1800 }
+      "tokenBudget": { "type": "number", "default": 1800 },
+      "project_slug": { "type": "string" }
     }
   },
   "configContracts": {
@@ -69,6 +70,11 @@
       "advanced": true,
       "placeholder": "1800",
       "help": "Approximate token budget for the auto-recall context block injected on each turn."
+    },
+    "project_slug": {
+      "label": "Project Slug (optional)",
+      "placeholder": "my-project",
+      "help": "If set, path-scopes all memory tool calls to /mcp/<slug> AND overrides per-cwd .rembric resolution for session lifecycle. Lowercase letters/digits/hyphens, 1-64 chars, no leading/trailing hyphen. Leave empty to use .rembric files per cwd."
     }
   }
 }

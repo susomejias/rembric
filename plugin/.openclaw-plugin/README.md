@@ -28,6 +28,7 @@ Then designate Rembric as your active memory provider in `~/.openclaw/openclaw.j
           "autoRecall": true,
           "autoCapture": false,
           "tokenBudget": 1800,
+          "project_slug": "my-project",
         },
       },
     },

@@ -134,6 +134,36 @@ describe('registerHooks', () => {
     expect(api._logs.some(([level]) => level === 'warn')).toBe(true);
   });
 
+  it('projectSlug config override takes precedence over .rembric file', async () => {
+    const api = recordingApi();
+    const client = {
+      readProjectSlug: () => 'from-rembric-file',
+      createSession: vi.fn(async () => ({ ok: true, data: {} })),
+      summarizeSession: async () => ({ ok: true, data: {} }),
+      endSession: async () => ({ ok: true, data: {} }),
+    };
+    registerHooks(api, client, { projectSlug: 'from-config' });
+    await api.fire('session_start', {
+      sessionId: 'sess-12345678',
+      cwd: '/work/with-slug',
+    });
+    expect(client.createSession).toHaveBeenCalledOnce();
+    const [{ slug }] = client.createSession.mock.calls[0];
+    expect(slug).toBe('from-config');
+  });
+
+  it('falls back to .rembric when projectSlug config is null', async () => {
+    const api = recordingApi();
+    const client = recordingClient();
+    registerHooks(api, client, { projectSlug: null });
+    await api.fire('session_start', {
+      sessionId: 'sess-12345678',
+      cwd: '/work/with-slug',
+    });
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0][1].slug).toBe('foo');
+  });
+
   it('extracts transcript from messages array fallback', async () => {
     const api = recordingApi();
     const client = recordingClient();

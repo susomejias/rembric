@@ -277,7 +277,10 @@ Then configure the plugin in `~/.openclaw/openclaw.json`:
           "api_token": "rbr_...",                     // mint from /dashboard/tokens
           "autoRecall": true,                         // inject memories into every prompt (default)
           "autoCapture": false,                       // off by default — Rembric prefers explicit memory_save
-          "tokenBudget": 1800                         // approx tokens for the auto-recall context block
+          "tokenBudget": 1800,                        // approx tokens for the auto-recall context block
+          "project_slug": "my-project"                // OPTIONAL: pin all memory tool calls to /mcp/<slug>
+                                                      //   AND override per-cwd .rembric resolution.
+                                                      //   Omit to use .rembric files per project root.
         }
       }
     }

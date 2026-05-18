@@ -22,8 +22,12 @@ import { registerCommands } from './commands.mjs';
 
 const PLUGIN_ID = 'rembric';
 const DEFAULT_TOKEN_BUDGET = 1800;
+// Mirror plugin/bin/rembric-bridge.mjs::SLUG_RE — same .rembric files
+// work across every client, and the same regex gates `project_slug`
+// config so a typo doesn't silently break path-scoping.
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 
-function readConfig(pluginConfig) {
+function readConfig(pluginConfig, logger) {
   const serverUrl = String(pluginConfig?.server_url ?? '').trim();
   const apiToken = String(pluginConfig?.api_token ?? '').trim();
   const autoRecall = pluginConfig?.autoRecall !== false; // default true
@@ -32,7 +36,19 @@ function readConfig(pluginConfig) {
     typeof pluginConfig?.tokenBudget === 'number' && pluginConfig.tokenBudget > 0
       ? pluginConfig.tokenBudget
       : DEFAULT_TOKEN_BUDGET;
-  return { serverUrl, apiToken, autoRecall, autoCapture, tokenBudget };
+  let projectSlug = null;
+  const rawSlug =
+    typeof pluginConfig?.project_slug === 'string' ? pluginConfig.project_slug.trim() : '';
+  if (rawSlug) {
+    if (SLUG_RE.test(rawSlug)) {
+      projectSlug = rawSlug;
+    } else {
+      logger?.warn?.(
+        `rembric: project_slug "${rawSlug}" does not match ${SLUG_RE.source} — ignoring and falling back to per-cwd .rembric resolution.`,
+      );
+    }
+  }
+  return { serverUrl, apiToken, autoRecall, autoCapture, tokenBudget, projectSlug };
 }
 
 function warnIfSlotMismatch(api) {
@@ -71,10 +87,11 @@ const plugin = {
       autoRecall: { type: 'boolean', default: true },
       autoCapture: { type: 'boolean', default: false },
       tokenBudget: { type: 'number', default: DEFAULT_TOKEN_BUDGET },
+      project_slug: { type: 'string' },
     },
   },
   register(api) {
-    const config = readConfig(api.pluginConfig);
+    const config = readConfig(api.pluginConfig, api.logger);
 
     if (!config.serverUrl || !config.apiToken) {
       api.logger?.error?.(
@@ -94,18 +111,21 @@ const plugin = {
     }
 
     // The MCP client speaks Rembric's `/mcp` JSON-RPC for tool calls
-    // (memory.*, project.*). It is path-less; project scope is resolved
-    // either by api.pluginConfig or by per-call `project.use` invocation.
+    // (memory.*, project.*). When config.projectSlug is set, the URL is
+    // path-scoped to `/mcp/<slug>` from the first connect; otherwise it
+    // is path-less and project scope falls back to per-call `project.use`
+    // or to SessionRouter resolution via the active session row.
     const mcpClient = createMcpClient({
       serverUrl: config.serverUrl,
       apiToken: config.apiToken,
-      slug: null,
+      slug: config.projectSlug,
       logger: api.logger,
     });
 
     // The HTTP client speaks Rembric's `/api/<slug>/sessions(*)` for
-    // session lifecycle. Lifecycle hooks resolve slug per-call from
-    // `.rembric::PROJECT_SLUG` in the event's cwd.
+    // session lifecycle. Lifecycle hooks prefer config.projectSlug when
+    // set; otherwise resolve per-call from `.rembric::PROJECT_SLUG` in
+    // the event's cwd.
     const httpClient = createHttpClient({
       serverUrl: config.serverUrl,
       apiToken: config.apiToken,
@@ -113,7 +133,7 @@ const plugin = {
     });
 
     registerTools(api, mcpClient);
-    registerHooks(api, httpClient);
+    registerHooks(api, httpClient, { projectSlug: config.projectSlug });
     registerMemorySurface(api, mcpClient, config);
     registerCommands(api, {
       serverUrl: config.serverUrl,
@@ -121,10 +141,11 @@ const plugin = {
       autoRecall: config.autoRecall,
       autoCapture: config.autoCapture,
       tokenBudget: config.tokenBudget,
+      projectSlug: config.projectSlug,
     });
 
     api.logger?.info?.(
-      `rembric: registered (server=${config.serverUrl}, autoRecall=${config.autoRecall}, autoCapture=${config.autoCapture})`,
+      `rembric: registered (server=${config.serverUrl}, projectSlug=${config.projectSlug ?? '<from .rembric>'}, autoRecall=${config.autoRecall}, autoCapture=${config.autoCapture})`,
     );
   },
 };

@@ -21,6 +21,7 @@ const CONFIG = {
   autoRecall: true,
   autoCapture: false,
   tokenBudget: 1800,
+  projectSlug: null,
 };
 
 describe('registerCommands', () => {
@@ -49,6 +50,20 @@ describe('registerCommands', () => {
     registerCommands(api, CONFIG);
     const result = await api.cmd.handler(['status']);
     expect(result.message).toMatch(/memory-lancedb \(INACTIVE/);
+  });
+
+  it('shows project_slug when set in config', async () => {
+    const api = buildApi();
+    registerCommands(api, { ...CONFIG, projectSlug: 'my-project' });
+    const result = await api.cmd.handler(['status']);
+    expect(result.message).toMatch(/project_slug:\s+my-project/);
+  });
+
+  it('shows fallback hint when project_slug is null', async () => {
+    const api = buildApi();
+    registerCommands(api, CONFIG);
+    const result = await api.cmd.handler(['status']);
+    expect(result.message).toMatch(/project_slug:\s+<from \.rembric per cwd>/);
   });
 
   it('returns error message for unknown subcommands', async () => {
