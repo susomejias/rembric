@@ -55,10 +55,16 @@ const plugin = {
   name: 'Rembric',
   description:
     'Self-hosted memory, sessions, and dashboard for AI coding agents. Native OpenClaw memory provider.',
+  // NOTE: server_url and api_token are NOT declared `required` in the
+  // JSON schema. OpenClaw validates configSchema at startup against the
+  // user's `plugins.entries.rembric.config` block; a strict `required`
+  // there refuses to boot the CLI before the user has filled the values.
+  // Instead we check at register-time below and log + return gracefully
+  // (agentmemory pattern). See openclaw.plugin.json::configSchema for
+  // the on-disk schema that mirrors this — both must omit `required`.
   configSchema: {
     type: 'object',
     additionalProperties: false,
-    required: ['server_url', 'api_token'],
     properties: {
       server_url: { type: 'string' },
       api_token: { type: 'string' },

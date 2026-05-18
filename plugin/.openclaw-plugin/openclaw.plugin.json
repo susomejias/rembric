@@ -31,7 +31,6 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["server_url", "api_token"],
     "properties": {
       "server_url": { "type": "string" },
       "api_token": { "type": "string" },

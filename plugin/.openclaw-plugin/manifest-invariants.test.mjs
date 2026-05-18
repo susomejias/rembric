@@ -36,8 +36,14 @@ describe('openclaw.plugin.json invariants', () => {
     ]);
   });
 
-  it('declares required configSchema fields', () => {
-    expect(manifest.configSchema?.required).toEqual(['server_url', 'api_token']);
+  it('declares configSchema fields (no required[] — runtime-checked instead)', () => {
+    // `required` is intentionally omitted from the JSON schema because
+    // OpenClaw validates configSchema at startup and a strict required
+    // list refuses to boot the CLI before the user has filled the
+    // values. The plugin's register() does the check at runtime and
+    // logs + returns instead. Mirror this constraint here to prevent
+    // someone re-adding `required` without realizing the impact.
+    expect(manifest.configSchema?.required).toBeUndefined();
     expect(manifest.configSchema?.additionalProperties).toBe(false);
     const props = manifest.configSchema?.properties || {};
     expect(props.server_url?.type).toBe('string');
