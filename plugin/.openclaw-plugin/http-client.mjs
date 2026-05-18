@@ -91,12 +91,11 @@ export function createHttpClient({ serverUrl, apiToken, logger, timeoutMs = 5000
     readProjectSlug,
     /** POST /api/<slug>/sessions  → ensure-session (idempotent). */
     createSession({ slug, id, cwd, agent, description }) {
-      return postJson(`/api/${encodeURIComponent(slug)}/sessions`, {
-        id,
-        cwd,
-        agent,
-        description,
-      });
+      const body = { id };
+      if (typeof cwd === 'string') body.cwd = cwd;
+      if (typeof agent === 'string') body.agent = agent;
+      if (typeof description === 'string') body.description = description;
+      return postJson(`/api/${encodeURIComponent(slug)}/sessions`, body);
     },
     /** POST /api/<slug>/sessions/<id>/summary  → per-turn / pre-compact. */
     summarizeSession({ slug, sessionId, summary, title, final }) {

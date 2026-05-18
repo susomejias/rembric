@@ -93,6 +93,29 @@ describe('createHttpClient', () => {
     });
   });
 
+  it('createSession omits null optional fields', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, sessionId: 'sess-123' }),
+      };
+    });
+    const client = createHttpClient(baseConfig);
+    await client.createSession({
+      slug: 'foo',
+      id: 'sess-12345678',
+      cwd: null,
+      agent: 'openclaw',
+    });
+    expect(JSON.parse(calls[0].init.body)).toEqual({
+      id: 'sess-12345678',
+      agent: 'openclaw',
+    });
+  });
+
   it('surfaces 4xx errors as { ok: false }', async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: false,
