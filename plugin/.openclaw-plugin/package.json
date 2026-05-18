@@ -1,0 +1,12 @@
+{
+  "name": "@rembric/openclaw-plugin",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "Native OpenClaw plugin for Rembric (memory provider, kind=memory).",
+  "openclaw": {
+    "extensions": [
+      "./plugin.mjs"
+    ]
+  }
+}

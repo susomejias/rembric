@@ -1,0 +1,75 @@
+{
+  "id": "rembric",
+  "kind": "memory",
+  "name": "Rembric",
+  "description": "Self-hosted memory, sessions, and dashboard for AI coding agents. Native OpenClaw memory provider.",
+  "version": "0.7.0",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "memory_save",
+      "memory_search",
+      "memory_get",
+      "memory_judge",
+      "memory_confirm",
+      "memory_compare",
+      "memory_context",
+      "memory_timeline",
+      "memory_stats",
+      "memory_session_start",
+      "memory_session_end",
+      "memory_session_summary",
+      "memory_save_prompt",
+      "memory_capture_passive",
+      "project_current",
+      "project_list",
+      "project_use"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["server_url", "api_token"],
+    "properties": {
+      "server_url": { "type": "string" },
+      "api_token": { "type": "string" },
+      "autoRecall": { "type": "boolean", "default": true },
+      "autoCapture": { "type": "boolean", "default": false },
+      "tokenBudget": { "type": "number", "default": 1800 }
+    }
+  },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [{ "path": "api_token", "expected": "string" }]
+    }
+  },
+  "uiHints": {
+    "server_url": {
+      "label": "Rembric Server URL",
+      "placeholder": "https://memory.example.com",
+      "help": "Base URL of your Rembric deployment WITHOUT the /mcp suffix. No trailing slash."
+    },
+    "api_token": {
+      "label": "Rembric API Token",
+      "placeholder": "rbr_...",
+      "sensitive": true,
+      "help": "Bearer token issued from the Rembric dashboard at /dashboard/tokens (plaintext shown exactly once)."
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Inject relevant Rembric memories into every prompt before the agent runs."
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically save observations from completed turns. Off by default — Rembric's topic_key + judgment model expects explicit memory_save calls."
+    },
+    "tokenBudget": {
+      "label": "Token Budget",
+      "advanced": true,
+      "placeholder": "1800",
+      "help": "Approximate token budget for the auto-recall context block injected on each turn."
+    }
+  }
+}

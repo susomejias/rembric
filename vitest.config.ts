@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'plugin/.openclaw-plugin/**/*.test.mjs'],
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,
     coverage: {

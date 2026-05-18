@@ -1,8 +1,21 @@
 # Changelog
 
-All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent).
+All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent, OpenClaw).
 
-The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, `plugin/.openclaw-plugin/openclaw.plugin.json` — plus the mirror in `plugin/.openclaw-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+
+## [0.7.0] — unreleased
+
+### Added
+
+- **Native OpenClaw plugin** at `plugin/.openclaw-plugin/`. OpenClaw is the fourth marketplace client Rembric supports, alongside Claude Code, Codex CLI, and Hermes Agent. Architecturally the OpenClaw plugin is closer to Hermes (in-process memory provider) than to Claude/Codex (MCP + shell hooks) — but unlike Hermes it registers the full 17-tool memory surface natively via `api.registerTool(...)` because OpenClaw's plugin SDK supports first-class dynamic tool registration with schemas and descriptions. The plugin claims `kind: "memory"` and the OpenClaw memory slot (`plugins.slots.memory`), wires `session_start`/`session_end`/`before_compaction`/`after_compaction` to the existing `/api/<slug>/sessions(*)` HTTP API, registers an interactive matcher for `remember|recall|acordate|qué hicimos|what did we do`, and auto-injects relevant memories via `registerMemoryPromptSection` when `autoRecall` is enabled (default `true`). Auto-capture defaults `false` because Rembric's `topic_key` + judgment-driven write model expects explicit `memory_save` calls.
+- **`/rembric status` slash command** under OpenClaw — surfaces server URL, masked API token, current config flags, and memory-slot ownership state so operators can confirm the plugin is the active memory provider.
+- **Plain ESM (no TypeScript / no build step) entry pattern** for the OpenClaw sub-tree. The OpenClaw plugin SDK (`@openclaw/plugin-sdk`) is a `workspace:*` package upstream and is not installable outside the OpenClaw monorepo, so the third-party path is hand-authored ESM matching the agentmemory precedent. Full rationale in the change archive (`add-openclaw-plugin/design.md::Decision 3`).
+- **Quadruple version bump rule.** Every plugin-tree change now bumps the version field in FOUR manifests in lock-step (Claude, Codex, Hermes, OpenClaw). CLAUDE.md updated.
+
+### Changed
+
+- The Claude Code, Codex CLI, and Hermes manifests are bumped from `0.6.0` → `0.7.0` for lock-step versioning only — there are no functional changes to those clients in this release. The MCP bridge, hooks, scripts, and lifecycle contract for Claude/Codex/Hermes are unchanged.
 
 ## [unreleased]
 

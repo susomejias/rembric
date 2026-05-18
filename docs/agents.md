@@ -240,6 +240,96 @@ Credentials, slug source, and update flow are independent per client. The Rembri
 
 Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).
 
+### OpenClaw (native memory-provider plugin)
+
+OpenClaw loads Rembric as a native Node plugin from `plugin/.openclaw-plugin/`. Architecturally closest to Hermes (in-process memory provider; no MCP subprocess; HTTP-only to the Rembric server) but with OpenClaw's first-class tool registration so all 17 `memory_*`/`project_*` tools surface natively without a separate `mcpServers` config.
+
+> **OpenClaw memory slot is exclusive: one active provider per OpenClaw instance.** If you currently have `memory-lancedb` or `agentmemory` in `plugins.slots.memory`, installing Rembric will leave it inactive until you switch the slot. See the snippet below.
+
+Install via the OpenClaw CLI. The plugin lives at `plugin/.openclaw-plugin/` inside the rembric repo (sibling to the Claude / Codex / Hermes sub-trees in the shared `plugin/` directory) — clone first, then `path:` install pointing at that sub-tree:
+
+```sh
+git clone https://github.com/susomejias/rembric.git /tmp/rembric
+openclaw plugins install path:/tmp/rembric/plugin/.openclaw-plugin
+```
+
+Or, for iterative development (symlinks the directory so saved edits show up without reinstall):
+
+```sh
+openclaw plugins install --link /tmp/rembric/plugin/.openclaw-plugin
+```
+
+> **Why not `openclaw plugins install git:https://github.com/susomejias/rembric.git`?** OpenClaw's git-install path (`/tmp/openclaw/src/plugins/install.ts:1285`) looks for `package.json` and `openclaw.plugin.json` at the ROOT of the cloned repository — it does not support a subdir/subpath syntax (verified against `plugins-install-command.ts` and `install.ts` source). Our plugin lives at `plugin/.openclaw-plugin/` inside the shared `plugin/` tree, so direct `git:repo` install would fail to find the manifest. Source kinds accepted by `openclaw plugins install` are `path | archive | npm-spec | git:repo | clawhub:pkg` — we use `path:` (after clone) for v1. A follow-up change may introduce a satellite repo (`rembric-openclaw-plugin`) with the plugin tree at root, or publish via ClawHub, to unlock single-command `git:` install.
+
+Then configure the plugin in `~/.openclaw/openclaw.json`:
+
+```jsonc
+{
+  "plugins": {
+    "slots": {
+      "memory": "rembric"  // ← required for auto-recall + memory capability
+    },
+    "entries": {
+      "rembric": {
+        "enabled": true,
+        "config": {
+          "server_url": "https://memory.example.com", // no /mcp suffix, no trailing slash
+          "api_token": "rbr_...",                     // mint from /dashboard/tokens
+          "autoRecall": true,                         // inject memories into every prompt (default)
+          "autoCapture": false,                       // off by default — Rembric prefers explicit memory_save
+          "tokenBudget": 1800                         // approx tokens for the auto-recall context block
+        }
+      }
+    }
+  }
+}
+```
+
+Restart OpenClaw. Verify with `/rembric status` inside an OpenClaw session — the slash command surfaces server URL, masked API token, and memory-slot ownership state.
+
+#### Memory-slot collision (only one active at a time)
+
+OpenClaw routes auto-recall and the memory-capability prompt through whichever plugin owns `plugins.slots.memory`. If you previously configured a different memory plugin:
+
+```jsonc
+// Before:
+{ "plugins": { "slots": { "memory": "memory-lancedb" } } }
+
+// After (Rembric takes over auto-recall + prompt section):
+{ "plugins": { "slots": { "memory": "rembric" } } }
+```
+
+The plugin emits a structured warning at register time when `plugins.slots.memory !== "rembric"`, so a quick `openclaw plugins logs rembric` (or your OpenClaw logging surface) shows the slot mismatch explicitly.
+
+#### Auto-recall token budget
+
+`autoRecall: true` calls `memory.search` against the current prompt on every turn and injects up to `tokenBudget` tokens of context. If you came from `memory-lancedb` or `agentmemory`, tune `tokenBudget` to match the budget you were used to (memory-lancedb's default is around 2000; Rembric defaults to 1800). Larger budget = more context, more LLM cost per turn.
+
+#### Auto-capture is OFF by default
+
+Unlike memory-lancedb, Rembric's `autoCapture` defaults `false`. Rembric's append-only `(scope, project_id, topic_key)` graph expects each save to declare a `topic_key` that lets the server cluster related memories together. Auto-capture without a `topic_key` would generate orphan rows that consolidator-orphan-promotion has to clean up later. Set `autoCapture: true` only if you understand that trade-off; the explicit `memory_save` tool is the recommended write path.
+
+#### Symptom → cause table
+
+| Symptom in OpenClaw                                                            | Cause                                                                                                                                                                              |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/rembric status` shows `memory slot: <other> (INACTIVE)`                     | Another plugin owns `plugins.slots.memory`. Update `~/.openclaw/openclaw.json` per the snippet above and restart OpenClaw.                                                          |
+| Auto-recall isn't injecting memories                                          | Either `autoRecall: false`, the slot is INACTIVE, or `memory.search` is failing. Check the log: the plugin warns on every failed search via `api.logger.warn`.                       |
+| `/dashboard/sessions` stays empty when running OpenClaw                       | The current cwd has no `.rembric::PROJECT_SLUG=<slug>` file. Lifecycle hooks skip the POST when slug cannot be resolved (global scope cannot upsert a session row). Add the file.    |
+| Tool calls return errors like `mcp_error — token_invalid`                     | `api_token` in the config is wrong or revoked. Mint a new one at `/dashboard/tokens` and update the config.                                                                          |
+| Tool calls return `mcp_init_failed`                                           | The plugin can't reach the Rembric server. Check `server_url`; the plugin retries `initialize` once per call, but a persistent network/DNS issue surfaces as `mcp_init_failed`.     |
+
+#### Updating the plugin
+
+Since v1 install is path-based (clone + `path:`), updates require pulling the repo and re-running install:
+
+```sh
+cd /tmp/rembric && git pull origin main
+openclaw plugins install path:/tmp/rembric/plugin/.openclaw-plugin   # overwrites
+```
+
+If you installed with `--link`, edits to the cloned repo are picked up immediately (after restarting OpenClaw to re-register the plugin code). The plugin's `version` field in `openclaw.plugin.json` participates in OpenClaw's update detection and bumps in lock-step with the other three clients (Claude / Codex / Hermes) on every plugin release — see `plugin/CHANGELOG.md`. Once a satellite repo or ClawHub publication lands, `openclaw plugins update rembric` becomes the canonical flow.
+
 ### Codex CLI (manual config.toml, no plugin)
 
 If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.
