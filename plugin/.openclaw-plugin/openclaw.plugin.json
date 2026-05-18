@@ -1,0 +1,41 @@
+{
+  "id": "rembric-openclaw",
+  "name": "Rembric OpenClaw",
+  "description": "Tracks OpenClaw session lifecycle in Rembric.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "serverUrl": {
+        "type": "string",
+        "description": "Base URL of your Rembric deployment, without the /mcp suffix."
+      },
+      "apiToken": {
+        "type": "string",
+        "description": "Bearer token issued from the Rembric dashboard at /dashboard/tokens."
+      },
+      "agentName": {
+        "type": "string",
+        "default": "openclaw",
+        "description": "Agent label stored in Rembric session rows."
+      }
+    },
+    "required": ["serverUrl", "apiToken"]
+  },
+  "uiHints": {
+    "serverUrl": {
+      "label": "Rembric server URL"
+    },
+    "apiToken": {
+      "label": "Rembric API token",
+      "sensitive": true
+    },
+    "agentName": {
+      "label": "Agent name",
+      "advanced": true
+    }
+  }
+}

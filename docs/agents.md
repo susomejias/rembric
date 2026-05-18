@@ -255,6 +255,66 @@ headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 
 > Heads-up: the manual path has no Codex hooks, so session lifecycle (creation, summary-on-compact, end-on-stop) depends entirely on the agent's discipline to call `memory.session_start` / `memory.session_summary` / `memory.session_end` over MCP. The plugin install is the recommended path — its hooks POST to `/api/<slug>/sessions(*)` automatically, so sessions are tracked regardless of agent diligence.
 
+### OpenClaw (manual MCP + optional lifecycle plugin)
+
+OpenClaw can talk to Rembric as a normal MCP client using the same Streamable HTTP URL + Bearer token shape described at the top of this page. In other words: **the MCP side already works without any Rembric server changes**.
+
+What OpenClaw was missing is the session-lifecycle bridge that the Claude/Codex/Hermes integrations already ship: creating the Rembric session row, persisting a fallback transcript on compaction, and closing the session when OpenClaw rotates or ends it.
+
+That bridge now lives in `plugin/.openclaw-plugin/`.
+
+#### 1. Register Rembric as MCP in OpenClaw
+
+Use your normal OpenClaw MCP config surface and point it at the same endpoint as any other client:
+
+```text
+URL:    http(s)://your-host:8787/mcp[/<project-slug>]
+Header: Authorization: Bearer <agent-token>
+```
+
+If you want path-scoped operation, either use `/mcp/<slug>` directly or keep the URL path-less and let the agent call `project.use({slug})`.
+
+#### 2. Install the optional lifecycle plugin
+
+From a local checkout of this repo:
+
+```bash
+openclaw plugins install ./plugin/.openclaw-plugin
+```
+
+Then enable/configure it in OpenClaw with your Rembric base URL (no `/mcp` suffix) and the same bearer token:
+
+```json5
+{
+  plugins: {
+    entries: {
+      "rembric-openclaw": {
+        enabled: true,
+        config: {
+          serverUrl: "https://memory.example.com",
+          apiToken: "oc-token-XXXXXXXX",
+          agentName: "openclaw"
+        }
+      }
+    }
+  }
+}
+```
+
+Per-project scoping reuses the same `.rembric` file as the Claude/Codex plugins:
+
+```bash
+echo "PROJECT_SLUG=my-app" > .rembric
+```
+
+When the plugin sees a valid `.rembric`, it will:
+
+- upsert `/api/<slug>/sessions` once OpenClaw reaches its first natural finalization
+- POST `/summary` before compaction using the OpenClaw JSONL session transcript as fallback material
+- POST `/end` on `session_end`
+
+If `.rembric` is missing or invalid, OpenClaw still works as a plain MCP client; only the Rembric lifecycle POSTs are skipped.
+
 ## Any other MCP client
 
 Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.

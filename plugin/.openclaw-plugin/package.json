@@ -1,0 +1,36 @@
+{
+  "name": "@susomejias/rembric-openclaw",
+  "version": "0.1.0",
+  "description": "OpenClaw lifecycle plugin for Rembric",
+  "type": "module",
+  "license": "MIT",
+  "peerDependencies": {
+    "openclaw": ">=2026.5.6"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "runtimeExtensions": [
+      "./index.js"
+    ],
+    "install": {
+      "defaultChoice": "local",
+      "minHostVersion": ">=2026.5.6"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.6"
+    }
+  },
+  "files": [
+    "index.js",
+    "transcript.js",
+    "README.md",
+    "openclaw.plugin.json"
+  ]
+}

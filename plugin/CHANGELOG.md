@@ -1,14 +1,20 @@
 # Changelog
 
-All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent).
+All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, OpenClaw, Hermes Agent).
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
 ## [unreleased]
 
+### Added
+
+- **OpenClaw lifecycle plugin scaffold** at `plugin/.openclaw-plugin/`. It is a small hook-only OpenClaw plugin that complements the existing MCP integration by POSTing Rembric session lifecycle updates from OpenClaw's native hooks: it upserts `/api/<slug>/sessions` on first natural finalization, writes fallback transcript summaries on `before_compaction`, and closes rows on `session_end`.
+- **OpenClaw transcript fixtures/tests.** `src/test/openclaw-plugin-transcript.test.ts` and `src/test/fixtures/transcripts/openclaw.jsonl` lock the parser against the observed OpenClaw JSONL session shape so future host transcript changes fail loudly.
+
 ### Changed (docs only — no version bump)
 
 - **Repointed `userConfig` / `requires_env` descriptions to `/dashboard/tokens`.** The companion server change (`remove-cli-and-npm-distribution`) eliminates the operator CLI, including `rembric token create`. The three plugin manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`) now reference the dashboard mint path; `plugin/.codex-plugin/plugin.json` has no `userConfig` field (Codex does not support it). Companion README copy (`plugin/README.md`, `plugin/.hermes-plugin/README.md`) updated to match.
+- **Explicit OpenClaw documentation** in `docs/agents.md` and `plugin/README.md`, including the split between plain MCP connectivity and the optional lifecycle plugin.
 - **No bump of plugin manifest versions** — the bridge MCP surface, hooks, scripts, and lifecycle contract are unchanged. The change is text-only in user-facing wizard descriptions. Per `CLAUDE.md::Plugin development discipline`, bumping the plugin version would invalidate installer caches for a cosmetic-only delta without benefit.
 
 ## [0.6.0] — unreleased
