@@ -91,6 +91,34 @@ const plugin = {
     },
   },
   register(api) {
+    // Diagnostic: dump what the api surface actually exposes for this
+    // third-party plugin. OpenClaw may inject a stricter shape than the
+    // one its bundled plugins see; this surfaces which register* methods
+    // are usable at runtime so we can match the real API instead of the
+    // SDK-types documentation.
+    try {
+      const apiKeys = Object.keys(api ?? {})
+        .filter((k) => typeof api[k] === 'function')
+        .sort();
+      api.logger?.info?.(`rembric: api method keys = [${apiKeys.join(', ')}]`);
+      const nestedKeys = [
+        'config',
+        'pluginConfig',
+        'runtime',
+        'logger',
+        'session',
+        'agent',
+        'lifecycle',
+      ]
+        .filter((k) => api[k] && typeof api[k] === 'object')
+        .map((k) => `${k}: {${Object.keys(api[k]).slice(0, 10).join(', ')}…}`);
+      if (nestedKeys.length) {
+        api.logger?.info?.(`rembric: api nested = ${nestedKeys.join(' | ')}`);
+      }
+    } catch (err) {
+      api.logger?.warn?.(`rembric: api-shape diagnostic failed: ${String(err)}`);
+    }
+
     const config = readConfig(api.pluginConfig, api.logger);
 
     if (!config.serverUrl || !config.apiToken) {
