@@ -92,9 +92,10 @@ See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 Docker is the canonical install path. The image bundles Node 22 and the native modules (`better-sqlite3`, `sqlite-vec`) pre-built for `linux/amd64` and `linux/arm64`, so the only requirement on your host is Docker.
 
 ```bash
-git clone https://github.com/susomejias/rembric.git && cd rembric
+mkdir rembric && cd rembric
+curl -fsSLO https://raw.githubusercontent.com/susomejias/rembric/main/docker-compose.yml
+curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.example -o .env
 
-cp .env.example .env
 # edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`)
 #             confirm OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL
 
