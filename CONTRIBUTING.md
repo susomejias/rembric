@@ -118,10 +118,14 @@ before adding any new runtime or dev dependency. The full 17-practice
 reference and the per-package-manager support matrix live there. For day-to-day
 work, the load-bearing items are:
 
-- **Lockfile is validated in CI** via `lockfile-lint` (the `Validate lockfile`
-  step in `.github/workflows/ci.yml`). It runs BEFORE `pnpm install`, so a
-  malicious lockfile entry is caught before any tarball is fetched. You can
-  run the same check locally with `pnpm run lockfile:lint`.
+- **Lockfile integrity** is enforced by three pnpm-native defenses inside
+  `pnpm install --frozen-lockfile` (the `Install` step in
+  `.github/workflows/ci.yml`): (a) lockfile must exactly match `package.json`,
+  (b) every tarball's integrity hash must match what the lockfile claims, and
+  (c) `blockExoticSubdeps: true` refuses git URLs and non-registry tarballs.
+  `lockfile-lint` v4.x does NOT support `pnpm-lock.yaml`, so it isn't used here
+  — see `.agents/skills/npm-security-best-practices/SKILL.md` practice #5 for
+  the rationale.
 - **Lifecycle scripts are blocked** for every dep except the three set to
   `true` in `pnpm-workspace.yaml::allowBuilds` (`husky`, `better-sqlite3`,
   `sqlite-vec`). If a new dep declares a `postinstall` that genuinely needs to
