@@ -33,50 +33,50 @@
 
 ## 5. Pre-orphan backup (zip-primary, remote-branch secondary)
 
-- [ ] 5.1 Owner-attested: a full-directory `.zip` of the repo (working tree + `.git/`) has been produced and stored outside the repo before proceeding. This is the primary recovery artifact for this execution per design.md Decision 2. No automated check — owner confirms in the apply transcript.
-- [ ] 5.2 Push `main` as a backup branch on origin: `git branch backup-pre-public main && git push origin backup-pre-public`. Cheap insurance — survives local-disk loss. Verify on GitHub UI that `backup-pre-public` is visible in the branch list.
-- [ ] 5.3 Apply GitHub branch protection to `backup-pre-public`: Settings → Branches → Add rule → match `backup-pre-public` → enable `Restrict deletions` and `Do not allow force-pushes`. Verify the rule is active on the GitHub UI. Required by the `open-source-distribution` spec (90-day recoverable backup branch).
+- [x] 5.1 Owner-attested: a full-directory `.zip` of the repo (working tree + `.git/`) has been produced and stored outside the repo before proceeding. This is the primary recovery artifact for this execution per design.md Decision 2. No automated check — owner confirms in the apply transcript.
+- [x] 5.2 Push `main` as a backup branch on origin: `git branch backup-pre-public main && git push origin backup-pre-public`. Cheap insurance — survives local-disk loss. Verify on GitHub UI that `backup-pre-public` is visible in the branch list.
+- [x] 5.3 Apply GitHub branch protection to `backup-pre-public`: Settings → Branches → Add rule → match `backup-pre-public` → enable `Restrict deletions` and `Do not allow force-pushes`. Verify the rule is active on the GitHub UI. Required by the `open-source-distribution` spec (90-day recoverable backup branch).
 
 ## 6. Pre-orphan housekeeping
 
-- [ ] 6.1 Close PR #49 (release-please pending 0.15.0): `gh pr close 49 --comment "Closing ahead of repository history rewrite for public open-source release. release-please will re-open a fresh 0.15.0 PR once the orphan commit lands; the version chain continues from 0.14.2."`.
-- [ ] 6.2 Confirm no other open PRs: `gh pr list --state open --json number,title` returns empty.
-- [ ] 6.3 Confirm no in-flight CI workflows: `gh run list --workflow ci.yml --status in_progress` returns empty. If anything is running, wait for it to complete.
+- [x] 6.1 Close PR #49 (release-please pending 0.15.0): `gh pr close 49 --comment "Closing ahead of repository history rewrite for public open-source release. release-please will re-open a fresh 0.15.0 PR once the orphan commit lands; the version chain continues from 0.14.2."`.
+- [x] 6.2 Confirm no other open PRs: `gh pr list --state open --json number,title` returns empty.
+- [x] 6.3 Confirm no in-flight CI workflows: `gh run list --workflow ci.yml --status in_progress` returns empty. If anything is running, wait for it to complete.
 
 ## 7. Orphan-branch swap and force-push
 
-- [ ] 7.1 From repo root: `git checkout --orphan public-release`. The working tree is preserved; only `HEAD` becomes the orphan ref.
-- [ ] 7.2 Wipe `CHANGELOG.md` (`rm CHANGELOG.md`). release-please regenerates from the next merge. Leave `.release-please-manifest.json` and `package.json` at `0.14.2` — the version chain continues per design.md Decision 3.
-- [ ] 7.3 Stage everything: `git add -A`. Verify `git diff --cached --stat` shows the full project tree as staged.
-- [ ] 7.4 Run the validation suite ONE MORE TIME against the orphan-tree state: `pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build`. ALL must pass before committing.
-- [ ] 7.5 Commit with the canonical text from design.md Decision 4: `git commit -m "$(cat <<'EOF'`...`EOF`...`)"`. Verify the commit hash via `git log --oneline -1` — it MUST be a root commit (no parent): `git rev-parse HEAD^` MUST fail with "unknown revision".
-- [ ] 7.6 Rename branches: `git branch -M main main-old-local && git branch -M public-release main`. The orphan is now `main` locally.
-- [ ] 7.7 Force-push: `git push --force-with-lease origin main`. The flag avoids overwriting a remote that's somehow ahead of expectations. Verify on GitHub UI that `main` now shows ONE commit at the top, with subject `feat: initial public release of Rembric`.
+- [x] 7.1 From repo root: `git checkout --orphan public-release`. The working tree is preserved; only `HEAD` becomes the orphan ref.
+- [x] 7.2 Wipe `CHANGELOG.md` (`rm CHANGELOG.md`). release-please regenerates from the next merge. Leave `.release-please-manifest.json` and `package.json` at `0.14.2` — the version chain continues per design.md Decision 3.
+- [x] 7.3 Stage everything: `git add -A`. Verify `git diff --cached --stat` shows the full project tree as staged.
+- [x] 7.4 Run the validation suite ONE MORE TIME against the orphan-tree state: `pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build`. ALL must pass before committing.
+- [x] 7.5 Commit with the canonical text from design.md Decision 4: `git commit -m "$(cat <<'EOF'`...`EOF`...`)"`. Verify the commit hash via `git log --oneline -1` — it MUST be a root commit (no parent): `git rev-parse HEAD^` MUST fail with "unknown revision".
+- [x] 7.6 Rename branches: `git branch -M main main-old-local && git branch -M public-release main`. The orphan is now `main` locally.
+- [x] 7.7 Force-push: `git push --force-with-lease origin main`. The flag avoids overwriting a remote that's somehow ahead of expectations. Verify on GitHub UI that `main` now shows ONE commit at the top, with subject `feat: initial public release of Rembric`.
 
 ## 8. Post-orphan validation
 
-- [ ] 8.1 Clone a fresh copy of the repo to a sibling directory: `cd /tmp && git clone https://github.com/susomejias/rembric.git rembric-fresh`. Run `cd rembric-fresh && pnpm install --frozen-lockfile && pnpm test && pnpm run build`. ALL must pass. This proves the orphan tree is genuinely self-contained.
-- [ ] 8.2 Verify `openspec validate --strict` for the active change: `cd rembric-fresh && openspec validate add-data-protection-defaults --strict`. Must pass.
-- [ ] 8.3 Verify `openspec list` shows `add-data-protection-defaults` as the only active change.
+- [x] 8.1 Clone a fresh copy of the repo to a sibling directory: `cd /tmp && git clone https://github.com/susomejias/rembric.git rembric-fresh`. Run `cd rembric-fresh && pnpm install --frozen-lockfile && pnpm test && pnpm run build`. ALL must pass. This proves the orphan tree is genuinely self-contained.
+- [x] 8.2 Verify `openspec validate --strict` for the active change: `cd rembric-fresh && openspec validate add-data-protection-defaults --strict`. Must pass.
+- [x] 8.3 Verify `openspec list` shows `add-data-protection-defaults` as the only active change.
 
 ## 9. Tag and Release cleanup
 
-- [ ] 9.1 List all tags on origin to confirm what's about to be deleted: `git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep '^v0\.'` — expected output: 28 tags `v0.1.0`..`v0.14.2`.
-- [ ] 9.2 Delete all GitHub Releases AND their underlying tags in one pass: `for t in $(gh release list --limit 30 --json tagName --jq '.[].tagName'); do gh release delete "$t" --yes --cleanup-tag; done`. The `--cleanup-tag` flag deletes both the Release and its tag from origin.
-- [ ] 9.3 Delete any remaining tags locally and on origin (in case some tags had no Release): `git tag --list 'v*' | xargs -I {} git tag -d {} && git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | xargs -I {} git push origin :refs/tags/{}`.
-- [ ] 9.4 Verify cleanup: `git tag --list` is empty; `gh release list` is empty; `git ls-remote --tags origin` is empty.
+- [x] 9.1 List all tags on origin to confirm what's about to be deleted: `git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep '^v0\.'` — expected output: 28 tags `v0.1.0`..`v0.14.2`.
+- [x] 9.2 Delete all GitHub Releases AND their underlying tags in one pass: `for t in $(gh release list --limit 30 --json tagName --jq '.[].tagName'); do gh release delete "$t" --yes --cleanup-tag; done`. The `--cleanup-tag` flag deletes both the Release and its tag from origin.
+- [x] 9.3 Delete any remaining tags locally and on origin (in case some tags had no Release): `git tag --list 'v*' | xargs -I {} git tag -d {} && git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | xargs -I {} git push origin :refs/tags/{}`.
+- [x] 9.4 Verify cleanup: `git tag --list` is empty; `gh release list` is empty; `git ls-remote --tags origin` is empty.
 
 ## 10. GitHub-side operator actions
 
-- [ ] 10.1 Operator: Settings → Packages → `ghcr.io/susomejias/rembric` → Change visibility → Public. Confirm anonymous `docker pull ghcr.io/susomejias/rembric:v0.14.2` succeeds from a clean machine if the image still exists, OR confirm anonymous pull of the new `:latest` once it publishes.
-- [ ] 10.2 Operator: Settings → General → Danger Zone → Change repository visibility → Public. Acknowledge the GitHub warnings. Confirm the repo is browsable anonymously at `https://github.com/susomejias/rembric`.
-- [ ] 10.3 Operator: About sidebar → Edit topics → add `mcp`, `claude-code`, `agent-memory`, `sqlite`, `self-hosted`, `codex-cli`, `hermes-agent`, `typescript`, `nodejs`. Confirm topics render under the description on the public repo page.
-- [ ] 10.4 Operator: Settings → Branches → Add branch protection rule on `main`: require PRs before merge, require status checks (ci / docker-build-check from `ci.yml`), require linear history, do NOT require signed commits (matches current practice), do NOT require approvals (single-maintainer project).
-- [ ] 10.5 Operator: trigger the next release-please run by merging `add-data-protection-defaults` once apply is complete. Verify release-please opens a PR for `v0.15.0` and `/healthz` reports the matching version after merge + GHCR publish.
+- [x] 10.1 Operator: Settings → Packages → `ghcr.io/susomejias/rembric` → Change visibility → Public. Confirm anonymous `docker pull ghcr.io/susomejias/rembric:v0.14.2` succeeds from a clean machine if the image still exists, OR confirm anonymous pull of the new `:latest` once it publishes.
+- [x] 10.2 Operator: Settings → General → Danger Zone → Change repository visibility → Public. Acknowledge the GitHub warnings. Confirm the repo is browsable anonymously at `https://github.com/susomejias/rembric`.
+- [x] 10.3 Operator: About sidebar → Edit topics → add `mcp`, `claude-code`, `agent-memory`, `sqlite`, `self-hosted`, `codex-cli`, `hermes-agent`, `typescript`, `nodejs`. Confirm topics render under the description on the public repo page.
+- [x] 10.4 Operator: Settings → Branches → Add branch protection rule on `main`: require PRs before merge, require status checks (ci / docker-build-check from `ci.yml`), require linear history, do NOT require signed commits (matches current practice), do NOT require approvals (single-maintainer project).
+- [x] 10.5 Operator: trigger the next release-please run by merging `add-data-protection-defaults` once apply is complete. Verify release-please opens a PR for `v0.15.0` and `/healthz` reports the matching version after merge + GHCR publish.
 
 ## 11. Final sweep
 
-- [ ] 11.1 Operator: read the public README on `github.com/susomejias/rembric` from a clean browser session (incognito) and walk through `Quickstart`. Confirm zero broken anchors, zero stale claims, zero references to private-only resources.
-- [ ] 11.2 Operator: open a fresh GitHub Security Advisory dry-run to confirm `SECURITY.md` is wired up: Security tab → Advisories → "Report a vulnerability" — the form opens, can be cancelled out.
-- [ ] 11.3 Operator: read `CODE_OF_CONDUCT.md` link from the About sidebar — it MUST resolve.
-- [ ] 11.4 Operator: confirm `backup-pre-public` branch is still visible and protected: Settings → Branches → the rule on `backup-pre-public` shows as active. Try `git push --force origin backup-pre-public` from a test branch — it MUST be rejected.
+- [x] 11.1 Operator: read the public README on `github.com/susomejias/rembric` from a clean browser session (incognito) and walk through `Quickstart`. Confirm zero broken anchors, zero stale claims, zero references to private-only resources.
+- [x] 11.2 Operator: open a fresh GitHub Security Advisory dry-run to confirm `SECURITY.md` is wired up: Security tab → Advisories → "Report a vulnerability" — the form opens, can be cancelled out.
+- [x] 11.3 Operator: read `CODE_OF_CONDUCT.md` link from the About sidebar — it MUST resolve.
+- [x] 11.4 Operator: confirm `backup-pre-public` branch is still visible and protected: Settings → Branches → the rule on `backup-pre-public` shows as active. Try `git push --force origin backup-pre-public` from a test branch — it MUST be rejected.
