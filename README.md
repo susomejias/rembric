@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="#architecture">Architecture</a> ·
+  <a href="#dashboard">Dashboard</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#hooking-up-claude-code-recommended">Claude Code</a> ·
   <a href="#hooking-up-codex-cli">Codex CLI</a> ·
@@ -86,6 +87,77 @@ Four load-bearing invariants:
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. The nightly consolidator only handles decay + orphan promotion.
 
 See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
+
+## Dashboard
+
+Self-hosted operator surface for every memory, session, judgment, and consolidation op. SSR HTML + HTMX, brutalist on purpose, no JS framework, no telemetry. Auth is one admin token — no onboarding flow.
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-login.png" alt="Sign-in" width="100%">
+</p>
+
+<p align="center"><i>Sign-in · one admin token, scope ✱.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-overview.png" alt="Overview" width="100%">
+</p>
+
+<p align="center"><i>Overview · counters, pending judgments queue, recent agent sessions.</i></p>
+
+<details>
+<summary><b>More surfaces</b> — overview health · memories · judgments · consolidation · projects · tokens · maintenance</summary>
+
+<br>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-consolidation.png" alt="Consolidation health" width="100%">
+</p>
+
+<p align="center"><i>Overview · health — last run, ops applied, orphan pendings, 7-day activity, system info.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-memories.png" alt="Memories list" width="100%">
+</p>
+
+<p align="center"><i>Memories · append-only; filter by scope, status, type, FTS5 search.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-memory-detail.png" alt="Memory detail" width="100%">
+</p>
+
+<p align="center"><i>Memory detail · status, scope, project, type, full content body.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-judgments.png" alt="Judgments" width="100%">
+</p>
+
+<p align="center"><i>Judgments · audit trail of every relation verdict — compatible, supersedes, not_conflict.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-consolidation-run.png" alt="Consolidation run detail" width="100%">
+</p>
+
+<p align="center"><i>Consolidation run · op-by-op view with per-op undo and full-run revert. Every action journaled.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-projects.png" alt="Projects" width="100%">
+</p>
+
+<p align="center"><i>Projects · slug-keyed, archivable. Each project is an isolated scope.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-tokens.png" alt="Tokens" width="100%">
+</p>
+
+<p align="center"><i>Tokens · scope-bound (<code>*</code> or <code>project:&lt;slug&gt;</code>), revocable, expirable.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-maintenance.png" alt="Maintenance" width="100%">
+</p>
+
+<p align="center"><i>Maintenance · DB breakdown + admin-only physical purges for empty sessions and disconnected archived memories.</i></p>
+
+</details>
 
 ## Quickstart (Docker)
 
