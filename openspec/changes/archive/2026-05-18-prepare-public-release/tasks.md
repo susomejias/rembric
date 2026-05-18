@@ -1,35 +1,35 @@
 ## 1. Docs and content scrubs
 
-- [ ] 1.1 Fix `README.md:10`: change `<i>One npm package, one process, one SQLite file. Multi-client by construction, reversible by design.</i>` to `<i>One Docker image, one process, one SQLite file. Multi-client by construction, reversible by design.</i>`.
-- [ ] 1.2 Remove the broken `<a href="#cli-operations">CLI</a> ·` entry from the README anchor nav at `README.md:20`. Re-balance the trailing separators so the nav line stays well-formed.
-- [ ] 1.3 Add a new README section near the install/quickstart anchor titled "Project status" — short paragraph saying the project is open-source under MIT, points at `SECURITY.md` for vulnerability disclosure, and at `docs/backup.md` for operator backup responsibility. Do NOT yet claim default-on backups (that belongs to `add-data-protection-defaults`).
-- [ ] 1.4 Update `docs/docker.md:3`: replace the parenthetical "The image is **private** today; flips to public when the project opens." with a single accurate sentence that states the image is hosted at `ghcr.io/susomejias/rembric` and is public.
-- [ ] 1.5 Scrub `openspec/changes/archive/2026-05-16-fix-codex-hook-stdout-prefix/tasks.md:48`: replace `/Users/jesus.mejias/Desktop/rembric` with `<repo>`.
-- [ ] 1.6 Repo-wide grep for any other personal home-directory leaks: `grep -rE '/Users/jesus|/home/jesus|/Users/<personal' --include='*.md' --include='*.ts' --include='*.json' --include='*.yml' --include='*.yaml' .`. If any matches outside `node_modules/` and `data-dev/`, scrub them.
-- [ ] 1.7 Direct edit (NOT a spec delta — prose outside any Requirement) of `openspec/specs/claude-code-plugin/spec.md:255`: replace `A public plugin marketplace. The plugin remains private to the monorepo's audience; a future change may extract it via \`git subtree split\` for public distribution.` with the public-friendly framing already drafted in the proposal (no longer asserts the plugin is "private to the monorepo's audience").
-- [ ] 1.8 Spec-delta sweep of `openspec/specs/` for residual "private repo / single-maintainer / pre-public" framing not already covered by the `hermes-agent-plugin` delta. Run `grep -rniE "(private|single.maintainer|single.owner|pre.public|the author|personal use|for v0|monorepo.s audience)" openspec/specs/`. Any remaining hit SHALL either be (a) rephrased in a delta spec under this change, or (b) accepted as a true historical reference and left intact with a one-sentence note explaining why it remains.
+- [x] 1.1 Fix `README.md:10`: change `<i>One npm package, one process, one SQLite file. Multi-client by construction, reversible by design.</i>` to `<i>One Docker image, one process, one SQLite file. Multi-client by construction, reversible by design.</i>`.
+- [x] 1.2 Remove the broken `<a href="#cli-operations">CLI</a> ·` entry from the README anchor nav at `README.md:20`. Re-balance the trailing separators so the nav line stays well-formed.
+- [x] 1.3 Add a new README section near the install/quickstart anchor titled "Project status" — short paragraph saying the project is open-source under MIT, points at `SECURITY.md` for vulnerability disclosure, and at `docs/backup.md` for operator backup responsibility. Do NOT yet claim default-on backups (that belongs to `add-data-protection-defaults`).
+- [x] 1.4 Update `docs/docker.md:3`: replace the parenthetical "The image is **private** today; flips to public when the project opens." with a single accurate sentence that states the image is hosted at `ghcr.io/susomejias/rembric` and is public.
+- [x] 1.5 Scrub `openspec/changes/archive/2026-05-16-fix-codex-hook-stdout-prefix/tasks.md:48`: replace `/Users/jesus.mejias/Desktop/rembric` with `<repo>`.
+- [x] 1.6 Repo-wide grep for any other personal home-directory leaks: `grep -rE '/Users/jesus|/home/jesus|/Users/<personal' --include='*.md' --include='*.ts' --include='*.json' --include='*.yml' --include='*.yaml' .`. If any matches outside `node_modules/` and `data-dev/`, scrub them.
+- [x] 1.7 Direct edit (NOT a spec delta — prose outside any Requirement) of `openspec/specs/claude-code-plugin/spec.md:255`: replace `A public plugin marketplace. The plugin remains private to the monorepo's audience; a future change may extract it via \`git subtree split\` for public distribution.` with the public-friendly framing already drafted in the proposal (no longer asserts the plugin is "private to the monorepo's audience").
+- [x] 1.8 Spec-delta sweep of `openspec/specs/` for residual "private repo / single-maintainer / pre-public" framing not already covered by the `hermes-agent-plugin` delta. Run `grep -rniE "(private|single.maintainer|single.owner|pre.public|the author|personal use|for v0|monorepo.s audience)" openspec/specs/`. Any remaining hit SHALL either be (a) rephrased in a delta spec under this change, or (b) accepted as a true historical reference and left intact with a one-sentence note explaining why it remains.
 
 ## 2. New OSS meta files
 
-- [ ] 2.1 Create `SECURITY.md` at repo root. Required content: (a) supported version policy (latest minor on `main` is the only supported version pre-1.0), (b) preferred reporting channel = GitHub Security Advisories, (c) email fallback to maintainer, (d) acknowledgement SLA = 5 business days, (e) explicit statement that pre-1.0 versions are not eligible for coordinated disclosure beyond best-effort.
-- [ ] 2.2 Create `CODE_OF_CONDUCT.md` at repo root. Content: Contributor Covenant 2.1 verbatim from `https://www.contributor-covenant.org/version/2/1/code_of_conduct.txt`, with the enforcement contact replaced by the maintainer's email (matches `SECURITY.md`).
-- [ ] 2.3 Create `.github/ISSUE_TEMPLATE/bug.yml` with required form fields: `Reproduction steps` (textarea, required), `Rembric version` (input, required), `Client` (dropdown: Claude Code / Codex CLI / Hermes Agent / Other / N-A), `Environment` (textarea: OS, Docker version, Node version if running outside Docker), `Logs` (textarea, optional).
-- [ ] 2.4 Create `.github/ISSUE_TEMPLATE/feature.yml` with form fields: `Problem statement` (textarea, required), `Proposed solution` (textarea, required), `Alternatives considered` (textarea, optional), `Why now?` (textarea, optional).
-- [ ] 2.5 Create `.github/ISSUE_TEMPLATE/config.yml` with `blank_issues_enabled: false` and a `contact_links` entry pointing "I have a question" at GitHub Discussions if Discussions are enabled later, otherwise omit.
-- [ ] 2.6 Create `.github/PULL_REQUEST_TEMPLATE.md` with the checklist from `CONTRIBUTING.md::Pull request checklist`: lint, typecheck, tests, conventional commit message, openspec validate (if applicable), changelog entry not needed (release-please handles it).
+- [x] 2.1 Create `SECURITY.md` at repo root. Required content: (a) supported version policy (latest minor on `main` is the only supported version pre-1.0), (b) preferred reporting channel = GitHub Security Advisories, (c) email fallback to maintainer, (d) acknowledgement SLA = 5 business days, (e) explicit statement that pre-1.0 versions are not eligible for coordinated disclosure beyond best-effort.
+- [x] 2.2 Create `CODE_OF_CONDUCT.md` at repo root. Content: Contributor Covenant 2.1 verbatim from `https://www.contributor-covenant.org/version/2/1/code_of_conduct.txt`, with the enforcement contact replaced by the maintainer's email (matches `SECURITY.md`).
+- [x] 2.3 Create `.github/ISSUE_TEMPLATE/bug.yml` with required form fields: `Reproduction steps` (textarea, required), `Rembric version` (input, required), `Client` (dropdown: Claude Code / Codex CLI / Hermes Agent / Other / N-A), `Environment` (textarea: OS, Docker version, Node version if running outside Docker), `Logs` (textarea, optional).
+- [x] 2.4 Create `.github/ISSUE_TEMPLATE/feature.yml` with form fields: `Problem statement` (textarea, required), `Proposed solution` (textarea, required), `Alternatives considered` (textarea, optional), `Why now?` (textarea, optional).
+- [x] 2.5 Create `.github/ISSUE_TEMPLATE/config.yml` with `blank_issues_enabled: false` and a `contact_links` entry pointing "I have a question" at GitHub Discussions if Discussions are enabled later, otherwise omit.
+- [x] 2.6 Create `.github/PULL_REQUEST_TEMPLATE.md` with the checklist from `CONTRIBUTING.md::Pull request checklist`: lint, typecheck, tests, conventional commit message, openspec validate (if applicable), changelog entry not needed (release-please handles it).
 
 ## 3. Pre-rewrite validation gate
 
-- [ ] 3.1 Stage the docs + scrub edits + new meta files. Run `pnpm run lint`, `pnpm run typecheck`, `pnpm test`, `pnpm run build` — ALL must pass before committing.
-- [ ] 3.2 Run `openspec validate prepare-public-release --strict` and `openspec validate add-data-protection-defaults --strict`. Both must pass.
-- [ ] 3.3 Commit the docs + scrub edits + meta files with a single Conventional Commit on current main: `docs: prepare repository for public open-source release`. This commit lands BEFORE the orphan swap.
-- [ ] 3.4 Verify the commit's tree includes the new files: `git show --stat HEAD` should list `SECURITY.md`, `CODE_OF_CONDUCT.md`, the `.github/ISSUE_TEMPLATE/` entries, `.github/PULL_REQUEST_TEMPLATE.md`, the README diff, the `docs/docker.md` diff, and the archived openspec tasks scrub.
+- [x] 3.1 Stage the docs + scrub edits + new meta files. Run `pnpm run lint`, `pnpm run typecheck`, `pnpm test`, `pnpm run build` — ALL must pass before committing.
+- [x] 3.2 Run `openspec validate prepare-public-release --strict` and `openspec validate add-data-protection-defaults --strict`. Both must pass.
+- [x] 3.3 Commit the docs + scrub edits + meta files with a single Conventional Commit on current main: `docs: prepare repository for public open-source release`. This commit lands BEFORE the orphan swap.
+- [x] 3.4 Verify the commit's tree includes the new files: `git show --stat HEAD` should list `SECURITY.md`, `CODE_OF_CONDUCT.md`, the `.github/ISSUE_TEMPLATE/` entries, `.github/PULL_REQUEST_TEMPLATE.md`, the README diff, the `docs/docker.md` diff, and the archived openspec tasks scrub.
 
 ## 4. Archive this change BEFORE the orphan commit
 
-- [ ] 4.1 Run `/opsx:archive prepare-public-release` to move `openspec/changes/prepare-public-release/` to `openspec/changes/archive/<YYYY-MM-DD>-prepare-public-release/`. Sync any spec deltas to `openspec/specs/open-source-distribution/spec.md`.
-- [ ] 4.2 Verify the archive landed under `openspec/changes/archive/`. Verify `openspec/changes/add-data-protection-defaults/` is still ACTIVE (it is the next PR after the flip).
-- [ ] 4.3 Commit the archive move with Conventional Commit: `chore(openspec): archive prepare-public-release ahead of orphan swap`.
+- [x] 4.1 Run `/opsx:archive prepare-public-release` to move `openspec/changes/prepare-public-release/` to `openspec/changes/archive/<YYYY-MM-DD>-prepare-public-release/`. Sync any spec deltas to `openspec/specs/open-source-distribution/spec.md`.
+- [x] 4.2 Verify the archive landed under `openspec/changes/archive/`. Verify `openspec/changes/add-data-protection-defaults/` is still ACTIVE (it is the next PR after the flip).
+- [x] 4.3 Commit the archive move with Conventional Commit: `chore(openspec): archive prepare-public-release ahead of orphan swap`.
 
 ## 5. Pre-orphan backup (zip-primary, remote-branch secondary)
 
