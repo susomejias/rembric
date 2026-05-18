@@ -1,6 +1,6 @@
 # Docker operator guide
 
-The canonical install for Rembric. Versioned image at `ghcr.io/susomejias/rembric`, one process, one SQLite file, one bind-mount. The image is **private** today; flips to public when the project opens.
+The canonical install for Rembric. Versioned image at `ghcr.io/susomejias/rembric` (public), one process, one SQLite file, one bind-mount.
 
 ## Topologies
 

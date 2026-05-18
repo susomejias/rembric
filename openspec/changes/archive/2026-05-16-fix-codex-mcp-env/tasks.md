@@ -37,7 +37,7 @@
 - [x] 5.3 Commit (sha `2d8c54f`): `fix(codex): split MCP config per client; use cwd + env_vars`. Body cites the three Codex source functions.
 - [x] 5.4 User pushed to `origin/main` externally during the session.
 - [x] 5.5 `codex plugin marketplace upgrade rembric` run by user — cache regenerated to `0.2.1/`.
-- [x] 5.6 Codex relaunch verified: log shows `[rembric-bridge] cwd=/Users/jesus.mejias/.codex/plugins/cache/rembric/rembric/0.2.1 url=http://192.168.20.48:8787/mcp` (real URL). Bridge spawn clean, no `Cannot find module`, no `TypeError: Invalid URL`. MCP `initialize` + `notifications/initialized` + `tools/list` all complete. Bearer token auth succeeds. `/mcp` panel lists all rembric tools.
+- [x] 5.6 Codex relaunch verified: log shows `[rembric-bridge] cwd=<home>/.codex/plugins/cache/rembric/rembric/0.2.1 url=http://192.0.2.10:8787/mcp` (real URL). Bridge spawn clean, no `Cannot find module`, no `TypeError: Invalid URL`. MCP `initialize` + `notifications/initialized` + `tools/list` all complete. Bearer token auth succeeds. `/mcp` panel lists all rembric tools.
 - [x] 5.7 Archiving via `/opsx:archive` now.
 
 ## 6. Cross-client regression check

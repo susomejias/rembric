@@ -5,7 +5,7 @@ The Codex plugin install completes successfully (marketplace add + plugin instal
 Diagnosed live against `codex-cli 0.130.0` (stderr captured in `~/.codex/log/codex-tui.log`):
 
 ```
-2026-05-15T23:24:44 INFO MCP server stderr (node): Error: Cannot find module '/Users/jesus.mejias/Desktop/rembric/${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs'
+2026-05-15T23:24:44 INFO MCP server stderr (node): Error: Cannot find module '<repo>/${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs'
 ```
 
 Two distinct bugs, both confirmed against [openai/codex source](https://github.com/openai/codex/tree/main/codex-rs):

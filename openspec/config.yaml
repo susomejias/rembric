@@ -1,20 +1,131 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context shown to AI agents when authoring proposal / design / specs /
+# tasks. Keep this in sync with CLAUDE.md::Architecture and DESIGN.md — when the
+# two diverge, this section is the authoritative summary for spec authoring.
+context: |
+  Rembric is a self-hosted memory + sessions + dashboard for AI coding agents.
+  The MCP memory surface (save/search/get/judge/confirm/compare/context/timeline)
+  is the core; sessions, judgments, projects, consolidation, and an operator
+  dashboard come along in the same single Node process backed by one SQLite
+  file. Multi-client by construction (Claude Code, Codex CLI, Hermes Agent,
+  generic MCP). Distributed exclusively as a Docker image at
+  ghcr.io/susomejias/rembric. MIT license, open-source on GitHub.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Tech stack:
+    - TypeScript strict (no any without a justifying comment, no floating promises)
+    - Node 22+ via corepack-pinned pnpm 11.x
+    - Drizzle ORM over better-sqlite3 (sqlite-vec + FTS5 extensions)
+    - Hono (HTTP + dashboard SSR) + raw IncomingMessage for /mcp transport
+    - HTMX for dashboard interactivity (no SPA, no build pipeline for JS)
+    - Vitest for tests; co-located src/**/*.test.ts
+    - Conventional Commits, release-please, GHCR for image publish
+
+  Load-bearing invariants (DO NOT violate without a dedicated OpenSpec change):
+    - Append-only memory: rows are never DELETEd; content is never UPDATEd.
+      Lifecycle is `status` flips (active → superseded | archived) plus
+      `replaces` links. Every consolidation op is journaled in `consolidation_ops`
+      and reversible. Two narrow physical-purge escape hatches exist
+      (purgeEmpty sessions, purgeDisconnectedArchived memory) gated by admin
+      bypass and journaled.
+    - Scope enforced at the service layer: every MemoryService query filters
+      by Scope. Tools resolve scope once and thread it down; they never query
+      DB directly.
+    - Convergent topics via `topic_key`: previously-active row in
+      (scope, project_id, topic_key) is auto-superseded atomically inside
+      saveWithTopicKey.
+    - Fresh-context judgment: candidate conflicts surface in
+      memory.save.candidates[]; the agent that produced the conflict judges
+      it via memory.judge.
+    - Path-scoping vs URL-routing: /mcp/<slug> connections have ctx.project
+      set; /mcp connections rely on SessionRouter. Tools that need effective
+      project consult BOTH sources via resolveEffectiveProject / scopeFromContext.
+
+  Cross-client distribution:
+    - One shared plugin tree at plugin/ feeds three marketplaces:
+      Claude Code (.claude-plugin/), Codex CLI (.codex-plugin/),
+      Hermes Agent (.hermes-plugin/). Per-client divergence ONLY when the
+      platform forces it (e.g., Codex doesn't substitute ${CLAUDE_PLUGIN_ROOT},
+      uses env_vars instead of env-map interpolation).
+    - Shared logic lives in the HTTP API contract (src/server/api-router.ts).
+      Per-client adapters MAY be written in any language; they implement the
+      same set of POSTs against the same endpoints.
+
+  Open-source posture:
+    - MIT, no warranty, no responsibility for operator data loss.
+    - Vulnerability disclosure via GitHub Security Advisories (see SECURITY.md).
+    - Operator is responsible for backups (see docs/backup.md). The
+      `add-data-protection-defaults` change introduces default-on auto-snapshot
+      once landed.
+
+  When in doubt about a spec change, prefer adding a new capability over
+  modifying an existing one. Modifications to existing requirements MUST
+  include the full updated content (not a diff) so the archive sync step
+  resolves cleanly.
+
+# Per-artifact rules. Apply across every OpenSpec change in this repo. Authors
+# (human or agent) MUST treat these as non-negotiable before strict validate.
+rules:
+  proposal:
+    - One Why paragraph + structured What Changes + Capabilities + Impact.
+    - Mark breaking changes with **BREAKING** inline; downstream contributors
+      grep for that token.
+    - List the affected files concretely in Impact. "Various files" is not
+      acceptable.
+    - Reference the durable invariants this proposal touches (append-only,
+      scope-at-service, topic_key, judgment freshness) when applicable.
+
+  design:
+    - Include design.md whenever the change is cross-cutting, introduces a new
+      external dependency, touches security/performance/migration complexity,
+      or resolves architectural ambiguity. Skip only for trivial single-module
+      changes.
+    - Decisions section MUST include alternatives considered (not just the
+      chosen path) so the archived design reads as a complete decision log.
+    - Risks / Trade-offs section uses the format `[Risk] description → Mitigation`
+      or `[Trade-off] description → Accepted because ...`. Be specific about
+      what could go wrong.
+
+  specs:
+    - One spec file per capability. New capability names go in kebab-case under
+      specs/<name>/spec.md. Modified capabilities use the existing folder name
+      from openspec/specs/.
+    - ADDED Requirements are for entirely new behaviour. MODIFIED Requirements
+      MUST copy the ENTIRE existing requirement block (header + description +
+      every scenario) before editing — partial MODIFIED entries lose detail at
+      archive-time sync.
+    - Every Requirement MUST have at least one Scenario in WHEN/THEN form, with
+      exactly four hashtags on the Scenario header. Three hashtags or bullet
+      lists for scenarios silently break the parser.
+    - Prefer SHALL/MUST over should/may. The spec is a contract, not a
+      recommendation.
+
+  tasks:
+    - |
+      Group related tasks under numbered ## headings. Each task is a GFM
+      checkbox line (the literal pattern `dash space open-bracket space
+      close-bracket space X.Y description`); the /opsx:apply tool parses this
+      checkbox format to track progress.
+    - |
+      Tasks should be verifiable: "implement X" is bad, "implement X so that
+      `pnpm test --filter foo` produces N passing tests" is good.
+    - |
+      Tasks that are operator-only (Docker build on host, GitHub UI action,
+      manual smoke against a remote service) MUST be labelled clearly so
+      /opsx:apply can pause on them.
+    - |
+      Sensitive value rule: NEVER paste real tokens, API keys, bearer tokens,
+      private repository paths, internal hostnames, LAN IPs, or maintainer
+      home-directory strings into tasks. Use placeholders such as `<repo>`,
+      `<token>`, `<server-host>`, `192.0.2.10` (RFC 5737 documentation IP),
+      `<user>@<host>`. The git-history-rewrite at public-release time will
+      collapse pre-public content, but any tracked content with a leak is a
+      regression — pre-commit grep enforces this.
+    - |
+      Lists of past sessions, agent transcripts, or anything that could
+      identify an operator's deployment MUST be redacted before commit.
+    - |
+      The same sensitive-content rule applies to ANY tracked file (spec,
+      code, doc, manifest, hook script). Do not assume "it is just an
+      example" — examples in canonical specs become part of the public
+      contract.

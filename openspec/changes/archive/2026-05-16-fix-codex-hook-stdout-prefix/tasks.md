@@ -45,7 +45,7 @@
 - [ ] 6.1 `codex plugin marketplace upgrade rembric`. Confirm `~/.codex/plugins/cache/rembric/rembric/` now contains a `0.2.3/` directory (or upgraded existing one).
 - [ ] 6.2 Cold-restart `codex` from `~/Desktop/rembric`. Send any user prompt.
 - [ ] 6.3 Tail `~/.codex/log/codex-tui.log` and confirm: NO `error: hook returned invalid session start JSON output` entries since the restart timestamp.
-- [ ] 6.4 Confirm a new session row appears at `/dashboard/sessions` in the Rembric server with `agent=codex-cli` and `cwd=/Users/jesus.mejias/Desktop/rembric`.
+- [ ] 6.4 Confirm a new session row appears at `/dashboard/sessions` in the Rembric server with `agent=codex-cli` and `cwd=<repo>` (the local checkout path).
 - [ ] 6.5 (Optional) Trigger the UserPromptSubmit recall matcher: send a prompt containing `recall` or `acordate`. Confirm no error in the log; the `rembric: User intent...` nudge should appear in the agent's reasoning trace.
 
 ## 7. Archive

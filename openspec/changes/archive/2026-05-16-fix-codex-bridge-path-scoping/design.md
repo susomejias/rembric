@@ -129,7 +129,7 @@ Mitigation: this is strictly a fix. Today empty-string `CLAUDE_PROJECT_DIR` prod
 2. `codex plugin marketplace upgrade rembric`.
 3. Confirm `.rembric` exists at this repo root with `PROJECT_SLUG=rembric`.
 4. Restart `codex` from this repo's directory.
-5. Tail `~/.codex/log/codex-tui.log`. Expected: `[rembric-bridge] projectDir=/Users/jesus.mejias/Desktop/rembric (from PWD) url=http://192.168.20.48:8787/mcp/rembric`.
+5. Tail `~/.codex/log/codex-tui.log`. Expected: `[rembric-bridge] projectDir=<repo> (from PWD) url=http://192.0.2.10:8787/mcp/rembric`.
 6. Trigger a tool call. Confirm response routes to the `rembric` project on the server side (not global).
 
 **Rollback.** If the change causes any regression, revert the bridge file + the env_vars entry + the version bumps in a single commit. Users who already pulled `0.2.2` would need another `marketplace upgrade` to drop back to `0.2.1` once a `0.2.3` revert is published.

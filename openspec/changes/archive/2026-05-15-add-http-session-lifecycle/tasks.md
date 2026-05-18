@@ -37,7 +37,7 @@
 ## 5. Plugin scripts
 
 - [x] 5.1 Created `plugin/scripts/_api.sh` exposing `rembric_post`, `rembric_read_project_slug`, `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, `rembric_json_escape`. Bash builtins for parsing (no jq dep); curl for the POST.
-- [x] 5.2 Rewrote `plugin/scripts/session-start.sh`: reads `session_id` + `cwd` from stdin JSON, resolves slug from `.rembric`, POSTs `/api/<slug>/sessions`, then emits the existing nudge. 25 LOC excl. helper, with `trap 'exit 0' ERR`. Smoke-tested against `/Users/jesus.mejias/Desktop/rembric` (slug `rembric`).
+- [x] 5.2 Rewrote `plugin/scripts/session-start.sh`: reads `session_id` + `cwd` from stdin JSON, resolves slug from `.rembric`, POSTs `/api/<slug>/sessions`, then emits the existing nudge. 25 LOC excl. helper, with `trap 'exit 0' ERR`. Smoke-tested against `<repo>` (slug `rembric`).
 - [x] 5.3 Created `plugin/scripts/pre-compact.sh`: reads stdin, POSTs the literal stdin payload as summary (truncated at 19_500 chars to stay under the server's 20k limit). No stdout.
 - [x] 5.4 Created `plugin/scripts/session-stop.sh`: reads stdin, POSTs `/api/<slug>/sessions/<id>/end {}`. No stdout. Designed for `async: true`.
 - [x] 5.5 Deleted `post-compact.sh`, `pre-compact-codex.sh`, `stop-codex.sh`.

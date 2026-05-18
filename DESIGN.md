@@ -186,9 +186,9 @@ patterns — match them rather than inventing new ones.
 ## Overview
 
 Rembric's identity is **brutalist editorial**. The product is a
-single-tenant, self-hosted memory layer for AI agents; it should feel
-operational, terse, and unambiguous — like an oscilloscope, not a SaaS
-landing page.
+single-tenant, self-hosted memory + sessions + dashboard for AI coding
+agents; it should feel operational, terse, and unambiguous — like an
+oscilloscope, not a SaaS landing page.
 
 Visual choices:
 

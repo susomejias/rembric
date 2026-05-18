@@ -32,8 +32,8 @@
 - [x] 5.4 Cache regenerated to `0.2.2/` (verified `~/.codex/plugins/cache/rembric/rembric/0.2.2/.codex-plugin/{plugin.json,mcp.json}` have new content).
 - [x] 5.5 Codex relaunched from repo root with `REMBRIC_*` exported.
 - [x] 5.6 Log confirms all three checks:
-  - `[rembric-bridge] projectDir=/Users/jesus.mejias/Desktop/rembric (from PWD) url=http://192.168.20.48:8787/mcp/rembric` ✓
-  - URL path-scoped to `/mcp/rembric` (verified via `Connecting to remote server: http://192.168.20.48:8787/mcp/rembric` line) ✓
+  - `[rembric-bridge] projectDir=<repo> (from PWD) url=http://192.0.2.10:8787/mcp/rembric` ✓
+  - URL path-scoped to `/mcp/rembric` (verified via `Connecting to remote server: http://192.0.2.10:8787/mcp/rembric` line) ✓
   - MCP handshake completes (`Local→Remote initialize` → `Remote→Local 0` → `notifications/initialized` → `tools/list` → `Remote→Local 1`) ✓
   - Server-side `/dashboard/sessions` attribution pending: needs user to trigger a tool call to confirm.
 - [x] 5.7 5.6 passed end-to-end. Verified by user: agent inside Codex called `rembric.project.current({})` and got `{"slug": "rembric", "source": "url-path"}` — the `source: "url-path"` field proves the bridge built `/mcp/rembric` correctly and the server pinned the project from the URL slug. `memory.context` returned real project-scoped data. Archiving now.

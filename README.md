@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <b>Self-hosted memory layer for AI coding agents</b>
+  <b>Self-hosted memory, sessions, and dashboard for AI coding agents</b>
 </p>
 
 <p align="center">
-  <i>One npm package, one process, one SQLite file. Multi-client by construction, reversible by design.</i>
+  <i>One Docker image, one process, one SQLite file. Multi-client by construction, reversible by design.</i>
 </p>
 
 <p align="center">
@@ -17,14 +17,14 @@
   <a href="#hooking-up-codex-cli">Codex CLI</a> ·
   <a href="#hooking-up-hermes-agent">Hermes Agent</a> ·
   <a href="#hooking-up-other-mcp-clients">Other Clients</a> ·
-  <a href="#cli-operations">CLI</a> ·
   <a href="#configuration">Configuration</a> ·
+  <a href="#project-status">Project status</a> ·
   <a href="#contributing">Contributing</a>
 </p>
 
 ---
 
-> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory layer beneath your agents. One brain, shared across every MCP-capable tool — Claude Code, Codex CLI, Cursor, and beyond.
+> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
 
 ## Architecture
 
@@ -340,9 +340,18 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ## More docs
 
-- [docs/docker.md](./docs/docker.md) — Docker operator guide (topologies, private GHCR auth, upgrade/rollback, troubleshooting).
+- [docs/docker.md](./docs/docker.md) — Docker operator guide (topologies, GHCR auth, upgrade/rollback, troubleshooting).
 - [docs/agents.md](./docs/agents.md) — per-client MCP config (Codex, Cursor, Windsurf, VS Code, Gemini, …).
+- [docs/backup.md](./docs/backup.md) — backup strategies and restore recipes for the SQLite data file.
 - [docs/troubleshooting.md](./docs/troubleshooting.md) — common errors and recovery.
+
+## Project status
+
+Rembric is open-source under the MIT License — **as-is, no warranty**. The maintainers do not accept responsibility for operator data loss, deployment downtime, or any other operational consequence of running the software.
+
+- **Security**: vulnerability reports go through [SECURITY.md](./SECURITY.md). Preferred channel is GitHub Security Advisories.
+- **Backups**: the entire server state lives in one SQLite file. Operators are responsible for backing it up; see [docs/backup.md](./docs/backup.md) for `sqlite3 .backup` cron, manual snapshots, and litestream.
+- **Versioning**: SemVer, driven by release-please. Pre-1.0 means the wire and HTTP contracts may shift across minors; check release notes before upgrading.
 
 ## Contributing
 

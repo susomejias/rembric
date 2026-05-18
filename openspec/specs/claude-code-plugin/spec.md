@@ -252,5 +252,5 @@ This capability does not specify:
 
 - A stdio→HTTP bridge for filesystem-side slug resolution. Considered and rejected for v1; possible opt-in in a future change.
 - A local stdio mode for Rembric. The plugin is a configuration layer for the existing HTTP server.
-- A public plugin marketplace. The plugin remains private to the monorepo's audience; a future change may extract it via `git subtree split` for public distribution.
+- A standalone public plugin marketplace listing (e.g., a curated Anthropic-hosted directory). The plugin is shipped from this repository's public marketplace manifest; a future change may extract it via `git subtree split` to distribute as a separate package.
 - Server-side changes to `deriveSlugFromUri` or other Rembric internals. The plugin sits entirely on the client side.

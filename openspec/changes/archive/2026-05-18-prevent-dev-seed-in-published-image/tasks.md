@@ -91,5 +91,5 @@
 - [ ] 10.3 BEFORE arranque, confirm `~/docker/rembric/.env` contains the `REMBRIC_ADMIN_TOKEN` value that matches the hash in the backup's `tokens` table. If not, set it accordingly (the admin token is the only token the dashboard accepts post-restore).
 - [ ] 10.4 Arrancar el container: `docker compose up -d`. La nueva imagen NO ejecuta seed-dev y, gracias al data-loss guard, si por error apuntara a un directorio vacío refusaría arrancar en vez de continuar.
 - [ ] 10.5 Verificar el banner de arranque: `docker compose logs --tail=20 rembric | grep "^\[bootstrap\]"` SHALL mostrar `counts: memory=82 projects=6 sessions=59 tokens=6 prompts=1`.
-- [ ] 10.6 Verify the dashboard at `http://192.168.20.48:8787/dashboard` renders the restored data and login works with the original admin token.
+- [ ] 10.6 Verify the dashboard at `http://192.0.2.10:8787/dashboard` renders the restored data and login works with the original admin token.
 - [ ] 10.7 After 24h of confirmed-stable operation, remove the defensive backup directory `~/docker/rembric/data.lost-20260517-2153/` from the LXC.

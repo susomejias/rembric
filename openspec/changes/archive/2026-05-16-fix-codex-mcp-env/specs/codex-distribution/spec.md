@@ -69,7 +69,7 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 - **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json`
 - **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env (the shell that launched `codex`)
 - **AND** the curated env passed to the bridge subprocess (after `Command::env_clear()`) SHALL contain those names with the user-supplied values
-- **AND** the bridge SHALL build a real URL — e.g. `http://192.168.20.48:8787/mcp/<slug>` — not a placeholder literal
+- **AND** the bridge SHALL build a real URL — e.g. `http://192.0.2.10:8787/mcp/<slug>` — not a placeholder literal
 
 #### Scenario: Bridge surfaces a useful error when env vars are missing
 

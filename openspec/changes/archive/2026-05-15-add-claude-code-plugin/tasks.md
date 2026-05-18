@@ -26,7 +26,7 @@
 - [x] 3b.4 Spawn `npx -y mcp-remote@latest <url> --allow-http --header "Authorization:Bearer <token>"` with `stdio: 'inherit'`.
 - [x] 3b.5 Forward exit code; propagate signals.
 - [x] 3b.6 Write startup diagnostic to stderr.
-- [x] 3b.7 Smoke test locally: `slug=rembric url=http://192.168.20.48:8787/mcp/rembric`, connects to server, proxy established. ✓
+- [x] 3b.7 Smoke test locally: `slug=rembric url=http://192.0.2.10:8787/mcp/rembric`, connects to server, proxy established. ✓
 - [x] 3b.8 Fix HTTP support: pass `--allow-http` to `mcp-remote` so plain-HTTP LAN deployments work (Rembric typical case).
 
 ## 4. Skill (removed — now server-side)

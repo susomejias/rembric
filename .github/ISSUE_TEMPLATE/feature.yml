@@ -1,0 +1,88 @@
+name: Feature request
+description: Suggest a new capability, integration, or improvement
+title: 'feat: <one-line summary>'
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening, please search existing issues. For non-trivial
+        behavioural changes (new MCP tool, new HTTP endpoint, new invariant),
+        the project goes through a spec-driven workflow under
+        `openspec/changes/`. A feature request here is the right first step;
+        if the maintainer agrees on direction, a follow-up OpenSpec change
+        will capture the proposal / design / specs / tasks.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: |
+        What user-facing problem does this feature solve? Describe the situation
+        where you (or another operator / agent) hit a wall today.
+      placeholder: |
+        When I... I expected to be able to... but Rembric currently doesn't
+        support... so I had to work around it by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How would the feature work? Sketch the user-facing surface (new MCP
+        tool name + signature, new dashboard page, new env var, etc.).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What other approaches did you consider? Why are they worse than the
+        proposed solution?
+    validations:
+      required: false
+
+  - type: textarea
+    id: why_now
+    attributes:
+      label: Why now?
+      description: |
+        Why is this worth shipping in the near term vs. parked? What changes
+        downstream if it lands?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      description: Which surface does this feature touch?
+      multiple: true
+      options:
+        - MCP tools
+        - HTTP API
+        - Dashboard
+        - Plugin (Claude Code)
+        - Plugin (Codex CLI)
+        - Plugin (Hermes Agent)
+        - CLI / dev workflow
+        - Docker image / distribution
+        - OpenSpec workflow
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and could not find a duplicate request.
+          required: true
+        - label: I understand that non-trivial behaviour changes go through an OpenSpec change before implementation.
+          required: true

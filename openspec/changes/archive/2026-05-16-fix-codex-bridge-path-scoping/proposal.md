@@ -2,7 +2,7 @@
 
 After the previous change (`2026-05-16-fix-codex-mcp-env`) shipped `plugin/.codex-plugin/mcp.json` with `cwd: "."` to anchor the bundled bridge path, an unintended regression emerged: under Codex, the bridge subprocess runs with `cwd = plugin cache dir` (`~/.codex/plugins/cache/rembric/rembric/0.2.1`). The bridge reads `${projectDir}/.rembric` from `process.env.CLAUDE_PROJECT_DIR ?? process.cwd()`. Codex does not set `CLAUDE_PROJECT_DIR`, and `process.cwd()` returns the cache dir. So `.rembric` is never found and the bridge always falls back to path-less `/mcp` (global scope) even when the user has a valid `PROJECT_SLUG` in their project root. Path-scoping breaks entirely under Codex.
 
-Verified live: bridge stderr shows `[rembric-bridge] No .rembric in /Users/jesus.mejias/.codex/plugins/cache/rembric/rembric/0.2.1; using path-less /mcp.` immediately after the install fix landed.
+Verified live: bridge stderr shows `[rembric-bridge] No .rembric in <home>/.codex/plugins/cache/rembric/rembric/0.2.1; using path-less /mcp.` immediately after the install fix landed.
 
 ## What Changes
 

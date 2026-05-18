@@ -1,0 +1,108 @@
+name: Bug report
+description: Report a defect in the Rembric server, dashboard, or plugins
+title: 'bug: <one-line summary>'
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Before opening, please
+        search existing issues to avoid duplicates. **Do not** report security
+        vulnerabilities here — see [SECURITY.md](../SECURITY.md) for the
+        private disclosure channel.
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: |
+        Numbered steps to reproduce. Include exact commands, env vars, and any
+        relevant config. The ideal repro starts from a fresh `pnpm run dev:docker:up`
+        or `docker compose up`.
+      placeholder: |
+        1. `pnpm run dev:docker:up`
+        2. Authenticate against `/mcp/<slug>` with token X
+        3. Call `memory.save({...})`
+        4. Observe: response includes Y instead of Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened? Include error messages or stack traces in code blocks.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Rembric version
+      description: |
+        Output of `curl -H "Authorization: Bearer $TOKEN" http://localhost:8787/healthz`,
+        the GHCR image tag you pulled, or the git commit SHA if running from source.
+      placeholder: 'v0.14.2  /  ghcr.io/susomejias/rembric:v0.14.2  /  commit abc1234'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      description: Which MCP client surfaces the issue (if relevant)?
+      options:
+        - Claude Code
+        - Codex CLI
+        - Hermes Agent
+        - Other MCP client
+        - Dashboard only
+        - Server-side / no client involved
+        - N/A
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS + version, Docker version, Node version (if running outside Docker), any reverse proxy / load balancer in front of the server.
+      placeholder: |
+        macOS 15.4 (M2 Pro)
+        Docker Desktop 4.42.1
+        Node 22.13.0 (only if running pnpm start directly)
+        No reverse proxy
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant server logs, MCP transcript snippets, or browser DevTools
+        console output. **Redact tokens, IPs, and personal paths before
+        pasting** — anything you paste here is public.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and could not find a duplicate.
+          required: true
+        - label: I redacted any tokens, private hostnames, and personal paths from the logs above.
+          required: true
+        - label: I am not reporting a security vulnerability here (see SECURITY.md for that).
+          required: true
