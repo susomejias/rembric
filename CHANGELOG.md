@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/susomejias/rembric/compare/v0.14.2...v0.15.0) (2026-05-18)
+
+
+### Features
+
+* add openspec archive, explore, propose, and apply skills ([959c38a](https://github.com/susomejias/rembric/commit/959c38a966cac3acba1c56271056430323d20289))
+* add skill packaging and validation scripts ([862f77d](https://github.com/susomejias/rembric/commit/862f77d27bd2ecfe8da94ad3d503520116d988b3))
+* **security:** harden npm supply chain + bump pnpm 11 / node 22 ([e693fed](https://github.com/susomejias/rembric/commit/e693fed5bb76fd69473485db44c385d01b4581b5))
+
+
+### Documentation
+
+* **contributing:** fix stale lockfile-lint reference in adding-a-dependency section ([931c149](https://github.com/susomejias/rembric/commit/931c1491001ad0c38060b771e87378030af5d308))
+
 ## [0.14.2](https://github.com/susomejias/rembric/compare/v0.14.1...v0.14.2) (2026-05-17)
 
 
