@@ -242,7 +242,9 @@ Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider
 
 ### opencode (bundled plugin)
 
-[opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle, passive prompt capture, and compaction-time context injection. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
+[opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
+
+v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-output capture (`tool.execute.after`); their HTTP endpoints (`/api/<slug>/prompts/passive`, `/api/<slug>/observations/passive`) do not exist on Rembric's API yet and land in a follow-up change.
 
 #### Install
 

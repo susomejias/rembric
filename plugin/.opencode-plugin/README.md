@@ -77,13 +77,13 @@ Removes the plugin file and bridge file. Does **not** touch `opencode.json` — 
 
 - **Sessions don't appear in the dashboard.** Most likely cause: missing or invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug for session …`. Add a valid `.rembric` to the repo root.
 - **opencode reports an MCP connection error.** Check the bridge can reach the server: `REMBRIC_SERVER_URL='http://...' REMBRIC_API_TOKEN='...' node ~/.config/rembric/bin/rembric-bridge.mjs` should print one diagnostic line and then connect via `mcp-remote`. If it exits 1 with a missing-env error, the placeholders in `opencode.json` weren't filled in.
-- **`<private>...</private>` content leaks into Rembric.** The plugin redacts these tags before POSTing. If you see secrets in the dashboard's prompt list, file an issue — the redaction is a hard invariant.
-- **Tested with**: opencode CLI ≥ 0.x.y (set by the operator after running the cwd spike, see `openspec/changes/add-opencode-plugin/tasks.md` task 0.1). If you run an older opencode, the event handler API may not match — the plugin will fail to load and opencode will log a TypeScript error.
+- **Session never transitions to `'ended'`.** Expected. opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. Same steady state as Codex CLI.
+- **Tested with**: opencode CLI ≥ 1.15.5. If you run an older opencode, the event handler API may not match — the plugin will fail to load and opencode will log a TypeScript error.
 
 ## Files this plugin owns
 
 ```
-~/.config/opencode/plugins/rembric.ts        ← lifecycle + passive capture (JS)
+~/.config/opencode/plugins/rembric.ts        ← session lifecycle + post-compact reminder (JS)
 ~/.config/rembric/bin/rembric-bridge.mjs     ← MCP stdio↔HTTP bridge
 ~/.config/opencode/opencode.json             ← MCP block (user-edited)
 <repo>/.rembric                              ← per-project slug (user-created)
