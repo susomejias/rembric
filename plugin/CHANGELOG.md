@@ -4,6 +4,24 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.8.0] — unreleased
+
+### Added
+
+- **opencode plugin: per-turn session summary flush.** Plugin now POSTs `/api/<slug>/sessions/<id>/summary` (with `final:false`) on every `session.idle` event (debounced 500ms). Dashboard always shows a current transcript without waiting on the agent to call `memory.session_summary`. Mirrors Codex CLI's per-turn `Stop` writer semantics. The session row stays `status='active'` until either the agent's `memory.session_summary({final:true})` or the server's `abandonStale` flips it.
+- **opencode plugin: best-effort dispose flush.** Separate `server.instance.disposed` handler issues fire-and-forget `fetch(...)` for every known session. Pre-implementation spike confirmed opencode does NOT await async handlers at dispose time, so this is opportunistic. Documented in the `// dispose-spike-result: fire-and-forget` header.
+- **opencode plugin: chat.message and message.updated handlers** re-introduced. They feed the in-memory transcript accumulator (`sessionMessages` Map) that backs the per-turn flush. NO HTTP POSTs from these handlers.
+- **opencode install.sh: auto-configures `~/.config/opencode/opencode.json`.** Three branches: absent → create with `{env:REMBRIC_*}` substitution; with-rembric → leave alone; with-other-mcp → print manual-merge snippet. Users only need to `export REMBRIC_SERVER_URL` and `export REMBRIC_API_TOKEN` in their shell rc.
+
+### Changed
+
+- **opencode plugin: handler set grows from 2 to 5.** Spec `Event handler set` requirement modified accordingly.
+- **No behaviour change for Claude Code, Codex CLI, or Hermes Agent.** Lock-step version bump only.
+
+### Compatibility
+
+- Operators upgrading from `0.7.1` re-run `curl -fsSL .../install.sh | sh`. Script overwrites the three installed files; existing `mcp.rembric` block in `opencode.json` is left untouched.
+
 ## [0.7.1] — unreleased
 
 ### Changed

@@ -303,6 +303,25 @@ describe('scope-leak invariant', () => {
  * cache hits and "already at the latest version" messages despite
  * shipped changes.
  */
+describe('opencode plugin dispose-spike result is recorded', () => {
+  it('plugin.ts declares the spike outcome in the header', () => {
+    const src = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const head = src.split('\n').slice(0, 10).join('\n');
+    expect(
+      /\/\/ dispose-spike-result: fire-and-forget/.test(head),
+      'plugin.ts must declare `// dispose-spike-result: fire-and-forget` in the first 10 lines',
+    ).toBe(true);
+  });
+
+  it('server.instance.disposed handler exists in plugin.ts', () => {
+    const src = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    expect(
+      src.includes("'server.instance.disposed'"),
+      'plugin.ts must dispatch the undocumented server.instance.disposed event',
+    ).toBe(true);
+  });
+});
+
 describe('plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
   it('plugin.ts and rembric-bridge.mjs import from the shared dotenv lib', () => {
     const pluginSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
