@@ -14,9 +14,9 @@ Every closed session in the dashboard SHALL display a non-null `summary` wheneve
 - The session compacted (Claude Code only) and the model produced a compact summary the post-compact instruction injection could refer to.
 - The session reached `SessionEnd` (Claude Code) or successive `Stop` invocations (Codex) with a readable `transcript_path` containing at least one assistant turn.
 - The session ran under Hermes Agent (`on_session_end(messages)` with non-empty messages).
-- The session ran under opencode AND the agent called `memory.session_summary({summary, title?})` voluntarily (cooperating-agent path). opencode has no `SessionEnd`-equivalent or `Stop`-equivalent event the plugin can hook; non-cooperating opencode sessions therefore stay in `status='active'` until `abandonStale` flips them to `'abandoned'`. Summary convergence for non-cooperating opencode agents is OUT of scope — the dashboard surfaces these as "no summary captured" without crashing, same as the contrary cases enumerated below.
+- The session ran under opencode and **either** the agent called `memory.session_summary({summary, title?})` voluntarily, **or** opencode's `server.instance.disposed` event fired with a non-empty per-session transcript accumulator. The opencode plugin POSTs `/api/<slug>/sessions/<id>/summary` with `final:false` for every known top-level session at dispose time, populated from the in-memory `sessionMessages` Map fed by `chat.message` and `message.updated` handlers during the session. `status` stays `'active'` until `abandonStale` flips it (the plugin never POSTs `/end`).
 
-A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty, opencode agent never called `memory.session_summary`) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
+A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty, opencode hard-crashed before `server.instance.disposed` could fire) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
 
 #### Scenario: Claude Code short session with cooperating agent
 
@@ -56,20 +56,32 @@ A session SHALL be considered to have "converged on a summary" if its `sessions.
 #### Scenario: opencode short session with cooperating agent
 
 - **GIVEN** an opencode session of N user prompts (N ≥ 1, no compact)
-- **AND** the agent called `memory.session_summary({summary, title})` via MCP at any point
-- **WHEN** the session ends (user closes opencode, switches projects, or `experimental.session.compacting` fires triggering the compacted-agent reminder path)
-- **THEN** `sessions.summary` SHALL be the model-authored content
-- **AND** `sessions.title` SHALL be the model-authored title
-- **AND** `sessions.status` SHALL transition to `'ended'` only via the `memory.session_summary` write (the opencode plugin never POSTs `/end`)
+- **AND** the agent called `memory.session_summary({summary, title})` via MCP at any point (sets `summary_final=true` server-side)
+- **WHEN** the user closes opencode (firing `server.instance.disposed`)
+- **THEN** the plugin's dispose handler POSTs `/sessions/<id>/summary` with the accumulated transcript and `final:false`
+- **AND** the server applies the precedence rule and DOES NOT overwrite the existing summary (because `summary_final=true`)
+- **AND** `sessions.summary` SHALL remain the model-authored content
+- **AND** `sessions.title` SHALL remain the model-authored title
+- **AND** `sessions.status` SHALL transition to `'ended'` only if the cooperating `memory.session_summary` call routed through the MCP server's terminating path; otherwise stays `'active'` until `abandonStale` flips it
 
 #### Scenario: opencode short session with non-cooperating agent
 
 - **GIVEN** an opencode session of N user prompts (N ≥ 1, no compact)
 - **AND** the agent never called `memory.session_summary`
-- **WHEN** the user closes opencode without compacting
-- **THEN** `sessions.summary` SHALL remain `NULL` (no bash transcript fallback exists for opencode — its plugin is JS, not shell, and the platform exposes no `transcript_path`)
+- **WHEN** the user closes opencode (firing `server.instance.disposed`)
+- **THEN** the plugin's dispose handler POSTs `/sessions/<id>/summary` for every known session with body `{summary: <role-prefixed transcript truncated to 19500 chars>, title?: <first user text truncated to 100 chars>, final: false}`
+- **AND** `sessions.summary` SHALL be the accumulated transcript (NOT `NULL` — this is the key behaviour change vs the pre-0.8.0 plugin)
+- **AND** `sessions.title` SHALL be the derived title when the accumulator had at least one user entry; OMITTED from the body otherwise (server leaves the placeholder `basename(cwd) · HH:MM UTC` in place)
 - **AND** `sessions.status` SHALL be `'active'` until `abandonStale` flips it to `'abandoned'`
-- **AND** the dashboard SHALL surface the session as "no summary captured" without crashing
+- **AND** the dashboard surfaces the session row with the transcript visible immediately after close
+
+#### Scenario: opencode hard-crash before dispose fires
+
+- **GIVEN** opencode is killed via SIGKILL (or OS-level crash) before `server.instance.disposed` can fire
+- **WHEN** the operator opens the dashboard
+- **THEN** the session row's `summary` SHALL be `NULL` (no fallback exists for this scenario — same risk Claude/Codex hooks carry)
+- **AND** `sessions.status` SHALL be `'active'` until `abandonStale` flips it
+- **AND** the dashboard surfaces the session as "no summary captured" without crashing
 
 #### Scenario: opencode session survives compaction with cooperating agent
 
