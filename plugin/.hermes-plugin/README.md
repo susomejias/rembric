@@ -32,20 +32,6 @@ Developing against a local rembric clone? Same script, local source:
 PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh
 ```
 
-### Private repo? Pass a GitHub PAT.
-
-If the `susomejias/rembric` repo is private (or you're hosting your own fork as a private repo), plain `curl` will get a 404 from `raw.githubusercontent.com`. Create a [Personal Access Token](https://github.com/settings/tokens) with `repo` scope, export it, and the installer picks it up automatically (`GH_PAT`, `GH_TOKEN`, or `GITHUB_TOKEN` — first non-empty wins):
-
-```sh
-export GH_PAT=ghp_xxxxxxxx
-curl -fsSL -H "Authorization: Bearer $GH_PAT" \
-  https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
-hermes plugins install rembric
-hermes plugins enable rembric
-```
-
-The token is inherited by the piped `sh` subprocess and reused for the three internal file fetches. The script never writes it to disk; it only flows through env + the per-request `Authorization` header.
-
 ## Configure
 
 The plugin works in two complementary modes — **wire both** unless you really only want lifecycle without tool access:

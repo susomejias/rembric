@@ -1,4 +1,4 @@
-// @rembric-plugin-version 0.7.0
+// @rembric-plugin-version 0.7.1
 // cwd-spike-result: plan-a
 //
 // Rembric plugin for opencode (https://opencode.ai).

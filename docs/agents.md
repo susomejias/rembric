@@ -158,15 +158,6 @@ hermes plugins enable rembric
 
 The script drops three files (`plugin.yaml`, `__init__.py`, `README.md`) into `${HERMES_HOME:-$HOME/.hermes}/plugins/rembric/`. Inspect before running with `curl … | less`. Developers iterating locally: same script, `PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh`.
 
-**Private repo?** Set a GitHub PAT (`repo` scope) in your env and add the auth header to the outer curl — the installer reuses the token for the three internal fetches automatically (`GH_PAT`, `GH_TOKEN`, or `GITHUB_TOKEN`, first non-empty wins):
-
-```sh
-export GH_PAT=ghp_xxxxxxxx
-curl -fsSL -H "Authorization: Bearer $GH_PAT" \
-  https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
-hermes plugins enable rembric
-```
-
 > **Why curl-pipe-sh, not `hermes plugins install`?** Hermes's installer (`hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x) accepts only `owner/repo` shorthand or a full Git URL — it does NOT support monorepo subpaths. Cloning the whole rembric repo into `~/.hermes/plugins/rembric/` to extract three files would mean tens of MB of unrelated TS source. The curl-installer ships the right artifacts and nothing else.
 
 Then drop this block into `~/.hermes/config.yaml`:
@@ -248,13 +239,13 @@ v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-ou
 
 #### Install
 
-Run the script from a Rembric checkout:
+One-line install — no checkout required:
 
 ```bash
-bash plugin/.opencode-plugin/install.sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
 ```
 
-It copies `plugin.ts` to `~/.config/opencode/plugins/rembric.ts` and the shared bridge to `~/.config/rembric/bin/rembric-bridge.mjs` (the bridge lives outside opencode's plugin dir so opencode doesn't try to load it as a plugin). The script prints the MCP block you paste in the next step.
+The script fetches `plugin.ts`, `rembric-bridge.mjs`, and the shared `rembric-dotenv.mjs` from `main` and drops them at `~/.config/opencode/plugins/rembric.ts` + `~/.config/rembric/bin/rembric-{bridge,dotenv}.mjs` (the bridge + dotenv lib live outside opencode's plugin dir so opencode doesn't try to load them as plugins; the bridge imports the dotenv lib by sibling-relative path at runtime). It prints the MCP block you paste in the next step. Inspect before running with `curl … | less`. Developers iterating locally: `PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" BIN_SRC="$(pwd)/plugin/bin" sh plugin/.opencode-plugin/install.sh`.
 
 #### Configure
 
@@ -300,7 +291,7 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 
 #### Updating the plugin
 
-opencode does not cache plugins by version. Re-run `bash plugin/.opencode-plugin/install.sh` from an updated checkout — it overwrites both installed files. Restart opencode.
+opencode does not cache plugins by version. Re-run the curl-pipe-sh command above — the script fetches the latest files from `main` and overwrites the three installed files. Restart opencode.
 
 ### Codex CLI (manual config.toml, no plugin)
 

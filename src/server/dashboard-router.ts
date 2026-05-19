@@ -674,9 +674,10 @@ function renderLogin(error: string | null): string {
         </div>
         <div class="clients t-mono-up fg-dim" style="display:flex;gap:24px;flex-wrap:wrap">
           <span><span class="bn"></span> CLAUDE CODE</span>
+          <span><span class="bn"></span> OPENCODE</span>
           <span><span class="bn"></span> CODEX CLI</span>
-          <span><span class="bn"></span> HERMES</span>
           <span><span class="bn"></span> MCP CLIENTS</span>
+          <span><span class="bn"></span> HERMES</span>
         </div>
       </div>
       <div class="right">

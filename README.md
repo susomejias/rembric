@@ -14,11 +14,7 @@
   <a href="#architecture">Architecture</a> ·
   <a href="#dashboard">Dashboard</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="#hooking-up-claude-code-recommended">Claude Code</a> ·
-  <a href="#hooking-up-codex-cli">Codex CLI</a> ·
-  <a href="#hooking-up-hermes-agent">Hermes Agent</a> ·
-  <a href="#hooking-up-opencode">opencode</a> ·
-  <a href="#hooking-up-other-mcp-clients">Other Clients</a> ·
+  <a href="#supported-agents">Supported agents</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="#project-status">Project status</a> ·
   <a href="#contributing">Contributing</a>
@@ -27,6 +23,69 @@
 ---
 
 > **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Hermes Agent, opencode, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
+
+## Supported agents
+
+Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically; everything else gets the same memory tools via a plain MCP URL.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%">
+      <a href="./plugin/README.md"><img src="https://matthiasroder.com/content/images/2026/01/Claude.png?size=120" alt="Claude Code" width="64" height="64" /><br/><b>Claude Code</b></a><br/>
+      <sub>native plugin · 4 hooks · MCP</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <a href="./plugin/.opencode-plugin/README.md"><img src="https://github.com/opencode-ai.png?size=120" alt="opencode" width="64" height="64" /><br/><b>opencode</b></a><br/>
+      <sub>native plugin · MCP</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <a href="./docs/agents.md#codex-cli-recommended-bundled-plugin"><img src="https://github.com/openai.png?size=120" alt="Codex CLI" width="64" height="64" /><br/><b>Codex CLI</b></a><br/>
+      <sub>native plugin · 4 hooks · MCP</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <a href="./plugin/.hermes-plugin/README.md"><img src="https://github.com/NousResearch.png?size=120" alt="Hermes Agent" width="64" height="64" /><br/><b>Hermes Agent</b></a><br/>
+      <sub>native provider · MCP</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://www.freelogovectors.net/wp-content/uploads/2025/06/cursor-logo-freelogovectors.net_.png" alt="Cursor" width="64" height="64" /><br/><b>Cursor</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://exafunction.github.io/public/brand/windsurf-black-symbol.svg?size=120" alt="Windsurf" width="64" height="64" /><br/><b>Windsurf</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/anthropics.png?size=120" alt="Claude Desktop" width="64" height="64" /><br/><b>Claude Desktop</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/cline.png?size=120" alt="Cline" width="64" height="64" /><br/><b>Cline</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/block.png?size=120" alt="Goose" width="64" height="64" /><br/><b>Goose</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/Kilo-Org.png?size=120" alt="Kilo Code" width="64" height="64" /><br/><b>Kilo Code</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/RooCodeInc.png?size=120" alt="Roo Code" width="64" height="64" /><br/><b>Roo Code</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/google-gemini.png?size=120" alt="Gemini CLI" width="64" height="64" /><br/><b>Gemini CLI</b></a><br/>
+      <sub>MCP server</sub>
+    </td>
+  </tr>
+</table>
+
+Works with **any** agent that speaks MCP. One server, memories shared across all of them.
 
 ## Architecture
 
@@ -230,104 +289,6 @@ docker compose up -d
 ```
 
 **Do not bind-mount `./data/` onto NFS / SMB / network filesystems** — SQLite's POSIX locking guarantees don't hold there, and you'll eventually corrupt the DB.
-
-## Hooking up Claude Code (recommended)
-
-**Strongly recommended path.** The bundled plugin replaces hand-editing `.mcp.json`, stores your token in the keychain, registers `/rembric:*` commands, and ships hooks that trigger memory ops at the right lifecycle moments without the model needing to remember them.
-
-```bash
-claude plugin marketplace add https://github.com/susomejias/rembric.git
-claude plugin install rembric@rembric
-```
-
-You'll be prompted for two values at install time:
-
-- **Rembric server URL** — base URL **without** `/mcp` (e.g. `https://memory.example.com`). The plugin appends the path itself.
-- **API token** — issued from the dashboard at `/dashboard/tokens` (plaintext shown exactly once). Stored in your system keychain.
-
-To pin a project per repo, drop a `.rembric` file at the root:
-
-```bash
-echo "PROJECT_SLUG=my-app" > .rembric
-```
-
-Without that file the bridge connects path-less (`/mcp`) and operates in global scope.
-
-Full plugin docs: [`plugin/README.md`](./plugin/README.md).
-
-## Hooking up Codex CLI
-
-Codex CLI installs the same `plugin/` directory via its native marketplace, alongside its own `.codex-plugin/plugin.json` manifest and a Codex-specific `hooks.codex.json`. One source tree, both clients:
-
-```bash
-codex plugin marketplace add https://github.com/susomejias/rembric.git
-codex plugin install rembric
-```
-
-Codex's plugin manifest has no keychain prompt — set `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as env vars in the shell that launches `codex`. Drop `.rembric` files per project to path-scope the slug automatically (same flow as the Claude Code plugin).
-
-> **Extra Codex-only steps for hooks to fire** (as of `codex-cli 0.130.0`): after the install + env exports, run `codex features enable plugin_hooks` and then approve the 4 hooks via `/hooks` inside Codex. Without these two one-time steps, MCP works but `/dashboard/sessions` stays empty. Full walk-through (including the symptom-vs-cause troubleshooting table) in [docs/agents.md](./docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
-
-Full details and the manual config.toml fallback: [docs/agents.md](./docs/agents.md).
-
-## Hooking up Hermes Agent
-
-[Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) has a native Python `MemoryProvider` ABC, so Rembric ships as a memory-provider plugin from `plugin/.hermes-plugin/`. One-line install:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
-hermes plugins enable rembric
-```
-
-Then add to `~/.hermes/config.yaml`:
-
-```yaml
-mcp_servers:
-  rembric:
-    command: npx
-    args:
-      [
-        '-y',
-        'mcp-remote@latest',
-        '${REMBRIC_SERVER_URL}/mcp',
-        '--header',
-        'Authorization: Bearer ${REMBRIC_API_TOKEN}',
-        '--allow-http',
-      ]
-
-memory:
-  provider: rembric
-```
-
-The provider gives you lifecycle (session create / summary-on-compact / end-on-close), the MCP bridge gives you the full tool surface. Wire both. Full docs (slug cascade, env vars, troubleshooting): [`plugin/.hermes-plugin/README.md`](./plugin/.hermes-plugin/README.md).
-
-## Hooking up opencode
-
-[opencode](https://opencode.ai) plugins are JS/TS modules dropped into `~/.config/opencode/plugins/`. Rembric ships a single TypeScript file plus the shared MCP bridge — no npm install, script-based:
-
-```bash
-bash plugin/.opencode-plugin/install.sh
-```
-
-The script copies `plugin.ts` to `~/.config/opencode/plugins/rembric.ts` and the bridge to `~/.config/rembric/bin/rembric-bridge.mjs`, then prints the MCP block to paste into `~/.config/opencode/opencode.json`. Per-project path-scoping uses the same `.rembric` convention as Claude Code, Codex CLI, and Hermes Agent. Full docs: [`plugin/.opencode-plugin/README.md`](./plugin/.opencode-plugin/README.md).
-
-## Hooking up other MCP clients
-
-Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP. The shape is identical:
-
-```json
-{
-  "mcpServers": {
-    "rembric": {
-      "type": "http",
-      "url": "https://memory.example.com/mcp/my-app",
-      "headers": { "Authorization": "Bearer your-token" }
-    }
-  }
-}
-```
-
-Drop `/my-app` from the URL for global scope. Per-client config-file locations and validation status: [docs/agents.md](./docs/agents.md).
 
 ## Operating Rembric
 
