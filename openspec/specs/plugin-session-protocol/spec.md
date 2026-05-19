@@ -14,8 +14,9 @@ Every closed session in the dashboard SHALL display a non-null `summary` wheneve
 - The session compacted (Claude Code only) and the model produced a compact summary the post-compact instruction injection could refer to.
 - The session reached `SessionEnd` (Claude Code) or successive `Stop` invocations (Codex) with a readable `transcript_path` containing at least one assistant turn.
 - The session ran under Hermes Agent (`on_session_end(messages)` with non-empty messages).
+- The session ran under opencode AND the agent called `memory.session_summary({summary, title?})` voluntarily (cooperating-agent path). opencode has no `SessionEnd`-equivalent or `Stop`-equivalent event the plugin can hook; non-cooperating opencode sessions therefore stay in `status='active'` until `abandonStale` flips them to `'abandoned'`. Summary convergence for non-cooperating opencode agents is OUT of scope — the dashboard surfaces these as "no summary captured" without crashing, same as the contrary cases enumerated below.
 
-A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
+A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty, opencode agent never called `memory.session_summary`) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
 
 #### Scenario: Claude Code short session with cooperating agent
 
@@ -51,6 +52,32 @@ A session SHALL be considered to have "converged on a summary" if its `sessions.
 - **THEN** the provider SHALL POST `/end {summary: _format_transcript(messages), title, final:false}`
 - **AND** `sessions.summary` SHALL be non-null
 - **AND** `sessions.status` SHALL be `'ended'`
+
+#### Scenario: opencode short session with cooperating agent
+
+- **GIVEN** an opencode session of N user prompts (N ≥ 1, no compact)
+- **AND** the agent called `memory.session_summary({summary, title})` via MCP at any point
+- **WHEN** the session ends (user closes opencode, switches projects, or `experimental.session.compacting` fires triggering the compacted-agent reminder path)
+- **THEN** `sessions.summary` SHALL be the model-authored content
+- **AND** `sessions.title` SHALL be the model-authored title
+- **AND** `sessions.status` SHALL transition to `'ended'` only via the `memory.session_summary` write (the opencode plugin never POSTs `/end`)
+
+#### Scenario: opencode short session with non-cooperating agent
+
+- **GIVEN** an opencode session of N user prompts (N ≥ 1, no compact)
+- **AND** the agent never called `memory.session_summary`
+- **WHEN** the user closes opencode without compacting
+- **THEN** `sessions.summary` SHALL remain `NULL` (no bash transcript fallback exists for opencode — its plugin is JS, not shell, and the platform exposes no `transcript_path`)
+- **AND** `sessions.status` SHALL be `'active'` until `abandonStale` flips it to `'abandoned'`
+- **AND** the dashboard SHALL surface the session as "no summary captured" without crashing
+
+#### Scenario: opencode session survives compaction with cooperating agent
+
+- **GIVEN** an opencode session approaching the context window limit
+- **WHEN** `experimental.session.compacting` fires
+- **THEN** the plugin appends the recall-context block AND the "FIRST ACTION REQUIRED: call memory.session_summary" reminder to `output.context`
+- **AND** the next agent (post-compaction) reads that reminder and calls `memory.session_summary({summary: <compacted summary content>, title})`
+- **AND** the resulting row in `sessions` has the compacted summary as `summary` and a non-null `title`
 
 ### Requirement: Write precedence for summary and title MUST be expressed via a `final:boolean` flag
 

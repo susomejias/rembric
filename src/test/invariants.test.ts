@@ -285,3 +285,86 @@ describe('scope-leak invariant', () => {
     }
   });
 });
+
+/**
+ * Plugin version lock-step invariant.
+ *
+ * The Rembric plugin is shipped to four agent clients (Claude Code, Codex
+ * CLI, Hermes Agent, opencode). Each declares its own version in a
+ * client-specific surface:
+ *   - plugin/.claude-plugin/plugin.json::version
+ *   - plugin/.codex-plugin/plugin.json::version
+ *   - plugin/.hermes-plugin/plugin.yaml::version (top-level `version: '...'`)
+ *   - plugin/.opencode-plugin/plugin.ts (// @rembric-plugin-version <semver>)
+ *
+ * Operators expect `/plugin update` (Claude Code), Codex's marketplace
+ * cache key, and a re-run of the opencode install script to produce the
+ * same version everywhere. Drift between the four sources causes silent
+ * cache hits and "already at the latest version" messages despite
+ * shipped changes.
+ */
+describe('plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
+  it('plugin.ts and rembric-bridge.mjs import from the shared dotenv lib', () => {
+    const pluginSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const bridgeSrc = readFileSync(join(repoRoot, 'plugin/bin/rembric-bridge.mjs'), 'utf8');
+
+    expect(
+      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(pluginSrc),
+      'plugin.ts must import slug helpers from rembric-dotenv.mjs',
+    ).toBe(true);
+    expect(
+      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(bridgeSrc),
+      'rembric-bridge.mjs must import slug helpers from rembric-dotenv.mjs',
+    ).toBe(true);
+
+    for (const [name, src] of [
+      ['plugin.ts', pluginSrc],
+      ['rembric-bridge.mjs', bridgeSrc],
+    ] as const) {
+      if (/\bfunction\s+parseDotenv\b/.test(src)) {
+        throw new Error(
+          `${name} defines its own parseDotenv — must import from rembric-dotenv.mjs instead.`,
+        );
+      }
+      if (/\bSLUG_RE\s*=\s*\//.test(src)) {
+        throw new Error(
+          `${name} defines its own SLUG_RE — must import from rembric-dotenv.mjs instead.`,
+        );
+      }
+    }
+  });
+});
+
+describe('plugin version lock-step', () => {
+  it('all four version sources agree', () => {
+    const claude = JSON.parse(
+      readFileSync(join(repoRoot, 'plugin/.claude-plugin/plugin.json'), 'utf8'),
+    ) as { version?: string };
+    const codex = JSON.parse(
+      readFileSync(join(repoRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),
+    ) as { version?: string };
+    const hermesRaw = readFileSync(join(repoRoot, 'plugin/.hermes-plugin/plugin.yaml'), 'utf8');
+    const hermesMatch = hermesRaw.match(/^version:\s*['"]?([^'"\n]+)['"]?\s*$/m);
+    const opencodeRaw = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const opencodeMatch = opencodeRaw.match(/^\/\/\s*@rembric-plugin-version\s+(\S+)\s*$/m);
+
+    const sources: { name: string; value?: string }[] = [
+      { name: 'plugin/.claude-plugin/plugin.json::version', value: claude.version },
+      { name: 'plugin/.codex-plugin/plugin.json::version', value: codex.version },
+      { name: 'plugin/.hermes-plugin/plugin.yaml::version', value: hermesMatch?.[1] },
+      {
+        name: 'plugin/.opencode-plugin/plugin.ts::// @rembric-plugin-version',
+        value: opencodeMatch?.[1],
+      },
+    ];
+
+    for (const s of sources) {
+      expect(s.value, `missing version source: ${s.name}`).toBeTruthy();
+    }
+    const distinct = new Set(sources.map((s) => s.value));
+    if (distinct.size > 1) {
+      const lines = sources.map((s) => `  ${s.name} = ${s.value ?? '<missing>'}`).join('\n');
+      throw new Error(`plugin versions out of sync — bump all four together.\n${lines}`);
+    }
+  });
+});

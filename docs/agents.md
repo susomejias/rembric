@@ -1,6 +1,6 @@
 # Agent integration
 
-For **Claude Code**, use the bundled plugin — see [`plugin/README.md`](../plugin/README.md). The rest of this doc is for everything else.
+For **Claude Code**, use the bundled plugin — see [`plugin/README.md`](../plugin/README.md). Rembric also ships first-class plugins for **Codex CLI**, **Hermes Agent**, and **opencode** — see the sections below.
 
 > **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
 
@@ -240,6 +240,68 @@ Credentials, slug source, and update flow are independent per client. The Rembri
 
 Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).
 
+### opencode (bundled plugin)
+
+[opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
+
+v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-output capture (`tool.execute.after`); their HTTP endpoints (`/api/<slug>/prompts/passive`, `/api/<slug>/observations/passive`) do not exist on Rembric's API yet and land in a follow-up change.
+
+#### Install
+
+Run the script from a Rembric checkout:
+
+```bash
+bash plugin/.opencode-plugin/install.sh
+```
+
+It copies `plugin.ts` to `~/.config/opencode/plugins/rembric.ts` and the shared bridge to `~/.config/rembric/bin/rembric-bridge.mjs` (the bridge lives outside opencode's plugin dir so opencode doesn't try to load it as a plugin). The script prints the MCP block you paste in the next step.
+
+#### Configure
+
+Paste the printed MCP block into `~/.config/opencode/opencode.json` (or per project `./opencode.json`):
+
+```json
+{
+  "mcp": {
+    "rembric": {
+      "type": "local",
+      "command": ["node", "<HOME>/.config/rembric/bin/rembric-bridge.mjs"],
+      "environment": {
+        "REMBRIC_SERVER_URL": "https://memory.example.com",
+        "REMBRIC_API_TOKEN": "oc-token-XXXXXXXX"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+Per-project path-scoping uses `.rembric` in each repo (same convention as Claude / Codex / Hermes):
+
+```
+PROJECT_SLUG=my-app
+```
+
+The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/<slug>`, and the agent is locked to that project automatically.
+
+#### Verify
+
+1. Open opencode in a repo with a valid `.rembric`.
+2. Trigger any MCP tool (e.g. ask the agent to call `memory.search`).
+3. `/dashboard/sessions` shows a new row with `agent='opencode'`.
+4. opencode's debug log contains one `[rembric] session.created id=...` line.
+
+#### Troubleshooting
+
+- **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
+- **MCP connection error in opencode.** Verify the bridge is reachable: `REMBRIC_SERVER_URL=... REMBRIC_API_TOKEN=... node ~/.config/rembric/bin/rembric-bridge.mjs`. Should print one diagnostic line and connect via `mcp-remote`.
+- **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in ` subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
+- **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. Same steady state as Codex CLI.
+
+#### Updating the plugin
+
+opencode does not cache plugins by version. Re-run `bash plugin/.opencode-plugin/install.sh` from an updated checkout — it overwrites both installed files. Restart opencode.
+
 ### Codex CLI (manual config.toml, no plugin)
 
 If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.
@@ -257,7 +319,7 @@ headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 
 ## Any other MCP client
 
-Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.
+Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.
 
 If your client is stdio-only, use `mcp-remote` (the same package the Rembric plugin's bridge wraps) as a stdio↔HTTP shim. See its README for the exact spawn command; the Rembric plugin's `bin/rembric-bridge.mjs` is a working reference.
 

@@ -1,14 +1,15 @@
 # Rembric — agent plugins
 
-Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, three per-client manifests:
+Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, four per-client surfaces:
 
-| Client           | Manifest dir      | Install                                                                                                                                        | Docs                                                                       |
-| ---------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **Claude Code**  | `.claude-plugin/` | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                             | this file                                                                  |
-| **Codex CLI**    | `.codex-plugin/`  | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin install rembric`                                       | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
-| **Hermes Agent** | `.hermes-plugin/` | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric` | [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)            |
+| Client           | Manifest dir        | Install                                                                                                                                        | Docs                                                                       |
+| ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **Claude Code**  | `.claude-plugin/`   | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                             | this file                                                                  |
+| **Codex CLI**    | `.codex-plugin/`    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin install rembric`                                       | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
+| **Hermes Agent** | `.hermes-plugin/`   | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric` | [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)            |
+| **opencode**     | `.opencode-plugin/` | `bash plugin/.opencode-plugin/install.sh` (from a rembric checkout), then paste the printed MCP block into `~/.config/opencode/opencode.json`  | [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)        |
 
-The rest of this file is the Claude Code plugin reference. For Codex, see [`docs/agents.md`](../docs/agents.md). For Hermes, see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md).
+The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
 
 > **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 4 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
 

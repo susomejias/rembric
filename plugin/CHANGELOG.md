@@ -1,8 +1,23 @@
 # Changelog
 
-All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent).
+All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent, opencode).
 
-The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all three per-client manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+
+## [0.7.0] — unreleased
+
+### Added
+
+- **opencode plugin (`plugin/.opencode-plugin/`).** New script-installed plugin for [opencode](https://opencode.ai). Single TypeScript file (`plugin.ts`) drops into `~/.config/opencode/plugins/rembric.ts` via `install.sh`. Reuses the shared MCP bridge (`plugin/bin/rembric-bridge.mjs`) verbatim — installed to `~/.config/rembric/bin/` so opencode doesn't auto-load it as a plugin. Two event handlers in v1: `event` (dispatching `session.created` / `session.deleted` with sub-agent filtering via `parentID || title.endsWith(" subagent)")` to avoid session inflation per engram issue #116) and `experimental.session.compacting` (pushes a post-compact `memory.session_summary` reminder to `output.context`). Path-scoping via `.rembric` (same file the bridge and other clients read). No system-prompt injection — relies on MCP `initialize.instructions` like Claude Code and Codex. Passive prompt/observation capture and recall-context-on-compact are deferred: their HTTP endpoints do not exist on `src/server/api-router.ts` yet.
+- **Plan A / Plan B contract** for opencode cwd handling (see `openspec/changes/add-opencode-plugin/design.md` Decision 2). v0.7.0 ships Plan A: the spawned bridge uses its existing `CLAUDE_PROJECT_DIR > PWD > process.cwd()` resolution. The plugin file declares `// cwd-spike-result: plan-a`. If a follow-up spike shows opencode does not propagate the user's repo cwd, Plan B adds a `shell.env` handler injecting `REMBRIC_PROJECT_DIR` and the bridge gains a highest-precedence step.
+
+### Changed
+
+- **No behaviour change for Claude Code, Codex CLI, or Hermes Agent.** These three plugins receive a manifest version bump only (lock-step discipline) so installer caches refresh in tandem when users update.
+
+### Compatibility
+
+- Operators upgrading to plugin `0.7.0` who do not use opencode see no change. Operators who install the opencode plugin SHOULD pin opencode CLI ≥ the version recorded in `openspec/changes/add-opencode-plugin/tasks.md` task 0.1 once the spike runs.
 
 ## [unreleased]
 
