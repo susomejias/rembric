@@ -93,15 +93,25 @@ const plugin = {
     },
   },
   register(api) {
-    // Diagnostic: dump what the api surface actually exposes for this
-    // third-party plugin. OpenClaw may inject a stricter shape than the
-    // one its bundled plugins see; this surfaces which register* methods
-    // are usable at runtime so we can match the real API instead of the
-    // SDK-types documentation.
+    // Diagnostic: surface enough about the loader pass to disambiguate noop
+    // registrations from real ones. OpenClaw's plugin loader runs register()
+    // with a `registrationMode` from the set {full, discovery, tool-discovery,
+    // setup-only, cli-metadata}. Only the first three wire real handlers for
+    // registerTool / registerCommand / registerMemoryCapability — the other
+    // two leave every register* method as a noop while still passing the
+    // typeof === 'function' guard. So Object.keys(api) on its own can't tell
+    // you why "registered without errors" still produced 0 tools / 0 commands.
+    // Logging registrationMode is the deterministic answer.
+    // See /tmp/openclaw/src/plugins/api-builder.ts (noops) and
+    // /tmp/openclaw/src/plugins/registry.ts::resolvePluginRegistrationCapabilities.
     try {
       const apiKeys = Object.keys(api ?? {})
         .filter((k) => typeof api[k] === 'function')
         .sort();
+      api.logger?.info?.(
+        `rembric: register() invoked — id=${api.id ?? '?'} version=${api.version ?? '?'} ` +
+          `registrationMode=${api.registrationMode ?? '<unknown>'} source=${api.source ?? '?'}`,
+      );
       api.logger?.info?.(`rembric: api method keys = [${apiKeys.join(', ')}]`);
       const nestedKeys = [
         'config',
@@ -163,12 +173,18 @@ const plugin = {
     });
 
     // Each stage is wrapped independently — one bad SDK-shape mismatch
-    // shouldn't tear down the whole plugin's registration. Specific
-    // failures are logged so the user can run `openclaw plugins logs
-    // rembric` and see which surface broke.
+    // shouldn't tear down the whole plugin's registration. Stage outcomes are
+    // logged with the count returned by each register* helper so the operator
+    // can run `openclaw plugins logs rembric` and see exactly what landed.
+    // A "registered 0 of N" line in a non-`full` registrationMode is the
+    // smoking gun that the loader is running register() in a noop mode and
+    // the plugin needs to be re-loaded on the activation pass.
     function safeStage(name, fn) {
       try {
-        fn();
+        const result = fn();
+        api.logger?.info?.(
+          `rembric: stage "${name}" ok${typeof result === 'number' ? ` (count=${result})` : ''}`,
+        );
       } catch (err) {
         api.logger?.warn?.(`rembric: stage "${name}" failed: ${String(err)}`);
       }
@@ -191,7 +207,7 @@ const plugin = {
     );
 
     api.logger?.info?.(
-      `rembric: registered (server=${config.serverUrl}, projectSlug=${config.projectSlug ?? '<from .rembric>'}, autoRecall=${config.autoRecall}, autoCapture=${config.autoCapture})`,
+      `rembric: registered (server=${config.serverUrl}, projectSlug=${config.projectSlug ?? '<from .rembric>'}, autoRecall=${config.autoRecall}, autoCapture=${config.autoCapture}, registrationMode=${api.registrationMode ?? '<unknown>'})`,
     );
   },
 };
