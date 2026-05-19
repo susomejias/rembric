@@ -303,41 +303,37 @@ describe('scope-leak invariant', () => {
  * cache hits and "already at the latest version" messages despite
  * shipped changes.
  */
-describe('plugin/.opencode-plugin/ helpers parity', () => {
-  it('helper bodies in plugin.ts and helpers.ts match', () => {
+describe('plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
+  it('plugin.ts and rembric-bridge.mjs import from the shared dotenv lib', () => {
     const pluginSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
-    const helpersSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/helpers.ts'), 'utf8');
+    const bridgeSrc = readFileSync(join(repoRoot, 'plugin/bin/rembric-bridge.mjs'), 'utf8');
 
-    const helperNames = ['parseDotenv', 'readRembricSlug'];
-    for (const name of helperNames) {
-      const pluginBody = extractFunctionBody(pluginSrc, name);
-      const helperBody = extractFunctionBody(helpersSrc, name);
-      expect(pluginBody, `plugin.ts missing helper ${name}`).toBeTruthy();
-      expect(helperBody, `helpers.ts missing helper ${name}`).toBeTruthy();
-      if (pluginBody !== helperBody) {
+    expect(
+      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(pluginSrc),
+      'plugin.ts must import slug helpers from rembric-dotenv.mjs',
+    ).toBe(true);
+    expect(
+      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(bridgeSrc),
+      'rembric-bridge.mjs must import slug helpers from rembric-dotenv.mjs',
+    ).toBe(true);
+
+    for (const [name, src] of [
+      ['plugin.ts', pluginSrc],
+      ['rembric-bridge.mjs', bridgeSrc],
+    ] as const) {
+      if (/\bfunction\s+parseDotenv\b/.test(src)) {
         throw new Error(
-          `helper ${name}() drifted between plugin.ts and helpers.ts — keep them in lock-step.\n` +
-            `--- plugin.ts ---\n${pluginBody}\n--- helpers.ts ---\n${helperBody}\n`,
+          `${name} defines its own parseDotenv — must import from rembric-dotenv.mjs instead.`,
+        );
+      }
+      if (/\bSLUG_RE\s*=\s*\//.test(src)) {
+        throw new Error(
+          `${name} defines its own SLUG_RE — must import from rembric-dotenv.mjs instead.`,
         );
       }
     }
   });
 });
-
-function extractFunctionBody(src: string, fnName: string): string | null {
-  const re = new RegExp(`function\\s+${fnName}\\b[^{]*\\{`);
-  const m = re.exec(src);
-  if (!m) return null;
-  let depth = 1;
-  let i = m.index + m[0].length;
-  while (i < src.length && depth > 0) {
-    const ch = src[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') depth--;
-    i++;
-  }
-  return src.slice(m.index, i).trim();
-}
 
 describe('plugin version lock-step', () => {
   it('all four version sources agree', () => {

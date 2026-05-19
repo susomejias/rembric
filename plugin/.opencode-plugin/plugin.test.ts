@@ -4,10 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-// Imports from `./helpers` (test-only mirror), NOT from `./plugin`. The
-// distributed plugin.ts exports ONLY `RembricPlugin`; opencode invokes every
-// named export as a Plugin function. Helper exports would crash on load.
-import { parseDotenv, readRembricSlug } from './helpers';
+// Imports from the shared dotenv lib (single source of truth, used by the
+// MCP bridge AND the opencode plugin). The distributed plugin.ts exports
+// ONLY `RembricPlugin`; opencode invokes every named export as a Plugin
+// function, so the helpers MUST stay outside plugin.ts's export surface.
+import { parseDotenv, readRembricSlug } from '../bin/rembric-dotenv.mjs';
 
 describe('parseDotenv', () => {
   it('returns {} for empty input', () => {

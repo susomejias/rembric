@@ -91,6 +91,21 @@ Alternatives considered:
 
 - **Fork the bridge into `plugin/.opencode-plugin/rembric-bridge-opencode.mjs`**: rejected. Violates the shared-plugin-logic doctrine (`01KRNZM2VFCME5HNT8N78HZW18`). Per-client divergence is only acceptable when the platform forces it; an extra env-var precedence step is not platform divergence — it's additive shared code.
 
+### Decision 3b: Extract dotenv parser + slug regex to a shared module
+
+The first iteration of this change inlined `parseDotenv` and `SLUG_RE` in three places: `plugin/bin/rembric-bridge.mjs` (JS), `plugin/.opencode-plugin/plugin.ts` (TS), and a `plugin/.opencode-plugin/helpers.ts` test mirror (also TS). Three copies of ~30 lines each, kept in lock-step by an invariant test comparing function bodies byte-for-byte.
+
+This is replaced by a single shared module `plugin/bin/rembric-dotenv.mjs` exporting `parseDotenv`, `readRembricSlug`, and `SLUG_RE`. The bridge imports it via the relative path `./rembric-dotenv.mjs` (resolves at runtime against the bridge's installed directory). The opencode plugin imports it via `../bin/rembric-dotenv.mjs` at source time (resolves for `tsc --noEmit` and `pnpm vitest` against the monorepo layout); `install.sh` rewrites that path to the absolute installed location (`$HOME/.config/rembric/bin/rembric-dotenv.mjs`) before copying `plugin.ts` to the user's machine. Bun's ESM resolver in opencode 1.15.x accepts absolute paths — confirmed during the same cwd spike that validated Plan A.
+
+The test mirror (`helpers.ts`) is deleted. `plugin.test.ts` imports the helpers directly from the shared lib. The byte-by-byte invariant test is replaced by a static-grep invariant that fails the build if either `plugin.ts` or `rembric-bridge.mjs` declares a local `parseDotenv` function or `SLUG_RE = /` literal.
+
+Bash (`plugin/scripts/_api.sh`) and Python (`plugin/.hermes-plugin/__init__.py`) keep their own implementations because cross-language wrapping a 20-line parser pays a per-call subprocess spawn that the duplication cost doesn't justify. Those implementations are required to agree on the slug regex value — documented in the new `Shared dotenv lib SHALL be the single source of truth` requirement in `opencode-plugin/spec.md`.
+
+Alternatives considered:
+
+- **Inline at install time** (concatenate helpers.ts + plugin.ts into a single deployed file): rejected. Bridge would still duplicate (only consolidates TS↔TS, leaves JS↔TS divergence). Install.sh becomes more complex (build-step semantics). Debug experience worse ("the file you're editing isn't quite what runs").
+- **Keep three copies + byte-by-byte parity invariant** (status quo of first iteration): rejected. 90 lines of duplicated code that mutate together is a perpetual maintenance tax; the lock-step test catches drift but doesn't prevent the developer from having to read three near-identical files when debugging.
+
 ### Decision 4: Bridge installation location is `~/.config/rembric/bin/`, NOT `~/.config/opencode/plugins/`
 
 opencode auto-loads every JS/TS file in `~/.config/opencode/plugins/` as a plugin. If we put `rembric-bridge.mjs` in that directory, opencode tries to load it as a plugin too, sees no `Plugin`-compatible export, and either crashes or logs an error. We need a location outside opencode's plugin discovery.

@@ -4,23 +4,30 @@
 // Rembric plugin for opencode (https://opencode.ai).
 //
 // Distributed as a single .ts file via plugin/.opencode-plugin/install.sh,
-// which copies this file to ~/.config/opencode/plugins/rembric.ts and the
-// shared bridge to ~/.config/rembric/bin/rembric-bridge.mjs. MCP wiring
-// lives in ~/.config/opencode/opencode.json (user-edited, see README).
+// which copies this file to ~/.config/opencode/plugins/rembric.ts, the
+// shared bridge to ~/.config/rembric/bin/rembric-bridge.mjs, and the
+// shared dotenv lib to ~/.config/rembric/bin/rembric-dotenv.mjs. MCP
+// wiring lives in ~/.config/opencode/opencode.json (user-edited, see
+// README).
 //
-// The plugin handles session lifecycle + passive capture over HTTP. MCP
-// memory.* tools are served by the spawned bridge — single source of truth
-// for path-scoping via .rembric.
+// The plugin handles session lifecycle over HTTP. MCP memory.* tools
+// are served by the spawned bridge — single source of truth for
+// path-scoping via .rembric.
+//
+// Slug-resolution helpers (`parseDotenv`, `readRembricSlug`, `SLUG_RE`)
+// live in `rembric-dotenv.mjs`, the same module the bridge imports. The
+// import path below is patched by install.sh: at source time it is the
+// relative `../bin/rembric-dotenv.mjs` (resolves for `pnpm vitest` and
+// `tsc --noEmit` against the monorepo layout). install.sh rewrites it to
+// the absolute installed path before copying this file to the user's
+// machine.
 //
 // ONLY `RembricPlugin` is exported. opencode iterates every named export
-// of a plugin module and invokes each with the plugin ctx — exporting the
-// helpers would crash on load. Test mirror lives in `helpers.ts` (sibling
-// file, NOT distributed).
+// of a plugin module and invokes each with the plugin ctx — exporting
+// helpers (or re-exporting from the dotenv lib) would crash on load.
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
 
-const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 const POST_TIMEOUT_MS = 3000;
 
 type EventInput = {
@@ -44,38 +51,6 @@ type PluginReturn = {
 };
 
 type Plugin = (ctx: PluginContext) => Promise<PluginReturn>;
-
-function parseDotenv(content: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (key) out[key] = val;
-  }
-  return out;
-}
-
-function readRembricSlug(directory: string): string | null {
-  const file = join(directory, '.rembric');
-  if (!existsSync(file)) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-  const cfg = parseDotenv(raw);
-  const slug = cfg.PROJECT_SLUG;
-  if (!slug) return null;
-  return SLUG_RE.test(slug) ? slug : null;
-}
 
 function diag(line: string): void {
   process.stderr.write(`[rembric] ${line}\n`);

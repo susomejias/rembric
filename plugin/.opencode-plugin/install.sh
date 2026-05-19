@@ -12,34 +12,45 @@ fi
 
 PLUGIN_SRC="${REPO_ROOT}/plugin/.opencode-plugin/plugin.ts"
 BRIDGE_SRC="${REPO_ROOT}/plugin/bin/rembric-bridge.mjs"
+DOTENV_SRC="${REPO_ROOT}/plugin/bin/rembric-dotenv.mjs"
 
-if [ ! -f "${PLUGIN_SRC}" ]; then
-  echo "[rembric] missing source: ${PLUGIN_SRC}" >&2
-  exit 1
-fi
-if [ ! -f "${BRIDGE_SRC}" ]; then
-  echo "[rembric] missing source: ${BRIDGE_SRC}" >&2
-  exit 1
-fi
+for src in "${PLUGIN_SRC}" "${BRIDGE_SRC}" "${DOTENV_SRC}"; do
+  if [ ! -f "${src}" ]; then
+    echo "[rembric] missing source: ${src}" >&2
+    exit 1
+  fi
+done
 
 OPENCODE_PLUGINS_DIR="${HOME}/.config/opencode/plugins"
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 PLUGIN_DEST="${OPENCODE_PLUGINS_DIR}/rembric.ts"
 BRIDGE_DEST="${REMBRIC_BIN_DIR}/rembric-bridge.mjs"
+DOTENV_DEST="${REMBRIC_BIN_DIR}/rembric-dotenv.mjs"
 
 mkdir -p "${OPENCODE_PLUGINS_DIR}"
 mkdir -p "${REMBRIC_BIN_DIR}"
 
-cp "${PLUGIN_SRC}" "${PLUGIN_DEST}"
+# Copy the bridge + shared dotenv lib verbatim. The bridge imports
+# rembric-dotenv.mjs from the same directory, so they MUST land together.
 cp "${BRIDGE_SRC}" "${BRIDGE_DEST}"
-chmod 644 "${PLUGIN_DEST}" "${BRIDGE_DEST}"
+cp "${DOTENV_SRC}" "${DOTENV_DEST}"
+chmod 644 "${BRIDGE_DEST}" "${DOTENV_DEST}"
+
+# Patch the plugin's relative import (`../bin/rembric-dotenv.mjs`, used at
+# dev time so `tsc --noEmit` and `pnpm vitest` resolve against the
+# monorepo layout) to the absolute installed path before copying.
+# Bun resolves absolute paths in ESM imports — verified against opencode
+# 1.15.5's bundled runtime during the cwd spike.
+sed "s|'\\.\\./bin/rembric-dotenv\\.mjs'|'${DOTENV_DEST}'|g" "${PLUGIN_SRC}" > "${PLUGIN_DEST}"
+chmod 644 "${PLUGIN_DEST}"
 
 cat <<EOF
 
   Rembric opencode plugin installed.
 
-  Plugin: ${PLUGIN_DEST}
-  Bridge: ${BRIDGE_DEST}
+  Plugin:     ${PLUGIN_DEST}
+  Bridge:     ${BRIDGE_DEST}
+  Dotenv lib: ${DOTENV_DEST}
 
   One step left: paste the MCP block below into your opencode.json.
 

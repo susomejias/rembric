@@ -26,6 +26,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
+import { SLUG_RE, parseDotenv } from './rembric-dotenv.mjs';
+
 let projectDir;
 let projectDirSource;
 if (process.env.CLAUDE_PROJECT_DIR) {
@@ -49,24 +51,6 @@ if (!baseUrl || !token) {
   process.exit(1);
 }
 
-function parseDotenv(content) {
-  const out = {};
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (key) out[key] = val;
-  }
-  return out;
-}
-
-const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 const configFile = path.join(projectDir, '.rembric');
 
 let scopedPath = '/mcp';

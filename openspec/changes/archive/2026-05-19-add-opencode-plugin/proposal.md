@@ -9,7 +9,8 @@ The constraint that shapes the design: `package.json` is `private: true` and npm
 - New per-client plugin tree at `plugin/.opencode-plugin/` containing exactly four files (`plugin.ts`, `install.sh`, `uninstall.sh`, `README.md`). No subdirectories, no manifest (opencode has no manifest format — plugins are JS/TS modules in a known directory).
 - The opencode plugin SHALL reuse the existing `plugin/bin/rembric-bridge.mjs` verbatim — same bridge consumed by Claude Code and Codex CLI. Reuse is non-negotiable: it preserves single-source-of-truth path-scoping behaviour (`.rembric` → `/mcp/<slug>`) and avoids divergent slug-resolution code across clients.
 - The plugin SHALL NOT use opencode's `type: "remote"` MCP transport, because path-scope-per-project requires dynamic URL rewriting at MCP startup time — only the stdio bridge can do that. (This was the option initially under consideration; rejected in design.md::Decision 1 after weighing the per-project `./opencode.json` cost.)
-- The install script SHALL copy two files to two distinct locations on the user's machine: `plugin.ts` → `~/.config/opencode/plugins/rembric.ts`, and `rembric-bridge.mjs` → `~/.config/rembric/bin/rembric-bridge.mjs`. Placing the bridge inside `~/.config/opencode/plugins/` would cause opencode to try loading it as a plugin and crash — the bridge MUST live outside that directory.
+- The install script SHALL copy three files to two distinct locations on the user's machine: `plugin.ts` → `~/.config/opencode/plugins/rembric.ts` (with its `../bin/rembric-dotenv.mjs` import path rewritten to the absolute installed path), `rembric-bridge.mjs` → `~/.config/rembric/bin/rembric-bridge.mjs`, and `rembric-dotenv.mjs` → `~/.config/rembric/bin/rembric-dotenv.mjs`. Placing the bridge or dotenv lib inside `~/.config/opencode/plugins/` would cause opencode to try loading them as plugins and crash — they MUST live outside that directory.
+- A new shared `plugin/bin/rembric-dotenv.mjs` module SHALL be the single source of truth for `parseDotenv`, `readRembricSlug`, and `SLUG_RE` across all JS/TS clients. `plugin/bin/rembric-bridge.mjs` and `plugin/.opencode-plugin/plugin.ts` SHALL import from it; neither SHALL declare its own copy. An invariant test fails the build if drift is introduced. Bash (`plugin/scripts/_api.sh`) and Python (`plugin/.hermes-plugin/__init__.py`) keep their own implementations — cross-language wrapper cost > duplication cost.
 - The plugin SHALL register four event subscriptions: `event` (dispatcher for `session.created` and `session.deleted`), `chat.message` (passive prompt capture), `tool.execute.after` (passive tool-count + Task-output capture), and `experimental.session.compacting` (synthetic boundary + context injection at compaction). It SHALL NOT register a `SessionEnd`-equivalent; opencode has no clean "user closed the session" event, and the agent-driven `memory.session_summary` MCP tool is the contract for closing (consistent with how Codex behaves today).
 - The plugin SHALL filter sub-agent sessions (Task-spawned, detected via `parentID` or title ending in ` subagent)`) from `session.created` to avoid the session-inflation pathology described in engram's issue #116 (a single conversation producing 170 sessions).
 - The plugin SHALL read `.rembric` from `ctx.directory` to determine the project slug for HTTP API lifecycle calls (`/api/<slug>/sessions/...`), matching `_api.sh::rembric_read_project_slug` semantics exactly (same regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`, same fail-silent behaviour on miss).
@@ -33,14 +34,18 @@ The constraint that shapes the design: `package.json` is `private: true` and npm
 
 Affected paths:
 
-- `plugin/.opencode-plugin/plugin.ts` — new file, ~400-500 lines TS (event handlers + HTTP client + dotenv parser + slug regex).
-- `plugin/.opencode-plugin/install.sh` — new file. Two `cp` commands + creates `~/.config/rembric/bin/` if missing + prints MCP snippet to stdout.
-- `plugin/.opencode-plugin/uninstall.sh` — new file. Removes the two installed files.
+- `plugin/.opencode-plugin/plugin.ts` — new file, ~170 lines TS (event handlers + HTTP client). Imports `readRembricSlug` from the shared dotenv lib; no inline parser.
+- `plugin/.opencode-plugin/plugin.test.ts` — new co-located vitest tests for the shared helpers.
+- `plugin/.opencode-plugin/install.sh` — new file. Three `cp` commands + sed-substitutes the dotenv import path on plugin.ts before copying + creates `~/.config/rembric/bin/` if missing + prints MCP snippet to stdout.
+- `plugin/.opencode-plugin/uninstall.sh` — new file. Removes the three installed files.
 - `plugin/.opencode-plugin/README.md` — new file. Two-step install (script + MCP paste) documented.
+- `plugin/bin/rembric-dotenv.mjs` — new shared module. Single source of truth for `parseDotenv`, `readRembricSlug`, `SLUG_RE`. Consumed by both the bridge and the opencode plugin.
+- `plugin/bin/rembric-bridge.mjs` — refactored to import from `./rembric-dotenv.mjs` instead of inlining `parseDotenv` and `SLUG_RE`. Behaviour byte-identical for existing Claude/Codex clients.
 - `plugin/CHANGELOG.md` — minor version bump entry.
 - `plugin/.claude-plugin/plugin.json::version`, `plugin/.codex-plugin/plugin.json::version`, `plugin/.hermes-plugin/plugin.yaml::version` — minor version bump (lock-step rule).
-- `plugin/bin/rembric-bridge.mjs` — possibly extended to read `REMBRIC_PROJECT_DIR` as the highest-precedence step of its resolution chain (only if cwd spike fails). No behaviour change for existing clients (they don't set this env var).
-- `README.md`, `docs/agents.md`, `src/dashboard/help.ts` (or equivalent token-creation page copy) — mention opencode as supported client.
+- `src/test/invariants.test.ts` — new `plugin/bin/rembric-dotenv.mjs is the single source of truth` invariant (drift detection via static grep) and new `plugin version lock-step` 4-way invariant covering claude/codex/hermes manifests + opencode `// @rembric-plugin-version` comment.
+- `vitest.config.ts` — include extended with `plugin/**/*.test.ts` so the new plugin tests run under `pnpm test`.
+- `README.md`, `docs/agents.md`, `plugin/README.md` — mention opencode as supported client.
 - `openspec/specs/opencode-plugin/spec.md` — new capability spec.
 - `openspec/specs/plugin-session-protocol/spec.md` — extended with the opencode scenario.
 
