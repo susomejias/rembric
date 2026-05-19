@@ -1,6 +1,6 @@
 {
   "name": "@susomejias/rembric",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Self-hosted memory, sessions, and dashboard for AI coding agents",
   "type": "module",
   "license": "MIT",
