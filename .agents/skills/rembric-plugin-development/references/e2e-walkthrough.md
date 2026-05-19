@@ -27,8 +27,25 @@ docker logs rembric-dev 2>&1 | grep -aE 'demo-writer|demo-reader' | head -2
 
 ## 3. Install the plugin under test
 
+For dev iteration against a local checkout (preferred — exercises the same code your branch is on):
+
 ```bash
-bash plugin/.<client>-plugin/install.sh
+# Hermes
+PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh
+
+# opencode
+PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" BIN_SRC="$(pwd)/plugin/bin" \
+  sh plugin/.opencode-plugin/install.sh
+```
+
+For end-user-style install (curl-pipe-sh, no checkout — verifies the public install path works):
+
+```bash
+# Hermes
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+
+# opencode
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
 ```
 
 For opencode specifically:
@@ -124,7 +141,7 @@ For sub-agent filter changes: send a `session.created` with `parentID` set OR `t
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-bash plugin/.<client>-plugin/uninstall.sh
+bash plugin/.<client>-plugin/uninstall.sh   # works from a local checkout for any client
 ```
 
 **Restore the user's agent config file** to its prior state. If they didn't have an `opencode.json` before, delete it. If they did, restore from the backup you (should have) made.

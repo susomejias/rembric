@@ -12,19 +12,26 @@ Two steps. Run them in order.
 
 ### 1. Run the install script
 
-Clone (or `cd` into) the Rembric checkout, then:
+One-line install — no checkout required:
 
 ```bash
-bash plugin/.opencode-plugin/install.sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
 ```
 
-The script:
+The script fetches three files from the rembric `main` branch and drops them in place:
 
-- Copies `plugin.ts` → `~/.config/opencode/plugins/rembric.ts`.
-- Copies the shared MCP bridge → `~/.config/rembric/bin/rembric-bridge.mjs`.
-- Prints the MCP block you need for step 2.
+- `plugin.ts` → `~/.config/opencode/plugins/rembric.ts` (with the dotenv-lib import path patched to the absolute installed path before writing).
+- `rembric-bridge.mjs` → `~/.config/rembric/bin/rembric-bridge.mjs` (the shared stdio↔HTTP MCP bridge).
+- `rembric-dotenv.mjs` → `~/.config/rembric/bin/rembric-dotenv.mjs` (single source of truth for slug parsing; the bridge imports this).
 
-The script is idempotent — re-run it any time to upgrade.
+Then prints the MCP block you paste in step 2. Idempotent — re-run any time to upgrade.
+
+Inspect before running with `curl … | less`. Developers iterating locally:
+
+```bash
+PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" BIN_SRC="$(pwd)/plugin/bin" \
+  sh plugin/.opencode-plugin/install.sh
+```
 
 ### 2. Paste the MCP block into `opencode.json`
 
@@ -63,7 +70,7 @@ The slug regex is `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Invalid slugs are reje
 
 ## Update
 
-opencode does not cache plugins by version — re-run `bash plugin/.opencode-plugin/install.sh` from an updated checkout. The script overwrites the two installed files. Restart opencode.
+opencode does not cache plugins by version — re-run the curl-pipe-sh command above. The script fetches the latest files from `main` and overwrites the three installed files. Restart opencode.
 
 ## Uninstall
 

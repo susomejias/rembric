@@ -4,6 +4,18 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.7.1] — unreleased
+
+### Changed
+
+- **opencode `install.sh`: switched to curl-pipe-sh.** Previously required a `git rev-parse`-resolved checkout and ran `cp` from the local source. Now downloads `plugin.ts` + `rembric-bridge.mjs` + `rembric-dotenv.mjs` from `main` via `curl -fsSL`, matching the Hermes installer pattern. End-user install becomes a single `curl … | sh` line with no clone required. Local-dev iteration is preserved via `PLUGIN_SRC` + `BIN_SRC` env vars (cp from a checkout). Docs swept in `README.md`, `docs/agents.md`, `plugin/README.md`, `plugin/.opencode-plugin/README.md`, and the `rembric-plugin-development` skill's `e2e-walkthrough.md`.
+- **Hermes + opencode `install.sh`: PAT auth dropped.** With the repository public, the `GH_PAT` / `GH_TOKEN` / `GITHUB_TOKEN` fallback no longer adds value — `curl` against `raw.githubusercontent.com` works unauthenticated. Removed the auth-token logic and the corresponding usage comments in both installers and their READMEs.
+- **Dashboard login footer**: added `OPENCODE` to the supported-clients strip; reordered to `CLAUDE CODE · OPENCODE · CODEX CLI · MCP CLIENTS · HERMES` to match the README's new "Supported agents" grid.
+
+### Compatibility
+
+- **Operators with an existing opencode install from `0.7.0`** can either re-run the new `curl | sh` to fetch the updated files (recommended) or do nothing — the deployed plugin/bridge/dotenv files from `0.7.0` are byte-identical to `0.7.1`. The only change is the install path.
+
 ## [0.7.0] — unreleased
 
 ### Added
