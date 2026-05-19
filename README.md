@@ -17,6 +17,7 @@
   <a href="#hooking-up-claude-code-recommended">Claude Code</a> ·
   <a href="#hooking-up-codex-cli">Codex CLI</a> ·
   <a href="#hooking-up-hermes-agent">Hermes Agent</a> ·
+  <a href="#hooking-up-opencode">opencode</a> ·
   <a href="#hooking-up-other-mcp-clients">Other Clients</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="#project-status">Project status</a> ·
@@ -25,7 +26,7 @@
 
 ---
 
-> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
+> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Hermes Agent, opencode, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
 
 ## Architecture
 
@@ -300,9 +301,19 @@ memory:
 
 The provider gives you lifecycle (session create / summary-on-compact / end-on-close), the MCP bridge gives you the full tool surface. Wire both. Full docs (slug cascade, env vars, troubleshooting): [`plugin/.hermes-plugin/README.md`](./plugin/.hermes-plugin/README.md).
 
+## Hooking up opencode
+
+[opencode](https://opencode.ai) plugins are JS/TS modules dropped into `~/.config/opencode/plugins/`. Rembric ships a single TypeScript file plus the shared MCP bridge — no npm install, script-based:
+
+```bash
+bash plugin/.opencode-plugin/install.sh
+```
+
+The script copies `plugin.ts` to `~/.config/opencode/plugins/rembric.ts` and the bridge to `~/.config/rembric/bin/rembric-bridge.mjs`, then prints the MCP block to paste into `~/.config/opencode/opencode.json`. Per-project path-scoping uses the same `.rembric` convention as Claude Code, Codex CLI, and Hermes Agent. Full docs: [`plugin/.opencode-plugin/README.md`](./plugin/.opencode-plugin/README.md).
+
 ## Hooking up other MCP clients
 
-Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, OpenCode, etc. — they all speak Streamable HTTP. The shape is identical:
+Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP. The shape is identical:
 
 ```json
 {

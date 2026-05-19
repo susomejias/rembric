@@ -285,3 +285,90 @@ describe('scope-leak invariant', () => {
     }
   });
 });
+
+/**
+ * Plugin version lock-step invariant.
+ *
+ * The Rembric plugin is shipped to four agent clients (Claude Code, Codex
+ * CLI, Hermes Agent, opencode). Each declares its own version in a
+ * client-specific surface:
+ *   - plugin/.claude-plugin/plugin.json::version
+ *   - plugin/.codex-plugin/plugin.json::version
+ *   - plugin/.hermes-plugin/plugin.yaml::version (top-level `version: '...'`)
+ *   - plugin/.opencode-plugin/plugin.ts (// @rembric-plugin-version <semver>)
+ *
+ * Operators expect `/plugin update` (Claude Code), Codex's marketplace
+ * cache key, and a re-run of the opencode install script to produce the
+ * same version everywhere. Drift between the four sources causes silent
+ * cache hits and "already at the latest version" messages despite
+ * shipped changes.
+ */
+describe('plugin/.opencode-plugin/ helpers parity', () => {
+  it('helper bodies in plugin.ts and helpers.ts match', () => {
+    const pluginSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const helpersSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/helpers.ts'), 'utf8');
+
+    const helperNames = ['parseDotenv', 'readRembricSlug'];
+    for (const name of helperNames) {
+      const pluginBody = extractFunctionBody(pluginSrc, name);
+      const helperBody = extractFunctionBody(helpersSrc, name);
+      expect(pluginBody, `plugin.ts missing helper ${name}`).toBeTruthy();
+      expect(helperBody, `helpers.ts missing helper ${name}`).toBeTruthy();
+      if (pluginBody !== helperBody) {
+        throw new Error(
+          `helper ${name}() drifted between plugin.ts and helpers.ts — keep them in lock-step.\n` +
+            `--- plugin.ts ---\n${pluginBody}\n--- helpers.ts ---\n${helperBody}\n`,
+        );
+      }
+    }
+  });
+});
+
+function extractFunctionBody(src: string, fnName: string): string | null {
+  const re = new RegExp(`function\\s+${fnName}\\b[^{]*\\{`);
+  const m = re.exec(src);
+  if (!m) return null;
+  let depth = 1;
+  let i = m.index + m[0].length;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+  return src.slice(m.index, i).trim();
+}
+
+describe('plugin version lock-step', () => {
+  it('all four version sources agree', () => {
+    const claude = JSON.parse(
+      readFileSync(join(repoRoot, 'plugin/.claude-plugin/plugin.json'), 'utf8'),
+    ) as { version?: string };
+    const codex = JSON.parse(
+      readFileSync(join(repoRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),
+    ) as { version?: string };
+    const hermesRaw = readFileSync(join(repoRoot, 'plugin/.hermes-plugin/plugin.yaml'), 'utf8');
+    const hermesMatch = hermesRaw.match(/^version:\s*['"]?([^'"\n]+)['"]?\s*$/m);
+    const opencodeRaw = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const opencodeMatch = opencodeRaw.match(/^\/\/\s*@rembric-plugin-version\s+(\S+)\s*$/m);
+
+    const sources: { name: string; value?: string }[] = [
+      { name: 'plugin/.claude-plugin/plugin.json::version', value: claude.version },
+      { name: 'plugin/.codex-plugin/plugin.json::version', value: codex.version },
+      { name: 'plugin/.hermes-plugin/plugin.yaml::version', value: hermesMatch?.[1] },
+      {
+        name: 'plugin/.opencode-plugin/plugin.ts::// @rembric-plugin-version',
+        value: opencodeMatch?.[1],
+      },
+    ];
+
+    for (const s of sources) {
+      expect(s.value, `missing version source: ${s.name}`).toBeTruthy();
+    }
+    const distinct = new Set(sources.map((s) => s.value));
+    if (distinct.size > 1) {
+      const lines = sources.map((s) => `  ${s.name} = ${s.value ?? '<missing>'}`).join('\n');
+      throw new Error(`plugin versions out of sync — bump all four together.\n${lines}`);
+    }
+  });
+});
