@@ -97,7 +97,7 @@ Every mutating dashboard form or HTMX action SHALL include a CSRF token bound to
 
 ### Requirement: Destructive dashboard actions MUST gate submission with the confirmation modal
 
-Every dashboard `<form>` whose submit triggers a destructive or hard-to-reverse server action — soft-delete, hard-delete/purge, revoke, archive, undo of a journaled op — SHALL declare the three confirmation attributes (`data-confirm`, `data-confirm-label`, `data-confirm-tone`) on the FORM element itself (NOT on the submit `<button>`), so the inline modal handler implemented in `src/dashboard/templates.ts::shell()::CONFIRM` intercepts the submit and prompts the operator.
+Every dashboard `<form>` whose submit triggers a destructive or hard-to-reverse server action — soft-delete, hard-delete/purge, revoke, archive, undo of a journaled op — SHALL declare the three confirmation attributes (`data-confirm`, `data-confirm-label`, `data-confirm-tone`) on the FORM element itself (NOT on the submit `<button>`), so the inline modal handler implemented in `apps/server/src/dashboard/templates.ts::shell()::CONFIRM` intercepts the submit and prompts the operator.
 
 The handler binds with the selector `form[data-confirm]` and rebinds on `htmx:afterSwap`. Attributes on a child `<button>` are silently ignored — the form would submit unprompted.
 
@@ -243,7 +243,7 @@ The SQLite storage, the service-layer `new Date()` writes, and the MCP serializa
 
 ### Requirement: Dashboard CSS MUST be organised as a layered design system
 
-The dashboard styles SHALL live under `src/dashboard/styles/` and SHALL be split across exactly two layers of source files:
+The dashboard styles SHALL live under `apps/server/src/dashboard/styles/` and SHALL be split across exactly two layers of source files:
 
 - A `core/` directory containing, in this order, `tokens.css` (CSS custom properties for palette, typography stack, and spacing scale), `base.css` (reset, root element defaults, `::selection`, scrollbar, focus ring, anchor behaviour), `atoms.css` (single-class building blocks: `.pill`, `.btn`, `.bn`, `.inp`, `.sel`, `.tag`, `.flash`, `.hl-lime`, `.u-lime`, `.spark`), `layout.css` (app shell: `.app`, `.sb`, `.sb-*`, `.mob-bar`, `.main`, `.view-head`), and `patterns.css` (composed surfaces: `.stat`, `.card`, `.tbl`, `.filters`, `.pager`, `.section-bar`, `.kv-grid`, `.content-block`, `.grid-7`, `.grid-6`, `.row-2`, `.row-3`, `.health`, `.tl`, plus the full responsive override block).
 - A `views/` directory containing one `<view>.css` per dashboard route, holding only the selectors that are exclusively used by that view.
@@ -263,7 +263,7 @@ The shipped artefact SHALL be two CSS bundles per page: one shared `core.css` an
 #### Scenario: Adding a new view requires adding its CSS file
 
 - **WHEN** a contributor adds a new dashboard route that needs view-specific selectors
-- **THEN** they SHALL add a new file `src/dashboard/styles/views/<view>.css`, register the view key in the build script's view list, and reference the view key from the route's `shell()` call — and a `pnpm run build` SHALL emit and serve the new file with no further configuration
+- **THEN** they SHALL add a new file `apps/server/src/dashboard/styles/views/<view>.css`, register the view key in the build script's view list, and reference the view key from the route's `shell()` call — and a `pnpm run build` SHALL emit and serve the new file with no further configuration
 
 ### Requirement: Dashboard CSS MUST be minified and content-hashed in production
 
@@ -309,7 +309,7 @@ Changing any of these tokens SHALL require a new OpenSpec change. The dashboard 
 
 #### Scenario: Tokens are declared once in core.css
 
-- **WHEN** a contributor inspects `src/dashboard/styles/core/tokens.css`
+- **WHEN** a contributor inspects `apps/server/src/dashboard/styles/core/tokens.css`
 - **THEN** the file SHALL contain all design tokens listed above, declared inside a single `:root { ... }` block
 
 ### Requirement: Dashboard fonts MUST be self-hosted

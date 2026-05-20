@@ -14,7 +14,11 @@ data/
 openspec/
 docs/
 examples/
-plugin/.hermes-plugin-tests/
+# Plugin source is NOT shipped in the server image. Only apps/plugin/package.json
+# is COPYed (so pnpm can resolve the workspace for `--filter @rembric/server...`).
+# Excluding the rest keeps the Docker build context minimal.
+apps/plugin/**
+!apps/plugin/package.json
 **/*.test.ts
 **/__tests__/
 **/.DS_Store

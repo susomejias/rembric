@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * Regression tests for the per-agent transcript parsers in
- * `plugin/scripts/_transcript.sh`.
+ * `apps/plugin/scripts/_transcript.sh`.
  *
  * The parsers are coupled to the JSONL shapes emitted by each host
  * agent's transcript file. If Claude Code or Codex CLI ever change the
@@ -26,8 +26,9 @@ import { describe, expect, it } from 'vitest';
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, '..', '..');
-const scriptsDir = join(repoRoot, 'plugin', 'scripts');
+// repoRoot is the monorepo root (three levels up from apps/server/src/test).
+const repoRoot = resolve(here, '..', '..', '..', '..');
+const scriptsDir = join(repoRoot, 'apps', 'plugin', 'scripts');
 const transcriptHelper = join(scriptsDir, '_transcript.sh');
 const fixturesDir = join(here, 'fixtures', 'transcripts');
 

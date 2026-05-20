@@ -62,7 +62,11 @@ jobs:
           RAW_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          VERSION="${RAW_TAG#v}"
+          # Multi-component release-please tags now have a `<component>-v` prefix
+          # (e.g., `server-v0.18.0`). Strip the optional component prefix and the
+          # leading `v` to get the bare semver for use as the Docker tag.
+          VERSION="${RAW_TAG#server-}"
+          VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "::error::Could not resolve version from tag '$RAW_TAG'" >&2
             exit 1
@@ -97,7 +101,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Dockerfile
+          file: ./apps/server/Dockerfile
           target: runtime
           platforms: linux/amd64,linux/arm64
           push: true

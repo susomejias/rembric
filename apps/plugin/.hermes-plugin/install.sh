@@ -7,14 +7,14 @@
 # fetched via curl.
 #
 # Usage (public repo):
-#   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 #
 # Usage (dev, local clone — no fetch):
-#   PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh
+#   PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
 
 set -eu
 
-PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin}"
+PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin}"
 HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
 TARGET="${HERMES_HOME}/plugins/rembric"
 

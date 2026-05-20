@@ -18,7 +18,7 @@ The `summary` and `title` columns are exempt from one-write-per-lifetime immutab
 
 #### Scenario: Code path attempts to physically delete a session
 
-- **WHEN** any service or migration emits a `DELETE FROM agent_sessions` statement from any file OTHER than `src/services/agent-sessions.ts`
+- **WHEN** any service or migration emits a `DELETE FROM agent_sessions` statement from any file OTHER than `apps/server/src/services/agent-sessions.ts`
 - **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
 
 #### Scenario: Code path attempts to mutate an immutable session column
@@ -281,7 +281,7 @@ The detail view at `/dashboard/sessions/:id` SHALL render whether the row is sof
 
 ### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
 
-Every MCP tool handler under `src/mcp/sessions-tools.ts` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
+Every MCP tool handler under `apps/server/src/mcp/sessions-tools.ts` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
 
 1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
 2. The `SessionRouter` entry for `(tokenId, mcpSessionId)`, populated by a prior `project.use` call or by roots-based discovery, when the connection is path-less (`ctx.requestedSlug === null`).

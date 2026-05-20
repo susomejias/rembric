@@ -83,11 +83,11 @@ Every PR must keep coverage above the thresholds enforced by Vitest:
 
 Critical invariants of the product (append-only, status state machine, scope
 isolation, replaces-graph acyclicity, confirm-chain semantics) have
-dedicated tests under `src/**/__tests__/invariants/`. **Do not** weaken or
+dedicated tests under `apps/server/src/**/__tests__/invariants/`. **Do not** weaken or
 delete these. If a feature genuinely requires changing an invariant, change
 the spec first via an OpenSpec change.
 
-For new code, add unit tests in `src/**/*.test.ts` next to the module, and
+For new code, add unit tests in `apps/server/src/**/*.test.ts` next to the module, and
 integration / E2E tests where the boundary lives. Run with:
 
 ```bash

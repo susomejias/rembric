@@ -8,7 +8,7 @@ services:
 
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: apps/server/Dockerfile
       target: dev
 
     ports: !override
@@ -16,7 +16,7 @@ services:
 
     volumes: !override
       - ./data-dev:/data
-      - ./src:/app/src
+      - ./apps/server/src:/app/apps/server/src
 
     environment:
       LOG_LEVEL: debug

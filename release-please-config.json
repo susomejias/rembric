@@ -1,10 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "packages": {
-    ".": {
+    "apps/server": {
       "release-type": "node",
-      "package-name": "rembric",
-      "include-component-in-tag": false,
+      "component": "server",
+      "package-name": "@rembric/server",
+      "include-component-in-tag": true,
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
@@ -24,6 +25,57 @@
         { "type": "style", "section": "Style", "hidden": true },
         { "type": "revert", "section": "Reverts" }
       ]
+    },
+    "apps/plugin/.claude-plugin": {
+      "release-type": "simple",
+      "component": "claude-code-plugin",
+      "package-name": "@rembric/plugin-claude-code",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "extra-files": ["plugin.json"]
+    },
+    "apps/plugin/.codex-plugin": {
+      "release-type": "simple",
+      "component": "codex-plugin",
+      "package-name": "@rembric/plugin-codex",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "extra-files": ["plugin.json"]
+    },
+    "apps/plugin/.hermes-plugin": {
+      "release-type": "simple",
+      "component": "hermes-plugin",
+      "package-name": "@rembric/plugin-hermes",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "extra-files": ["plugin.yaml"]
+    },
+    "apps/plugin/.opencode-plugin": {
+      "release-type": "node",
+      "component": "opencode-plugin",
+      "package-name": "@rembric/plugin-opencode",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "extra-files": [{ "type": "generic", "path": "plugin.ts" }]
     }
-  }
+  },
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "bridge-bundlers",
+      "components": ["claude-code-plugin", "codex-plugin"]
+    }
+  ]
 }

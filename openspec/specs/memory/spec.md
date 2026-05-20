@@ -12,7 +12,7 @@ The system SHALL never delete a memory row and SHALL never mutate the `content` 
 
 #### Scenario: Code path attempts to physically delete a memory
 
-- **WHEN** any service or migration emits a `DELETE FROM memory` statement from any file OTHER than `src/services/memory.ts`
+- **WHEN** any service or migration emits a `DELETE FROM memory` statement from any file OTHER than `apps/server/src/services/memory.ts`
 - **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
 
 #### Scenario: Code path attempts to mutate `content`

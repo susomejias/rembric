@@ -6,6 +6,41 @@ settings:
 
 importers:
   .:
+    devDependencies:
+      '@commitlint/cli':
+        specifier: ^19.5.0
+        version: 19.8.1(@types/node@22.19.19)(typescript@5.9.3)
+      '@commitlint/config-conventional':
+        specifier: ^19.5.0
+        version: 19.8.1
+      '@eslint/js':
+        specifier: ^9.13.0
+        version: 9.39.4
+      eslint:
+        specifier: ^9.13.0
+        version: 9.39.4(jiti@2.6.1)
+      eslint-config-prettier:
+        specifier: ^9.1.0
+        version: 9.1.2(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-import:
+        specifier: ^2.31.0
+        version: 2.32.0(@typescript-eslint/parser@8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))
+      husky:
+        specifier: ^9.1.0
+        version: 9.1.7
+      lint-staged:
+        specifier: ^15.2.0
+        version: 15.5.2
+      prettier:
+        specifier: ^3.3.0
+        version: 3.8.3
+      typescript-eslint:
+        specifier: ^8.11.0
+        version: 8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+
+  apps/plugin: {}
+
+  apps/server:
     dependencies:
       '@hono/node-server':
         specifier: ^1.13.0
@@ -35,15 +70,6 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
     devDependencies:
-      '@commitlint/cli':
-        specifier: ^19.5.0
-        version: 19.8.1(@types/node@22.19.19)(typescript@5.9.3)
-      '@commitlint/config-conventional':
-        specifier: ^19.5.0
-        version: 19.8.1
-      '@eslint/js':
-        specifier: ^9.13.0
-        version: 9.39.4
       '@types/better-sqlite3':
         specifier: ^7.6.0
         version: 7.6.13
@@ -56,39 +82,18 @@ importers:
       drizzle-kit:
         specifier: ^0.27.0
         version: 0.27.2
-      eslint:
-        specifier: ^9.13.0
-        version: 9.39.4(jiti@2.6.1)
-      eslint-config-prettier:
-        specifier: ^9.1.0
-        version: 9.1.2(eslint@9.39.4(jiti@2.6.1))
-      eslint-plugin-import:
-        specifier: ^2.31.0
-        version: 2.32.0(@typescript-eslint/parser@8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))
       fast-check:
         specifier: ^3.22.0
         version: 3.23.2
-      husky:
-        specifier: ^9.1.0
-        version: 9.1.7
       lightningcss:
         specifier: ^1.32.0
         version: 1.32.0
-      lint-staged:
-        specifier: ^15.2.0
-        version: 15.5.2
-      prettier:
-        specifier: ^3.3.0
-        version: 3.8.3
       tsx:
         specifier: ^4.22.1
         version: 4.22.1
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
-      typescript-eslint:
-        specifier: ^8.11.0
-        version: 8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)

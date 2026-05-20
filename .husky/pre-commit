@@ -1,2 +1,2 @@
 pnpm exec lint-staged
-pnpm exec tsc --noEmit --incremental
+pnpm -r run typecheck

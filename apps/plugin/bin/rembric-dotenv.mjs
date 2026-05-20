@@ -8,10 +8,10 @@
 //     `PROJECT_SLUG`, validates against `SLUG_RE`, returns the slug or null.
 //
 // Imported by:
-//   - `plugin/bin/rembric-bridge.mjs` (Claude Code, Codex CLI MCP transport)
-//   - `plugin/.opencode-plugin/plugin.ts` (opencode lifecycle handlers)
+//   - `apps/plugin/bin/rembric-bridge.mjs` (Claude Code, Codex CLI MCP transport)
+//   - `apps/plugin/.opencode-plugin/plugin.ts` (opencode lifecycle handlers)
 //
-// Bash and Python clients (plugin/scripts/_api.sh, plugin/.hermes-plugin/
+// Bash and Python clients (apps/plugin/scripts/_api.sh, apps/plugin/.hermes-plugin/
 // __init__.py) keep their own dotenv parsers — cross-language sharing is
 // not worth the wrapper-spawn overhead for a 20-line parser. The slug
 // regex is documented in `openspec/specs/claude-code-plugin/spec.md` as

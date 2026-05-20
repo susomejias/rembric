@@ -1,0 +1,44 @@
+{
+  "name": "@rembric/server",
+  "version": "0.17.0",
+  "description": "Self-hosted memory, sessions, and dashboard for AI coding agents",
+  "type": "module",
+  "license": "MIT",
+  "author": "rembric contributors",
+  "private": true,
+  "scripts": {
+    "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && pnpm run build:css",
+    "build:css": "node scripts/build-css.mjs",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "start": "node dist/server-entrypoint.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.5.0",
+    "croner": "^9.0.0",
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0",
+    "sqlite-vec": "^0.1.6",
+    "ulid": "^2.3.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.7.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "drizzle-kit": "^0.27.0",
+    "fast-check": "^3.22.0",
+    "lightningcss": "^1.32.0",
+    "tsx": "^4.22.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
