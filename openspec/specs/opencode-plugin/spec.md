@@ -35,7 +35,7 @@ The repository SHALL contain `apps/plugin/bin/rembric-dotenv.mjs` exporting exac
 
 Bash (`apps/plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`apps/plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
 
-An invariant test (`apps/server/src/test/invariants.test.ts::apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing`) SHALL fail the build if either `plugin.ts` or `rembric-bridge.mjs` declares its own `parseDotenv` function or `SLUG_RE` constant.
+An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build if either `plugin.ts` or `rembric-bridge.mjs` declares its own `parseDotenv` function or `SLUG_RE` constant. The invariant test SHALL reference the canonical path `apps/plugin/bin/rembric-dotenv.mjs` in its assertions.
 
 #### Scenario: Shared dotenv lib exists and exports the canonical helpers
 
@@ -63,13 +63,13 @@ An invariant test (`apps/server/src/test/invariants.test.ts::apps/plugin/bin/rem
 
 The plugin module SHALL be importable in a Node/Bun environment that has `@opencode-ai/plugin` available as a peer dependency. The repository SHALL NOT add `@opencode-ai/plugin` to its own `dependencies` or `devDependencies` — it is consumed only at the user's runtime when opencode loads the plugin file.
 
-A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first 5 lines of `plugin.ts`. opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics. The value is managed by release-please as an independent component (the opencode `install.sh` re-fetches plugin assets from `main` at install time, so opencode does NOT need to ride the `bridge-bundlers` linked-versions group that cascades `claude-code` and `codex`).
+A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first 5 lines of `plugin.ts`. opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics. The version SHALL be managed by release-please's `opencode` component via the `extra-files` generic updater (NOT in lock-step with other plugin components — opencode versions independently).
 
 #### Scenario: Plugin file declares its version
 
 - **WHEN** the file is read at HEAD
 - **THEN** one of the first five lines matches `^// @rembric-plugin-version \d+\.\d+\.\d+$`
-- **AND** the captured version equals the `opencode` component version recorded in `.release-please-manifest.json`
+- **AND** the captured version equals the most recent `opencode-vX.Y.Z` git tag
 
 #### Scenario: Plugin module loads under Bun
 
@@ -77,6 +77,13 @@ A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear
 - **THEN** the import succeeds without error
 - **AND** the exported `RembricPlugin` is an async function
 - **AND** calling `RembricPlugin(ctx)` returns a Promise whose resolved value is a plain object with event-handler properties
+
+#### Scenario: Version is managed by the opencode release-please component
+
+- **WHEN** a commit modifies only files under `apps/plugin/.opencode-plugin/`
+- **THEN** release-please's `opencode` component SHALL stage a version bump for the `// @rembric-plugin-version` comment in `plugin.ts`
+- **AND** the bump SHALL be independent of `claude-code`, `codex`, `hermes`, and `server`
+- **AND** a `opencode-vX.Y.Z` git tag SHALL be created when the release-please PR is merged
 
 ### Requirement: MCP transport reuses the existing stdio bridge
 
@@ -100,9 +107,11 @@ The MCP server entry in the user's `opencode.json` SHALL be:
 }
 ```
 
-where `<HOME>` is the literal string from `$HOME` at install time. The install script SHALL substitute `<HOME>` with the resolved absolute path before printing the snippet, but SHALL leave `<URL>` and `<TOKEN>` as placeholders for the user to fill in.
+where `<HOME>` is the literal string from `$HOME` at install time. The install script SHALL substitute `<HOME>` with the resolved absolute path before printing the snippet, but SHALL leave `<URL>` and `<TOKEN>` as placeholders (or as `{env:REMBRIC_*}` substitutions per the install.sh auto-config branch) for the user.
 
-The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT use `type: "remote"`. The reasoning is recorded in design.md::Decision 1 (path-scoping requires dynamic URL construction per project, which only the spawned bridge can do).
+The install script SHALL fetch the bridge from `https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/bin/rembric-bridge.mjs` (and the companion `rembric-dotenv.mjs` from the same `apps/plugin/bin/` prefix) when running against the public repo. Local-dev iteration via `PLUGIN_SRC` + `BIN_SRC` env vars SHALL continue to work, with the dev paths now pointing at `apps/plugin/.opencode-plugin/` and `apps/plugin/bin/` respectively.
+
+The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT use `type: "remote"`.
 
 #### Scenario: Bridge file is reused without divergence
 
@@ -116,6 +125,21 @@ The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT 
 - **THEN** the printed JSON has `mcp.rembric.type = "local"`
 - **AND** `mcp.rembric.command` is `["node", "<expanded $HOME>/.config/rembric/bin/rembric-bridge.mjs"]`
 - **AND** `mcp.rembric.environment` declares exactly `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` as placeholder values for the user to edit
+
+#### Scenario: Default install URLs point at apps/plugin
+
+- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh`
+- **THEN** the script SHALL fetch `plugin.ts` from `.../apps/plugin/.opencode-plugin/plugin.ts`
+- **AND** the script SHALL fetch `rembric-bridge.mjs` from `.../apps/plugin/bin/rembric-bridge.mjs`
+- **AND** the script SHALL fetch `rembric-dotenv.mjs` from `.../apps/plugin/bin/rembric-dotenv.mjs`
+- **AND** none of the URLs SHALL contain the legacy `/plugin/` path
+
+#### Scenario: Legacy install URL returns 404
+
+- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh`
+- **THEN** `curl -fsSL` SHALL fail with a 404 from `raw.githubusercontent.com` and exit non-zero — no shim file is kept under `plugin/`
+- **AND** no files SHALL be installed under `~/.config/opencode/` or `~/.config/rembric/bin/`
+- **AND** the corrected install command SHALL be discoverable in `README.md`, `docs/agents.md`, `apps/plugin/.opencode-plugin/README.md`, and the first post-restructure `opencode-vX.Y.Z` release notes
 
 ### Requirement: Slug resolution uses the .rembric convention shared across clients
 

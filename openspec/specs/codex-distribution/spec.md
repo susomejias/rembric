@@ -24,19 +24,26 @@ The repository SHALL host a Codex plugin manifest at `apps/plugin/.codex-plugin/
 
 ### Requirement: Codex marketplace declaration
 
-The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketplace.json` at the repo root, installable via `codex plugin marketplace add <repo>`.
+The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketplace.json` at the repo root, installable via `codex plugin marketplace add <repo>`. The `source.path` entry SHALL point at `./apps/plugin` so the marketplace's `git-subdir` extraction targets the relocated plugin tree.
 
 #### Scenario: git-subdir source
 
 - **WHEN** `.codex-plugin/marketplace.json` is loaded
 - **THEN** it declares exactly one plugin entry named `rembric`
-- **AND** the entry's `source` object is `{ "source": "git-subdir", "url": "git@github.com:susomejias/rembric.git", "path": "./apps/plugin", "ref": "main" }`
+- **AND** the entry's `source` object is `{ "source": "git-subdir", "url": "https://github.com/susomejias/rembric.git", "path": "./apps/plugin", "ref": "main" }`
 - **AND** the entry declares `policy.installation: "AVAILABLE"` and `policy.authentication: "ON_INSTALL"` and `category: "Memory"`
 
 #### Scenario: Marketplace metadata
 
 - **WHEN** the marketplace is loaded
 - **THEN** the top-level object contains `name: "rembric"` and `interface.displayName: "Rembric"`
+
+#### Scenario: Marketplace install resolves the relocated plugin tree
+
+- **GIVEN** a clean Codex CLI installation with no `rembric` plugin cached
+- **WHEN** the user runs `codex plugin marketplace add https://github.com/susomejias/rembric.git` followed by `codex plugin install rembric`
+- **THEN** Codex SHALL clone the repo, extract the subtree at `./apps/plugin` per the `source.path`, and cache it under `~/.codex/plugins/cache/rembric/<version>/`
+- **AND** the cached directory SHALL contain `.codex-plugin/plugin.json`, `.codex-plugin/mcp.json`, `bin/rembric-bridge.mjs`, `bin/rembric-dotenv.mjs`, `hooks/hooks.codex.json`, and the relevant `scripts/` files
 
 ### Requirement: Codex hook configuration
 
@@ -89,7 +96,7 @@ Therefore Codex's mapping of lifecycle events to HTTP endpoints diverges from Cl
 
 - **WHEN** the repository is at HEAD after this change
 - **THEN** the file `apps/plugin/scripts/pre-compact-codex.sh` SHALL NOT exist
-- **AND** the file `apps/plugin/scripts/pre-compact.sh` SHALL NOT exist (deleted from Claude Code spec as well)
+- **AND** the file `apps/plugin/scripts/pre-compact.sh` SHALL NOT exist
 - **AND** no Codex hook entry SHALL reference either file
 
 ### Requirement: Codex hooks MUST receive `session_id` from stdin in the same JSON shape as Claude Code
@@ -145,23 +152,23 @@ The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugi
 #### Scenario: env*vars forwards REMBRIC*\* from the launching shell to the bridge
 
 - **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json`
-- **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env (the shell that launched `codex`)
-- **AND** the curated env passed to the bridge subprocess (after `Command::env_clear()`) SHALL contain those names with the user-supplied values
+- **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env
+- **AND** the curated env passed to the bridge subprocess SHALL contain those names with the user-supplied values
 - **AND** the bridge SHALL build a real URL — e.g. `http://192.0.2.10:8787/mcp/<slug>` — not a placeholder literal
 
 #### Scenario: env_vars forwards PWD so the bridge can resolve the user's project directory
 
-- **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json` AND the shell that launched `codex` has `PWD` set (POSIX shell convention — `bash`, `zsh`, `fish` all set it)
+- **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json` AND the shell that launched `codex` has `PWD` set
 - **THEN** `create_env_for_mcp_server` SHALL read `PWD` from Codex's own process env
 - **AND** the curated env passed to the bridge subprocess SHALL contain `PWD` with the shell's working directory
-- **AND** the bridge's project-directory resolution (per the `claude-code-plugin` capability's MCP bridge contract) SHALL pick `PWD` as the `projectDir` (since Codex never sets `CLAUDE_PROJECT_DIR`)
+- **AND** the bridge's project-directory resolution SHALL pick `PWD` as the `projectDir`
 - **AND** path-scoping via `${projectDir}/.rembric` SHALL function correctly when the user has launched `codex` from their project root
 
 #### Scenario: Bridge surfaces a useful error when env vars are missing
 
 - **WHEN** the user launches `codex` without exporting `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN`
-- **THEN** Codex's `env_vars` mechanism silently skips names it cannot find (per `env::var_os(var).map(...)`)
-- **AND** the bridge SHALL exit non-zero with a clear stderr message instructing the user to export the variables — preserving the diagnostic contract from the `claude-code-plugin` spec's "MCP bridge contract" requirement
+- **THEN** Codex's `env_vars` mechanism silently skips names it cannot find
+- **AND** the bridge SHALL exit non-zero with a clear stderr message instructing the user to export the variables
 
 #### Scenario: Claude Code MCP config is unaffected
 
@@ -170,12 +177,12 @@ The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugi
 - **AND** Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution in args SHALL keep working
 - **AND** Claude Code's keychain-driven `${user_config.*}` substitution into the `env` map SHALL remain the canonical credential path under Claude Code
 
-#### Scenario: Claude Code and Codex manifests cascade together via release-please
+#### Scenario: Claude-code and codex version-bump together when shared bin or hooks change
 
-- **WHEN** either `apps/plugin/.claude-plugin/mcp.json` or `apps/plugin/.codex-plugin/mcp.json` is modified (or any of the shared `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/scripts/` files)
-- **THEN** release-please's `bridge-bundlers` linked-versions group SHALL cascade the version bump across BOTH the `claude-code` and `codex` release-please components on the next release PR — operators do NOT manually bump the two manifests; release-please is the single source of truth
-- **AND** each component's release-please-managed changelog SHALL gain a matching entry describing the change
-- **AND** the bump SHALL follow Conventional Commits → SemVer: `fix:` for patch, `feat:` for minor, `feat!:` / `BREAKING CHANGE:` for major (credential or transport contract breaks)
+- **WHEN** any file under `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/commands/`, or `apps/plugin/scripts/` is modified
+- **THEN** release-please SHALL bump BOTH the `claude-code` and `codex` components (linked-versions `bridge-bundlers` group)
+- **AND** `apps/plugin/.claude-plugin/plugin.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` SHALL update together via the manifests' `extra-files` updaters
+- **AND** the `hermes` and `opencode` component versions SHALL NOT change
 
 ### Requirement: End-user credential flow
 

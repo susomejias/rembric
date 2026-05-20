@@ -136,6 +136,12 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 - **THEN** the row SHALL transition to `ended`
 - **AND** `summary` and `title` SHALL remain the model-authored values (the `final:false` writes are silently skipped due to precedence)
 
+#### Scenario: Hook catalog lives at the new path
+
+- **WHEN** Claude Code consumes the plugin from the marketplace
+- **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
+- **AND** the file SHALL declare the four hooks listed above
+
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
 To keep `session-start.sh`, `post-compact.sh`, and `session-end.sh` minimal and consistent, the plugin SHALL ship a shared helper at `apps/plugin/scripts/_api.sh` that:
@@ -177,13 +183,13 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 
 #### Scenario: Plugin hook scripts do not check for or interoperate with other memory systems
 
-- **WHEN** the plugin's hook scripts (`session-start.sh`, `pre-compact.sh`, `session-stop.sh`) and the bundled MCP bridge (`bin/rembric-bridge.mjs`) are inspected
+- **WHEN** the plugin's hook scripts (`session-start.sh`, `post-compact.sh`, `session-end.sh`, `prompt-search.sh`) and the bundled MCP bridge (`apps/plugin/bin/rembric-bridge.mjs`) are inspected
 - **THEN** none SHALL contain logic that detects, warns about, defers to, or imports state from any agent memory tool other than Rembric
 - **AND** none SHALL name a specific third-party memory tool in their output, comments, or stderr diagnostics
 
 #### Scenario: Skill content does not instruct the agent to migrate from or compare with other memory systems
 
-- **WHEN** the plugin's skill content (markdown files under `apps/plugin/skills/`) is read
+- **WHEN** the plugin's skill content (if any markdown files exist under `apps/plugin/.claude-plugin/skills/`) is read
 - **THEN** the skill SHALL NOT direct the agent to import from, deduplicate against, prefer Rembric over, or otherwise reason about parallel memory tools
 - **AND** the skill SHALL describe Rembric's memory protocol on its own terms, without comparison to other agent memory systems
 
