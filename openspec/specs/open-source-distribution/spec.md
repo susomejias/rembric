@@ -93,10 +93,10 @@ Tracked content SHALL NOT include literal references to any maintainer or contri
 The repo's release identity is multi-component. The version declared in EACH component's manifest SHALL match the version that release-please last set there, AND SHALL match the most recent component-prefixed git tag for that component, AND SHALL match the value reported by the relevant runtime surface for that component:
 
 - `apps/server/package.json::version` ⟷ the most recent `server-vX.Y.Z` git tag ⟷ `GET /healthz` body `version` field ⟷ `ghcr.io/susomejias/rembric:<X.Y.Z>` image tag.
-- `apps/plugin/.claude-plugin/plugin.json::version` ⟷ the most recent `claude-code-vX.Y.Z` git tag.
-- `apps/plugin/.codex-plugin/plugin.json::version` ⟷ the most recent `codex-vX.Y.Z` git tag.
-- `apps/plugin/.hermes-plugin/plugin.yaml::version` ⟷ the most recent `hermes-vX.Y.Z` git tag.
-- The `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts` ⟷ the most recent `opencode-vX.Y.Z` git tag.
+- `apps/plugin/.claude-plugin/plugin.json::version` ⟷ the most recent `claude-code-plugin-vX.Y.Z` git tag.
+- `apps/plugin/.codex-plugin/plugin.json::version` ⟷ the most recent `codex-plugin-vX.Y.Z` git tag.
+- `apps/plugin/.hermes-plugin/plugin.yaml::version` ⟷ the most recent `hermes-plugin-vX.Y.Z` git tag.
+- The `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts` ⟷ the most recent `opencode-plugin-vX.Y.Z` git tag.
 
 `release-please` SHALL be the single source of truth for bumping these — `.release-please-manifest.json` carries the authoritative versions and the corresponding `extra-files` updaters synchronize the surfaces on each release PR.
 
@@ -109,7 +109,7 @@ The legacy `vX.Y.Z` tags (pre-restructure) SHALL be retained in git history for 
 
 #### Scenario: Plugin component version drift
 
-- **WHEN** any plugin component's manifest version disagrees with its most recent component-prefixed git tag (e.g., `apps/plugin/.hermes-plugin/plugin.yaml::version` differs from the latest `hermes-vX.Y.Z`)
+- **WHEN** any plugin component's manifest version disagrees with its most recent component-prefixed git tag (e.g., `apps/plugin/.hermes-plugin/plugin.yaml::version` differs from the latest `hermes-plugin-vX.Y.Z`)
 - **THEN** the disagreement SHALL be treated as a release-blocking bug
 - **AND** release-please's `extra-files` mechanism SHALL be the only writer to those manifest version fields
 
@@ -138,16 +138,16 @@ After the orphan-branch swap that opens the project to the public, the pre-rewri
 The repository SHALL configure `release-please-config.json` in manifest mode with exactly five packages, each tied to a single workspace path:
 
 - `apps/server` — component name `server`, `release-type: node`, `package-name: @rembric/server`, `include-component-in-tag: true`.
-- `apps/plugin/.claude-plugin` — component name `claude-code`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.json"]`.
-- `apps/plugin/.codex-plugin` — component name `codex`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.json"]`.
-- `apps/plugin/.hermes-plugin` — component name `hermes`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.yaml"]`.
-- `apps/plugin/.opencode-plugin` — component name `opencode`, `release-type: node`, `include-component-in-tag: true`, `extra-files: [{ "type": "generic", "path": "plugin.ts" }]` (the generic updater bumps the `// @rembric-plugin-version` header).
+- `apps/plugin/.claude-plugin` — component name `claude-code-plugin`, `package-name: @rembric/plugin-claude-code`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.json"]`.
+- `apps/plugin/.codex-plugin` — component name `codex-plugin`, `package-name: @rembric/plugin-codex`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.json"]`.
+- `apps/plugin/.hermes-plugin` — component name `hermes-plugin`, `package-name: @rembric/plugin-hermes`, `release-type: simple`, `include-component-in-tag: true`, `extra-files: ["plugin.yaml"]`.
+- `apps/plugin/.opencode-plugin` — component name `opencode-plugin`, `package-name: @rembric/plugin-opencode`, `release-type: node`, `include-component-in-tag: true`, `extra-files: [{ "type": "generic", "path": "plugin.ts" }]` (the generic updater bumps the `// @rembric-plugin-version` header).
 
-`release-please-config.json` SHALL also declare a `plugins` array containing one `linked-versions` entry with `groupName: "bridge-bundlers"` and `components: ["claude-code", "codex"]`. This causes any release-please-eligible commit affecting either component to bump both — modelling the fact that both marketplace consumers extract `apps/plugin/` as a self-contained root and bundle the shared `bin/`, `hooks/`, `commands/`, `scripts/`. `hermes` and `opencode` SHALL NOT participate in any linked-versions group because their installers re-fetch from `main` at install time.
+`release-please-config.json` SHALL also declare a `plugins` array containing one `linked-versions` entry with `groupName: "bridge-bundlers"` and `components: ["claude-code-plugin", "codex-plugin"]`. This causes any release-please-eligible commit affecting either component to bump both — modelling the fact that both marketplace consumers extract `apps/plugin/` as a self-contained root and bundle the shared `bin/`, `hooks/`, `commands/`, `scripts/`. `hermes-plugin` and `opencode-plugin` SHALL NOT participate in any linked-versions group because their installers re-fetch from `main` at install time.
 
 The `.release-please-manifest.json` SHALL declare five entries with one initial version per component. The first server release after the restructure SHALL be `server-v0.18.0` (minor bump from the previous `v0.17.0` — semantics unchanged, only layout moved). The four plugin components SHALL each start at the version currently declared in their respective manifests (today `0.8.0`).
 
-Git tags produced by release-please SHALL follow the format `<component>-vX.Y.Z` (e.g., `server-v0.18.0`, `claude-code-v0.9.0`). The legacy `vX.Y.Z` tags continue to exist in git history but SHALL NOT be created by future release-please runs.
+Git tags produced by release-please SHALL follow the format `<component>-vX.Y.Z` (e.g., `server-v0.18.0`, `claude-code-plugin-v0.9.0`). The legacy `vX.Y.Z` tags continue to exist in git history but SHALL NOT be created by future release-please runs.
 
 #### Scenario: A commit touching only apps/server bumps only the server component
 
@@ -159,16 +159,16 @@ Git tags produced by release-please SHALL follow the format `<component>-vX.Y.Z`
 #### Scenario: A commit touching shared plugin code bumps both linked bundlers
 
 - **WHEN** a contributor merges a `feat:` commit that modifies `apps/plugin/bin/rembric-bridge.mjs`
-- **THEN** release-please SHALL bump BOTH `claude-code` and `codex` components in a single coordinated release PR
-- **AND** `hermes` and `opencode` versions SHALL remain unchanged
+- **THEN** release-please SHALL bump BOTH `claude-code-plugin` and `codex-plugin` components in a single coordinated release PR
+- **AND** `hermes-plugin` and `opencode-plugin` versions SHALL remain unchanged
 - **AND** both `apps/plugin/.claude-plugin/plugin.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` SHALL be updated via the `extra-files` mechanism
 
 #### Scenario: A Hermes-only fix cuts only a Hermes release
 
 - **WHEN** a contributor merges a `fix:` commit that modifies only `apps/plugin/.hermes-plugin/__init__.py`
-- **THEN** release-please SHALL open a release PR bumping only `hermes`
+- **THEN** release-please SHALL open a release PR bumping only `hermes-plugin`
 - **AND** no other component versions SHALL change
-- **AND** the resulting tag SHALL be of the form `hermes-vX.Y.Z`
+- **AND** the resulting tag SHALL be of the form `hermes-plugin-vX.Y.Z`
 
 ### Requirement: docker-publish MUST run only when the server component releases
 
@@ -180,7 +180,7 @@ A `workflow_dispatch` manual override SHALL remain available on `docker-publish.
 
 #### Scenario: Plugin-only release does not publish Docker
 
-- **GIVEN** a release-please PR is merged that bumps only the `claude-code` and `codex` components
+- **GIVEN** a release-please PR is merged that bumps only the `claude-code-plugin` and `codex-plugin` components
 - **WHEN** `release-please.yml` runs to completion
 - **THEN** the `publish-docker` job SHALL be skipped (status `skipped`, not `failed`)
 - **AND** no new image SHALL appear at `ghcr.io/susomejias/rembric:*`
@@ -195,7 +195,7 @@ A `workflow_dispatch` manual override SHALL remain available on `docker-publish.
 
 ### Requirement: Legacy plugin install URLs return 404 — no shim
 
-The directories `plugin/.hermes-plugin/` and `plugin/.opencode-plugin/` SHALL NOT be re-added to the repository tree after the `apps/plugin/` move. Bookmarked old `raw.githubusercontent.com/.../main/plugin/.X-plugin/install.sh` URLs SHALL return HTTP 404. The breakage SHALL be called out as **BREAKING** in the first post-restructure `hermes-vX.Y.Z` and `opencode-vX.Y.Z` release notes, and the corrected install command SHALL be discoverable in `README.md`, `docs/agents.md`, and the per-client READMEs at `apps/plugin/.<client>-plugin/README.md`.
+The directories `plugin/.hermes-plugin/` and `plugin/.opencode-plugin/` SHALL NOT be re-added to the repository tree after the `apps/plugin/` move. Bookmarked old `raw.githubusercontent.com/.../main/plugin/.X-plugin/install.sh` URLs SHALL return HTTP 404. The breakage SHALL be called out as **BREAKING** in the first post-restructure `hermes-plugin-vX.Y.Z` and `opencode-plugin-vX.Y.Z` release notes, and the corrected install command SHALL be discoverable in `README.md`, `docs/agents.md`, and the per-client READMEs at `apps/plugin/.<client>-plugin/README.md`.
 
 This is a hard cutover by design — maintaining shim files (and remembering to delete them in 3-6 months) was rejected as more drag than the marginal UX recovery. The 404 is short, unambiguous, and forces the user to re-read the install docs, which are the canonical source of truth.
 

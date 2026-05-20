@@ -177,12 +177,12 @@ The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugi
 - **AND** Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution in args SHALL keep working
 - **AND** Claude Code's keychain-driven `${user_config.*}` substitution into the `env` map SHALL remain the canonical credential path under Claude Code
 
-#### Scenario: Claude-code and codex version-bump together when shared bin or hooks change
+#### Scenario: claude-code-plugin and codex-plugin version-bump together when shared bin or hooks change
 
 - **WHEN** any file under `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/commands/`, or `apps/plugin/scripts/` is modified
-- **THEN** release-please SHALL bump BOTH the `claude-code` and `codex` components (linked-versions `bridge-bundlers` group)
+- **THEN** release-please SHALL bump BOTH the `claude-code-plugin` and `codex-plugin` components (linked-versions `bridge-bundlers` group)
 - **AND** `apps/plugin/.claude-plugin/plugin.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` SHALL update together via the manifests' `extra-files` updaters
-- **AND** the `hermes` and `opencode` component versions SHALL NOT change
+- **AND** the `hermes-plugin` and `opencode-plugin` component versions SHALL NOT change
 
 ### Requirement: End-user credential flow
 

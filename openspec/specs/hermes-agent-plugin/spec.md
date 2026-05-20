@@ -18,7 +18,7 @@ The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling
 
 ### Requirement: Plugin manifest declares lifecycle hooks
 
-`apps/plugin/.hermes-plugin/plugin.yaml` SHALL declare the canonical Hermes manifest fields: `name: "rembric"`, `version: "<semver>"` (managed by release-please's `hermes` component via the `extra-files` updater — NOT in lock-step with other plugin manifests anymore), `description`, `author`, `homepage`. The manifest SHALL declare a `hooks` array listing the lifecycle events the provider implements with real behavior: `[on_session_end, on_pre_compress, on_session_switch]`. The manifest SHALL declare a `requires_env` array listing the three runtime environment variables the plugin needs, in this order and with these descriptors:
+`apps/plugin/.hermes-plugin/plugin.yaml` SHALL declare the canonical Hermes manifest fields: `name: "rembric"`, `version: "<semver>"` (managed by release-please's `hermes-plugin` component via the `extra-files` updater — NOT in lock-step with other plugin manifests anymore), `description`, `author`, `homepage`. The manifest SHALL declare a `hooks` array listing the lifecycle events the provider implements with real behavior: `[on_session_end, on_pre_compress, on_session_switch]`. The manifest SHALL declare a `requires_env` array listing the three runtime environment variables the plugin needs, in this order and with these descriptors:
 
 1. `name: REMBRIC_SERVER_URL`, `description: "Rembric server base URL (WITHOUT /mcp suffix). Example: https://memory.example.com — no trailing slash."`.
 2. `name: REMBRIC_API_TOKEN`, `description: "Bearer token issued from the Rembric dashboard at /dashboard/tokens."`, `secret: true`.
@@ -35,12 +35,12 @@ The `hooks` array SHALL include `on_session_switch` because the provider now ove
 - **AND** it sees `requires_env: [REMBRIC_SERVER_URL, REMBRIC_API_TOKEN, REMBRIC_PROJECT_SLUG]` and prompts the user for any of those not already set in the parent shell env
 - **AND** answered values land in `${HERMES_HOME:-~/.hermes}/.env` and become available to the plugin module at import time and to all `mcp_servers.*` subprocesses Hermes spawns
 
-#### Scenario: Version is managed by the hermes release-please component
+#### Scenario: Version is managed by the hermes-plugin release-please component
 
 - **WHEN** a commit modifies any file under `apps/plugin/.hermes-plugin/`
-- **THEN** release-please's `hermes` component SHALL detect the change and stage a version bump for `apps/plugin/.hermes-plugin/plugin.yaml`
-- **AND** the bump SHALL be independent of the `claude-code`, `codex`, and `opencode` components
-- **AND** a `hermes-vX.Y.Z` git tag SHALL be created when the release-please PR is merged
+- **THEN** release-please's `hermes-plugin` component SHALL detect the change and stage a version bump for `apps/plugin/.hermes-plugin/plugin.yaml`
+- **AND** the bump SHALL be independent of the `claude-code-plugin`, `codex-plugin`, and `opencode-plugin` components
+- **AND** a `hermes-plugin-vX.Y.Z` git tag SHALL be created when the release-please PR is merged
 
 ### Requirement: Provider class implements the MemoryProvider ABC
 
@@ -227,7 +227,7 @@ The recommended public install command in `README.md` SHALL be:
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
-The legacy URL `https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh` SHALL return HTTP 404 — no shim file is kept under `plugin/.hermes-plugin/`. The breakage is communicated via the first post-restructure `hermes-vX.Y.Z` release notes (BREAKING), and via the install command published in `README.md`, `docs/agents.md`, and `apps/plugin/.hermes-plugin/README.md`.
+The legacy URL `https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh` SHALL return HTTP 404 — no shim file is kept under `plugin/.hermes-plugin/`. The breakage is communicated via the first post-restructure `hermes-plugin-vX.Y.Z` release notes (BREAKING), and via the install command published in `README.md`, `docs/agents.md`, and `apps/plugin/.hermes-plugin/README.md`.
 
 The plugin's README and docs SHALL NOT recommend a `git clone + cp -r` two-step install as a parallel path. The curl-installer with `PLUGIN_SRC` covers both the casual-user and the developer-with-clone case.
 
@@ -283,24 +283,24 @@ The repository's root `README.md` SHALL be updated to list Hermes Agent under "S
 
 ### Requirement: Version coupling with other client manifests
 
-The `version` field in `apps/plugin/.hermes-plugin/plugin.yaml` SHALL be managed by release-please's `hermes` component independently of the other plugin clients — superseding the previous lock-step rule that pinned Hermes to Claude Code and Codex. Each `apps/plugin/.X-plugin/` SHALL be its own release-please component and SHALL bump when its own paths change. Additionally, the `claude-code` and `codex` components SHALL bump when shared paths under `apps/plugin/bin/`, `hooks/`, `commands/`, or `scripts/` change (via the `bridge-bundlers` linked-versions group).
+The `version` field in `apps/plugin/.hermes-plugin/plugin.yaml` SHALL be managed by release-please's `hermes-plugin` component independently of the other plugin clients — superseding the previous lock-step rule that pinned Hermes to Claude Code and Codex. Each `apps/plugin/.X-plugin/` SHALL be its own release-please component and SHALL bump when its own paths change. Additionally, the `claude-code-plugin` and `codex-plugin` components SHALL bump when shared paths under `apps/plugin/bin/`, `hooks/`, `commands/`, or `scripts/` change (via the `bridge-bundlers` linked-versions group).
 
-`hermes` SHALL be excluded from `bridge-bundlers` because the Hermes installer re-fetches from `main` at install time; changes to shared code under `apps/plugin/` reach Hermes users on their next `curl … install.sh | sh` run without requiring a coordinated `hermes-vX.Y.Z` release.
+`hermes-plugin` SHALL be excluded from `bridge-bundlers` because the Hermes installer re-fetches from `main` at install time; changes to shared code under `apps/plugin/` reach Hermes users on their next `curl … install.sh | sh` run without requiring a coordinated `hermes-plugin-vX.Y.Z` release.
 
 The "Releasing a new plugin version" rule in `CLAUDE.md` SHALL describe this per-component model, replacing the previous lock-step wording.
 
 #### Scenario: A Hermes-only fix produces only a Hermes release
 
 - **WHEN** a contributor merges a `fix:` commit that modifies only files under `apps/plugin/.hermes-plugin/`
-- **THEN** release-please SHALL open a release PR that bumps only `hermes`
-- **AND** `claude-code`, `codex`, `opencode`, and `server` versions SHALL remain unchanged
-- **AND** the resulting git tag SHALL be of the form `hermes-vX.Y.Z`
+- **THEN** release-please SHALL open a release PR that bumps only `hermes-plugin`
+- **AND** `claude-code-plugin`, `codex-plugin`, `opencode-plugin`, and `server` versions SHALL remain unchanged
+- **AND** the resulting git tag SHALL be of the form `hermes-plugin-vX.Y.Z`
 
 #### Scenario: A shared-bin change does not produce a Hermes release
 
 - **WHEN** a contributor merges a `feat:` commit that modifies `apps/plugin/bin/rembric-bridge.mjs`
-- **THEN** release-please SHALL bump `claude-code` and `codex` (via the `bridge-bundlers` linked group)
-- **AND** `hermes` SHALL NOT be bumped
+- **THEN** release-please SHALL bump `claude-code-plugin` and `codex-plugin` (via the `bridge-bundlers` linked group)
+- **AND** `hermes-plugin` SHALL NOT be bumped
 - **AND** Hermes users SHALL receive the updated bridge on their next re-run of the install.sh from `main`
 
 ### Requirement: No modification to existing plugin assets
