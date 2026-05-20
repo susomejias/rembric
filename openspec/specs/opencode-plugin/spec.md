@@ -63,7 +63,7 @@ An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the bu
 
 The plugin module SHALL be importable in a Node/Bun environment that has `@opencode-ai/plugin` available as a peer dependency. The repository SHALL NOT add `@opencode-ai/plugin` to its own `dependencies` or `devDependencies` — it is consumed only at the user's runtime when opencode loads the plugin file.
 
-A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first 5 lines of `plugin.ts`. opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics. The version SHALL be managed by release-please's `opencode-plugin` component via the `extra-files` generic updater (NOT in lock-step with other plugin components — opencode versions independently).
+A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first five lines of `plugin.ts`, wrapped on the line above and below by `// x-release-please-start-version` and `// x-release-please-end` (release-please's standard annotation for updating arbitrary text in non-package files). opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics, and the `x-release-please-*` wrappers are what let release-please's `opencode-plugin` component find and update the version via the `extra-files` generic updater (NOT in lock-step with other plugin components — opencode versions independently).
 
 #### Scenario: Plugin file declares its version
 

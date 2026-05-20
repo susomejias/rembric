@@ -1,4 +1,6 @@
-// @rembric-plugin-version 0.8.0
+// x-release-please-start-version
+// @rembric-plugin-version 0.9.0
+// x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
 //
