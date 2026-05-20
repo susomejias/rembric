@@ -11,17 +11,17 @@
 # directory path is copied with cp.
 #
 # Usage (public repo):
-#   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh
 #
 # Usage (dev, local clone — no fetch):
-#   PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" \
-#   BIN_SRC="$(pwd)/plugin/bin" \
-#     sh plugin/.opencode-plugin/install.sh
+#   PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" \
+#   BIN_SRC="$(pwd)/apps/plugin/bin" \
+#     sh apps/plugin/.opencode-plugin/install.sh
 
 set -eu
 
-PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin}"
-BIN_SRC="${BIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/plugin/bin}"
+PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin}"
+BIN_SRC="${BIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/bin}"
 
 OPENCODE_DIR="${HOME}/.config/opencode"
 OPENCODE_PLUGINS_DIR="${OPENCODE_DIR}/plugins"

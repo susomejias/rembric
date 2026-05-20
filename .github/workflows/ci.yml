@@ -73,7 +73,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Dockerfile
+          file: ./apps/server/Dockerfile
           target: runtime
           platforms: linux/amd64
           push: false
@@ -84,7 +84,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Dockerfile
+          file: ./apps/server/Dockerfile
           target: dev
           platforms: linux/amd64
           push: false

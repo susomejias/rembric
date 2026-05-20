@@ -6,14 +6,15 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   {
     ignores: [
-      'dist/**',
-      'node_modules/**',
+      '**/dist/**',
+      '**/node_modules/**',
       'coverage/**',
       'examples/**',
       'example-design/**',
-      'scripts/**',
+      'apps/server/scripts/**',
+      'apps/plugin/**',
       'plugin/**',
-      'src/dashboard/public/**',
+      'apps/server/src/dashboard/public/**',
       '**/*.d.ts',
     ],
   },
@@ -26,8 +27,8 @@ export default tseslint.config(
           allowDefaultProject: [
             'eslint.config.js',
             'commitlint.config.js',
-            'drizzle.config.ts',
-            'vitest.config.ts',
+            'apps/server/drizzle.config.ts',
+            'apps/server/vitest.config.ts',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -58,6 +59,14 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-floating-promises': 'off',
     },
+  },
+  {
+    // Root-level config files use the projectService default project; the
+    // type-checked rule set doesn't have full type info for them after the
+    // monorepo restructure (tsconfig.json moved to apps/server/). Disable
+    // type-checked rules for these files.
+    files: ['eslint.config.js', 'commitlint.config.js'],
+    extends: [tseslint.configs.disableTypeChecked],
   },
   prettier,
 );

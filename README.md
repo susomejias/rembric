@@ -31,11 +31,11 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
 <table>
   <tr>
     <td align="center" valign="top" width="25%">
-      <a href="./plugin/README.md"><img src="https://matthiasroder.com/content/images/2026/01/Claude.png?size=120" alt="Claude Code" width="64" height="64" /><br/><b>Claude Code</b></a><br/>
+      <a href="./apps/plugin/README.md"><img src="https://matthiasroder.com/content/images/2026/01/Claude.png?size=120" alt="Claude Code" width="64" height="64" /><br/><b>Claude Code</b></a><br/>
       <sub>native plugin · 4 hooks · MCP</sub>
     </td>
     <td align="center" valign="top" width="25%">
-      <a href="./plugin/.opencode-plugin/README.md"><img src="https://github.com/opencode-ai.png?size=120" alt="opencode" width="64" height="64" /><br/><b>opencode</b></a><br/>
+      <a href="./apps/plugin/.opencode-plugin/README.md"><img src="https://github.com/opencode-ai.png?size=120" alt="opencode" width="64" height="64" /><br/><b>opencode</b></a><br/>
       <sub>native plugin · MCP</sub>
     </td>
     <td align="center" valign="top" width="25%">
@@ -43,7 +43,7 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
       <sub>native plugin · 4 hooks · MCP</sub>
     </td>
     <td align="center" valign="top" width="25%">
-      <a href="./plugin/.hermes-plugin/README.md"><img src="https://github.com/NousResearch.png?size=120" alt="Hermes Agent" width="64" height="64" /><br/><b>Hermes Agent</b></a><br/>
+      <a href="./apps/plugin/.hermes-plugin/README.md"><img src="https://github.com/NousResearch.png?size=120" alt="Hermes Agent" width="64" height="64" /><br/><b>Hermes Agent</b></a><br/>
       <sub>native provider · MCP</sub>
     </td>
   </tr>

@@ -207,7 +207,7 @@ It's NOT the right tool for the prod operator. For prod, follow the Quickstart a
 
 ### What it gives you
 
-- **Hot-reload via tsx watch.** Edit a file under `src/**/*.ts` on the host, and the running Node process inside the container restarts within ~1–2 seconds. No rebuild, no recompile loop. The container itself stays up; only its Node child cycles.
+- **Hot-reload via tsx watch.** Edit a file under `apps/server/src/**/*.ts` on the host, and the running Node process inside the container restarts within ~1–2 seconds. No rebuild, no recompile loop. The container itself stays up; only its Node child cycles.
 - **Isolated state.** Volume `./data-dev/` (gitignored), container `rembric-dev`, compose project `rembric-dev`, network `rembric-dev_default`, port `127.0.0.1:8788`. Your prod stack (if any) on the same host is untouched.
 - **Loopback only.** The dev port binds to `127.0.0.1` to keep half-cooked debug builds off the LAN. Opt into LAN exposure via a personal `docker-compose.override.yml` if you really need it.
 - **A populated dashboard out of the box.** The seed script creates a demo project, 3 tokens, ~23 memories across 5 `topic_key` clusters, 3 ended sessions with summaries, 2 active sessions, and 1 pending judgment. Every dashboard surface renders meaningfully on first login.
@@ -229,7 +229,7 @@ pnpm run dev:docker:up
 
 open http://127.0.0.1:8788/dashboard
 # log in with the 'admin-dev' token captured above
-# iterate on src/... — tsx watch reloads in ~2s on save
+# iterate on apps/server/src/... — tsx watch reloads in ~2s on save
 ```
 
 ### Every `up` is a fresh canvas
@@ -245,7 +245,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml \
 
 This emits a one-line stderr warning and then deletes from `memory_relations`, `confirmations`, `consolidation_ops`, `consolidation_runs`, `prompts`, `memory`, `sessions`, `tokens`, `projects` (children-first, in one transaction). Triggers clean up `memory_vec` and `memory_fts` automatically.
 
-`--reset` is the only path outside the operator-only purges (`services/memory.ts::purgeDisconnectedArchived` and `services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`src/test/invariants.test.ts`) pins this allow-list and asserts that `scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
+`--reset` is the only path outside the operator-only purges (`apps/server/src/services/memory.ts::purgeDisconnectedArchived` and `apps/server/src/services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`apps/server/src/test/invariants.test.ts`) pins this allow-list and asserts that `apps/server/src/scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
 
 ### How it avoids colliding with prod
 

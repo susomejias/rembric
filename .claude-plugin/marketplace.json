@@ -9,7 +9,7 @@
     {
       "name": "rembric",
       "description": "Automatic memory for Claude Code, backed by your self-hosted Rembric server.",
-      "source": "./plugin"
+      "source": "./apps/plugin"
     }
   ]
 }

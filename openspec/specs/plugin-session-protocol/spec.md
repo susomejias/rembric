@@ -180,23 +180,23 @@ The cross-client write contract maps lifecycle events to HTTP endpoints as follo
 | Hermes      | `on_session_end(messages)`                        | `POST /end {summary, title, final:false}`                     | false   |
 | Any (model) | `memory.session_summary({summary, title?})` (MCP) | internal write (no HTTP) with `final:true`                    | true    |
 
-The Claude Code `Stop` hook SHALL NOT be wired in `plugin/hooks/hooks.json`. The Claude Code `pre-compact.sh` script SHALL NOT exist. The Codex `pre-compact.sh` reference in `hooks.codex.json` SHALL be removed (there is no equivalent event in Codex).
+The Claude Code `Stop` hook SHALL NOT be wired in `apps/plugin/hooks/hooks.json`. The Claude Code `pre-compact.sh` script SHALL NOT exist. The Codex `pre-compact.sh` reference in `hooks.codex.json` SHALL be removed (there is no equivalent event in Codex).
 
 #### Scenario: Claude Code hooks.json contains the mapped events
 
-- **WHEN** `plugin/hooks/hooks.json` is loaded
+- **WHEN** `apps/plugin/hooks/hooks.json` is loaded
 - **THEN** the `hooks` object SHALL contain entries for `SessionStart` (with two matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit`, and `SessionEnd`
 - **AND** the `hooks` object SHALL NOT contain a `Stop` entry
 - **AND** the `hooks` object SHALL NOT contain a `PreCompact` entry
 
 #### Scenario: Codex hooks.codex.json contains the mapped events
 
-- **WHEN** `plugin/hooks/hooks.codex.json` is loaded
+- **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
 - **THEN** the `hooks` object SHALL contain entries for `SessionStart`, `UserPromptSubmit`, and `Stop`
 - **AND** the `hooks` object SHALL NOT contain a `PreCompact` entry
 - **AND** the `Stop` script SHALL emit `'{}'` to stdout (Codex requires JSON on Stop stdout — plain text is invalid per docs)
 
 #### Scenario: Hermes plugin.yaml declares the lifecycle methods
 
-- **WHEN** `plugin/.hermes-plugin/plugin.yaml` is loaded
+- **WHEN** `apps/plugin/.hermes-plugin/plugin.yaml` is loaded
 - **THEN** the `hooks` array SHALL contain `on_pre_compress`, `on_session_end`, and `on_session_switch`

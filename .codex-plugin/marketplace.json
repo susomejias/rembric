@@ -9,7 +9,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/susomejias/rembric.git",
-        "path": "./plugin",
+        "path": "./apps/plugin",
         "ref": "main"
       },
       "policy": {

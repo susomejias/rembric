@@ -8,17 +8,17 @@ TBD - created by archiving change add-hermes-agent-plugin. Update Purpose after 
 
 ### Requirement: Plugin source location
 
-The plugin SHALL live in this monorepo at `plugin/.hermes-plugin/`, sibling to `plugin/.claude-plugin/` and `plugin/.codex-plugin/`. The directory SHALL contain exactly four files: `plugin.yaml`, `__init__.py`, `install.sh`, `README.md`. No subdirectories.
+The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to `apps/plugin/.claude-plugin/` and `apps/plugin/.codex-plugin/`. The directory SHALL contain exactly four files: `plugin.yaml`, `__init__.py`, `install.sh`, `README.md`. No subdirectories.
 
 #### Scenario: Plugin tree contains the four files
 
 - **WHEN** the repository is at HEAD
-- **THEN** `ls plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, and `README.md`
-- **AND** there are no nested directories under `plugin/.hermes-plugin/`
+- **THEN** `ls apps/plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, and `README.md`
+- **AND** there are no nested directories under `apps/plugin/.hermes-plugin/`
 
 ### Requirement: Plugin manifest declares lifecycle hooks
 
-`plugin/.hermes-plugin/plugin.yaml` SHALL declare the canonical Hermes manifest fields: `name: "rembric"`, `version: "<semver>"` (kept in lock-step with `plugin/.claude-plugin/plugin.json::version` and `plugin/.codex-plugin/plugin.json::version`), `description`, `author`, `homepage`. The manifest SHALL declare a `hooks` array listing the lifecycle events the provider implements with real behavior: `[on_session_end, on_pre_compress, on_session_switch]`. The manifest SHALL declare a `requires_env` array listing the three runtime environment variables the plugin needs, in this order and with these descriptors:
+`apps/plugin/.hermes-plugin/plugin.yaml` SHALL declare the canonical Hermes manifest fields: `name: "rembric"`, `version: "<semver>"` (managed by release-please as an independent component — bumps independently of `claude-code` / `codex`), `description`, `author`, `homepage`. The manifest SHALL declare a `hooks` array listing the lifecycle events the provider implements with real behavior: `[on_session_end, on_pre_compress, on_session_switch]`. The manifest SHALL declare a `requires_env` array listing the three runtime environment variables the plugin needs, in this order and with these descriptors:
 
 1. `name: REMBRIC_SERVER_URL`, `description: "Rembric server base URL (WITHOUT /mcp suffix). Example: https://memory.example.com — no trailing slash."`.
 2. `name: REMBRIC_API_TOKEN`, `description: "Bearer token issued by 'rembric token create'."`, `secret: true`.
@@ -37,7 +37,7 @@ The `hooks` array SHALL include `on_session_switch` (new addition) because the p
 
 ### Requirement: Provider class implements the MemoryProvider ABC
 
-`plugin/.hermes-plugin/__init__.py` SHALL define a class `RembricMemoryProvider` extending `agent.memory_provider.MemoryProvider`. The file SHALL guard the import with `try: from agent.memory_provider import MemoryProvider / except ImportError:` falling back to a local stub ABC defining the same method names, so the file is importable for tests and linting without Hermes installed.
+`apps/plugin/.hermes-plugin/__init__.py` SHALL define a class `RembricMemoryProvider` extending `agent.memory_provider.MemoryProvider`. The file SHALL guard the import with `try: from agent.memory_provider import MemoryProvider / except ImportError:` falling back to a local stub ABC defining the same method names, so the file is importable for tests and linting without Hermes installed.
 
 The file SHALL expose a module-level `register(ctx)` function that calls `ctx.register_memory_provider(RembricMemoryProvider())`. No other registrations.
 
@@ -167,7 +167,7 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentia
 
 ### Requirement: Slug resolution cascade
 
-The provider SHALL resolve the project slug in `initialize` using this strict precedence chain. The chain SHALL stop at the first source that yields a slug that matches the regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (identical to the bridge's regex in `plugin/bin/rembric-bridge.mjs`):
+The provider SHALL resolve the project slug in `initialize` using this strict precedence chain. The chain SHALL stop at the first source that yields a slug that matches the regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (identical to the bridge's regex in `apps/plugin/bin/rembric-bridge.mjs`):
 
 1. `REMBRIC_PROJECT_SLUG` environment variable (populated by Hermes from `~/.hermes/.env` via the `requires_env` install flow, or set directly in the parent shell).
 2. The `PROJECT_SLUG` value parsed from `<kwargs.cwd>/.rembric`, using the same dotenv-style parser as the bridge: trim whitespace, skip blank lines and lines starting with `#`, accept `KEY=VALUE`, and strip matched outer single or double quotes from the value.
@@ -204,9 +204,9 @@ The resolved slug SHALL be validated against the slug regex; non-matching candid
 
 ### Requirement: Distribution via curl-installer
 
-The plugin SHALL be installable through a single shell script hosted at `plugin/.hermes-plugin/install.sh` in the rembric monorepo. The script SHALL:
+The plugin SHALL be installable through a single shell script hosted at `apps/plugin/.hermes-plugin/install.sh` in the rembric monorepo. The script SHALL:
 
-- Default to `PLUGIN_SRC="https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin"`.
+- Default to `PLUGIN_SRC="https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin"`.
 - Honour an overriding `PLUGIN_SRC` environment variable that points at any local directory (for developers with a cloned monorepo) or any other reachable URL prefix.
 - Honour `HERMES_HOME` (default `${HOME}/.hermes`).
 - Honour `GH_PAT`, `GH_TOKEN`, or `GITHUB_TOKEN` (in that precedence; first non-empty wins) as a GitHub Personal Access Token used for HTTPS fetches. When set, the script SHALL include `Authorization: Bearer <token>` on every internal `curl` call so the same script works against any auth-protected `raw.githubusercontent.com` URL prefix (a non-public fork, a private mirror, or a fork the user owns and keeps private) without further command-line plumbing.
@@ -218,20 +218,20 @@ The plugin SHALL be installable through a single shell script hosted at `plugin/
 The recommended public install command in `README.md` SHALL be:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
 The plugin's README and docs SHALL NOT recommend a `git clone + cp -r` two-step install as a parallel path. The curl-installer with `PLUGIN_SRC` covers both the casual-user and the developer-with-clone case.
 
 #### Scenario: Default install fetches the three files via curl
 
-- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh` in a fresh shell with `HERMES_HOME` unset
+- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh` in a fresh shell with `HERMES_HOME` unset
 - **THEN** the script creates `${HOME}/.hermes/plugins/rembric/` and writes `plugin.yaml`, `__init__.py`, `README.md` into it
 - **AND** stdout includes `✓ rembric installed at` followed by the resolved path
 
 #### Scenario: Developer install reads from local clone
 
-- **WHEN** a developer with a clone of rembric runs `PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh`
+- **WHEN** a developer with a clone of rembric runs `PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh`
 - **THEN** the three files in the target directory are byte-identical to the files in the local source
 - **AND** no network request is issued by the script
 
@@ -270,43 +270,43 @@ The repository's root `README.md` SHALL be updated to list Hermes Agent under "S
 
 `docs/agents.md` SHALL gain a new "Hermes Agent" section mirroring the structure of the existing Claude Code and Codex CLI sections, covering install (including the `requires_env` prompt flow), config, env vars, slug resolution, and a pointer to the plugin README.
 
-`plugin/README.md` and `plugin/CHANGELOG.md` SHALL be updated to include Hermes alongside Claude/Codex.
+`apps/plugin/README.md` and `apps/plugin/CHANGELOG.md` SHALL be updated to include Hermes alongside Claude/Codex.
 
 #### Scenario: README pairs provider and bridge in the config example
 
-- **WHEN** a user reads `plugin/.hermes-plugin/README.md` end-to-end
+- **WHEN** a user reads `apps/plugin/.hermes-plugin/README.md` end-to-end
 - **THEN** the first config block they see registers BOTH the `mcp_servers.rembric` entry (bridge) AND the `memory.provider: rembric` entry (provider) in the same `~/.hermes/config.yaml` snippet
 - **AND** the prose preceding the block explicitly notes that lifecycle (provider) and tool access (bridge) are complementary, not redundant
 - **AND** the README contains no reference to `~/.rembric/.env` or `get_config_schema`
 
-### Requirement: Version coupling with other client manifests
+### Requirement: Versioning managed by release-please as an independent component
 
-The `version` field in `plugin/.hermes-plugin/plugin.yaml` SHALL stay numerically equal to `plugin/.claude-plugin/plugin.json::version` and `plugin/.codex-plugin/plugin.json::version`. The "Releasing a new plugin version" rule in `CLAUDE.md` SHALL be extended in the same commit so that the version-bump rule covers all three manifests.
+The `version` field in `apps/plugin/.hermes-plugin/plugin.yaml` SHALL be managed by release-please as an independent component (NOT joined to the `bridge-bundlers` linked-versions group that covers `claude-code` and `codex`). Hermes bumps independently because its `install.sh` re-fetches plugin assets from `main` at install time — shared changes to `apps/plugin/bin/` or `apps/plugin/scripts/` propagate to Hermes installs without requiring a coordinated version bump on the Hermes manifest. Operators do NOT hand-edit the version; Conventional Commits drive the bump via release-please.
 
-#### Scenario: All three manifests bump together
+#### Scenario: Hermes manifest bumps via release-please on a Hermes-scoped change
 
-- **WHEN** any client-visible change in `plugin/` is committed (scripts, hooks, mcp.json, bin/, or any of the manifests themselves)
-- **THEN** the same commit bumps the `version` field in all three of `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, and `plugin/.hermes-plugin/plugin.yaml`
-- **AND** `plugin/CHANGELOG.md` gains a corresponding `[X.Y.Z]` entry
+- **WHEN** a Conventional Commit scoped to `hermes` (e.g. `feat(hermes): ...`) lands on `main`
+- **THEN** release-please opens (or updates) a release PR that bumps only the `version` field in `apps/plugin/.hermes-plugin/plugin.yaml` and the manifest entry for the `hermes` component — `claude-code` and `codex` are untouched
+- **AND** the matching Hermes-component changelog entry is generated by release-please from the commit subject
 
 ### Requirement: No modification to existing plugin assets
 
 This change SHALL NOT modify any of:
 
-- `plugin/bin/rembric-bridge.mjs`
-- `plugin/scripts/_api.sh`, `plugin/scripts/session-start.sh`, `plugin/scripts/session-stop.sh`, `plugin/scripts/pre-compact.sh`, `plugin/scripts/prompt-search.sh`
-- `plugin/hooks/hooks.json`, `plugin/hooks/hooks.codex.json`
-- `plugin/.claude-plugin/mcp.json`, `plugin/.codex-plugin/mcp.json`
-- `src/server/api-router.ts` (endpoints, schemas, auth)
+- `apps/plugin/bin/rembric-bridge.mjs`
+- `apps/plugin/scripts/_api.sh`, `apps/plugin/scripts/session-start.sh`, `apps/plugin/scripts/session-stop.sh`, `apps/plugin/scripts/pre-compact.sh`, `apps/plugin/scripts/prompt-search.sh`
+- `apps/plugin/hooks/hooks.json`, `apps/plugin/hooks/hooks.codex.json`
+- `apps/plugin/.claude-plugin/mcp.json`, `apps/plugin/.codex-plugin/mcp.json`
+- `apps/server/src/server/api-router.ts` (endpoints, schemas, auth)
 - DB schema or migrations
 - Existing capability specs in `openspec/specs/` other than the documentation-only edit to `CLAUDE.md` invariant wording (which is project guidance, not a spec).
 
-The Hermes plugin consumes the **existing** HTTP session endpoints in `src/server/api-router.ts` and the **existing** bridge entry point. No new server-side runtime dependencies are introduced.
+The Hermes plugin consumes the **existing** HTTP session endpoints in `apps/server/src/server/api-router.ts` and the **existing** bridge entry point. No new server-side runtime dependencies are introduced.
 
 #### Scenario: Bridge and bash scripts are byte-identical post-change
 
 - **WHEN** the change is applied
-- **THEN** `git diff` against `plugin/bin/rembric-bridge.mjs` and every file under `plugin/scripts/`, `plugin/hooks/`, `plugin/.claude-plugin/`, `plugin/.codex-plugin/` shows no modifications
+- **THEN** `git diff` against `apps/plugin/bin/rembric-bridge.mjs` and every file under `apps/plugin/scripts/`, `apps/plugin/hooks/`, `apps/plugin/.claude-plugin/`, `apps/plugin/.codex-plugin/` shows no modifications
 
 ### Requirement: Provider MUST override `on_session_switch` to rotate session ids cleanly
 

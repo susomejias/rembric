@@ -35,4 +35,4 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 ## All shell-hook clients (Claude + Codex)
 
 - Bridge cwd resolution chain: `CLAUDE_PROJECT_DIR > PWD > process.cwd()`. The `||` short-circuit (not `??`) lets explicitly-empty env vars fall through. Don't introduce new precedence steps without an invariant test + a bridge-contract spec amendment.
-- All hook scripts source `plugin/scripts/_api.sh` for `rembric_post`, `rembric_read_project_slug`, etc. NEVER write a per-client variant (`*-claude.sh`, `*-codex.sh`) — the platform delta is in the env-prefix at the hook manifest level, not in the script.
+- All hook scripts source `apps/plugin/scripts/_api.sh` for `rembric_post`, `rembric_read_project_slug`, etc. NEVER write a per-client variant (`*-claude.sh`, `*-codex.sh`) — the platform delta is in the env-prefix at the hook manifest level, not in the script.

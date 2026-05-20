@@ -190,18 +190,21 @@ describe('append-only invariants (static grep)', () => {
   });
 });
 
-const repoRoot = join(srcRoot, '..');
+// repoRoot points to the monorepo root (../../../ from apps/server/src/test).
+// srcRoot resolves to apps/server/src; the actual repo root is two levels up
+// from apps/server (one extra `..` for apps, one for the repo).
+const repoRoot = join(srcRoot, '..', '..', '..');
 
 describe('image packaging invariants', () => {
   it('Dockerfile: the LAST `FROM ... AS <name>` stage is `runtime`', () => {
-    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
     const stages = [...dockerfile.matchAll(/^FROM\s+\S+\s+AS\s+(\w+)/gim)].map((m) => m[1]);
     expect(stages.length).toBeGreaterThan(1);
     expect(stages[stages.length - 1]).toBe('runtime');
   });
 
   it('Dockerfile: the `runtime` stage declares LABEL rembric.stage=runtime', () => {
-    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
     const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
     expect(runtimeIdx).toBeGreaterThan(-1);
     const runtimeBlock = dockerfile.slice(runtimeIdx);
@@ -209,7 +212,7 @@ describe('image packaging invariants', () => {
   });
 
   it('Dockerfile: the `dev` stage declares LABEL rembric.stage=dev', () => {
-    const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+    const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
     const devIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+dev\b/m);
     const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
     expect(devIdx).toBeGreaterThan(-1);
@@ -305,7 +308,7 @@ describe('scope-leak invariant', () => {
  */
 describe('opencode plugin dispose-spike result is recorded', () => {
   it('plugin.ts declares the spike outcome in the header', () => {
-    const src = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const src = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
     const head = src.split('\n').slice(0, 10).join('\n');
     expect(
       /\/\/ dispose-spike-result: fire-and-forget/.test(head),
@@ -314,7 +317,7 @@ describe('opencode plugin dispose-spike result is recorded', () => {
   });
 
   it('server.instance.disposed handler exists in plugin.ts', () => {
-    const src = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    const src = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
     expect(
       src.includes("'server.instance.disposed'"),
       'plugin.ts must dispatch the undocumented server.instance.disposed event',
@@ -322,10 +325,13 @@ describe('opencode plugin dispose-spike result is recorded', () => {
   });
 });
 
-describe('plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
+describe('apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
   it('plugin.ts and rembric-bridge.mjs import from the shared dotenv lib', () => {
-    const pluginSrc = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
-    const bridgeSrc = readFileSync(join(repoRoot, 'plugin/bin/rembric-bridge.mjs'), 'utf8');
+    const pluginSrc = readFileSync(
+      join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'),
+      'utf8',
+    );
+    const bridgeSrc = readFileSync(join(repoRoot, 'apps/plugin/bin/rembric-bridge.mjs'), 'utf8');
 
     expect(
       /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(pluginSrc),
@@ -354,36 +360,9 @@ describe('plugin/bin/rembric-dotenv.mjs is the single source of truth for slug p
   });
 });
 
-describe('plugin version lock-step', () => {
-  it('all four version sources agree', () => {
-    const claude = JSON.parse(
-      readFileSync(join(repoRoot, 'plugin/.claude-plugin/plugin.json'), 'utf8'),
-    ) as { version?: string };
-    const codex = JSON.parse(
-      readFileSync(join(repoRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),
-    ) as { version?: string };
-    const hermesRaw = readFileSync(join(repoRoot, 'plugin/.hermes-plugin/plugin.yaml'), 'utf8');
-    const hermesMatch = hermesRaw.match(/^version:\s*['"]?([^'"\n]+)['"]?\s*$/m);
-    const opencodeRaw = readFileSync(join(repoRoot, 'plugin/.opencode-plugin/plugin.ts'), 'utf8');
-    const opencodeMatch = opencodeRaw.match(/^\/\/\s*@rembric-plugin-version\s+(\S+)\s*$/m);
-
-    const sources: { name: string; value?: string }[] = [
-      { name: 'plugin/.claude-plugin/plugin.json::version', value: claude.version },
-      { name: 'plugin/.codex-plugin/plugin.json::version', value: codex.version },
-      { name: 'plugin/.hermes-plugin/plugin.yaml::version', value: hermesMatch?.[1] },
-      {
-        name: 'plugin/.opencode-plugin/plugin.ts::// @rembric-plugin-version',
-        value: opencodeMatch?.[1],
-      },
-    ];
-
-    for (const s of sources) {
-      expect(s.value, `missing version source: ${s.name}`).toBeTruthy();
-    }
-    const distinct = new Set(sources.map((s) => s.value));
-    if (distinct.size > 1) {
-      const lines = sources.map((s) => `  ${s.name} = ${s.value ?? '<missing>'}`).join('\n');
-      throw new Error(`plugin versions out of sync — bump all four together.\n${lines}`);
-    }
-  });
-});
+// Per-component versioning (see openspec/changes/restructure-monorepo-apps-layout):
+// the previous "all four version sources agree" invariant is removed. Each
+// apps/plugin/.X-plugin/ now versions independently via its own release-please
+// component. claude-code + codex are linked via release-please's
+// linked-versions plugin (cluster `bridge-bundlers`); hermes and opencode
+// bump independently. Drift between components is intentional, not a bug.

@@ -1,9 +1,9 @@
 """Shared test-side helper: import the Hermes plugin module without Hermes installed.
 
-The plugin lives at ``plugin/.hermes-plugin/__init__.py`` with no proper
-package marker (Hermes's loader expects a flat directory, not a Python
-package). Tests load it via ``importlib`` from its absolute path so they
-work no matter what cwd ``python -m unittest discover`` runs from.
+The plugin lives at ``apps/plugin/.hermes-plugin/__init__.py``. Hermes's
+loader expects a flat directory, so we cannot rely on a normal package
+import. Tests load the module via ``importlib`` from its absolute path
+so they work no matter what cwd ``python -m unittest discover`` runs from.
 
 We also reset ``REMBRIC_*`` env vars + ``HOME`` ``XDG_CONFIG_HOME``
 ``HERMES_HOME`` per call so the module-level ``_preload_rembric_dotenv``
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_PLUGIN_ROOT = Path(__file__).resolve().parent.parent / ".hermes-plugin"
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _PLUGIN_INIT = _PLUGIN_ROOT / "__init__.py"
 
 

@@ -2,17 +2,17 @@
 
 ## Purpose
 
-Distribution and configuration of Rembric for Codex CLI. Defines the dual-manifest layout that lets one `plugin/` source tree serve both the Claude Code and Codex marketplaces, the Codex-specific hook subset, the marketplace declaration, and the credential flow given Codex's lack of a keychain-style `userConfig` prompt.
+Distribution and configuration of Rembric for Codex CLI. Defines the dual-manifest layout that lets one `apps/plugin/` source tree serve both the Claude Code and Codex marketplaces, the Codex-specific hook subset, the marketplace declaration, and the credential flow given Codex's lack of a keychain-style `userConfig` prompt.
 
 ## Requirements
 
 ### Requirement: Codex plugin manifest
 
-The repository SHALL host a Codex plugin manifest at `plugin/.codex-plugin/plugin.json`, sibling to the existing `plugin/.claude-plugin/plugin.json`, declaring Codex's view of the shared `plugin/` tree.
+The repository SHALL host a Codex plugin manifest at `apps/plugin/.codex-plugin/plugin.json`, sibling to the existing `apps/plugin/.claude-plugin/plugin.json`, declaring Codex's view of the shared `apps/plugin/` tree.
 
 #### Scenario: Required fields
 
-- **WHEN** `plugin/.codex-plugin/plugin.json` is loaded
+- **WHEN** `apps/plugin/.codex-plugin/plugin.json` is loaded
 - **THEN** it contains `name: "rembric"`, a `version`, a `description`, `license: "MIT"`, `repository`, `homepage`, and an `author` block matching the Claude Code manifest
 - **AND** it declares `mcpServers: "./.codex-plugin/mcp.json"` referencing the Codex-specific MCP config (NOT the Claude Code `mcp.json`)
 - **AND** it declares `hooks: "./hooks/hooks.codex.json"` referencing the Codex-specific hook file
@@ -30,7 +30,7 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 
 - **WHEN** `.codex-plugin/marketplace.json` is loaded
 - **THEN** it declares exactly one plugin entry named `rembric`
-- **AND** the entry's `source` object is `{ "source": "git-subdir", "url": "git@github.com:susomejias/rembric.git", "path": "./plugin", "ref": "main" }`
+- **AND** the entry's `source` object is `{ "source": "git-subdir", "url": "git@github.com:susomejias/rembric.git", "path": "./apps/plugin", "ref": "main" }`
 - **AND** the entry declares `policy.installation: "AVAILABLE"` and `policy.authentication: "ON_INSTALL"` and `category: "Memory"`
 
 #### Scenario: Marketplace metadata
@@ -40,7 +40,7 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 
 ### Requirement: Codex hook configuration
 
-The repository SHALL host Codex hook configuration at `plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `plugin/hooks/hooks.json`, declaring the three Codex-supported events the plugin wires.
+The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the three Codex-supported events the plugin wires.
 
 Codex's hook surface differs from Claude Code's in ways the platform forces:
 
@@ -53,7 +53,7 @@ Therefore Codex's mapping of lifecycle events to HTTP endpoints diverges from Cl
 
 #### Scenario: Hook event coverage
 
-- **WHEN** `plugin/hooks/hooks.codex.json` is loaded
+- **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
 - **THEN** the `hooks` object SHALL declare entries for `SessionStart`, `UserPromptSubmit`, and `Stop`
 - **AND** the `hooks` object SHALL NOT contain `PreCompact`, `PostCompact`, or `SessionEnd` (Codex does not support these events)
 - **AND** every hook entry SHALL be `type: "command"` — Codex does not support `type: "mcp_tool"` for hooks
@@ -88,8 +88,8 @@ Therefore Codex's mapping of lifecycle events to HTTP endpoints diverges from Cl
 #### Scenario: pre-compact-codex.sh deletion
 
 - **WHEN** the repository is at HEAD after this change
-- **THEN** the file `plugin/scripts/pre-compact-codex.sh` SHALL NOT exist
-- **AND** the file `plugin/scripts/pre-compact.sh` SHALL NOT exist (deleted from Claude Code spec as well)
+- **THEN** the file `apps/plugin/scripts/pre-compact-codex.sh` SHALL NOT exist
+- **AND** the file `apps/plugin/scripts/pre-compact.sh` SHALL NOT exist (deleted from Claude Code spec as well)
 - **AND** no Codex hook entry SHALL reference either file
 
 ### Requirement: Codex hooks MUST receive `session_id` from stdin in the same JSON shape as Claude Code
@@ -123,11 +123,11 @@ If Codex passes the id under a different key (e.g. `sessionId`), the scripts SHA
 
 ### Requirement: Codex-specific MCP server configuration
 
-The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `plugin/.claude-plugin/mcp.json`. The two files diverge in path resolution and env injection mechanism because Codex and Claude Code expose different MCP loader contracts (Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in `args`, and `Command::env_clear()` strips parent-env inheritance — see `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` and `codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`). The Codex-specific `env_vars` list also forwards the user's shell `PWD` so the bridge can resolve the user's project directory (Codex's spawn semantics put `process.cwd()` at the plugin cache dir, which is not the project).
+The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `apps/plugin/.claude-plugin/mcp.json`. The two files diverge in path resolution and env injection mechanism because Codex and Claude Code expose different MCP loader contracts (Codex does not substitute `${CLAUDE_PLUGIN_ROOT}` in `args`, and `Command::env_clear()` strips parent-env inheritance — see `codex-rs/core-plugins/src/loader.rs::normalize_plugin_mcp_server_value` and `codex-rs/rmcp-client/src/stdio_server_launcher.rs::launch_server`). The Codex-specific `env_vars` list also forwards the user's shell `PWD` so the bridge can resolve the user's project directory (Codex's spawn semantics put `process.cwd()` at the plugin cache dir, which is not the project).
 
 #### Scenario: Codex MCP config file declares stdio bridge with plugin-root anchoring
 
-- **WHEN** `plugin/.codex-plugin/mcp.json` is loaded
+- **WHEN** `apps/plugin/.codex-plugin/mcp.json` is loaded
 - **THEN** the top-level object contains exactly one entry `mcpServers.rembric`
 - **AND** the entry declares `command: "node"`
 - **AND** the entry declares `args: ["./bin/rembric-bridge.mjs"]` — a relative path under the plugin root
@@ -137,21 +137,21 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 
 #### Scenario: Bridge resolves under Codex via plugin-root cwd
 
-- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json`
+- **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json`
 - **THEN** `LocalStdioServerLauncher::launch_server` SHALL set `current_dir` on the spawned `Command` to the plugin root (resolved from `cwd: "."`)
 - **AND** node SHALL receive `./bin/rembric-bridge.mjs` as its script argument and resolve it relative to the cwd → `plugin_root/bin/rembric-bridge.mjs`
 - **AND** the bridge SHALL start without `Cannot find module` errors
 
 #### Scenario: env*vars forwards REMBRIC*\* from the launching shell to the bridge
 
-- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json`
+- **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json`
 - **THEN** `create_env_for_mcp_server` SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from Codex's own process env (the shell that launched `codex`)
 - **AND** the curated env passed to the bridge subprocess (after `Command::env_clear()`) SHALL contain those names with the user-supplied values
 - **AND** the bridge SHALL build a real URL — e.g. `http://192.0.2.10:8787/mcp/<slug>` — not a placeholder literal
 
 #### Scenario: env_vars forwards PWD so the bridge can resolve the user's project directory
 
-- **WHEN** Codex spawns the bridge per `plugin/.codex-plugin/mcp.json` AND the shell that launched `codex` has `PWD` set (POSIX shell convention — `bash`, `zsh`, `fish` all set it)
+- **WHEN** Codex spawns the bridge per `apps/plugin/.codex-plugin/mcp.json` AND the shell that launched `codex` has `PWD` set (POSIX shell convention — `bash`, `zsh`, `fish` all set it)
 - **THEN** `create_env_for_mcp_server` SHALL read `PWD` from Codex's own process env
 - **AND** the curated env passed to the bridge subprocess SHALL contain `PWD` with the shell's working directory
 - **AND** the bridge's project-directory resolution (per the `claude-code-plugin` capability's MCP bridge contract) SHALL pick `PWD` as the `projectDir` (since Codex never sets `CLAUDE_PROJECT_DIR`)
@@ -166,16 +166,16 @@ The Codex plugin SHALL ship its own MCP server configuration file at `plugin/.co
 #### Scenario: Claude Code MCP config is unaffected
 
 - **WHEN** the Claude Code plugin loads
-- **THEN** it SHALL continue to load `plugin/.claude-plugin/mcp.json` (unchanged behaviour)
+- **THEN** it SHALL continue to load `apps/plugin/.claude-plugin/mcp.json` (unchanged behaviour)
 - **AND** Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution in args SHALL keep working
 - **AND** Claude Code's keychain-driven `${user_config.*}` substitution into the `env` map SHALL remain the canonical credential path under Claude Code
 
-#### Scenario: Both plugin manifests version-bump in lockstep on every mcp config change
+#### Scenario: Claude Code and Codex manifests cascade together via release-please
 
-- **WHEN** either `plugin/.claude-plugin/mcp.json` or `plugin/.codex-plugin/mcp.json` is modified
-- **THEN** the `version` field in BOTH `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` SHALL be bumped in the same commit
-- **AND** `plugin/CHANGELOG.md` SHALL gain a matching `[X.Y.Z] — <date>` heading describing the change
-- **AND** the bump SHALL follow SemVer: patch for bug fixes, minor for new behaviour, major for breaking changes to the credential or transport contract
+- **WHEN** either `apps/plugin/.claude-plugin/mcp.json` or `apps/plugin/.codex-plugin/mcp.json` is modified (or any of the shared `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/scripts/` files)
+- **THEN** release-please's `bridge-bundlers` linked-versions group SHALL cascade the version bump across BOTH the `claude-code` and `codex` release-please components on the next release PR — operators do NOT manually bump the two manifests; release-please is the single source of truth
+- **AND** each component's release-please-managed changelog SHALL gain a matching entry describing the change
+- **AND** the bump SHALL follow Conventional Commits → SemVer: `fix:` for patch, `feat:` for minor, `feat!:` / `BREAKING CHANGE:` for major (credential or transport contract breaks)
 
 ### Requirement: End-user credential flow
 

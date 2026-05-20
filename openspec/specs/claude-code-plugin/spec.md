@@ -6,7 +6,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ## Plugin manifest
 
-- The plugin SHALL be packaged in this monorepo at `plugin/` with the manifest at `plugin/.claude-plugin/plugin.json`.
+- The plugin SHALL be packaged in this monorepo at `apps/plugin/` with the manifest at `apps/plugin/.claude-plugin/plugin.json`.
 - The manifest SHALL declare `name: "rembric"` for namespacing of commands (`/rembric:*`) and agent listings.
 - The manifest SHALL declare exactly two `userConfig` fields:
   - `server_url`: `type: "string"`, `required: true`. Base URL of the user's Rembric deployment WITHOUT the `/mcp` suffix. The plugin appends `/mcp` itself.
@@ -17,19 +17,19 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 ## Marketplace declaration
 
 - A `.claude-plugin/marketplace.json` SHALL exist at the repository root.
-- The marketplace SHALL declare exactly one plugin entry whose `source` is a relative path string (`"./plugin"`).
+- The marketplace SHALL declare exactly one plugin entry whose `source` is a relative path string (`"./apps/plugin"`).
 - The marketplace SHALL be installable via `claude plugin marketplace add <repo>` using each user's existing git credentials (SSH key or PAT) when fetched from git, or directly from a local path during development.
 
 ## MCP server declaration
 
-- `plugin/.claude-plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
+- `apps/plugin/.claude-plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
 - The server entry SHALL use `command: "node"` with `args: ["${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs"]`, spawning the local bridge as a stdio MCP server.
 - The bridge SHALL receive `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` via `env`, sourced from `${user_config.server_url}` and `${user_config.api_token}` respectively.
 - The plugin SHALL NOT use a direct `type: "http"` MCP server entry; the bridge mediates traffic so that the URL can be path-scoped with the slug read from `.rembric` at session start.
 
 ## MCP bridge contract
 
-- The plugin SHALL ship `plugin/bin/rembric-bridge.mjs`, a Node ≥18 script that acts as a stdio MCP server for Claude Code while forwarding to Rembric over HTTP.
+- The plugin SHALL ship `apps/plugin/bin/rembric-bridge.mjs`, a Node ≥18 script that acts as a stdio MCP server for Claude Code while forwarding to Rembric over HTTP.
 - The bridge SHALL resolve the project directory from a precedence chain of environment variables, in this order: `CLAUDE_PROJECT_DIR`, then `PWD`, then `process.cwd()`. The chain SHALL skip empty-string values (use `||` not `??` semantics) so that an explicitly-set-to-empty env var falls through cleanly. This makes the bridge reusable from non-Claude-Code clients (notably Codex) that propagate the user's shell working directory via `PWD` rather than Claude's `CLAUDE_PROJECT_DIR` convention.
 - The bridge SHALL look for `${projectDir}/.rembric`. If the file exists, the bridge SHALL parse it as dotenv-style `KEY=VALUE` lines (with `#` line comments and optional matched-quote stripping) and read `PROJECT_SLUG`. If `PROJECT_SLUG` is defined and matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`, the bridge SHALL construct the URL `${REMBRIC_SERVER_URL}/mcp/<slug>` (path-scoped).
 - If `.rembric` is missing, unparseable, lacks `PROJECT_SLUG`, or `PROJECT_SLUG` does not match the slug regex, the bridge SHALL write a one-line stderr diagnostic and fall back to path-less `${REMBRIC_SERVER_URL}/mcp`. The bridge SHALL NOT abort in this case — the session continues with global scope (or whatever pinning the agent later does).
@@ -41,7 +41,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ## Skill catalog
 
-- The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`src/mcp/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
+- The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
 - An earlier iteration shipped a `rembric-memory` skill with the same content; it was removed once `initialize.instructions` was verified to carry equivalent guidance under the 800-character hard limit enforced by `instructions.test.ts`.
 
 ## Command catalog
@@ -56,7 +56,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ## Requirements
 
-### Requirement: The plugin SHALL ship exactly four hooks at `plugin/hooks/hooks.json`
+### Requirement: The plugin SHALL ship exactly four hooks at `apps/plugin/hooks/hooks.json`
 
 The plugin's hook catalog SHALL declare four entries: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit`, and `SessionEnd`. The prior `Stop` and `PreCompact` entries SHALL NOT be wired in this version. The prior `pre-compact.sh` script SHALL be deleted from the repo.
 
@@ -138,7 +138,7 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
-To keep `session-start.sh`, `post-compact.sh`, and `session-end.sh` minimal and consistent, the plugin SHALL ship a shared helper at `plugin/scripts/_api.sh` that:
+To keep `session-start.sh`, `post-compact.sh`, and `session-end.sh` minimal and consistent, the plugin SHALL ship a shared helper at `apps/plugin/scripts/_api.sh` that:
 
 - Resolves `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from the environment.
 - Parses `${cwd}/.rembric` for `PROJECT_SLUG` (reuses the same dotenv parser logic).
@@ -147,7 +147,7 @@ To keep `session-start.sh`, `post-compact.sh`, and `session-end.sh` minimal and 
 - Exposes functions `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, and a new `rembric_transcript_path_from_stdin_json` that pull those fields from stdin JSON.
 - Discards stdout and returns `0` even on failure (so callers can `|| true` safely).
 
-A new sibling helper `plugin/scripts/_transcript.sh` SHALL expose `rembric_format_transcript <path>` that reads a JSONL transcript and emits `role: content\n…` oldest-first, truncated to 19500 chars from the tail. The helper SHALL prefer `jq` when available and SHALL fall back to a sed-based parser otherwise; both paths SHALL emit empty string on parse failure rather than crashing.
+A new sibling helper `apps/plugin/scripts/_transcript.sh` SHALL expose `rembric_format_transcript <path>` that reads a JSONL transcript and emits `role: content\n…` oldest-first, truncated to 19500 chars from the tail. The helper SHALL prefer `jq` when available and SHALL fall back to a sed-based parser otherwise; both paths SHALL emit empty string on parse failure rather than crashing.
 
 Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript handling is needed) and SHALL NOT inline the curl invocation or transcript parsing directly. The helpers SHALL respect the same "exit 0 on error" discipline as the existing scripts.
 
@@ -183,7 +183,7 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 
 #### Scenario: Skill content does not instruct the agent to migrate from or compare with other memory systems
 
-- **WHEN** the plugin's skill content (markdown files under `plugin/skills/`) is read
+- **WHEN** the plugin's skill content (markdown files under `apps/plugin/skills/`) is read
 - **THEN** the skill SHALL NOT direct the agent to import from, deduplicate against, prefer Rembric over, or otherwise reason about parallel memory tools
 - **AND** the skill SHALL describe Rembric's memory protocol on its own terms, without comparison to other agent memory systems
 

@@ -1,6 +1,11 @@
 # pnpm workspace + supply-chain policy.
 # See .agents/skills/npm-security-best-practices/ for the full rationale.
 
+# Workspace members: server + plugin under apps/, libraries under packages/.
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
 # Allowlist of dependencies permitted to run lifecycle scripts.
 # Everything else is blocked via .npmrc::ignore-scripts=true.
 # Adding an entry here is a security-relevant decision; review carefully.

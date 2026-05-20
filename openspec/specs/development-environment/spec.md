@@ -12,9 +12,9 @@ The repo SHALL ship a `docker-compose.dev.yml` at the root that, when combined w
 
 - Declare `name: rembric-dev` (distinct compose project name).
 - Override `container_name` to `rembric-dev`.
-- Build the image from local source via `build: { context: ., dockerfile: Dockerfile, target: dev }` — targeting the dev stage defined in the Dockerfile.
+- Build the image from local source via `build: { context: ., dockerfile: apps/server/Dockerfile, target: dev }` — targeting the dev stage defined in `apps/server/Dockerfile`.
 - Use a distinct bind-mount: `./data-dev:/data` (not `./data:/data`).
-- Bind-mount `./src:/app/src` so the container's `tsx watch` sees host-side edits and restarts the Node child sub-second.
+- Bind-mount `./apps/server/src:/app/apps/server/src` so the container's `tsx watch` sees host-side edits and restarts the Node child sub-second.
 - Bind the host port at `127.0.0.1:8788:8787` (loopback-only, distinct from the canonical 8787).
 - Set `LOG_LEVEL=debug` and `restart: 'no'` (crash visibility).
 - Inherit `env_file: .env` from the canonical compose (no duplicated secrets).
@@ -46,7 +46,7 @@ The Dockerfile SHALL contain a `dev` stage (in addition to the existing `builder
 
 ### Requirement: The repo MUST provide a dev seed script with `--reset` semantics
 
-The repo SHALL ship a TypeScript seed script at `src/scripts/seed-dev.ts` that populates the dev database with thematic baseline data. The script SHALL:
+The repo SHALL ship a TypeScript seed script at `apps/server/src/scripts/seed-dev.ts` that populates the dev database with thematic baseline data. The script SHALL:
 
 - Open the database via the same `createDb` helper used by the server's bootstrap, honoring `REMBRIC_DATA_DIR` (which is `/data` inside the dev container).
 - On invocation without `--reset`: check whether a project with slug `demo` already exists. If yes, emit a one-line stderr message of the form `[seed-dev] data already present; pass --reset to wipe and reseed` and exit `0` without modifying any rows. If no, proceed with the seed.
@@ -61,7 +61,7 @@ The dev container's boot chain SHALL always invoke the seed with `--reset` AND S
 
 Operators who want to preserve manually-added rows across container restarts SHALL run the seed manually without `--reset` (or modify the boot chain locally), accepting that the canonical dev contract is fresh-canvas-per-up.
 
-The `src/test/invariants.test.ts` source-file allow-list for `DELETE FROM` statements SHALL be extended to include `src/scripts/seed-dev.ts`, and SHALL retain a positive assertion that this file contains the expected `DELETE FROM` strings (so the allow-list does not silently expire). The invariants test SHALL additionally assert that the `DELETE FROM` block in `seed-dev.ts` is reached only after a runtime check of `process.env.REMBRIC_ALLOW_DESTRUCTIVE_SEED === '1'`.
+The `apps/server/src/test/invariants.test.ts` source-file allow-list for `DELETE FROM` statements SHALL be extended to include `apps/server/src/scripts/seed-dev.ts`, and SHALL retain a positive assertion that this file contains the expected `DELETE FROM` strings (so the allow-list does not silently expire). The invariants test SHALL additionally assert that the `DELETE FROM` block in `seed-dev.ts` is reached only after a runtime check of `process.env.REMBRIC_ALLOW_DESTRUCTIVE_SEED === '1'`.
 
 #### Scenario: Fresh DB seed populates the expected counts
 
@@ -219,12 +219,12 @@ This catches Dockerfile-level regressions (broken `COPY` paths, missing dependen
 
 #### Scenario: Dockerfile last stage is runtime (invariant test)
 
-- **WHEN** `src/test/invariants.test.ts` runs the "Dockerfile stage order" check
-- **THEN** the test SHALL parse the Dockerfile, identify all `FROM ... AS <name>` lines in order, and assert the final entry's name is `runtime`
+- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "Dockerfile stage order" check
+- **THEN** the test SHALL parse `apps/server/Dockerfile`, identify all `FROM ... AS <name>` lines in order, and assert the final entry's name is `runtime`
 
 #### Scenario: Dockerfile declares stage labels (invariant test)
 
-- **WHEN** `src/test/invariants.test.ts` runs the "image labels" check
+- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "image labels" check
 - **THEN** the test SHALL verify the `runtime` stage block contains a line matching `LABEL rembric.stage=runtime`
 - **AND** the test SHALL verify the `dev` stage block contains a line matching `LABEL rembric.stage=dev`
 

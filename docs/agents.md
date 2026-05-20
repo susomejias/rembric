@@ -1,6 +1,6 @@
 # Agent integration
 
-For **Claude Code**, use the bundled plugin — see [`plugin/README.md`](../plugin/README.md). Rembric also ships first-class plugins for **Codex CLI**, **Hermes Agent**, and **opencode** — see the sections below.
+For **Claude Code**, use the bundled plugin — see [`apps/plugin/README.md`](../apps/plugin/README.md). Rembric also ships first-class plugins for **Codex CLI**, **Hermes Agent**, and **opencode** — see the sections below.
 
 > **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
 
@@ -40,7 +40,7 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 
 ### Codex CLI (recommended: bundled plugin)
 
-Use the Codex marketplace install — the plugin ships from the same `plugin/` directory as the Claude Code plugin (one source tree, two manifests):
+Use the Codex marketplace install — the plugin ships from the same `apps/plugin/` directory as the Claude Code plugin (one source tree, two manifests):
 
 ```bash
 codex plugin marketplace add https://github.com/susomejias/rembric.git
@@ -51,7 +51,7 @@ The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the
 
 What the plugin registers for Codex:
 
-- The `rembric` MCP server (declared by `plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `plugin/.claude-plugin/mcp.json`), invoking the bundled bridge at `plugin_root/bin/rembric-bridge.mjs` (resolved via the manifest's `cwd: "."` + relative args).
+- The `rembric` MCP server (declared by `apps/plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `apps/plugin/.claude-plugin/mcp.json`), invoking the bundled bridge at `plugin_root/bin/rembric-bridge.mjs` (resolved via the manifest's `cwd: "."` + relative args).
 - A four-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact, and end-on-stop.
 
 After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
@@ -76,7 +76,7 @@ export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token minted from /
 
 Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
 
-- The **MCP bridge** — `plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The same manifest also uses `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` to anchor the bridge path to the plugin root — `${CLAUDE_PLUGIN_ROOT}` substitution does NOT work in MCP args under Codex (only in hook commands), so future contributors should not "simplify" the path back to the Claude Code form.
+- The **MCP bridge** — `apps/plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The same manifest also uses `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` to anchor the bridge path to the plugin root — `${CLAUDE_PLUGIN_ROOT}` substitution does NOT work in MCP args under Codex (only in hook commands), so future contributors should not "simplify" the path back to the Claude Code form.
 - The **lifecycle hooks** (`SessionStart`, `PreCompact`, `Stop`) so sessions appear in `/dashboard/sessions` and PreCompact persists a summary.
 
 Symptoms of missing envs:
@@ -123,7 +123,7 @@ If you only use one client, set up just that one. If you use both, you need both
 
 #### Updating the plugin
 
-Codex caches plugins by `version` under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`, so the cache invalidates when we bump `plugin/.codex-plugin/plugin.json`. Official commands (`developers.openai.com/codex/plugins`):
+Codex caches plugins by `version` under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`, so the cache invalidates when we bump `apps/plugin/.codex-plugin/plugin.json`. Official commands (`developers.openai.com/codex/plugins`):
 
 ```shell
 # refresh ALL configured marketplaces
@@ -139,7 +139,7 @@ Restart `codex` after the update so the bridge and hooks re-spawn from the new c
 
 ### Hermes Agent (memory provider plugin)
 
-Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `plugin/.hermes-plugin/`. Two pieces compose:
+Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `apps/plugin/.hermes-plugin/`. Two pieces compose:
 
 > **Plugin `0.6.0+` required against Rembric `0.13.0+`.** The provider's `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` to `/healthz` (the server made the endpoint bearer-gated in `0.13.0`). The env var was already required for every other call; this just tightens an existing requirement. Running plugin `0.5.x` against server `0.13+` will silently disable the memory provider — upgrade in lock-step.
 
@@ -152,11 +152,11 @@ Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` f
 Install with one shell command — no `git clone` of rembric required:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 hermes plugins enable rembric
 ```
 
-The script drops three files (`plugin.yaml`, `__init__.py`, `README.md`) into `${HERMES_HOME:-$HOME/.hermes}/plugins/rembric/`. Inspect before running with `curl … | less`. Developers iterating locally: same script, `PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh`.
+The script drops three files (`plugin.yaml`, `__init__.py`, `README.md`) into `${HERMES_HOME:-$HOME/.hermes}/plugins/rembric/`. Inspect before running with `curl … | less`. Developers iterating locally: same script, `PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh`.
 
 > **Why curl-pipe-sh, not `hermes plugins install`?** Hermes's installer (`hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x) accepts only `owner/repo` shorthand or a full Git URL — it does NOT support monorepo subpaths. Cloning the whole rembric repo into `~/.hermes/plugins/rembric/` to extract three files would mean tens of MB of unrelated TS source. The curl-installer ships the right artifacts and nothing else.
 
@@ -242,10 +242,10 @@ v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-ou
 One-line install — no checkout required:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh
 ```
 
-The script fetches `plugin.ts`, `rembric-bridge.mjs`, and the shared `rembric-dotenv.mjs` from `main` and drops them at `~/.config/opencode/plugins/rembric.ts` + `~/.config/rembric/bin/rembric-{bridge,dotenv}.mjs` (the bridge + dotenv lib live outside opencode's plugin dir so opencode doesn't try to load them as plugins; the bridge imports the dotenv lib by sibling-relative path at runtime). It prints the MCP block you paste in the next step. Inspect before running with `curl … | less`. Developers iterating locally: `PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" BIN_SRC="$(pwd)/plugin/bin" sh plugin/.opencode-plugin/install.sh`.
+The script fetches `plugin.ts`, `rembric-bridge.mjs`, and the shared `rembric-dotenv.mjs` from `main` and drops them at `~/.config/opencode/plugins/rembric.ts` + `~/.config/rembric/bin/rembric-{bridge,dotenv}.mjs` (the bridge + dotenv lib live outside opencode's plugin dir so opencode doesn't try to load them as plugins; the bridge imports the dotenv lib by sibling-relative path at runtime). It prints the MCP block you paste in the next step. Inspect before running with `curl … | less`. Developers iterating locally: `PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" BIN_SRC="$(pwd)/apps/plugin/bin" sh apps/plugin/.opencode-plugin/install.sh`.
 
 #### Configure
 

@@ -8,68 +8,68 @@ TBD - created by archiving change add-opencode-plugin. Update Purpose after arch
 
 ### Requirement: Plugin source location
 
-The plugin SHALL live in this monorepo at `plugin/.opencode-plugin/`, sibling to `plugin/.claude-plugin/`, `plugin/.codex-plugin/`, and `plugin/.hermes-plugin/`. The directory SHALL contain exactly four files at the top level: `plugin.ts`, `install.sh`, `uninstall.sh`, `README.md`. A co-located test file `plugin.test.ts` MAY exist alongside `plugin.ts` for vitest-based unit testing; the test file is NOT distributed to users.
+The plugin SHALL live in this monorepo at `apps/plugin/.opencode-plugin/`, sibling to `apps/plugin/.claude-plugin/`, `apps/plugin/.codex-plugin/`, and `apps/plugin/.hermes-plugin/`. The directory SHALL contain exactly four files at the top level: `plugin.ts`, `install.sh`, `uninstall.sh`, `README.md`. A co-located test file `plugin.test.ts` MAY exist alongside `plugin.ts` for vitest-based unit testing; the test file is NOT distributed to users.
 
-The plugin SHALL NOT carry its own copy of the dotenv parser, slug regex, or `readRembricSlug` function. Those helpers live in the shared `plugin/bin/rembric-dotenv.mjs` module (single source of truth, also consumed by `plugin/bin/rembric-bridge.mjs`). `plugin.ts` imports from that module via the relative path `../bin/rembric-dotenv.mjs` at source time; `install.sh` rewrites the path to the absolute installed location before copying.
+The plugin SHALL NOT carry its own copy of the dotenv parser, slug regex, or `readRembricSlug` function. Those helpers live in the shared `apps/plugin/bin/rembric-dotenv.mjs` module (single source of truth, also consumed by `apps/plugin/bin/rembric-bridge.mjs`). `plugin.ts` imports from that module via the relative path `../bin/rembric-dotenv.mjs` at source time; `install.sh` rewrites the path to the absolute installed location before copying.
 
-There SHALL NOT be a `plugin/.opencode-plugin/plugin.json`, `plugin/.opencode-plugin/manifest.yaml`, or `plugin/.opencode-plugin/helpers.ts` file. opencode has no plugin manifest format; plugins are JS/TS modules in a known directory, identified only by their exported `Plugin` function.
+There SHALL NOT be a `apps/plugin/.opencode-plugin/plugin.json`, `apps/plugin/.opencode-plugin/manifest.yaml`, or `apps/plugin/.opencode-plugin/helpers.ts` file. opencode has no plugin manifest format; plugins are JS/TS modules in a known directory, identified only by their exported `Plugin` function.
 
 #### Scenario: Plugin tree contains the four files
 
 - **WHEN** the repository is at HEAD
-- **THEN** `ls plugin/.opencode-plugin/` lists `plugin.ts`, `install.sh`, `uninstall.sh`, and `README.md`
-- **AND** there are no nested directories under `plugin/.opencode-plugin/`
+- **THEN** `ls apps/plugin/.opencode-plugin/` lists `plugin.ts`, `install.sh`, `uninstall.sh`, and `README.md`
+- **AND** there are no nested directories under `apps/plugin/.opencode-plugin/`
 - **AND** there is no `plugin.json`, `plugin.yaml`, `manifest.*`, or `helpers.ts` file
 
 #### Scenario: Co-located test file is permitted
 
 - **WHEN** the repository is at HEAD and unit tests exist for the plugin
-- **THEN** `plugin/.opencode-plugin/plugin.test.ts` MAY exist
+- **THEN** `apps/plugin/.opencode-plugin/plugin.test.ts` MAY exist
 - **AND** the install script SHALL NOT copy `plugin.test.ts` to the user's machine
 
 ### Requirement: Shared dotenv lib SHALL be the single source of truth for slug parsing
 
-The repository SHALL contain `plugin/bin/rembric-dotenv.mjs` exporting exactly: `parseDotenv(content: string)`, `readRembricSlug(directory: string)`, and `SLUG_RE`. This module SHALL be the only place where the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and the dotenv parser live in JS/TS form across the entire repository.
+The repository SHALL contain `apps/plugin/bin/rembric-dotenv.mjs` exporting exactly: `parseDotenv(content: string)`, `readRembricSlug(directory: string)`, and `SLUG_RE`. This module SHALL be the only place where the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and the dotenv parser live in JS/TS form across the entire repository.
 
-`plugin/bin/rembric-bridge.mjs` SHALL import `parseDotenv` and `SLUG_RE` from `./rembric-dotenv.mjs`. `plugin/.opencode-plugin/plugin.ts` SHALL import `readRembricSlug` from `../bin/rembric-dotenv.mjs`. Neither file SHALL define its own copy of these helpers.
+`apps/plugin/bin/rembric-bridge.mjs` SHALL import `parseDotenv` and `SLUG_RE` from `./rembric-dotenv.mjs`. `apps/plugin/.opencode-plugin/plugin.ts` SHALL import `readRembricSlug` from `../bin/rembric-dotenv.mjs`. Neither file SHALL define its own copy of these helpers.
 
-Bash (`plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
+Bash (`apps/plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`apps/plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
 
-An invariant test (`src/test/invariants.test.ts::plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing`) SHALL fail the build if either `plugin.ts` or `rembric-bridge.mjs` declares its own `parseDotenv` function or `SLUG_RE` constant.
+An invariant test (`apps/server/src/test/invariants.test.ts::apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing`) SHALL fail the build if either `plugin.ts` or `rembric-bridge.mjs` declares its own `parseDotenv` function or `SLUG_RE` constant.
 
 #### Scenario: Shared dotenv lib exists and exports the canonical helpers
 
 - **WHEN** the repository is at HEAD
-- **THEN** `plugin/bin/rembric-dotenv.mjs` exists
+- **THEN** `apps/plugin/bin/rembric-dotenv.mjs` exists
 - **AND** it exports `parseDotenv`, `readRembricSlug`, and `SLUG_RE` as named exports
 - **AND** `SLUG_RE.source` equals `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`
 
 #### Scenario: Bridge and opencode plugin both import from the shared lib
 
 - **WHEN** the repository is at HEAD
-- **THEN** `plugin/bin/rembric-bridge.mjs` contains an import statement referencing `./rembric-dotenv.mjs`
-- **AND** `plugin/.opencode-plugin/plugin.ts` contains an import statement referencing `../bin/rembric-dotenv.mjs`
+- **THEN** `apps/plugin/bin/rembric-bridge.mjs` contains an import statement referencing `./rembric-dotenv.mjs`
+- **AND** `apps/plugin/.opencode-plugin/plugin.ts` contains an import statement referencing `../bin/rembric-dotenv.mjs`
 - **AND** neither file contains a local `function parseDotenv` or `SLUG_RE = /`
 
 #### Scenario: Invariant test catches drift
 
 - **GIVEN** a future change introduces a local `function parseDotenv` inside either `plugin.ts` or `rembric-bridge.mjs`
-- **WHEN** `pnpm vitest run src/test/invariants.test.ts` runs
+- **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
 - **THEN** the test FAILS with a message naming the offending file
 
 ### Requirement: Plugin module exports a Plugin function
 
-`plugin/.opencode-plugin/plugin.ts` SHALL export a named const `RembricPlugin` typed as `Plugin` (from `@opencode-ai/plugin`). The export SHALL be an async function that receives the opencode plugin context (`{ project, client, $, directory, worktree }`) and returns an object whose properties are the event handler subscriptions.
+`apps/plugin/.opencode-plugin/plugin.ts` SHALL export a named const `RembricPlugin` typed as `Plugin` (from `@opencode-ai/plugin`). The export SHALL be an async function that receives the opencode plugin context (`{ project, client, $, directory, worktree }`) and returns an object whose properties are the event handler subscriptions.
 
 The plugin module SHALL be importable in a Node/Bun environment that has `@opencode-ai/plugin` available as a peer dependency. The repository SHALL NOT add `@opencode-ai/plugin` to its own `dependencies` or `devDependencies` — it is consumed only at the user's runtime when opencode loads the plugin file.
 
-A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first 5 lines of `plugin.ts`. opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics and lock-step with `plugin/.claude-plugin/plugin.json::version`.
+A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first 5 lines of `plugin.ts`. opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics. The value is managed by release-please as an independent component (the opencode `install.sh` re-fetches plugin assets from `main` at install time, so opencode does NOT need to ride the `bridge-bundlers` linked-versions group that cascades `claude-code` and `codex`).
 
 #### Scenario: Plugin file declares its version
 
 - **WHEN** the file is read at HEAD
 - **THEN** one of the first five lines matches `^// @rembric-plugin-version \d+\.\d+\.\d+$`
-- **AND** the captured version equals `plugin/.claude-plugin/plugin.json::version`
+- **AND** the captured version equals the `opencode` component version recorded in `.release-please-manifest.json`
 
 #### Scenario: Plugin module loads under Bun
 
@@ -80,7 +80,7 @@ A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear
 
 ### Requirement: MCP transport reuses the existing stdio bridge
 
-The opencode plugin SHALL reuse `plugin/bin/rembric-bridge.mjs` verbatim — the same file consumed by Claude Code and Codex CLI. The bridge SHALL NOT be forked, copied with modifications, or replaced by an opencode-specific variant.
+The opencode plugin SHALL reuse `apps/plugin/bin/rembric-bridge.mjs` verbatim — the same file consumed by Claude Code and Codex CLI. The bridge SHALL NOT be forked, copied with modifications, or replaced by an opencode-specific variant.
 
 The MCP server entry in the user's `opencode.json` SHALL be:
 
@@ -107,8 +107,8 @@ The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT 
 #### Scenario: Bridge file is reused without divergence
 
 - **WHEN** the repository is at HEAD
-- **THEN** `plugin/.opencode-plugin/` contains no `*.mjs` or `*-bridge.*` file
-- **AND** the install script copies `plugin/bin/rembric-bridge.mjs` (not a sibling copy) to the user's `~/.config/rembric/bin/`
+- **THEN** `apps/plugin/.opencode-plugin/` contains no `*.mjs` or `*-bridge.*` file
+- **AND** the install script copies `apps/plugin/bin/rembric-bridge.mjs` (not a sibling copy) to the user's `~/.config/rembric/bin/`
 
 #### Scenario: MCP snippet uses type: local with the shared bridge path
 
@@ -121,7 +121,7 @@ The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT 
 
 The bridge spawned by opencode SHALL resolve the project slug by reading `<cwd>/.rembric` and parsing `PROJECT_SLUG=<slug>` from dotenv-style lines (mirroring `_api.sh::rembric_read_project_slug` and the existing bridge contract in `claude-code-plugin::MCP bridge contract`).
 
-The plugin's runtime event handlers (that POST directly to `/api/<slug>/sessions/...` over HTTP, bypassing MCP) SHALL call `readRembricSlug(ctx.directory)` from `plugin/bin/rembric-dotenv.mjs` — the same function the bridge uses. This guarantees byte-identical resolution semantics (same dotenv grammar, same regex, same fail-silent miss behaviour) without duplicating the implementation.
+The plugin's runtime event handlers (that POST directly to `/api/<slug>/sessions/...` over HTTP, bypassing MCP) SHALL call `readRembricSlug(ctx.directory)` from `apps/plugin/bin/rembric-dotenv.mjs` — the same function the bridge uses. This guarantees byte-identical resolution semantics (same dotenv grammar, same regex, same fail-silent miss behaviour) without duplicating the implementation.
 
 The plugin SHALL NOT fall back to git-remote-derived slugs, `package.json::name`, or repository-directory basename. If `.rembric` is missing or the slug is invalid, `readRembricSlug` returns `null`, the plugin's `disabled || !slug` short-circuit fires inside `rembricPost`, and lifecycle POSTs are skipped silently (one stderr diagnostic line emitted at plugin startup when the env vars are present but slug resolution fails).
 
@@ -170,7 +170,7 @@ The plugin SHALL NOT register `experimental.chat.system.transform` (no system-pr
 
 If Plan B of the cwd spike applies (see "cwd spike" requirement), the plugin SHALL additionally register `"shell.env": async (input, output) => { output.env.REMBRIC_PROJECT_DIR = ctx.directory }`. The hook SHALL be omitted otherwise.
 
-The `chat.message` and `message.updated` handlers MUST treat the `sessionMessages` Map as their only side effect. An invariant test (`src/test/invariants.test.ts`) SHALL fail the build if either handler invokes `rembricPost`, `fetch`, or any other HTTP work.
+The `chat.message` and `message.updated` handlers MUST treat the `sessionMessages` Map as their only side effect. An invariant test (`apps/server/src/test/invariants.test.ts`) SHALL fail the build if either handler invokes `rembricPost`, `fetch`, or any other HTTP work.
 
 #### Scenario: Handler set is exactly the documented set
 
@@ -291,14 +291,14 @@ The plugin's HTTP client SHALL:
 
 ### Requirement: Install script contract
 
-`plugin/.opencode-plugin/install.sh` SHALL:
+`apps/plugin/.opencode-plugin/install.sh` SHALL:
 
 1. Use `#!/usr/bin/env bash` shebang and `set -euo pipefail`.
 2. Create `${HOME}/.config/opencode/plugins/` if missing.
 3. Create `${HOME}/.config/rembric/bin/` if missing.
-4. Copy (not symlink) `plugin/bin/rembric-bridge.mjs` to `${HOME}/.config/rembric/bin/rembric-bridge.mjs`.
-5. Copy (not symlink) `plugin/bin/rembric-dotenv.mjs` to `${HOME}/.config/rembric/bin/rembric-dotenv.mjs`. The bridge imports from this file via the relative path `./rembric-dotenv.mjs`, so the two files MUST land together in the same directory.
-6. Transform `plugin/.opencode-plugin/plugin.ts` while copying it to `${HOME}/.config/opencode/plugins/rembric.ts`: the source file contains `from '../bin/rembric-dotenv.mjs'` (relative path that resolves at dev time against the monorepo layout); `install.sh` SHALL substitute it with `from '${HOME}/.config/rembric/bin/rembric-dotenv.mjs'` (absolute installed path). Bun's ESM resolver in opencode 1.15.x accepts absolute paths. No other transformation is applied.
+4. Copy (not symlink) `apps/plugin/bin/rembric-bridge.mjs` to `${HOME}/.config/rembric/bin/rembric-bridge.mjs`.
+5. Copy (not symlink) `apps/plugin/bin/rembric-dotenv.mjs` to `${HOME}/.config/rembric/bin/rembric-dotenv.mjs`. The bridge imports from this file via the relative path `./rembric-dotenv.mjs`, so the two files MUST land together in the same directory.
+6. Transform `apps/plugin/.opencode-plugin/plugin.ts` while copying it to `${HOME}/.config/opencode/plugins/rembric.ts`: the source file contains `from '../bin/rembric-dotenv.mjs'` (relative path that resolves at dev time against the monorepo layout); `install.sh` SHALL substitute it with `from '${HOME}/.config/rembric/bin/rembric-dotenv.mjs'` (absolute installed path). Bun's ESM resolver in opencode 1.15.x accepts absolute paths. No other transformation is applied.
 7. Set all three copied files to `chmod 644` (the bridge and dotenv lib are invoked as `node <path>`, not directly-executed scripts; the +x bit is unnecessary and reduces attack surface).
 8. Print a success banner showing the three destination paths.
 9. Print the MCP snippet with `${HOME}` substituted (real absolute path) and `<REMBRIC_SERVER_URL>` / `<REMBRIC_API_TOKEN>` LEFT AS LITERAL PLACEHOLDERS.
@@ -306,7 +306,7 @@ The plugin's HTTP client SHALL:
 
 The script SHALL NOT touch `~/.config/opencode/opencode.json`. The script SHALL NOT prompt for input. The script SHALL be idempotent: running it twice SHALL leave the system in the same valid state without error.
 
-If any of `plugin/.opencode-plugin/plugin.ts`, `plugin/bin/rembric-bridge.mjs`, or `plugin/bin/rembric-dotenv.mjs` is missing at install time (operator running it from an unfinished checkout), the script SHALL exit non-zero with a clear stderr message naming the missing path.
+If any of `apps/plugin/.opencode-plugin/plugin.ts`, `apps/plugin/bin/rembric-bridge.mjs`, or `apps/plugin/bin/rembric-dotenv.mjs` is missing at install time (operator running it from an unfinished checkout), the script SHALL exit non-zero with a clear stderr message naming the missing path.
 
 #### Scenario: Idempotent re-run
 
@@ -324,14 +324,14 @@ If any of `plugin/.opencode-plugin/plugin.ts`, `plugin/bin/rembric-bridge.mjs`, 
 
 #### Scenario: Missing bridge source aborts
 
-- **GIVEN** `plugin/bin/rembric-bridge.mjs` is absent
+- **GIVEN** `apps/plugin/bin/rembric-bridge.mjs` is absent
 - **WHEN** `install.sh` runs
 - **THEN** the script exits with a non-zero code
 - **AND** writes a stderr message naming the missing path
 
 ### Requirement: Uninstall script contract
 
-`plugin/.opencode-plugin/uninstall.sh` SHALL:
+`apps/plugin/.opencode-plugin/uninstall.sh` SHALL:
 
 1. Use `#!/usr/bin/env bash` shebang and `set -uo pipefail` (no `-e` — we want to continue past missing files).
 2. Remove `${HOME}/.config/opencode/plugins/rembric.ts` if present.
@@ -363,7 +363,7 @@ Before implementation begins, an operator-driven spike SHALL determine whether o
 The result determines which path ships:
 
 - **Plan A (default)**: If opencode sets cwd or PWD to the user's repo, the bridge resolves the slug correctly via its existing `CLAUDE_PROJECT_DIR > PWD > process.cwd()` chain. The plugin SHALL NOT register `shell.env`. The bridge SHALL NOT change. The plugin SHALL NOT export `REMBRIC_PROJECT_DIR` anywhere.
-- **Plan B**: If neither cwd nor PWD reaches the user's repo, the plugin SHALL register a `shell.env` hook that sets `output.env.REMBRIC_PROJECT_DIR = ctx.directory` on every subprocess opencode spawns. The bridge (`plugin/bin/rembric-bridge.mjs`) SHALL gain a new highest-precedence step in its resolution chain: `REMBRIC_PROJECT_DIR > CLAUDE_PROJECT_DIR > PWD > process.cwd()`. The new step SHALL be additive: existing clients that never set `REMBRIC_PROJECT_DIR` SHALL retain their current behaviour unchanged.
+- **Plan B**: If neither cwd nor PWD reaches the user's repo, the plugin SHALL register a `shell.env` hook that sets `output.env.REMBRIC_PROJECT_DIR = ctx.directory` on every subprocess opencode spawns. The bridge (`apps/plugin/bin/rembric-bridge.mjs`) SHALL gain a new highest-precedence step in its resolution chain: `REMBRIC_PROJECT_DIR > CLAUDE_PROJECT_DIR > PWD > process.cwd()`. The new step SHALL be additive: existing clients that never set `REMBRIC_PROJECT_DIR` SHALL retain their current behaviour unchanged.
 
 The decision SHALL be recorded as a one-line comment near the top of `plugin.ts` of the form `// cwd-spike-result: plan-a` or `// cwd-spike-result: plan-b`. The comment SHALL match the implementation actually shipped.
 
@@ -373,7 +373,7 @@ The decision SHALL be recorded as a one-line comment near the top of `plugin.ts`
 - **WHEN** the implementation lands
 - **THEN** `plugin.ts` contains `// cwd-spike-result: plan-a`
 - **AND** `plugin.ts` exports no `"shell.env"` handler
-- **AND** `plugin/bin/rembric-bridge.mjs` is unchanged from its pre-change content (its diff against the previous version is empty)
+- **AND** `apps/plugin/bin/rembric-bridge.mjs` is unchanged from its pre-change content (its diff against the previous version is empty)
 
 #### Scenario: Plan B ships with additive bridge change
 
@@ -381,12 +381,12 @@ The decision SHALL be recorded as a one-line comment near the top of `plugin.ts`
 - **WHEN** the implementation lands
 - **THEN** `plugin.ts` contains `// cwd-spike-result: plan-b`
 - **AND** `plugin.ts` exports a `"shell.env"` handler that sets `output.env.REMBRIC_PROJECT_DIR`
-- **AND** `plugin/bin/rembric-bridge.mjs` reads `REMBRIC_PROJECT_DIR` as the highest-precedence step of its resolution chain
+- **AND** `apps/plugin/bin/rembric-bridge.mjs` reads `REMBRIC_PROJECT_DIR` as the highest-precedence step of its resolution chain
 - **AND** the bridge's behaviour when `REMBRIC_PROJECT_DIR` is unset is byte-identical to its pre-change behaviour
 
 ### Requirement: README documents the two-step install
 
-`plugin/.opencode-plugin/README.md` SHALL document the install in exactly two steps in this order:
+`apps/plugin/.opencode-plugin/README.md` SHALL document the install in exactly two steps in this order:
 
 1. Run `bash install.sh` (or `curl ... | bash` shorthand if the operator publishes one).
 2. Paste the printed MCP snippet into `~/.config/opencode/opencode.json` (or the project's `./opencode.json`), filling in `<REMBRIC_SERVER_URL>` and `<REMBRIC_API_TOKEN>`. Restart opencode.
@@ -406,26 +406,27 @@ The README SHALL NOT include an "npm install" path.
 - **AND** there is no third step before "Verify"
 - **AND** no section mentions npm
 
-### Requirement: Plugin version lock-step
+### Requirement: Plugin version managed by release-please as an independent component
 
-The version recorded in `plugin/.opencode-plugin/plugin.ts`'s `// @rembric-plugin-version` comment SHALL equal:
+The version recorded in `apps/plugin/.opencode-plugin/plugin.ts`'s `// @rembric-plugin-version` comment SHALL track the `opencode` release-please component's version. opencode is configured as an **independent component** in `release-please-config.json` — it does NOT join the `bridge-bundlers` linked-versions group that cascades `claude-code` and `codex` together. The rationale: opencode's `install.sh` re-fetches shared assets (`apps/plugin/bin/`, `apps/plugin/scripts/`) from `main` at install time, so shared-asset changes reach opencode installs without requiring a coordinated version bump.
 
-- `plugin/.claude-plugin/plugin.json::version`
-- `plugin/.codex-plugin/plugin.json::version`
-- `plugin/.hermes-plugin/plugin.yaml::version`
+Likewise, `apps/plugin/.hermes-plugin/plugin.yaml::version` is its own independent release-please component for the same reason.
 
-These four values SHALL move together. Any commit that bumps one of them SHALL bump all four. A `plugin/CHANGELOG.md` entry SHALL describe the change in the same commit. The lock-step rule is enforced by an existing invariant test (`src/test/invariants.test.ts` or sibling) that SHALL be extended to read the `// @rembric-plugin-version` comment as a fourth value.
+Operators do NOT hand-edit any of the four version surfaces. Conventional Commits drive bumps via release-please.
 
-#### Scenario: All four version sources match
+#### Scenario: opencode-scoped change bumps only the opencode component
 
-- **WHEN** the invariant test runs at HEAD
-- **THEN** it reads `plugin.json::version` from both `.claude-plugin` and `.codex-plugin`, `plugin.yaml::version` from `.hermes-plugin`, AND the `// @rembric-plugin-version` comment from `plugin/.opencode-plugin/plugin.ts`
-- **AND** all four values are equal
-- **AND** the test fails with a clear message if any single value diverges
+- **WHEN** a Conventional Commit scoped to `opencode` (e.g. `feat(opencode): ...`) lands on `main`
+- **THEN** release-please opens (or updates) a release PR that bumps only the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts` and the manifest entry for the `opencode` component — `claude-code`, `codex`, and `hermes` are untouched
+
+#### Scenario: Shared-asset change cascades only claude-code and codex
+
+- **WHEN** a Conventional Commit modifies a shared file under `apps/plugin/bin/` or `apps/plugin/scripts/` (commit scope `bridge-bundlers` or similar)
+- **THEN** release-please cascades the bump across `claude-code` AND `codex` via the `bridge-bundlers` linked-versions group — `hermes` and `opencode` remain on their previous versions and pick up the shared change at next install (their installers re-fetch from `main`)
 
 ### Requirement: Docs and dashboard help mention opencode
 
-`README.md`, `docs/agents.md`, and the dashboard's connection-help copy (wherever Claude Code / Codex CLI / Hermes Agent are listed as supported clients) SHALL list "opencode" as a fourth supported client. The opencode entry SHALL link to `plugin/.opencode-plugin/README.md` for setup instructions.
+`README.md`, `docs/agents.md`, and the dashboard's connection-help copy (wherever Claude Code / Codex CLI / Hermes Agent are listed as supported clients) SHALL list "opencode" as a fourth supported client. The opencode entry SHALL link to `apps/plugin/.opencode-plugin/README.md` for setup instructions.
 
 `docs/agents.md` SHALL gain an "opencode" section parallel in shape to the existing Claude / Codex / Hermes sections, structured as:
 
@@ -585,17 +586,17 @@ The 200-entry cap from `chat.message` applies here too — when appending a new 
 
 ### Requirement: Dispose spike result MUST be recorded
 
-The plugin's source file (`plugin/.opencode-plugin/plugin.ts`) MUST declare the comment line `// dispose-spike-result: fire-and-forget` within the first 10 lines, recording the outcome of the pre-implementation runtime spike. Outcome: opencode kills the subprocess before async handlers complete; awaited fetches do not land (full evidence in design.md::Decision 4 resolved). An invariant test (`src/test/invariants.test.ts`) MUST fail the build if the line is absent. The plugin SHALL NOT contain any other `// dispose-spike-result:` line.
+The plugin's source file (`apps/plugin/.opencode-plugin/plugin.ts`) MUST declare the comment line `// dispose-spike-result: fire-and-forget` within the first 10 lines, recording the outcome of the pre-implementation runtime spike. Outcome: opencode kills the subprocess before async handlers complete; awaited fetches do not land (full evidence in design.md::Decision 4 resolved). An invariant test (`apps/server/src/test/invariants.test.ts`) MUST fail the build if the line is absent. The plugin SHALL NOT contain any other `// dispose-spike-result:` line.
 
 #### Scenario: Spike-result comment is recorded
 
-- **WHEN** `plugin/.opencode-plugin/plugin.ts` is read at HEAD
+- **WHEN** `apps/plugin/.opencode-plugin/plugin.ts` is read at HEAD
 - **THEN** the first 10 lines contain `// dispose-spike-result: fire-and-forget`
 - **AND** the `server.instance.disposed` handler does NOT `await` the fetch call
 
 ### Requirement: Install script auto-configures opencode.json
 
-`plugin/.opencode-plugin/install.sh` SHALL, in addition to copying the plugin/bridge/dotenv files, manage the `~/.config/opencode/opencode.json` file with conservative semantics so the user does not need to copy-paste an MCP block manually.
+`apps/plugin/.opencode-plugin/install.sh` SHALL, in addition to copying the plugin/bridge/dotenv files, manage the `~/.config/opencode/opencode.json` file with conservative semantics so the user does not need to copy-paste an MCP block manually.
 
 Behaviour:
 

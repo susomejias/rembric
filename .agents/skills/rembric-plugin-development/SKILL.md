@@ -1,6 +1,6 @@
 ---
 name: rembric-plugin-development
-description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode, on edits to `plugin/bin/rembric-bridge.mjs` or `plugin/bin/rembric-dotenv.mjs`, on per-client manifest changes, or on plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
+description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode, on edits to `apps/plugin/bin/rembric-bridge.mjs` or `apps/plugin/bin/rembric-dotenv.mjs`, on per-client manifest changes, or on plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
 ---
 
 # Rembric plugin development
@@ -10,16 +10,16 @@ Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,herm
 ## Mandatory workflow
 
 1. **OpenSpec change first.** Run `/opsx:propose` (or amend an existing change). Plugin work always touches ≥2 specs and ≥3 files. Skipping the change is the failure mode that produces drift.
-2. **Bump versions in lock-step.** A user-visible plugin change bumps ALL FOUR sources in the same commit (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml::version`, `plugin/.opencode-plugin/plugin.ts::// @rembric-plugin-version`). `plugin/CHANGELOG.md` gets a `[X.Y.Z]` entry. Invariant test (`src/test/invariants.test.ts::plugin version lock-step`) catches drift.
+2. **Per-component versioning.** Each `apps/plugin/.X-plugin/` is its own release-please component and bumps based on its own paths changing. The `claude-code` and `codex` components are **linked** via the `bridge-bundlers` linked-versions group, so shared changes under `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/commands/`, or `apps/plugin/scripts/` cascade-bump both together. The `hermes` and `opencode` components bump **independently** — their `install.sh` re-fetches from `main` at install time, so shared `bin/` changes reach those users on the next install without coordinated release. Removed the old lock-step rule that required bumping all four plugin manifests in the same commit.
 3. **End-to-end against `pnpm run dev:docker:up`** before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
-4. **Docs sweep**: `README.md`, `docs/agents.md`, `plugin/README.md`, the in-plugin `README.md`, `plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
+4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
 
 ## The two single-source-of-truth rules
 
 - **`.rembric` is the only per-repo slug source.** Dotenv file with `PROJECT_SLUG=<lowercase-hyphen>`. Regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`.
-- **`plugin/bin/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. Bridge imports it. opencode plugin imports it (via path rewritten by `install.sh`). Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
+- **`apps/plugin/bin/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. Bridge imports it. opencode plugin imports it (via path rewritten by `install.sh`). Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
 
-Bash (`plugin/scripts/_api.sh`) and Python (`plugin/.hermes-plugin/__init__.py`) keep their own implementations — cross-language wrappers cost more than the duplication. They MUST agree on the regex value.
+Bash (`apps/plugin/scripts/_api.sh`) and Python (`apps/plugin/.hermes-plugin/__init__.py`) keep their own implementations — cross-language wrappers cost more than the duplication. They MUST agree on the regex value.
 
 ## Per-client gotchas (read on touch)
 
@@ -34,10 +34,10 @@ Each client has 3–5 non-obvious behaviors that bit us. **Before modifying that
 
 Per memory `01KRNZM2VFCME5HNT8N78HZW18`: shared logic lives in shared paths. Divergence is allowed ONLY when the platform forces it.
 
-- **MUST be shared**: `plugin/bin/rembric-bridge.mjs`, `plugin/bin/rembric-dotenv.mjs`, `plugin/scripts/*.sh` (Claude+Codex hooks).
+- **MUST be shared**: `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs`, `apps/plugin/scripts/*.sh` (Claude+Codex hooks).
 - **Legitimately divergent today**: `hooks/hooks.json` vs `hooks/hooks.codex.json` (env-substitution rules differ); `.claude-plugin/mcp.json` vs `.codex-plugin/mcp.json` (`${CLAUDE_PLUGIN_ROOT}` works in one, not the other); Python in-process provider for Hermes; JS/TS in-process for opencode.
 
-Sanity check: `git ls-files plugin/` should show ONE copy of each shared resource. Two paths with near-identical content is a sync bug.
+Sanity check: `git ls-files apps/plugin/` should show ONE copy of each shared resource. Two paths with near-identical content is a sync bug.
 
 ## Install / uninstall script invariants
 
@@ -51,7 +51,7 @@ Sanity check: `git ls-files plugin/` should show ONE copy of each shared resourc
 Before adding a handler that POSTs to an endpoint, verify the endpoint exists:
 
 ```bash
-grep -nE "app\\.(post|get)" src/server/api-router.ts
+grep -nE "app\\.(post|get)" apps/server/src/server/api-router.ts
 ```
 
 If it doesn't exist: either add the endpoint first (separate OpenSpec change) OR drop the handler from this scope (`tasks.md` says DEFERRED, change CHANGELOG documents it). Don't ship a handler that 404s.
@@ -71,7 +71,7 @@ The spike's outcome MUST be recorded as a comment in BOTH `tasks.md` (`<!-- spik
 Minimum required steps:
 
 1. `pnpm run dev:docker:up`. Wait for `[bootstrap] listening on`. Capture the seeded `demo-writer` token from the seed banner.
-2. Install the plugin (`bash plugin/.<X>-plugin/install.sh`), configure the client end-to-end with real URL + real token, drop `.rembric` with `PROJECT_SLUG=demo` in the working directory.
+2. Install the plugin (`bash apps/plugin/.<X>-plugin/install.sh`), configure the client end-to-end with real URL + real token, drop `.rembric` with `PROJECT_SLUG=demo` in the working directory.
 3. Exercise the lifecycle path your change affects. The exact commands per client (opencode `mcp list`, tsx-driven handler invocation, dashboard SQLite verification, etc.) are in [references/e2e-walkthrough.md](./references/e2e-walkthrough.md).
 4. Tear down: `docker compose ... down`, uninstall, restore user's config file to its prior state (placeholders if it didn't exist before).
 
@@ -91,10 +91,10 @@ Honest > glossing-over.
 If any answer is "no" or "I don't know", stop and resolve it.
 
 - [ ] OpenSpec change open or amended for this work
-- [ ] Four version sources bumped + CHANGELOG entry written
+- [ ] Per-component versioning respected (release-please bumps each `apps/plugin/.X-plugin/` from its own paths; `claude-code`+`codex` linked via `bridge-bundlers`; `hermes`+`opencode` independent)
 - [ ] No duplication of `parseDotenv` / `SLUG_RE` / endpoint strings without justification
 - [ ] `pnpm vitest run` + `pnpm run typecheck` + `pnpm run lint` + `openspec validate <change> --strict` all clean
 - [ ] Exercised against `pnpm run dev:docker:up` (or explicitly told the user what isn't verified)
-- [ ] Docs sweep done (README, docs/agents.md, plugin/README.md, in-plugin README, CHANGELOG)
+- [ ] Docs sweep done (README, docs/agents.md, apps/plugin/README.md, in-plugin README, CHANGELOG)
 - [ ] Install/uninstall idempotent (verified by running twice)
 - [ ] User's local state restored (dev stack down, plugin uninstalled, config placeholders)

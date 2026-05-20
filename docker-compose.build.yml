@@ -12,4 +12,4 @@ services:
   rembric:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: apps/server/Dockerfile
