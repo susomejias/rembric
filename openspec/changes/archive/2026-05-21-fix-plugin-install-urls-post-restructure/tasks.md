@@ -25,6 +25,6 @@
 
 ## 5. Land
 
-- [ ] 5.1 Commit on a feature branch with a Conventional Commit message: `fix(plugin): point per-client install URLs at apps/plugin after monorepo restructure`. Include the invariant test in the same commit.
-- [ ] 5.2 Open a PR against `main` with a body that links to this change folder and to the spec the fix realigns reality with.
-- [ ] 5.3 After merge, run `/opsx:archive fix-plugin-install-urls-post-restructure` to apply the spec delta to `openspec/specs/open-source-distribution/spec.md` and move the change to `openspec/changes/archive/`.
+- [x] 5.1 Commit on a feature branch with a Conventional Commit message: `fix(plugin): point per-client install URLs at apps/plugin after monorepo restructure`. Include the invariant test in the same commit.
+- [x] 5.2 Open a PR against `main` with a body that links to this change folder and to the spec the fix realigns reality with.
+- [x] 5.3 After merge, run `/opsx:archive fix-plugin-install-urls-post-restructure` to apply the spec delta to `openspec/specs/open-source-distribution/spec.md` and move the change to `openspec/changes/archive/`.
