@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -400,3 +401,105 @@ describe('apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for s
 // component. claude-code + codex are linked via release-please's
 // linked-versions plugin (cluster `bridge-bundlers`); hermes and opencode
 // bump independently. Drift between components is intentional, not a bug.
+
+// Install URL drift guard. The `restructure-monorepo-apps-layout` change
+// moved the shared plugin tree from `plugin/` to `apps/plugin/` and
+// requires every install-command surface to point at the new path
+// (`open-source-distribution` + `hermes-agent-plugin` specs). The legacy
+// `…/main/plugin/…` URL returns HTTP 404 from `raw.githubusercontent.com`;
+// shipping it anywhere outside the spec files that document that 404
+// contract is always a regression.
+const LEGACY_INSTALL_URL_SUBSTRINGS = [
+  'raw.githubusercontent.com/susomejias/rembric/main/plugin/',
+  'github.com/susomejias/rembric/blob/main/plugin/',
+];
+
+const LEGACY_URL_ALLOW_LIST = new Set([
+  'openspec/specs/open-source-distribution/spec.md', // 404-contract documentation
+  'openspec/specs/hermes-agent-plugin/spec.md', // 404-contract documentation
+  'openspec/specs/opencode-plugin/spec.md', // 404-contract documentation
+  'apps/server/src/test/invariants.test.ts', // self-reference: this test owns the rule
+]);
+
+const LEGACY_URL_BINARY_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.webp',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.pdf',
+  '.sqlite',
+  '.db',
+]);
+
+describe('install URL drift invariant', () => {
+  it('legacy plugin install URL substring is absent from non-spec surfaces', () => {
+    const trackedRaw = execSync('git ls-files', { cwd: repoRoot, encoding: 'utf8' });
+    const tracked = trackedRaw.split('\n').filter(Boolean);
+
+    const offenders: { file: string; line: number; text: string }[] = [];
+    for (const rel of tracked) {
+      if (LEGACY_URL_ALLOW_LIST.has(rel)) continue;
+      // Active and archived OpenSpec changes are work-in-progress
+      // documents that may legitimately quote the legacy URL while
+      // describing the 404 contract. The canonical 404-contract
+      // documentation lives in `openspec/specs/` (allow-listed above);
+      // any drift introduced via a change is caught at archive time
+      // when the delta merges into the canonical spec.
+      if (rel.startsWith('openspec/changes/')) continue;
+      const dotIdx = rel.lastIndexOf('.');
+      const ext = dotIdx >= 0 ? rel.slice(dotIdx).toLowerCase() : '';
+      if (LEGACY_URL_BINARY_EXTENSIONS.has(ext)) continue;
+      const abs = join(repoRoot, rel);
+      let src: string;
+      try {
+        src = readFileSync(abs, 'utf8');
+      } catch {
+        continue;
+      }
+      if (!LEGACY_INSTALL_URL_SUBSTRINGS.some((s) => src.includes(s))) continue;
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (LEGACY_INSTALL_URL_SUBSTRINGS.some((s) => line.includes(s))) {
+          offenders.push({ file: rel, line: i + 1, text: line.trim() });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
+      throw new Error(
+        `Install URL drift detected. The legacy '…/main/plugin/…' URL returns HTTP 404 ` +
+          `after the restructure-monorepo-apps-layout change. Replace with ` +
+          `'…/main/apps/plugin/…' or, if the reference intentionally documents the 404 ` +
+          `contract, add the file to LEGACY_URL_ALLOW_LIST at ` +
+          `apps/server/src/test/invariants.test.ts.\n${formatted}`,
+      );
+    }
+  });
+
+  it('allow-list anchors: each allow-listed spec file actually contains a legacy URL reference', () => {
+    // Symmetric to the DELETE-FROM allow-list anchor tests: if a future
+    // edit removes the 404-contract documentation from a spec, the
+    // allow-list entry becomes a silent loophole. Force the allow-list
+    // to stay tight by asserting each listed file still has a reason to
+    // be there.
+    for (const rel of LEGACY_URL_ALLOW_LIST) {
+      const abs = join(repoRoot, rel);
+      const src = readFileSync(abs, 'utf8');
+      const hasLegacy = LEGACY_INSTALL_URL_SUBSTRINGS.some((s) => src.includes(s));
+      expect(
+        hasLegacy,
+        `Allow-list entry ${rel} no longer contains a legacy URL — remove it from LEGACY_URL_ALLOW_LIST.`,
+      ).toBe(true);
+    }
+  });
+});

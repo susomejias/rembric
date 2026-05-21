@@ -2,7 +2,7 @@
 
 Install with:
 
-    curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
     hermes plugins install rembric   # answers requires_env prompts, writes ~/.hermes/.env
     hermes plugins enable rembric
 
