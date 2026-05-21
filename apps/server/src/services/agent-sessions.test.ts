@@ -498,8 +498,8 @@ describe('AgentSessionsService', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-prompt' });
       db.handle.raw
         .prepare(
-          `INSERT INTO prompts (id, session_id, project_id, content, agent, created_at)
-           VALUES (?, ?, ?, 'do the thing', 'claude', ?)`,
+          `INSERT INTO prompts (id, session_id, project_id, content, title, agent, created_at)
+           VALUES (?, ?, ?, 'do the thing', 'do the thing', 'claude', ?)`,
         )
         .run(newSessionId('p'), s.id, projectId, Date.now());
       const recent = sessions.recentForContext({ projectId, limit: 25 });

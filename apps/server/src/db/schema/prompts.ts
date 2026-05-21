@@ -31,8 +31,8 @@ export const prompts = sqliteTable(
     sessionId: text('session_id').references(() => agentSessions.id),
     projectId: text('project_id').references(() => projects.id),
     content: text('content').notNull(),
-    /** Short human-readable label for retrieval lists. ≤100 chars (app-layer). */
-    title: text('title'),
+    /** Short human-readable label for retrieval lists. 1..100 chars (app-layer). */
+    title: text('title').notNull(),
     /** JSON array of categorical labels; feeds prompts_fts. */
     tags: text('tags', { mode: 'json' }).$type<string[] | null>(),
     /** Array of predecessor prompt ids this row refines. JSON array of ids. */

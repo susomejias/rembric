@@ -29,11 +29,11 @@ const PROMPT_PURGE_REASONING = 'operator purge of soft-deleted prompts';
 
 export interface SavePromptInput {
   content: string;
+  /** Required scannable label for retrieval lists. 1..100 chars (app-layer). */
+  title: string;
   sessionId?: string | null;
   projectId?: string | null;
   agent?: string | null;
-  /** ≤100 chars; rejected with `invalid_input` otherwise. */
-  title?: string | null;
   /** JSON-encoded array of categorical labels; each must be non-empty. */
   tags?: string[] | null;
   /**
@@ -75,13 +75,15 @@ export class PromptsService {
     if (input.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'prompts.save: content must be non-empty');
     }
-    if (input.title !== undefined && input.title !== null) {
-      if (input.title.length === 0 || input.title.length > PROMPT_TITLE_MAX_LENGTH) {
-        throw new DomainError(
-          'invalid_input',
-          `prompts.save: title must be 1..${PROMPT_TITLE_MAX_LENGTH} chars`,
-        );
-      }
+    if (
+      typeof input.title !== 'string' ||
+      input.title.length === 0 ||
+      input.title.length > PROMPT_TITLE_MAX_LENGTH
+    ) {
+      throw new DomainError(
+        'invalid_input',
+        `prompts.save: title is required and must be 1..${PROMPT_TITLE_MAX_LENGTH} chars`,
+      );
     }
     if (input.tags) {
       for (const tag of input.tags) {
@@ -106,7 +108,7 @@ export class PromptsService {
         sessionId: input.sessionId ?? null,
         projectId: input.projectId ?? null,
         content: input.content,
-        title: input.title ?? null,
+        title: input.title,
         tags: input.tags ?? null,
         replaces: replaces ?? null,
         agent: input.agent ?? null,
@@ -148,7 +150,7 @@ export class PromptsService {
           sessionId: input.sessionId ?? null,
           projectId: input.projectId ?? null,
           content: input.content,
-          title: input.title ?? null,
+          title: input.title,
           tags: input.tags ?? null,
           replaces: [predecessorId],
           agent: input.agent ?? null,

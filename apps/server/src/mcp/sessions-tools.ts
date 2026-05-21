@@ -51,7 +51,7 @@ export const contextSchema = {
 
 export const savePromptSchema = {
   content: z.string().min(1).max(20_000),
-  title: z.string().min(1).max(100).optional(),
+  title: z.string().min(1).max(100),
   tags: z.array(z.string().min(1)).optional(),
   replaces: z.string().min(1).optional(),
 };
@@ -156,7 +156,7 @@ function handleSavePrompt(
   deps: SessionsToolDeps,
   args: {
     content: string;
-    title?: string;
+    title: string;
     tags?: string[];
     replaces?: string;
   },
@@ -170,7 +170,7 @@ function handleSavePrompt(
       sessionId,
       projectId: scope.kind === 'project' ? scope.projectId : null,
       agent: ctx.token.name,
-      title: args.title ?? null,
+      title: args.title,
       tags: args.tags ?? null,
       replaces: args.replaces ?? null,
     });

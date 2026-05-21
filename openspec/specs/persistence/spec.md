@@ -378,29 +378,40 @@ This makes "started with an unexpectedly empty DB" loud and obvious in operator 
 
 ### Requirement: The `prompts` table MUST carry lifecycle and retrieval metadata columns
 
-The `prompts` schema SHALL be extended with the following nullable columns, all added via a single additive migration (`ALTER TABLE prompts ADD COLUMN <col>`):
+The `prompts` schema SHALL be extended with four columns, applied across two migrations:
 
 - `deleted_at INTEGER` (timestamp_ms, nullable) — operator soft-delete marker. NULL = visible; non-NULL = soft-deleted.
-- `title TEXT` (nullable, ≤100 chars enforced at the application layer) — short human-readable label for retrieval lists.
+- `title TEXT` (**NOT NULL**, 1..100 chars enforced at the application layer) — short human-readable label for retrieval lists. Required at both the MCP boundary (`memory.save_prompt` zod schema) and the service layer (`PromptsService.save` validates non-empty).
 - `tags TEXT` (nullable, JSON array of strings) — categorical labels; same shape as `memory.tags`.
 - `replaces TEXT` (nullable, JSON array of prompt IDs) — predecessor link for the refine chain (typically a single-element array of the previous prompt's id, mirroring the shape of `memory.replaces`).
 
+Migration sequence:
+
+1. The first migration (`0008_prompts_extend.sql`) adds all four columns as NULLABLE via `ALTER TABLE prompts ADD COLUMN <col>` — SQLite cannot add a NOT NULL column without a DEFAULT, and we did not want to bake a placeholder into the schema-level default.
+2. A follow-up migration (`0010_prompts_title_required.sql`) tightens `title` to NOT NULL via the standard SQLite table-rebuild dance: backfill NULL titles with the literal placeholder `'(untitled)'`, recreate the table with `title TEXT NOT NULL`, re-create indexes, re-install the `prompts_fts` triggers (DROP TABLE cascades them), and run `INSERT INTO prompts_fts(prompts_fts) VALUES('rebuild')` so the contentless FTS5 index re-binds against the new rowids.
+
 The `content` column SHALL remain immutable in convention — there SHALL be no UPDATE-capable code path for it. Lifecycle changes SHALL be expressed via `deleted_at` flips (operator or refine) plus the `replaces` link (refine).
 
-Existing rows SHALL get NULL for all four new columns at migration time. No backfill is required.
-
-#### Scenario: Schema review confirms the new columns and their immutability contract
+#### Scenario: Schema review confirms the column constraints
 
 - **WHEN** a code reviewer inspects `apps/server/src/db/schema/prompts.ts`
-- **THEN** the schema SHALL declare `deleted_at`, `title`, `tags`, `replaces` as nullable columns
+- **THEN** the schema SHALL declare `title` as `text('title').notNull()` and `deleted_at` / `tags` / `replaces` as nullable
 - **AND** the file's top-level docstring SHALL describe `content` as immutable; lifecycle as `deleted_at` flips + `replaces` links
 
-#### Scenario: Existing prompts survive the migration with NULL metadata
+#### Scenario: Existing prompts with NULL title are backfilled with `(untitled)`
 
-- **GIVEN** a DB with prompts inserted before this change
-- **WHEN** the migration runs
-- **THEN** every pre-existing row SHALL gain `deleted_at = NULL`, `title = NULL`, `tags = NULL`, `replaces = NULL`
-- **AND** the row's `content`, `session_id`, `project_id`, `agent`, `created_at` SHALL remain unchanged
+- **GIVEN** a DB that already applied `0008_prompts_extend.sql` and contains prompts with `title IS NULL`
+- **WHEN** the server runs `0010_prompts_title_required.sql` on next boot
+- **THEN** every NULL title SHALL be UPDATEd to the literal string `'(untitled)'` BEFORE the table-rebuild step
+- **AND** the rebuilt table SHALL declare `title TEXT NOT NULL`
+- **AND** every pre-existing row SHALL retain its original `content`, `session_id`, `project_id`, `agent`, `created_at`, `deleted_at`, `tags`, and `replaces` values
+- **AND** the `prompts_fts` index SHALL be rebuilt so search continues to work after the table is recreated
+
+#### Scenario: A new insert without title is rejected at every layer
+
+- **GIVEN** the schema with `title TEXT NOT NULL` and `PromptsService.save` validating title presence
+- **WHEN** any code path attempts to insert a prompt row without `title`
+- **THEN** the insert SHALL fail — either via the zod schema (`memory.save_prompt`), the service-layer validation (`prompts.save: title is required`), or the DB-level NOT NULL constraint (raw SQL bypass)
 
 ### Requirement: `prompts_fts` MUST stay in sync with `prompts`
 

@@ -200,7 +200,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'remember this' })),
+      Promise.resolve(handlers.savePrompt({ content: 'remember this', title: 'reminder' })),
     );
     const { isError, payload } = decode(r);
 
@@ -363,8 +363,8 @@ describe('memory.search_prompts — scope resolution', () => {
   it('returns prompts from the router-pinned project, not global', async () => {
     const project = projects.create({ slug: 'pinned', displayName: null });
     // One prompt in the pinned project; one global decoy.
-    prompts.save({ content: 'pinned prompt content', projectId: project.id });
-    prompts.save({ content: 'global decoy', projectId: null });
+    prompts.save({ content: 'pinned prompt content', title: 'pinned', projectId: project.id });
+    prompts.save({ content: 'global decoy', title: 'decoy', projectId: null });
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
@@ -379,9 +379,9 @@ describe('memory.search_prompts — scope resolution', () => {
   });
 
   it('returns global prompts when no router pin and no path scope', async () => {
-    prompts.save({ content: 'global only', projectId: null });
+    prompts.save({ content: 'global only', title: 'global only', projectId: null });
     const project = projects.create({ slug: 'unused', displayName: null });
-    prompts.save({ content: 'project noise', projectId: project.id });
+    prompts.save({ content: 'project noise', title: 'noise', projectId: project.id });
     // No router pin, no ctx.project.
 
     const r = await runWithContext(makeContext(adminToken), () =>
@@ -398,8 +398,8 @@ describe('memory.search_prompts — scope resolution', () => {
   it('returns the path-scoped project, ignoring stale router pin', async () => {
     const pathProject = projects.create({ slug: 'pathprompt', displayName: null });
     const routerProject = projects.create({ slug: 'routerprompt', displayName: null });
-    prompts.save({ content: 'pathy prompt', projectId: pathProject.id });
-    prompts.save({ content: 'router prompt', projectId: routerProject.id });
+    prompts.save({ content: 'pathy prompt', title: 'pathy', projectId: pathProject.id });
+    prompts.save({ content: 'router prompt', title: 'routerish', projectId: routerProject.id });
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, routerProject.id, 'tool-explicit');
 
     const r = await runWithContext(
@@ -421,12 +421,18 @@ describe('memory.save_prompt — refine flow via MCP', () => {
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const first = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'initial take' })),
+      Promise.resolve(handlers.savePrompt({ content: 'initial take', title: 'initial' })),
     );
     const firstPayload = decode(first).payload as { id: string };
 
     const second = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'refined take', replaces: firstPayload.id })),
+      Promise.resolve(
+        handlers.savePrompt({
+          content: 'refined take',
+          title: 'refined',
+          replaces: firstPayload.id,
+        }),
+      ),
     );
     const { isError, payload } = decode(second);
 
@@ -444,7 +450,13 @@ describe('memory.save_prompt — refine flow via MCP', () => {
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'orphan refine', replaces: 'never-existed' })),
+      Promise.resolve(
+        handlers.savePrompt({
+          content: 'orphan refine',
+          title: 'orphan',
+          replaces: 'never-existed',
+        }),
+      ),
     );
     const { isError, payload } = decode(r);
 
@@ -455,11 +467,21 @@ describe('memory.save_prompt — refine flow via MCP', () => {
   it('refine across scopes surfaces prompt_scope_mismatch', async () => {
     const projectA = projects.create({ slug: 'scope-a', displayName: null });
     const projectB = projects.create({ slug: 'scope-b', displayName: null });
-    const foreign = prompts.save({ content: 'foreign', projectId: projectA.id });
+    const foreign = prompts.save({
+      content: 'foreign',
+      title: 'foreign',
+      projectId: projectA.id,
+    });
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, projectB.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'cross-scope', replaces: foreign.id })),
+      Promise.resolve(
+        handlers.savePrompt({
+          content: 'cross-scope',
+          title: 'cross-scope',
+          replaces: foreign.id,
+        }),
+      ),
     );
     const { isError, payload } = decode(r);
 
@@ -470,11 +492,13 @@ describe('memory.save_prompt — refine flow via MCP', () => {
   it('refine of an already-deleted predecessor surfaces prompt_already_deleted', async () => {
     const project = projects.create({ slug: 'refine-deleted', displayName: null });
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
-    const first = prompts.save({ content: 'first', projectId: project.id });
+    const first = prompts.save({ content: 'first', title: 'first', projectId: project.id });
     prompts.softDelete(first.id);
 
     const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.savePrompt({ content: 'second', replaces: first.id })),
+      Promise.resolve(
+        handlers.savePrompt({ content: 'second', title: 'second', replaces: first.id }),
+      ),
     );
     const { isError, payload } = decode(r);
 

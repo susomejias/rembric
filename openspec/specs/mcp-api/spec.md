@@ -564,7 +564,7 @@ The gate SHALL be a no-op (the call proceeds with the previous behavior) when AN
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.save_prompt` for persisting curated user prompts. Input schema:
 
 - `content: string` (required, non-empty after trim).
-- `title?: string` (optional, ≤100 chars).
+- `title: string` (required, ≤100 chars).
 - `tags?: string[]` (optional; each element is a non-empty string).
 - `replaces?: string` (optional; ULID of a predecessor prompt in the same scope).
 
@@ -619,11 +619,16 @@ On `replaces=null`/unset, the response SHALL be `{ ok: true, id: <newId>, create
 - **WHEN** the agent calls `memory.save_prompt({ content: "...", replaces: "01HVALIDLOOKINGBUTUNKNOWN" })`
 - **THEN** the call SHALL be rejected with code `prompt_not_found`
 
-#### Scenario: `memory.save_prompt` plain save (no replaces) is backward-compatible
+#### Scenario: `memory.save_prompt` plain save (no tags, no replaces)
 
-- **WHEN** the agent calls `memory.save_prompt({ content: "save me" })` (no title, no tags, no replaces — pre-change shape)
-- **THEN** the call SHALL succeed and the row SHALL have `title = NULL`, `tags = NULL`, `replaces = NULL`
+- **WHEN** the agent calls `memory.save_prompt({ content: "save me", title: "remember to save" })` with no tags and no replaces
+- **THEN** the call SHALL succeed and the row SHALL have `tags = NULL`, `replaces = NULL`
 - **AND** the response SHALL be `{ ok: true, id: <ulid>, createdAt: <ts> }`
+
+#### Scenario: `memory.save_prompt` rejects calls missing `title`
+
+- **WHEN** the agent calls `memory.save_prompt({ content: "save me" })` without a `title`
+- **THEN** the call SHALL be rejected with code `invalid_input` (zod validation failure: title is required)
 
 ### Requirement: The MCP server MUST expose `memory.search_prompts`
 
