@@ -409,15 +409,17 @@
 .grid-6 {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 0;
-  border: 1px solid var(--fg-faint);
+  /* 1px gap + grid background = single consistent separator line between every
+     cell (vertical AND horizontal), independent of layout direction. Avoids
+     nth-child border tricks that produced doubled or missing dividers on the
+     mobile 2-col layout. Brighter than --fg-faint so the separators stay
+     legible against the near-black --bg. */
+  gap: 1px;
+  background: #383838;
+  border: 1px solid #383838;
 }
 .grid-6 > .stat {
   border: 0;
-  border-right: 1px solid var(--fg-faint);
-}
-.grid-6 > .stat:last-child {
-  border-right: 0;
 }
 
 .row-2 {
@@ -682,12 +684,7 @@ form .field label {
   }
   .grid-6 {
     grid-template-columns: repeat(3, 1fr);
-  }
-  .grid-6 > .stat:nth-child(3) {
-    border-right: 0;
-  }
-  .grid-6 > .stat:nth-child(n + 4) {
-    border-top: 1px solid var(--fg-faint);
+    /* gap + background separators apply automatically */
   }
 }
 
@@ -802,12 +799,7 @@ form .field label {
   }
   .grid-6 {
     grid-template-columns: repeat(3, 1fr);
-  }
-  .grid-6 > .stat:nth-child(3) {
-    border-right: 0;
-  }
-  .grid-6 > .stat:nth-child(n + 4) {
-    border-top: 1px solid var(--fg-faint);
+    /* gap + background separators apply automatically */
   }
   .kv-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -892,12 +884,8 @@ form .field label {
   }
   .grid-6 {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .grid-6 > .stat:nth-child(2n) {
-    border-right: 0;
-  }
-  .grid-6 > .stat:nth-child(n + 3) {
-    border-top: 1px solid var(--fg-faint);
+    /* gap + background separators still apply automatically — no per-cell
+       border rules needed at this breakpoint. */
   }
   .kv-grid {
     grid-template-columns: repeat(2, 1fr);

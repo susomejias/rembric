@@ -309,6 +309,73 @@ export function runSeed(deps: SeedDeps): SeedResult {
   });
   memoryCount += 3;
 
+  // 7. Judged relations — four memory pairs, one per verdict colour the
+  // home overview's RECENT JUDGMENTS tile renders (supersedes / warn,
+  // conflicts_with / danger, related / dim, compatible / lime). Each pair
+  // is a fresh topicKey so the cluster supersede chains stay untouched.
+  const judgedPairs: Array<{
+    relation: 'supersedes' | 'conflicts_with' | 'related' | 'compatible';
+    topicKey: string;
+    source: string;
+    target: string;
+  }> = [
+    {
+      relation: 'supersedes',
+      topicKey: 'demo-judged-supersedes',
+      source:
+        'Pin pnpm to v11.1.2 in package.json::packageManager — newer versions need Node 22.13.',
+      target: 'Pin pnpm to v9 in package.json::packageManager for max compatibility.',
+    },
+    {
+      relation: 'conflicts_with',
+      topicKey: 'demo-judged-conflicts',
+      source: 'Run consolidator nightly at 03:00 UTC (matches default CONSOLIDATION_CRON).',
+      target: 'Run consolidator every 6h to keep orphan promotions snappy.',
+    },
+    {
+      relation: 'related',
+      topicKey: 'demo-judged-related',
+      source: 'data-confirm attributes live on the <form> element, not the <button>.',
+      target: 'Destructive forms always use data-confirm-tone=danger for irreversible ops.',
+    },
+    {
+      relation: 'compatible',
+      topicKey: 'demo-judged-compatible',
+      source: 'Use formatTs helper for absolute timestamps in dashboard tables.',
+      target: 'Use relTime helper for "X AGO" relative time in dashboard overview tiles.',
+    },
+  ];
+  for (const pair of judgedPairs) {
+    const src = memorySvc.save(
+      {
+        type: 'reference',
+        content: pair.source,
+        tags: [pair.topicKey],
+        topicKey: `${pair.topicKey}-src`,
+      },
+      scope,
+    );
+    const tgt = memorySvc.save(
+      {
+        type: 'reference',
+        content: pair.target,
+        tags: [pair.topicKey],
+        topicKey: `${pair.topicKey}-tgt`,
+      },
+      scope,
+    );
+    relationsSvc.compare({
+      sourceId: src.id,
+      targetId: tgt.id,
+      relation: pair.relation,
+      actor: 'seed-dev',
+      kind: 'agent',
+      confidence: 0.85,
+      reason: `seed-dev demo: ${pair.relation}`,
+    });
+    memoryCount += 2;
+  }
+
   const result: SeedResult = {
     skipped: false,
     counts: {

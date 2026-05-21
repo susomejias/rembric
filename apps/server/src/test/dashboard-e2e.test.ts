@@ -470,4 +470,98 @@ describe('dashboard E2E', () => {
     const body = await res.text();
     expect(body).toContain('csrf_invalid');
   });
+
+  it('home overview surfaces RECENT JUDGMENTS (empty then populated)', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    // Empty state: no judged relations yet.
+    const before = await get(baseUrl, '/dashboard', jar);
+    expect(before.status).toBe(200);
+    const beforeBody = await before.text();
+    expect(beforeBody).toContain('RECENT JUDGMENTS');
+    expect(beforeBody).toContain('NEWEST FIRST');
+    expect(beforeBody).toContain('NO JUDGMENTS YET');
+    expect(beforeBody).not.toContain('NO PENDING JUDGMENTS YET');
+
+    // Seed: two memories + a judged 'supersedes' relation between them.
+    const { createDb } = await import('../db/index.js');
+    const { MemoryService } = await import('../services/memory.js');
+    const { RelationsService } = await import('../services/relations.js');
+    const { SCOPE_GLOBAL } = await import('../services/scope.js');
+    const dataDir = server.config.dataDir;
+    const handle = createDb({ dataDir });
+    const memSvc = new MemoryService(handle.db);
+    const a = memSvc.save({ type: 'feedback', content: 'judged-row-source-content' }, SCOPE_GLOBAL);
+    const b = memSvc.save({ type: 'feedback', content: 'judged-row-target-content' }, SCOPE_GLOBAL);
+    const rel = new RelationsService(handle.db).compare({
+      sourceId: a.id,
+      targetId: b.id,
+      relation: 'supersedes',
+      actor: 'e2e-test',
+      kind: 'agent',
+      confidence: 0.9,
+      reason: 'e2e demo reason',
+    });
+    handle.close();
+
+    // Populated state on home: row renders with the supersedes pill class
+    // and the source/target content wrapped in memory-detail links (no bare
+    // short ids).
+    const after = await get(baseUrl, '/dashboard', jar);
+    expect(after.status).toBe(200);
+    const afterBody = await after.text();
+    expect(afterBody).toContain('RECENT JUDGMENTS');
+    expect(afterBody).not.toContain('NO JUDGMENTS YET');
+    expect(afterBody).toContain('pill k-supersedes');
+    expect(afterBody).toContain('judged-row-source-content');
+    expect(afterBody).toContain('judged-row-target-content');
+    expect(afterBody).toContain(`href="/dashboard/memories/${a.id}"`);
+    expect(afterBody).toContain(`href="/dashboard/memories/${b.id}"`);
+    expect(afterBody).toContain('agent');
+    // Home tile: the verdict pill itself is NOT wrapped in an anchor — a
+    // dedicated VIEW button in the row's .acts slot carries the detail link.
+    expect(afterBody).toContain(`href="/dashboard/judgments/${rel.id}"`);
+    expect(afterBody).toContain('VIEW');
+    expect(afterBody).not.toContain(
+      `<a\n                              href="/dashboard/judgments/${rel.id}"`,
+    );
+    // Stat strip: the PENDING JUDGMENTS card has been removed; the strip
+    // is now grid-6 with no pending-judgments labelled card.
+    expect(afterBody).toContain('grid-6');
+    expect(afterBody).not.toContain('PENDING JUDGMENTS');
+
+    // Same seed appears on /dashboard/judgments: source → target column
+    // shows truncated content as memory-detail links, not bare short ids;
+    // the verdict cell uses the shared verdictPill helper (k-supersedes);
+    // the leftmost id column is a link to the detail page.
+    const list = await get(baseUrl, '/dashboard/judgments', jar);
+    expect(list.status).toBe(200);
+    const listBody = await list.text();
+    expect(listBody).toContain('judged-row-source-content');
+    expect(listBody).toContain('judged-row-target-content');
+    expect(listBody).toContain(`href="/dashboard/memories/${a.id}"`);
+    expect(listBody).toContain(`href="/dashboard/memories/${b.id}"`);
+    expect(listBody).toContain('pill k-supersedes');
+    expect(listBody).toContain(`href="/dashboard/judgments/${rel.id}"`);
+
+    // Judgment detail view: renders full content for both sides, the verdict
+    // pill, reason text, back-link, and resolves 404 for unknown ids.
+    const detail = await get(baseUrl, `/dashboard/judgments/${rel.id}`, jar);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.text();
+    expect(detailBody).toContain('Rembric');
+    expect(detailBody).toContain('Judgment');
+    expect(detailBody).toContain('BACK TO JUDGMENTS');
+    expect(detailBody).toContain('judged-row-source-content');
+    expect(detailBody).toContain('judged-row-target-content');
+    expect(detailBody).toContain('pill k-supersedes');
+    expect(detailBody).toContain('e2e demo reason');
+    expect(detailBody).toContain(`href="/dashboard/memories/${a.id}"`);
+    expect(detailBody).toContain(`href="/dashboard/memories/${b.id}"`);
+
+    const missing = await get(baseUrl, '/dashboard/judgments/non-existent-id-xyz', jar);
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toContain('Judgment not found');
+  });
 });
