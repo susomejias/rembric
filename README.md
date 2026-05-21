@@ -106,22 +106,24 @@ Works with **any** agent that speaks MCP. One server, memories shared across all
    │   │  Streamable HTTP transport │   │  SSR HTML + HTMX              │  │
    │   │  + initialize.instructions │   │                               │  │
    │   │  memory.{save,search,…}    │   │  /memories /sessions          │  │
-   │   │  memory.session_*          │   │  /consolidation /projects     │  │
-   │   │  memory.judge / compare    │   │  /tokens                      │  │
+   │   │  memory.session_*          │   │  /prompts /judgments          │  │
+   │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
+   │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
    │   │  project.{use,list,current}│   │                               │  │
    │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
    │                 ▼                                ▼                    │
    │   ┌───────────────────────────────────────────────────────────────┐   │
    │   │  Service layer                                                │   │
-   │   │   MemoryService · RelationsService · ProjectsService          │   │
-   │   │   TokensService · AgentSessionsService · SessionRouter        │   │
+   │   │   MemoryService · PromptsService · RelationsService           │   │
+   │   │   ProjectsService · TokensService · AgentSessionsService      │   │
+   │   │   SessionRouter                                               │   │
    │   └───────────────────────────────┬───────────────────────────────┘   │
    │                                   ▼                                   │
    │   ┌───────────────────────────────────────────────────────────────┐   │
    │   │  SQLite (Drizzle, append-only + tombstones)                   │   │
    │   │   memory · projects · tokens · sessions · prompts             │   │
    │   │   memory_relations · consolidation_{runs,ops}                 │   │
-   │   │   + memory_fts (FTS5)      + memory_vec (sqlite-vec)          │   │
+   │   │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)│   │
    │   └───────────────────────────────▲───────────────────────────────┘   │
    │   ┌───────────────────────────────┴───────────────────────────────┐   │
    │   │  Background workers                                           │   │
@@ -150,7 +152,7 @@ See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 
 ## Dashboard
 
-Self-hosted operator surface for every memory, session, judgment, and consolidation op. SSR HTML + HTMX, brutalist on purpose, no JS framework, no telemetry. Auth is one admin token — no onboarding flow.
+Self-hosted operator surface for every memory, session, prompt, judgment, and consolidation op. SSR HTML + HTMX, brutalist on purpose, no JS framework, no telemetry. Auth is one admin token — no onboarding flow.
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-login.png" alt="Sign-in" width="100%">
@@ -165,7 +167,7 @@ Self-hosted operator surface for every memory, session, judgment, and consolidat
 <p align="center"><i>Overview · counters, pending judgments queue, recent agent sessions.</i></p>
 
 <details>
-<summary><b>More surfaces</b> — overview health · memories · judgments · consolidation · projects · tokens · maintenance</summary>
+<summary><b>More surfaces</b> — overview health · memories · prompts · sessions · judgments · consolidation · projects · tokens · maintenance</summary>
 
 <br>
 
@@ -292,16 +294,17 @@ docker compose up -d
 
 ## Operating Rembric
 
-Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (port `8788` in the dev stack). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
+Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (port `8788` in the dev stack). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, browse and soft-delete curated user prompts at `/dashboard/prompts` (FTS5 search over content + tags; refined predecessors show a `REFINED` badge), trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
 
 ## Dashboard maintenance (manual purges)
 
-The dashboard exposes `/dashboard/maintenance` for two **irreversible**, **operator-triggered** physical purges. Both are gated to dashboard sessions whose underlying token has scope `*` (admin):
+The dashboard exposes `/dashboard/maintenance` for three **irreversible**, **operator-triggered** physical purges. All are gated to dashboard sessions whose underlying token has scope `*` (admin):
 
-- **Purge empty sessions** — removes `ended` / `abandoned` session rows that have no summary, no manual title, no referencing memories/prompts/confirmations, are not operator-soft-deleted, and ended over 1 hour ago.
+- **Purge empty sessions** — removes `ended` / `abandoned` session rows that have no summary, no manual title, no referencing memories / non-deleted prompts / confirmations, are not operator-soft-deleted, and ended over 1 hour ago. Soft-deleted prompts no longer block purge.
 - **Purge disconnected archived memories** — removes `archived` memory rows whose ids are referenced by NO other row in the graph (`memory.replaces`, `consolidation_ops.affected_ids` / `created_id`, `memory_relations.{source,target}_id`, `confirmations.memory_id`). The matching `memory_vec` and `memory_fts` shadow rows are dropped in the same transaction.
+- **Purge deleted prompts** — removes `prompts` rows whose `deleted_at IS NOT NULL`. Covers both operator soft-deletes (from `/dashboard/prompts`) and refine supersedes (from `memory.save_prompt({ replaces })`). The matching `prompts_fts` shadow row is dropped in the same transaction.
 
-Each click shows a count and a confirmation modal. The deletion is journaled in `consolidation_ops` (`op_type = 'session_purge'` or `'archived_memory_purge'`) so the operator can audit what was removed even after the rows are gone. **Consolidation undo on operations whose rows have been purged returns a structured error** — the dashboard surfaces it inline naming the missing ids.
+Each click shows a count and a confirmation modal. The deletion is journaled in `consolidation_ops` (`op_type = 'session_purge'`, `'archived_memory_purge'`, or `'prompt_purge'`) so the operator can audit what was removed even after the rows are gone. **Consolidation undo on operations whose rows have been purged returns a structured error** — the dashboard surfaces it inline naming the missing ids.
 
 To reclaim file-level disk after a large purge, run `VACUUM` against the SQLite file. The maintenance page surfaces the freelist size so you know how much would be reclaimed.
 
