@@ -30,18 +30,13 @@ COPY apps/server ./apps/server
 
 # Build inside the server workspace.
 WORKDIR /app/apps/server
-
-# --ignore-scripts is redundant given .npmrc, kept as defense in depth.
-# The explicit `pnpm rebuild` below runs the postinstall for the
-# allowlisted native modules (better-sqlite3, sqlite-vec) under the controlled
-# allowlist in pnpm-workspace.yaml.
 RUN pnpm run build
 
+# pnpm deploy ships a flat node_modules to /prod-out (no symlinks into the workspace store).
 WORKDIR /app
-
-RUN rm -rf node_modules apps/server/node_modules \
-    && pnpm install --frozen-lockfile --prod --ignore-scripts --filter @rembric/server... \
-    && pnpm rebuild --filter @rembric/server better-sqlite3 sqlite-vec
+RUN pnpm deploy --filter=@rembric/server --prod --legacy /prod-out \
+    && cd /prod-out \
+    && pnpm rebuild better-sqlite3 sqlite-vec
 
 
 FROM node:22-bookworm-slim AS dev
@@ -94,9 +89,9 @@ RUN useradd -r -u 10001 -m rembric
 
 WORKDIR /app
 
-COPY --from=builder --chown=rembric:rembric /app/apps/server/dist          ./dist
-COPY --from=builder --chown=rembric:rembric /app/apps/server/node_modules  ./node_modules
-COPY --from=builder --chown=rembric:rembric /app/apps/server/package.json  ./
+COPY --from=builder --chown=rembric:rembric /prod-out/dist          ./dist
+COPY --from=builder --chown=rembric:rembric /prod-out/node_modules  ./node_modules
+COPY --from=builder --chown=rembric:rembric /prod-out/package.json  ./
 
 USER rembric
 
