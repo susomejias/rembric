@@ -49,6 +49,13 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+}
+.jq-item .pair .mem a.txt {
+  color: var(--lime);
+}
+.jq-item .pair .mem a.txt:hover {
+  text-decoration: underline;
 }
 .jq-item .acts {
   display: flex;

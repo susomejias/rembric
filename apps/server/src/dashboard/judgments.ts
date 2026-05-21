@@ -1,15 +1,21 @@
-import { desc, eq, isNull, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
 import type { Db } from '../db/client.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { formatTs, html, raw, shortId, statusPill } from './templates.js';
+import { escape, formatTs, html, raw, shortId, statusPill, verdictPill } from './templates.js';
 import type { ResolvedSession } from './types.js';
+
+function truncate(s: string | null, max: number): string {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
+}
 
 export interface JudgmentsDeps {
   db: Db;
@@ -35,46 +41,49 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const conditions = [] as ReturnType<typeof eq>[];
+    const whereParts: ReturnType<typeof sql>[] = [];
     if (VALID_STATUSES.has(statusFilter)) {
-      conditions.push(
-        eq(memoryRelations.status, statusFilter as 'pending' | 'judged' | 'orphaned'),
-      );
+      whereParts.push(sql`r.status = ${statusFilter}`);
     }
-    if (kindFilter && kindFilter !== 'pending') {
-      conditions.push(
-        eq(
-          memoryRelations.relation,
-          kindFilter as
-            | 'supersedes'
-            | 'conflicts_with'
-            | 'related'
-            | 'compatible'
-            | 'scoped'
-            | 'not_conflict',
-        ),
-      );
+    const KIND_VALUES = new Set([
+      'supersedes',
+      'conflicts_with',
+      'related',
+      'compatible',
+      'scoped',
+      'not_conflict',
+    ]);
+    if (kindFilter && KIND_VALUES.has(kindFilter)) {
+      whereParts.push(sql`r.relation = ${kindFilter}`);
     } else if (kindFilter === 'pending') {
-      conditions.push(isNull(memoryRelations.relation));
+      whereParts.push(sql`r.relation IS NULL`);
     }
+    const whereSql =
+      whereParts.length === 0 ? sql`` : sql` WHERE ${sql.join(whereParts, sql` AND `)}`;
 
-    const rows =
-      conditions.length === 0
-        ? deps.db
-            .select()
-            .from(memoryRelations)
-            .orderBy(desc(memoryRelations.createdAt))
-            .limit(PAGE_SIZE + 1)
-            .offset(offset)
-            .all()
-        : deps.db
-            .select()
-            .from(memoryRelations)
-            .where(sql.join(conditions, sql` AND `))
-            .orderBy(desc(memoryRelations.createdAt))
-            .limit(PAGE_SIZE + 1)
-            .offset(offset)
-            .all();
+    const rows = deps.db.all<{
+      id: string;
+      judgment_id: string;
+      source_id: string;
+      target_id: string;
+      relation: string | null;
+      status: 'pending' | 'judged' | 'orphaned';
+      marked_by_actor: string | null;
+      created_at: number;
+      source_content: string;
+      target_content: string;
+    }>(sql`
+      SELECT r.id, r.judgment_id, r.source_id, r.target_id, r.relation,
+             r.status, r.marked_by_actor, r.created_at,
+             ms.content AS source_content,
+             mt.content AS target_content
+      FROM memory_relations r
+      JOIN memory ms ON ms.id = r.source_id
+      JOIN memory mt ON mt.id = r.target_id
+      ${whereSql}
+      ORDER BY r.created_at DESC
+      LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
+    `);
 
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
@@ -126,7 +135,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
               r.status === 'pending'
                 ? html`
                     <form
-                      action="/dashboard/judgments/${r.judgmentId}/orphan"
+                      action="/dashboard/judgments/${r.judgment_id}/orphan"
                       method="post"
                       class="inline"
                       data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
@@ -140,15 +149,18 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
                 : raw('<span class="muted small">—</span>');
             return html`
               <tr>
-                <td class="mono small">${shortId(r.id)}</td>
-                <td>${statusPill(r.status)}</td>
-                <td>${r.relation ?? raw('<span class="muted">—</span>')}</td>
                 <td class="mono small">
-                  <a href="/dashboard/memories/${r.sourceId}">${shortId(r.sourceId)}</a>
-                  → <a href="/dashboard/memories/${r.targetId}">${shortId(r.targetId)}</a>
+                  <a href="/dashboard/judgments/${r.id}">${shortId(r.id)}</a>
                 </td>
-                <td class="small">${r.markedByActor ?? raw('<span class="muted">—</span>')}</td>
-                <td class="muted">${formatTs(r.createdAt)}</td>
+                <td>${statusPill(r.status)}</td>
+                <td>${verdictPill(r.relation)}</td>
+                <td class="small">
+                  <a href="/dashboard/memories/${r.source_id}">${truncate(r.source_content, 60)}</a>
+                  →
+                  <a href="/dashboard/memories/${r.target_id}">${truncate(r.target_content, 60)}</a>
+                </td>
+                <td class="small">${r.marked_by_actor ?? raw('<span class="muted">—</span>')}</td>
+                <td class="muted">${formatTs(new Date(r.created_at))}</td>
                 <td>${orphanForm}</td>
               </tr>
             `;
@@ -189,6 +201,153 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     `;
     return c.html(
       renderPage(c, deps.sessions, body, { title: 'Judgments', activeNav: 'judgments' }),
+    );
+  });
+
+  app.get('/:id', (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+
+    const id = c.req.param('id');
+    const row = deps.db.get<{
+      id: string;
+      judgment_id: string;
+      source_id: string;
+      target_id: string;
+      relation: string | null;
+      status: 'pending' | 'judged' | 'orphaned';
+      reason: string | null;
+      evidence: string | null;
+      confidence: number | null;
+      marked_by_kind: string | null;
+      marked_by_actor: string | null;
+      judged_at: number | null;
+      created_at: number;
+      source_content: string;
+      target_content: string;
+    }>(sql`
+      SELECT r.id, r.judgment_id, r.source_id, r.target_id, r.relation, r.status,
+             r.reason, r.evidence, r.confidence,
+             r.marked_by_kind, r.marked_by_actor,
+             r.judged_at, r.created_at,
+             ms.content AS source_content,
+             mt.content AS target_content
+      FROM memory_relations r
+      JOIN memory ms ON ms.id = r.source_id
+      JOIN memory mt ON mt.id = r.target_id
+      WHERE r.id = ${id}
+    `);
+
+    if (!row) {
+      return c.html(
+        renderPage(c, deps.sessions, html`<p class="flash error">Judgment not found.</p>`, {
+          title: 'Judgment',
+          activeNav: 'judgments',
+        }),
+        404,
+      );
+    }
+
+    let evidencePretty: string | null = null;
+    if (row.evidence !== null && row.evidence !== undefined) {
+      try {
+        evidencePretty = JSON.stringify(JSON.parse(row.evidence), null, 2);
+      } catch {
+        evidencePretty = String(row.evidence);
+      }
+    }
+
+    const orphanForm =
+      row.status === 'pending'
+        ? html`
+            <form
+              action="/dashboard/judgments/${row.judgment_id}/orphan"
+              method="post"
+              class="inline"
+              data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
+              data-confirm-label="MARK ORPHANED"
+              data-confirm-tone="danger"
+            >
+              ${csrfInput(session.session, deps.sessions, 'judgment.orphan')}
+              <button class="warn" type="submit">Mark orphaned</button>
+            </form>
+          `
+        : raw('<span class="muted">No actions available — this judgment is closed.</span>');
+
+    const body = html`
+      ${viewHead({
+        num: '04',
+        title: `Rembric Judgment ${shortId(row.id)}.`,
+        hl: 'Rembric',
+        meta: [
+          { k: 'STATUS', v: row.status.toUpperCase() },
+          { k: 'VERDICT', v: row.relation ? row.relation.toUpperCase() : '—' },
+        ],
+      })}
+      ${backLink({ href: '/dashboard/judgments', label: 'BACK TO JUDGMENTS' })}
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="label">Status</div>
+          <div class="value">${statusPill(row.status)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Verdict</div>
+          <div class="value">${verdictPill(row.relation)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Confidence</div>
+          <div class="value">${row.confidence !== null ? row.confidence.toFixed(2) : '—'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Marked by</div>
+          <div class="value">
+            ${row.marked_by_kind ?? '—'}
+            ${row.marked_by_actor
+              ? html`<span class="muted small"> · ${row.marked_by_actor}</span>`
+              : raw('')}
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Created</div>
+          <div class="value" style="font-size:.9rem">${formatTs(new Date(row.created_at))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Judged</div>
+          <div class="value" style="font-size:.9rem">
+            ${row.judged_at !== null ? formatTs(new Date(row.judged_at)) : '—'}
+          </div>
+        </div>
+      </div>
+
+      <h2>Source</h2>
+      <p class="mono small">
+        <a href="/dashboard/memories/${row.source_id}">${shortId(row.source_id)}</a>
+      </p>
+      <pre>${row.source_content}</pre>
+
+      <h2>Target</h2>
+      <p class="mono small">
+        <a href="/dashboard/memories/${row.target_id}">${shortId(row.target_id)}</a>
+      </p>
+      <pre>${row.target_content}</pre>
+
+      <h2>Reason</h2>
+      <p>${row.reason ?? raw('<span class="muted">—</span>')}</p>
+
+      <h2>Evidence</h2>
+      ${evidencePretty ? html`<pre>${evidencePretty}</pre>` : html`<p class="muted">—</p>`}
+
+      <h2>Judgment id</h2>
+      <p class="mono small">${escape(row.judgment_id)}</p>
+
+      <h2>Actions</h2>
+      <p>${orphanForm}</p>
+    `;
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: `Judgment ${shortId(row.id)}`,
+        activeNav: 'judgments',
+      }),
     );
   });
 

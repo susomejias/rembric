@@ -25,7 +25,15 @@ import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
 import { createPromptsRouter } from '../dashboard/prompts.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
-import { escape, html, raw, shell, statusPill, type SafeHtml } from '../dashboard/templates.js';
+import {
+  escape,
+  html,
+  raw,
+  shell,
+  statusPill,
+  verdictPill,
+  type SafeHtml,
+} from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import type { Db } from '../db/client.js';
@@ -191,24 +199,26 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
 
     const activity = sevenDayActivity(deps.db);
 
-    const pendingRows = deps.db.all<{
+    const recentJudgedRows = deps.db.all<{
       id: string;
       judgment_id: string;
-      created_at: number;
+      relation: string;
+      judged_at: number;
+      marked_by_kind: string | null;
       source_id: string;
       target_id: string;
       source_content: string;
       target_content: string;
     }>(sql`
-      SELECT r.id, r.judgment_id, r.created_at,
+      SELECT r.id, r.judgment_id, r.relation, r.judged_at, r.marked_by_kind,
              r.source_id, r.target_id,
              ms.content AS source_content,
              mt.content AS target_content
       FROM memory_relations r
       JOIN memory ms ON ms.id = r.source_id
       JOIN memory mt ON mt.id = r.target_id
-      WHERE r.status = 'pending'
-      ORDER BY r.created_at ASC
+      WHERE r.status = 'judged'
+      ORDER BY r.judged_at DESC
       LIMIT 4
     `);
 
@@ -274,30 +284,30 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         hl: 'Rembric',
       })}
 
-      <div class="grid-7" style="margin-bottom:var(--s-6)">
+      <div class="grid-6" style="margin-bottom:var(--s-6)">
         ${statCard({
-          k: 'TOTAL',
+          k: 'TOTAL MEMORIES',
           v: stats.totalMemories,
           tone: 'fg',
-          sub: html`${sparkline(activity)}<span>7D</span>`,
+          sub: html`${sparkline(activity)}<span>LAST 7 DAYS</span>`,
           href: '/dashboard/memories',
         })}
         ${statCard({
-          k: 'ACTIVE',
+          k: 'ACTIVE MEMORIES',
           v: stats.activeMemories,
           tone: 'lime',
           sub: pctOfTotal(stats.activeMemories, stats.totalMemories),
           href: '/dashboard/memories?status=active',
         })}
         ${statCard({
-          k: 'SUPERSEDED',
+          k: 'SUPERSEDED MEMORIES',
           v: supersededMemories,
           tone: supersededColor,
           sub: html`<span>SAFE TO ARCHIVE</span><span>›</span>`,
           href: '/dashboard/memories?status=superseded',
         })}
         ${statCard({
-          k: 'ARCHIVED',
+          k: 'ARCHIVED MEMORIES',
           v: stats.archivedMemories,
           tone: 'dim',
           sub: html`<span>DECAYED</span><span>›</span>`,
@@ -314,52 +324,42 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           k: 'ACTIVE SESSIONS',
           v: stats.activeSessions,
           tone: stats.activeSessions > 0 ? 'lime' : 'fg',
-          sub: html`<span>NOW</span><span>›</span>`,
+          sub: html`<span>CONNECTED NOW</span><span>›</span>`,
           href: '/dashboard/sessions',
-        })}
-        ${statCard({
-          k: 'PENDING JUDGMENTS',
-          v: stats.pendingJudgments,
-          tone: stats.pendingJudgments > 0 ? 'warn' : 'lime',
-          sub: html`<span>${orphanedJ}</span><span>ORPHANED</span>`,
-          href: '/dashboard/judgments?status=pending',
         })}
       </div>
 
       <div class="row-2" style="margin-bottom:var(--s-6)">
         <div>
           ${sectionBar({
-            name: 'PENDING JUDGMENTS',
-            meta: 'QUEUE / OLDEST FIRST',
-            more: raw(
-              '<a href="/dashboard/judgments?status=pending" style="color:var(--lime)">OPEN ALL ›</a>',
-            ),
+            name: 'RECENT JUDGMENTS',
+            meta: 'NEWEST FIRST',
+            more: raw('<a href="/dashboard/judgments" style="color:var(--lime)">OPEN ALL ›</a>'),
           })}
-          ${pendingRows.length === 0
-            ? html`<div class="tbl-empty">NO PENDING JUDGMENTS YET</div>`
+          ${recentJudgedRows.length === 0
+            ? html`<div class="tbl-empty">NO JUDGMENTS YET</div>`
             : html`
                 <div class="jq">
-                  ${pendingRows.map(
+                  ${recentJudgedRows.map(
                     (r) => html`
                       <div class="jq-item">
                         <div class="pair">
                           <div class="met">
-                            <span class="pill k-pending">PENDING</span>
-                            <span>${shortDisplayId(r.id)}</span>
-                            <span>·</span>
-                            <span>${relTime(r.created_at)}</span>
+                            ${verdictPill(r.relation)}
+                            <span>${relTime(r.judged_at)}</span>
+                            ${r.marked_by_kind
+                              ? html`<span>·</span><span class="fg-dim">${r.marked_by_kind}</span>`
+                              : raw('')}
                           </div>
                           <div class="mem">
-                            <span class="t-mono fg-dim">${shortDisplayId(r.source_id)}</span>
-                            <span class="txt fg-dim" style="flex:1"
-                              >${truncate(r.source_content, 70)}</span
+                            <a href="/dashboard/memories/${r.source_id}" class="txt"
+                              >${truncate(r.source_content, 70)}</a
                             >
                           </div>
                           <div class="mem">
                             <span class="arrow">↳</span>
-                            <span class="t-mono fg-dim">${shortDisplayId(r.target_id)}</span>
-                            <span class="txt fg-dim" style="flex:1"
-                              >${truncate(r.target_content, 70)}</span
+                            <a href="/dashboard/memories/${r.target_id}" class="txt"
+                              >${truncate(r.target_content, 70)}</a
                             >
                           </div>
                         </div>
@@ -367,8 +367,8 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                           ${btn({
                             variant: 'primary',
                             size: 'sm',
-                            label: 'JUDGE',
-                            href: `/dashboard/judgments`,
+                            label: 'VIEW →',
+                            href: `/dashboard/judgments/${r.id}`,
                           })}
                         </div>
                       </div>

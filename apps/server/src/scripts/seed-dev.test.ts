@@ -21,7 +21,7 @@ describe('runSeed', () => {
     expect(result.counts).toEqual({
       projects: 1,
       tokens: 3,
-      memories: 23,
+      memories: 31,
       endedSessions: 3,
       activeSessions: 2,
       pendingJudgments: 1,
@@ -63,7 +63,7 @@ describe('runSeed', () => {
     expect(result.refused).toBeUndefined();
     expect(result.counts!.projects).toBe(1);
     expect(result.counts!.tokens).toBe(3);
-    expect(result.counts!.memories).toBe(23);
+    expect(result.counts!.memories).toBe(31);
     expect(result.counts!.pendingJudgments).toBe(1);
   });
 
