@@ -220,15 +220,16 @@ describe('tblEmpty', () => {
 });
 
 describe('NAV', () => {
-  it('exposes 8 entries in MAIN + ADMIN groups', () => {
-    expect(NAV).toHaveLength(8);
-    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(5);
+  it('exposes 9 entries in MAIN + ADMIN groups', () => {
+    expect(NAV).toHaveLength(9);
+    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(6);
     expect(NAV.filter((n) => n.group === 'ADMIN')).toHaveLength(3);
   });
 
   it('navEntry(key) returns the matching entry', () => {
     expect(navEntry('home').href).toBe('/dashboard');
     expect(navEntry('memories').num).toBe('02');
+    expect(navEntry('prompts').href).toBe('/dashboard/prompts');
     expect(navEntry('maintenance').href).toBe('/dashboard/maintenance');
   });
 });

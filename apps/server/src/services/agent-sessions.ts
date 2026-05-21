@@ -605,7 +605,7 @@ export class AgentSessionsService {
          AND s.ended_at IS NOT NULL
          AND s.ended_at < ${cutoff}
          AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
-         AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id AND p.deleted_at IS NULL)
          AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
     `) as { v: number } | undefined;
     return row?.v ?? 0;
@@ -645,7 +645,7 @@ export class AgentSessionsService {
            AND s.ended_at IS NOT NULL
            AND s.ended_at < ${cutoff}
            AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
-           AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
+           AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id AND p.deleted_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
       `);
       const deletedIds = eligible.map((r) => r.id);

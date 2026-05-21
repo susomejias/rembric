@@ -5,6 +5,7 @@ import type { Db } from '../db/client.js';
 import { type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type MemoryService } from '../services/memory.js';
+import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
 
@@ -19,6 +20,7 @@ export interface MaintenanceDeps {
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
   memory: MemoryService;
+  prompts: PromptsService;
   tokens: TokensService;
 }
 
@@ -155,9 +157,11 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     const url = new URL(c.req.url);
     const purgedSessions = url.searchParams.get('purged-sessions');
     const purgedMemories = url.searchParams.get('purged-memories');
+    const purgedPrompts = url.searchParams.get('purged-prompts');
 
     const emptyCount = deps.agentSessions.countPurgeableEmpty();
     const archivedCount = deps.memory.countPurgeableDisconnectedArchived();
+    const deletedPromptsCount = deps.prompts.countPurgeableDeleted();
     const breakdown = readBreakdown(deps.db);
 
     const flashBanner =
@@ -173,7 +177,13 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
               label: 'PURGED',
               body: html`Removed ${purgedMemories} disconnected archived memory row(s).`,
             })
-          : raw('');
+          : purgedPrompts !== null
+            ? flash({
+                tone: 'success',
+                label: 'PURGED',
+                body: html`Removed ${purgedPrompts} deleted prompt row(s).`,
+              })
+            : raw('');
 
     const breakdownRows = breakdown.perTable.map(
       (r) => html`
@@ -220,6 +230,28 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
         : btn({
             variant: 'secondary',
             label: 'NO DISCONNECTED ARCHIVED TO PURGE',
+            disabled: true,
+          });
+
+    const promptBtn =
+      deletedPromptsCount > 0
+        ? html`
+            <form
+              action="/dashboard/maintenance/purge-prompts"
+              method="post"
+              data-confirm="Purge ${deletedPromptsCount} soft-deleted prompt row(s)? This is irreversible. prompts_fts shadow rows are also removed. The deletion is journaled in consolidation_ops for audit."
+              data-confirm-label="PURGE ${deletedPromptsCount} PROMPTS"
+              data-confirm-tone="danger"
+            >
+              ${csrfInput(session.session, deps.sessions, 'maintenance.purge-prompts')}
+              <button class="btn danger" type="submit">
+                PURGE DELETED PROMPTS (${deletedPromptsCount})
+              </button>
+            </form>
+          `
+        : btn({
+            variant: 'secondary',
+            label: 'NO DELETED PROMPTS TO PURGE',
             disabled: true,
           });
 
@@ -296,6 +328,27 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
           </div>
           <div class="actions">${memoryBtn}</div>
         </div>
+
+        <div class="maint-card">
+          <div class="head">
+            <h3>Deleted Prompts</h3>
+            <span class="count ${deletedPromptsCount === 0 ? 'zero' : ''}"
+              >${deletedPromptsCount}</span
+            >
+          </div>
+          <div class="body">
+            <p>Eligible rows match:</p>
+            <ul>
+              <li><code>deleted_at IS NOT NULL</code></li>
+            </ul>
+            <p>
+              Covers both operator soft-deletes (from <code>/dashboard/prompts</code>) and refine
+              supersedes (from <code>memory.save_prompt({ replaces })</code>). The
+              <code>prompts_fts</code> shadow row is dropped in the same transaction.
+            </p>
+          </div>
+          <div class="actions">${promptBtn}</div>
+        </div>
       </section>
     `;
 
@@ -352,6 +405,35 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     try {
       const { deletedIds } = deps.memory.purgeDisconnectedArchived({ adminBypass: true });
       return c.redirect(`/dashboard/maintenance?purged-memories=${deletedIds.length}`);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
+            title: 'Maintenance',
+            activeNav: 'maintenance',
+          }),
+          err.code === 'forbidden' ? 403 : 400,
+        );
+      }
+      throw err;
+    }
+  });
+
+  app.post('/purge-prompts', async (c) => {
+    const guard = requireAdmin(c, deps);
+    if (guard.forbidden) return guard.forbidden;
+    const session = guard.session;
+    const form = await readFormAndVerifyCsrf(
+      c,
+      session.session,
+      deps.sessions,
+      'maintenance.purge-prompts',
+    );
+    if (form instanceof Response) return form;
+
+    try {
+      const { deletedIds } = deps.prompts.purgeDeleted({ adminBypass: true });
+      return c.redirect(`/dashboard/maintenance?purged-prompts=${deletedIds.length}`);
     } catch (err) {
       if (err instanceof DomainError) {
         return c.html(

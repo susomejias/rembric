@@ -1,0 +1,371 @@
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { Hono, type Context } from 'hono';
+
+import type { Db } from '../db/client.js';
+import { agentSessions } from '../db/schema/agent-sessions.js';
+import { projects } from '../db/schema/projects.js';
+import { prompts as promptsTbl, type Prompt } from '../db/schema/prompts.js';
+import { DomainError } from '../services/errors.js';
+import type { PromptsService } from '../services/prompts.js';
+import type { SessionsService } from '../services/sessions.js';
+
+import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
+import { renderPage } from './page-shell.js';
+import { escape, formatTs, html, raw, shortId } from './templates.js';
+import type { ResolvedSession } from './types.js';
+
+export interface PromptsDeps {
+  db: Db;
+  prompts: PromptsService;
+  sessions: SessionsService;
+}
+
+function getSession(c: Context): ResolvedSession | null {
+  return (c.get('session') as ResolvedSession | undefined) ?? null;
+}
+
+export function createPromptsRouter(deps: PromptsDeps): Hono {
+  const app = new Hono();
+
+  app.get('/', (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+
+    const url = new URL(c.req.url);
+    const justDeleted = url.searchParams.get('deleted');
+    const justUndeleted = url.searchParams.get('undeleted');
+    const includeDeleted = url.searchParams.get('include_deleted') === '1';
+    const projectFilter = url.searchParams.get('project') ?? '';
+    const agentFilter = url.searchParams.get('agent') ?? '';
+    const sessionFilter = url.searchParams.get('session') ?? '';
+    const query = url.searchParams.get('q') ?? '';
+    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const offset = page * PAGE_SIZE;
+
+    const projectRows = deps.db.select().from(projects).all();
+    const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
+    const projectById = new Map(projectRows.map((p) => [p.id, p]));
+
+    const conditions = [];
+    if (!includeDeleted) {
+      conditions.push(isNull(promptsTbl.deletedAt));
+    }
+    if (projectFilter === '__global__') {
+      conditions.push(isNull(promptsTbl.projectId));
+    } else if (projectFilter) {
+      const p = projectBySlug.get(projectFilter);
+      if (p) conditions.push(eq(promptsTbl.projectId, p.id));
+    }
+    if (agentFilter) {
+      conditions.push(eq(promptsTbl.agent, agentFilter));
+    }
+    if (sessionFilter) {
+      // Operator pastes shortId; match by prefix against the session id.
+      conditions.push(sql`${promptsTbl.sessionId} LIKE ${sessionFilter + '%'}`);
+    }
+
+    let rows: Prompt[];
+    if (query) {
+      const ids = deps.db
+        .all<{ id: string }>(
+          sql`
+            SELECT p.id
+            FROM prompts p
+            JOIN prompts_fts f ON f.rowid = p.rowid
+            WHERE prompts_fts MATCH ${query}
+            ORDER BY rank, p.created_at DESC
+            LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
+          `,
+        )
+        .map((r) => r.id);
+      rows =
+        ids.length === 0
+          ? []
+          : deps.db
+              .select()
+              .from(promptsTbl)
+              .where(sql`id IN ${ids}`)
+              .all()
+              .filter((p) =>
+                matchesFilters(
+                  p,
+                  projectBySlug,
+                  includeDeleted,
+                  projectFilter,
+                  agentFilter,
+                  sessionFilter,
+                ),
+              );
+    } else {
+      const wherePredicate = conditions.length > 0 ? and(...conditions) : undefined;
+      const q = deps.db
+        .select()
+        .from(promptsTbl)
+        .orderBy(desc(promptsTbl.createdAt))
+        .limit(PAGE_SIZE + 1)
+        .offset(offset);
+      rows = wherePredicate ? q.where(wherePredicate).all() : q.all();
+    }
+
+    const hasMore = rows.length > PAGE_SIZE;
+    const visible = rows.slice(0, PAGE_SIZE);
+
+    const flash = justDeleted
+      ? html`<p class="flash success">
+          Prompt <code>${justDeleted}</code> soft-deleted.
+          <a href="/dashboard/prompts?include_deleted=1">View deleted</a>
+          to undelete.
+        </p>`
+      : justUndeleted
+        ? html`<p class="flash success">Prompt <code>${justUndeleted}</code> restored.</p>`
+        : raw('');
+
+    const projectOptions = [
+      raw('<option value="">all scopes</option>'),
+      raw(
+        `<option value="__global__"${projectFilter === '__global__' ? ' selected' : ''}>global only</option>`,
+      ),
+      ...projectRows.map((p) =>
+        raw(
+          `<option value="${escape(p.slug)}"${projectFilter === p.slug ? ' selected' : ''}>${escape(p.slug)}</option>`,
+        ),
+      ),
+    ];
+
+    const renderRow = (p: Prompt) => {
+      const projectLabel = p.projectId
+        ? (projectById.get(p.projectId)?.slug ?? shortId(p.projectId))
+        : '—';
+      const isDeleted = p.deletedAt != null;
+      const isRefined = isDeleted && Array.isArray(p.replaces) && p.replaces.length > 0;
+      const statusPill = isDeleted
+        ? isRefined
+          ? raw('<span class="pill k-refined">REFINED</span>')
+          : raw('<span class="pill k-deleted">DELETED</span>')
+        : raw('<span class="pill k-active">ACTIVE</span>');
+      const titleCell = p.title
+        ? html`<span class="rbr-prompt-title" title="${p.title}">${p.title}</span>`
+        : html`<span class="rbr-prompt-title muted">—</span>`;
+      const tagsCell =
+        Array.isArray(p.tags) && p.tags.length > 0
+          ? html`<span class="rbr-prompt-tags"
+              >${p.tags.map((t) => html`<span class="tag">${t}</span>`)}</span
+            >`
+          : raw('—');
+      const contentCell = html`
+        <details class="rbr-prompt-content">
+          <summary>${truncate(p.content, 120)}</summary>
+          <pre>${p.content}</pre>
+        </details>
+      `;
+      const sessionCell = p.sessionId
+        ? html`<a href="/dashboard/sessions/${p.sessionId}" class="mono"
+            >${shortId(p.sessionId)}</a
+          >`
+        : raw('—');
+      const actionForm = isDeleted
+        ? html`
+            <form action="/dashboard/prompts/${p.id}/undelete" method="post" class="inline">
+              ${csrfInput(session.session, deps.sessions, 'prompt.undelete')}
+              <button type="submit">Undelete</button>
+            </form>
+          `
+        : html`
+            <form
+              action="/dashboard/prompts/${p.id}/delete"
+              method="post"
+              class="inline"
+              data-confirm="Soft-delete this prompt? It is hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable via the Undelete action."
+              data-confirm-label="DELETE PROMPT"
+              data-confirm-tone="warn"
+            >
+              ${csrfInput(session.session, deps.sessions, 'prompt.delete')}
+              <button class="warn" type="submit">Delete</button>
+            </form>
+          `;
+      return html`
+        <tr>
+          <td class="mono">${shortId(p.id)}</td>
+          <td>${titleCell}</td>
+          <td>${projectLabel}</td>
+          <td>${sessionCell}</td>
+          <td>${p.agent ?? '—'}</td>
+          <td>${tagsCell}</td>
+          <td>${statusPill}</td>
+          <td class="muted">${formatTs(p.createdAt)}</td>
+          <td>${contentCell}</td>
+          <td class="actions">
+            <div class="actions-stack">${actionForm}</div>
+          </td>
+        </tr>
+      `;
+    };
+
+    const body = html`
+      ${viewHead({
+        num: '03b',
+        title: 'Rembric Prompts.',
+        hl: 'Rembric',
+        meta: [{ k: 'SHOWING', v: `${visible.length} ROWS` }],
+      })}
+      ${flash}
+      ${includeDeleted
+        ? raw(
+            '<p class="small muted">Showing soft-deleted rows. <a href="/dashboard/prompts">Hide</a>.</p>',
+          )
+        : raw(
+            '<p class="small muted"><a href="/dashboard/prompts?include_deleted=1">Show deleted</a></p>',
+          )}
+
+      <form class="filters" method="get">
+        <span class="group">
+          <span class="k">SCOPE</span>
+          <select name="project">
+            ${projectOptions}
+          </select>
+        </span>
+        <span class="group">
+          <span class="k">SESSION</span>
+          <input type="text" name="session" value="${sessionFilter}" placeholder="shortId prefix" />
+        </span>
+        <span class="group">
+          <span class="k">AGENT</span>
+          <input type="text" name="agent" value="${agentFilter}" placeholder="e.g. claude-code" />
+        </span>
+        <span class="group search">
+          <span class="k">SEARCH</span>
+          <input type="search" name="q" value="${query}" placeholder="FTS5 over content + tags" />
+        </span>
+        ${includeDeleted
+          ? raw('<input type="hidden" name="include_deleted" value="1" />')
+          : raw('')}
+        <span class="acts">
+          <button class="btn primary" type="submit">FILTER</button>
+          <a class="clear" href="/dashboard/prompts${includeDeleted ? '?include_deleted=1' : ''}"
+            >CLEAR</a
+          >
+        </span>
+      </form>
+
+      ${visible.length === 0
+        ? html`<p class="muted">No prompts match this filter.</p>`
+        : html`
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>title</th>
+                    <th>project</th>
+                    <th>session</th>
+                    <th>agent</th>
+                    <th>tags</th>
+                    <th>status</th>
+                    <th>created</th>
+                    <th>content</th>
+                    <th>actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${visible.map(renderRow)}
+                </tbody>
+              </table>
+            </div>
+          `}
+      ${visible.length > 0 || page > 0
+        ? pager({
+            page,
+            hasMore,
+            pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+            totalLabel: `${visible.length} ROWS`,
+          })
+        : raw('')}
+    `;
+
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: 'Prompts',
+        activeNav: 'prompts',
+        view: 'prompts',
+      }),
+    );
+  });
+
+  app.post('/:id/delete', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'prompt.delete');
+    if (form instanceof Response) return form;
+    const id = c.req.param('id');
+    try {
+      deps.prompts.softDelete(id, { adminBypass: true });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
+            title: 'Prompts',
+            activeNav: 'prompts',
+          }),
+          err.code === 'prompt_not_found' ? 404 : 400,
+        );
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/prompts?deleted=${encodeURIComponent(id)}`);
+  });
+
+  app.post('/:id/undelete', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'prompt.undelete');
+    if (form instanceof Response) return form;
+    const id = c.req.param('id');
+    try {
+      deps.prompts.undelete(id, { adminBypass: true });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return c.html(
+          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
+            title: 'Prompts',
+            activeNav: 'prompts',
+          }),
+          err.code === 'prompt_not_found' ? 404 : 400,
+        );
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/prompts?undeleted=${encodeURIComponent(id)}`);
+  });
+
+  return app;
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
+}
+
+function matchesFilters(
+  p: Prompt,
+  projectBySlug: Map<string, { id: string }>,
+  includeDeleted: boolean,
+  projectFilter: string,
+  agentFilter: string,
+  sessionFilter: string,
+): boolean {
+  if (!includeDeleted && p.deletedAt != null) return false;
+  if (projectFilter === '__global__' && p.projectId != null) return false;
+  if (projectFilter && projectFilter !== '__global__') {
+    const proj = projectBySlug.get(projectFilter);
+    if (!proj || p.projectId !== proj.id) return false;
+  }
+  if (agentFilter && p.agent !== agentFilter) return false;
+  if (sessionFilter && (!p.sessionId || !p.sessionId.startsWith(sessionFilter))) return false;
+  return true;
+}
+
+// Maintained imports for downstream consumers.
+void agentSessions;
+void backLink;
+void isNotNull;

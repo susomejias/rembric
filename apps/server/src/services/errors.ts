@@ -21,7 +21,11 @@ export type DomainErrorCode =
   | 'token_expired'
   | 'admin_token_required'
   | 'conflict'
-  | 'id_collision';
+  | 'id_collision'
+  | 'prompt_not_found'
+  | 'prompt_scope_mismatch'
+  | 'prompt_already_deleted'
+  | 'prompt_not_deleted';
 
 export class DomainError extends Error {
   constructor(
