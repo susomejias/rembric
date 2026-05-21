@@ -425,5 +425,134 @@ describe('AgentSessionsService', () => {
         /adminBypass:true required/,
       );
     });
+
+    it('preserves byte-identical behavior after the predicate refactor (3-fixture parity)', () => {
+      const empty = sessions.start({ tokenId, projectId, agent: 'empty' });
+      endAndBackdate(empty.id, 2 * 60 * 60 * 1000);
+
+      const withMemory = sessions.start({ tokenId, projectId, agent: 'with-memory' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+        )
+        .run('mem-parity-test-001', projectId, Date.now(), withMemory.id);
+      endAndBackdate(withMemory.id, 2 * 60 * 60 * 1000);
+
+      const withSummary = sessions.start({ tokenId, projectId, agent: 'with-summary' });
+      sessions.summarize(withSummary.id, { tokenId, summary: 'did the thing' });
+      db.handle.raw
+        .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+        .run(Date.now() - 2 * 60 * 60 * 1000, withSummary.id);
+
+      expect(sessions.countPurgeableEmpty()).toBe(1);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).toEqual([empty.id]);
+      expect(sessions.getById(empty.id)).toBeUndefined();
+      expect(sessions.getById(withMemory.id)).toBeDefined();
+      expect(sessions.getById(withSummary.id)).toBeDefined();
+    });
+  });
+
+  describe('recentForContext content filter (sessionHasContent predicate)', () => {
+    function newSessionId(suffix: string): string {
+      return `sess-content-${suffix}-${Date.now()}`;
+    }
+
+    it('excludes an empty active session with no anchored content', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'empty-active' });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
+
+    it('includes a session that has a summary written', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-summary' });
+      sessions.summarize(s.id, { tokenId, summary: 'goal: x' });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('includes a session with title_final = 1 even without a summary', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-title-final' });
+      db.handle.raw
+        .prepare('UPDATE sessions SET title = ?, title_final = 1 WHERE id = ?')
+        .run('locked title', s.id);
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('includes a session referenced by at least one memory row', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-memory' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+        )
+        .run(newSessionId('mem'), projectId, Date.now(), s.id);
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('includes a session referenced by at least one prompt row', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-prompt' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO prompts (id, session_id, project_id, content, agent, created_at)
+           VALUES (?, ?, ?, 'do the thing', 'claude', ?)`,
+        )
+        .run(newSessionId('p'), s.id, projectId, Date.now());
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('includes a session referenced by at least one confirmation row', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-confirmation' });
+      const memoryId = newSessionId('mem-for-conf');
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, NULL)`,
+        )
+        .run(memoryId, projectId, Date.now());
+      db.handle.raw
+        .prepare(
+          `INSERT INTO confirmations (id, memory_id, event_ts, source, session_id)
+           VALUES (?, ?, ?, NULL, ?)`,
+        )
+        .run(newSessionId('c'), memoryId, Date.now(), s.id);
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('filter-then-truncate: backfills past newer empty sessions', () => {
+      const useful = sessions.start({ tokenId, projectId, agent: 'useful-old' });
+      sessions.summarize(useful.id, { tokenId, summary: 'older but useful' });
+
+      // Three empty sessions started AFTER `useful`. Backdating started_at
+      // via raw SQL to guarantee ordering on fast machines.
+      const now = Date.now();
+      for (let i = 1; i <= 3; i++) {
+        const e = sessions.start({ tokenId, projectId, agent: `empty-${i}` });
+        db.handle.raw
+          .prepare('UPDATE sessions SET started_at = ? WHERE id = ?')
+          .run(now + i * 1000, e.id);
+      }
+      db.handle.raw
+        .prepare('UPDATE sessions SET started_at = ? WHERE id = ?')
+        .run(now - 60_000, useful.id);
+
+      const recent = sessions.recentForContext({ projectId, limit: 1 });
+      expect(recent).toHaveLength(1);
+      expect(recent[0]?.id).toBe(useful.id);
+    });
+
+    it('soft-deleted session with content is still excluded', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'deleted-with-content' });
+      sessions.summarize(s.id, { tokenId, summary: 'had value, then deleted' });
+      sessions.softDelete(s.id, { adminBypass: true });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
   });
 });

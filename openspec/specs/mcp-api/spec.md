@@ -248,7 +248,21 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories }`, with each list scoped to the request context (global vs path-scoped project), `recentSessions` ordered by `started_at DESC`, `recentMemories` ordered by `last_seen_at DESC`, and `includeArchived = false` (default) filtering out `status = 'archived'` rows
+- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories }`, with each list scoped to the request context (global vs path-scoped project)
+- **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 5`
+- **AND** `recentMemories` SHALL be ordered by `last_seen_at DESC` with `includeArchived = false` (default) filtering out `status = 'archived'` rows
+
+#### Scenario: `memory.context.recentSessions` backfills past empty sessions
+
+- **GIVEN** the active scope contains, in `started_at` order from newest to oldest, three empty sessions and one useful session
+- **WHEN** an MCP client calls `memory.context({sessions: 1})`
+- **THEN** the response's `recentSessions` array SHALL have length 1 and SHALL contain only the useful session — the three newer empty sessions SHALL NOT consume the slot
+
+#### Scenario: `memory.context.recentSessions` excludes soft-deleted sessions
+
+- **GIVEN** a session that has content AND is soft-deleted (`deleted_at IS NOT NULL`)
+- **WHEN** an MCP client calls `memory.context`
+- **THEN** the row SHALL NOT appear in `recentSessions` — the soft-delete filter and the content filter both apply
 
 #### Scenario: `memory.context` arguments exceed clamps
 

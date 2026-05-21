@@ -255,6 +255,9 @@ describe('MCP protocol conformance', () => {
     expect(ended.isError).toBeFalsy();
 
     // 5. memory.context should include the session as recent and `ended`.
+    //    The session was anchored to a saved memory AND received a summary,
+    //    so it satisfies the `sessionHasContent` predicate and survives the
+    //    content filter applied by recentForContext.
     const ctx = (await client.callTool({
       name: 'memory.context',
       arguments: { sessions: 5, memories: 5 },
@@ -267,6 +270,72 @@ describe('MCP protocol conformance', () => {
     expect(seenSession?.status).toBe('ended');
     expect(seenSession?.summary).toMatch(/wire test/);
     expect(ctxPayload.recentMemories.some((m) => m.id === savedPayload.id)).toBe(true);
+
+    await client.close();
+  });
+
+  it('memory.context excludes a session ended without memories or summary', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'empty session' },
+    })) as ToolResult;
+    const startedPayload = readJson(started) as { sessionId: string };
+
+    const ended = (await client.callTool({
+      name: 'memory.session_end',
+      arguments: {},
+    })) as ToolResult;
+    expect(ended.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string }[];
+    };
+    expect(ctxPayload.recentSessions.some((s) => s.id === startedPayload.sessionId)).toBe(false);
+
+    await client.close();
+  });
+
+  it('memory.context backfills past empty sessions to return useful older ones', async () => {
+    const client = await connect();
+
+    // First: a session WITH content (will be the oldest).
+    const usefulStart = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'useful session' },
+    })) as ToolResult;
+    const usefulPayload = readJson(usefulStart) as { sessionId: string };
+    await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        content: 'backfill-useful-row',
+      },
+    });
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+
+    // Then: three empty sessions in newer-than-useful order.
+    for (let i = 0; i < 3; i++) {
+      await client.callTool({
+        name: 'memory.session_start',
+        arguments: { agent: 'rembric-test', description: `empty ${i}` },
+      });
+      await client.callTool({ name: 'memory.session_end', arguments: {} });
+    }
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 1 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as { recentSessions: { id: string }[] };
+    expect(ctxPayload.recentSessions).toHaveLength(1);
+    expect(ctxPayload.recentSessions[0]?.id).toBe(usefulPayload.sessionId);
 
     await client.close();
   });

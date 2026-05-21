@@ -11,6 +11,29 @@ const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
 
 /**
+ * Single source of truth for "this session has something worth surfacing".
+ *
+ * Consumed positively by `recentForContext` (filter to useful sessions) and
+ * negatively by `countPurgeableEmpty` / `purgeEmpty` (must be empty to be
+ * purgeable). Adding a new content-bearing table that anchors to a session
+ * id (e.g. a future `tool_calls`) MUST update only this helper — every
+ * call site picks the change up automatically.
+ *
+ * `alias` is the SQL identifier used to reference the sessions row in the
+ * caller's query. Callers pass `'s'` (purge methods) or the table name
+ * `'sessions'` (drizzle's implicit alias in `recentForContext`).
+ */
+function sessionHasContentSql(alias: 's' | 'sessions') {
+  return sql.raw(
+    `(${alias}.summary IS NOT NULL` +
+      ` OR ${alias}.title_final = 1` +
+      ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
+      ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id)` +
+      ` OR EXISTS (SELECT 1 FROM confirmations WHERE session_id = ${alias}.id))`,
+  );
+}
+
+/**
  * Service for the agent (MCP) session lifecycle.
  *
  * Append-only contract:
@@ -383,8 +406,12 @@ export class AgentSessionsService {
 
   /**
    * N most recent sessions for the given scope, ordered newest first.
-   * Soft-deleted sessions are NEVER surfaced via this path — memory.context
-   * callers must not see them.
+   * Soft-deleted sessions and empty sessions (those failing the shared
+   * `sessionHasContent` predicate) are NEVER surfaced via this path —
+   * memory.context callers must not see noise. Filter-then-truncate
+   * semantics: empty sessions do not consume slots, so a `limit:N`
+   * request returns the N most-recent USEFUL sessions even if dozens of
+   * newer empties exist between them.
    */
   recentForContext(input: RecentForContextInput): AgentSession[] {
     const limit = clamp(input.limit ?? 5, 1, 25);
@@ -395,7 +422,7 @@ export class AgentSessionsService {
     return this.db
       .select()
       .from(agentSessions)
-      .where(and(scopeCondition, isNull(agentSessions.deletedAt)))
+      .where(and(scopeCondition, isNull(agentSessions.deletedAt), sessionHasContentSql('sessions')))
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit)
       .all();
@@ -590,9 +617,9 @@ export class AgentSessionsService {
    * Predicate (in lock-step with `purgeEmpty`):
    *   - status ∈ {ended, abandoned}
    *   - deleted_at IS NULL (operator soft-delete is respected)
-   *   - summary IS NULL AND title_final = 0
+   *   - NOT sessionHasContent(s) — i.e. no summary, no title_final,
+   *     no referencing memory/prompts/confirmations
    *   - ended_at < now − 1h (grace for late summary writes)
-   *   - no referencing rows in memory, prompts, confirmations
    */
   countPurgeableEmpty(): number {
     const cutoff = this.now().getTime() - SESSION_PURGE_GRACE_MS;
@@ -600,13 +627,9 @@ export class AgentSessionsService {
       SELECT COUNT(*) AS v FROM sessions s
        WHERE s.status IN ('ended','abandoned')
          AND s.deleted_at IS NULL
-         AND s.summary IS NULL
-         AND s.title_final = 0
          AND s.ended_at IS NOT NULL
          AND s.ended_at < ${cutoff}
-         AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
-         AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
-         AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
+         AND NOT ${sessionHasContentSql('s')}
     `) as { v: number } | undefined;
     return row?.v ?? 0;
   }
@@ -640,13 +663,9 @@ export class AgentSessionsService {
         SELECT s.id FROM sessions s
          WHERE s.status IN ('ended','abandoned')
            AND s.deleted_at IS NULL
-           AND s.summary IS NULL
-           AND s.title_final = 0
            AND s.ended_at IS NOT NULL
            AND s.ended_at < ${cutoff}
-           AND NOT EXISTS (SELECT 1 FROM memory        m WHERE m.session_id = s.id)
-           AND NOT EXISTS (SELECT 1 FROM prompts       p WHERE p.session_id = s.id)
-           AND NOT EXISTS (SELECT 1 FROM confirmations c WHERE c.session_id = s.id)
+           AND NOT ${sessionHasContentSql('s')}
       `);
       const deletedIds = eligible.map((r) => r.id);
       if (deletedIds.length === 0) {
