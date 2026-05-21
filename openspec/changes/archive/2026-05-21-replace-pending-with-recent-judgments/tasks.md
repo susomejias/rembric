@@ -1,0 +1,56 @@
+## 1. Replace the home overview pending-judgments tile with recent-judgments
+
+- [x] 1.1 In `apps/server/src/server/dashboard-router.ts`, rename the local `pendingRows` binding to `recentJudgedRows` and replace its SQL with `SELECT r.id, r.judgment_id, r.relation, r.judged_at, r.marked_by_kind, r.source_id, r.target_id, ms.content AS source_content, mt.content AS target_content FROM memory_relations r JOIN memory ms ON ms.id = r.source_id JOIN memory mt ON mt.id = r.target_id WHERE r.status = 'judged' ORDER BY r.judged_at DESC LIMIT 4`. Update the row type to include `relation: RelationKind | null` and `judged_at: number | null` and `marked_by_kind: MarkedByKind | null`.
+- [x] 1.2 In the same file, update the `sectionBar` call inside the left tile of `.row-2`: change `name` from `PENDING JUDGMENTS` to `RECENT JUDGMENTS`, change `meta` from `QUEUE / OLDEST FIRST` to `NEWEST FIRST`, change the `more` anchor `href` from `/dashboard/judgments?status=pending` to `/dashboard/judgments`.
+- [x] 1.3 Replace the per-row `html` template inside the left tile so each row renders, top-down: a `<span class="pill k-${relation}">${relation}</span>` followed by short judgment id, `relTime(judgedAt)` (matching the helper used by `RECENT SESSIONS`), and the `marked_by_kind` value in dim text when present; one `<div class="mem">` line for the source (short id + truncated content); one `<div class="mem">` line for the target (prefixed with the `↳` arrow span + short id + truncated content). Drop the trailing `<div class="acts">` block (no JUDGE button on closed verdicts).
+- [x] 1.4 Replace the empty-state copy `NO PENDING JUDGMENTS YET` with `NO JUDGMENTS YET`.
+- [x] 1.5 Run `pnpm --filter server typecheck` and confirm green.
+
+## 2. Update tests
+
+- [x] 2.1 In `apps/server/src/test/dashboard-e2e.test.ts`, locate the home-page assertion block that touches `PENDING JUDGMENTS` / `NO PENDING JUDGMENTS YET`. Replace it with assertions that the body contains `RECENT JUDGMENTS`, `NEWEST FIRST`, and either `NO JUDGMENTS YET` (empty fixture) or one judged-row fixture with a verdict pill class like `k-supersedes`. _Note: no prior assertions existed for the pending block — added a new test case covering both branches._
+- [x] 2.2 Extend the test seed to insert at least one `memory_relations` row with `status='judged'`, `relation='supersedes'`, `judged_at = now`, and matching source + target memory rows, so the populated branch of the new tile is covered.
+- [x] 2.3 Run `pnpm --filter server vitest run dashboard-e2e.test.ts` and confirm green.
+- [x] 2.4 Run `pnpm test` and confirm the full suite stays green (no regressions in pending-flow tests, since the inline tile is the only thing touched). _466 server tests + 28 hermes-plugin tests passed._
+
+## 3. Validate spec
+
+- [x] 3.1 Run `openspec validate replace-pending-with-recent-judgments --strict` and confirm clean exit.
+- [x] 3.2 Spot-check the rendered dashboard at `pnpm run dev:docker:up` (or local dev): seed a judged relation, confirm the new tile shows it with the correct pill colour and that `OPEN ALL ›` lands on `/dashboard/judgments`. _Operator confirmed visually on 2026-05-21 against the dev stack (desktop + mobile)._
+
+## 4. Link memory content (instead of short ids) on both surfaces
+
+- [x] 4.1 In `apps/server/src/server/dashboard-router.ts` (home overview tile), replace the per-row `mem` lines: remove the `<span class="t-mono fg-dim">${shortDisplayId(...)}</span>` and wrap the truncated content in `<a href="/dashboard/memories/${r.source_id}">` and `<a href="/dashboard/memories/${r.target_id}">` respectively, with `text-decoration:none; color:inherit` inline styles consistent with the adjacent `.tl-item` links.
+- [x] 4.2 In `apps/server/src/dashboard/judgments.ts`, rewrite the rows query as a raw `sql` JOIN: `SELECT r.*, ms.content AS source_content, mt.content AS target_content FROM memory_relations r JOIN memory ms ON ms.id = r.source_id JOIN memory mt ON mt.id = r.target_id ...` preserving the existing WHERE clauses (status/kind filters) and the `ORDER BY r.created_at DESC LIMIT/OFFSET` pagination. Drop the drizzle `select().from(memoryRelations)` path entirely.
+- [x] 4.3 In the same file, update the `source → target` column rendering so each side is `<a href="/dashboard/memories/{id}">{truncate(content, 60)}</a>` (use a small local `truncate` helper or factor one if missing). Remove the previous `shortId(r.sourceId)` / `shortId(r.targetId)` rendering inside that column.
+- [x] 4.4 Extend the e2e test (`apps/server/src/test/dashboard-e2e.test.ts`): in the existing populated-tile assertion, add `expect(afterBody).toContain('href="/dashboard/memories/${a.id}"')` and the same for `b.id`; in the `judgments list view renders after login` test, add an assertion that the response HTML contains `href="/dashboard/memories/"` (twice — once per side) for the seeded judged row.
+- [x] 4.5 Run `pnpm --filter server typecheck`, `pnpm --filter server exec vitest run dashboard-e2e.test.ts`, and `openspec validate replace-pending-with-recent-judgments --strict`. All green.
+
+## 5. Extract verdictPill component
+
+- [x] 5.1 In `apps/server/src/dashboard/templates.ts`, export `verdictPill(kind: string | null | undefined): SafeHtml` alongside `statusPill` / `scopePill`. For null/undefined return `<span class="muted">—</span>`; for known verdicts (`supersedes`, `conflicts_with`, `related`, `compatible`, `scoped`, `not_conflict`) return `<span class="pill k-{kind}">{kind}</span>`; for unknown strings return a neutral `<span class="pill">{kind}</span>` (defensive).
+- [x] 5.2 In `apps/server/src/server/dashboard-router.ts`, import `verdictPill` and replace the inline `<span class="pill k-${r.relation}">${r.relation}</span>` on the home tile with `${verdictPill(r.relation)}`.
+- [x] 5.3 In `apps/server/src/dashboard/judgments.ts`, import `verdictPill` and replace the bare-text `verdict` cell (`${r.relation ?? raw('<span class="muted">—</span>')}`) with `${verdictPill(r.relation)}` so the column gets the same colored pill as the home tile.
+- [x] 5.4 Extend the e2e test to assert the judgments list contains `pill k-supersedes` (mirroring the home assertion). Run `pnpm --filter server exec vitest run dashboard-e2e.test.ts`. Re-run `pnpm test` + `pnpm run lint` + `openspec validate --strict`. All green.
+
+## 6. Judgment detail page + linkage
+
+- [x] 6.1 Add a new route `app.get('/:id', ...)` to `apps/server/src/dashboard/judgments.ts`. The handler SHALL query the row by `memory_relations.id` JOINed with `memory` twice for source + target content, render the `viewHead` + stat grid (Status, Verdict, Confidence, Marked by, Created, Judged), `<pre>` blocks for source/target full contents (with anchors to `/dashboard/memories/{id}`), reason, evidence (JSON pretty-printed), the opaque `judgment_id`, and the orphan form when status='pending'. Return `404` with `Judgment not found.` flash on unknown id.
+- [x] 6.2 In `apps/server/src/server/dashboard-router.ts` (home tile), remove the `<span>${shortDisplayId(r.id)}</span>` + separator from the meta line. (Note: the pill wrapping was later replaced in task 7.1 by a dedicated `VIEW →` button in `.acts` to avoid click conflicts with the memory anchors — superseded by 7.1.)
+- [x] 6.3 In `apps/server/src/dashboard/judgments.ts` (list page), wrap the `shortId(r.id)` rendering of the leftmost `id` column in `<a href="/dashboard/judgments/${r.id}">…</a>`.
+- [x] 6.4 Extend `apps/server/src/test/dashboard-e2e.test.ts`: in the populated-tile test, capture the relation id (`compare()` returns the row), assert `href="/dashboard/judgments/${rel.id}"` is present on the home tile, fetch `/dashboard/judgments/${rel.id}` and assert (a) status 200 (b) body contains both untruncated memory contents (c) body contains `verdictPill` HTML `pill k-supersedes` (d) body contains `BACK TO JUDGMENTS`. Also assert that the home meta line no longer contains the relation's short id rendered as plain text (only inside the anchor href).
+- [x] 6.5 Run `pnpm --filter server typecheck`, `pnpm --filter server exec vitest run dashboard-e2e.test.ts`, `pnpm test`, `pnpm run lint`, and `openspec validate replace-pending-with-recent-judgments --strict`. All green.
+
+## 7. Polish: lime memory links + dedicated VIEW button + drop PENDING stat card
+
+- [x] 7.1 In `apps/server/src/server/dashboard-router.ts` (home tile), remove the `<a>` wrapper around the `verdictPill` call (pill becomes a plain span again) and reinstate the right-side `.acts` slot with a single `${btn({ variant:'primary', size:'sm', label:'VIEW →', href:'/dashboard/judgments/${r.id}' })}` so the row regains a clear, non-conflicting click target for the detail view.
+- [x] 7.2 In `apps/server/src/dashboard/styles/views/home.css`, add scoped CSS rules so memory anchors inside `.jq-item .pair .mem` render in `var(--lime)` with an underline on hover, and remove the legacy inline `color:inherit` / `text-decoration:none` from the template.
+- [x] 7.3 In `apps/server/src/dashboard/styles/views/judgments.css`, scope a parallel rule (`.tbl-host td a { color: var(--lime) }` + hover underline) so the listing's source→target anchors and the id-column detail link match the home tile's brand-accent treatment.
+- [x] 7.4 In `apps/server/src/server/dashboard-router.ts`, drop the `PENDING JUDGMENTS` stat card from the home stat strip and change the wrapping container from `grid-7` to `grid-6`. Keep `stats.pendingJudgments` flowing into `renderSidebar` (it still drives the sidebar `JUDGMENTS` badge) and keep `orphanedJ` (still consumed by the CONSOLIDATION HEALTH strip below).
+- [x] 7.5 Extend the e2e test to assert (a) the home contains a `VIEW` button + `href="/dashboard/judgments/{rel.id}"` outside the verdict pill, (b) the stat strip uses `grid-6` and contains no `PENDING JUDGMENTS` text. Run `pnpm --filter server typecheck`, `pnpm --filter server exec vitest run dashboard-e2e.test.ts`, `pnpm test`, `pnpm run lint`, `openspec validate replace-pending-with-recent-judgments --strict` — all green.
+
+## 8. Verbose stat labels + visible mobile inter-card separator
+
+- [x] 8.1 In `apps/server/src/server/dashboard-router.ts`, expand the six stat cards' `k` labels so each card's referent is unambiguous: `TOTAL` → `TOTAL MEMORIES`, `ACTIVE` → `ACTIVE MEMORIES`, `SUPERSEDED` → `SUPERSEDED MEMORIES`, `ARCHIVED` → `ARCHIVED MEMORIES`. Tighten the `sub` copy: `7D` → `LAST 7 DAYS`, `NOW` → `CONNECTED NOW`. `PROJECTS` and `ACTIVE SESSIONS` stay as-is per operator feedback (`ACTIVE SESSIONS` was clearer than `ACTIVE AGENT SESSIONS`; `DECAYED` is shorter than `DECAYED — NOT RECALLED`).
+- [x] 8.2 In `apps/server/src/dashboard/styles/core/patterns.css`, replace the inter-card border colour on `.grid-6` (base + the 1280/980/640 breakpoints) from raw `var(--fg-faint)` (`#2a2a2a`, virtually indistinguishable from the page background) to `color-mix(in oklab, var(--fg-faint), var(--fg-dim) 35%)`. Affects only the .stat internal separators, not the outer card border or other surfaces.
+- [x] 8.3 Run `pnpm --filter server typecheck`, `pnpm --filter server exec vitest run dashboard-e2e.test.ts`, `pnpm test`, `pnpm run lint`, `openspec validate replace-pending-with-recent-judgments --strict` — all green.

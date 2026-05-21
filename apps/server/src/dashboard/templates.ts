@@ -439,6 +439,22 @@ export function scopePill(scope: string): SafeHtml {
   return raw(`<span class="pill ${cls}">${label}</span>`);
 }
 
+const VERDICT_KINDS = new Set([
+  'supersedes',
+  'conflicts_with',
+  'related',
+  'compatible',
+  'scoped',
+  'not_conflict',
+]);
+
+export function verdictPill(kind: string | null | undefined): SafeHtml {
+  if (!kind) return raw('<span class="muted">—</span>');
+  if (!VERDICT_KINDS.has(kind)) return raw(`<span class="pill">${escape(kind)}</span>`);
+  const cls = escape(kind);
+  return raw(`<span class="pill k-${cls}">${cls}</span>`);
+}
+
 export function formatTs(d: Date | string | number | null | undefined): SafeHtml {
   if (d === null || d === undefined) return raw('—');
   const date = d instanceof Date ? d : new Date(d);

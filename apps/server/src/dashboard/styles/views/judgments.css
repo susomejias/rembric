@@ -67,3 +67,12 @@
     justify-content: flex-start;
   }
 }
+
+/* Memory + judgment-detail anchors in the listing use the brand accent so
+   operators can spot interactive cells at a glance. Scoped to this view. */
+.tbl-host td a {
+  color: var(--lime);
+}
+.tbl-host td a:hover {
+  text-decoration: underline;
+}
