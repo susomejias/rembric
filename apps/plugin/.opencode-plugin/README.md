@@ -15,7 +15,7 @@ Two steps. Run them in order.
 One-line install — no checkout required:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh
 ```
 
 The script fetches three files from the rembric `main` branch and drops them in place:

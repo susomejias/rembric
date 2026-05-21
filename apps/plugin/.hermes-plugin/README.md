@@ -7,7 +7,7 @@ Memory for [Hermes Agent](https://hermes-agent.nousresearch.com), backed by your
 Two commands, no `git clone` needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 hermes plugins install rembric
 hermes plugins enable rembric
 ```
@@ -23,7 +23,7 @@ If the three vars are already exported in the shell that launches `hermes`, the 
 Inspect the install script first if you prefer:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | less
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | less
 ```
 
 Developing against a local rembric clone? Same script, local source:
@@ -129,7 +129,7 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 Re-run the installer. The script is idempotent — it overwrites the three files.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
 `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
