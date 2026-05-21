@@ -5,6 +5,7 @@ import type { Db } from '../db/client.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
 import { memory } from '../db/schema/memory.js';
 import { projects } from '../db/schema/projects.js';
+import { prompts as promptsTbl } from '../db/schema/prompts.js';
 import { tokens } from '../db/schema/tokens.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
@@ -87,6 +88,19 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       }, {});
     void memory;
 
+    // Per-session prompt counts (non-deleted only).
+    const promptCountRows = deps.db
+      .all<{
+        session_id: string;
+        n: number;
+      }>(
+        sql`SELECT session_id, COUNT(*) AS n FROM prompts WHERE session_id IS NOT NULL AND deleted_at IS NULL GROUP BY session_id`,
+      )
+      .reduce<Record<string, number>>((acc, r) => {
+        acc[r.session_id] = Number(r.n);
+        return acc;
+      }, {});
+
     const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => {
       const displayTitle = titleCascade(r.title, r.description, r.id);
       return html`
@@ -107,6 +121,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           <td class="muted">${formatTs(r.endedAt)}</td>
           <td>${statusPill(r.status)}</td>
           <td class="right">${countRows[r.id] ?? 0}</td>
+          <td class="right">${promptCountRows[r.id] ?? 0}</td>
           <td class="actions">
             <div class="actions-stack">
               ${opts.deleted
@@ -202,6 +217,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                     <th>ended</th>
                     <th>status</th>
                     <th>memories</th>
+                    <th>prompts</th>
                     <th>actions</th>
                   </tr>
                 </thead>
@@ -227,6 +243,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                     <th>ended</th>
                     <th>status</th>
                     <th>memories</th>
+                    <th>prompts</th>
                     <th>actions</th>
                   </tr>
                 </thead>
@@ -291,6 +308,13 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       .from(memory)
       .where(sql`session_id = ${id}`)
       .orderBy(memory.createdAt)
+      .all();
+
+    const sessionPrompts = deps.db
+      .select()
+      .from(promptsTbl)
+      .where(sql`session_id = ${id} AND deleted_at IS NULL`)
+      .orderBy(promptsTbl.createdAt)
       .all();
 
     const memoriesCount = memories.length;
@@ -415,6 +439,42 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                         <td>${truncate(m.content, 120)}</td>
                         <td>${statusPill(m.status)}</td>
                         <td class="muted">${formatTs(m.createdAt)}</td>
+                      </tr>
+                    `,
+                  )}
+                </tbody>
+              </table>
+            </div>
+          `}
+
+      <h2>Prompts (${sessionPrompts.length})</h2>
+      ${sessionPrompts.length === 0
+        ? html`<p class="muted">No prompts anchored to this session.</p>`
+        : html`
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>id</th>
+                    <th>title</th>
+                    <th>content</th>
+                    <th>tags</th>
+                    <th>created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sessionPrompts.map(
+                    (p) => html`
+                      <tr>
+                        <td class="mono">${shortId(p.id)}</td>
+                        <td>${p.title ?? '—'}</td>
+                        <td>${truncate(p.content, 120)}</td>
+                        <td>
+                          ${Array.isArray(p.tags) && p.tags.length > 0
+                            ? raw(p.tags.map((t) => `<code>${t}</code>`).join(' '))
+                            : raw('—')}
+                        </td>
+                        <td class="muted">${formatTs(p.createdAt)}</td>
                       </tr>
                     `,
                   )}

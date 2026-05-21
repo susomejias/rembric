@@ -94,6 +94,26 @@ const FORBIDDEN: ForbiddenRule[] = [
     allow: ['scripts/seed-dev.ts'],
   },
   {
+    pattern: /delete\s*\(\s*prompts\s*\)/i,
+    description:
+      'Drizzle `db.delete(prompts)` is forbidden — prompts are append-only (lifecycle is `deleted_at` flips + `replaces`)',
+  },
+  {
+    pattern: /DELETE\s+FROM\s+prompts\b/i,
+    description:
+      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in services/prompts.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['services/prompts.ts', 'scripts/seed-dev.ts'],
+  },
+  {
+    pattern: /update\([^)]*prompts[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
+    description:
+      '`db.update(prompts).set({ content: … })` is forbidden — prompt content is immutable',
+  },
+  {
+    pattern: /UPDATE\s+prompts\b[^;]*\bSET\s+content\s*=/i,
+    description: 'raw `UPDATE prompts SET content = …` is forbidden — content is immutable',
+  },
+  {
     pattern:
       /update\([^)]*memoryRelations[^)]*\)[^.]*\.set\([^)]*(source_id|target_id|judgment_id|sourceId|targetId|judgmentId)\s*:/i,
     description:
@@ -169,6 +189,20 @@ describe('append-only invariants (static grep)', () => {
     const file = join(srcRoot, 'services/agent-sessions.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
+  });
+
+  it('allow-list anchors: services/prompts.ts contains DELETE FROM prompts', () => {
+    const file = join(srcRoot, 'services/prompts.ts');
+    const src = readFileSync(file, 'utf8');
+    expect(/DELETE\s+FROM\s+prompts\b/i.test(src)).toBe(true);
+  });
+
+  it('schema/prompts.ts declares content as immutable in its docstring', () => {
+    const file = join(srcRoot, 'db/schema/prompts.ts');
+    const src = readFileSync(file, 'utf8');
+    // Mirrors the pattern asserted for memory.content; the docstring must
+    // make the append-only contract explicit so reviewers can rely on it.
+    expect(/content[^.\n]*immutable/i.test(src)).toBe(true);
   });
 
   it('allow-list anchors: scripts/seed-dev.ts contains DELETE FROM memory / sessions / memory_relations', () => {

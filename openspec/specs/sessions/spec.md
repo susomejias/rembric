@@ -281,7 +281,7 @@ The detail view at `/dashboard/sessions/:id` SHALL render whether the row is sof
 
 ### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
 
-Every MCP tool handler under `apps/server/src/mcp/sessions-tools.ts` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
+Every MCP tool handler under `apps/server/src/mcp/sessions-tools.ts` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
 
 1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
 2. The `SessionRouter` entry for `(tokenId, mcpSessionId)`, populated by a prior `project.use` call or by roots-based discovery, when the connection is path-less (`ctx.requestedSlug === null`).
@@ -319,6 +319,13 @@ A handler that resolves scope using only `ctx.project` and falls through directl
 - **WHEN** the agent calls `memory.context`
 - **THEN** the response SHALL include `scope: "project:<baz.id>"` regardless of any router state
 
+#### Scenario: `memory.search_prompts` honours router-based scope resolution
+
+- **GIVEN** a token connected to `/mcp` (path-less) with a `project.use({slug: 'foo'})` pin
+- **WHEN** the agent calls `memory.search_prompts({ query: "anything" })`
+- **THEN** the server SHALL resolve scope to `project:<foo.id>` via the `SessionRouter` entry
+- **AND** SHALL NOT return prompts from any other project or from global scope
+
 ### Requirement: Session rows MUST carry a title column with write-once-final precedence
 
 The `sessions` table SHALL gain a nullable `title TEXT` column and two boolean precedence columns: `summary_final` and `title_final` (default `false`). The title SHALL be initialised at row creation with a placeholder of the form `basename(cwd) · HH:MM UTC` (or `session · HH:MM UTC` when `cwd` is unavailable), stored with `title_final = false`.
@@ -355,7 +362,7 @@ A session row SHALL be physically deletable from the `sessions` table ONLY throu
 3. `summary IS NULL` and `title_final = false` (no human-meaningful label was ever written).
 4. `ended_at IS NOT NULL AND ended_at < (now − 3_600_000)` (a 1-hour grace period after end to avoid racing with late-arriving summary writes).
 5. No row exists in `memory` with `session_id = sessions.id`.
-6. No row exists in `prompts` with `session_id = sessions.id`.
+6. No row exists in `prompts` with `session_id = sessions.id` AND `deleted_at IS NULL`. (Soft-deleted prompts are interpreted as already removed from the session's logical footprint and do NOT block purge.)
 7. No row exists in `confirmations` with `session_id = sessions.id`.
 
 The method SHALL run the predicate and the `DELETE` inside a single SQLite transaction. The method SHALL write a `consolidation_ops` row with `op_type = 'session_purge'`, `affected_ids` carrying the deleted ids, and a static `reasoning` string, in the same transaction.
@@ -364,7 +371,7 @@ Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ..
 
 #### Scenario: An empty ended session older than the grace period is purged
 
-- **GIVEN** session `S` with `status='ended'`, `deleted_at=NULL`, `summary=NULL`, `title_final=false`, `ended_at = now − 2h`, and zero referencing rows in `memory`, `prompts`, `confirmations`
+- **GIVEN** session `S` with `status='ended'`, `deleted_at=NULL`, `summary=NULL`, `title_final=false`, `ended_at = now − 2h`, and zero referencing rows in `memory`, non-deleted `prompts`, `confirmations`
 - **WHEN** `AgentSessionsService.purgeEmpty({ adminBypass: true })` is called
 - **THEN** the row SHALL be removed from `sessions`
 - **AND** a row SHALL exist in `consolidation_ops` with `op_type='session_purge'` and `affected_ids` containing `S.id`
@@ -395,6 +402,21 @@ Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ..
 - **WHEN** `AgentSessionsService.purgeEmpty({ adminBypass: true })` is called
 - **THEN** the row SHALL remain in `sessions`
 - **AND** the memory row SHALL be unaffected
+
+#### Scenario: A session with only soft-deleted prompts is now purgeable
+
+- **GIVEN** session `S` matching the purge predicate except its `prompts` references are all soft-deleted (`deleted_at IS NOT NULL`)
+- **WHEN** `AgentSessionsService.purgeEmpty({ adminBypass: true })` is called
+- **THEN** the row SHALL be removed from `sessions` (the predicate now ignores soft-deleted prompts)
+- **AND** `S.id` SHALL appear in the response's `deletedIds`
+- **AND** the soft-deleted prompts SHALL remain in the `prompts` table (their physical purge is governed by the separate "Purge deleted prompts" flow under `/dashboard/maintenance`)
+
+#### Scenario: A session with even one non-deleted prompt is preserved
+
+- **GIVEN** session `S` matching the purge predicate except one row in `prompts` has `session_id = S.id AND deleted_at IS NULL`
+- **WHEN** `AgentSessionsService.purgeEmpty({ adminBypass: true })` is called
+- **THEN** the row SHALL remain in `sessions`
+- **AND** the prompt row SHALL be unaffected
 
 ### Requirement: The session purge journal is permanent
 
@@ -473,8 +495,10 @@ The method SHALL NOT call into `abandonStale` and `abandonStale` SHALL NOT call 
 1. `s.summary IS NOT NULL`, OR
 2. `s.title_final = 1`, OR
 3. there exists at least one row in `memory` with `session_id = s.id`, OR
-4. there exists at least one row in `prompts` with `session_id = s.id`, OR
+4. there exists at least one row in `prompts` with `session_id = s.id` AND `deleted_at IS NULL`, OR
 5. there exists at least one row in `confirmations` with `session_id = s.id`.
+
+Soft-deleted prompts (`deleted_at IS NOT NULL`) DO NOT make a session content-bearing; the operator has already marked them as obsolete, and a session that has nothing else SHALL be eligible for purge and SHALL NOT surface in `memory.context.recentSessions`.
 
 The predicate SHALL be implemented as a single private SQL-fragment helper inside `apps/server/src/services/agent-sessions.ts`. It SHALL be the ONLY place in the codebase where this five-clause predicate is expressed. The `countPurgeableEmpty` and `purgeEmpty` methods SHALL consume the predicate in negated form (`NOT sessionHasContent(s)`) as part of their "purgeable" check. `recentForContext` SHALL consume the predicate in positive form as part of its "is useful to surface" check.
 

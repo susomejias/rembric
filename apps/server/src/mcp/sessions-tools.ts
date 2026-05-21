@@ -51,6 +51,18 @@ export const contextSchema = {
 
 export const savePromptSchema = {
   content: z.string().min(1).max(20_000),
+  title: z.string().min(1).max(100),
+  tags: z.array(z.string().min(1)).optional(),
+  replaces: z.string().min(1).optional(),
+};
+
+export const searchPromptsSchema = {
+  query: z.string().optional(),
+  sessionId: z.string().min(1).optional(),
+  agent: z.string().min(1).optional(),
+  includeDeleted: z.boolean().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).optional(),
 };
 
 export const timelineSchema = {
@@ -136,10 +148,19 @@ export function buildSessionsHandlers(deps: SessionsToolDeps) {
     doctor: handleDoctor.bind(null, deps),
     stats: handleStats.bind(null, deps),
     savePrompt: handleSavePrompt.bind(null, deps),
+    searchPrompts: handleSearchPrompts.bind(null, deps),
   };
 }
 
-function handleSavePrompt(deps: SessionsToolDeps, args: { content: string }) {
+function handleSavePrompt(
+  deps: SessionsToolDeps,
+  args: {
+    content: string;
+    title: string;
+    tags?: string[];
+    replaces?: string;
+  },
+) {
   const ctx = getRequestContext();
   const scope = scopeFromContext(deps);
   const sessionId = resolveSessionId(deps, undefined);
@@ -149,8 +170,64 @@ function handleSavePrompt(deps: SessionsToolDeps, args: { content: string }) {
       sessionId,
       projectId: scope.kind === 'project' ? scope.projectId : null,
       agent: ctx.token.name,
+      title: args.title,
+      tags: args.tags ?? null,
+      replaces: args.replaces ?? null,
     });
-    return ok({ ok: true, id: row.id, createdAt: row.createdAt });
+    const response: {
+      ok: true;
+      id: string;
+      createdAt: Date;
+      replaces?: string[];
+    } = { ok: true, id: row.id, createdAt: row.createdAt };
+    if (row.replaces && row.replaces.length > 0) {
+      response.replaces = row.replaces;
+    }
+    return ok(response);
+  } catch (err) {
+    return errToMcp(err);
+  }
+}
+
+function handleSearchPrompts(
+  deps: SessionsToolDeps,
+  args: {
+    query?: string;
+    sessionId?: string;
+    agent?: string;
+    includeDeleted?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+) {
+  const scope = scopeFromContext(deps);
+  try {
+    const result = deps.prompts.searchByScope({
+      scope,
+      query: args.query,
+      sessionId: args.sessionId,
+      agent: args.agent,
+      includeDeleted: args.includeDeleted,
+      limit: args.limit,
+      offset: args.offset,
+    });
+    return ok({
+      scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
+      prompts: result.prompts.map((p) => ({
+        id: p.id,
+        content: p.content,
+        title: p.title,
+        tags: p.tags,
+        sessionId: p.sessionId,
+        projectId: p.projectId,
+        agent: p.agent,
+        replaces: p.replaces,
+        deletedAt: p.deletedAt,
+        createdAt: p.createdAt,
+      })),
+      total: result.total,
+      clamped: result.clamped,
+    });
   } catch (err) {
     return errToMcp(err);
   }

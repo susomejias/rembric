@@ -23,6 +23,7 @@ import { createJudgmentsRouter } from '../dashboard/judgments.js';
 import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
+import { createPromptsRouter } from '../dashboard/prompts.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
 import {
   escape,
@@ -40,6 +41,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
+import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
 
@@ -53,6 +55,7 @@ export interface DashboardDeps {
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
   projects: ProjectsService;
+  prompts: PromptsService;
   memory: MemoryService;
   getStats: () => DashboardStats;
   /** Resolved data directory (from `config.dataDir`). */
@@ -507,6 +510,10 @@ ${ascBars(activity)}</pre
       agentSessions: deps.agentSessions,
     }),
   );
+  app.route(
+    '/prompts',
+    createPromptsRouter({ db: deps.db, prompts: deps.prompts, sessions: deps.sessions }),
+  );
   app.route('/judgments', createJudgmentsRouter({ db: deps.db, sessions: deps.sessions }));
   app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
   app.route(
@@ -524,6 +531,7 @@ ${ascBars(activity)}</pre
       sessions: deps.sessions,
       agentSessions: deps.agentSessions,
       memory: deps.memory,
+      prompts: deps.prompts,
       tokens: deps.tokens,
     }),
   );

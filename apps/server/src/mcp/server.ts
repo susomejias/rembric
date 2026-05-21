@@ -29,6 +29,7 @@ import {
   contextSchema,
   type DoctorReport,
   savePromptSchema,
+  searchPromptsSchema,
   sessionEndSchema,
   sessionStartSchema,
   sessionSummarySchema,
@@ -193,10 +194,19 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.save_prompt',
     {
       description:
-        "Persist the user's most recent prompt for the active session/project so future sessions can read it via memory.context.recentPrompts. Call this when the user states a goal or constraint worth remembering.",
+        "Persist the user's most recent prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). Call this when the user states a goal or constraint worth remembering. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`.",
       inputSchema: savePromptSchema,
     },
     sessions.savePrompt,
+  );
+  server.registerTool(
+    'memory.search_prompts',
+    {
+      description:
+        'Search curated prompts in the active scope. With `query`, runs an FTS5 MATCH over `content + tags` (token-aware); without it, falls back to recency. Filters: `sessionId`, `agent`, `includeDeleted` (default false). Returns `{ scope, prompts[], total, clamped }`. Use when the user references a prior goal/directive and you need to retrieve the exact wording.',
+      inputSchema: searchPromptsSchema,
+    },
+    sessions.searchPrompts,
   );
   server.registerTool(
     'memory.doctor',

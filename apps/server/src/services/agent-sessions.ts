@@ -28,7 +28,7 @@ function sessionHasContentSql(alias: 's' | 'sessions') {
     `(${alias}.summary IS NOT NULL` +
       ` OR ${alias}.title_final = 1` +
       ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
-      ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id)` +
+      ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
       ` OR EXISTS (SELECT 1 FROM confirmations WHERE session_id = ${alias}.id))`,
   );
 }

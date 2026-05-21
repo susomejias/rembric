@@ -16,7 +16,8 @@ export type ConsolidationOpType =
   | 'failed'
   | 'orphan_promote'
   | 'session_purge'
-  | 'archived_memory_purge';
+  | 'archived_memory_purge'
+  | 'prompt_purge';
 
 export const consolidationRuns = sqliteTable(
   'consolidation_runs',
@@ -53,6 +54,7 @@ export const consolidationOps = sqliteTable(
         'orphan_promote',
         'session_purge',
         'archived_memory_purge',
+        'prompt_purge',
       ],
     }).notNull(),
     /** Memory ids touched by this op (predecessors, archived ones). */

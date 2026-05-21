@@ -214,7 +214,7 @@ Cross-token id collisions (a client tries to create a session with an id already
 
 The image artifact published to `ghcr.io/susomejias/rembric:*` (and any successor registry/repository name) SHALL invoke the runtime server entrypoint (`node /app/dist/server-entrypoint.js`) on container start and SHALL NOT execute any code path that issues `DELETE FROM` against operator-visible tables (`memory`, `projects`, `sessions`, `tokens`, `prompts`, `memory_relations`, `confirmations`, `consolidation_ops`) as part of its boot sequence.
 
-Operator-visible tables MAY be modified by the server's normal startup path (`AgentSessionsService.abandonStale` flips `active` sessions to `abandoned` after a TTL, migration runner inserts into `_migrations`, embedding worker enqueues but does not delete) — these are non-destructive UPDATE/INSERT operations against a small subset of rows and are NOT covered by this prohibition. The prohibition specifically targets `DELETE FROM <table>` and `TRUNCATE` of any row whose loss is not deterministically reconstructible from operator action.
+Operator-visible tables MAY be modified by the server's normal startup path (`AgentSessionsService.abandonStale` flips `active` sessions to `abandoned` after a TTL, migration runner inserts into `_migrations`, embedding worker enqueues but does not delete) — these are non-destructive UPDATE/INSERT operations against a small subset of rows and are NOT covered by this prohibition. The prohibition specifically targets `DELETE FROM <table>` and `TRUNCATE` of any row whose loss is not deterministically reconstructible from operator action. Note that operator-invoked purge actions (session purge, archived-memory purge, deleted-prompt purge) issued via `/dashboard/maintenance` are EXEMPT — they are explicit operator intent, not boot-sequence behaviour.
 
 The seed script `apps/server/src/scripts/seed-dev.ts` exists in the source tree and SHALL be present in the dev-stage Docker image, but SHALL NOT be invoked by the runtime-stage image's `ENTRYPOINT` or `CMD`. Compliance with this requirement is verified by:
 
@@ -256,6 +256,12 @@ This requirement complements the existing append-only contract on the `memory` t
 - **AND** verify the `runtime` stage has no destructive command (no `CMD` referencing `seed-dev` or `tsx watch`)
 - **AND** verify `.github/workflows/docker-publish.yml` contains a build-push step with `target: runtime`
 - **AND** verify `.github/workflows/docker-publish.yml` contains the post-publish smoke-test step that greps `Config.Cmd`/`Config.Entrypoint` for the forbidden substrings
+
+#### Scenario: The invariants test allow-lists `DELETE FROM prompts` only from `purgeDeleted`
+
+- **WHEN** the invariants test scans the server source tree for `DELETE FROM prompts` occurrences
+- **THEN** the only allowed occurrence SHALL be inside `apps/server/src/services/prompts.ts::purgeDeleted`
+- **AND** the test SHALL positively assert that file contains the statement so the relaxation cannot silently disappear if `purgeDeleted` is removed
 
 ### Requirement: The server MUST refuse to start when operator-visible tables shrink by ≥ 50% since the last clean shutdown
 
@@ -369,3 +375,111 @@ This makes "started with an unexpectedly empty DB" loud and obvious in operator 
 - **WHEN** the server starts and the data-loss guard refuses to start
 - **THEN** the operator SHALL NOT see the `[bootstrap] listening on ...` line because the listener never binds
 - **AND** the operator SHALL see the guard's error output instead, making the failure unambiguous
+
+### Requirement: The `prompts` table MUST carry lifecycle and retrieval metadata columns
+
+The `prompts` schema SHALL be extended with four columns, applied across two migrations:
+
+- `deleted_at INTEGER` (timestamp_ms, nullable) — operator soft-delete marker. NULL = visible; non-NULL = soft-deleted.
+- `title TEXT` (**NOT NULL**, 1..100 chars enforced at the application layer) — short human-readable label for retrieval lists. Required at both the MCP boundary (`memory.save_prompt` zod schema) and the service layer (`PromptsService.save` validates non-empty).
+- `tags TEXT` (nullable, JSON array of strings) — categorical labels; same shape as `memory.tags`.
+- `replaces TEXT` (nullable, JSON array of prompt IDs) — predecessor link for the refine chain (typically a single-element array of the previous prompt's id, mirroring the shape of `memory.replaces`).
+
+Migration sequence:
+
+1. The first migration (`0008_prompts_extend.sql`) adds all four columns as NULLABLE via `ALTER TABLE prompts ADD COLUMN <col>` — SQLite cannot add a NOT NULL column without a DEFAULT, and we did not want to bake a placeholder into the schema-level default.
+2. A follow-up migration (`0010_prompts_title_required.sql`) tightens `title` to NOT NULL via the standard SQLite table-rebuild dance: backfill NULL titles with the literal placeholder `'(untitled)'`, recreate the table with `title TEXT NOT NULL`, re-create indexes, re-install the `prompts_fts` triggers (DROP TABLE cascades them), and run `INSERT INTO prompts_fts(prompts_fts) VALUES('rebuild')` so the contentless FTS5 index re-binds against the new rowids.
+
+The `content` column SHALL remain immutable in convention — there SHALL be no UPDATE-capable code path for it. Lifecycle changes SHALL be expressed via `deleted_at` flips (operator or refine) plus the `replaces` link (refine).
+
+#### Scenario: Schema review confirms the column constraints
+
+- **WHEN** a code reviewer inspects `apps/server/src/db/schema/prompts.ts`
+- **THEN** the schema SHALL declare `title` as `text('title').notNull()` and `deleted_at` / `tags` / `replaces` as nullable
+- **AND** the file's top-level docstring SHALL describe `content` as immutable; lifecycle as `deleted_at` flips + `replaces` links
+
+#### Scenario: Existing prompts with NULL title are backfilled with `(untitled)`
+
+- **GIVEN** a DB that already applied `0008_prompts_extend.sql` and contains prompts with `title IS NULL`
+- **WHEN** the server runs `0010_prompts_title_required.sql` on next boot
+- **THEN** every NULL title SHALL be UPDATEd to the literal string `'(untitled)'` BEFORE the table-rebuild step
+- **AND** the rebuilt table SHALL declare `title TEXT NOT NULL`
+- **AND** every pre-existing row SHALL retain its original `content`, `session_id`, `project_id`, `agent`, `created_at`, `deleted_at`, `tags`, and `replaces` values
+- **AND** the `prompts_fts` index SHALL be rebuilt so search continues to work after the table is recreated
+
+#### Scenario: A new insert without title is rejected at every layer
+
+- **GIVEN** the schema with `title TEXT NOT NULL` and `PromptsService.save` validating title presence
+- **WHEN** any code path attempts to insert a prompt row without `title`
+- **THEN** the insert SHALL fail — either via the zod schema (`memory.save_prompt`), the service-layer validation (`prompts.save: title is required`), or the DB-level NOT NULL constraint (raw SQL bypass)
+
+### Requirement: `prompts_fts` MUST stay in sync with `prompts`
+
+The persistence layer SHALL gain a contentless FTS5 virtual table `prompts_fts` indexing `content` plus a flattened tags string, configured with `content='prompts'` and `content_rowid='rowid'`. The table SHALL be maintained automatically by three triggers on `prompts`:
+
+- `prompts_ai` (`AFTER INSERT`): inserts a row into `prompts_fts` with the new `content` and `coalesce(group_concat(value, ' ') FROM json_each(new.tags), '')`.
+- `prompts_au` (`AFTER UPDATE`): emits a `'delete'` row to `prompts_fts` for the old values, then inserts a fresh row with the new values. This trigger is required because `deleted_at` and `replaces` flips are UPDATEs on the `prompts` row even though `content` itself never changes.
+- `prompts_ad` (`AFTER DELETE`): emits a `'delete'` row to `prompts_fts` for the old values. This trigger is defensive — `DELETE FROM prompts` only happens through `PromptsService.purgeDeleted` — but kept consistent with the `memory_fts` pattern.
+
+The triggers SHALL be installed by a dedicated migration `apps/server/src/db/migrations/000X_prompts_fts.sql`. The migration SHALL also backfill `prompts_fts` from existing rows so the index is complete on first boot after this change.
+
+#### Scenario: Inserting a prompt populates prompts_fts immediately
+
+- **WHEN** a row is inserted into `prompts` with `content = "deploy via Docker Compose"` and `tags = '["deploy","docker"]'`
+- **THEN** a corresponding row SHALL exist in `prompts_fts` indexing both `"deploy via Docker Compose"` and the flattened `"deploy docker"` string before the transaction commits
+
+#### Scenario: Soft-deleting a prompt updates prompts_fts via the AU trigger
+
+- **GIVEN** prompt P1 indexed in `prompts_fts`
+- **WHEN** the dashboard sets `P1.deleted_at = now()`
+- **THEN** the `prompts_au` trigger SHALL re-issue the index entry (delete-then-insert) so the row remains discoverable when callers pass `includeDeleted: true`
+- **AND** queries with `includeDeleted: false` SHALL filter out P1 at the outer-table level, not via the index
+
+#### Scenario: Refining a prompt updates prompts_fts for both the old and the new row
+
+- **GIVEN** prompt P1 in scope
+- **WHEN** the agent calls `memory.save_prompt({ content: "...refined...", replaces: "<P1.id>" })`
+- **THEN** P1's index entry SHALL be re-issued by the `prompts_au` trigger (because `P1.deleted_at` flipped)
+- **AND** a new index entry SHALL be inserted for P2 by the `prompts_ai` trigger
+
+#### Scenario: Physically purging a prompt removes its prompts_fts row
+
+- **GIVEN** prompt P1 with `deleted_at IS NOT NULL`
+- **WHEN** `PromptsService.purgeDeleted({ adminBypass: true })` deletes P1 from `prompts`
+- **THEN** the `prompts_ad` trigger SHALL emit a `'delete'` row to `prompts_fts` so the index entry is removed in the same transaction
+
+### Requirement: `prompts` MUST be physically purgeable when soft-deleted
+
+A `prompts` row SHALL be physically deletable from the `prompts` table ONLY through `PromptsService.purgeDeleted({ adminBypass: true })` and ONLY when the row's `deleted_at IS NOT NULL`. The method SHALL be the sole code path that issues `DELETE FROM prompts`; the invariant test (`apps/server/src/test/invariants.test.ts`) SHALL allow-list this call site explicitly and SHALL positively assert that the file actually contains the `DELETE FROM prompts` statement (so the relaxation cannot expire silently if the implementation drifts).
+
+The method SHALL run the predicate and the DELETE inside a single SQLite transaction. The method SHALL write a `consolidation_ops` row with `op_type = 'prompt_purge'`, `affected_ids` carrying the deleted ids, and a static `reasoning` string, in the same transaction. The `prompts_ad` trigger SHALL cascade-remove the corresponding `prompts_fts` entries inside the same transaction.
+
+Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ...)` and SHALL NOT touch the database.
+
+#### Scenario: Soft-deleted prompts are purged and journaled
+
+- **GIVEN** 4 prompts with `deleted_at IS NOT NULL` exist
+- **WHEN** `PromptsService.purgeDeleted({ adminBypass: true })` is called
+- **THEN** the 4 rows SHALL be removed from `prompts`
+- **AND** the matching 4 rows SHALL be removed from `prompts_fts` (via the AFTER DELETE trigger)
+- **AND** a `consolidation_ops` row SHALL exist with `op_type = 'prompt_purge'` and `affected_ids` of length 4
+- **AND** the response SHALL include the 4 ids in `deletedIds`
+
+#### Scenario: A non-admin caller is rejected before any read
+
+- **WHEN** `PromptsService.purgeDeleted({})` or `purgeDeleted({ adminBypass: false })` is called
+- **THEN** the method SHALL throw `DomainError('forbidden', ...)`
+- **AND** SHALL NOT issue any SQL statement
+
+#### Scenario: A prompt without `deleted_at` is not purged
+
+- **GIVEN** prompts `P1` (`deleted_at = NULL`) and `P2` (`deleted_at = now − 1h`)
+- **WHEN** `PromptsService.purgeDeleted({ adminBypass: true })` is called
+- **THEN** `P2` SHALL be removed and `P1` SHALL remain
+- **AND** the response's `deletedIds` SHALL contain only `P2.id`
+
+#### Scenario: `consolidation_ops` row from prompt purge is never deletable
+
+- **GIVEN** `purgeDeleted` has run and produced a `consolidation_ops` row with `op_type='prompt_purge'`
+- **WHEN** any subsequent purge runs (sessions, memories, or prompts) or the consolidator runs
+- **THEN** the `consolidation_ops` row SHALL remain in place, preserving the audit trail of which prompt ids were physically removed and when
