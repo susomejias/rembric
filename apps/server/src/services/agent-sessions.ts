@@ -11,17 +11,21 @@ const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
 
 /**
- * Single source of truth for "this session has something worth surfacing".
+ * Purge-eligibility predicate. TRUE when the session has at least one
+ * anchored row that would dangle on physical delete.
  *
- * Consumed positively by `recentForContext` (filter to useful sessions) and
- * negatively by `countPurgeableEmpty` / `purgeEmpty` (must be empty to be
- * purgeable). Adding a new content-bearing table that anchors to a session
- * id (e.g. a future `tool_calls`) MUST update only this helper — every
- * call site picks the change up automatically.
+ * Consumed (negated) by `countPurgeableEmpty` / `purgeEmpty` to keep
+ * sessions with foreign-key references out of the purge set. NOT used
+ * by `recentForContext` — surfacing to the LLM uses the stricter
+ * `sessionIsContextWorthySql` below.
  *
- * `alias` is the SQL identifier used to reference the sessions row in the
- * caller's query. Callers pass `'s'` (purge methods) or the table name
- * `'sessions'` (drizzle's implicit alias in `recentForContext`).
+ * Adding a new content-bearing table that anchors to a session id
+ * (e.g. a future `tool_calls`) MUST update only this helper — both
+ * purge call-sites pick the change up automatically.
+ *
+ * `alias` is the SQL identifier used to reference the sessions row in
+ * the caller's query. Callers pass `'s'` (purge methods) or the table
+ * name `'sessions'` (drizzle's implicit alias).
  */
 function sessionHasContentSql(alias: 's' | 'sessions') {
   return sql.raw(
@@ -31,6 +35,61 @@ function sessionHasContentSql(alias: 's' | 'sessions') {
       ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
       ` OR EXISTS (SELECT 1 FROM confirmations WHERE session_id = ${alias}.id))`,
   );
+}
+
+/**
+ * Surfacing predicate for `memory.context.recentSessions`. TRUE only
+ * when the session carries curated signal the LLM can read directly:
+ * a final summary or a final title, both lifted either by the MCP
+ * tool `memory.session_summary` (server-hardcoded `final:true`) or by
+ * the server-side auto-curate path at terminal transition (see
+ * `applyAutoCurateIfApplicable`).
+ *
+ * Strict subset of `sessionHasContentSql`: every context-worthy
+ * session is also content-bearing, but the converse does not hold
+ * BEFORE a terminal transition fires the auto-curate. After the
+ * transition, sessions with anchored content become context-worthy
+ * automatically via the `[auto]`-prefixed derived summary.
+ *
+ * Single consumer: `recentForContext`.
+ */
+function sessionIsContextWorthySql(alias: 's' | 'sessions') {
+  return sql.raw(
+    `((${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1)` +
+      ` OR ${alias}.title_final = 1)`,
+  );
+}
+
+/**
+ * Pure helper. Composes a server-derived summary from anchored-content
+ * counts and the most recent memory snippet. Deterministic: same input
+ * always produces the same output. NEVER calls an LLM, NEVER inspects
+ * the previous summary, NEVER applies heuristics.
+ *
+ * Format: `[auto] N memorias[, P prompts[, C confirmaciones]][ — última: '<snippet>']`
+ *
+ * The `[auto]` prefix is mandatory and identifies the row as
+ * server-derived to both the agent and the operator.
+ */
+export function composeDerivedSummary(
+  counts: { memories: number; prompts: number; confirmations: number },
+  lastMemoryContent: string | null,
+): string {
+  const parts: string[] = [];
+  if (counts.memories > 0) parts.push(`${counts.memories} memorias`);
+  if (counts.prompts > 0) parts.push(`${counts.prompts} prompts`);
+  if (counts.confirmations > 0) parts.push(`${counts.confirmations} confirmaciones`);
+  const head = parts.join(', ');
+  const tail =
+    lastMemoryContent && lastMemoryContent.length > 0
+      ? ` — última: '${snippetForDerived(lastMemoryContent, 80)}'`
+      : '';
+  return `[auto] ${head}${tail}`;
+}
+
+function snippetForDerived(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + '…';
 }
 
 /**
@@ -222,10 +281,16 @@ export class AgentSessionsService {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
     if (existing.status !== 'active') {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' is already ${existing.status}`,
-      );
+      // Relaxed: allow final:true writes on terminal sessions so the
+      // agent can override an auto-curated row via memory.session_summary.
+      // HTTP fallback writes cannot exploit this — their handlers
+      // hard-code final:false (see api-router.ts).
+      if (input.final !== true) {
+        throw new DomainError(
+          'session_already_ended',
+          `session '${sessionId}' is already ${existing.status}`,
+        );
+      }
     }
     const incomingFinal = input.final ?? false;
     const summaryUpdate = applyPrecedence(
@@ -252,12 +317,11 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.db
-      .update(agentSessions)
-      .set(set)
-      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
-      .returning()
-      .get();
+    const updateCondition =
+      existing.status === 'active'
+        ? and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active'))
+        : eq(agentSessions.id, sessionId);
+    const updated = this.db.update(agentSessions).set(set).where(updateCondition).returning().get();
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -265,6 +329,41 @@ export class AgentSessionsService {
       );
     }
     return updated;
+  }
+
+  /**
+   * Compute the auto-curate write for a session, if applicable.
+   *
+   * Returns the derived summary string when the session has at least
+   * one anchored row in memory / prompts (deleted_at IS NULL) /
+   * confirmations. Returns null otherwise.
+   *
+   * Pure read against the database; the caller writes the result as
+   * part of the same UPDATE that transitions status.
+   */
+  private computeAutoCurate(sessionId: string): string | null {
+    const memCount = this.db.get<{ v: number }>(
+      sql`SELECT COUNT(*) AS v FROM memory WHERE session_id = ${sessionId}`,
+    ) as { v: number } | undefined;
+    const prCount = this.db.get<{ v: number }>(
+      sql`SELECT COUNT(*) AS v FROM prompts WHERE session_id = ${sessionId} AND deleted_at IS NULL`,
+    ) as { v: number } | undefined;
+    const confCount = this.db.get<{ v: number }>(
+      sql`SELECT COUNT(*) AS v FROM confirmations WHERE session_id = ${sessionId}`,
+    ) as { v: number } | undefined;
+    const counts = {
+      memories: memCount?.v ?? 0,
+      prompts: prCount?.v ?? 0,
+      confirmations: confCount?.v ?? 0,
+    };
+    if (counts.memories + counts.prompts + counts.confirmations === 0) return null;
+    const lastMem =
+      counts.memories > 0
+        ? (this.db.get<{ content: string }>(
+            sql`SELECT content FROM memory WHERE session_id = ${sessionId} ORDER BY created_at DESC LIMIT 1`,
+          ) as { content: string } | undefined)
+        : undefined;
+    return composeDerivedSummary(counts, lastMem?.content ?? null);
   }
 
   end(sessionId: string, input: EndSessionInput): AgentSession {
@@ -336,6 +435,16 @@ export class AgentSessionsService {
       set.title = titleUpdate.value;
       set.titleFinal = titleUpdate.final;
     }
+    const willHaveCuratedSummary = summaryUpdate.changed
+      ? summaryUpdate.final
+      : existing.summaryFinal;
+    if (!willHaveCuratedSummary) {
+      const derived = this.computeAutoCurate(sessionId);
+      if (derived !== null) {
+        set.summary = derived;
+        set.summaryFinal = true;
+      }
+    }
     const updated = this.db
       .update(agentSessions)
       .set(set)
@@ -406,12 +515,12 @@ export class AgentSessionsService {
 
   /**
    * N most recent sessions for the given scope, ordered newest first.
-   * Soft-deleted sessions and empty sessions (those failing the shared
-   * `sessionHasContent` predicate) are NEVER surfaced via this path —
-   * memory.context callers must not see noise. Filter-then-truncate
-   * semantics: empty sessions do not consume slots, so a `limit:N`
-   * request returns the N most-recent USEFUL sessions even if dozens of
-   * newer empties exist between them.
+   * Soft-deleted sessions and non-curated sessions (those failing the
+   * `sessionIsContextWorthy` predicate) are NEVER surfaced via this
+   * path — `memory.context` callers must see only curated signal.
+   * Filter-then-truncate semantics: non-curated sessions do not consume
+   * slots, so a `limit:N` request returns the N most-recent CURATED
+   * sessions even if dozens of newer non-curated rows exist between them.
    */
   recentForContext(input: RecentForContextInput): AgentSession[] {
     const limit = clamp(input.limit ?? 5, 1, 25);
@@ -422,7 +531,9 @@ export class AgentSessionsService {
     return this.db
       .select()
       .from(agentSessions)
-      .where(and(scopeCondition, isNull(agentSessions.deletedAt), sessionHasContentSql('sessions')))
+      .where(
+        and(scopeCondition, isNull(agentSessions.deletedAt), sessionIsContextWorthySql('sessions')),
+      )
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit)
       .all();
@@ -520,15 +631,40 @@ export class AgentSessionsService {
    * Mark any `status='active'` row older than `olderThanMs` as abandoned.
    * Called at startup so a crashed/restarted server doesn't leak
    * eternally-active rows.
+   *
+   * Per-row loop (not bulk UPDATE) so each transition gets the auto-curate
+   * pass: when `summary_final = 0` and the session has anchored content,
+   * the derived summary is written atomically with the status flip.
    */
   abandonStale(input: { olderThanMs: number }): { abandoned: number } {
     const cutoff = new Date(this.now().getTime() - input.olderThanMs);
-    const result = this.db
-      .update(agentSessions)
-      .set({ status: 'abandoned', endedAt: this.now() })
+    const stale = this.db
+      .select()
+      .from(agentSessions)
       .where(and(eq(agentSessions.status, 'active'), lt(agentSessions.startedAt, cutoff)))
-      .run();
-    return { abandoned: result.changes };
+      .all();
+    let abandoned = 0;
+    for (const row of stale) {
+      const ts = this.now();
+      const set: Partial<typeof agentSessions.$inferInsert> = {
+        status: 'abandoned',
+        endedAt: ts,
+      };
+      if (!row.summaryFinal) {
+        const derived = this.computeAutoCurate(row.id);
+        if (derived !== null) {
+          set.summary = derived;
+          set.summaryFinal = true;
+        }
+      }
+      const result = this.db
+        .update(agentSessions)
+        .set(set)
+        .where(and(eq(agentSessions.id, row.id), eq(agentSessions.status, 'active')))
+        .run();
+      if (result.changes > 0) abandoned += 1;
+    }
+    return { abandoned };
   }
 
   /**

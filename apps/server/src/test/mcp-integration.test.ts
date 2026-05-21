@@ -301,10 +301,10 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.context backfills past empty sessions to return useful older ones', async () => {
+  it('memory.context backfills past empty sessions to return curated older ones', async () => {
     const client = await connect();
 
-    // First: a session WITH content (will be the oldest).
+    // First: a CURATED session (will be the oldest).
     const usefulStart = (await client.callTool({
       name: 'memory.session_start',
       arguments: { agent: 'rembric-test', description: 'useful session' },
@@ -317,6 +317,12 @@ describe('MCP protocol conformance', () => {
         type: 'feedback',
         content: 'backfill-useful-row',
       },
+    });
+    // Mark the session as curated via memory.session_summary — the only path
+    // that lifts summary_final = 1 and makes the session context-worthy.
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { title: 'Backfill probe', summary: 'Curated session for backfill assertion' },
     });
     await client.callTool({ name: 'memory.session_end', arguments: {} });
 
@@ -426,6 +432,53 @@ describe('MCP protocol conformance', () => {
     const judgedPayload = readJson(judgement) as { status: string; relation: string };
     expect(judgedPayload.status).toBe('judged');
     expect(judgedPayload.relation).toBe('related');
+
+    await client.close();
+  });
+
+  it('memory.context auto-curates a session with anchored memory and surfaces it with [auto] summary', async () => {
+    // Placed AFTER the candidates test because the candidates test depends on
+    // FTS5 BM25 corpus size (IDF). Adding more memories to the global scope
+    // BEFORE the candidates test pushes the rank past the configured ftsThreshold.
+    const client = await connect();
+
+    // Start a session and save a memory — the memory auto-anchors via
+    // resolveActiveSessionId. No memory.session_summary call. End the session
+    // and let the server auto-curate at the terminal transition.
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'anchored but uncurated' },
+    })) as ToolResult;
+    const startedPayload = readJson(started) as { sessionId: string };
+
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        content: 'memory anchored to uncurated session',
+      },
+    })) as ToolResult;
+    const savedPayload = readJson(saved) as { id: string };
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25, memories: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+      recentMemories: { id: string }[];
+    };
+
+    // The session SURFACES because auto-curate composed a derived summary.
+    const session = ctxPayload.recentSessions.find((s) => s.id === startedPayload.sessionId);
+    expect(session).toBeDefined();
+    expect(session?.summary).toMatch(/^\[auto\] 1 memorias/);
+
+    // The memory itself also surfaces in recentMemories.
+    expect(ctxPayload.recentMemories.some((m) => m.id === savedPayload.id)).toBe(true);
 
     await client.close();
   });

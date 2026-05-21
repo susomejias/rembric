@@ -42,16 +42,19 @@ const sessionPostSchema = z.object({
   description: z.string().max(2000).optional(),
 });
 
+// HTTP path body schemas. `final` is NOT accepted — the only writer that
+// can lift `summary_final` / `title_final` is the MCP tool
+// `memory.session_summary`, which hard-codes `final: true` server-side.
+// HTTP-path callers (plugin Stop/idle/end hooks) are structurally
+// restricted to `final: false` writes regardless of what they send.
 const sessionSummarySchema = z.object({
   summary: z.string().min(1).max(20_000),
   title: z.string().min(1).max(100).optional(),
-  final: z.boolean().optional(),
 });
 
 const sessionEndSchema = z.object({
   summary: z.string().min(1).max(20_000).optional(),
   title: z.string().min(1).max(100).optional(),
-  final: z.boolean().optional(),
 });
 
 export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
@@ -119,7 +122,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         tokenId: ctx.token.id,
         summary: parsed.data.summary,
         title: parsed.data.title,
-        final: parsed.data.final,
+        final: false,
       });
       return c.json({
         ok: true,
@@ -154,7 +157,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         tokenId: ctx.token.id,
         summary: parsed.data.summary,
         title: parsed.data.title,
-        final: parsed.data.final,
+        final: false,
       });
       return c.json({
         ok: true,

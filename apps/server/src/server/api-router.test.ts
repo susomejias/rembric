@@ -206,7 +206,7 @@ describe('createApiRouter', () => {
       expect(row?.summaryFinal).toBe(false);
     });
 
-    it('persists title alongside summary with final:true precedence', async () => {
+    it('persists title alongside summary (always final:false on HTTP path)', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -214,13 +214,33 @@ describe('createApiRouter', () => {
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-sum-title/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'Goal', title: 'Fix bug', final: true },
+        body: { summary: 'Goal', title: 'Fix bug' },
       });
       expect(r.status).toBe(200);
       const row = agentSessions.getById('sess-sum-title');
+      expect(row?.summary).toBe('Goal');
       expect(row?.title).toBe('Fix bug');
-      expect(row?.summaryFinal).toBe(true);
-      expect(row?.titleFinal).toBe(true);
+      // HTTP path never lifts `_final` — only memory.session_summary (MCP) can.
+      expect(row?.summaryFinal).toBe(false);
+      expect(row?.titleFinal).toBe(false);
+    });
+
+    it('HTTP body `final:true` is silently ignored on /summary', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-final-ignored' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-final-ignored/summary`, {
+        token: adminToken.plaintext,
+        // A misbehaving plugin tries to lift the curated flag via HTTP.
+        body: { summary: 'raw transcript', title: 'fake curated', final: true },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-final-ignored');
+      // zod strips `final`; handler hard-codes false; flags stay 0.
+      expect(row?.summaryFinal).toBe(false);
+      expect(row?.titleFinal).toBe(false);
     });
 
     it('400 on empty summary', async () => {
@@ -260,23 +280,28 @@ describe('createApiRouter', () => {
       expect(r.body.code).toBe('session_not_found');
     });
 
-    it('non-final write is silently blocked when summary_final is true', async () => {
+    it('HTTP write is silently blocked when summary_final is already true', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
         body: { id: 'sess-twice' },
       });
-      await call(app, 'POST', `/${projectSlug}/sessions/sess-twice/summary`, {
-        token: adminToken.plaintext,
-        body: { summary: 'final-first', final: true },
+      // Simulate a prior memory.session_summary (MCP) call that set final=1.
+      // The HTTP path can never lift that flag itself, so we set it via the
+      // service layer (the only legitimate path).
+      agentSessions.writeSummary('sess-twice', {
+        tokenId: adminToken.id,
+        summary: 'final-first',
+        final: true,
       });
+      // Now a HTTP-path Stop hook tries to overwrite (final defaults to false).
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-twice/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'non-final-second', final: false },
+        body: { summary: 'non-final-second' },
       });
       expect(r.status).toBe(200);
       const row = agentSessions.getById('sess-twice');
-      // First (final:true) write wins; non-final overwrite is ignored.
+      // Curated value wins; HTTP overwrite is ignored.
       expect(row?.summary).toBe('final-first');
       expect(row?.summaryFinal).toBe(true);
     });
@@ -349,7 +374,7 @@ describe('createApiRouter', () => {
       expect(r.body.endedAt).toBe(firstEnd);
     });
 
-    it('end accepts summary and title atomically (final:false precedence)', async () => {
+    it('end accepts summary and title atomically (always final:false on HTTP path)', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -357,7 +382,7 @@ describe('createApiRouter', () => {
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-with-summary/end`, {
         token: adminToken.plaintext,
-        body: { summary: 'transcript dump', title: 'Bug fix', final: false },
+        body: { summary: 'transcript dump', title: 'Bug fix' },
       });
       expect(r.status).toBe(200);
       const row = agentSessions.getById('sess-end-with-summary');
@@ -365,26 +390,46 @@ describe('createApiRouter', () => {
       expect(row?.summary).toBe('transcript dump');
       expect(row?.title).toBe('Bug fix');
       expect(row?.summaryFinal).toBe(false);
+      expect(row?.titleFinal).toBe(false);
     });
 
-    it('end on already-ended session preserves final summary against non-final overwrite', async () => {
+    it('HTTP body `final:true` is silently ignored on /end', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-final-ignored' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-final-ignored/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'transcript', title: 'fallback', final: true },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-end-final-ignored');
+      expect(row?.status).toBe('ended');
+      expect(row?.summaryFinal).toBe(false);
+      expect(row?.titleFinal).toBe(false);
+    });
+
+    it('end on already-ended session preserves curated summary against HTTP overwrite', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
         body: { id: 'sess-end-protected' },
       });
-      // Model writes a final summary first.
-      await call(app, 'POST', `/${projectSlug}/sessions/sess-end-protected/summary`, {
-        token: adminToken.plaintext,
-        body: { summary: 'model wrote', title: 'Real title', final: true },
+      // Simulate a prior memory.session_summary (MCP) call that curated.
+      agentSessions.writeSummary('sess-end-protected', {
+        tokenId: adminToken.id,
+        summary: 'model wrote',
+        title: 'Real title',
+        final: true,
       });
-      // Bash hook then ends with a non-final fallback.
+      // Bash hook then ends with the HTTP fallback (which is always final:false).
       await call(app, 'POST', `/${projectSlug}/sessions/sess-end-protected/end`, {
         token: adminToken.plaintext,
-        body: { summary: 'raw transcript', title: 'fallback title', final: false },
+        body: { summary: 'raw transcript', title: 'fallback title' },
       });
       const row = agentSessions.getById('sess-end-protected');
-      // Model values preserved through the end transition.
+      // Curated values preserved through the end transition.
       expect(row?.status).toBe('ended');
       expect(row?.summary).toBe('model wrote');
       expect(row?.title).toBe('Real title');

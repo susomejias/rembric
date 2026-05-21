@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { AgentSessionsService } from './agent-sessions.js';
+import { AgentSessionsService, composeDerivedSummary } from './agent-sessions.js';
 import { ProjectsService } from './projects.js';
 import { TokensService } from './tokens.js';
 
@@ -455,7 +455,7 @@ describe('AgentSessionsService', () => {
     });
   });
 
-  describe('recentForContext content filter (sessionHasContent predicate)', () => {
+  describe('recentForContext content filter (sessionIsContextWorthy predicate)', () => {
     function newSessionId(suffix: string): string {
       return `sess-content-${suffix}-${Date.now()}`;
     }
@@ -466,9 +466,16 @@ describe('AgentSessionsService', () => {
       expect(recent.some((r) => r.id === s.id)).toBe(false);
     });
 
-    it('includes a session that has a summary written', () => {
+    it('includes a session that has a curated summary written', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-summary' });
       sessions.summarize(s.id, { tokenId, summary: 'goal: x' });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('includes a session with curated summary via writeSummary({final:true})', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'has-curated' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'Goal: x', final: true });
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(true);
     });
@@ -482,7 +489,14 @@ describe('AgentSessionsService', () => {
       expect(recent.some((r) => r.id === s.id)).toBe(true);
     });
 
-    it('includes a session referenced by at least one memory row', () => {
+    it('excludes a session whose only summary write was final:false (transcript fallback)', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'transcript-only' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript', final: false });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
+
+    it('excludes a session referenced ONLY by a memory row (memory still surfaces via recentMemories[])', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-memory' });
       db.handle.raw
         .prepare(
@@ -491,10 +505,10 @@ describe('AgentSessionsService', () => {
         )
         .run(newSessionId('mem'), projectId, Date.now(), s.id);
       const recent = sessions.recentForContext({ projectId, limit: 25 });
-      expect(recent.some((r) => r.id === s.id)).toBe(true);
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
     });
 
-    it('includes a session referenced by at least one prompt row', () => {
+    it('excludes a session referenced ONLY by a prompt row', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-prompt' });
       db.handle.raw
         .prepare(
@@ -503,10 +517,10 @@ describe('AgentSessionsService', () => {
         )
         .run(newSessionId('p'), s.id, projectId, Date.now());
       const recent = sessions.recentForContext({ projectId, limit: 25 });
-      expect(recent.some((r) => r.id === s.id)).toBe(true);
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
     });
 
-    it('includes a session referenced by at least one confirmation row', () => {
+    it('excludes a session referenced ONLY by a confirmation row', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-confirmation' });
       const memoryId = newSessionId('mem-for-conf');
       db.handle.raw
@@ -522,15 +536,13 @@ describe('AgentSessionsService', () => {
         )
         .run(newSessionId('c'), memoryId, Date.now(), s.id);
       const recent = sessions.recentForContext({ projectId, limit: 25 });
-      expect(recent.some((r) => r.id === s.id)).toBe(true);
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
     });
 
-    it('filter-then-truncate: backfills past newer empty sessions', () => {
+    it('filter-then-truncate: backfills past newer non-curated sessions', () => {
       const useful = sessions.start({ tokenId, projectId, agent: 'useful-old' });
       sessions.summarize(useful.id, { tokenId, summary: 'older but useful' });
 
-      // Three empty sessions started AFTER `useful`. Backdating started_at
-      // via raw SQL to guarantee ordering on fast machines.
       const now = Date.now();
       for (let i = 1; i <= 3; i++) {
         const e = sessions.start({ tokenId, projectId, agent: `empty-${i}` });
@@ -547,12 +559,254 @@ describe('AgentSessionsService', () => {
       expect(recent[0]?.id).toBe(useful.id);
     });
 
-    it('soft-deleted session with content is still excluded', () => {
+    it('soft-deleted session with curated summary is still excluded', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'deleted-with-content' });
       sessions.summarize(s.id, { tokenId, summary: 'had value, then deleted' });
       sessions.softDelete(s.id, { adminBypass: true });
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
+  });
+
+  describe('purge protection vs surfacing asymmetry', () => {
+    function newId(suffix: string): string {
+      return `asym-${suffix}-${Date.now()}`;
+    }
+
+    it('a session with anchored memory but no curated summary surfaces via auto-curate AND stays purge-protected', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'asym' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'memory anchored to uncurated session', 'active', '[]', ?, ?)`,
+        )
+        .run(newId('mem'), projectId, Date.now(), s.id);
+
+      // Before end(): session is active, summary_final=0, NOT context-worthy yet.
+      const recentBefore = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recentBefore.some((r) => r.id === s.id)).toBe(false);
+
+      // End the session — auto-curate fires (EXISTS memory).
+      sessions.end(s.id, { tokenId });
+
+      // After end(): row now has summary_final=1 with derived summary.
+      const after = sessions.getById(s.id);
+      expect(after?.summaryFinal).toBe(true);
+      expect(after?.summary).toMatch(/^\[auto\] 1 memorias/);
+
+      // (a) Surfacing: NOW context-worthy → IS in recentForContext.
+      const recentAfter = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recentAfter.some((r) => r.id === s.id)).toBe(true);
+
+      // (b) Purge protection: content-bearing (EXISTS memory) → NOT purgeable
+      // even after backdating ended_at past the 1h grace.
+      const tenHoursAgo = Date.now() - 10 * 3_600_000;
+      db.handle.raw.prepare('UPDATE sessions SET ended_at = ? WHERE id = ?').run(tenHoursAgo, s.id);
+      expect(sessions.countPurgeableEmpty()).toBe(0);
+    });
+  });
+
+  describe('auto-curate at terminal transition', () => {
+    function newId(suffix: string): string {
+      return `autocur-${suffix}-${Date.now()}`;
+    }
+
+    it('end() auto-curates a session with anchored memory and no prior curation', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-memory' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'Fixed null check in handler', 'active', '[]', ?, ?)`,
+        )
+        .run(newId('m'), projectId, Date.now(), s.id);
+
+      sessions.end(s.id, { tokenId });
+
+      const row = sessions.getById(s.id);
+      expect(row?.status).toBe('ended');
+      expect(row?.summaryFinal).toBe(true);
+      expect(row?.summary).toBe("[auto] 1 memorias — última: 'Fixed null check in handler'");
+    });
+
+    it('end() does NOT auto-curate if summary_final is already true', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-curated' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'should not appear', 'active', '[]', ?, ?)`,
+        )
+        .run(newId('m'), projectId, Date.now(), s.id);
+      sessions.writeSummary(s.id, {
+        tokenId,
+        summary: 'Curated by agent',
+        final: true,
+      });
+
+      sessions.end(s.id, { tokenId });
+
+      const row = sessions.getById(s.id);
+      expect(row?.summary).toBe('Curated by agent');
+      expect(row?.summaryFinal).toBe(true);
+    });
+
+    it('end() does NOT auto-curate if no anchored content exists', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-empty' });
+      sessions.end(s.id, { tokenId });
+      const row = sessions.getById(s.id);
+      expect(row?.summary).toBeNull();
+      expect(row?.summaryFinal).toBe(false);
+    });
+
+    it('end() auto-curate counts memories and shows last memory snippet', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-multi' });
+      const baseTs = Date.now();
+      for (let i = 0; i < 3; i++) {
+        db.handle.raw
+          .prepare(
+            `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+             VALUES (?, 'project', ?, 'user', ?, 'active', '[]', ?, ?)`,
+          )
+          .run(newId(`m-${i}`), projectId, `memory ${i}`, baseTs + i, s.id);
+      }
+      sessions.end(s.id, { tokenId });
+      const row = sessions.getById(s.id);
+      expect(row?.summary).toBe("[auto] 3 memorias — última: 'memory 2'");
+    });
+
+    it('end() with prompts only generates prompt-based summary', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-prompts' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO prompts (id, session_id, project_id, content, title, agent, created_at)
+           VALUES (?, ?, ?, 'do the thing', 'do the thing', 'claude', ?)`,
+        )
+        .run(newId('p'), s.id, projectId, Date.now());
+      sessions.end(s.id, { tokenId });
+      const row = sessions.getById(s.id);
+      expect(row?.summary).toBe('[auto] 1 prompts');
+      expect(row?.summaryFinal).toBe(true);
+    });
+
+    it('end() ignores soft-deleted prompts in auto-curate counts', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-soft' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO prompts (id, session_id, project_id, content, title, agent, created_at, deleted_at)
+           VALUES (?, ?, ?, 'deleted', 'deleted', 'claude', ?, ?)`,
+        )
+        .run(newId('p'), s.id, projectId, Date.now(), Date.now());
+      sessions.end(s.id, { tokenId });
+      const row = sessions.getById(s.id);
+      expect(row?.summary).toBeNull();
+      expect(row?.summaryFinal).toBe(false);
+    });
+
+    it('abandonStale() auto-curates each transitioned session that has anchored content', () => {
+      const s1 = sessions.start({ tokenId, projectId, agent: 'autocur-stale-1' });
+      const s2 = sessions.start({ tokenId, projectId, agent: 'autocur-stale-2' });
+      const baseTs = Date.now();
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'work in s1', 'active', '[]', ?, ?)`,
+        )
+        .run(newId('m1'), projectId, baseTs, s1.id);
+      // s2 has no memories.
+
+      // Backdate so abandonStale picks them up.
+      const ancient = baseTs - 10 * 3_600_000;
+      db.handle.raw
+        .prepare('UPDATE sessions SET started_at = ? WHERE id IN (?, ?)')
+        .run(ancient, s1.id, s2.id);
+
+      const result = sessions.abandonStale({ olderThanMs: 3_600_000 });
+      expect(result.abandoned).toBe(2);
+
+      const row1 = sessions.getById(s1.id);
+      const row2 = sessions.getById(s2.id);
+      expect(row1?.status).toBe('abandoned');
+      expect(row1?.summary).toBe("[auto] 1 memorias — última: 'work in s1'");
+      expect(row1?.summaryFinal).toBe(true);
+
+      expect(row2?.status).toBe('abandoned');
+      expect(row2?.summary).toBeNull();
+      expect(row2?.summaryFinal).toBe(false);
+    });
+
+    it('writeSummary({final:true}) succeeds on an ended (auto-curated) session — agent override', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-override' });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'auto material', 'active', '[]', ?, ?)`,
+        )
+        .run(newId('m'), projectId, Date.now(), s.id);
+      sessions.end(s.id, { tokenId });
+
+      const auto = sessions.getById(s.id);
+      expect(auto?.summary).toMatch(/^\[auto\]/);
+
+      // Agent overrides AFTER end with a curated text.
+      const overridden = sessions.writeSummary(s.id, {
+        tokenId,
+        summary: 'Goal: Refactor X. Files: foo.ts.',
+        title: 'Refactor X',
+        final: true,
+      });
+      expect(overridden.summary).toBe('Goal: Refactor X. Files: foo.ts.');
+      expect(overridden.title).toBe('Refactor X');
+      expect(overridden.summaryFinal).toBe(true);
+      expect(overridden.titleFinal).toBe(true);
+      expect(overridden.status).toBe('ended');
+    });
+
+    it('writeSummary({final:false}) is rejected on an ended session', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'autocur-reject' });
+      sessions.end(s.id, { tokenId });
+      expect(() =>
+        sessions.writeSummary(s.id, {
+          tokenId,
+          summary: 'should be rejected',
+          final: false,
+        }),
+      ).toThrow(/session_already_ended|already ended/);
+    });
+  });
+
+  describe('composeDerivedSummary helper', () => {
+    it('memories-only template', () => {
+      expect(composeDerivedSummary({ memories: 5, prompts: 0, confirmations: 0 }, 'foo')).toBe(
+        "[auto] 5 memorias — última: 'foo'",
+      );
+    });
+
+    it('prompts-only template (no memory snippet)', () => {
+      expect(composeDerivedSummary({ memories: 0, prompts: 3, confirmations: 0 }, null)).toBe(
+        '[auto] 3 prompts',
+      );
+    });
+
+    it('confirmations-only template', () => {
+      expect(composeDerivedSummary({ memories: 0, prompts: 0, confirmations: 2 }, null)).toBe(
+        '[auto] 2 confirmaciones',
+      );
+    });
+
+    it('mixed counts with snippet', () => {
+      expect(
+        composeDerivedSummary(
+          { memories: 3, prompts: 2, confirmations: 1 },
+          'Refactored the auth middleware to use jose',
+        ),
+      ).toBe(
+        "[auto] 3 memorias, 2 prompts, 1 confirmaciones — última: 'Refactored the auth middleware to use jose'",
+      );
+    });
+
+    it('truncates long memory content at 80 chars', () => {
+      const long = 'A'.repeat(200);
+      const result = composeDerivedSummary({ memories: 1, prompts: 0, confirmations: 0 }, long);
+      expect(result).toMatch(/^\[auto\] 1 memorias — última: 'A{79}…'$/);
     });
   });
 });
