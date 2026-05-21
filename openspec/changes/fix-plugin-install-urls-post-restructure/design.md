@@ -52,7 +52,7 @@ openspec/specs/hermes-agent-plugin/spec.md
 openspec/specs/opencode-plugin/spec.md
 ```
 
-(`openspec/changes/archive/**` is excluded by the same path filter the other invariants already use.)
+(`openspec/changes/**` — active and archived — is excluded by path: change dirs are work-in-progress docs that may legitimately quote the legacy URL while describing the 404 contract.)
 
 **Alternative considered:** Inline `<!-- legacy-url-ok -->` HTML comments adjacent to each documented 404 reference, with the test scanning for the comment to exempt a substring match.
 

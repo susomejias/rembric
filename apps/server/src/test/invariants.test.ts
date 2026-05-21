@@ -448,7 +448,13 @@ describe('install URL drift invariant', () => {
     const offenders: { file: string; line: number; text: string }[] = [];
     for (const rel of tracked) {
       if (LEGACY_URL_ALLOW_LIST.has(rel)) continue;
-      if (rel.startsWith('openspec/changes/archive/')) continue;
+      // Active and archived OpenSpec changes are work-in-progress
+      // documents that may legitimately quote the legacy URL while
+      // describing the 404 contract. The canonical 404-contract
+      // documentation lives in `openspec/specs/` (allow-listed above);
+      // any drift introduced via a change is caught at archive time
+      // when the delta merges into the canonical spec.
+      if (rel.startsWith('openspec/changes/')) continue;
       const dotIdx = rel.lastIndexOf('.');
       const ext = dotIdx >= 0 ? rel.slice(dotIdx).toLowerCase() : '';
       if (LEGACY_URL_BINARY_EXTENSIONS.has(ext)) continue;

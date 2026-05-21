@@ -8,7 +8,7 @@ The repository SHALL include a Vitest invariant test (in `apps/server/src/test/i
 - `openspec/specs/hermes-agent-plugin/spec.md`
 - `openspec/specs/opencode-plugin/spec.md`
 
-Archived OpenSpec changes (`openspec/changes/archive/**`) SHALL be excluded by path, mirroring the exclusion already used by sibling invariants. The test SHALL NOT issue any network request; the assertion is purely substring presence in the working-tree source.
+OpenSpec change directories (`openspec/changes/**`, active and archived) SHALL be excluded by path: they are work-in-progress documents that may legitimately quote the legacy URL while describing the 404 contract; any drift introduced via a change is caught at archive time when the delta merges into the (allow-listed) canonical spec. The test SHALL NOT issue any network request; the assertion is purely substring presence in the working-tree source.
 
 The failure message SHALL name the offending `<file>:<line>` and point the reader at the allow-list location so the regression is self-diagnosing.
 
