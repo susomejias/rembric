@@ -503,3 +503,37 @@ describe('install URL drift invariant', () => {
     }
   });
 });
+
+// SQLite migration FK-safety: SQLite refuses `DROP TABLE` on a parent
+// table whose children reference live rows when `foreign_keys=ON`, and
+// `db/client.ts` enables FKs before running migrations. `PRAGMA foreign_keys`
+// cannot be changed inside a transaction and `defer_foreign_keys` does NOT
+// defer the DROP-TABLE check (verified empirically). The migration runner
+// therefore MUST disable FKs around each migration transaction and run
+// `PRAGMA foreign_key_check` as the final pre-commit step. Without this
+// dance, any rebuild of a populated parent table fails at startup with
+// `rembric: FOREIGN KEY constraint failed` (the production incident that
+// motivated openspec/changes/fix-sessions-rebuild-fk-safety/).
+describe('migration runner FK-safety invariant', () => {
+  const migrateSrc = readFileSync(join(srcRoot, 'db/migrate.ts'), 'utf8');
+
+  it('migrate.ts disables foreign_keys around each migration transaction', () => {
+    expect(/PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(migrateSrc)).toBe(true);
+    expect(/PRAGMA\s+foreign_keys\s*=\s*ON/i.test(migrateSrc)).toBe(true);
+  });
+
+  it('migrate.ts runs PRAGMA foreign_key_check before commit', () => {
+    expect(/PRAGMA\s+foreign_key_check/i.test(migrateSrc)).toBe(true);
+  });
+
+  it('migrate.ts restores foreign_keys via a finally block', () => {
+    // Belt-and-suspenders: a thrown migration must not leave FKs disabled
+    // for the rest of the process. The check below is intentionally loose
+    // (greps for `finally` near a `PRAGMA foreign_keys = ON`) so a refactor
+    // that keeps the semantics passes.
+    const finallyBlock = migrateSrc.match(
+      /finally\s*\{[\s\S]{0,200}?PRAGMA\s+foreign_keys\s*=\s*ON/i,
+    );
+    expect(finallyBlock, 'expected a finally block that re-enables foreign_keys').not.toBeNull();
+  });
+});
