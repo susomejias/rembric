@@ -36,7 +36,14 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"]
+      "extra-files": ["plugin.json"],
+      "include-paths": [
+        "apps/plugin/.claude-plugin",
+        "apps/plugin/bin",
+        "apps/plugin/hooks/hooks.json",
+        "apps/plugin/commands",
+        "apps/plugin/scripts"
+      ]
     },
     "apps/plugin/.codex-plugin": {
       "release-type": "simple",
@@ -47,7 +54,14 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"]
+      "extra-files": ["plugin.json"],
+      "include-paths": [
+        "apps/plugin/.codex-plugin",
+        "apps/plugin/bin",
+        "apps/plugin/hooks/hooks.codex.json",
+        "apps/plugin/commands",
+        "apps/plugin/scripts"
+      ]
     },
     "apps/plugin/.hermes-plugin": {
       "release-type": "simple",
@@ -58,7 +72,8 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.yaml"]
+      "extra-files": ["plugin.yaml"],
+      "include-paths": ["apps/plugin/.hermes-plugin"]
     },
     "apps/plugin/.opencode-plugin": {
       "release-type": "node",
@@ -69,7 +84,8 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": [{ "type": "generic", "path": "plugin.ts" }]
+      "extra-files": [{ "type": "generic", "path": "plugin.ts" }],
+      "include-paths": ["apps/plugin/.opencode-plugin", "apps/plugin/bin"]
     }
   },
   "plugins": [
