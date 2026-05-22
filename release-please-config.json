@@ -27,6 +27,22 @@
         { "type": "revert", "section": "Reverts" }
       ]
     },
+    "apps/plugin": {
+      "release-type": "node",
+      "component": "plugin-shared",
+      "package-name": "@rembric/plugin",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "exclude-paths": [
+        "apps/plugin/.claude-plugin",
+        "apps/plugin/.codex-plugin",
+        "apps/plugin/.hermes-plugin",
+        "apps/plugin/.opencode-plugin"
+      ]
+    },
     "apps/plugin/.claude-plugin": {
       "release-type": "simple",
       "component": "claude-code-plugin",
@@ -36,14 +52,7 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"],
-      "include-paths": [
-        "apps/plugin/.claude-plugin",
-        "apps/plugin/bin",
-        "apps/plugin/hooks/hooks.json",
-        "apps/plugin/commands",
-        "apps/plugin/scripts"
-      ]
+      "extra-files": ["plugin.json"]
     },
     "apps/plugin/.codex-plugin": {
       "release-type": "simple",
@@ -54,14 +63,7 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"],
-      "include-paths": [
-        "apps/plugin/.codex-plugin",
-        "apps/plugin/bin",
-        "apps/plugin/hooks/hooks.codex.json",
-        "apps/plugin/commands",
-        "apps/plugin/scripts"
-      ]
+      "extra-files": ["plugin.json"]
     },
     "apps/plugin/.hermes-plugin": {
       "release-type": "simple",
@@ -72,8 +74,7 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.yaml"],
-      "include-paths": ["apps/plugin/.hermes-plugin"]
+      "extra-files": ["plugin.yaml"]
     },
     "apps/plugin/.opencode-plugin": {
       "release-type": "node",
@@ -84,15 +85,14 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": [{ "type": "generic", "path": "plugin.ts" }],
-      "include-paths": ["apps/plugin/.opencode-plugin", "apps/plugin/bin"]
+      "extra-files": [{ "type": "generic", "path": "plugin.ts" }]
     }
   },
   "plugins": [
     {
       "type": "linked-versions",
-      "groupName": "bridge-bundlers",
-      "components": ["claude-code-plugin", "codex-plugin"]
+      "groupName": "plugin-suite",
+      "components": ["plugin-shared", "claude-code-plugin", "codex-plugin", "opencode-plugin"]
     }
   ]
 }
