@@ -41,7 +41,6 @@ enableScripts: false
 allowBuilds:
   husky: true
   better-sqlite3: true
-  sqlite-vec: true
   esbuild: false # transitive of vitest; no install-time binary needed
 
 # Practice #2 — refuse transitive deps fetched from git URLs or
@@ -60,7 +59,6 @@ minimumReleaseAge: 4320
 onlyBuiltDependencies:
   - husky
   - better-sqlite3
-  - sqlite-vec
 blockExoticSubdeps: true
 minimumReleaseAge: 4320
 ```

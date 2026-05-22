@@ -27,6 +27,22 @@
         { "type": "revert", "section": "Reverts" }
       ]
     },
+    "apps/plugin": {
+      "release-type": "node",
+      "component": "plugin-shared",
+      "package-name": "@rembric/plugin",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "exclude-paths": [
+        "apps/plugin/.claude-plugin",
+        "apps/plugin/.codex-plugin",
+        "apps/plugin/.hermes-plugin",
+        "apps/plugin/.opencode-plugin"
+      ]
+    },
     "apps/plugin/.claude-plugin": {
       "release-type": "simple",
       "component": "claude-code-plugin",
@@ -75,8 +91,8 @@
   "plugins": [
     {
       "type": "linked-versions",
-      "groupName": "bridge-bundlers",
-      "components": ["claude-code-plugin", "codex-plugin"]
+      "groupName": "plugin-suite",
+      "components": ["plugin-shared", "claude-code-plugin", "codex-plugin", "opencode-plugin"]
     }
   ]
 }
