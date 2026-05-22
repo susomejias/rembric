@@ -24,8 +24,8 @@
 
 ## 5. Land
 
-- [ ] 5.1 Create branch `feat/add-dependabot-and-engine-strict`, stage the three file changes (`.npmrc`, `.github/dependabot.yml`, `openspec/changes/add-dependabot-and-engine-strict/**`), commit using Conventional Commits (`feat(security): add Dependabot config and engine-strict for supply-chain hygiene`).
-- [ ] 5.2 Push and open the PR against `main`; confirm CI runs the `test` and `docker-build-check` jobs and both pass.
+- [x] 5.1 Create branch `feat/add-dependabot-and-engine-strict`, stage the three file changes (`.npmrc`, `.github/dependabot.yml`, `openspec/changes/add-dependabot-and-engine-strict/**`), commit using Conventional Commits (`feat(security): add Dependabot config and engine-strict for supply-chain hygiene`).
+- [x] 5.2 Push and open the PR against `main`; confirm CI runs the `test` and `docker-build-check` jobs and both pass.
 - [ ] 5.3 (OPERATOR-ONLY) After PR merge, navigate to repo Settings → Security & analysis and ENABLE both **Dependency graph** and **Dependabot security updates**. Verify the toggles persist after refresh.
 - [ ] 5.4 (OPERATOR-ONLY) Within 7 days post-merge, confirm at least one Dependabot PR has appeared (any of the three ecosystems) to validate the config is wired. If no PR appears, debug by checking the Dependabot logs under repo Insights → Dependency graph → Dependabot.
-- [ ] 5.5 After merge, run `/opsx:archive add-dependabot-and-engine-strict` to move the change into `openspec/changes/archive/YYYY-MM-DD-add-dependabot-and-engine-strict/` and sync the new `supply-chain-hygiene` spec into `openspec/specs/`.
+- [x] 5.5 Bundled the archive into the same PR (pattern from prior sessions): ran `openspec archive add-dependabot-and-engine-strict -y` which moved the change into `openspec/changes/archive/2026-05-22-add-dependabot-and-engine-strict/` and synced the new `supply-chain-hygiene` spec into `openspec/specs/`.
