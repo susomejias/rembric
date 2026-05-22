@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
-import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { truncateSummary, type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import { isAuthorized } from '../services/tokens.js';
@@ -115,9 +115,12 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
     }
     try {
+      // HTTP path truncates server-side: bash / Python / opencode writers
+      // cannot react to invalid_input. The MCP path rejects (agent retries).
+      // See apps/server/src/services/agent-sessions.ts:SUMMARY_MAX_CHARS.
       const updated = deps.agentSessions.writeSummary(sessionId, {
         tokenId: ctx.token.id,
-        summary: parsed.data.summary,
+        summary: truncateSummary(parsed.data.summary),
         title: parsed.data.title,
         final: parsed.data.final,
       });
@@ -150,9 +153,11 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
     }
     try {
+      // HTTP path truncates server-side (see /summary handler above).
       const updated = deps.agentSessions.end(sessionId, {
         tokenId: ctx.token.id,
-        summary: parsed.data.summary,
+        summary:
+          parsed.data.summary !== undefined ? truncateSummary(parsed.data.summary) : undefined,
         title: parsed.data.title,
         final: parsed.data.final,
       });

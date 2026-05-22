@@ -59,6 +59,16 @@ describe('MCP initialize instructions', () => {
     }
   });
 
+  it('surfaces the summary length cap (2000) inline in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('2000');
+    }
+  });
+
   it('teaches the post-compact recovery path (memory.context) in both variants', () => {
     const variants = [
       buildInstructions({ requestedSlug: null }),

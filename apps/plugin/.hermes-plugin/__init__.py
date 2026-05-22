@@ -313,8 +313,8 @@ class RembricMemoryProvider(MemoryProvider):
         return (
             "Rembric: before declaring work done, call "
             "memory.session_summary({title, summary}). Title ≤100 chars "
-            "describing what was actually worked on. Summary covers Goal · "
-            "Discoveries · Accomplished · Next Steps · Files. "
+            "describing what was actually worked on. Summary ≤2000 chars "
+            "covers Goal · Discoveries · Accomplished · Next Steps · Files. "
             "After /compact: call memory.context if detail is missing."
         )
 
