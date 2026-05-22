@@ -25,6 +25,12 @@
 -- (`agent`, `token_id`, `project_id`, `started_at`) is touched and no row
 -- is deleted. Truncation is one-way; operators wanting to preserve
 -- pre-cap content SHOULD take a `sqlite3 .backup` before the upgrade.
+--
+-- FK safety: this rebuild DROPs `sessions`, which is the parent of
+-- prompts.session_id / memory.session_id / confirmations.session_id. The
+-- migration runner (`apps/server/src/db/migrate.ts`) wraps every migration
+-- in `PRAGMA foreign_keys=OFF` … `PRAGMA foreign_key_check` … `COMMIT`
+-- so the DROP succeeds and the post-rebuild integrity is still validated.
 
 UPDATE sessions
    SET summary = substr(summary, 1, 1987) || '…[truncated]'

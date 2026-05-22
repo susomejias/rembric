@@ -29,6 +29,12 @@ Single Node process, single SQLite file. Server layers at `apps/server/src/{serv
 
 Path-scoping contract (in `apps/server/src/mcp/tools.ts`): `/mcp/<slug>` rejects `scope='global'` with `scope_locked`; `/mcp` rejects `scope='project'` with `project_required` unless an active project exists.
 
+### Table-rebuild migrations (SQLite)
+
+SQLite has no `ALTER TABLE … ADD CONSTRAINT`, `ALTER COLUMN`, or change-nullability. To add a `CHECK`, change a type, or flip NOT NULL you have to do the rebuild dance (`CREATE TABLE x_new (…)` → `INSERT … SELECT *` → `DROP TABLE x` → `ALTER TABLE x_new RENAME TO x` → recreate indexes/triggers). With `foreign_keys = ON` (the default set by `db/client.ts`), `DROP TABLE` on a parent of any populated child table fails with `FOREIGN KEY constraint failed`. `PRAGMA foreign_keys` cannot be changed inside a transaction, and `PRAGMA defer_foreign_keys` does **not** defer the DROP-TABLE check (it only defers per-row FK violations).
+
+The migration runner (`apps/server/src/db/migrate.ts`) therefore wraps every migration in `PRAGMA foreign_keys = OFF` → `BEGIN IMMEDIATE` → migration body → `PRAGMA foreign_key_check` (pre-commit gate) → `COMMIT` → `PRAGMA foreign_keys = ON`. Migration authors do not need to add any pragma. The integrity gate runs `foreign_key_check` before COMMIT and aborts the transaction on any dangling reference, so disabling FKs around the body is safe. Enforced by `apps/server/src/test/invariants.test.ts::"migration runner FK-safety invariant"`.
+
 ## OpenSpec workflow
 
 Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active proposals in `openspec/changes/<name>/`; archived in `openspec/changes/archive/`. **Before changing a load-bearing invariant or adding a new MCP tool, open an OpenSpec change first.**
