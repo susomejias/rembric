@@ -42,6 +42,9 @@ const MAX_TRANSCRIPT_CHARS = 19_500;
 const MAX_ENTRY_CHARS = 2000;
 const MAX_ENTRIES_PER_SESSION = 200;
 const MAX_TITLE_CHARS = 100;
+const RECALL_REGEX = /remember|recall|acordate|qué hicimos|what did we do/i;
+const RECALL_NUDGE =
+  'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
 
 type EventInput = {
   event: {
@@ -294,6 +297,19 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (event.type === 'server.instance.disposed') {
         disposeFlushFireAndForget();
       }
+
+      if (event.type === 'session.compacted') {
+        const props = (event.properties ?? {}) as {
+          sessionID?: string;
+          info?: { id?: string };
+        };
+        const sessionId = props.sessionID ?? props.info?.id ?? '';
+        if (!sessionId) return;
+        if (subAgentSessions.has(sessionId)) return;
+        if (!knownSessions.has(sessionId)) return;
+        diag(`session.compacted sessionId=${sessionId}`);
+        await flushSessionSummary(sessionId);
+      }
     },
 
     'chat.message': async (input, output) => {
@@ -315,6 +331,10 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       if (!content) return;
       appendUserMessage(input.sessionID, content);
+
+      if (RECALL_REGEX.test(content)) {
+        output.parts.push({ type: 'text', text: RECALL_NUDGE });
+      }
     },
 
     'message.updated': async (input, output) => {
@@ -349,7 +369,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
           `call \`memory.session_summary\` with the content of the compacted summary above. ` +
           (slug ? `Use project: '${slug}'. ` : '') +
           'This preserves what was accomplished before compaction. ' +
-          'Without this step, everything done before compaction is lost from memory.',
+          'Without this step, everything done before compaction is lost from memory. ' +
+          'If the compacted summary lacks specific detail you need (exact file paths, prior decisions, concrete error messages), call `memory.context` before responding.',
       );
     },
   };

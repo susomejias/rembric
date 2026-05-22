@@ -11,18 +11,20 @@ Memory for AI coding agents, backed by your self-hosted [Rembric](https://github
 
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
 
-> **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 4 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+> **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
 
 ## What you get
 
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
 - **A tiny stdio bridge** (`bin/rembric-bridge.mjs`, ~80 LOC) that reads `PROJECT_SLUG` from a `.rembric` file at the project root and path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the correct project on connect. No agent-side `project.use` call, no router-fallback codepath.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
-- **Four lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
-  - `SessionStart` reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent). Also nudges the agent to load recent context.
+- **Six lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
+  - `SessionStart` (matcher `startup|resume|clear`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent). Also nudges the agent to load recent context.
+  - `SessionStart` (matcher `compact`) injects a multi-line nudge into the post-compact model context directing it to call `memory.session_summary` and `memory.context` if detail is missing.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
-  - `PreCompact` POSTs the compact transcript to `/api/<slug>/sessions/<id>/summary` so compaction never silently loses session state.
-  - `Stop` POSTs `/api/<slug>/sessions/<id>/end` (async) when the agent stops, closing the session row cleanly.
+  - `PreCompact` POSTs the live transcript to `/api/<slug>/sessions/<id>/summary` BEFORE compaction wipes context, so the snapshot survives independent of model cooperation.
+  - `PostCompact` POSTs the model-authored `compaction_summary` (delivered on stdin) directly to `/api/<slug>/sessions/<id>/summary` — the highest-quality summary we can capture.
+  - `SessionEnd` POSTs `/api/<slug>/sessions/<id>/end` when the session terminates, closing the row cleanly.
 
 Proactive memory protocol ("save after decisions, fixes, conventions, preferences, discoveries") is delivered server-side via the Rembric MCP `initialize.instructions` handshake — it applies to every MCP client (Claude Code plugin, Codex CLI, Cursor, …) automatically, with no per-client skill needed.
 
@@ -121,13 +123,15 @@ Pick something stable, lowercase, hyphen-separated (`acme-foo`, `my-app-api`). F
 
 ## Token budget
 
-| What                   | Cost     | When                         |
-| ---------------------- | -------- | ---------------------------- |
-| 4 command listings     | ≤ 40 tok | always-on (per turn)         |
-| SessionStart nudge     | ~ 20 tok | once per session             |
-| UserPromptSubmit nudge | ~ 20 tok | per matched prompt           |
-| PreCompact             | 0 tok    | side effect; no model output |
-| Stop                   | 0 tok    | side effect; async           |
+| What                         | Cost      | When                               |
+| ---------------------------- | --------- | ---------------------------------- |
+| 4 command listings           | ≤ 40 tok  | always-on (per turn)               |
+| SessionStart nudge (startup) | ~ 20 tok  | once per session                   |
+| SessionStart nudge (compact) | ~ 120 tok | once per /compact (model-context)  |
+| UserPromptSubmit nudge       | ~ 20 tok  | per matched prompt                 |
+| PreCompact                   | 0 tok     | side effect; no model output       |
+| PostCompact                  | 0 tok     | side effect; no model output       |
+| SessionEnd                   | 0 tok     | side effect; runs after model exit |
 
 The proactive-save protocol travels via the MCP `initialize.instructions` (~500 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
 

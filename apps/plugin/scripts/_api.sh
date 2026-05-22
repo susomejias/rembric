@@ -103,6 +103,44 @@ rembric_transcript_path_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
+# Extract `compaction_summary` from a PostCompact hook stdin JSON blob.
+# Prefers Claude Code's snake_case; falls back to camelCase in case Codex
+# (or a future client) ships the same content under `compactionSummary`.
+# Returns empty when missing.
+#
+# Prefers `jq` when available (correctly handles escaped quotes and any
+# whitespace in the payload). Falls back to a sed regex that matches the
+# same shape as the other stdin extractors — simple `"[^"]*"` value
+# capture. The fallback cannot recover content past an unescaped quote
+# inside the value, but in practice compaction summaries from Claude
+# Code / Codex are JSON-encoded so embedded quotes appear as `\"` and
+# the regex truncates at the first escape; for v1 this is the same
+# trade-off as the other stdin extractors. jq is the recommended path.
+rembric_compaction_summary_from_stdin_json() {
+  local input="${1:-}"
+  [ -z "$input" ] && return 0
+  local s=""
+  if command -v jq >/dev/null 2>&1; then
+    s="$(printf '%s' "$input" | jq -r '.compaction_summary // .compactionSummary // empty' 2>/dev/null)"
+  else
+    s="$(printf '%s' "$input" | sed -n 's/.*"compaction_summary"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    if [ -z "$s" ]; then
+      s="$(printf '%s' "$input" | sed -n 's/.*"compactionSummary"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    fi
+    # The sed regex preserved JSON escape sequences (e.g. \n, \") literally.
+    # Convert them back to real characters so callers handling plain text
+    # see a readable summary; rembric_json_escape will re-encode on emit.
+    if [ -n "$s" ]; then
+      s="${s//\\n/$'\n'}"
+      s="${s//\\r/$'\r'}"
+      s="${s//\\t/$'\t'}"
+      s="${s//\\\"/\"}"
+      s="${s//\\\\/\\}"
+    fi
+  fi
+  printf '%s' "$s"
+}
+
 # Escape a string for embedding in a JSON value: backslashes, double quotes,
 # and control chars (\n \r \t). Good enough for transcripts captured from
 # hook stdin; not a general-purpose JSON encoder.
