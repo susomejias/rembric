@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.10.0...opencode-plugin-v0.10.0) (2026-05-22)
+
+
+### Miscellaneous Chores
+
+* **opencode-plugin:** Synchronize plugin-suite versions
+
 ## [0.10.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.9.0...opencode-plugin-v0.10.0) (2026-05-22)
 
 
