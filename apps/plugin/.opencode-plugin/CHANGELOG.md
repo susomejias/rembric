@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.9.0...opencode-plugin-v0.10.0) (2026-05-22)
+
+
+### Features
+
+* **plugin:** wire pre/post-compact hooks + opencode recall paridad ([#88](https://github.com/susomejias/rembric/issues/88)) ([e78b4e4](https://github.com/susomejias/rembric/commit/e78b4e43813b14138ff7c53d20d54ee9ad4d8c9b))
+
+
+### Bug Fixes
+
+* **plugin:** point per-client install URLs at apps/plugin after monorepo restructure ([#75](https://github.com/susomejias/rembric/issues/75)) ([bd26271](https://github.com/susomejias/rembric/commit/bd2627178e65ac46c8488d3e7b9cd3e405b489b2))
+
 ## [0.9.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.8.0...opencode-plugin-v0.9.0) (2026-05-20)
 
 
