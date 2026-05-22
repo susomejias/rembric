@@ -144,38 +144,43 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
-To keep `session-start.sh`, `post-compact.sh`, and `session-end.sh` minimal and consistent, the plugin SHALL ship a shared helper at `apps/plugin/scripts/_api.sh` that:
+To keep `session-start.sh`, `post-compact.sh`, `session-end.sh`, `pre-compact.sh`, and `post-compaction.sh` minimal and consistent, the plugin SHALL ship a shared helper at `apps/plugin/scripts/_api.sh` that:
 
 - Resolves `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from the environment.
 - Parses `${cwd}/.rembric` for `PROJECT_SLUG` (reuses the same dotenv parser logic).
 - Exposes a function `rembric_post <path> <json-body>` that issues `curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --max-time 3 -d "$body" "$URL"`.
 - Exposes a function `rembric_json_escape <string>` that escapes for embedding in a JSON value.
-- Exposes functions `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, and a new `rembric_transcript_path_from_stdin_json` that pull those fields from stdin JSON.
+- Exposes functions `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, `rembric_transcript_path_from_stdin_json`, AND a new `rembric_compaction_summary_from_stdin_json` that pulls the `compaction_summary` field from hook stdin JSON. The compaction-summary extractor SHALL prefer `compaction_summary` and SHALL fall back to `compactionSummary` (in case Codex uses camelCase, per the same precedent that `session_id`/`sessionId` already follows).
 - Discards stdout and returns `0` even on failure (so callers can `|| true` safely).
 
-A new sibling helper `apps/plugin/scripts/_transcript.sh` SHALL expose `rembric_format_transcript <path>` that reads a JSONL transcript and emits `role: content\n…` oldest-first, truncated to 19500 chars from the tail. The helper SHALL prefer `jq` when available and SHALL fall back to a sed-based parser otherwise; both paths SHALL emit empty string on parse failure rather than crashing.
+The sibling helper `apps/plugin/scripts/_transcript.sh` (unchanged) exposes `rembric_format_transcript_claude_code`, `rembric_extract_first_assistant_claude_code`, `rembric_format_transcript_codex_cli`, and `rembric_extract_first_assistant_codex_cli`. The new `pre-compact.sh` consumes the Claude Code variants directly; Codex's `pre-compact.sh` execution SHALL select the codex_cli variants OR (preferred) the script SHALL detect the agent from `$1` (already conventional for `session-start.sh`) and dispatch accordingly. The contract is: `pre-compact.sh <agent>` accepts the same agent name argument as `session-start.sh`.
 
 Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript handling is needed) and SHALL NOT inline the curl invocation or transcript parsing directly. The helpers SHALL respect the same "exit 0 on error" discipline as the existing scripts.
 
-#### Scenario: Helper is sourced by all hook scripts
+#### Scenario: New helpers are sourced by the new scripts
 
-- **WHEN** `session-start.sh`, `post-compact.sh`, or `session-end.sh` are read
+- **WHEN** `pre-compact.sh` or `post-compaction.sh` are read
 - **THEN** each SHALL start with `source "${SCRIPT_DIR}/_api.sh"` (where `SCRIPT_DIR` is the script's own directory)
-- **AND** `session-end.sh` SHALL also `source "${SCRIPT_DIR}/_transcript.sh"`
-- **AND** none SHALL inline a literal `curl` invocation outside the helper
+- **AND** `pre-compact.sh` SHALL also `source "${SCRIPT_DIR}/_transcript.sh"` (transcript needed)
+- **AND** neither SHALL inline a literal `curl` invocation outside the helper
 
-#### Scenario: Helper fails silently when env is incomplete
+#### Scenario: rembric_compaction_summary_from_stdin_json accepts both naming conventions
 
-- **WHEN** `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is missing
-- **THEN** the helper SHALL emit a one-line stderr diagnostic and `rembric_post` SHALL return `0` without issuing a request
+- **WHEN** the helper is called with stdin `{"compaction_summary": "X"}` (snake_case, Claude convention)
+- **THEN** it SHALL extract `X`
 
-#### Scenario: Transcript helper degrades gracefully
+- **WHEN** the helper is called with stdin `{"compactionSummary": "X"}` (camelCase, in case Codex differs)
+- **THEN** it SHALL extract `X`
 
-- **WHEN** `rembric_format_transcript <path>` is called with a non-existent path
-- **THEN** the helper SHALL emit empty string to stdout and exit `0`
+- **WHEN** the helper is called with stdin lacking both keys
+- **THEN** it SHALL emit empty string and exit `0`
 
-- **WHEN** the helper is called with a malformed JSONL file
-- **THEN** the helper SHALL extract what it can (best-effort `role`/`content` parse) and emit empty string if nothing parsable was found, exiting `0`
+<!-- Token budget is a `## Section` in the canonical spec, not a `### Requirement`,
+     so it cannot be expressed as a MODIFIED Requirement delta. The output cap for
+     `post-compact.sh` declared in that section (≤120 tokens) remains the soft
+     target; the sharpened nudge stays well within the input window in practice.
+     A future change can convert "Token budget" into a proper Requirement if we
+     want it enforceable. -->
 
 ### Requirement: The plugin MUST NOT implement migration or coexistence behaviors with other agent memory systems
 

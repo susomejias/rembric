@@ -68,4 +68,14 @@ describe('MCP initialize instructions', () => {
       expect(text).toContain('2000');
     }
   });
+
+  it('teaches the post-compact recovery path (memory.context) in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('memory.context');
+    }
+  });
 });

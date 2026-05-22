@@ -306,14 +306,16 @@ class RembricMemoryProvider(MemoryProvider):
 
     def system_prompt_block(self) -> str:
         # Permanent nudge so the model knows to write a structured summary
-        # before declaring work done. Parity with the MCP server's
+        # before declaring work done, AND to recover detail after /compact
+        # via memory.context. Parity with the MCP server's
         # initialize.instructions block served to Claude Code / Codex CLI.
+        # Hard cap: ≤300 chars (asserted by tests).
         return (
             "Rembric: before declaring work done, call "
             "memory.session_summary({title, summary}). Title ≤100 chars "
             "describing what was actually worked on. Summary ≤2000 chars "
-            "(server rejects longer) covers Goal · Discoveries · "
-            "Accomplished · Next Steps · Files."
+            "covers Goal · Discoveries · Accomplished · Next Steps · Files. "
+            "After /compact: call memory.context if detail is missing."
         )
 
     def prefetch(self, query: str, **kwargs: Any) -> str:
