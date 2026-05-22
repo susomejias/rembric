@@ -61,7 +61,10 @@ export const agentSessions = sqliteTable(
     /**
      * Structured summary populated by memory.session_summary (final:true)
      * or by hook fallbacks (final:false). Mutable subject to the
-     * `summary_final` precedence flag.
+     * `summary_final` precedence flag. Bounded to `SUMMARY_MAX_CHARS`
+     * (2000) by a SQLite CHECK constraint declared in migration
+     * `0011_summary_length_check.sql`; the service layer rejects oversize
+     * writes and the HTTP handler truncates with a `…[truncated]` suffix.
      */
     summary: text('summary'),
     /** Lock flag for `summary`. Once true, only final writes overwrite. */

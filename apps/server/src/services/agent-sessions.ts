@@ -11,6 +11,46 @@ const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
 
 /**
+ * Single source of truth for the maximum length (UTF-16 code units) of
+ * `sessions.summary`. Enforced at: (a) the service layer below via
+ * `assertSummaryWithinCap`, (b) the MCP zod schema in `sessions-tools.ts`,
+ * (c) the HTTP handler in `api-router.ts` via `truncateSummary`, (d) the
+ * SQLite `CHECK` constraint on the `sessions.summary` column.
+ *
+ * The asymmetry between (b) and (c) is deliberate: MCP rejects (the agent
+ * retries with a shorter body), HTTP truncates (hook scripts cannot react
+ * to an error). See `openspec/specs/sessions/spec.md` and the design notes
+ * in the `summary-length-cap` change.
+ */
+export const SUMMARY_MAX_CHARS = 2000;
+
+/** Suffix appended by `truncateSummary` when overflow trims content. */
+export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';
+
+/**
+ * Returns `s` unchanged when its length fits in `SUMMARY_MAX_CHARS`; otherwise
+ * returns `s.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + SUFFIX`. The
+ * returned string is always at most `SUMMARY_MAX_CHARS` chars long.
+ *
+ * Used by the HTTP layer (where hook scripts cannot retry on rejection) to
+ * silently bring oversized bodies under the cap before calling the service.
+ * The service itself rejects oversized inputs unconditionally.
+ */
+export function truncateSummary(s: string): string {
+  if (s.length <= SUMMARY_MAX_CHARS) return s;
+  return s.slice(0, SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_SUFFIX.length) + SUMMARY_TRUNCATE_SUFFIX;
+}
+
+function assertSummaryWithinCap(callsite: string, summary: string | undefined): void {
+  if (summary !== undefined && summary.length > SUMMARY_MAX_CHARS) {
+    throw new DomainError(
+      'invalid_input',
+      `${callsite}: summary must be ≤${SUMMARY_MAX_CHARS} chars (got ${summary.length})`,
+    );
+  }
+}
+
+/**
  * Single source of truth for "this session has something worth surfacing".
  *
  * Consumed positively by `recentForContext` (filter to useful sessions) and
@@ -206,6 +246,7 @@ export class AgentSessionsService {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.writeSummary: summary must be non-empty');
     }
+    assertSummaryWithinCap('sessions.writeSummary', input.summary);
     if (input.title !== undefined) {
       if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
         throw new DomainError(
@@ -271,6 +312,7 @@ export class AgentSessionsService {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.end: summary must be non-empty');
     }
+    assertSummaryWithinCap('sessions.end', input.summary);
     if (input.title !== undefined) {
       if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
         throw new DomainError(
@@ -361,6 +403,7 @@ export class AgentSessionsService {
     if (input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.summarize: summary must be non-empty');
     }
+    assertSummaryWithinCap('sessions.summarize', input.summary);
     return this.end(sessionId, {
       tokenId: input.tokenId,
       summary: input.summary,

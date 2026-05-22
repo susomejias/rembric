@@ -7,7 +7,7 @@ import { agentSessions } from '../db/schema/agent-sessions.js';
 import { memory } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
-import { type AgentSessionsService } from '../services/agent-sessions.js';
+import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import { type ProjectsService } from '../services/projects.js';
@@ -38,7 +38,7 @@ export const sessionEndSchema = {
 
 export const sessionSummarySchema = {
   sessionId: z.string().min(1).optional(),
-  summary: z.string().min(1).max(20_000),
+  summary: z.string().min(1).max(SUMMARY_MAX_CHARS, `summary must be ≤${SUMMARY_MAX_CHARS} chars`),
   title: z.string().min(1).max(100).optional(),
 };
 

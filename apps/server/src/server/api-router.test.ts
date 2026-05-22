@@ -312,6 +312,39 @@ describe('createApiRouter', () => {
       expect(r.status).toBe(409);
       expect(r.body.code).toBe('session_deleted');
     });
+
+    it('truncates summary > SUMMARY_MAX_CHARS server-side with the …[truncated] suffix', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-trunc-summary' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-trunc-summary/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'A'.repeat(5000) },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      const row = agentSessions.getById('sess-trunc-summary');
+      expect(row?.summary?.length).toBe(2000);
+      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+      // Response body echoes the truncated value.
+      expect((r.body.summary as string).length).toBe(2000);
+    });
+
+    it('400 invalid_input on summary > 20_000 (wire DoS guard fires before truncation)', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-dos-summary' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-dos-summary/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'A'.repeat(20_001) },
+      });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('invalid_input');
+    });
   });
 
   describe('POST /:slug/sessions/:id/end', () => {
@@ -365,6 +398,24 @@ describe('createApiRouter', () => {
       expect(row?.summary).toBe('transcript dump');
       expect(row?.title).toBe('Bug fix');
       expect(row?.summaryFinal).toBe(false);
+    });
+
+    it('end truncates oversize summary server-side and still transitions', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-trunc' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-trunc/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'A'.repeat(5000), final: false },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-end-trunc');
+      expect(row?.status).toBe('ended');
+      expect(row?.endedAt).not.toBeNull();
+      expect(row?.summary?.length).toBe(2000);
+      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
     });
 
     it('end on already-ended session preserves final summary against non-final overwrite', async () => {

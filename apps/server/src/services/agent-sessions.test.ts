@@ -102,6 +102,62 @@ describe('AgentSessionsService', () => {
     expect(() => sessions.summarize(s.id, { tokenId, summary: '   ' })).toThrow(/non-empty/);
   });
 
+  describe('summary length cap (SUMMARY_MAX_CHARS = 2000)', () => {
+    it('writeSummary rejects summary of length > 2000 and leaves the row unchanged', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'claude' });
+      expect(() =>
+        sessions.writeSummary(s.id, { tokenId, summary: 'a'.repeat(2001), final: true }),
+      ).toThrow(/2000/);
+      const after = sessions.getById(s.id);
+      expect(after?.summary).toBeNull();
+      expect(after?.summaryFinal).toBe(false);
+    });
+
+    it('writeSummary accepts summary of exactly 2000 chars', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'claude' });
+      const updated = sessions.writeSummary(s.id, {
+        tokenId,
+        summary: 'a'.repeat(2000),
+        final: true,
+      });
+      expect(updated.summary?.length).toBe(2000);
+      expect(updated.summaryFinal).toBe(true);
+    });
+
+    it('end rejects oversized summary atomically with the transition', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'claude' });
+      expect(() => sessions.end(s.id, { tokenId, summary: 'a'.repeat(2001) })).toThrow(/2000/);
+      const after = sessions.getById(s.id);
+      expect(after?.status).toBe('active');
+      expect(after?.endedAt).toBeNull();
+      expect(after?.summary).toBeNull();
+    });
+
+    it('summarize (legacy wrapper) inherits the cap', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'claude' });
+      expect(() => sessions.summarize(s.id, { tokenId, summary: 'a'.repeat(2001) })).toThrow(
+        /2000/,
+      );
+      const after = sessions.getById(s.id);
+      expect(after?.status).toBe('active');
+    });
+  });
+
+  describe('truncateSummary helper', () => {
+    it('returns input unchanged when within the cap', async () => {
+      const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
+      expect(truncateSummary('hi')).toBe('hi');
+      expect(truncateSummary('a'.repeat(SUMMARY_MAX_CHARS))).toHaveLength(SUMMARY_MAX_CHARS);
+    });
+
+    it('truncates oversize input with the …[truncated] suffix and lands at exactly the cap', async () => {
+      const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
+      const out = truncateSummary('a'.repeat(5000));
+      expect(out.length).toBe(SUMMARY_MAX_CHARS);
+      expect(out.endsWith('…[truncated]')).toBe(true);
+    });
+  });
+
   it('findActiveForTransport returns the most recent active session for the pair', () => {
     const a = sessions.start({ tokenId, projectId, agent: 'a' });
     // Sleep so b's startedAt > a's startedAt.
