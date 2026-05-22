@@ -17,9 +17,10 @@ export interface InstructionsContext {
 
 const BASE = `Rembric memory.
 
-Call memory.save right after: bug fix · decision · discovery · config change · pattern · user preference. If the same topic is evolving, pass topic_key (or call memory.suggest_topic_key first) so the previous row supersedes atomically. When save returns candidates[], close each with memory.judge.
+Call memory.save after: bug fix · decision · discovery · config change · pattern · user preference. If the topic is evolving, pass topic_key (use memory.suggest_topic_key) so the prior row supersedes. On save candidates[], close each with memory.judge.
 Call memory.search when the user references past work or asks "what did we do".
-Call memory.session_summary({title, summary}) before saying "done": title ≤100 chars describing what was actually worked on; summary covers Goal · Discoveries · Accomplished · Next Steps · Files.`;
+Call memory.session_summary({title, summary}) before "done": title ≤100 chars describing what was actually worked on; summary covers Goal · Discoveries · Accomplished · Next Steps · Files.
+After /compact: call memory.context if detail is missing.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>
   `\n\nThis connection is path-scoped to '${slug}'. scope='global' is rejected; open /mcp for user-wide memory.`;

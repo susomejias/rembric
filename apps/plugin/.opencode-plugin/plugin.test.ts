@@ -2,13 +2,14 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Imports from the shared dotenv lib (single source of truth, used by the
 // MCP bridge AND the opencode plugin). The distributed plugin.ts exports
 // ONLY `RembricPlugin`; opencode invokes every named export as a Plugin
 // function, so the helpers MUST stay outside plugin.ts's export surface.
 import { parseDotenv, readRembricSlug } from '../bin/rembric-dotenv.mjs';
+import { RembricPlugin } from './plugin.js';
 
 describe('parseDotenv', () => {
   it('returns {} for empty input', () => {
@@ -130,5 +131,143 @@ describe('readRembricSlug byte-for-byte equivalence with bridge parser', () => {
     expect(parsed.OTHER_KEY).toBe('ignored');
     expect(parsed.TRAILING_WHITESPACE).toBe('xyz');
     expect(readRembricSlug(dir)).toBe('my-repo');
+  });
+});
+
+describe('RembricPlugin handlers', () => {
+  let dir: string;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-handlers-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+    fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+    vi.restoreAllMocks();
+  });
+
+  it('experimental.session.compacting nudge includes memory.context guidance', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const out: { context: string[] } = { context: [] };
+    await handlers['experimental.session.compacting']!({ sessionID: 's1' } as never, out as never);
+    expect(out.context).toHaveLength(1);
+    expect(out.context[0]).toContain('memory.session_summary');
+    expect(out.context[0]).toContain('memory.context');
+    expect(out.context[0]).toContain("'demo'");
+  });
+
+  it('chat.message appends recall nudge when user text matches recall regex', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const cases = [
+      'remember what we did yesterday',
+      'please recall the auth fix',
+      'acordate cuando hicimos la migración?',
+      'What did we do with the JWT?',
+      '¿qué hicimos con el login?',
+    ];
+    for (const text of cases) {
+      const output = {
+        parts: [{ type: 'text', text }],
+        message: {},
+      };
+      await handlers['chat.message']!({ sessionID: 's-recall' } as never, output as never);
+      const lastPart = output.parts[output.parts.length - 1];
+      expect(lastPart.text).toContain('rembric: User intent: recall');
+      expect(lastPart.text).toContain('memory.search');
+    }
+  });
+
+  it('chat.message does NOT append recall nudge when user text does not match', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const cases = [
+      'please write a unit test for src/auth.ts',
+      'fix the failing build',
+      'add a new endpoint at /api/foo',
+    ];
+    for (const text of cases) {
+      const output = {
+        parts: [{ type: 'text', text }],
+        message: {},
+      };
+      await handlers['chat.message']!({ sessionID: 's-no-recall' } as never, output as never);
+      // Only the original part remains; nudge was not appended.
+      expect(output.parts).toHaveLength(1);
+      expect(output.parts[0].text).toBe(text);
+    }
+  });
+
+  it('event(session.compacted) flushes the accumulator for a known session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+
+    // Register the session and prime the accumulator.
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'sc1', parentID: '', title: 'work' } },
+      },
+    } as never);
+    await handlers['chat.message']!(
+      { sessionID: 'sc1' } as never,
+      { parts: [{ type: 'text', text: 'turn one' }], message: {} } as never,
+    );
+
+    const before = fetchMock.mock.calls.length;
+
+    await handlers.event!({
+      event: {
+        type: 'session.compacted',
+        properties: { sessionID: 'sc1' },
+      },
+    } as never);
+
+    const summaryCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.includes('/sessions/sc1/summary'),
+    );
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
+    expect(summaryCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('event(session.compacted) is a no-op for unknown sessions', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const before = fetchMock.mock.calls.length;
+
+    await handlers.event!({
+      event: {
+        type: 'session.compacted',
+        properties: { sessionID: 'never-registered' },
+      },
+    } as never);
+
+    expect(fetchMock.mock.calls.length).toBe(before);
+  });
+
+  it('event(session.compacted) is a no-op for sub-agent sessions', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+
+    // Register as sub-agent (has parentID).
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'sub-1', parentID: 'parent', title: 'sub work' } },
+      },
+    } as never);
+    const before = fetchMock.mock.calls.length;
+
+    await handlers.event!({
+      event: {
+        type: 'session.compacted',
+        properties: { sessionID: 'sub-1' },
+      },
+    } as never);
+
+    expect(fetchMock.mock.calls.length).toBe(before);
   });
 });

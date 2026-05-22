@@ -76,7 +76,7 @@ The file SHALL expose a module-level `register(ctx)` function that calls `ctx.re
 - `on_session_switch(new_session_id, *, parent_session_id="", reset=False, **kwargs)` SHALL override per the "Provider MUST override on_session_switch" requirement.
 - `get_tool_schemas` SHALL return `[]`. The provider contributes no agent-callable tools.
 - `handle_tool_call(name, args)` SHALL return `json.dumps({"error": "unknown_tool", "hint": "register the rembric MCP bridge in mcp_servers.rembric to access memory tools"})`.
-- `system_prompt_block` SHALL return a single-paragraph block (≤300 chars) directing the agent to call `memory.session_summary({title, summary})` before declaring work done. Title ≤100 chars descriptive of what was actually worked on; summary follows Goal · Discoveries · Accomplished · Next Steps · Files. This is the Hermes-side counterpart to Claude/Codex's `initialize.instructions` nudge.
+- `system_prompt_block` SHALL return a single-paragraph block (**≤300 chars**) directing the agent to (a) call `memory.session_summary({title, summary})` before declaring work done — title ≤100 chars descriptive of what was actually worked on; summary follows Goal · Discoveries · Accomplished · Next Steps · Files — AND (b) call `memory.context` after any compaction event when the compact summary lacks detail (file paths, specific decisions, errors). This is the Hermes-side counterpart to Claude/Codex's `initialize.instructions` nudge, which now also carries the memory.context post-compact recovery guidance for symmetry.
 - `prefetch(query, **kwargs)` SHALL return `""`.
 - `queue_prefetch(query, **kwargs)` SHALL be a no-op (return `None`).
 - `sync_turn(user, assistant, **kwargs)` SHALL be a no-op.
@@ -87,90 +87,59 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentia
 
 #### Scenario: is_available with both envs set and a healthy server returns True
 
-- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
-- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `200`
-- **WHEN** Hermes calls `provider.is_available()`
-- **THEN** the provider SHALL return `True`
+(Unchanged from the prior spec.)
 
 #### Scenario: is_available with a missing token returns False without making a request
 
-- **GIVEN** `REMBRIC_SERVER_URL` is set but `REMBRIC_API_TOKEN` is unset
-- **WHEN** Hermes calls `provider.is_available()`
-- **THEN** the provider SHALL return `False`
-- **AND** the provider SHALL NOT issue any HTTP request
+(Unchanged from the prior spec.)
 
 #### Scenario: is_available with an invalid token returns False
 
-- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
-- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `401`
-- **WHEN** Hermes calls `provider.is_available()`
-- **THEN** the provider SHALL return `False`
+(Unchanged from the prior spec.)
 
 #### Scenario: is_available with the server's database unavailable returns False
 
-- **GIVEN** `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are set
-- **AND** `GET ${REMBRIC_SERVER_URL}/healthz` with the bearer header returns `503`
-- **WHEN** Hermes calls `provider.is_available()`
-- **THEN** the provider SHALL return `False`
+(Unchanged from the prior spec.)
 
 #### Scenario: Session initialize POSTs to the sessions endpoint with agent: hermes
 
-- **WHEN** Hermes starts a session and calls `provider.initialize(session_id="01XYZ", cwd="/home/user/repo")` with a resolvable slug `myproj`
-- **THEN** the provider issues `POST ${REMBRIC_SERVER_URL}/api/myproj/sessions` with `Authorization: Bearer …` and body `{"id":"01XYZ","cwd":"/home/user/repo","agent":"hermes"}`
-- **AND** the response is discarded
-- **AND** the provider caches `slug="myproj"`, `session_id="01XYZ"`, `cwd="/home/user/repo"` for subsequent lifecycle calls
+(Unchanged from the prior spec.)
 
 #### Scenario: Pre-compress posts a transcript summary
 
-- **WHEN** `provider.on_pre_compress(messages=[...])` is called for an initialized session
-- **THEN** the provider serializes messages to `role: content` lines (oldest-first), caps at 19,500 chars, and POSTs to `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/summary` with `{"summary":"<transcript>","final":false}`
-- **AND** the body SHALL NOT include `title`
-- **AND** the `messages` argument is NOT mutated by the provider
-- **AND** the return value SHALL be `""`
+(Unchanged from the prior spec.)
 
 #### Scenario: Session end posts to the end endpoint with summary and derived title
 
-- **WHEN** Hermes ends the session and calls `provider.on_session_end(messages=[{role:"user",content:"hi"},{role:"assistant",content:"Fixed the auth bug; refactored login flow"}])` for an initialized session
-- **THEN** the provider issues `POST ${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body containing `summary` = the formatted transcript, `title` = `"Fixed the auth bug; refactored login flow"` (or truncated to 100 chars), `final: false`
-- **AND** the response is discarded
+(Unchanged from the prior spec.)
 
 #### Scenario: Session end with empty messages degrades to `{}`
 
-- **WHEN** `provider.on_session_end(messages=[])` is called
-- **THEN** the provider POSTs `/end` with body `{}` (no summary, no title)
-- **AND** the server transitions the row to `ended` with summary/title unchanged
+(Unchanged from the prior spec.)
 
 #### Scenario: Session end when model already wrote a final summary
 
-- **GIVEN** during the session the agent called `memory.session_summary({summary, title})` via the MCP bridge (server-side `summary_final = true`)
-- **WHEN** `provider.on_session_end(messages)` posts `/end {summary, title, final: false}`
-- **THEN** the server transitions the row to `ended` but the `final:false` writes are skipped due to precedence
-- **AND** the model's summary and title SHALL remain intact
+(Unchanged from the prior spec.)
 
 #### Scenario: Lifecycle calls without a resolved slug skip silently
 
-- **WHEN** `provider.initialize(session_id="01XYZ", cwd="/tmp")` runs with no resolvable slug from any cascade source
-- **THEN** the provider writes a single stderr diagnostic `[rembric] no project slug for session 01XYZ; skipping session POST`
-- **AND** no HTTP request is issued
-- **AND** subsequent calls to `on_pre_compress`, `on_session_end`, and `on_session_switch` skip silently without diagnostic spam
+(Unchanged from the prior spec.)
 
-#### Scenario: system_prompt_block emits the session-close protocol
+#### Scenario: system_prompt_block emits the session-close protocol AND memory.context post-compact guidance
 
 - **WHEN** Hermes calls `provider.system_prompt_block()`
 - **THEN** the returned string SHALL be non-empty and SHALL contain the substring `memory.session_summary`
 - **AND** SHALL contain a reference to `title` and the structure `Goal · Discoveries · Accomplished · Next Steps · Files`
-- **AND** SHALL be ≤300 chars
+- **AND** SHALL contain the substring `memory.context` (new — post-compact recovery guidance)
+- **AND** SHALL be ≤300 chars total (unchanged cap — the new content MUST fit within the existing cap, requiring concise phrasing)
 
 #### Scenario: handle_tool_call returns a defensive error
 
-- **WHEN** for any reason `provider.handle_tool_call(name="memory_save", args={})` is invoked
-- **THEN** the provider returns the JSON string `{"error":"unknown_tool","hint":"register the rembric MCP bridge in mcp_servers.rembric to access memory tools"}`
+(Unchanged from the prior spec.)
 
 #### Scenario: Provider does not manage credential storage
 
-- **WHEN** Hermes inspects the provider's published surface
-- **THEN** the provider does NOT override `get_config_schema` (default returns `[]`) and does NOT override `save_config` (default no-op)
-- **AND** no `~/.hermes/rembric.json` file is created by the provider
+(Unchanged from the prior spec.)
 
 ### Requirement: Slug resolution cascade
 
