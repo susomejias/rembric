@@ -24,11 +24,23 @@
       "sourceType": "well-known",
       "computedHash": "f6356cb950cd3a4954685744df4bf4a828bbbae7b3d7ce45bd0cc632f66ea07a"
     },
+    "diagnose": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnose/SKILL.md",
+      "computedHash": "15939a26f86edec2d4862042b8564e5a062cb81d04e047a0cea6305c8830b5f5"
+    },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
       "skillPath": "skills/find-skills/SKILL.md",
       "computedHash": "9e1c8b3103f92fa8092568a44fe64858de7c5c9dc65ce4bea8f168080e889cfd"
+    },
+    "improve-codebase-architecture": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
+      "computedHash": "ef32aea0a8fab9b365ff9e08a95f8d353e20ca21ea46ec2e73587c86dd341351"
     },
     "mcp-builder": {
       "source": "anthropics/skills",
@@ -36,17 +48,47 @@
       "skillPath": "skills/mcp-builder/SKILL.md",
       "computedHash": "826e46adf81e1372282e205c34e1a2ee876e72148007726e4a2512599d2fef7b"
     },
+    "npm-security-best-practices": {
+      "source": "susomejias/skills",
+      "sourceType": "github",
+      "skillPath": "npm-security-best-practices/SKILL.md",
+      "computedHash": "d8fbe258d4beed380b6b1b03739ca2ef303c803c0fc3545196c2c274993dc8d5"
+    },
     "plugin-creator": {
       "source": "openai/skills",
       "sourceType": "github",
       "skillPath": "skills/.system/plugin-creator/SKILL.md",
       "computedHash": "f6cd2ab74e30276067cb68aa2f41d56a762b41fe9dfb9dd914f2dbc27d0010f9"
     },
+    "review-and-ship": {
+      "source": "cursor/plugins",
+      "sourceType": "github",
+      "skillPath": "cursor-team-kit/skills/review-and-ship/SKILL.md",
+      "computedHash": "8d6a4b696b9c89ee19a8aebdcc3a624d092911a7233273039b00ededd14de187"
+    },
     "skill-creator": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "skillPath": "skills/skill-creator/SKILL.md",
       "computedHash": "5ea13a6d9f0d4bb694405d79acd00cadec0d21bb138c4dd10fcf3c500cb835c2"
+    },
+    "testing": {
+      "source": "susomejias/skills",
+      "sourceType": "github",
+      "skillPath": "testing/SKILL.md",
+      "computedHash": "947edfa458d2816a4c061bcf5b205528daf007ae68485b2851ab41180398b036"
+    },
+    "thermo-nuclear-code-quality-review": {
+      "source": "cursor/plugins",
+      "sourceType": "github",
+      "skillPath": "cursor-team-kit/skills/thermo-nuclear-code-quality-review/SKILL.md",
+      "computedHash": "9052b01b46b1d8dbf94c45f9313ec1983443f9a460e83d49cdc7fe0f640ca476"
+    },
+    "zero-tech-debt": {
+      "source": "susomejias/skills",
+      "sourceType": "github",
+      "skillPath": "zero-tech-debt/SKILL.md",
+      "computedHash": "f15024c66c3808e55eeb212e384c4d492d44b62efff70b356748bdde37c40af4"
     }
   }
 }
