@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0](https://github.com/susomejias/rembric/compare/hermes-plugin-v0.9.0...hermes-plugin-v0.10.0) (2026-05-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sessions:** cap session.summary at 2000 chars (DB CHECK + reject/truncate) ([#87](https://github.com/susomejias/rembric/issues/87))
+
+### Features
+
+* **plugin:** wire pre/post-compact hooks + opencode recall paridad ([#88](https://github.com/susomejias/rembric/issues/88)) ([e78b4e4](https://github.com/susomejias/rembric/commit/e78b4e43813b14138ff7c53d20d54ee9ad4d8c9b))
+* **sessions:** cap session.summary at 2000 chars (DB CHECK + reject/truncate) ([#87](https://github.com/susomejias/rembric/issues/87)) ([0af3b8a](https://github.com/susomejias/rembric/commit/0af3b8a36e4125c021fb5e6df811486016b24c73))
+
+
+### Bug Fixes
+
+* **plugin:** point per-client install URLs at apps/plugin after monorepo restructure ([#75](https://github.com/susomejias/rembric/issues/75)) ([bd26271](https://github.com/susomejias/rembric/commit/bd2627178e65ac46c8488d3e7b9cd3e405b489b2))
+
 ## [0.9.0](https://github.com/susomejias/rembric/compare/hermes-plugin-v0.8.0...hermes-plugin-v0.9.0) (2026-05-20)
 
 
