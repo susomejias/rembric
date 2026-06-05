@@ -25,11 +25,31 @@ if (!target) {
 console.error(`fetch-model: ${MODEL_ID}@${REVISION.slice(0, 7)} dtype=${DTYPE} → ${target}`);
 
 // Phase 1 — download at the pinned revision into a throwaway cache.
+// Anonymous requests from shared CI runners get rate-limited by HF (429);
+// transformers.js sends Authorization automatically when HF_TOKEN is set
+// (wired as a Docker build secret), and transient failures retry with
+// backoff. A non-transient error (bad revision, 401) fails immediately.
 const tmpCache = join(target, '.cache-tmp');
 {
   const { env, pipeline } = await import('@huggingface/transformers');
   env.cacheDir = tmpCache;
-  await pipeline('feature-extraction', MODEL_ID, { dtype: DTYPE, revision: REVISION });
+  const ATTEMPTS = 5;
+  const TRANSIENT = /\((429|5\d{2})\)|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN/;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await pipeline('feature-extraction', MODEL_ID, { dtype: DTYPE, revision: REVISION });
+      break;
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (attempt >= ATTEMPTS || !TRANSIENT.test(msg)) throw err;
+      rmSync(tmpCache, { recursive: true, force: true });
+      const waitMs = 5000 * 2 ** (attempt - 1);
+      console.error(
+        `fetch-model: transient download failure (attempt ${attempt}/${ATTEMPTS}, retrying in ${waitMs / 1000}s): ${msg}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
 }
 
 // Phase 2 — flatten the revision-qualified cache into the local-model

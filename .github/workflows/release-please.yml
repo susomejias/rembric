@@ -48,6 +48,8 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     with:
       tag: ${{ needs.release-please.outputs.server_tag_name }}
+    secrets:
+      hf_token: ${{ secrets.HF_TOKEN }}
     permissions:
       contents: read
       packages: write
