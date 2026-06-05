@@ -10,33 +10,32 @@ import { z } from 'zod';
  * only `REMBRIC_ADMIN_TOKEN` is required on the very first start (when no
  * admin token row exists in the DB yet).
  *
- * Embedding provider model:
- *
- *   EMBEDDING_PROVIDER=openai    ← selects the embedding provider
- *
- *   When provider=openai, configuration is read from the OPENAI_* namespace
- *   (OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL). The
- *   OPENAI_BASE_URL must include the `/v1` path segment; local Ollama
- *   exposes the compatible API at `http://localhost:11434/v1`.
- *
- * There is no chat-LLM configuration: the server performs no LLM reasoning
- * (see the `remove-llm-consolidation` change). Stale chat/cron vars from
- * pre-0.21 deployments are ignored with a boot warning, never an error.
+ * Engine-vs-deployment rule: env vars configure the DEPLOYMENT (ports,
+ * tokens, data dir, time windows) — never the engine. The server performs
+ * no LLM reasoning (`remove-llm-consolidation`) and embeds its embedding
+ * model in-process (`embed-embeddings-in-process`); stale vars from older
+ * deployments are ignored with a boot warning, never an error.
  */
 
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
-export const LLM_PROVIDERS = ['openai'] as const;
-export type LlmProviderName = (typeof LLM_PROVIDERS)[number];
-
-/** Env vars removed by `remove-llm-consolidation`; ignored with a warning. */
+/** Env vars removed by past changes; ignored with a warning. */
 export const REMOVED_ENV_VARS = [
+  // remove-llm-consolidation
   'LLM_PROVIDER',
   'OPENAI_MODEL',
   'CONSOLIDATION_ENABLED',
   'CONSOLIDATION_CRON',
   'CONSOLIDATION_BATCH_SIZE',
+  // embed-embeddings-in-process
+  'OPENAI_BASE_URL',
+  'OPENAI_API_KEY',
+  'OPENAI_EMBEDDING_MODEL',
+  'EMBEDDING_PROVIDER',
+  'EMBEDDING_ENABLED',
+  'CANDIDATE_VEC_THRESHOLD',
+  'CANDIDATE_FTS_THRESHOLD',
 ] as const;
 
 /** Names from `REMOVED_ENV_VARS` still present in `env`, for the boot warning. */
@@ -51,22 +50,6 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
   REMBRIC_ADMIN_TOKEN: z.string().min(16).optional(),
   REMBRIC_SESSION_SECRET: z.string().min(16).optional(),
-
-  // Embedding provider selection (chat-LLM config was removed; see header)
-  EMBEDDING_PROVIDER: z.enum(LLM_PROVIDERS).default('openai'),
-
-  // OpenAI-compatible provider settings (consumed by embeddings only)
-  OPENAI_BASE_URL: z.string().url().default('http://localhost:11434/v1'),
-  OPENAI_API_KEY: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.length > 0 ? v : undefined)),
-  OPENAI_EMBEDDING_MODEL: z.string().default('nomic-embed-text'),
-
-  EMBEDDING_ENABLED: z
-    .union([z.string(), z.boolean()])
-    .transform((v) => (typeof v === 'boolean' ? v : v.toLowerCase() === 'true'))
-    .default(true),
 
   // Per-token MCP rate limiting. Disabled by default — single-user
   // localhost deployments do not need it. Set RATE_LIMIT_ENABLED=true
@@ -90,11 +73,9 @@ const envSchema = z.object({
 
   // Save-time candidate detection. Controls how many similar memories
   // `memory.save` surfaces to the agent for judgment. 0 disables
-  // surfacing (the pending rows are still inserted for the consolidator
-  // to pick up later); useful for batch/automation paths.
+  // surfacing; useful for batch/automation paths. Similarity thresholds
+  // are engine constants in `save-time-candidates.ts`, not configuration.
   CANDIDATES_PER_SAVE_MAX: z.coerce.number().int().min(0).max(25).default(5),
-  CANDIDATE_VEC_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
-  CANDIDATE_FTS_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
 
   // Relations stuck in 'pending' longer than this are re-exposed to
   // agents via memory.context (pendingJudgments[]) for fresh-context
@@ -118,14 +99,6 @@ const envSchema = z.object({
 
 export type ParsedEnv = z.infer<typeof envSchema>;
 
-export interface EmbeddingConfig {
-  provider: LlmProviderName;
-  baseUrl: string;
-  apiKey: string | null;
-  model: string;
-  enabled: boolean;
-}
-
 export interface Config {
   host: string;
   port: number;
@@ -133,7 +106,6 @@ export interface Config {
   logLevel: LogLevel;
   adminToken: string | null;
   sessionSecret: string | null;
-  embedding: EmbeddingConfig;
   rateLimit: {
     enabled: boolean;
     ratePerSecond: number;
@@ -144,8 +116,6 @@ export interface Config {
   };
   candidates: {
     perSaveMax: number;
-    vecThreshold: number;
-    ftsThreshold: number;
   };
   judgments: {
     orphanAfterMs: number;
@@ -184,13 +154,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: parsed.LOG_LEVEL,
     adminToken: parsed.REMBRIC_ADMIN_TOKEN ?? null,
     sessionSecret: parsed.REMBRIC_SESSION_SECRET ?? null,
-    embedding: {
-      provider: parsed.EMBEDDING_PROVIDER,
-      baseUrl: parsed.OPENAI_BASE_URL,
-      apiKey: parsed.OPENAI_API_KEY ?? null,
-      model: parsed.OPENAI_EMBEDDING_MODEL,
-      enabled: parsed.EMBEDDING_ENABLED,
-    },
     rateLimit: {
       enabled: parsed.RATE_LIMIT_ENABLED,
       ratePerSecond: parsed.RATE_LIMIT_RPS,
@@ -201,8 +164,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     candidates: {
       perSaveMax: parsed.CANDIDATES_PER_SAVE_MAX,
-      vecThreshold: parsed.CANDIDATE_VEC_THRESHOLD,
-      ftsThreshold: parsed.CANDIDATE_FTS_THRESHOLD,
     },
     judgments: {
       orphanAfterMs: parsed.JUDGMENT_ORPHAN_AFTER_MS,
@@ -220,13 +181,6 @@ export function redactConfig(config: Config): Record<string, unknown> {
     logLevel: config.logLevel,
     adminToken: config.adminToken ? '[set]' : '[unset]',
     sessionSecret: config.sessionSecret ? '[set]' : '[derived from admin token]',
-    embedding: {
-      provider: config.embedding.provider,
-      baseUrl: config.embedding.baseUrl,
-      apiKey: config.embedding.apiKey ? '[set]' : '[unset]',
-      model: config.embedding.model,
-      enabled: config.embedding.enabled,
-    },
     rateLimit: config.rateLimit,
     sessions: config.sessions,
     candidates: config.candidates,

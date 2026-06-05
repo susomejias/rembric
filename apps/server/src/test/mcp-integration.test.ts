@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';
+import { FakeEmbedder } from './embedder.js';
 
 /** Probe the OS for a free TCP port and release it. */
 async function findFreePort(): Promise<number> {
@@ -68,15 +69,15 @@ describe('MCP protocol conformance', () => {
     tmp.cleanup(); // we only want the unique dataDir; remove the pre-created DB.
 
     const port = await findFreePort();
-    server = await createServer({
-      REMBRIC_HOST: '127.0.0.1',
-      REMBRIC_PORT: String(port),
-      REMBRIC_DATA_DIR: tmp.dataDir,
-      REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
-      CONSOLIDATION_ENABLED: 'false',
-      EMBEDDING_ENABLED: 'false',
-      OPENAI_API_KEY: 'sk-test',
-    });
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder() },
+    );
 
     baseUrl = `http://127.0.0.1:${port}`;
   }, 30_000);
@@ -483,7 +484,7 @@ describe('MCP protocol conformance', () => {
     expect(result.isError).toBeFalsy();
     const payload = readJson(result) as {
       db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
-      embeddings: { enabled: boolean; backlog: number };
+      embeddings: { model: string; backlog: number };
       consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
       sessions: { active: number };
       warnings: string[];
@@ -494,7 +495,8 @@ describe('MCP protocol conformance', () => {
     expect(typeof payload.db.sizeBytes).toBe('number');
     // The llm block was removed by `remove-llm-consolidation`.
     expect('llm' in payload).toBe(false);
-    expect(typeof payload.embeddings.enabled).toBe('boolean');
+    expect(payload.embeddings.model).toContain('gte-multilingual-base');
+    expect('enabled' in payload.embeddings).toBe(false);
     expect(Array.isArray(payload.warnings)).toBe(true);
     await client.close();
   });

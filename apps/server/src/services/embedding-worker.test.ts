@@ -1,37 +1,35 @@
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { LlmError } from '../llm/index.js';
-import { asLlmClient, createTestDb, MockLlmClient, type TestDb } from '../test/index.js';
+import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
 import { MemoryService } from './memory.js';
 import { SCOPE_GLOBAL } from './scope.js';
 
 /**
- * 13.19 — embedding worker behavior.
+ * 13.19 — embedding worker behavior (in-process embedder).
  *
  * Covers:
  *   - backfill: every memory missing a vector gets one
- *   - retry semantics on transient failure
- *   - hard failure (auth, rate_limited) surfaces immediately
+ *   - retry semantics on failure (skip now, retry next call)
  *   - skips archived rows
  *   - is idempotent (running twice does not double-insert)
+ *   - early return without touching the embedder when nothing is pending
  */
 
 let db: TestDb;
 let mem: MemoryService;
-let llm: MockLlmClient;
+let embedder: FakeEmbedder;
 let worker: EmbeddingWorker;
 
 beforeEach(() => {
   db = createTestDb();
   mem = new MemoryService(db.handle.db);
-  llm = new MockLlmClient();
+  embedder = new FakeEmbedder();
   worker = new EmbeddingWorker({
     db: db.handle.db,
-    client: asLlmClient(llm),
-    model: 'mock-embed',
+    embedder,
     batchSize: 50,
   });
 });
@@ -73,38 +71,22 @@ describe('EmbeddingWorker', () => {
     expect(vecCount()).toBe(1);
   });
 
-  it('rethrows hard LLM errors (auth) so the caller can surface them', async () => {
-    mem.save({ type: 'feedback', content: 'auth-fail-row' }, SCOPE_GLOBAL);
-    llm.setEmbeddingResponder(() => {
-      throw new LlmError('auth', 'forged-auth-error');
-    });
-
-    await expect(worker.processBatch()).rejects.toThrowError(LlmError);
+  it('does not touch the embedder when nothing is pending (lazy-load preserved)', async () => {
+    const { processed } = await worker.processBatch();
+    expect(processed).toBe(0);
+    expect(embedder.calls.length).toBe(0);
   });
 
-  it('counts and continues past soft failures (e.g. transient embedding error)', async () => {
-    mem.save({ type: 'feedback', content: 'soft-fail-row-1' }, SCOPE_GLOBAL);
-    mem.save({ type: 'feedback', content: 'soft-fail-row-2' }, SCOPE_GLOBAL);
-
-    let call = 0;
-    llm.setEmbeddingResponder((opts) => {
-      call += 1;
-      if (call === 1) {
-        // Soft error: a domain error that isn't auth/rate_limited.
-        throw new LlmError('network', 'transient network blip');
-      }
-      // Second call succeeds — fall back to deterministic embedding.
-      return { embedding: new Float32Array(768), model: opts.model };
-    });
+  it('counts and continues past failures, retrying on the next call', async () => {
+    mem.save({ type: 'feedback', content: 'fail-row-1' }, SCOPE_GLOBAL);
+    mem.save({ type: 'feedback', content: 'fail-row-2' }, SCOPE_GLOBAL);
+    embedder.failOnce(new Error('transient inference blip'));
 
     const { processed, failed } = await worker.processBatch();
     expect(failed).toBe(1);
     expect(processed).toBe(1);
-    // Re-running should retry the previously failed row and succeed.
-    llm.setEmbeddingResponder((opts) => ({
-      embedding: new Float32Array(768),
-      model: opts.model,
-    }));
+
+    // Re-running retries the previously failed row and succeeds.
     const retry = await worker.processBatch();
     expect(retry.processed).toBe(1);
     expect(vecCount()).toBe(2);

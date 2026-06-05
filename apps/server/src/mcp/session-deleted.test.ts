@@ -81,7 +81,7 @@ beforeEach(() => {
     doctor: () => ({
       db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
       llm: { reachable: false, lastPingAt: null },
-      embeddings: { enabled: false, backlog: 0 },
+      embeddings: { model: 'fake-test-embedder', backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },
       warnings: [],

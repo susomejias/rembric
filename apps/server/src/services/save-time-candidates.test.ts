@@ -130,11 +130,7 @@ describe('findSaveTimeCandidates', () => {
       SCOPE_GLOBAL,
     );
 
-    const cands = findSaveTimeCandidates(db.handle.db, b, {
-      vecThreshold: 0.85,
-      ftsThreshold: 0.3,
-      perSaveMax: 5,
-    });
+    const cands = findSaveTimeCandidates(db.handle.db, b, { perSaveMax: 5 });
     expect(cands.length).toBeGreaterThanOrEqual(1);
     expect(cands.some((c) => c.targetId === a.id)).toBe(true);
     expect(cands.every((c) => c.source === 'fts' || c.source === 'vec')).toBe(true);
@@ -148,11 +144,7 @@ describe('findSaveTimeCandidates', () => {
       { type: 'feedback', content: 'similar marker keyword extra' },
       SCOPE_GLOBAL,
     );
-    const cands = findSaveTimeCandidates(db.handle.db, recent, {
-      vecThreshold: 0.85,
-      ftsThreshold: 0.05,
-      perSaveMax: 3,
-    });
+    const cands = findSaveTimeCandidates(db.handle.db, recent, { perSaveMax: 3 });
     expect(cands.length).toBeLessThanOrEqual(3);
   });
 
@@ -170,11 +162,7 @@ describe('findSaveTimeCandidates', () => {
       scopeA,
     );
 
-    const cands = findSaveTimeCandidates(db.handle.db, saved, {
-      vecThreshold: 0.85,
-      ftsThreshold: 0.1,
-      perSaveMax: 5,
-    });
+    const cands = findSaveTimeCandidates(db.handle.db, saved, { perSaveMax: 5 });
     // The global match must NOT appear because it has scope='global'.
     expect(cands.some((c) => c.targetId === _global.id)).toBe(false);
   });
@@ -190,11 +178,7 @@ describe('findSaveTimeCandidates', () => {
     );
     // second.memory.replaces contains first.memory.id; candidate
     // detection must not re-surface it.
-    const cands = findSaveTimeCandidates(db.handle.db, second.memory, {
-      vecThreshold: 0.85,
-      ftsThreshold: 0.05,
-      perSaveMax: 5,
-    });
+    const cands = findSaveTimeCandidates(db.handle.db, second.memory, { perSaveMax: 5 });
     expect(cands.some((c) => c.targetId === first.memory.id)).toBe(false);
   });
 });

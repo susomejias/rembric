@@ -94,7 +94,7 @@ export interface SessionsToolDeps {
 
 export interface DoctorReport {
   db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
-  embeddings: { enabled: boolean; backlog: number };
+  embeddings: { model: string; backlog: number };
   consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
   sessions: { active: number };
   warnings: string[];
