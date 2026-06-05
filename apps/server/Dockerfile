@@ -25,7 +25,15 @@ COPY apps/plugin/package.json ./apps/plugin/package.json
 # Install the @rembric/server closure only — plugin is not needed for the runtime image.
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
+# Bake the embedding model BEFORE copying the source so the ~300MB layer
+# only invalidates on lockfile/script changes. Pinned revision +
+# functional validation: a drifted artifact fails the build.
+COPY apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
+WORKDIR /app/apps/server
+RUN node scripts/fetch-model.mjs /models
+
 # Copy the server source.
+WORKDIR /app
 COPY apps/server ./apps/server
 
 # Build inside the server workspace.
@@ -36,7 +44,7 @@ RUN pnpm run build
 WORKDIR /app
 RUN pnpm deploy --filter=@rembric/server --prod --legacy /prod-out \
     && cd /prod-out \
-    && pnpm rebuild better-sqlite3 sqlite-vec
+    && pnpm rebuild better-sqlite3 sqlite-vec onnxruntime-node
 
 
 FROM node:22-bookworm-slim AS dev
@@ -57,6 +65,11 @@ COPY --chown=rembric:rembric package.json pnpm-lock.yaml .npmrc pnpm-workspace.y
 COPY --chown=rembric:rembric apps/server/package.json ./apps/server/package.json
 COPY --chown=rembric:rembric apps/plugin/package.json ./apps/plugin/package.json
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
+
+# Bake the embedding model into the dev image too (same cache-friendly
+# ordering as the builder stage; dev parity with the runtime image).
+COPY --chown=rembric:rembric apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
+RUN cd /app/apps/server && node scripts/fetch-model.mjs /app/models
 
 COPY --chown=rembric:rembric apps/server ./apps/server
 
@@ -92,6 +105,7 @@ WORKDIR /app
 COPY --from=builder --chown=rembric:rembric /prod-out/dist          ./dist
 COPY --from=builder --chown=rembric:rembric /prod-out/node_modules  ./node_modules
 COPY --from=builder --chown=rembric:rembric /prod-out/package.json  ./
+COPY --from=builder --chown=rembric:rembric /models                 ./models
 
 USER rembric
 

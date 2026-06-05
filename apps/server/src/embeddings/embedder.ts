@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 
 /**
  * In-process embedder. The model is part of the engine, not configuration:
@@ -22,9 +21,11 @@ import { join } from 'node:path';
 export const EMBEDDING_MODEL_ID = 'onnx-community/gte-multilingual-base';
 export const EMBEDDING_DTYPE = 'q8';
 export const EMBEDDING_DIMS = 768;
+/** Pinned HF revision — build-time fetch and dev downloads MUST agree. */
+export const EMBEDDING_MODEL_REVISION = '2edbf5e672aab465f9ed4c154a8b61791c082c69';
 
-/** Image-local model root baked by the Dockerfile (HF layout: <root>/<model-id>). */
-const IMAGE_MODEL_ROOT = '/app/models';
+/** Model cache baked by the Dockerfile; present → fully offline. */
+const IMAGE_MODEL_CACHE = '/app/models';
 
 export interface Embedder {
   /** Compute a normalized 768-dim embedding. Triggers model load on first call. */
@@ -46,13 +47,16 @@ export function createEmbedder(): Embedder {
   const load = (): Promise<FeaturePipeline> => {
     pipelinePromise ??= (async () => {
       const { env, pipeline } = await import('@huggingface/transformers');
-      if (existsSync(join(IMAGE_MODEL_ROOT, EMBEDDING_MODEL_ID))) {
-        // Baked image: serve from local files, refuse network.
-        env.localModelPath = IMAGE_MODEL_ROOT;
+      // The baked cache dir only exists in the Docker image (created by
+      // scripts/fetch-model.mjs at build time, same library, same
+      // revision — cache keys match by construction).
+      if (existsSync(IMAGE_MODEL_CACHE)) {
+        env.cacheDir = IMAGE_MODEL_CACHE;
         env.allowRemoteModels = false;
       }
       const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
         dtype: EMBEDDING_DTYPE,
+        revision: EMBEDDING_MODEL_REVISION,
       })) as unknown as FeaturePipeline;
       ready = true;
       return pipe;
