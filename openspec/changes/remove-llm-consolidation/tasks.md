@@ -47,4 +47,4 @@
 
 ## 8. E2E smoke (operator-assisted)
 
-- [ ] 8.1 OPERATOR/local: `pnpm run dev:docker:up`, then per `.agents/skills/rembric-smoke-tests/`: boot with stale `OPENAI_API_KEY` env → warning logged, server healthy; session start triggers sweep (consolidation_runs row, NULL llm columns); second session start within 6h skips; manual dashboard trigger forces; aged pending appears in `memory.context` and closes via `memory.judge`
+- [x] 8.1 OPERATOR/local: `pnpm run dev:docker:up`, then per `.agents/skills/rembric-smoke-tests/`: boot with stale `OPENAI_API_KEY` env → warning logged, server healthy; session start triggers sweep (consolidation_runs row, NULL llm columns); second session start within 6h skips; manual dashboard trigger forces; aged pending appears in `memory.context` and closes via `memory.judge`
