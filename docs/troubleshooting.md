@@ -17,27 +17,25 @@ Once a row exists, the env var is ignored on subsequent runs. Rotate via the das
 
 ### `⚠ ignoring removed env vars …` warning at boot
 
-Pre-0.21 deployments configured a chat LLM and a consolidation cron (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_ENABLED`, `CONSOLIDATION_CRON`, `CONSOLIDATION_BATCH_SIZE`). The server no longer makes chat-LLM calls and the cron was replaced by a deterministic sweep on session start. The warning is informational — remove the listed vars from `.env` to silence it. `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_EMBEDDING_MODEL` remain valid (embeddings only). `EMBEDDING_ENABLED=false` disables the only remaining external call.
+Older deployments configured a chat LLM, a consolidation cron, or an external embedding provider (`LLM_PROVIDER`, `OPENAI_*`, `CONSOLIDATION_*`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`). None of that exists anymore: the sweep is deterministic and the embedding model runs in-process from the image. The warning is informational — remove the listed vars from `.env` to silence it.
 
 ### `Error: address already in use :::8787`
 
 Another process holds the port. `lsof -i :8787` to find it, or set `REMBRIC_PORT`. A force-killed instance can leave the WAL dirty — SQLite recovers on restart.
 
-## Embedding endpoint
+## Embeddings (in-process)
 
-Probe the configured endpoint directly:
+### `embedding worker error: …` in the logs
 
-```bash
-curl -sS -H "Authorization: Bearer $OPENAI_API_KEY" "$OPENAI_BASE_URL/models"
-```
+The in-process embedder failed an inference. Failed rows are retried on the next 30s drain tick; candidate detection falls back to FTS5 in the meantime. Persistent failures usually mean the container is memory-starved — check `docker stats` against the 1 GB minimum.
 
-### Connection refused / timeout
+### The server exits at boot with a model-load error
 
-`OPENAI_BASE_URL` is unreachable from the rembric host. If running rembric inside Docker against an Ollama / LM Studio on the host, the URL must be reachable from inside the container (use `host.docker.internal` on Mac/Windows or the host's LAN IP on Linux, not `127.0.0.1`). Confirm `OPENAI_BASE_URL` ends in `/v1`.
+The embedding model is required: a missing, corrupt, or incompatible model aborts the boot (fail fast — there is no degraded no-embeddings mode). In the Docker image this indicates a broken image build (the build itself validates the model, so prefer re-pulling). On bare metal, the first boot downloads the model (~300 MB, one-time) — a network failure there also aborts; retry with connectivity.
 
-### `401` / `403` on `/models`
+### Vectors missing right after an upgrade
 
-For OpenAI proper, the key is wrong or revoked. For Ollama / LM Studio, the upstream is rejecting the request — the `/models` listing should include the value configured in `OPENAI_EMBEDDING_MODEL`.
+A model change wipes stale vectors and re-embeds the corpus in background batches (`↻ embedding model changed → N stale vector(s) wiped` in the logs, then a `◆ embedding drain complete` line with similarity percentiles). FTS-based detection works throughout; vec-sourced candidates for OLD rows resume when the drain completes. New saves embed inline and are unaffected.
 
 ## Database
 

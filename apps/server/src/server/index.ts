@@ -5,14 +5,15 @@
  * handling for clean shutdown.
  */
 
-import { bootstrap, type BootstrappedServer } from './bootstrap.js';
+import { bootstrap, type BootstrappedServer, type BootstrapOverrides } from './bootstrap.js';
 
-export type { BootstrappedServer };
+export type { BootstrappedServer, BootstrapOverrides };
 
 export async function createServer(
   env: NodeJS.ProcessEnv = process.env,
+  overrides: BootstrapOverrides = {},
 ): Promise<BootstrappedServer> {
-  return bootstrap(env);
+  return bootstrap(env, overrides);
 }
 
 export async function startCli(): Promise<void> {

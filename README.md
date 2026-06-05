@@ -126,17 +126,12 @@ Works with **any** agent that speaks MCP. One server, memories shared across all
    │   │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)│   │
    │   └───────────────────────────────▲───────────────────────────────┘   │
    │   ┌───────────────────────────────┴───────────────────────────────┐   │
-   │   │  Background workers                                           │   │
-   │   │   EmbeddingWorker (every 30s) · ConsolidationScheduler        │   │
-   │   │     decay (deterministic) + orphan promotion (LLM judge)      │   │
-   │   └───────────────────────────────┬───────────────────────────────┘   │
-   └───────────────────────────────────┼───────────────────────────────────┘
-                                       │  OpenAI-compatible HTTP
-                                       ▼
-                   ┌────────────────────────────────────────┐
-                   │   LLM endpoint                         │
-                   │   Ollama · OpenAI · LM Studio · …      │
-                   └────────────────────────────────────────┘
+   │   │  In-process background work (no external services)            │   │
+   │   │   embedder: gte-multilingual-base, ONNX q8, loaded at boot    │   │
+   │   │   drain worker (every 30s) fills memory_vec                   │   │
+   │   │   deterministic sweep: decay + deadline orphaning             │   │
+   │   └───────────────────────────────────────────────────────────────┘   │
+   └───────────────────────────────────────────────────────────────────────┘
 ```
 
 Single Node process, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`); the `pnpm dlx rembric` path stays available as a power-user fallback during the dual-publish window.
@@ -223,15 +218,14 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 
 ## Quickstart (Docker)
 
-Docker is the canonical install path. The image bundles Node 22 and the native modules (`better-sqlite3`, `sqlite-vec`) pre-built for `linux/amd64` and `linux/arm64`, so the only requirement on your host is Docker.
+Docker is the canonical install path. The image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (see [Hardware requirements](#hardware-requirements)).
 
 ```bash
 mkdir rembric && cd rembric
 curl -fsSLO https://raw.githubusercontent.com/susomejias/rembric/main/docker-compose.yml
 curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.example -o .env
 
-# edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`)
-#             optionally configure embeddings (OPENAI_BASE_URL / OPENAI_API_KEY)
+# edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`) — that's it
 
 docker compose up -d
 docker compose logs -f rembric
@@ -275,7 +269,7 @@ REMBRIC_VERSION=0.13.0
 
 Bump `REMBRIC_VERSION` to a previous tag in `.env` and re-run `docker compose up -d`. The bind-mounted `./data/` directory is untouched, so your memory stays intact across version flips.
 
-See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR auth, named-volume vs bind-mount, host-on-Linux `host.docker.internal` notes, troubleshooting).
+See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR auth, named-volume vs bind-mount, troubleshooting).
 
 ### Backups
 
@@ -321,20 +315,15 @@ All config via environment variables. With Docker, these live in `.env` and are 
 | `REMBRIC_DATA_DIR` | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.    |
 | `LOG_LEVEL`        | `info`                            | `debug` / `info` / `warn` / `error`.                                                                          |
 
-### Embeddings (optional)
+### Hardware requirements
 
-The server performs no LLM reasoning — there is no chat model and no API key requirement. Embeddings are the only optional external dependency: they power semantic candidate detection in `memory.save`. Any OpenAI-compatible `/v1` endpoint works (OpenAI, Ollama, LM Studio, vLLM, …).
+**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), loaded at boot (~1.1 s from the baked image; a broken model fails the boot instead of degrading silently), ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
 
-| Variable                 | Default                     | Description                                    |
-| ------------------------ | --------------------------- | ---------------------------------------------- |
-| `OPENAI_BASE_URL`        | `http://localhost:11434/v1` | Endpoint URL including `/v1`.                  |
-| `OPENAI_API_KEY`         | _(empty)_                   | Required for OpenAI proper; Ollama ignores it. |
-| `OPENAI_EMBEDDING_MODEL` | `nomic-embed-text`          | Embedding model (768 dims).                    |
-| `EMBEDDING_ENABLED`      | `true`                      | If `false`, candidates fall back to FTS5 only. |
+The engine is code, not configuration: there is no model selector, no threshold knob, no off switch. The model class is pinned (≤350M params, ≤800 MB RSS); changing it is a breaking architectural change.
 
 ### Consolidation sweep
 
-Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21 vars (`CONSOLIDATION_ENABLED` / `CONSOLIDATION_CRON` / `CONSOLIDATION_BATCH_SIZE` / `OPENAI_MODEL` / `LLM_PROVIDER`) are ignored with a boot warning.
+Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
 
 | Variable                      | Default      | Description                                                                                     |
 | ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |

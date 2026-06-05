@@ -3,6 +3,7 @@ import { createServer as createNetServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createTestDb } from '../test/db.js';
+import { FakeEmbedder } from '../test/embedder.js';
 
 import { createServer, type BootstrappedServer } from './index.js';
 
@@ -38,15 +39,15 @@ describe('startup banner', () => {
     const tmp = createTestDb();
     tmp.cleanup();
     const port = await findFreePort();
-    server = await createServer({
-      REMBRIC_HOST: '127.0.0.1',
-      REMBRIC_PORT: String(port),
-      REMBRIC_DATA_DIR: tmp.dataDir,
-      REMBRIC_ADMIN_TOKEN: BANNER_ADMIN_TOKEN,
-      CONSOLIDATION_ENABLED: 'false',
-      EMBEDDING_ENABLED: 'false',
-      OPENAI_API_KEY: 'sk-test',
-    });
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: BANNER_ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder() },
+    );
 
     spy.mockRestore();
   }, 30_000);

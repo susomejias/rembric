@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^11.5.0",
     "drizzle-orm": "^0.36.0",

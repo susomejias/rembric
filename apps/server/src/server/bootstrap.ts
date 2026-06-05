@@ -6,7 +6,8 @@ import { createDb, type DbHandle } from '../db/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { projects as projectsTable } from '../db/schema/projects.js';
-import { LlmClient } from '../llm/index.js';
+import { EMBEDDING_MODEL_ID, loadEmbedder, type Embedder } from '../embeddings/embedder.js';
+import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/sessions-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -45,14 +46,22 @@ export interface BootstrappedServer {
   shutdown: () => Promise<void>;
 }
 
-export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<BootstrappedServer> {
+export interface BootstrapOverrides {
+  /** Test-only seam: replace the in-process embedder (never operator config). */
+  embedder?: Embedder;
+}
+
+export async function bootstrap(
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: BootstrapOverrides = {},
+): Promise<BootstrappedServer> {
   const config = loadConfig(env);
   printStartupBanner(config);
 
   const staleVars = findStaleEnvVars(env);
   if (staleVars.length > 0) {
     console.error(
-      `  ⚠ ignoring removed env vars (chat LLM and consolidation cron were removed): ${staleVars.join(', ')}`,
+      `  ⚠ ignoring removed env vars (chat LLM, consolidation cron and embedding provider were removed): ${staleVars.join(', ')}`,
     );
   }
 
@@ -99,40 +108,47 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   }
   const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
 
-  // Embedding worker — drains new memories into memory_vec so save-time
-  // candidate detection has vectors to kNN over. When EMBEDDING_ENABLED
-  // is false the worker is skipped and candidates fall back to FTS5-only.
-  const embeddingWorker = config.embedding.enabled
-    ? new EmbeddingWorker({
-        db: dbHandle.db,
-        client: new LlmClient({
-          baseUrl: config.embedding.baseUrl,
-          apiKey: config.embedding.apiKey,
-        }),
-        model: config.embedding.model,
-      })
-    : null;
-
-  let embedTimer: NodeJS.Timeout | null = null;
-  if (embeddingWorker) {
-    const tick = (): void => {
-      embeddingWorker.processBatch().catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('embedding worker error:', message);
-      });
-    };
-    // First pass immediately to backfill anything pending from a prior run.
-    tick();
-    embedTimer = setInterval(tick, 30_000);
-    // Don't keep the event loop alive solely for this timer during shutdown.
-    embedTimer.unref?.();
+  // In-process embedder + drain worker — fills memory_vec so save-time
+  // candidate detection has vectors to kNN over. The model loads eagerly
+  // and is REQUIRED: a load failure aborts the boot (fail fast) so a
+  // listening server always has a warm model. A model change invalidates
+  // stale vectors up front and the drain re-embeds them in resumable
+  // batches.
+  const embedStart = Date.now();
+  const embedder = overrides.embedder ?? (await loadEmbedder());
+  if (!overrides.embedder) {
+    console.error(
+      `  ✓ embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`,
+    );
   }
+  const vectorReset = ensureVectorModel(dbHandle.db, config.dataDir);
+  if (vectorReset.wiped > 0) {
+    console.error(
+      `  ↻ embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
+    );
+  }
+  const embeddingWorker = new EmbeddingWorker({
+    db: dbHandle.db,
+    embedder,
+    onDrained: () => logSimilarityDistribution(dbHandle.db),
+  });
+
+  const embedTick = (): void => {
+    embeddingWorker.processBatch().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('embedding worker error:', message);
+    });
+  };
+  // First pass immediately to backfill anything pending from a prior run.
+  embedTick();
+  const embedTimer = setInterval(embedTick, 30_000);
+  // Don't keep the event loop alive solely for this timer during shutdown.
+  embedTimer.unref?.();
 
   // Doctor report builder — captures live services for `memory.doctor`.
   const buildDoctorReport = buildDoctorReportFactory({
     dbHandle,
     agentSessions: agentSessionsSvc,
-    embeddingEnabled: config.embedding.enabled,
   });
 
   // Deterministic consolidation sweep — decay + deadline orphaning, no
@@ -168,9 +184,8 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       relations: relationsSvc,
       candidates: {
         perSaveMax: config.candidates.perSaveMax,
-        vecThreshold: config.candidates.vecThreshold,
-        ftsThreshold: config.candidates.ftsThreshold,
       },
+      embedNow: (memoryId, content) => embeddingWorker.embedNow(memoryId, content),
       router: sessionRouter,
       db: dbHandle.db,
       doctor: buildDoctorReport,
@@ -251,7 +266,7 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
           err instanceof Error ? err.message : String(err),
         );
       }
-      if (embedTimer) clearInterval(embedTimer);
+      clearInterval(embedTimer);
       await http.close();
       dbHandle.close();
     },
@@ -298,7 +313,6 @@ function printReadyBanner(url: string, firstRun: boolean): void {
 function buildDoctorReportFactory(deps: {
   dbHandle: DbHandle;
   agentSessions: AgentSessionsService;
-  embeddingEnabled: boolean;
 }): () => DoctorReport {
   return () => {
     const warnings: string[] = [];
@@ -356,7 +370,7 @@ function buildDoctorReportFactory(deps: {
       sql`SELECT COUNT(*) AS v FROM memory m LEFT JOIN memory_vec v ON v.memory_id = m.id WHERE v.memory_id IS NULL AND m.status != 'archived'`,
     ) as { v: number } | undefined;
     const backlog = backlogRow?.v ?? 0;
-    if (deps.embeddingEnabled && backlog > 100) {
+    if (backlog > 100) {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
 
@@ -364,7 +378,7 @@ function buildDoctorReportFactory(deps: {
 
     return {
       db: { open: true, journalMode, integrity, sizeBytes },
-      embeddings: { enabled: deps.embeddingEnabled, backlog },
+      embeddings: { model: EMBEDDING_MODEL_ID, backlog },
       consolidation: {
         lastRunAt: lastConsolidation?.startedAt ? lastConsolidation.startedAt.toISOString() : null,
         lastRunOps,

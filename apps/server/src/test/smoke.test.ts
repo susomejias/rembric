@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';
+import { FakeEmbedder } from './embedder.js';
 
 /**
  * 13.24 — smoke test.
@@ -53,15 +54,15 @@ describe('smoke test — full server boot/shutdown cycle', () => {
     tmp.cleanup();
 
     const port = await findFreePort();
-    server = await createServer({
-      REMBRIC_HOST: '127.0.0.1',
-      REMBRIC_PORT: String(port),
-      REMBRIC_DATA_DIR: tmp.dataDir,
-      REMBRIC_ADMIN_TOKEN: SMOKE_ADMIN_TOKEN,
-      CONSOLIDATION_ENABLED: 'false',
-      EMBEDDING_ENABLED: 'false',
-      OPENAI_API_KEY: 'sk-test',
-    });
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: SMOKE_ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder() },
+    );
     baseUrl = `http://127.0.0.1:${port}`;
   }, 30_000);
 

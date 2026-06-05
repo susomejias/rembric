@@ -6,5 +6,5 @@
 export { createTestDb } from './db.js';
 export type { TestDb } from './db.js';
 export { TestClock } from './clock.js';
-export { MockLlmClient, asLlmClient } from './llm.js';
+export { FakeEmbedder } from './embedder.js';
 export { mintTestToken } from './tokens.js';

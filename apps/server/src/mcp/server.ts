@@ -60,6 +60,8 @@ export interface CreateMcpServerOptions {
   prompts: PromptsService;
   relations: RelationsService;
   candidates: CandidateOptions;
+  /** Inline save-time embedding (see ToolDeps.embedNow). */
+  embedNow?: (memoryId: string, content: string) => Promise<boolean>;
   router: SessionRouter;
   db: Db;
   doctor: () => DoctorReport;
@@ -101,6 +103,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     memory: opts.memory,
     relations: opts.relations,
     candidates: opts.candidates,
+    embedNow: opts.embedNow,
     db: opts.db,
     router: opts.router,
     projects: opts.projects,

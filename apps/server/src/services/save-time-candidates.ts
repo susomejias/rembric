@@ -11,7 +11,7 @@ import type { Memory } from '../db/schema/memory.js';
  *
  *   1. Vec kNN (when an embedding for the just-saved row already
  *      exists; otherwise this pass is a no-op for THIS save and the
- *      consolidator's orphan-promotion picks up the slack later).
+ *      FTS pass below picks up the slack).
  *   2. FTS5 BM25 query against the row's content.
  *
  * Scope isolation: the SQL filters by `(scope, project_id)` matching
@@ -23,9 +23,18 @@ import type { Memory } from '../db/schema/memory.js';
  * which to leave to the consolidator.
  */
 
+/**
+ * Similarity floors are engine constants calibrated for the compiled-in
+ * embedding model (gte-multilingual-base q8) — not operator configuration.
+ * VEC: sandbox-calibrated on a 16-pair battery (positives 0.73–0.97,
+ * negatives 0.43–0.68); revisit against backfill distribution logs.
+ * FTS: BM25-derived proxy `1/(1+|rank|)` — corpus-size sensitive, same
+ * recalibration channel.
+ */
+export const VEC_THRESHOLD = 0.7;
+export const FTS_THRESHOLD = 0.4;
+
 export interface CandidateOptions {
-  vecThreshold: number;
-  ftsThreshold: number;
   perSaveMax: number;
   /** Internal candidate pool size before the cap is applied; default 20. */
   poolSize?: number;
@@ -76,7 +85,7 @@ export function findSaveTimeCandidates(
       source: 'vec' as const,
       snippet: snippet(r.content, 200),
     }))
-    .filter((c) => c.similarity >= opts.vecThreshold);
+    .filter((c) => c.similarity >= VEC_THRESHOLD);
 
   // --- 2. FTS5 lexical -----------------------------------------------
   // BM25 returns lower-is-better; normalize via 1/(1+|rank|) to a [0,1]
@@ -100,7 +109,7 @@ export function findSaveTimeCandidates(
     );
     for (const r of ftsRows) {
       const sim = 1 / (1 + Math.abs(r.rank));
-      if (sim >= opts.ftsThreshold) {
+      if (sim >= FTS_THRESHOLD) {
         ftsPool.push({
           targetId: r.id,
           similarity: sim,

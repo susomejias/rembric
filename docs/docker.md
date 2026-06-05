@@ -164,17 +164,9 @@ If the new server version included a schema migration that your old data hadn't 
 
 Not recommended yet. Watchtower would auto-pull `:latest` and recreate the container without your involvement — if a release ships a breaking server↔plugin API change (e.g. the `/healthz` auth hardening in `0.13.0`), Watchtower would update the server while your plugin still runs the old `0.5.x` and break silently. Stick to the manual "click after release" pattern until the project stabilizes.
 
-## `host.docker.internal` and Ollama
+## Embeddings are in-image
 
-Only relevant for embeddings — the server makes no chat-LLM calls. If your embedding provider (Ollama, LM Studio, vLLM) runs on the **host**, the compose file already wires `host.docker.internal:host-gateway` so the container can reach it. Set the endpoint in `.env`:
-
-```ini
-OPENAI_BASE_URL=http://host.docker.internal:11434/v1
-```
-
-On macOS and Windows (Docker Desktop), `host.docker.internal` is built-in — the `extra_hosts` line is a no-op. On Linux nativo, the `extra_hosts: ["host.docker.internal:host-gateway"]` in compose creates the alias. Both routes work.
-
-If the embedding provider runs in another container, point at it by service name within the same compose network. If it runs on another host, use the LAN IP or hostname.
+The embedding model (`gte-multilingual-base`, ONNX q8) ships inside the image and runs in-process — no Ollama, no API keys, no outbound calls. The container works air-gapped. Budget ~1 GB RAM minimum (2 GB recommended); the model loads at boot (~1 s from image files) and a broken model fails the boot — see [docs/embeddings.md](./embeddings.md) for the full flow.
 
 ## Healthchecks
 
@@ -195,7 +187,6 @@ External monitoring (Uptime Kuma, Healthchecks.io, Grafana, etc.) needs to send 
 | Container goes `unhealthy` after upgrade                           | Check `docker compose logs rembric`. If it's `db_unavailable`, the WAL might be locked by a stale process — `docker compose down && docker compose up -d` clears it.                   |
 | Hermes provider says memory is unavailable                         | The plugin must be on `0.6.0+` to talk to a Rembric `0.13.0+` server. The `/healthz` endpoint now requires auth; older plugins probe without it and see 401. Upgrade the plugin.       |
 | Bind-mount `EACCES` errors in container logs                       | On Linux: `sudo chown -R 10001:10001 ./data`. On macOS Docker Desktop: usually a permission issue with the parent directory; ensure your user owns the parent of `./data/`.            |
-| `host.docker.internal: name or service not known` from container   | Linux + Docker < 20.10. Either upgrade Docker, or replace `host.docker.internal` with your host's LAN IP, or switch to `--network=host` (loses the published-port isolation).          |
 | Dashboard reachable but the agent can't connect                    | The agent's `REMBRIC_SERVER_URL` doesn't match the host's published port. Verify with `curl -H "Authorization: Bearer $TOKEN" http://<your-url>/healthz` and adjust the plugin config. |
 | Memory list shows nothing after upgrade                            | You're looking at a freshly-bind-mounted `./data/` that's empty. The previous data is wherever the old install kept it — check the npm-install path `~/.rembric/` and migrate.         |
 

@@ -16,6 +16,9 @@ allowBuilds:
   better-sqlite3: true # native binding postinstall fetches prebuilt
   sqlite-vec: true # native binding postinstall fetches prebuilt
   esbuild: false # transitive of vitest; explicitly DENY (no native binary needed at install time)
+  onnxruntime-node: true # native binding postinstall validates/places prebuilt (in-process embedder)
+  sharp: false # transitive of @huggingface/transformers; vision-only, never loaded by text pipelines — DENY
+  protobufjs: false # transitive of onnxruntime; postinstall only writes version aliases — DENY
 
 # Refuse transitive deps fetched from git URLs, tarball URLs, or any non-registry source.
 # Practice #2 (lirantal/npm-security-best-practices). Requires pnpm ≥ 10.26.
