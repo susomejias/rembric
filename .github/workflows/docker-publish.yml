@@ -157,7 +157,8 @@ jobs:
             fail=1
           fi
 
-          MAX_MB=800
+          # Recalibrated 2026-06-05: in-process embeddings added ~340MB model + ~280MB onnxruntime (image measured 1263MB).
+          MAX_MB=1500
           if [ "$SIZE_MB" -gt "$MAX_MB" ]; then
             echo "::error::Signal 3 FAILED: image size ${SIZE_MB} MB exceeds ${MAX_MB} MB threshold." >&2
             fail=1
