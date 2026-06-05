@@ -71,7 +71,7 @@ describe('EmbeddingWorker', () => {
     expect(vecCount()).toBe(1);
   });
 
-  it('does not touch the embedder when nothing is pending (lazy-load preserved)', async () => {
+  it('does not run inference when nothing is pending', async () => {
     const { processed } = await worker.processBatch();
     expect(processed).toBe(0);
     expect(embedder.calls.length).toBe(0);

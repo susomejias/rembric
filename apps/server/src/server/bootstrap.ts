@@ -6,7 +6,7 @@ import { createDb, type DbHandle } from '../db/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { projects as projectsTable } from '../db/schema/projects.js';
-import { createEmbedder, EMBEDDING_MODEL_ID, type Embedder } from '../embeddings/embedder.js';
+import { EMBEDDING_MODEL_ID, loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/sessions-tools.js';
@@ -109,9 +109,18 @@ export async function bootstrap(
   const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
 
   // In-process embedder + drain worker — fills memory_vec so save-time
-  // candidate detection has vectors to kNN over. The model is lazy-loaded
-  // on the first embed; a model change invalidates stale vectors up front
-  // and the regular drain re-embeds the corpus in resumable batches.
+  // candidate detection has vectors to kNN over. The model loads eagerly
+  // and is REQUIRED: a load failure aborts the boot (fail fast) so a
+  // listening server always has a warm model. A model change invalidates
+  // stale vectors up front and the drain re-embeds them in resumable
+  // batches.
+  const embedStart = Date.now();
+  const embedder = overrides.embedder ?? (await loadEmbedder());
+  if (!overrides.embedder) {
+    console.error(
+      `  ✓ embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`,
+    );
+  }
   const vectorReset = ensureVectorModel(dbHandle.db, config.dataDir);
   if (vectorReset.wiped > 0) {
     console.error(
@@ -120,7 +129,7 @@ export async function bootstrap(
   }
   const embeddingWorker = new EmbeddingWorker({
     db: dbHandle.db,
-    embedder: overrides.embedder ?? createEmbedder(),
+    embedder,
     onDrained: () => logSimilarityDistribution(dbHandle.db),
   });
 

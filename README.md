@@ -127,7 +127,7 @@ Works with **any** agent that speaks MCP. One server, memories shared across all
    │   └───────────────────────────────▲───────────────────────────────┘   │
    │   ┌───────────────────────────────┴───────────────────────────────┐   │
    │   │  In-process background work (no external services)            │   │
-   │   │   embedder: gte-multilingual-base, ONNX q8, lazy-loaded       │   │
+   │   │   embedder: gte-multilingual-base, ONNX q8, loaded at boot    │   │
    │   │   drain worker (every 30s) fills memory_vec                   │   │
    │   │   deterministic sweep: decay + deadline orphaning             │   │
    │   └───────────────────────────────────────────────────────────────┘   │
@@ -317,7 +317,7 @@ All config via environment variables. With Docker, these live in `.env` and are 
 
 ### Hardware requirements
 
-**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), lazy-loaded on the first save, ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB).
+**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), loaded at boot (~1.1 s from the baked image; a broken model fails the boot instead of degrading silently), ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
 
 The engine is code, not configuration: there is no model selector, no threshold knob, no off switch. The model class is pinned (≤350M params, ≤800 MB RSS); changing it is a breaking architectural change.
 

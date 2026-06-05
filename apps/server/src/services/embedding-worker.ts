@@ -9,8 +9,9 @@ import type { Embedder } from '../embeddings/embedder.js';
  * are safe to repeat, and the worker can be invoked on a timer or right
  * after `memory.save`.
  *
- * The embedder is in-process and lazy — `processBatch` returns early when
- * nothing is pending so an idle server never pays the model load.
+ * The embedder is in-process and warm by construction (the model loads
+ * at boot, before the server listens) — every call here is ms-scale
+ * inference, never a model load.
  */
 
 export interface EmbeddingWorkerOptions {
@@ -38,13 +39,11 @@ export class EmbeddingWorker {
   /**
    * Embed one memory inline — used by `memory.save` so the row has a
    * vector BEFORE candidate detection runs (otherwise vec candidates can
-   * never fire: a brand-new row has no embedding yet). Skips when the
-   * model is still cold (lazy load in progress) so the save path never
-   * blocks on the initial model load; detection degrades to FTS5 for
-   * that save. Returns whether a vector is in place.
+   * never fire: a brand-new row has no embedding yet). Returns whether a
+   * vector is in place; on failure the save proceeds with FTS-only
+   * detection and the drain retries the row.
    */
   async embedNow(memoryId: string, content: string): Promise<boolean> {
-    if (!this.opts.embedder.isReady()) return false;
     try {
       const vector = await this.opts.embedder.embed(content);
       this.opts.db.run(sql`
@@ -52,9 +51,13 @@ export class EmbeddingWorker {
           VALUES (${memoryId}, ${Buffer.from(vector.buffer)})
         `);
       return true;
-    } catch {
-      // Possible benign race with the drain (row already embedded) or a
-      // transient inference failure — the drain retries either way.
+    } catch (err) {
+      // Benign race with the drain (row already embedded) or an inference
+      // failure — never break the save; the drain retries the row.
+      console.error(
+        'embedNow failed (drain will retry):',
+        err instanceof Error ? err.message : String(err),
+      );
       return false;
     }
   }

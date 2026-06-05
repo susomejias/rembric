@@ -13,7 +13,7 @@ Model selection record (do not re-open): **EmbeddingGemma-300M was rejected on l
 - Semantic candidate detection always on, zero external services, zero API keys, zero runtime downloads.
 - Engine knobs (model, thresholds, pooling) are code, not configuration.
 - Existing corpora migrate themselves: stale vectors re-embedded automatically, threshold calibrated from real data.
-- Boot latency unchanged (lazy model load).
+- Fail fast: a broken model turns the deploy red at boot, never a silently degraded server.
 
 **Non-Goals:**
 
@@ -32,11 +32,14 @@ Model selection record (do not re-open): **EmbeddingGemma-300M was rejected on l
 - _Alternative — multilingual-e5-small (MIT, 118 M)_: rejected; 384 dims force a vtab migration and quality drops; also requires query/passage prefixes (a footgun gte doesn't have).
 - _Alternative — keep model configurable_: rejected; the configurability was already fake (768 hardcoded in the vtab) and every model swap silently invalidates thresholds. Engine = code.
 
-### D2 — In-process via @huggingface/transformers, lazy-loaded
+### D2 — In-process via @huggingface/transformers, loaded eagerly at boot (revised during apply)
 
-One embedder module (`src/embeddings/`) owning the pipeline singleton. First call triggers model load (~18 s sandbox; from image-local files it's disk-bound); callers before readiness queue or no-op exactly like today's empty-`memory_vec` degradation — the FTS pass picks up the slack, so a cold model is invisible to correctness.
+One embedder module (`src/embeddings/`). Bootstrap awaits the model load BEFORE starting the HTTP listener; a load failure aborts the boot. Once listening, the model is always warm — the cold/warm dimension does not exist in a running server, which deletes a whole branch of degradation logic (`isReady`, lazy singleton, cold-save scenarios).
 
-- _Alternative — eager load at boot_: rejected; +18 s boot for a capability not needed until the first save, and healthchecks would flap during image cold starts.
+Rationale shift: the original lazy-load decision assumed an ~18 s load (sandbox download). The baked image measures **1.1 s** — cheap enough to buy fail-fast semantics and the complexity reduction outright (owner decision, 2026-06-05). Healthcheck `start-period` (10 s) absorbs it. The one cost: a bare-metal dev boot without a cached model blocks on a one-time ~300 MB download; the dev container bakes the model, so this only affects contributors running outside Docker, once.
+
+- _Alternative — lazy load on first use_: rejected on second pass; keeps the cold branch everywhere (save path, drain, tests, spec) for a window that fail-fast eliminates entirely.
+- _Alternative — non-blocking warmup at boot_: rejected; shrinks the cold window to ~1 s but keeps all the branches — the complexity was the problem, not the window.
 - _Alternative — child process / sidecar_: rejected; rembric's whole identity is one process, one file. onnxruntime releases the JS thread during inference (async), so the event loop is not blocked.
 
 Known quirk (pinned): transformers.js maps the custom `NewModel` architecture to its `EncoderOnly` fallback with a console warning. The sandbox battery validated output correctness through this path. The dependency version MUST be exact-pinned and a smoke test MUST embed a fixed pair and assert similarity bounds, so an upgrade that breaks the fallback fails CI instead of production.
@@ -69,7 +72,7 @@ README section: **minimum 1 GB RAM, recommended 2 GB** (measured: ~730 MB total 
 
 The e2e exposed a pre-existing structural flaw: the vec pass requires the just-saved row's own vector (`v_self`), but vectors only ever arrived asynchronously (30s drain) — so `source: 'vec'` could never fire at save time, in any prior version. Fix: `EmbeddingWorker.embedNow(id, content)` embeds the new row inline before candidate detection WHEN the model is already warm (~15 ms measured in-container); cold model → skip, FTS-only for that save (the documented degradation). Save latency impact is ms-scale and only on the warm path.
 
-Validated in-container (2026-06-05 e2e): cross-language ES→EN paraphrase saves surface `source: 'vec'` candidates at 0.754–0.774; a loose same-language paraphrase measured 0.657 (below the 0.70 floor — caught by FTS instead, the intended complementarity). Drain telemetry over the seed corpus: p50=0.681 p90=0.861 max=0.946 — 0.70 confirmed as a sane precision/recall point.
+Validated in-container (2026-06-05 e2e): cross-language ES→EN paraphrase saves surface `source: 'vec'` candidates at 0.754–0.774; a loose same-language paraphrase measured 0.657 (below the 0.70 floor — caught by FTS instead, the intended complementarity). Drain telemetry over the seed corpus: p50=0.681 p90=0.861 max=0.946 — 0.70 confirmed as a sane precision/recall point. With D2 revised to eager loading, embedNow is warm by construction; its only failure mode is a per-inference error (logged, FTS fallback, drain retry).
 
 ### D8 — Removed-var list also includes CANDIDATE_FTS_THRESHOLD — widened during apply
 

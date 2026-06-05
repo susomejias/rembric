@@ -6,10 +6,10 @@ import { existsSync } from 'node:fs';
  * normalized output — pinned constants, calibrated thresholds live in
  * `save-time-candidates.ts`.
  *
- * Lazy: nothing loads until the first `embed()` call, so boot stays
- * instant and processes that never write never pay the model's RSS.
- * While loading, callers degrade exactly like a missing vector does —
- * candidate detection falls back to FTS5.
+ * Loaded eagerly at boot and REQUIRED for boot to succeed (fail fast: a
+ * broken or missing model turns the deploy red instead of degrading
+ * silently). From the baked image the load takes ~1.1s; once the server
+ * is listening the model is always warm — there is no cold state.
  *
  * transformers.js quirk (pinned): the model's custom `NewModel`
  * architecture resolves through the EncoderOnly fallback with a console
@@ -28,10 +28,8 @@ export const EMBEDDING_MODEL_REVISION = '2edbf5e672aab465f9ed4c154a8b61791c082c6
 const IMAGE_MODEL_CACHE = '/app/models';
 
 export interface Embedder {
-  /** Compute a normalized 768-dim embedding. Triggers model load on first call. */
+  /** Compute a normalized 768-dim embedding. */
   embed(text: string): Promise<Float32Array>;
-  /** True once the model finished loading (embed() resolves promptly). */
-  isReady(): boolean;
   readonly modelId: string;
 }
 
@@ -40,39 +38,30 @@ type FeaturePipeline = (
   opts: { pooling: 'cls'; normalize: boolean },
 ) => Promise<{ data: Float32Array | number[] }>;
 
-export function createEmbedder(): Embedder {
-  let pipelinePromise: Promise<FeaturePipeline> | null = null;
-  let ready = false;
-
-  const load = (): Promise<FeaturePipeline> => {
-    pipelinePromise ??= (async () => {
-      const { env, pipeline } = await import('@huggingface/transformers');
-      // The baked model dir only exists in the Docker image (produced and
-      // offline-validated by scripts/fetch-model.mjs in local-model
-      // layout). Present → resolve locally, refuse network. Absent (dev
-      // machines) → download at the pinned revision into the default
-      // cache. Local resolution has no revision concept — the bake
-      // already pinned it.
-      const baked = existsSync(IMAGE_MODEL_CACHE);
-      if (baked) {
-        env.localModelPath = IMAGE_MODEL_CACHE;
-        env.allowRemoteModels = false;
-      }
-      const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
-        dtype: EMBEDDING_DTYPE,
-        ...(baked ? {} : { revision: EMBEDDING_MODEL_REVISION }),
-      })) as unknown as FeaturePipeline;
-      ready = true;
-      return pipe;
-    })();
-    return pipelinePromise;
-  };
+/**
+ * Load the model and return the embedder. Called once by bootstrap,
+ * before the HTTP listener starts; a load failure aborts the boot.
+ */
+export async function loadEmbedder(): Promise<Embedder> {
+  const { env, pipeline } = await import('@huggingface/transformers');
+  // The baked model dir only exists in the Docker image (produced and
+  // offline-validated by scripts/fetch-model.mjs in local-model layout).
+  // Present → resolve locally, refuse network. Absent (dev machines) →
+  // download at the pinned revision into the default cache; the first
+  // bare-metal boot blocks on that download, once.
+  const baked = existsSync(IMAGE_MODEL_CACHE);
+  if (baked) {
+    env.localModelPath = IMAGE_MODEL_CACHE;
+    env.allowRemoteModels = false;
+  }
+  const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
+    dtype: EMBEDDING_DTYPE,
+    ...(baked ? {} : { revision: EMBEDDING_MODEL_REVISION }),
+  })) as unknown as FeaturePipeline;
 
   return {
     modelId: EMBEDDING_MODEL_ID,
-    isReady: () => ready,
     async embed(text: string): Promise<Float32Array> {
-      const pipe = await load();
       const out = await pipe(text, { pooling: 'cls', normalize: true });
       const vector = out.data instanceof Float32Array ? out.data : Float32Array.from(out.data);
       if (vector.length !== EMBEDDING_DIMS) {

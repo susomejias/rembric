@@ -13,10 +13,6 @@ export class FakeEmbedder implements Embedder {
   public readonly calls: string[] = [];
   private failNext: Error | null = null;
 
-  isReady(): boolean {
-    return true;
-  }
-
   /** Make the next embed() call reject (worker retry-path tests). */
   failOnce(err: Error = new Error('fake embedder failure')): void {
     this.failNext = err;

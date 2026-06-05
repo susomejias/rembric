@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createEmbedder, EMBEDDING_DIMS } from './embedder.js';
+import { EMBEDDING_DIMS, loadEmbedder } from './embedder.js';
 
 /**
  * Real-model smoke test, guarding the transformers.js `NewModel →
@@ -20,13 +20,12 @@ describe.skipIf(!smoke)('embedder smoke (real model)', () => {
     'embeds a fixed pair within the recorded similarity bounds',
     { timeout: 180_000 },
     async () => {
-      const embedder = createEmbedder();
+      const embedder = await loadEmbedder();
       const a = await embedder.embed('purge empty sessions from the database');
       const b = await embedder.embed('empty sessions get deleted from the database');
       const c = await embedder.embed('the dashboard uses a brutalist dark theme');
 
       expect(a.length).toBe(EMBEDDING_DIMS);
-      expect(embedder.isReady()).toBe(true);
 
       const cos = (x: Float32Array, y: Float32Array): number => {
         let s = 0;

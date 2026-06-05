@@ -29,9 +29,13 @@ Another process holds the port. `lsof -i :8787` to find it, or set `REMBRIC_PORT
 
 The in-process embedder failed an inference. Failed rows are retried on the next 30s drain tick; candidate detection falls back to FTS5 in the meantime. Persistent failures usually mean the container is memory-starved — check `docker stats` against the 1 GB minimum.
 
-### First save after upgrade is slow / vectors missing
+### The server exits at boot with a model-load error
 
-The model lazy-loads on first use (seconds, disk-bound from the image) and a model change wipes stale vectors, re-embedding the corpus in background batches (`↻ embedding model changed → N stale vector(s) wiped` in the logs, then a `◆ embedding drain complete` line with similarity percentiles). FTS-based detection works throughout; vec-sourced candidates resume when the drain completes.
+The embedding model is required: a missing, corrupt, or incompatible model aborts the boot (fail fast — there is no degraded no-embeddings mode). In the Docker image this indicates a broken image build (the build itself validates the model, so prefer re-pulling). On bare metal, the first boot downloads the model (~300 MB, one-time) — a network failure there also aborts; retry with connectivity.
+
+### Vectors missing right after an upgrade
+
+A model change wipes stale vectors and re-embeds the corpus in background batches (`↻ embedding model changed → N stale vector(s) wiped` in the logs, then a `◆ embedding drain complete` line with similarity percentiles). FTS-based detection works throughout; vec-sourced candidates for OLD rows resume when the drain completes. New saves embed inline and are unaffected.
 
 ## Database
 

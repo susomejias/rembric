@@ -2,19 +2,24 @@
 
 ## ADDED Requirements
 
-### Requirement: Embeddings MUST be computed in-process and asynchronously
+### Requirement: Embeddings MUST be computed in-process by a model loaded at boot
 
-Each newly saved memory SHALL receive its embedding from the in-process embedder (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`): inline before candidate detection when the model is warm (ms-scale), or via the background drain otherwise. `memory.save` SHALL NOT block on model loading. The model SHALL be lazy-loaded on first use; while the model is loading (or a vector is not yet computed) candidate detection degrades to FTS5-only with no error. There SHALL be no external embedding endpoint, no API key, and no off switch.
+The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`) SHALL be loaded during bootstrap, BEFORE the HTTP listener starts. A model that cannot load SHALL abort the boot with a non-zero exit (fail fast — a listening server always has a warm model; there is no cold state). Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch.
 
-#### Scenario: Saving a memory with the model warm
+#### Scenario: Saving a memory
 
-- **WHEN** `memory.save(…)` is called and the model has finished loading
+- **WHEN** `memory.save(…)` is called
 - **THEN** the row's embedding SHALL be computed inline and persisted into `memory_vec` before candidate detection runs, so vec-sourced candidates can surface in the same save's response
 
-#### Scenario: Saving before the model finished loading
+#### Scenario: The model cannot load at boot
 
-- **WHEN** `memory.save(…)` is called while the lazy model load is still in progress
-- **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, and the embedding SHALL be computed once the model is ready
+- **WHEN** the server starts and the embedding model fails to load (missing, corrupt, or incompatible artifacts)
+- **THEN** the boot SHALL fail with a non-zero exit before the HTTP listener starts — the server SHALL NOT run in a degraded no-embeddings mode
+
+#### Scenario: A single inference fails at save time
+
+- **WHEN** `memory.save(…)` is called and the inline embedding throws
+- **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, the failure SHALL be logged, and the drain SHALL retry the row
 
 ### Requirement: Stale vectors MUST be re-embedded after a model change
 
@@ -50,9 +55,9 @@ For each candidate surfaced, a `memory_relations` row SHALL be inserted with `st
 - **WHEN** no existing memory exceeds the thresholds
 - **THEN** the response SHALL include `candidates: []` and `judgmentRequired: false`; no `memory_relations` rows SHALL be inserted
 
-#### Scenario: The just-saved row has no embedding yet
+#### Scenario: The just-saved row has no embedding
 
-- **GIVEN** the embedding for the just-saved row has not been computed (model loading or worker lag)
+- **GIVEN** the inline embedding of the just-saved row failed (logged, drain will retry)
 - **WHEN** `memory.save` runs candidate detection
 - **THEN** only FTS5-derived candidates SHALL be considered; each candidate in the response SHALL carry `source: 'fts'`
 
