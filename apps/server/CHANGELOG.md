@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.21.0](https://github.com/susomejias/rembric/compare/server-v0.20.1...server-v0.21.0) (2026-06-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** env vars OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, EMBEDDING_PROVIDER, EMBEDDING_ENABLED, CANDIDATE_VEC_THRESHOLD and CANDIDATE_FTS_THRESHOLD are removed (ignored with the boot warning). memory.doctor embeddings block is now { model, backlog }. Embeddings are always on: lazy in-process model (ONNX q8, 768 dims), model-identity marker wipes stale vectors and the drain re-embeds resumably; similarity thresholds become engine constants (vec 0.70 sandbox-calibrated, distribution telemetry on drain).
+* **server:** env vars LLM_PROVIDER, OPENAI_MODEL, CONSOLIDATION_ENABLED, CONSOLIDATION_CRON and CONSOLIDATION_BATCH_SIZE are removed (ignored with a boot warning). memory.doctor drops the llm block. Decay + pending-relation orphaning now run as a throttled deterministic sweep on session start; aged pendings surface in memory.context.pendingJudgments[] for agent-side memory.judge, and are orphaned after JUDGMENT_ORPHAN_DEADLINE_MS (14d).
+
+### Features
+
+* **server:** deterministic consolidation — remove chat LLM and cron ([#97](https://github.com/susomejias/rembric/issues/97)) ([b43fbdb](https://github.com/susomejias/rembric/commit/b43fbdb1783cca3486013576d8acd30461f621dd))
+* **server:** in-process embeddings — gte-multilingual-base baked into the image ([#99](https://github.com/susomejias/rembric/issues/99)) ([70a0915](https://github.com/susomejias/rembric/commit/70a0915b00adfc0aa2f3c33c8b378b360262b17a))
+
 ## [0.20.1](https://github.com/susomejias/rembric/compare/server-v0.20.0...server-v0.20.1) (2026-05-22)
 
 
