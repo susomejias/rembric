@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the core memory model: append-only semantics, scope isolation (global vs project), supersedes chains, confirmations, retrieval with history, and optional asynchronous embeddings.
+Defines the core memory model: append-only semantics, scope isolation (global vs project), supersedes chains, confirmations, retrieval with history, and in-process always-on embeddings.
 
 ## Requirements
 
@@ -78,19 +78,39 @@ Every memory row SHALL carry a `scope` of either `global` or `project`. When `sc
 - **WHEN** `memory.get('N')` is called
 - **THEN** the response's `relations` array SHALL include `{ kind: 'pending_conflict', targetId: 'M', judgmentId, status: 'pending' }`
 
-### Requirement: Embeddings MUST be optional and asynchronous
+### Requirement: Embeddings MUST be computed in-process by a model loaded at boot
 
-When `EMBEDDING_ENABLED = true`, each newly saved memory SHALL be enqueued for embedding computation by the worker. Embedding computation SHALL NOT block the `memory.save` call. When `EMBEDDING_ENABLED = false`, no embedding is computed and consolidation candidate detection SHALL fall back to FTS5-based similarity.
+The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`) SHALL be loaded during bootstrap, BEFORE the HTTP listener starts. A model that cannot load SHALL abort the boot with a non-zero exit (fail fast — a listening server always has a warm model; there is no cold state). Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch.
 
-#### Scenario: Saving with embeddings enabled
+#### Scenario: Saving a memory
 
-- **WHEN** `memory.save(…)` is called and `EMBEDDING_ENABLED = true`
-- **THEN** the call SHALL return successfully without waiting for the embedding endpoint, and a background worker SHALL compute and persist the embedding into `memory_vec`
+- **WHEN** `memory.save(…)` is called
+- **THEN** the row's embedding SHALL be computed inline and persisted into `memory_vec` before candidate detection runs, so vec-sourced candidates can surface in the same save's response
 
-#### Scenario: Saving with embeddings disabled
+#### Scenario: The model cannot load at boot
 
-- **WHEN** `memory.save(…)` is called and `EMBEDDING_ENABLED = false`
-- **THEN** the call SHALL return successfully, no embedding job SHALL be created, and `memory_vec` SHALL NOT receive a row for this memory
+- **WHEN** the server starts and the embedding model fails to load (missing, corrupt, or incompatible artifacts)
+- **THEN** the boot SHALL fail with a non-zero exit before the HTTP listener starts — the server SHALL NOT run in a degraded no-embeddings mode
+
+#### Scenario: A single inference fails at save time
+
+- **WHEN** `memory.save(…)` is called and the inline embedding throws
+- **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, the failure SHALL be logged, and the drain SHALL retry the row
+
+### Requirement: Stale vectors MUST be re-embedded after a model change
+
+The data dir SHALL record the embedding model identity. When the server starts and the recorded identity differs from the compiled-in model (including the upgrade from the external-provider era), all non-archived memories SHALL be re-embedded in batches by the in-process embedder, resumable across restarts, with progress logged. Candidate detection SHALL keep working (FTS5 + whatever vectors are fresh) throughout the backfill.
+
+#### Scenario: First boot after the upgrade
+
+- **GIVEN** a data dir whose `memory_vec` rows were produced by a different model
+- **WHEN** the server starts
+- **THEN** the backfill SHALL begin in the background, the server SHALL serve requests immediately, and after completion every active memory SHALL have a vector produced by the compiled-in model
+
+#### Scenario: Backfill interrupted by a restart
+
+- **WHEN** the process restarts mid-backfill
+- **THEN** the backfill SHALL resume from the remaining unembedded rows, not start over
 
 ### Requirement: Memories MAY upsert by `(scope, project_id, topic_key)`
 
@@ -119,13 +139,13 @@ The `memory` table SHALL gain a nullable `topic_key TEXT` column. When `memory.s
 
 ### Requirement: `memory.save` MUST surface candidate conflicts at save-time
 
-After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always) and vec kNN neighbors (when `EMBEDDING_ENABLED = true`), apply the configured similarity thresholds, deduplicate by target id, and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates ordered by max(vec, fts) score descending.
+After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always) and vec kNN neighbors (when the just-saved row has an embedding), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates ordered by max(vec, fts) score descending.
 
 For each candidate surfaced, a `memory_relations` row SHALL be inserted with `status = 'pending'`, `source_id = <new row>`, `target_id = <candidate>`, and a generated `judgment_id`.
 
 #### Scenario: A save finds two strong candidates
 
-- **GIVEN** EMBEDDING_ENABLED is true, two existing active memories M1 and M2 in the same scope each exceed `CANDIDATE_VEC_THRESHOLD = 0.85` against the just-saved row N
+- **GIVEN** two existing active memories M1 and M2 in the same scope each exceed the internal vec threshold against the just-saved row N
 - **WHEN** `memory.save({...})` returns
 - **THEN** the response SHALL include `candidates: [{ judgmentId, targetId: M1, snippet, similarity, source }, { judgmentId, targetId: M2, ... }]` and `judgmentRequired: true`; two `memory_relations` rows SHALL exist with `status = 'pending'`
 
@@ -134,9 +154,9 @@ For each candidate surfaced, a `memory_relations` row SHALL be inserted with `st
 - **WHEN** no existing memory exceeds the thresholds
 - **THEN** the response SHALL include `candidates: []` and `judgmentRequired: false`; no `memory_relations` rows SHALL be inserted
 
-#### Scenario: Embeddings are disabled
+#### Scenario: The just-saved row has no embedding
 
-- **GIVEN** `EMBEDDING_ENABLED = false`
+- **GIVEN** the inline embedding of the just-saved row failed (logged, drain will retry)
 - **WHEN** `memory.save` runs candidate detection
 - **THEN** only FTS5-derived candidates SHALL be considered; each candidate in the response SHALL carry `source: 'fts'`
 
