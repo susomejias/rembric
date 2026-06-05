@@ -15,15 +15,15 @@ docker compose up -d
 
 Once a row exists, the env var is ignored on subsequent runs. Rotate via the dashboard at `/dashboard/tokens`.
 
-### `Invalid configuration: OPENAI_API_KEY is required …`
+### `⚠ ignoring removed env vars …` warning at boot
 
-Required when `CONSOLIDATION_ENABLED=true` (default). For Ollama / LM Studio, any non-empty string works (`OPENAI_API_KEY=sk-local`). For OpenAI proper, use a real `sk-…`. To disable all LLM calls: `CONSOLIDATION_ENABLED=false` and `EMBEDDING_ENABLED=false`.
+Pre-0.21 deployments configured a chat LLM and a consolidation cron (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_ENABLED`, `CONSOLIDATION_CRON`, `CONSOLIDATION_BATCH_SIZE`). The server no longer makes chat-LLM calls and the cron was replaced by a deterministic sweep on session start. The warning is informational — remove the listed vars from `.env` to silence it. `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_EMBEDDING_MODEL` remain valid (embeddings only). `EMBEDDING_ENABLED=false` disables the only remaining external call.
 
 ### `Error: address already in use :::8787`
 
 Another process holds the port. `lsof -i :8787` to find it, or set `REMBRIC_PORT`. A force-killed instance can leave the WAL dirty — SQLite recovers on restart.
 
-## LLM endpoint
+## Embedding endpoint
 
 Probe the configured endpoint directly:
 
@@ -37,11 +37,7 @@ curl -sS -H "Authorization: Bearer $OPENAI_API_KEY" "$OPENAI_BASE_URL/models"
 
 ### `401` / `403` on `/models`
 
-For OpenAI proper, the key is wrong or revoked. For Ollama / LM Studio, the upstream is rejecting the request — the `/models` listing should include the value configured in `OPENAI_MODEL`.
-
-### Consolidation runs are very slow
-
-Round cost = (candidate pairs) × (LLM judge latency). Lower `CONSOLIDATION_BATCH_SIZE` (default 50) for slow local models. Per-op `reasoning` is visible at `/dashboard/consolidation/<id>`.
+For OpenAI proper, the key is wrong or revoked. For Ollama / LM Studio, the upstream is rejecting the request — the `/models` listing should include the value configured in `OPENAI_EMBEDDING_MODEL`.
 
 ## Database
 
@@ -63,7 +59,8 @@ Each migration runs in one transaction, so partial migrations roll back. If star
 
 Every save inserts `memory_relations` rows with `status='pending'` for each candidate. If the agent ignores `candidates[]`, they accumulate as `pending_conflict` annotations.
 
-- The consolidator's orphan-promotion pass closes them after `JUDGMENT_ORPHAN_AFTER_MS` (default 24h).
+- After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge`.
+- After `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks them `orphaned` (journaled, undoable from `/dashboard/consolidation`).
 - If the agent never calls `memory.judge`, confirm the tool is in `tools/list` and paste the relations excerpt into the agent's prompt.
 
 See [docs/relations.md](./relations.md).

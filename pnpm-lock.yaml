@@ -51,9 +51,6 @@ importers:
       better-sqlite3:
         specifier: ^11.5.0
         version: 11.10.0
-      croner:
-        specifier: ^9.0.0
-        version: 9.1.0
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
@@ -2180,13 +2177,6 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
-
-  croner@9.1.0:
-    resolution:
-      {
-        integrity: sha512-p9nwwR4qyT5W996vBZhdvBCnMhicY5ytZkR4D1Xj0wuTDEiMnjwR57Q3RXYY/s0EpX6Ay3vgIcfaR+ewGHsi+g==,
-      }
-    engines: { node: '>=18.0' }
 
   cross-spawn@7.0.6:
     resolution:
@@ -6350,8 +6340,6 @@ snapshots:
       parse-json: 5.2.0
     optionalDependencies:
       typescript: 5.9.3
-
-  croner@9.1.0: {}
 
   cross-spawn@7.0.6:
     dependencies:

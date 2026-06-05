@@ -3,15 +3,15 @@
 The `memory_relations` table records the judgment graph between memories. Each row is one of:
 
 - **candidate** — detected at `memory.save` time, awaiting agent judgment (`status='pending'`, `relation=null`).
-- **judged verdict** — from the agent (`memory.judge` / `memory.compare`) or the consolidator's orphan-promotion pass (`status='judged'`, `relation` set, `marked_by_kind` set).
-- **orphan** — neither the agent nor the consolidator could resolve (`status='orphaned'`, `relation=null`).
+- **judged verdict** — from the agent (`memory.judge` / `memory.compare`) (`status='judged'`, `relation` set, `marked_by_kind` set).
+- **orphan** — no agent closed it before the deadline; the deterministic sweep retired it (`status='orphaned'`, `relation=null`).
 
 ## Lifecycle
 
 ```
-   memory.save          memory.judge        consolidator
-   surfaces a            closes the          orphan-promote
-   candidate             pending row         pass
+   memory.save          memory.judge          sweep
+   surfaces a            closes the           deadline
+   candidate             pending row          orphaning
         │                     │                    │
         ▼                     ▼                    ▼
     pending ─────────────▶ judged ─────────▶ (terminal)
@@ -20,7 +20,7 @@ The `memory_relations` table records the judgment graph between memories. Each r
     orphaned ────────────▶ (terminal — re-judging not allowed)
 ```
 
-A row stays `pending` until the agent closes it via `memory.judge({judgmentId})` or the consolidator picks it up after `JUDGMENT_ORPHAN_AFTER_MS` (default 24h). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
+A row stays `pending` until an agent closes it via `memory.judge({judgmentId})`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context; after `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
 
 ## Taxonomy
 
@@ -60,3 +60,4 @@ Cap: 10 per memory in search, 50 in `memory.get`. One JOIN keyed on both source_
 | Save returned `candidates[]`                       | `memory.judge({judgmentId, relation})`         |
 | Two arbitrary memories analyzed independently      | `memory.compare({memoryIdA, memoryIdB, …})`    |
 | Search results have `pending_conflict` annotations | `memory.judge` using the embedded `judgmentId` |
+| `memory.context` returned `pendingJudgments[]`     | `memory.judge` each entry's `judgmentId`       |

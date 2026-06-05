@@ -14,6 +14,4 @@ export type {
 } from './client.js';
 export { LlmError } from './errors.js';
 export type { LlmErrorCode } from './errors.js';
-export { generate } from './generate.js';
-export type { GenerateOptions } from './generate.js';
 export { embed } from './embed.js';

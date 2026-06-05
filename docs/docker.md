@@ -166,7 +166,7 @@ Not recommended yet. Watchtower would auto-pull `:latest` and recreate the conta
 
 ## `host.docker.internal` and Ollama
 
-If your LLM (Ollama, LM Studio, vLLM) runs on the **host**, the compose file already wires `host.docker.internal:host-gateway` so the container can reach it. Set the endpoint in `.env`:
+Only relevant for embeddings — the server makes no chat-LLM calls. If your embedding provider (Ollama, LM Studio, vLLM) runs on the **host**, the compose file already wires `host.docker.internal:host-gateway` so the container can reach it. Set the endpoint in `.env`:
 
 ```ini
 OPENAI_BASE_URL=http://host.docker.internal:11434/v1
@@ -174,7 +174,7 @@ OPENAI_BASE_URL=http://host.docker.internal:11434/v1
 
 On macOS and Windows (Docker Desktop), `host.docker.internal` is built-in — the `extra_hosts` line is a no-op. On Linux nativo, the `extra_hosts: ["host.docker.internal:host-gateway"]` in compose creates the alias. Both routes work.
 
-If your LLM runs in another container, point at it by service name within the same compose network. If it runs on another host, use the LAN IP or hostname.
+If the embedding provider runs in another container, point at it by service name within the same compose network. If it runs on another host, use the LAN IP or hostname.
 
 ## Healthchecks
 

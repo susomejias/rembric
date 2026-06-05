@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 
-import { loadConfig, redactConfig, type Config } from '../config.js';
-import { ConsolidationRunner, ConsolidationScheduler } from '../consolidation/index.js';
+import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
+import { ConsolidationRunner } from '../consolidation/index.js';
 import { createDb, type DbHandle } from '../db/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
@@ -49,6 +49,13 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   const config = loadConfig(env);
   printStartupBanner(config);
 
+  const staleVars = findStaleEnvVars(env);
+  if (staleVars.length > 0) {
+    console.error(
+      `  ⚠ ignoring removed env vars (chat LLM and consolidation cron were removed): ${staleVars.join(', ')}`,
+    );
+  }
+
   const dbHandle = createDb({ dataDir: config.dataDir });
 
   const tokens = new TokensService(dbHandle.db);
@@ -92,26 +99,16 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   }
   const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
 
-  // LLM clients. Chat and embedding may share a provider (typical
-  // OpenAI/Ollama case) or differ; either way we instantiate one client
-  // per role so future divergence is a config swap, not a refactor.
-  const chatLlm = new LlmClient({ baseUrl: config.llm.baseUrl, apiKey: config.llm.apiKey });
-  const embeddingLlm =
-    config.embedding.baseUrl === config.llm.baseUrl && config.embedding.apiKey === config.llm.apiKey
-      ? chatLlm
-      : new LlmClient({
-          baseUrl: config.embedding.baseUrl,
-          apiKey: config.embedding.apiKey,
-        });
-
-  // Embedding worker — drains new memories into memory_vec so the
-  // redundancy detector has something to kNN over. When EMBEDDING_ENABLED
-  // is false we skip the worker entirely and the consolidation falls back to
-  // drift / contradiction / decay (which don't need vectors).
+  // Embedding worker — drains new memories into memory_vec so save-time
+  // candidate detection has vectors to kNN over. When EMBEDDING_ENABLED
+  // is false the worker is skipped and candidates fall back to FTS5-only.
   const embeddingWorker = config.embedding.enabled
     ? new EmbeddingWorker({
         db: dbHandle.db,
-        client: embeddingLlm,
+        client: new LlmClient({
+          baseUrl: config.embedding.baseUrl,
+          apiKey: config.embedding.apiKey,
+        }),
         model: config.embedding.model,
       })
     : null;
@@ -135,9 +132,29 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
   const buildDoctorReport = buildDoctorReportFactory({
     dbHandle,
     agentSessions: agentSessionsSvc,
-    llm: chatLlm,
     embeddingEnabled: config.embedding.enabled,
   });
+
+  // Deterministic consolidation sweep — decay + deadline orphaning, no
+  // LLM, no cron. Triggered lazily on session start (throttled per scope)
+  // and manually via POST /admin/consolidation/run.
+  const runner = new ConsolidationRunner({
+    db: dbHandle.db,
+    relations: relationsSvc,
+    orphanDeadlineMs: config.judgments.orphanDeadlineMs,
+  });
+  const sweepOnSessionStart = (projectId: string | null): void => {
+    setImmediate(() => {
+      try {
+        runner.sweepFor(projectId);
+      } catch (err) {
+        console.error(
+          'consolidation sweep failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+  };
 
   // One McpServer per session (the SDK requires a fresh server per
   // connected transport). The factory receives the URL path slug so the
@@ -157,27 +174,11 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
       router: sessionRouter,
       db: dbHandle.db,
       doctor: buildDoctorReport,
+      sweep: sweepOnSessionStart,
+      orphanAfterMs: config.judgments.orphanAfterMs,
       requestedSlug: factoryCtx.requestedSlug,
     }),
   );
-
-  // Background consolidation scheduler. Idle until the configured cron fires.
-  const runner = new ConsolidationRunner({
-    db: dbHandle.db,
-    llm: chatLlm,
-    model: config.llm.model,
-    batchSize: config.consolidation.batchSize,
-    relations: relationsSvc,
-    orphanAfterMs: config.judgments.orphanAfterMs,
-    embeddingWorker,
-  });
-  const scheduler = new ConsolidationScheduler({
-    cron: config.consolidation.cron,
-    runner,
-    enabled: config.consolidation.enabled,
-    onError: (err) => console.error('consolidation run failed:', err),
-  });
-  scheduler.start();
 
   const rateLimiter = config.rateLimit.enabled
     ? new RateLimiter({
@@ -219,19 +220,8 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
     agentSessions: agentSessionsSvc,
     db: dbHandle,
     rateLimiter,
-    triggerConsolidation: async (opts) => {
-      if (opts?.orphansOnly) {
-        // Skip the decay sweep by zeroing the decay threshold via a
-        // one-off runner. Easier: run the regular path but rely on the
-        // fact that decay is idempotent — almost-free when nothing
-        // crosses the threshold. The "orphans-only" guarantee is that
-        // we do NOT block on decay computation for very large stores.
-        // For now we just run the standard path; a future change can
-        // add a dedicated `runOrphansOnly()` if needed.
-        return runner.runAll();
-      }
-      return runner.runAll();
-    },
+    triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
+    sweep: sweepOnSessionStart,
     dashboard: {
       db: dbHandle.db,
       tokens,
@@ -262,7 +252,6 @@ export async function bootstrap(env: NodeJS.ProcessEnv = process.env): Promise<B
         );
       }
       if (embedTimer) clearInterval(embedTimer);
-      scheduler.stop();
       await http.close();
       dbHandle.close();
     },
@@ -309,7 +298,6 @@ function printReadyBanner(url: string, firstRun: boolean): void {
 function buildDoctorReportFactory(deps: {
   dbHandle: DbHandle;
   agentSessions: AgentSessionsService;
-  llm: LlmClient;
   embeddingEnabled: boolean;
 }): () => DoctorReport {
   return () => {
@@ -376,7 +364,6 @@ function buildDoctorReportFactory(deps: {
 
     return {
       db: { open: true, journalMode, integrity, sizeBytes },
-      llm: { reachable: false, lastPingAt: null },
       embeddings: { enabled: deps.embeddingEnabled, backlog },
       consolidation: {
         lastRunAt: lastConsolidation?.startedAt ? lastConsolidation.startedAt.toISOString() : null,

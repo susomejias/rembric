@@ -84,13 +84,16 @@ export interface SessionsToolDeps {
   prompts: PromptsService;
   router: SessionRouter;
   doctor: () => DoctorReport;
+  /** Fire-and-forget consolidation sweep, invoked after session start. */
+  sweep?: (projectId: string | null) => void;
+  /** Pending relations older than this surface in memory.context. */
+  orphanAfterMs?: number;
   /** Back-reference for roots-based discovery; set by createMcpServer. */
   getServer?: () => McpServer;
 }
 
 export interface DoctorReport {
   db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
-  llm: { reachable: boolean; lastPingAt: string | null };
   embeddings: { enabled: boolean; backlog: number };
   consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
   sessions: { active: number };
@@ -319,6 +322,8 @@ async function handleSessionStart(
     }
   }
 
+  deps.sweep?.(projectId);
+
   if (key) {
     deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
     if (projectId !== null) {
@@ -519,11 +524,49 @@ function handleContext(
       createdAt: p.createdAt,
     }));
 
+  // Aged pending relations (older than the orphan threshold) the agent
+  // should close with memory.judge while context is fresh. Unjudged rows
+  // are deterministically orphaned by the sweep after the deadline.
+  const now = Date.now();
+  const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
+  const relScopeClause =
+    scope.kind === 'project'
+      ? sql`ms.scope = 'project' AND ms.project_id = ${scope.projectId} AND mt.scope = 'project' AND mt.project_id = ${scope.projectId}`
+      : sql`ms.scope = 'global' AND ms.project_id IS NULL AND mt.scope = 'global' AND mt.project_id IS NULL`;
+  const pendingRows = deps.db.all<{
+    judgment_id: string;
+    source_id: string;
+    target_id: string;
+    created_at: number;
+    source_content: string;
+    target_content: string;
+  }>(sql`
+      SELECT r.judgment_id, r.source_id, r.target_id, r.created_at,
+             ms.content AS source_content, mt.content AS target_content
+      FROM memory_relations r
+        JOIN memory ms ON ms.id = r.source_id
+        JOIN memory mt ON mt.id = r.target_id
+      WHERE r.status = 'pending'
+        AND r.created_at < ${pendingCutoff}
+        AND ${relScopeClause}
+      ORDER BY r.created_at ASC
+      LIMIT 5
+    `);
+  const pendingJudgments = pendingRows.map((r) => ({
+    judgmentId: r.judgment_id,
+    sourceId: r.source_id,
+    targetId: r.target_id,
+    sourceSnippet: snippet(r.source_content, 200),
+    targetSnippet: snippet(r.target_content, 200),
+    ageMs: now - r.created_at,
+  }));
+
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
     recentSessions,
     recentPrompts,
     recentMemories,
+    pendingJudgments,
     clamped,
   });
 }

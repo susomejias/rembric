@@ -1,20 +1,19 @@
 /**
- * Consolidation engine module barrel. The server wires `ConsolidationRunner` and
- * `ConsolidationScheduler` together at boot; the dashboard reads the journal
- * (consolidation_runs / consolidation_ops) directly via Drizzle.
+ * Consolidation engine module barrel. The server wires the deterministic
+ * `ConsolidationRunner` sweep at boot (triggered lazily on session start);
+ * the dashboard reads the journal (consolidation_runs / consolidation_ops)
+ * directly via Drizzle.
  */
 
 // Note: findRedundancyCandidates / findDriftCandidates /
-// findContradictionCandidates were removed in v0.5. Save-time candidate
-// detection in `memory.save` + `RelationsService` superseded them; the
-// orphan-promotion pass in `ConsolidationRunner` handles the long tail.
+// findContradictionCandidates were removed in v0.5; the LLM orphan judge
+// and the cron scheduler were removed in `remove-llm-consolidation`.
+// Save-time candidate detection in `memory.save` + agent-side
+// `memory.judge` (re-exposed via `memory.context`) replaced them.
 export type { ScopeKey } from './candidates.js';
 
 export { findDecayCandidates, DEFAULT_DECAY } from './decay.js';
 export type { DecayThresholds } from './decay.js';
-
-export { judge, judgeDecisionSchema } from './judge.js';
-export type { JudgeDecision, RunJudgeOptions } from './judge.js';
 
 export {
   applyMerge,
@@ -38,6 +37,3 @@ export type {
   ConsolidationRunSummary,
   ScopeRunResult,
 } from './runner.js';
-
-export { ConsolidationScheduler } from './scheduler.js';
-export type { SchedulerOptions } from './scheduler.js';

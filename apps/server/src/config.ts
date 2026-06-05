@@ -10,19 +10,18 @@ import { z } from 'zod';
  * only `REMBRIC_ADMIN_TOKEN` is required on the very first start (when no
  * admin token row exists in the DB yet).
  *
- * Provider model:
+ * Embedding provider model:
  *
- *   LLM_PROVIDER=openai          ← selects the chat provider
  *   EMBEDDING_PROVIDER=openai    ← selects the embedding provider
  *
  *   When provider=openai, configuration is read from the OPENAI_* namespace
- *   (OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_EMBEDDING_MODEL).
- *   New providers add their own namespace (ANTHROPIC_*, GROQ_*, ...) without
- *   touching the generic LLM_PROVIDER / EMBEDDING_PROVIDER selection vars.
+ *   (OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL). The
+ *   OPENAI_BASE_URL must include the `/v1` path segment; local Ollama
+ *   exposes the compatible API at `http://localhost:11434/v1`.
  *
- *   The OPENAI_BASE_URL must include the `/v1` path segment, matching the
- *   official OpenAI endpoint convention. Local Ollama exposes the
- *   compatible API at `http://localhost:11434/v1`.
+ * There is no chat-LLM configuration: the server performs no LLM reasoning
+ * (see the `remove-llm-consolidation` change). Stale chat/cron vars from
+ * pre-0.21 deployments are ignored with a boot warning, never an error.
  */
 
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
@@ -30,6 +29,20 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export const LLM_PROVIDERS = ['openai'] as const;
 export type LlmProviderName = (typeof LLM_PROVIDERS)[number];
+
+/** Env vars removed by `remove-llm-consolidation`; ignored with a warning. */
+export const REMOVED_ENV_VARS = [
+  'LLM_PROVIDER',
+  'OPENAI_MODEL',
+  'CONSOLIDATION_ENABLED',
+  'CONSOLIDATION_CRON',
+  'CONSOLIDATION_BATCH_SIZE',
+] as const;
+
+/** Names from `REMOVED_ENV_VARS` still present in `env`, for the boot warning. */
+export function findStaleEnvVars(env: NodeJS.ProcessEnv = process.env): string[] {
+  return REMOVED_ENV_VARS.filter((name) => env[name] !== undefined && env[name] !== '');
+}
 
 const envSchema = z.object({
   REMBRIC_HOST: z.string().default('127.0.0.1'),
@@ -39,30 +52,21 @@ const envSchema = z.object({
   REMBRIC_ADMIN_TOKEN: z.string().min(16).optional(),
   REMBRIC_SESSION_SECRET: z.string().min(16).optional(),
 
-  // Provider selection
-  LLM_PROVIDER: z.enum(LLM_PROVIDERS).default('openai'),
+  // Embedding provider selection (chat-LLM config was removed; see header)
   EMBEDDING_PROVIDER: z.enum(LLM_PROVIDERS).default('openai'),
 
-  // OpenAI-compatible provider settings
+  // OpenAI-compatible provider settings (consumed by embeddings only)
   OPENAI_BASE_URL: z.string().url().default('http://localhost:11434/v1'),
   OPENAI_API_KEY: z
     .string()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : undefined)),
-  OPENAI_MODEL: z.string().default('qwen2.5:7b'),
   OPENAI_EMBEDDING_MODEL: z.string().default('nomic-embed-text'),
 
   EMBEDDING_ENABLED: z
     .union([z.string(), z.boolean()])
     .transform((v) => (typeof v === 'boolean' ? v : v.toLowerCase() === 'true'))
     .default(true),
-
-  CONSOLIDATION_ENABLED: z
-    .union([z.string(), z.boolean()])
-    .transform((v) => (typeof v === 'boolean' ? v : v.toLowerCase() === 'true'))
-    .default(true),
-  CONSOLIDATION_CRON: z.string().default('0 3 * * *'),
-  CONSOLIDATION_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(50),
 
   // Per-token MCP rate limiting. Disabled by default — single-user
   // localhost deployments do not need it. Set RATE_LIMIT_ENABLED=true
@@ -92,25 +96,27 @@ const envSchema = z.object({
   CANDIDATE_VEC_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
   CANDIDATE_FTS_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
 
-  // Orphan promotion: relations stuck in 'pending' longer than this
-  // get fed to the LLM judge during consolidation; rows the judge
-  // cannot resolve confidently transition to 'orphaned'.
+  // Relations stuck in 'pending' longer than this are re-exposed to
+  // agents via memory.context (pendingJudgments[]) for fresh-context
+  // judgment via memory.judge.
   JUDGMENT_ORPHAN_AFTER_MS: z.coerce
     .number()
     .int()
     .min(60_000) // 1 minute floor
     .max(30 * 86_400_000) // 30-day ceiling
     .default(86_400_000),
+
+  // Pending relations no agent judged within this window are marked
+  // 'orphaned' by the deterministic sweep (journaled, undoable).
+  JUDGMENT_ORPHAN_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .min(3_600_000) // 1 hour floor
+    .max(365 * 86_400_000) // 1-year ceiling
+    .default(14 * 86_400_000),
 });
 
 export type ParsedEnv = z.infer<typeof envSchema>;
-
-export interface ProviderConfig {
-  provider: LlmProviderName;
-  baseUrl: string;
-  apiKey: string | null;
-  model: string;
-}
 
 export interface EmbeddingConfig {
   provider: LlmProviderName;
@@ -127,13 +133,7 @@ export interface Config {
   logLevel: LogLevel;
   adminToken: string | null;
   sessionSecret: string | null;
-  llm: ProviderConfig;
   embedding: EmbeddingConfig;
-  consolidation: {
-    enabled: boolean;
-    cron: string;
-    batchSize: number;
-  };
   rateLimit: {
     enabled: boolean;
     ratePerSecond: number;
@@ -149,6 +149,7 @@ export interface Config {
   };
   judgments: {
     orphanAfterMs: number;
+    orphanDeadlineMs: number;
   };
 }
 
@@ -176,69 +177,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const parsed = result.data;
 
-  // Cross-field validation: when consolidation is enabled we will be making
-  // LLM calls (and optionally embedding calls). Surface the missing knobs
-  // up-front rather than at the first cron tick.
-  const issues: { path: string; message: string }[] = [];
-  if (parsed.CONSOLIDATION_ENABLED) {
-    if (parsed.LLM_PROVIDER === 'openai') {
-      if (!parsed.OPENAI_API_KEY) {
-        issues.push({
-          path: 'OPENAI_API_KEY',
-          message:
-            "is required when CONSOLIDATION_ENABLED=true and LLM_PROVIDER='openai' (use any non-empty string for Ollama; an sk-… key for OpenAI proper)",
-        });
-      }
-      if (!parsed.OPENAI_MODEL || parsed.OPENAI_MODEL.trim().length === 0) {
-        issues.push({
-          path: 'OPENAI_MODEL',
-          message: "is required when CONSOLIDATION_ENABLED=true and LLM_PROVIDER='openai'",
-        });
-      }
-    }
-    if (parsed.EMBEDDING_ENABLED && parsed.EMBEDDING_PROVIDER === 'openai') {
-      if (!parsed.OPENAI_API_KEY) {
-        issues.push({
-          path: 'OPENAI_API_KEY',
-          message:
-            "is required when CONSOLIDATION_ENABLED=true, EMBEDDING_ENABLED=true and EMBEDDING_PROVIDER='openai'",
-        });
-      }
-      if (!parsed.OPENAI_EMBEDDING_MODEL || parsed.OPENAI_EMBEDDING_MODEL.trim().length === 0) {
-        issues.push({
-          path: 'OPENAI_EMBEDDING_MODEL',
-          message:
-            "is required when CONSOLIDATION_ENABLED=true, EMBEDDING_ENABLED=true and EMBEDDING_PROVIDER='openai'",
-        });
-      }
-    }
-  }
-  if (issues.length > 0) {
-    const summary = issues.map((i) => `  - ${i.path}: ${i.message}`).join('\n');
-    throw new ConfigError(`Invalid configuration:\n${summary}`, issues);
-  }
-
-  // For now the only provider is 'openai'. The resolver below routes from
-  // (provider, *) to (baseUrl, apiKey, model). When new providers are added
-  // they slot in here with their own namespaced env-var reads.
-  const resolveProvider = (
-    name: LlmProviderName,
-    modelField: 'OPENAI_MODEL' | 'OPENAI_EMBEDDING_MODEL',
-  ): ProviderConfig => {
-    switch (name) {
-      case 'openai':
-        return {
-          provider: 'openai',
-          baseUrl: parsed.OPENAI_BASE_URL,
-          apiKey: parsed.OPENAI_API_KEY ?? null,
-          model: parsed[modelField],
-        };
-    }
-  };
-
-  const llm = resolveProvider(parsed.LLM_PROVIDER, 'OPENAI_MODEL');
-  const embeddingBase = resolveProvider(parsed.EMBEDDING_PROVIDER, 'OPENAI_EMBEDDING_MODEL');
-
   return {
     host: parsed.REMBRIC_HOST,
     port: parsed.REMBRIC_PORT,
@@ -246,18 +184,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: parsed.LOG_LEVEL,
     adminToken: parsed.REMBRIC_ADMIN_TOKEN ?? null,
     sessionSecret: parsed.REMBRIC_SESSION_SECRET ?? null,
-    llm,
     embedding: {
-      provider: embeddingBase.provider,
-      baseUrl: embeddingBase.baseUrl,
-      apiKey: embeddingBase.apiKey,
-      model: embeddingBase.model,
+      provider: parsed.EMBEDDING_PROVIDER,
+      baseUrl: parsed.OPENAI_BASE_URL,
+      apiKey: parsed.OPENAI_API_KEY ?? null,
+      model: parsed.OPENAI_EMBEDDING_MODEL,
       enabled: parsed.EMBEDDING_ENABLED,
-    },
-    consolidation: {
-      enabled: parsed.CONSOLIDATION_ENABLED,
-      cron: parsed.CONSOLIDATION_CRON,
-      batchSize: parsed.CONSOLIDATION_BATCH_SIZE,
     },
     rateLimit: {
       enabled: parsed.RATE_LIMIT_ENABLED,
@@ -274,6 +206,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     judgments: {
       orphanAfterMs: parsed.JUDGMENT_ORPHAN_AFTER_MS,
+      orphanDeadlineMs: parsed.JUDGMENT_ORPHAN_DEADLINE_MS,
     },
   };
 }
@@ -287,12 +220,6 @@ export function redactConfig(config: Config): Record<string, unknown> {
     logLevel: config.logLevel,
     adminToken: config.adminToken ? '[set]' : '[unset]',
     sessionSecret: config.sessionSecret ? '[set]' : '[derived from admin token]',
-    llm: {
-      provider: config.llm.provider,
-      baseUrl: config.llm.baseUrl,
-      apiKey: config.llm.apiKey ? '[set]' : '[unset]',
-      model: config.llm.model,
-    },
     embedding: {
       provider: config.embedding.provider,
       baseUrl: config.embedding.baseUrl,
@@ -300,7 +227,6 @@ export function redactConfig(config: Config): Record<string, unknown> {
       model: config.embedding.model,
       enabled: config.embedding.enabled,
     },
-    consolidation: config.consolidation,
     rateLimit: config.rateLimit,
     sessions: config.sessions,
     candidates: config.candidates,

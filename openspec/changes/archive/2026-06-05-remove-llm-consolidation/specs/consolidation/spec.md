@@ -1,10 +1,6 @@
-# consolidation Specification
+# consolidation — delta for remove-llm-consolidation
 
-## Purpose
-
-Defines the deterministic consolidation sweep that resolves memory pollution (decay and aged-pending orphaning) while preserving append-only semantics, scope isolation, journaling, and reversibility.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: The consolidation sweep MUST run lazily on session start, throttled per scope
 
@@ -57,6 +53,8 @@ A server booting in an environment that still defines any removed variable (`LLM
 - **WHEN** the server boots with `OPENAI_MODEL` and `CONSOLIDATION_CRON` still set
 - **THEN** it SHALL reach the listening state and SHALL log one warning listing both names as ignored
 
+## MODIFIED Requirements
+
 ### Requirement: The consolidation MUST target redundancy, drift, contradiction, and decay
 
 The consolidation sweep SHALL perform exactly two passes per run: (1) decay (deterministic, no LLM), and (2) deadline orphaning of pending relations older than `JUDGMENT_ORPHAN_DEADLINE_MS`. The LLM-driven detection of redundancy / drift / contradiction over the full corpus is REMOVED — that work moves to save-time as `memory.save` candidate detection. The LLM judging of aged pending relations is REMOVED — aged pendings are re-exposed to agents via `memory.context` and deterministically orphaned at the deadline.
@@ -73,26 +71,6 @@ The consolidation sweep SHALL perform exactly two passes per run: (1) decay (det
 - **WHEN** that save returned `candidates: [{...}]` and the agent never called `memory.judge`
 - **THEN** after `JUDGMENT_ORPHAN_AFTER_MS` the pending relation SHALL appear in `memory.context.pendingJudgments[]`, and after `JUDGMENT_ORPHAN_DEADLINE_MS` without judgment the sweep SHALL orphan it — no LLM is invoked at any point
 
-### Requirement: Consolidation operations MUST be atomic per operation
-
-Each operation in a consolidation run SHALL be applied within a single SQLite transaction. If any part of the operation fails, the transaction SHALL be rolled back and the operation SHALL be recorded as failed in `consolidation_ops` with the error reason.
-
-#### Scenario: Failure mid-merge
-
-- **GIVEN** a merge operation has inserted a new merged memory but the predecessor status update fails
-- **WHEN** the transaction commit is attempted
-- **THEN** the transaction SHALL roll back, the merged memory SHALL NOT exist after rollback, the predecessors SHALL remain `active`, and a failed op SHALL be logged
-
-### Requirement: Consolidation MUST NEVER cross scope boundaries
-
-The consolidation SHALL operate one (scope, project_id) tuple at a time. A single consolidation op SHALL NOT touch memories that span more than one scope or more than one project.
-
-#### Scenario: Two memories of different projects look similar
-
-- **GIVEN** memory X has `scope = 'project'`, `project_id = 'A'` and memory Y has `scope = 'project'`, `project_id = 'B'`, and their content is near-duplicate
-- **WHEN** the consolidation runs
-- **THEN** they SHALL NOT be considered candidates for the same merge, regardless of similarity
-
 ### Requirement: Every consolidation decision MUST be journaled
 
 Every operation produced by the sweep — decay archive or deadline orphaning — SHALL be recorded in `consolidation_ops` with the operation type, affected ids, a deterministic reasoning string, the resulting created id (when applicable), and the application status. Historical op types (`merge`, `supersede`, `orphan_promote`) remain valid journal rows: they SHALL keep rendering in the dashboard and SHALL keep their undo semantics, but the sweep SHALL NOT produce new rows of those types.
@@ -108,41 +86,6 @@ Every operation produced by the sweep — decay archive or deadline orphaning �
 - **WHEN** the operator views the run and triggers undo for that op
 - **THEN** the op SHALL render normally and the undo SHALL succeed exactly as before the upgrade
 
-### Requirement: Every consolidation operation MUST be reversible
-
-The dashboard and CLI SHALL provide an undo for any individual consolidation op and for an entire consolidation run, EXCEPT when one or more rows referenced by the op's `affected_ids` or `created_id` have been physically removed by `MemoryService.purgeDisconnectedArchived` or `AgentSessionsService.purgeEmpty`. In that case, undo SHALL fail with a structured error so the operator understands why.
-
-Undoing an op SHALL restore the affected memories to `active` and SHALL transition any merged-into memory to `archived` so it is removed from active retrieval, when all referenced rows still exist.
-
-#### Scenario: Undoing a merge op when all rows still exist
-
-- **GIVEN** a merge op resulted in memories A and B transitioning to `superseded` and a new memory M created with `status = 'active'`
-- **AND** none of A, B, M have been purged
-- **WHEN** the operator triggers undo for that op
-- **THEN** A and B SHALL transition back to `active`, M SHALL transition to `archived`, and the op SHALL be marked as reverted in `consolidation_ops`
-
-#### Scenario: Undoing a run when all rows still exist
-
-- **WHEN** the operator triggers undo for an entire consolidation run and every affected_id of every op is still present in `memory` and `sessions`
-- **THEN** every op in the run SHALL be reversed in reverse order, leaving the DB equivalent to its pre-run state aside from the journal entries themselves
-
-#### Scenario: Undo is blocked when a referenced row has been purged
-
-- **GIVEN** a merge op references memory ids `[A, B]` via `affected_ids` and `M` via `created_id`
-- **AND** `M` has since been removed by `MemoryService.purgeDisconnectedArchived`
-- **WHEN** the operator triggers undo for that op
-- **THEN** the undo handler SHALL return `{ ok: false, code: 'purged_row_missing', missing: ['M'] }`
-- **AND** the dashboard SHALL render that error inline on the consolidation runs view, naming the missing ids
-- **AND** the op SHALL remain in its current state (NOT marked reverted, NOT mutated)
-- **AND** rows A and B SHALL remain in their current state (NOT transitioned back to `active`)
-
-#### Scenario: Undo is blocked when a purged session is referenced
-
-- **GIVEN** a journal op references a session id that has since been removed by `AgentSessionsService.purgeEmpty`
-- **WHEN** the operator triggers undo for that op
-- **THEN** the undo handler SHALL return `{ ok: false, code: 'purged_row_missing', missing: [...sessionIds] }`
-- **AND** the op SHALL NOT be reverted
-
 ### Requirement: The consolidation MUST be idempotent on stable input
 
 Running the sweep twice with no intervening writes SHALL produce zero new operations beyond noops. Specifically: the decay pass SHALL be a no-op if no row crossed the threshold since the previous run; the deadline-orphaning pass SHALL be a no-op if no pending relation crossed `JUDGMENT_ORPHAN_DEADLINE_MS` since the previous run.
@@ -152,25 +95,14 @@ Running the sweep twice with no intervening writes SHALL produce zero new operat
 - **WHEN** the sweep runs twice in immediate succession (manual trigger bypassing the throttle)
 - **THEN** the second run's `consolidation_runs.summary` SHALL show zero new decay archives and zero new orphanings
 
-### Requirement: Purge ops are journaled but not themselves undoable
+## REMOVED Requirements
 
-The consolidation journal SHALL include two new `op_type` values: `session_purge` (written by `AgentSessionsService.purgeEmpty`) and `archived_memory_purge` (written by `MemoryService.purgeDisconnectedArchived`). These ops record `affected_ids` (the deleted row ids) and `reasoning` (a static operator-purge string). The `created_id` column SHALL be NULL for both new op types.
+### Requirement: The consolidation MUST run automatically on a schedule
 
-Undo SHALL NOT be available for `session_purge` or `archived_memory_purge` ops. The rows they record are gone and cannot be reconstructed. Attempts to undo SHALL return `{ ok: false, code: 'not_undoable', reason: 'purge ops are terminal' }`.
+**Reason**: The cron scheduler is removed; hygiene only matters at read time, and read time implies session traffic, which now triggers the throttled lazy sweep.
+**Migration**: No operator action. `CONSOLIDATION_CRON`/`CONSOLIDATION_ENABLED` are ignored with a boot warning; the first session start after upgrade runs the sweep, which subsumes anything the cron would have done. The manual dashboard trigger is unchanged.
 
-#### Scenario: A purge op is journaled with the deleted ids
+### Requirement: LLM judge output MUST be validated
 
-- **WHEN** `AgentSessionsService.purgeEmpty` deletes session ids `[s1, s2, s3]`
-- **THEN** exactly one row SHALL be inserted into `consolidation_ops` with `op_type = 'session_purge'`, `affected_ids = ['s1','s2','s3']`, `created_id = NULL`, and `reasoning` matching the operator-purge static string
-
-#### Scenario: An archived-memory purge op is journaled with the deleted ids
-
-- **WHEN** `MemoryService.purgeDisconnectedArchived` deletes memory ids `[m1, m2]`
-- **THEN** exactly one row SHALL be inserted into `consolidation_ops` with `op_type = 'archived_memory_purge'`, `affected_ids = ['m1','m2']`, `created_id = NULL`, and `reasoning` matching the operator-purge static string
-
-#### Scenario: Undo on a purge op is rejected
-
-- **GIVEN** a `consolidation_ops` row with `op_type IN ('session_purge', 'archived_memory_purge')`
-- **WHEN** the operator triggers undo for that op
-- **THEN** the undo handler SHALL return `{ ok: false, code: 'not_undoable', reason: 'purge ops are terminal' }`
-- **AND** the dashboard SHALL render that response as a non-error informational message (purges are intentionally one-way)
+**Reason**: There is no LLM judge anymore; the sweep is fully deterministic.
+**Migration**: Pending relations are closed by agents via `memory.judge` (re-exposed through `memory.context`) or deterministically orphaned at the deadline. Historical `orphan_promote` journal rows remain valid and undoable.
