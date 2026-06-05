@@ -63,6 +63,10 @@ export interface CreateMcpServerOptions {
   router: SessionRouter;
   db: Db;
   doctor: () => DoctorReport;
+  /** Fire-and-forget consolidation sweep, invoked after session start. */
+  sweep?: (projectId: string | null) => void;
+  /** Pending relations older than this surface in memory.context. */
+  orphanAfterMs?: number;
   /** URL path slug for this connection, used to scope `instructions`. */
   requestedSlug?: string | null;
   name?: string;
@@ -133,6 +137,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     prompts: opts.prompts,
     router: opts.router,
     doctor: opts.doctor,
+    sweep: opts.sweep,
+    orphanAfterMs: opts.orphanAfterMs,
     getServer: () => server,
   });
 

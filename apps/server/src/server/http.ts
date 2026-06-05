@@ -48,12 +48,15 @@ export interface CreateHttpServerOptions {
   /** Optional per-token rate limiter applied before MCP transport handoff. */
   rateLimiter?: RateLimiter | null;
   /**
-   * Triggers a consolidation pass on demand. Wired by the bootstrapper
-   * to the in-process ConsolidationRunner; exposed over HTTP via
+   * Triggers a consolidation sweep on demand (force — bypasses the
+   * per-scope throttle). Wired by the bootstrapper to the in-process
+   * ConsolidationRunner; exposed over HTTP via
    * `POST /admin/consolidation/run` (also the dashboard button at
    * `/dashboard/consolidation`).
    */
-  triggerConsolidation?: (opts: { orphansOnly?: boolean }) => Promise<unknown>;
+  triggerConsolidation?: () => Promise<unknown>;
+  /** Fire-and-forget lazy sweep, invoked after a session is created. */
+  sweep?: (projectId: string | null) => void;
 }
 
 export interface HttpServerHandle {
@@ -86,6 +89,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       agentSessions: opts.agentSessions,
       tokens: opts.tokens,
       projects: opts.projects,
+      sweep: opts.sweep,
     }),
   );
 
@@ -105,9 +109,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
         );
       }
       try {
-        const mode = c.req.query('mode');
-        const orphansOnly = mode === 'orphans-only';
-        const result = await trigger({ orphansOnly });
+        const result = await trigger();
         return c.json({ ok: true, result });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

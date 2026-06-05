@@ -23,7 +23,6 @@
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^11.5.0",
-    "croner": "^9.0.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
     "sqlite-vec": "^0.1.6",

@@ -30,6 +30,12 @@ export interface ApiRouterDeps {
   agentSessions: AgentSessionsService;
   tokens: TokensService;
   projects: ProjectsService;
+  /**
+   * Fire-and-forget consolidation sweep (decay + deadline orphaning),
+   * invoked after a session is created. Throttled and error-isolated by
+   * the bootstrapper — never affects the session response.
+   */
+  sweep?: (projectId: string | null) => void;
 }
 
 const ID_RE_SOURCE = '^[A-Za-z0-9_-]{8,128}$';
@@ -85,6 +91,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         description: parsed.data.description ?? null,
         cwd: parsed.data.cwd ?? null,
       });
+      deps.sweep?.(ctx.project.id);
       return c.json({
         ok: true,
         sessionId: result.session.id,

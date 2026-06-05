@@ -483,7 +483,6 @@ describe('MCP protocol conformance', () => {
     expect(result.isError).toBeFalsy();
     const payload = readJson(result) as {
       db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
-      llm: { reachable: boolean; lastPingAt: string | null };
       embeddings: { enabled: boolean; backlog: number };
       consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
       sessions: { active: number };
@@ -493,7 +492,8 @@ describe('MCP protocol conformance', () => {
     expect(payload.db.journalMode).toMatch(/wal/i);
     expect(payload.db.integrity).toMatch(/ok/i);
     expect(typeof payload.db.sizeBytes).toBe('number');
-    expect(typeof payload.llm.reachable).toBe('boolean');
+    // The llm block was removed by `remove-llm-consolidation`.
+    expect('llm' in payload).toBe(false);
     expect(typeof payload.embeddings.enabled).toBe('boolean');
     expect(Array.isArray(payload.warnings)).toBe(true);
     await client.close();
@@ -542,6 +542,75 @@ describe('MCP protocol conformance', () => {
     expect(result.isError).toBe(true);
     const payload = readJson(result) as { code?: string };
     expect(payload.code).toBe('not_found');
+    await client.close();
+  });
+  // NOTE: runs after the candidates[] test — the FTS similarity proxy
+  // (1/(1+|bm25|)) is corpus-size sensitive, so saves made here would
+  // shift BM25 IDF for earlier saves. Recalibrated in change B.
+  it('memory.context exposes aged pending judgments and memory.judge clears them', async () => {
+    const client = await connect();
+
+    const saveOne = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'pending-source-marker' },
+    })) as ToolResult;
+    const saveTwo = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'pending-target-marker' },
+    })) as ToolResult;
+    const sourceId = (readJson(saveOne) as { id: string }).id;
+    const targetId = (readJson(saveTwo) as { id: string }).id;
+
+    // Aged pending (2 days > JUDGMENT_ORPHAN_AFTER_MS default 24h) and a
+    // fresh one; only the aged row may surface.
+    const insert = server.dbHandle.raw.prepare(
+      `INSERT INTO memory_relations (id, judgment_id, source_id, target_id, status, created_at)
+       VALUES (?, ?, ?, ?, 'pending', ?)`,
+    );
+    insert.run(
+      '01TESTRELAGED000000000000A',
+      'jdg-aged-itest',
+      sourceId,
+      targetId,
+      Date.now() - 2 * 86_400_000,
+    );
+    insert.run('01TESTRELFRESH00000000000B', 'jdg-fresh-itest', targetId, sourceId, Date.now());
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: {},
+    })) as ToolResult;
+    const payload = readJson(ctx) as {
+      pendingJudgments: {
+        judgmentId: string;
+        sourceSnippet: string;
+        targetSnippet: string;
+        ageMs: number;
+      }[];
+    };
+    expect(payload.pendingJudgments).toHaveLength(1);
+    expect(payload.pendingJudgments[0]?.judgmentId).toBe('jdg-aged-itest');
+    expect(payload.pendingJudgments[0]?.sourceSnippet).toContain('pending-source-marker');
+    expect(payload.pendingJudgments[0]?.targetSnippet).toContain('pending-target-marker');
+    expect(payload.pendingJudgments[0]?.ageMs).toBeGreaterThan(86_400_000);
+
+    const judged = (await client.callTool({
+      name: 'memory.judge',
+      arguments: {
+        judgmentId: 'jdg-aged-itest',
+        relation: 'not_conflict',
+        reason: 'integration cleanup',
+      },
+    })) as ToolResult;
+    expect(judged.isError).toBeFalsy();
+
+    const ctxAfter = (await client.callTool({
+      name: 'memory.context',
+      arguments: {},
+    })) as ToolResult;
+    const after = readJson(ctxAfter) as { pendingJudgments: unknown[] };
+    expect(after.pendingJudgments).toHaveLength(0);
+
     await client.close();
   });
 });

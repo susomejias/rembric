@@ -96,8 +96,9 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       })}
       ${runs.length === 0
         ? html`<p class="muted">
-            No runs yet. The cron will fire at <code>CONSOLIDATION_CRON</code>; trigger one manually
-            via <code>POST /admin/consolidation/run</code> with the admin bearer token.
+            No runs yet. The deterministic sweep runs on session start (throttled per scope);
+            trigger one manually via <code>POST /admin/consolidation/run</code> with the admin
+            bearer token.
           </p>`
         : html`
             <div class="tbl-host">
