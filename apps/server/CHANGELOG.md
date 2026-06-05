@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/susomejias/rembric/compare/server-v0.21.0...server-v0.21.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **server:** retry model bake on HF 429 + optional hf_token build secret ([#101](https://github.com/susomejias/rembric/issues/101)) ([36b3b5c](https://github.com/susomejias/rembric/commit/36b3b5c09c599699388e973f3527f3fb3514bd01))
+
 ## [0.21.0](https://github.com/susomejias/rembric/compare/server-v0.20.1...server-v0.21.0) (2026-06-05)
 
 
