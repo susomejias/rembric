@@ -47,16 +47,20 @@ export function createEmbedder(): Embedder {
   const load = (): Promise<FeaturePipeline> => {
     pipelinePromise ??= (async () => {
       const { env, pipeline } = await import('@huggingface/transformers');
-      // The baked cache dir only exists in the Docker image (created by
-      // scripts/fetch-model.mjs at build time, same library, same
-      // revision — cache keys match by construction).
-      if (existsSync(IMAGE_MODEL_CACHE)) {
-        env.cacheDir = IMAGE_MODEL_CACHE;
+      // The baked model dir only exists in the Docker image (produced and
+      // offline-validated by scripts/fetch-model.mjs in local-model
+      // layout). Present → resolve locally, refuse network. Absent (dev
+      // machines) → download at the pinned revision into the default
+      // cache. Local resolution has no revision concept — the bake
+      // already pinned it.
+      const baked = existsSync(IMAGE_MODEL_CACHE);
+      if (baked) {
+        env.localModelPath = IMAGE_MODEL_CACHE;
         env.allowRemoteModels = false;
       }
       const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
         dtype: EMBEDDING_DTYPE,
-        revision: EMBEDDING_MODEL_REVISION,
+        ...(baked ? {} : { revision: EMBEDDING_MODEL_REVISION }),
       })) as unknown as FeaturePipeline;
       ready = true;
       return pipe;

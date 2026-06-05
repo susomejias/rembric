@@ -34,8 +34,8 @@
 
 ## 6. Docker image
 
-- [ ] 6.1 `apps/server/Dockerfile`: build stage downloads pinned model revision with checksum verification into the image; runtime stage sets offline env; image builds for `linux/amd64` and `linux/arm64`
-- [ ] 6.2 Measure image size delta and cold-start model load time inside the container; record in PR body
+- [x] 6.1 `apps/server/Dockerfile`: build stage downloads pinned model revision with checksum verification into the image; runtime stage sets offline env; image builds for `linux/amd64` and `linux/arm64`
+- [x] 6.2 Measure image size delta and cold-start model load time inside the container; record in PR body
 
 ## 7. Docs
 
@@ -44,4 +44,4 @@
 
 ## 8. E2E smoke (dev stack)
 
-- [ ] 8.1 Per `.agents/skills/rembric-smoke-tests/` against `pnpm run dev:docker:up`: boot with stale `EMBEDDING_ENABLED`/`OPENAI_API_KEY` → warning, healthy; save two paraphrased memories (ES/EN pair) → vec candidate surfaces with `source: 'vec'`; doctor shows `{ model, backlog }`; backfill triggers on a pre-existing seeded DB and completes; RSS of the container measured ≤ 800 MB after embedding activity
+- [x] 8.1 Per `.agents/skills/rembric-smoke-tests/` against `pnpm run dev:docker:up`: boot with stale `EMBEDDING_ENABLED`/`OPENAI_API_KEY` → warning, healthy; save two paraphrased memories (ES/EN pair) → vec candidate surfaces with `source: 'vec'`; doctor shows `{ model, backlog }`; backfill triggers on a pre-existing seeded DB and completes; RSS of the container measured ≤ 800 MB after embedding activity

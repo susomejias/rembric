@@ -65,6 +65,20 @@ A `model` marker (stored alongside the data dir state) detects vectors produced 
 
 README section: **minimum 1 GB RAM, recommended 2 GB** (measured: ~730 MB total RSS with q8 under load; 14 ms/embedding CPU). Framed explicitly: the requirement exists _because_ the server embeds its semantic engine — in exchange there are no external services, no API keys, no network calls. Pinned constraint for the future: the model class is ≤350M params / ≤800 MB total RSS; upgrading to a larger model is a breaking architectural change, not a tuning decision.
 
+### D7 — Inline save-time embedding (embedNow) — added during apply
+
+The e2e exposed a pre-existing structural flaw: the vec pass requires the just-saved row's own vector (`v_self`), but vectors only ever arrived asynchronously (30s drain) — so `source: 'vec'` could never fire at save time, in any prior version. Fix: `EmbeddingWorker.embedNow(id, content)` embeds the new row inline before candidate detection WHEN the model is already warm (~15 ms measured in-container); cold model → skip, FTS-only for that save (the documented degradation). Save latency impact is ms-scale and only on the warm path.
+
+Validated in-container (2026-06-05 e2e): cross-language ES→EN paraphrase saves surface `source: 'vec'` candidates at 0.754–0.774; a loose same-language paraphrase measured 0.657 (below the 0.70 floor — caught by FTS instead, the intended complementarity). Drain telemetry over the seed corpus: p50=0.681 p90=0.861 max=0.946 — 0.70 confirmed as a sane precision/recall point.
+
+### D8 — Removed-var list also includes CANDIDATE_FTS_THRESHOLD — widened during apply
+
+The spec delta says thresholds (plural) are engine constants; leaving `CANDIDATE_FTS_THRESHOLD` configurable contradicted it. Both thresholds are now compile-time constants; seven embedding-era vars are removed in total.
+
+### D9 — Baked model ships in local-model layout, offline-validated — corrected during apply
+
+The original cache-layout bake failed at runtime: transformers.js resolves tokenizer files without the revision-qualified cache key when offline, yielding a constructed-but-broken pipeline (`this.tokenizer is not a function`). The bake now flattens to the local-model layout (`<root>/<model-id>/<files>`) and phase 3 of `fetch-model.mjs` re-validates the pipeline in a fresh process with networking disabled — the exact runtime resolution path. Measured in-container: cold-start load 1.1 s from baked files, 15 ms/embedding.
+
 ## Risks / Trade-offs
 
 - [Risk] `onnxruntime-node` is a native dependency with platform binaries → Mitigation: route through the npm-security skill, add to `allowBuilds` explicitly, verify both `linux/amd64` and `linux/arm64` image builds in CI before release.

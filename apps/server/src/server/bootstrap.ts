@@ -176,6 +176,7 @@ export async function bootstrap(
       candidates: {
         perSaveMax: config.candidates.perSaveMax,
       },
+      embedNow: (memoryId, content) => embeddingWorker.embedNow(memoryId, content),
       router: sessionRouter,
       db: dbHandle.db,
       doctor: buildDoctorReport,

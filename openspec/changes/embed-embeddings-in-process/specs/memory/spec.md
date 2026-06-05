@@ -4,12 +4,12 @@
 
 ### Requirement: Embeddings MUST be computed in-process and asynchronously
 
-Each newly saved memory SHALL be enqueued for embedding computation by the in-process embedder (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`). Embedding computation SHALL NOT block the `memory.save` call. The model SHALL be lazy-loaded on first use; while the model is loading (or vectors are not yet computed) candidate detection degrades to FTS5-only with no error. There SHALL be no external embedding endpoint, no API key, and no off switch.
+Each newly saved memory SHALL receive its embedding from the in-process embedder (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`): inline before candidate detection when the model is warm (ms-scale), or via the background drain otherwise. `memory.save` SHALL NOT block on model loading. The model SHALL be lazy-loaded on first use; while the model is loading (or a vector is not yet computed) candidate detection degrades to FTS5-only with no error. There SHALL be no external embedding endpoint, no API key, and no off switch.
 
-#### Scenario: Saving a memory
+#### Scenario: Saving a memory with the model warm
 
-- **WHEN** `memory.save(…)` is called
-- **THEN** the call SHALL return successfully without waiting for embedding inference, and the in-process embedder SHALL compute and persist the embedding into `memory_vec` asynchronously
+- **WHEN** `memory.save(…)` is called and the model has finished loading
+- **THEN** the row's embedding SHALL be computed inline and persisted into `memory_vec` before candidate detection runs, so vec-sourced candidates can surface in the same save's response
 
 #### Scenario: Saving before the model finished loading
 

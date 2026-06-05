@@ -410,7 +410,10 @@ describe('MCP protocol conformance', () => {
     };
     expect(payload.candidates.length).toBeGreaterThanOrEqual(1);
     expect(payload.judgmentRequired).toBe(true);
-    expect(payload.candidates[0]!.source).toBe('fts');
+    // The harness embedder is always warm, so the identical-content match
+    // arrives through the vec pass (embedNow gives the new row its vector
+    // before detection; vec wins ties over fts).
+    expect(payload.candidates[0]!.source).toBe('vec');
 
     // Close the pending judgment via memory.judge.
     const judgmentId = payload.candidates[0]!.judgmentId;

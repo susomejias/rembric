@@ -36,6 +36,30 @@ export class EmbeddingWorker {
   }
 
   /**
+   * Embed one memory inline — used by `memory.save` so the row has a
+   * vector BEFORE candidate detection runs (otherwise vec candidates can
+   * never fire: a brand-new row has no embedding yet). Skips when the
+   * model is still cold (lazy load in progress) so the save path never
+   * blocks on the initial model load; detection degrades to FTS5 for
+   * that save. Returns whether a vector is in place.
+   */
+  async embedNow(memoryId: string, content: string): Promise<boolean> {
+    if (!this.opts.embedder.isReady()) return false;
+    try {
+      const vector = await this.opts.embedder.embed(content);
+      this.opts.db.run(sql`
+          INSERT INTO memory_vec (memory_id, embedding)
+          VALUES (${memoryId}, ${Buffer.from(vector.buffer)})
+        `);
+      return true;
+    } catch {
+      // Possible benign race with the drain (row already embedded) or a
+      // transient inference failure — the drain retries either way.
+      return false;
+    }
+  }
+
+  /**
    * Process up to `batchSize` memories without an embedding. Returns the
    * number of embeddings successfully inserted.
    */

@@ -7,7 +7,7 @@ Embeddings are the semantic half of save-time candidate detection — the only c
 ## What Changes
 
 - Embed `gte-multilingual-base` (Apache 2.0, 305M params, 768 dims — `memory_vec FLOAT[768]` unchanged) in the Docker image as ONNX q8 (`onnx-community/gte-multilingual-base`), run in-process via `@huggingface/transformers` + `onnxruntime-node`. No runtime downloads.
-- Replace the HTTP `EmbeddingWorker` + `LlmClient` with an in-process embedder: lazy model load on first use (boot stays instant), `pooling: 'cls'`, `normalize: true`.
+- Replace the HTTP `EmbeddingWorker` + `LlmClient` with an in-process embedder: lazy model load on first use (boot stays instant), `pooling: 'cls'`, `normalize: true`. `memory.save` embeds the new row inline when the model is warm (`embedNow`, ~15 ms) so vec candidate detection actually has a self-vector — previously `source: 'vec'` could never fire at save time (pre-existing flaw, see design D7).
 - **BREAKING** Remove the entire `llm/` directory (`client.ts`, `embed.ts`, `errors.ts`) — no remaining consumers.
 - **BREAKING** Remove env vars `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL`, `EMBEDDING_PROVIDER`, `EMBEDDING_ENABLED`, `CANDIDATE_VEC_THRESHOLD` — ignored with the existing stale-env boot warning. Rule: no env var configures the engine; vec threshold becomes an internal constant (~0.70, calibrated against real data during backfill — the 0.85 nomic-era default does not transfer between models).
 - **BREAKING** `memory.doctor` `embeddings` block changes shape: `{ enabled }` is gone (always on); `{ model, backlog }` remain.

@@ -80,6 +80,11 @@ export interface ToolDeps {
   candidates?: CandidateOptions;
   /** Optional — db handle needed for save-time candidate queries. */
   db?: Db;
+  /**
+   * Optional — embeds the just-saved row inline (when the model is warm)
+   * so vec candidate detection has a self-vector to kNN from.
+   */
+  embedNow?: (memoryId: string, content: string) => Promise<boolean>;
   /** Optional — required to evaluate the project-suggestion gate on save. */
   router?: SessionRouter;
   /** Optional — required to evaluate the project-suggestion gate on save. */
@@ -307,6 +312,9 @@ async function handleSave(
     }[] = [];
     if (deps.db && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
       try {
+        // Give the new row its vector before detection (no-op while the
+        // model is cold — detection falls back to FTS5 for this save).
+        if (deps.embedNow) await deps.embedNow(m.id, m.content);
         const detected = findSaveTimeCandidates(deps.db, m, deps.candidates);
         for (const c of detected) {
           // Skip the topic_key supersede target — we already wrote that relation.
