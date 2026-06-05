@@ -118,9 +118,9 @@ The `Candidate` type:
 - **WHEN** `memory.save({type, content, topic_key: 'arch/auth'})` is called and an active memory with that key exists in scope
 - **THEN** the response SHALL include the newly created `id`; the previous row SHALL be in `status = 'superseded'`; `candidates` MAY additionally include unrelated rows surfaced by FTS/vec; `judgmentRequired` reflects only the candidates surfaced via that path, not the topic-key upsert (which is already judged)
 
-#### Scenario: memory.save with embeddings disabled and FTS matches
+#### Scenario: memory.save before the just-saved row has an embedding
 
-- **GIVEN** `EMBEDDING_ENABLED = false`
+- **GIVEN** the just-saved row's embedding has not been computed yet (lazy model load or worker lag)
 - **WHEN** `memory.save` finds three FTS5 matches above threshold
 - **THEN** the response SHALL include three candidates each with `source: 'fts'`; no vec-sourced candidates SHALL appear
 
@@ -335,7 +335,7 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memor
 #### Scenario: `memory.doctor` returns an operational report
 
 - **WHEN** an MCP client calls `memory.doctor`
-- **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, embeddings: { enabled, backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, warnings: string[] }` — the report SHALL NOT contain an `llm` block
+- **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, embeddings: { model, backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, warnings: string[] }` — the report SHALL NOT contain an `llm` block, and the `embeddings` block SHALL NOT contain `enabled` (embeddings are always on); `model` SHALL identify the compiled-in embedding model
 
 #### Scenario: `memory.stats` returns counters by scope and status
 
