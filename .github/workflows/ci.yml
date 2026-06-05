@@ -79,6 +79,9 @@ jobs:
           push: false
           cache-from: type=gha,scope=docker-build-check-runtime
           cache-to: type=gha,mode=max,scope=docker-build-check-runtime
+          # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
 
       - name: Build dev target
         uses: docker/build-push-action@v7
@@ -90,3 +93,5 @@ jobs:
           push: false
           cache-from: type=gha,scope=docker-build-check-dev
           cache-to: type=gha,mode=max,scope=docker-build-check-dev
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
