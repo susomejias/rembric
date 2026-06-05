@@ -146,7 +146,7 @@ Four load-bearing invariants:
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible.
 - **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
-- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. The nightly consolidator only handles decay + orphan promotion.
+- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
 See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 
@@ -231,7 +231,7 @@ curl -fsSLO https://raw.githubusercontent.com/susomejias/rembric/main/docker-com
 curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.example -o .env
 
 # edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`)
-#             confirm OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL
+#             optionally configure embeddings (OPENAI_BASE_URL / OPENAI_API_KEY)
 
 docker compose up -d
 docker compose logs -f rembric
@@ -321,26 +321,25 @@ All config via environment variables. With Docker, these live in `.env` and are 
 | `REMBRIC_DATA_DIR` | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.    |
 | `LOG_LEVEL`        | `info`                            | `debug` / `info` / `warn` / `error`.                                                                          |
 
-### LLM provider (chat + embeddings)
+### Embeddings (optional)
 
-Provider selection uses generic vars; per-provider config lives under that provider's namespace. Today the only implemented provider is `openai`, which also covers Ollama, LM Studio, vLLM, Groq, Together, etc. (all expose an OpenAI-compatible `/v1`).
+The server performs no LLM reasoning — there is no chat model and no API key requirement. Embeddings are the only optional external dependency: they power semantic candidate detection in `memory.save`. Any OpenAI-compatible `/v1` endpoint works (OpenAI, Ollama, LM Studio, vLLM, …).
 
-| Variable                 | Default                     | Description                                        |
-| ------------------------ | --------------------------- | -------------------------------------------------- |
-| `OPENAI_BASE_URL`        | `http://localhost:11434/v1` | Endpoint URL including `/v1`.                      |
-| `OPENAI_API_KEY`         | _(empty)_                   | Required for OpenAI proper; Ollama ignores it.     |
-| `OPENAI_MODEL`           | `qwen2.5:7b`                | Chat model.                                        |
-| `OPENAI_EMBEDDING_MODEL` | `nomic-embed-text`          | Embedding model.                                   |
-| `EMBEDDING_ENABLED`      | `true`                      | If `false`, consolidation falls back to FTS5 only. |
+| Variable                 | Default                     | Description                                    |
+| ------------------------ | --------------------------- | ---------------------------------------------- |
+| `OPENAI_BASE_URL`        | `http://localhost:11434/v1` | Endpoint URL including `/v1`.                  |
+| `OPENAI_API_KEY`         | _(empty)_                   | Required for OpenAI proper; Ollama ignores it. |
+| `OPENAI_EMBEDDING_MODEL` | `nomic-embed-text`          | Embedding model (768 dims).                    |
+| `EMBEDDING_ENABLED`      | `true`                      | If `false`, candidates fall back to FTS5 only. |
 
-### Consolidation
+### Consolidation sweep
 
-| Variable                   | Default     | Description                                                                                |
-| -------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
-| `CONSOLIDATION_ENABLED`    | `true`      | Background consolidation toggle.                                                           |
-| `CONSOLIDATION_CRON`       | `0 3 * * *` | Cron schedule.                                                                             |
-| `CONSOLIDATION_BATCH_SIZE` | `50`        | Maximum candidate pairs evaluated per consolidation run. Higher = more LLM cost per night. |
-| `JUDGMENT_ORPHAN_AFTER_MS` | `86400000`  | Age (ms) past which pending judgments are sent to the LLM judge. Default 24h; max 30 days. |
+Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21 vars (`CONSOLIDATION_ENABLED` / `CONSOLIDATION_CRON` / `CONSOLIDATION_BATCH_SIZE` / `OPENAI_MODEL` / `LLM_PROVIDER`) are ignored with a boot warning.
+
+| Variable                      | Default      | Description                                                                                     |
+| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `JUDGMENT_ORPHAN_AFTER_MS`    | `86400000`   | Age (ms) past which pending judgments surface in `memory.context` for the agent to close. 24h.  |
+| `JUDGMENT_ORPHAN_DEADLINE_MS` | `1209600000` | Age (ms) past which unjudged pendings are orphaned by the sweep (journaled, undoable). 14 days. |
 
 ### Rate limiting
 
@@ -362,11 +361,11 @@ Per-token token-bucket limiter on `/mcp` requests. Disabled by default — singl
 
 Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
 
-| Variable                  | Default | Description                                                                                                             |
-| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted for nightly). |
-| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                      |
-| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                               |
+| Variable                  | Default | Description                                                                                                                                     |
+| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted and re-surface via `memory.context`). |
+| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                                              |
+| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                                                       |
 
 ## Development
 

@@ -25,7 +25,7 @@ Single Node process, single SQLite file. Server layers at `apps/server/src/{serv
 - **Append-only memory.** Rows never `DELETE`d (narrow purge exceptions in `apps/server/src/services/{memory,agent-sessions}.ts` and `apps/server/src/scripts/seed-dev.ts`, allow-listed in `apps/server/src/test/invariants.test.ts`). `content` never `UPDATE`d. Lifecycle = `status` flips (`active` → `superseded` | `archived`) plus `replaces` links. Every consolidation op journaled in `consolidation_ops`, reversible.
 - **Scope enforced at service layer.** Every `MemoryService` query filters by `Scope`. Cross-scope reads return `not_found`. New MCP tools that need project scope MUST consult both `ctx.project` (URL slug) and `SessionRouter` (`project.use` calls) via `resolveEffectiveProject` / `scopeFromContext` — never read `ctx.project` in isolation.
 - **Convergent topics via `topic_key`.** `saveWithTopicKey` atomically supersedes the previously-active row in the same `(scope, project_id, topic_key)`.
-- **Fresh-context judgment.** Conflicts surface in `memory.save.candidates[]`; closed by `memory.judge`. Nightly consolidator only does decay + orphan promotion.
+- **Fresh-context judgment.** Conflicts surface in `memory.save.candidates[]`; closed by `memory.judge`. Aged pendings re-surface in `memory.context.pendingJudgments[]`. The consolidation sweep is deterministic (decay + deadline orphaning, no LLM, no cron — runs throttled on session start).
 
 Path-scoping contract (in `apps/server/src/mcp/tools.ts`): `/mcp/<slug>` rejects `scope='global'` with `scope_locked`; `/mcp` rejects `scope='project'` with `project_required` unless an active project exists.
 

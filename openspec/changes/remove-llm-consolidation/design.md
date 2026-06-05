@@ -58,9 +58,12 @@ Decay ops (`op_type='decay'`) and orphan ops keep today's shapes; `consolidation
 
 ### D4 — Stale env vars warn, don't crash
 
-`config.ts` drops the seven removed keys from the schema. A boot-time check lists any of the removed names still present in the environment and logs one warning line naming them — operators upgrading from ≤0.20 see what to clean, nothing breaks.
+`config.ts` drops the five removed keys from the schema (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_{ENABLED,CRON,BATCH_SIZE}`). A boot-time check lists any of the removed names still present in the environment and logs one warning line naming them — operators upgrading from ≤0.20 see what to clean, nothing breaks.
+
+Implementation finding: `OPENAI_BASE_URL` / `OPENAI_API_KEY` are shared with the embedding client, so they stay until `embed-embeddings-in-process` removes the provider entirely. The cross-field validation block (which hard-required `OPENAI_API_KEY` when consolidation was enabled) is deleted outright — strictly upgrade-friendlier.
 
 - _Alternative — hard fail on unknown REMBRIC-relevant vars_: rejected; punishes upgrades for vars that no longer matter.
+- _Alternative — remove all OPENAI\_\* vars now_: rejected; would break working embedding setups one change before their replacement lands.
 
 ### D5 — Resurrection guard extended
 
