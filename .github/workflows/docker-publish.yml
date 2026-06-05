@@ -24,6 +24,9 @@ on:
       gh_token:
         description: "Token with `packages: write`. Defaults to the caller workflow's GITHUB_TOKEN."
         required: false
+      hf_token:
+        description: 'Hugging Face read token for the model bake (avoids anonymous-IP 429s).'
+        required: false
 
 permissions:
   contents: read
@@ -109,6 +112,8 @@ jobs:
           labels: ${{ steps.meta_immutable.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secrets: |
+            hf_token=${{ secrets.hf_token }}
 
       - name: Smoke test published image (three independent signals)
         env:

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.10
 
 # Stage order is load-bearing: `runtime` MUST be last so `docker build .`
 # without `--target` builds the prod image by default. See
@@ -30,7 +30,8 @@ RUN pnpm install --frozen-lockfile --filter @rembric/server...
 # functional validation: a drifted artifact fails the build.
 COPY apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
 WORKDIR /app/apps/server
-RUN node scripts/fetch-model.mjs /models
+# Optional hf_token secret avoids anonymous-IP 429s on CI runners.
+RUN --mount=type=secret,id=hf_token,env=HF_TOKEN node scripts/fetch-model.mjs /models
 
 # Copy the server source.
 WORKDIR /app
@@ -69,7 +70,7 @@ RUN pnpm install --frozen-lockfile --filter @rembric/server...
 # Bake the embedding model into the dev image too (same cache-friendly
 # ordering as the builder stage; dev parity with the runtime image).
 COPY --chown=rembric:rembric apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
-RUN cd /app/apps/server && node scripts/fetch-model.mjs /app/models
+RUN --mount=type=secret,id=hf_token,env=HF_TOKEN cd /app/apps/server && node scripts/fetch-model.mjs /app/models
 
 COPY --chown=rembric:rembric apps/server ./apps/server
 

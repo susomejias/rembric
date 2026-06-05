@@ -13,6 +13,8 @@ Dockerfile (builder / dev stage)
 scripts/fetch-model.mjs
    │
    ├─ phase 1  download @ pinned revision into a throwaway cache
+   │           (transient 429/5xx retried with backoff; the optional
+   │           hf_token build secret authenticates on rate-limited CI)
    ├─ phase 2  flatten to the local-model layout transformers.js
    │           resolves offline:
    │           /models/onnx-community/gte-multilingual-base/{config,tokenizer,onnx/…}
@@ -100,6 +102,7 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 | Single inference error at save  | Save succeeds, FTS-only detection for that save, drain retries |
 | Single inference error in drain | Row skipped, retried next tick                                 |
 | Model artifact drift at build   | Image build fails (phase-3 validation)                         |
+| HF rate limit (429) at build    | Retried with backoff; `hf_token` build secret authenticates    |
 | Model changed between versions  | Marker mismatch → vectors wiped once → drain re-embeds         |
 
 ## Engine constants (not configuration)
