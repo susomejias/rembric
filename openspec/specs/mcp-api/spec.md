@@ -262,10 +262,11 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories }`, with each list scoped to the request context (global vs path-scoped project)
+- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments }`, with each list scoped to the request context (global vs path-scoped project)
 - **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 5`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
 - **AND** `recentMemories` SHALL be ordered by `last_seen_at DESC` with `includeArchived = false` (default) filtering out `status = 'archived'` rows
+- **AND** `pendingJudgments` SHALL contain at most 5 pending relations in scope with `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)`, oldest first, each entry carrying `{ judgmentId, sourceId, targetId, sourceSnippet, targetSnippet, ageMs }` so the agent can close them with `memory.judge` without further reads
 
 #### Scenario: `memory.context.recentSessions` backfills past empty sessions
 
@@ -289,6 +290,18 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 - **GIVEN** prompts P1 and P2 in scope where `P2.deleted_at IS NOT NULL`
 - **WHEN** an MCP client calls `memory.context`
 - **THEN** `recentPrompts` SHALL include `P1` and SHALL NOT include `P2`
+
+#### Scenario: `memory.context` exposes only aged pendings, never fresh ones
+
+- **GIVEN** a pending relation younger than `JUDGMENT_ORPHAN_AFTER_MS` and another older than it, both in scope
+- **WHEN** an MCP client calls `memory.context`
+- **THEN** `pendingJudgments` SHALL include only the aged one — fresh pendings belong to the session that created them
+
+#### Scenario: `memory.context.pendingJudgments` respects scope
+
+- **GIVEN** an aged pending relation whose memories belong to project B
+- **WHEN** an MCP client scoped to project A calls `memory.context`
+- **THEN** `pendingJudgments` SHALL NOT include it
 
 #### Scenario: `memory.timeline` returns chronological neighbors within a session
 
@@ -322,7 +335,7 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memor
 #### Scenario: `memory.doctor` returns an operational report
 
 - **WHEN** an MCP client calls `memory.doctor`
-- **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, llm: { reachable, lastPingAt }, embeddings: { enabled, backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, warnings: string[] }`
+- **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, embeddings: { enabled, backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, warnings: string[] }` — the report SHALL NOT contain an `llm` block
 
 #### Scenario: `memory.stats` returns counters by scope and status
 

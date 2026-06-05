@@ -2,55 +2,76 @@
 
 ## Purpose
 
-Defines the background consolidation pipeline that detects and resolves memory pollution (redundancy, drift, contradiction, and decay) while preserving append-only semantics, scope isolation, journaling, and reversibility.
+Defines the deterministic consolidation sweep that resolves memory pollution (decay and aged-pending orphaning) while preserving append-only semantics, scope isolation, journaling, and reversibility.
 
 ## Requirements
 
-### Requirement: The consolidation MUST run automatically on a schedule
+### Requirement: The consolidation sweep MUST run lazily on session start, throttled per scope
 
-The server SHALL run a background consolidation on the cron schedule defined by `CONSOLIDATION_CRON` (default `0 3 * * *`) when `CONSOLIDATION_ENABLED = true`. A manually triggered run via HTTP SHALL be possible at any time.
+The server SHALL run the deterministic consolidation sweep (decay + deadline orphaning) as a side effect of session creation — both `POST /api/sessions` / `POST /api/<slug>/sessions` and MCP `memory.session_start` SHALL funnel through the same service method. The sweep SHALL be throttled: it SHALL short-circuit when the most recent `consolidation_runs` row for the target scope is younger than the internal minimum interval (6h). Sweep execution SHALL happen off the request's critical path: a sweep failure SHALL be logged and SHALL NOT fail the session call. A manually triggered run via `POST /admin/consolidation/run` (or the dashboard equivalent) SHALL remain possible at any time and SHALL bypass the throttle.
 
-#### Scenario: Scheduled consolidation fires at the configured time
+#### Scenario: First session start after the throttle window triggers a sweep
 
-- **WHEN** the configured cron expression matches the current time and `CONSOLIDATION_ENABLED = true`
-- **THEN** the consolidation runner SHALL be invoked and a new `consolidation_runs` row SHALL be created with `started_at` set
+- **GIVEN** the newest `consolidation_runs` row for the scope is older than the minimum interval (or absent)
+- **WHEN** a session is started in that scope
+- **THEN** the sweep SHALL run for that scope and a new `consolidation_runs` row SHALL be created with `started_at` set and `llm_provider`/`llm_model` NULL
 
-#### Scenario: Manual run via HTTP
+#### Scenario: Session start within the throttle window skips the sweep
 
-- **WHEN** an operator submits `POST /admin/consolidation/run` with a valid admin bearer token (or clicks the equivalent action in the dashboard at `/dashboard/consolidation`, which posts the same endpoint with a CSRF token)
-- **THEN** the consolidation SHALL execute against a running server and SHALL produce a `consolidation_runs` row regardless of the cron schedule
+- **GIVEN** a `consolidation_runs` row for the scope younger than the minimum interval
+- **WHEN** a session is started in that scope
+- **THEN** no sweep SHALL run and no new `consolidation_runs` row SHALL be created
 
-#### Scenario: Disabled consolidation
+#### Scenario: Sweep failure does not break session start
 
-- **WHEN** `CONSOLIDATION_ENABLED = false`
-- **THEN** the cron SHALL NOT fire and no `consolidation_runs` rows SHALL be created automatically
+- **WHEN** the sweep throws after a session has been created
+- **THEN** the session call SHALL still succeed and the failure SHALL be logged
+
+#### Scenario: Manual run bypasses the throttle
+
+- **WHEN** an operator submits `POST /admin/consolidation/run` with a valid admin bearer token
+- **THEN** the sweep SHALL execute immediately regardless of the throttle and SHALL produce a `consolidation_runs` row
+
+### Requirement: Aged pending relations MUST be deterministically orphaned after a deadline
+
+A `memory_relations` row with `status = 'pending'` and `created_at < (now - JUDGMENT_ORPHAN_DEADLINE_MS)` (default 14 days) SHALL be transitioned to `status = 'orphaned'` by the sweep, with `marked_by_kind = 'consolidator'`. Each orphaning SHALL be journaled in `consolidation_ops` and SHALL be undoable while the referenced rows exist. No LLM SHALL be involved. Between `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) and the deadline, the pending row SHALL be surfaced to agents via `memory.context` (see `mcp-api` capability) so it can be closed with `memory.judge` under fresh context.
+
+#### Scenario: A pending relation crosses the deadline
+
+- **GIVEN** a pending relation older than `JUDGMENT_ORPHAN_DEADLINE_MS`
+- **WHEN** the sweep runs for its scope
+- **THEN** the row SHALL transition to `status = 'orphaned'` and a journaled op SHALL record it; the orphaned status is final unless a future `memory.judge` or `memory.compare` call writes a fresh row
+
+#### Scenario: A pending relation is between the re-expose threshold and the deadline
+
+- **GIVEN** a pending relation older than `JUDGMENT_ORPHAN_AFTER_MS` but younger than `JUDGMENT_ORPHAN_DEADLINE_MS`
+- **WHEN** the sweep runs
+- **THEN** the row SHALL remain `pending` (only `memory.context` exposure applies)
+
+### Requirement: Removed configuration MUST degrade gracefully on upgrade
+
+A server booting in an environment that still defines any removed variable (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_ENABLED`, `CONSOLIDATION_CRON`, `CONSOLIDATION_BATCH_SIZE`) SHALL start normally and SHALL log a single warning naming the ignored variables. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` and `EMBEDDING_*` remain valid (embedding client). Boot SHALL NOT fail on a missing `OPENAI_API_KEY` under any combination. Upgrading a running installation SHALL require zero manual steps: no DB migration, no config rewrite, no plugin update.
+
+#### Scenario: Boot with stale LLM env vars
+
+- **WHEN** the server boots with `OPENAI_MODEL` and `CONSOLIDATION_CRON` still set
+- **THEN** it SHALL reach the listening state and SHALL log one warning listing both names as ignored
 
 ### Requirement: The consolidation MUST target redundancy, drift, contradiction, and decay
 
-The consolidation SHALL perform exactly two passes per run in v0.5: (1) decay (deterministic, no LLM), and (2) orphan promotion of pending relations older than `JUDGMENT_ORPHAN_AFTER_MS`. The LLM-driven detection of redundancy / drift / contradiction over the full corpus is REMOVED — that work moves to save-time as `memory.save` candidate detection.
+The consolidation sweep SHALL perform exactly two passes per run: (1) decay (deterministic, no LLM), and (2) deadline orphaning of pending relations older than `JUDGMENT_ORPHAN_DEADLINE_MS`. The LLM-driven detection of redundancy / drift / contradiction over the full corpus is REMOVED — that work moves to save-time as `memory.save` candidate detection. The LLM judging of aged pending relations is REMOVED — aged pendings are re-exposed to agents via `memory.context` and deterministically orphaned at the deadline.
 
 #### Scenario: A memory has not been seen for a long time
 
 - **GIVEN** a memory whose `last_seen_at` is older than the decay threshold and whose `confidence` count is below the floor
-- **WHEN** the consolidation runs
+- **WHEN** the sweep runs
 - **THEN** the memory SHALL transition from `active` to `archived` without an LLM call (decay path is unchanged)
-
-#### Scenario: A pending relation is older than the orphan threshold
-
-- **GIVEN** a `memory_relations` row with `status = 'pending'` and `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)` (default 24h)
-- **WHEN** the consolidation runs
-- **THEN** the existing LLM judge SHALL be invoked on the (source, target) pair; the verdict SHALL translate to a relation value and the row SHALL transition to `status = 'judged'` with `marked_by_kind = 'consolidator'`
-
-#### Scenario: The LLM judge cannot decide an orphan
-
-- **WHEN** the LLM judge errors, returns malformed output, or returns a verdict with confidence below the configured floor
-- **THEN** the relation row SHALL transition to `status = 'orphaned'`; the orphaned status is final unless a future `memory.judge` or `memory.compare` call writes a fresh row
 
 #### Scenario: Two near-duplicate memories save apart from each other
 
-- **GIVEN** EMBEDDING_ENABLED is true and the second save's candidate detection found the first as a candidate
+- **GIVEN** the second save's candidate detection found the first as a candidate
 - **WHEN** that save returned `candidates: [{...}]` and the agent never called `memory.judge`
-- **THEN** after `JUDGMENT_ORPHAN_AFTER_MS` the consolidator's orphan-promotion pass SHALL invoke the LLM judge on the pair (this is the only path that runs LLM detection in the new pipeline)
+- **THEN** after `JUDGMENT_ORPHAN_AFTER_MS` the pending relation SHALL appear in `memory.context.pendingJudgments[]`, and after `JUDGMENT_ORPHAN_DEADLINE_MS` without judgment the sweep SHALL orphan it — no LLM is invoked at any point
 
 ### Requirement: Consolidation operations MUST be atomic per operation
 
@@ -74,12 +95,18 @@ The consolidation SHALL operate one (scope, project_id) tuple at a time. A singl
 
 ### Requirement: Every consolidation decision MUST be journaled
 
-Every operation produced by the consolidation — merge, supersede, archive, or no-op — SHALL be recorded in `consolidation_ops` with the operation type, affected memory ids, the LLM reasoning (when applicable), the resulting created memory id (when applicable), and the application status.
+Every operation produced by the sweep — decay archive or deadline orphaning — SHALL be recorded in `consolidation_ops` with the operation type, affected ids, a deterministic reasoning string, the resulting created id (when applicable), and the application status. Historical op types (`merge`, `supersede`, `orphan_promote`) remain valid journal rows: they SHALL keep rendering in the dashboard and SHALL keep their undo semantics, but the sweep SHALL NOT produce new rows of those types.
 
-#### Scenario: A merge is performed
+#### Scenario: A decay archive is journaled
 
-- **WHEN** the consolidation merges A and B into M
-- **THEN** a `consolidation_ops` row SHALL exist with `op_type = 'merge'`, `affected_ids = ['A','B']`, `created_id = 'M'`, and the LLM's textual reasoning preserved
+- **WHEN** the sweep archives memories A and B via decay
+- **THEN** a `consolidation_ops` row SHALL exist with `op_type = 'decay'`, `affected_ids = ['A','B']`, and a deterministic reasoning string
+
+#### Scenario: A historical LLM-era op is still visible and undoable
+
+- **GIVEN** a pre-upgrade `consolidation_ops` row with `op_type = 'merge'` whose referenced rows all exist
+- **WHEN** the operator views the run and triggers undo for that op
+- **THEN** the op SHALL render normally and the undo SHALL succeed exactly as before the upgrade
 
 ### Requirement: Every consolidation operation MUST be reversible
 
@@ -118,21 +145,12 @@ Undoing an op SHALL restore the affected memories to `active` and SHALL transiti
 
 ### Requirement: The consolidation MUST be idempotent on stable input
 
-Running the consolidation twice with no intervening writes SHALL produce zero new operations beyond noops. Specifically: the decay pass SHALL be a no-op if no row crossed the threshold since the previous run; the orphan-promotion pass SHALL be a no-op if no pending relation crossed `JUDGMENT_ORPHAN_AFTER_MS` since the previous run.
+Running the sweep twice with no intervening writes SHALL produce zero new operations beyond noops. Specifically: the decay pass SHALL be a no-op if no row crossed the threshold since the previous run; the deadline-orphaning pass SHALL be a no-op if no pending relation crossed `JUDGMENT_ORPHAN_DEADLINE_MS` since the previous run.
 
-#### Scenario: Back-to-back consolidation runs with no intervening saves
+#### Scenario: Back-to-back sweeps with no intervening saves
 
-- **WHEN** the consolidation runs twice in immediate succession
-- **THEN** the second run's `consolidation_runs.summary` SHALL show zero new decay archives and zero new orphan promotions
-
-### Requirement: LLM judge output MUST be validated
-
-Every response from the LLM judge SHALL be parsed and validated against a zod schema before any DB mutation is performed. Malformed responses SHALL be logged and the corresponding op SHALL be recorded as failed; the run SHALL continue with the next candidate.
-
-#### Scenario: LLM returns malformed JSON
-
-- **WHEN** the LLM judge returns text that does not parse as the expected schema
-- **THEN** no DB mutation SHALL occur for that candidate, an error op SHALL be recorded, and the consolidation SHALL proceed to the next candidate
+- **WHEN** the sweep runs twice in immediate succession (manual trigger bypassing the throttle)
+- **THEN** the second run's `consolidation_runs.summary` SHALL show zero new decay archives and zero new orphanings
 
 ### Requirement: Purge ops are journaled but not themselves undoable
 
