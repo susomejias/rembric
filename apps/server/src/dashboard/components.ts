@@ -12,6 +12,8 @@
  * demands it.
  */
 
+import { REMBRIC_VERSION } from '../version.js';
+
 import { escape, html, raw, type SafeHtml } from './templates.js';
 
 /* ── icons (sidebar) ───────────────────────────────────────────────── */
@@ -179,7 +181,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
         <img class="brand-logo" src="/dashboard/assets/logo-transparent.png" alt="" />
         <div class="label-stack">
           <div>REMBRIC</div>
-          <small>SELF-HOSTED</small>
+          <small>v${REMBRIC_VERSION}</small>
         </div>
       </a>
       ${sections}
@@ -213,7 +215,7 @@ export function renderMobileBar(_active: NavKey | null): SafeHtml {
         <img class="brand-logo" src="/dashboard/assets/logo-transparent.png" alt="" />
         <div class="label-stack">
           <div>REMBRIC</div>
-          <small>SELF-HOSTED</small>
+          <small>v${REMBRIC_VERSION}</small>
         </div>
       </a>
       <a class="mob-toggle" href="#sidebar" aria-expanded="false">☰ MENU</a>

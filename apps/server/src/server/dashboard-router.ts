@@ -44,6 +44,7 @@ import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
+import { REMBRIC_VERSION } from '../version.js';
 
 const COOKIE_NAME = 'rembric_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -666,7 +667,7 @@ function renderLogin(error: string | null): string {
           />
           <div>
             <div class="t-mono-up fg-dim">REMBRIC</div>
-            <div class="t-mono-up fg-dim" style="margin-top:6px">SELF-HOSTED</div>
+            <div class="t-mono-up fg-dim" style="margin-top:6px">v${REMBRIC_VERSION}</div>
           </div>
         </div>
         <div>

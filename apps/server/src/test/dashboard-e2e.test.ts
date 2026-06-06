@@ -3,6 +3,7 @@ import { createServer as createNetServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { type BootstrappedServer, createServer } from '../server/index.js';
+import { REMBRIC_VERSION } from '../version.js';
 
 import { createTestDb } from './db.js';
 import { FakeEmbedder } from './embedder.js';
@@ -135,6 +136,7 @@ describe('dashboard E2E', () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('Admin token');
+    expect(body).toContain(`v${REMBRIC_VERSION}`);
   });
 
   it('home page redirects unauthenticated users to login', async () => {
@@ -154,6 +156,7 @@ describe('dashboard E2E', () => {
     expect(home.status).toBe(200);
     const homeBody = await home.text();
     expect(homeBody).toContain('Overview');
+    expect(homeBody).toContain(`v${REMBRIC_VERSION}`);
 
     // Logout invalidates the cookie.
     const logout = await postForm(baseUrl, '/dashboard/logout', jar, {});
