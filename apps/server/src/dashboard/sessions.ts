@@ -42,7 +42,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const baseQuery = () =>
+    const baseQuery = (opts: { activeFirst: boolean }) =>
       deps.db
         .select({
           id: agentSessions.id,
@@ -61,15 +61,22 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         .from(agentSessions)
         .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
         .leftJoin(projects, eq(projects.id, agentSessions.projectId))
-        .orderBy(desc(agentSessions.startedAt))
+        .orderBy(
+          ...(opts.activeFirst
+            ? [sql`CASE WHEN ${agentSessions.status} = 'active' THEN 0 ELSE 1 END`]
+            : []),
+          desc(agentSessions.startedAt),
+        )
         .limit(PAGE_SIZE + 1)
         .offset(offset);
 
-    const visibleRowsRaw = baseQuery().where(isNull(agentSessions.deletedAt)).all();
+    const visibleRowsRaw = baseQuery({ activeFirst: true })
+      .where(isNull(agentSessions.deletedAt))
+      .all();
     const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
     const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
     const deletedRowsRaw = includeDeleted
-      ? baseQuery().where(isNotNull(agentSessions.deletedAt)).all()
+      ? baseQuery({ activeFirst: false }).where(isNotNull(agentSessions.deletedAt)).all()
       : [];
     const deletedHasMore = deletedRowsRaw.length > PAGE_SIZE;
     const deletedRows = deletedRowsRaw.slice(0, PAGE_SIZE);
@@ -107,9 +114,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         <tr data-href="/dashboard/sessions/${r.id}">
           <td class="rbr-session-title" title="${displayTitle}">
             <a href="/dashboard/sessions/${r.id}">${displayTitle}</a>
-          </td>
-          <td class="mono">
-            <a href="/dashboard/sessions/${r.id}">${shortId(r.id)}</a>
           </td>
           <td>${r.agent}</td>
           <td>${r.projectSlug ? raw(`<code>${r.projectSlug}</code>`) : scopePill('global')}</td>
@@ -209,7 +213,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                 <thead>
                   <tr>
                     <th>title</th>
-                    <th>id</th>
                     <th>agent</th>
                     <th>project</th>
                     <th>token</th>
@@ -235,7 +238,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                 <thead>
                   <tr>
                     <th>title</th>
-                    <th>id</th>
                     <th>agent</th>
                     <th>project</th>
                     <th>token</th>
@@ -421,7 +423,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>type</th>
                     <th>content</th>
                     <th>status</th>
@@ -432,11 +433,10 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                   ${memories.map(
                     (m) => html`
                       <tr data-href="/dashboard/memories/${m.id}">
-                        <td class="mono">
-                          <a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a>
-                        </td>
                         <td>${m.type}</td>
-                        <td>${truncate(m.content, 120)}</td>
+                        <td>
+                          <a href="/dashboard/memories/${m.id}">${truncate(m.content, 120)}</a>
+                        </td>
                         <td>${statusPill(m.status)}</td>
                         <td class="muted">${formatTs(m.createdAt)}</td>
                       </tr>
@@ -455,7 +455,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>title</th>
                     <th>content</th>
                     <th>tags</th>
@@ -466,7 +465,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                   ${sessionPrompts.map(
                     (p) => html`
                       <tr>
-                        <td class="mono">${shortId(p.id)}</td>
                         <td>${p.title ?? '—'}</td>
                         <td>${truncate(p.content, 120)}</td>
                         <td>

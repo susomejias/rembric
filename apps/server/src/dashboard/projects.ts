@@ -7,7 +7,7 @@ import type { SessionsService } from '../services/sessions.js';
 import { viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { formatTs, html, raw, shortId } from './templates.js';
+import { formatTs, html, raw } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface ProjectsDeps {
@@ -47,7 +47,6 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
           <td class="mono">
             ${p.slug} ${isLegacy ? raw(' <span class="pill superseded">legacy</span>') : raw('')}
           </td>
-          <td class="muted small">${shortId(p.id)}</td>
           <td class="muted">${formatTs(p.createdAt)}</td>
           <td class="project-actions">
             <form action="/dashboard/projects/${p.id}/rename" method="post" class="rename-form">
@@ -129,7 +128,6 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
                   <tr>
                     <th>name</th>
                     <th>slug</th>
-                    <th>id</th>
                     <th>created</th>
                     <th>actions</th>
                   </tr>
@@ -150,7 +148,6 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
                   <tr>
                     <th>name</th>
                     <th>slug</th>
-                    <th>id</th>
                     <th>created</th>
                     <th>actions</th>
                   </tr>

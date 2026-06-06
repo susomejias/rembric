@@ -246,6 +246,39 @@ describe('dashboard E2E', () => {
     expect(body).toContain('Sessions');
   });
 
+  it('sessions list sorts active rows above ended ones regardless of age', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const { createDb } = await import('../db/index.js');
+    const { ProjectsService } = await import('../services/projects.js');
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { eq } = await import('drizzle-orm');
+    const dataDir = server.config.dataDir;
+    const handle = createDb({ dataDir });
+    const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
+    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-order-proj' });
+    const agentSessions = new AgentSessionsService(handle.db);
+    // Older active session first, then a newer session that ends — plain
+    // started_at DESC would render the ended one on top.
+    const activeOld = agentSessions.start({ tokenId: admin!.id, projectId: proj.id, agent: 'e2e' });
+    await new Promise((r) => setTimeout(r, 10));
+    const endedNew = agentSessions.start({ tokenId: admin!.id, projectId: proj.id, agent: 'e2e' });
+    agentSessions.end(endedNew.id, { tokenId: admin!.id });
+    handle.close();
+
+    const list = await get(baseUrl, '/dashboard/sessions', jar);
+    expect(list.status).toBe(200);
+    const body = await list.text();
+    expect(body).not.toContain('<th>id</th>');
+    const activeIdx = body.indexOf(`data-href="/dashboard/sessions/${activeOld.id}"`);
+    const endedIdx = body.indexOf(`data-href="/dashboard/sessions/${endedNew.id}"`);
+    expect(activeIdx).toBeGreaterThan(-1);
+    expect(endedIdx).toBeGreaterThan(-1);
+    expect(activeIdx).toBeLessThan(endedIdx);
+  });
+
   it('sessions detail 404 for unknown id', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
@@ -540,7 +573,8 @@ describe('dashboard E2E', () => {
     // Same seed appears on /dashboard/judgments: source → target column
     // shows truncated content as memory-detail links, not bare short ids;
     // the verdict cell uses the shared verdictPill helper (k-supersedes);
-    // the leftmost id column is a link to the detail page.
+    // rows are whole-row clickable (data-href) with the real detail anchor
+    // on the created cell — no id column.
     const list = await get(baseUrl, '/dashboard/judgments', jar);
     expect(list.status).toBe(200);
     const listBody = await list.text();
@@ -549,7 +583,9 @@ describe('dashboard E2E', () => {
     expect(listBody).toContain(`href="/dashboard/memories/${a.id}"`);
     expect(listBody).toContain(`href="/dashboard/memories/${b.id}"`);
     expect(listBody).toContain('pill k-supersedes');
-    expect(listBody).toContain(`href="/dashboard/judgments/${rel.id}"`);
+    expect(listBody).toContain(`data-href="/dashboard/judgments/${rel.id}"`);
+    expect(listBody).toContain(`<a href="/dashboard/judgments/${rel.id}">`);
+    expect(listBody).not.toContain('<th>id</th>');
 
     // Judgment detail view: renders full content for both sides, the verdict
     // pill, reason text, back-link, and resolves 404 for unknown ids.

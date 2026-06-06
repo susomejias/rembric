@@ -77,8 +77,9 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
 
       return html`
         <tr data-href="/dashboard/consolidation/${r.id}">
-          <td class="mono"><a href="/dashboard/consolidation/${r.id}">${shortId(r.id)}</a></td>
-          <td class="muted">${formatTs(r.startedAt)}</td>
+          <td class="muted">
+            <a href="/dashboard/consolidation/${r.id}">${formatTs(r.startedAt)}</a>
+          </td>
           <td class="muted">${formatTs(r.finishedAt)}</td>
           <td>${r.scope ?? '—'}</td>
           <td>${r.llmModel ?? '—'}</td>
@@ -105,7 +106,6 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>started</th>
                     <th>finished</th>
                     <th>scope</th>
@@ -180,7 +180,6 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
             `;
       return html`
         <tr>
-          <td class="mono">${shortId(op.id)}</td>
           <td><span class="pill ${pillTone}">${op.opType}</span></td>
           <td class="mono small">
             ${op.affectedIds.map((m) =>
@@ -258,7 +257,6 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>type</th>
                     <th>affected</th>
                     <th>created</th>
