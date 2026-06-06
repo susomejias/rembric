@@ -186,7 +186,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
           `;
       return html`
         <tr>
-          <td class="mono">${shortId(p.id)}</td>
           <td>${titleCell}</td>
           <td>${projectLabel}</td>
           <td>${sessionCell}</td>
@@ -255,7 +254,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>title</th>
                     <th>project</th>
                     <th>session</th>

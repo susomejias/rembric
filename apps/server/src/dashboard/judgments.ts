@@ -128,7 +128,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const tableBody =
       visible.length === 0
         ? html`<tr>
-            <td colspan="7" class="muted">No judgments match this filter.</td>
+            <td colspan="6" class="muted">No judgments match this filter.</td>
           </tr>`
         : visible.map((r) => {
             const orphanForm =
@@ -148,10 +148,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
                   `
                 : raw('<span class="muted small">—</span>');
             return html`
-              <tr>
-                <td class="mono small">
-                  <a href="/dashboard/judgments/${r.id}">${shortId(r.id)}</a>
-                </td>
+              <tr data-href="/dashboard/judgments/${r.id}">
                 <td>${statusPill(r.status)}</td>
                 <td>${verdictPill(r.relation)}</td>
                 <td class="small">
@@ -160,7 +157,9 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
                   <a href="/dashboard/memories/${r.target_id}">${truncate(r.target_content, 60)}</a>
                 </td>
                 <td class="small">${r.marked_by_actor ?? raw('<span class="muted">—</span>')}</td>
-                <td class="muted">${formatTs(new Date(r.created_at))}</td>
+                <td class="muted">
+                  <a href="/dashboard/judgments/${r.id}">${formatTs(new Date(r.created_at))}</a>
+                </td>
                 <td>${orphanForm}</td>
               </tr>
             `;
@@ -178,7 +177,6 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         <table>
           <thead>
             <tr>
-              <th>id</th>
               <th>status</th>
               <th>verdict</th>
               <th>source → target</th>

@@ -155,20 +155,30 @@ The dashboard SHALL be implemented with HTMX and server-side template literals. 
 
 ### Requirement: The dashboard MUST surface a sessions list view at `/dashboard/sessions`
 
-A logged-in dashboard user SHALL see a list of recent sessions for the active project (or globally when no project is selected). The list SHALL include columns for title, session id (short form), agent, started_at, ended_at, status, a memory count (number of `memory` rows with that `session_id`), and a prompt count (number of `prompts` rows with that `session_id` AND `deleted_at IS NULL`).
+A logged-in dashboard user SHALL see a list of recent sessions for the active project (or globally when no project is selected). The list SHALL include columns for title, agent, started_at, ended_at, status, a memory count (number of `memory` rows with that `session_id`), and a prompt count (number of `prompts` rows with that `session_id` AND `deleted_at IS NULL`). The list SHALL NOT include a session id column; the `title` cell carries the row's anchor to `/dashboard/sessions/:id`.
+
+The list SHALL be ordered with `status = 'active'` rows first, then all remaining rows; within each group rows SHALL be ordered by `started_at DESC`. The ordering SHALL be applied in the SQL query (before `LIMIT`/`OFFSET`) so pagination respects it. The soft-deleted table shown under `?include_deleted=1` keeps plain `started_at DESC`.
 
 The `title` column SHALL render using the cascade `row.title ?? row.description ?? shortId(row.id)`. The cascade SHALL NOT short-circuit on placeholder titles (e.g. `'rembric · 22:14 UTC'`) — those count as real titles for the purpose of display, because they are still more informative than `shortId` alone. The cascade ensures legacy rows (where `title` is NULL because they predate the column migration) still get a sensible value.
 
-The title column SHALL be the first visible content column (left of session id) and SHALL truncate with `text-overflow: ellipsis` past ~40 chars to keep the table compact. The full title SHALL be available as the cell's `title` attribute (HTML tooltip) so operators can hover to see the full string.
+The title column SHALL be the first visible content column and SHALL truncate with `text-overflow: ellipsis` past ~40 chars to keep the table compact. The full title SHALL be available as the cell's `title` attribute (HTML tooltip) so operators can hover to see the full string.
 
 The memory count and the prompt count SHALL be rendered as two separate right-aligned columns (`memories`, `prompts`). The detail view at `/dashboard/sessions/:id` SHALL render BOTH a `Memories (N)` and a `Prompts (N)` table — memories first, prompts below.
 
 #### Scenario: A dashboard user navigates to `/dashboard/sessions`
 
 - **WHEN** the user is authenticated with an admin token and visits `/dashboard/sessions`
-- **THEN** the server SHALL return a paginated list of the 50 most recent sessions ordered by `started_at DESC`, with each row linking to `/dashboard/sessions/:id`
+- **THEN** the server SHALL return a paginated list of 50 sessions ordered active-first then `started_at DESC`, with each row linking to `/dashboard/sessions/:id` via `data-href` and via the `title` cell's anchor
 - **AND** each row SHALL include a `title` column rendered via the documented cascade
 - **AND** each row SHALL include both a `memories` count column and a `prompts` count column
+- **AND** the table header SHALL NOT contain a `<th>` labelled `id`
+
+#### Scenario: Active sessions sort above ended ones regardless of age
+
+- **GIVEN** an active session `A` started three days ago and an ended session `E` started one hour ago
+- **WHEN** the operator navigates to `/dashboard/sessions`
+- **THEN** `A`'s row SHALL appear before `E`'s row
+- **AND** two active sessions SHALL order between themselves by `started_at DESC`
 
 #### Scenario: Session with a model-authored title
 
@@ -527,7 +537,9 @@ The dashboard SHALL serve the operator-facing queue of memory-relation judgments
 
 The page heading SHALL read `Rembric Judgments.` (with `Rembric` highlighted via `hl-lime`), the document `<title>` SHALL read `Judgments · Rembric`, the empty-state cell SHALL read `No judgments match this filter.`, the table column previously labelled `relation` SHALL be labelled `verdict`, and the orphan-not-found flash SHALL read `Judgment not found or already closed.`.
 
-The `source → target` column SHALL render each side as an `<a href="/dashboard/memories/{id}">` anchor whose visible text is the corresponding memory's `content` truncated to 60 characters (not the memory's short id). The two anchors SHALL be separated by the `→` arrow as before. Short-id-only rendering is retained ONLY for the leftmost `id` column (the judgment's own id) and for any other surface that pre-dates this change.
+The list SHALL NOT render an `id` column. Each row SHALL carry `data-href="/dashboard/judgments/{id}"` (whole-row click navigation, consistent with the sessions/memories/consolidation lists), and the `created` cell SHALL contain the row's real `<a href="/dashboard/judgments/{id}">` anchor wrapping the `formatTs(created_at)` output. The whole-row click handler's interactive-element bail-out keeps the memory anchors in `source → target` and the `Mark orphaned` form working inside the clickable row.
+
+The `source → target` column SHALL render each side as an `<a href="/dashboard/memories/{id}">` anchor whose visible text is the corresponding memory's `content` truncated to 60 characters (not the memory's short id). The two anchors SHALL be separated by the `→` arrow as before.
 
 The `verdict` column SHALL render via the shared `verdictPill(relation)` helper. When `relation` is non-null the cell SHALL contain a `<span class="pill k-{relation}">{relation}</span>` element (matching the home overview's `RECENT JUDGMENTS` tile). When `relation` is null (pending or orphaned rows) the cell SHALL contain the muted em-dash `<span class="muted">—</span>`. No inline `pill k-…` HTML SHALL exist in the judgments page template.
 
@@ -535,6 +547,13 @@ The `verdict` column SHALL render via the shared `verdictPill(relation)` helper.
 
 - **WHEN** an authenticated operator navigates to `/dashboard/judgments`
 - **THEN** the server SHALL return a `200` HTML response whose heading reads `Rembric Judgments.` and whose table column header for the relation kind reads `verdict`
+- **AND** the table header SHALL NOT contain a `<th>` labelled `id`
+
+#### Scenario: Judgment rows are whole-row clickable
+
+- **WHEN** an authenticated operator navigates to `/dashboard/judgments` with at least one row present
+- **THEN** each row SHALL carry `data-href="/dashboard/judgments/{id}"` where `{id}` is that row's `memory_relations.id`
+- **AND** the row's `created` cell SHALL contain an `<a href="/dashboard/judgments/{id}">` anchor wrapping the rendered timestamp
 
 #### Scenario: Legacy `/dashboard/relations` returns 404
 
@@ -638,7 +657,7 @@ The detail view at `/dashboard/sessions/:id` SHALL render the Abandon form in th
 
 ### Requirement: The dashboard MUST surface a prompts list view at `/dashboard/prompts`
 
-A logged-in dashboard user SHALL see a list of curated user prompts for the active project (or globally when no project is selected). The list SHALL include columns for title (cascade `title → content[truncated to 80 chars] → shortId`), short prompt id, project slug, session short id (link to session detail when present), agent, tags (comma-separated), and created_at.
+A logged-in dashboard user SHALL see a list of curated user prompts for the active project (or globally when no project is selected). The list SHALL include columns for title (cascade `title → content[truncated to 80 chars] → shortId`), project slug, session short id (link to session detail when present), agent, tags (comma-separated), and created_at. The list SHALL NOT include a prompt id column.
 
 The view SHALL paginate at 50 rows per page (`PAGE_SIZE` shared constant). The view SHALL support a free-text query box that submits as the `q` query parameter; when non-empty, the server-side handler SHALL use the FTS5 `prompts_fts` index (matching against `content` + `tags`). The view SHALL support filters by `project_slug`, `session_id` (shortId match), and `agent`.
 
@@ -651,6 +670,7 @@ The view SHALL NOT include a detail page at `/dashboard/prompts/:id` in this rev
 - **WHEN** an authenticated admin operator navigates to `/dashboard/prompts`
 - **THEN** the server SHALL return a paginated list of the 50 most recent prompts (active and not-deleted) ordered by `created_at DESC`
 - **AND** each row SHALL include the documented columns
+- **AND** the table header SHALL NOT contain a `<th>` labelled `id`
 - **AND** each row SHALL include a `Delete` form using `data-confirm` modal attributes on the `<form>` element
 
 #### Scenario: An operator searches prompts by content
@@ -704,7 +724,7 @@ The primary dashboard navigation (`apps/server/src/dashboard/components.ts::NAV`
 
 ### Requirement: The session detail view MUST list anchored prompts below memories
 
-The view at `/dashboard/sessions/:id` SHALL render a new `Prompts (N)` section AFTER the existing `Memories (N)` section. The section SHALL list every row of `prompts` whose `session_id` equals the URL id AND `deleted_at IS NULL`, ordered by `created_at ASC`, with columns: short prompt id, title (cascade), content (truncated to 120 chars), tags, created_at. When the session has no prompts, the section SHALL render `<p class="muted">No prompts anchored to this session.</p>` and SHALL still be emitted (so the `<h2>` is visible).
+The view at `/dashboard/sessions/:id` SHALL render a new `Prompts (N)` section AFTER the existing `Memories (N)` section. The section SHALL list every row of `prompts` whose `session_id` equals the URL id AND `deleted_at IS NULL`, ordered by `created_at ASC`, with columns: title (cascade), content (truncated to 120 chars), tags, created_at — no prompt id column. When the session has no prompts, the section SHALL render `<p class="muted">No prompts anchored to this session.</p>` and SHALL still be emitted (so the `<h2>` is visible).
 
 #### Scenario: Session with prompts and memories renders both sections
 
@@ -796,10 +816,11 @@ When the `:id` does not match any row, the page SHALL respond with `404 Not Foun
 - **THEN** each row SHALL contain a `.btn.primary.sm` anchor labelled `VIEW →` inside the row's `.acts` slot, whose `href` is `/dashboard/judgments/{id}` (where `{id}` is the corresponding `memory_relations.id`)
 - **AND** the verdict pill itself SHALL NOT be wrapped in an anchor (no click conflict with the memory links in the row)
 
-#### Scenario: Judgments list id column links to the detail page
+#### Scenario: Judgments list created cell links to the detail page
 
 - **WHEN** the operator navigates to `/dashboard/judgments` with at least one row present
-- **THEN** each row's leftmost `id` cell SHALL contain an `<a href="/dashboard/judgments/{id}">` anchor wrapping the short id, where `{id}` is that row's `memory_relations.id`
+- **THEN** each row's `created` cell SHALL contain an `<a href="/dashboard/judgments/{id}">` anchor wrapping the rendered timestamp, where `{id}` is that row's `memory_relations.id`
+- **AND** the list SHALL NOT render a standalone short-id cell for the judgment's own id
 
 ### Requirement: The dashboard brand block MUST display the running server version
 
@@ -879,3 +900,30 @@ After a one-click update is confirmed, the dashboard SHALL show a progress view 
 
 - **WHEN** the backup or pull step fails
 - **THEN** the progress view SHALL display the failure reason and the dashboard SHALL remain fully functional on the current version
+
+### Requirement: List tables MUST NOT spend a column on row ids
+
+Dashboard list tables SHALL NOT render a dedicated `id` column. Row identity is carried by the row's semantic cell (title, content, or timestamp), and navigation to a detail page — where one exists — is provided by whole-row `data-href` plus exactly one real `<a href>` anchor hosted on that semantic cell, so cmd-click / middle-click / keyboard navigation keep working.
+
+Concretely:
+
+- Sessions list: the `title` cell carries the anchor to `/dashboard/sessions/{id}` (rows keep `data-href`).
+- Memories list, session detail → Memories, memory detail → Predecessors: the `content` cell carries the anchor to `/dashboard/memories/{id}` (rows keep `data-href`).
+- Consolidation runs list: the `started` cell carries the anchor to `/dashboard/consolidation/{id}` (rows keep `data-href`).
+- Judgments list: the `created` cell carries the anchor to `/dashboard/judgments/{id}` (rows gain `data-href`).
+- Projects (active + archived), prompts list, session detail → Prompts, consolidation run detail → Ops: the id column is removed with no replacement anchor — these rows have no detail page. Memory shortId anchors inside the ops table's `affected` / `created` cells are retained: they are cross-navigation, not row identity.
+
+`shortId(...)` rendering remains in use outside list-table columns (detail-page headings such as `Rembric Memory {shortId}.`, ops `affected`/`created` cells, prompt session links).
+
+#### Scenario: A navigable list row keeps exactly one real anchor
+
+- **WHEN** an authenticated operator renders any list whose rows have a detail page (sessions, memories, consolidation runs, judgments, predecessors, session-detail memories)
+- **THEN** each row SHALL carry `data-href` pointing at its detail URL
+- **AND** each row SHALL contain exactly one `<a>` anchor pointing at that same detail URL, hosted on the row's semantic cell
+- **AND** no `<th>` labelled `id` SHALL be present in the table header
+
+#### Scenario: Tables without detail pages drop the id column with no replacement
+
+- **WHEN** an authenticated operator renders the projects, prompts, session-detail prompts, or run-detail ops tables
+- **THEN** no `<th>` labelled `id` SHALL be present and no cell SHALL render the row's own short id
+- **AND** row action forms SHALL keep functioning (they carry the full id in their `action` URLs)

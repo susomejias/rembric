@@ -105,11 +105,10 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         : '—';
       return html`
         <tr data-href="/dashboard/memories/${m.id}">
-          <td class="mono"><a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a></td>
           <td>${scopePill(m.scope)}</td>
           <td>${projectLabel}</td>
           <td>${m.type}</td>
-          <td>${truncate(m.content, 100)}</td>
+          <td><a href="/dashboard/memories/${m.id}">${truncate(m.content, 100)}</a></td>
           <td>${statusPill(m.status)}</td>
           <td class="muted">${formatTs(m.createdAt)}</td>
         </tr>
@@ -190,7 +189,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         <table>
           <thead>
             <tr>
-              <th>id</th>
               <th>scope</th>
               <th>project</th>
               <th>type</th>
@@ -202,7 +200,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           <tbody>
             ${visible.length === 0
               ? html`<tr>
-                  <td colspan="7" class="muted">No memories match this filter.</td>
+                  <td colspan="6" class="muted">No memories match this filter.</td>
                 </tr>`
               : rowsHtml}
           </tbody>
@@ -279,7 +277,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               <table>
                 <thead>
                   <tr>
-                    <th>id</th>
                     <th>status</th>
                     <th>content</th>
                     <th>created</th>
@@ -289,11 +286,10 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                   ${predecessors.map(
                     (p) => html`
                       <tr data-href="/dashboard/memories/${p.id}">
-                        <td class="mono">
-                          <a href="/dashboard/memories/${p.id}">${shortId(p.id)}</a>
-                        </td>
                         <td>${statusPill(p.status)}</td>
-                        <td>${truncate(p.content, 120)}</td>
+                        <td>
+                          <a href="/dashboard/memories/${p.id}">${truncate(p.content, 120)}</a>
+                        </td>
                         <td class="muted">${formatTs(p.createdAt)}</td>
                       </tr>
                     `,

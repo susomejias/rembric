@@ -613,15 +613,16 @@ trivially reversible).
 ```ts
 html`
   <tr data-href="/dashboard/memories/${m.id}">
-    <td class="mono"><a href="/dashboard/memories/${m.id}">${shortId(m.id)}</a></td>
+    <td><a href="/dashboard/memories/${m.id}">${truncate(m.content, 100)}</a></td>
     …
   </tr>
 `;
 ```
 
-The link inside the ID column is still there for keyboard users and
-right-clickers; the `data-href` lets the whole row be clickable for
-mouse users.
+Tables don't spend a column on row ids. The row's semantic cell (title,
+content, or timestamp) hosts the one real `<a>` — kept for keyboard
+users and right-clickers — while `data-href` lets the whole row be
+clickable for mouse users.
 
 ## JS enhancements (in `templates.ts`)
 

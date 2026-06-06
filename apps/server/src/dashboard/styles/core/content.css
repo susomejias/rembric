@@ -221,7 +221,7 @@
 .main tbody tr[data-href] {
   cursor: pointer;
 }
-/* links inside tables render in lime so the ID column feels clickable */
+/* links inside tables render in lime so the row's navigable cell reads as such */
 .main table a {
   color: var(--lime);
 }
