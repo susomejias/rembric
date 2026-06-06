@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.2](https://github.com/susomejias/rembric/compare/server-v0.21.1...server-v0.21.2) (2026-06-06)
+
+
+### Features
+
+* **server:** one-click self-update from the dashboard ([#106](https://github.com/susomejias/rembric/issues/106)) ([ad152db](https://github.com/susomejias/rembric/commit/ad152db139cc28f4660506b74ed432635381238c))
+* **server:** show server version in dashboard brand ([#104](https://github.com/susomejias/rembric/issues/104)) ([168220c](https://github.com/susomejias/rembric/commit/168220c99e5fe0ac0a96afe540bbc566ae9a2937))
+
 ## [0.21.1](https://github.com/susomejias/rembric/compare/server-v0.21.0...server-v0.21.1) (2026-06-05)
 
 
