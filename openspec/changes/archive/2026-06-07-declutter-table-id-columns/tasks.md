@@ -31,7 +31,7 @@
 ## 6. CSS & spec sync
 
 - [x] 6.1 Update the stale comment in `styles/core/content.css` ("links inside tables render in lime so the ID column feels clickable" → reflect that lime links mark the row's navigable cell)
-- [ ] 6.2 Apply the four MODIFIED requirements + one ADDED requirement from `specs/dashboard/spec.md` to `openspec/specs/dashboard/spec.md` at archive time (no manual action now — recorded for the archive step)
+- [x] 6.2 Apply the four MODIFIED requirements + one ADDED requirement from `specs/dashboard/spec.md` to `openspec/specs/dashboard/spec.md` at archive time (no manual action now — recorded for the archive step)
 
 ## 7. Tests & verification
 
