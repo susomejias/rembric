@@ -120,6 +120,8 @@ describe('dashboard E2E', () => {
         REMBRIC_PORT: String(port),
         REMBRIC_DATA_DIR: tmp.dataDir,
         REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+        // Keep the suite hermetic — never call the real GitHub API.
+        REMBRIC_UPDATE_CHECK: 'off',
       },
       { embedder: new FakeEmbedder() },
     );
@@ -567,5 +569,246 @@ describe('dashboard E2E', () => {
     const missing = await get(baseUrl, '/dashboard/judgments/non-existent-id-xyz', jar);
     expect(missing.status).toBe(404);
     expect(await missing.text()).toContain('Judgment not found');
+  });
+});
+
+describe('dashboard E2E — self-update surface', () => {
+  let server: BootstrappedServer;
+  let baseUrl: string;
+  const ADMIN_TOKEN = 'integration-admin-token-with-enough-entropy-upd';
+
+  // Mutable capability the fake detector reads — tests flip quadrants.
+  const capability = {
+    current: { state: 'manual', reason: 'no-socket' } as Record<string, unknown>,
+  };
+
+  beforeAll(async () => {
+    const [{ createTestDb }, { FakeEmbedder }] = [
+      await import('./db.js'),
+      await import('./embedder.js'),
+    ];
+    const { UpdateCheckService } = await import('../services/update-check.js');
+    const { SelfUpdateOrchestrator } = await import('../services/self-update/orchestrator.js');
+
+    const tmp = createTestDb();
+    tmp.cleanup();
+    const port = await findFreePort();
+
+    const fakeFetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              tag_name: 'server-v9.9.9',
+              body: '## New features\n- e2e changelog entry',
+              html_url: 'https://github.com/susomejias/rembric/releases/tag/server-v9.9.9',
+              published_at: '2026-06-01T00:00:00Z',
+              prerelease: false,
+              draft: false,
+            },
+          ]),
+          { status: 200 },
+        ),
+      )) as typeof fetch;
+    const updates = new UpdateCheckService({ enabled: true, fetchImpl: fakeFetch });
+    await updates.refresh();
+
+    // Duck-typed stand-in for CapabilityDetector; tests mutate `capability.current`.
+    const fakeDetector = {
+      detect: () => Promise.resolve(capability.current),
+      detectCached: () => Promise.resolve(capability.current),
+    } as unknown as ConstructorParameters<typeof SelfUpdateOrchestrator>[0]['capability'];
+    const selfUpdate = new SelfUpdateOrchestrator({
+      capability: fakeDetector,
+      engineFactory: () => {
+        throw new Error('engine must not be reached in these tests');
+      },
+      backup: () => {
+        throw new Error('backup must not be reached in these tests');
+      },
+      log: () => {},
+    });
+
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder(), updates, selfUpdate },
+    );
+    baseUrl = `http://127.0.0.1:${port}`;
+  }, 30_000);
+
+  afterAll(async () => {
+    await server.shutdown();
+  });
+
+  async function login(): Promise<CookieJar> {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    return jar;
+  }
+
+  it('renders the update badge and the per-version modal on every page', async () => {
+    capability.current = { state: 'manual', reason: 'no-socket' };
+    const jar = await login();
+    const home = await get(baseUrl, '/dashboard', jar);
+    const body = await home.text();
+    expect(body).toContain('sb-update');
+    expect(body).toContain('UPDATE v9.9.9');
+    expect(body).toContain('id="rbr-update"');
+    expect(body).toContain('data-version="9.9.9"');
+    expect(body).toContain('e2e changelog entry');
+
+    const memories = await get(baseUrl, '/dashboard/memories', jar);
+    expect(await memories.text()).toContain('sb-update');
+  });
+
+  it('manual quadrant: copy-paste command + docs link, no update button', async () => {
+    capability.current = { state: 'manual', reason: 'no-socket' };
+    const jar = await login();
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    const body = await page.text();
+    expect(body).toContain('docker compose pull');
+    expect(body).toContain('docs/updates.md');
+    expect(body).not.toContain('action="/dashboard/update/start"');
+  });
+
+  it('pinned quadrant: explanation instead of button', async () => {
+    capability.current = {
+      state: 'pinned',
+      reason: 'pinned-tag',
+      containerId: 'abc',
+      imageRepo: 'ghcr.io/susomejias/rembric',
+      imageTag: '0.21.1',
+    };
+    const jar = await login();
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    const body = await page.text();
+    expect(body).toContain('IMAGE TAG PINNED');
+    expect(body).toContain(':0.21.1');
+    expect(body).not.toContain('action="/dashboard/update/start"');
+  });
+
+  it('available quadrant: danger-tone confirm form with CSRF', async () => {
+    capability.current = {
+      state: 'available',
+      reason: 'ok',
+      containerId: 'abc',
+      imageRepo: 'ghcr.io/susomejias/rembric',
+      imageTag: 'latest',
+    };
+    const jar = await login();
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    const body = await page.text();
+    expect(body).toContain('action="/dashboard/update/start"');
+    expect(body).toContain('data-confirm-tone="danger"');
+    expect(body).toContain('back up the database');
+    expect(extractCsrf(body, '/dashboard/update/start')).toBeTruthy();
+  });
+
+  it('start without CSRF returns 403', async () => {
+    const jar = await login();
+    const res = await postForm(baseUrl, '/dashboard/update/start', jar, {});
+    expect(res.status).toBe(403);
+  });
+
+  it('start is refused with no side effects when capability is not available', async () => {
+    capability.current = { state: 'manual', reason: 'no-socket' };
+    const jar = await login();
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    // The form is not rendered, but a handcrafted POST must also bounce.
+    // Mint a CSRF via the modal on a page where the form exists? It does
+    // not — so reuse the sidebar-toggle pattern: pull CSRF from the
+    // available quadrant first, then flip to manual.
+    capability.current = {
+      state: 'available',
+      reason: 'ok',
+      containerId: 'abc',
+      imageRepo: 'ghcr.io/susomejias/rembric',
+      imageTag: 'latest',
+    };
+    const armed = await get(baseUrl, '/dashboard/update', jar);
+    const csrf = extractCsrf(await armed.text(), '/dashboard/update/start');
+    expect(csrf).toBeTruthy();
+    capability.current = { state: 'manual', reason: 'no-socket' };
+    const res = await postForm(baseUrl, '/dashboard/update/start', jar, { csrf: csrf! });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('err=not_available');
+    void page;
+  });
+
+  it('version probe answers the running version behind the session', async () => {
+    const jar = await login();
+    const res = await get(baseUrl, '/dashboard/update/version', jar);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: REMBRIC_VERSION });
+
+    const anon: CookieJar = { cookie: null };
+    const unauth = await get(baseUrl, '/dashboard/update/version', anon);
+    expect([302, 401]).toContain(unauth.status);
+  });
+
+  it('status endpoint reports idle before any run', async () => {
+    const jar = await login();
+    const res = await get(baseUrl, '/dashboard/update/status', jar);
+    expect(res.status).toBe(200);
+    const status = (await res.json()) as { phase: string };
+    expect(status.phase).toBe('idle');
+  });
+});
+
+describe('dashboard E2E — zero-action compatibility', () => {
+  // openspec/specs/self-update: a deployment without the Docker socket and
+  // without any new configuration boots and operates identically, with the
+  // feature in its degraded form and no badge when the check is off.
+  let server: BootstrappedServer;
+  let baseUrl: string;
+  const ADMIN_TOKEN = 'integration-admin-token-with-enough-entropy-zac';
+
+  beforeAll(async () => {
+    const { createTestDb } = await import('./db.js');
+    const { FakeEmbedder } = await import('./embedder.js');
+    const tmp = createTestDb();
+    tmp.cleanup();
+    const port = await findFreePort();
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+        REMBRIC_UPDATE_CHECK: 'off',
+      },
+      { embedder: new FakeEmbedder() },
+    );
+    baseUrl = `http://127.0.0.1:${port}`;
+  }, 30_000);
+
+  afterAll(async () => {
+    await server.shutdown();
+  });
+
+  it('boots and serves healthz, dashboard and MCP surfaces with no update chrome', async () => {
+    const health = await fetch(`${baseUrl}/healthz`, {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(health.status).toBe(200);
+
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const home = await get(baseUrl, '/dashboard', jar);
+    expect(home.status).toBe(200);
+    const body = await home.text();
+    expect(body).toContain(`v${REMBRIC_VERSION}`);
+    expect(body).not.toContain('sb-update');
+    expect(body).not.toContain('id="rbr-update"');
+
+    // The update page itself degrades to the up-to-date notice.
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('UP TO DATE');
   });
 });

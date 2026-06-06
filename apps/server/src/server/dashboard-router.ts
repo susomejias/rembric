@@ -36,14 +36,18 @@ import {
 } from '../dashboard/templates.js';
 import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
+import { updateShellExtras, type UpdateViewState } from '../dashboard/update-modal.js';
+import { createUpdateRouter } from '../dashboard/update.js';
 import type { Db } from '../db/client.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
+import type { SelfUpdateOrchestrator } from '../services/self-update/orchestrator.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
+import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 const COOKIE_NAME = 'rembric_session';
@@ -61,6 +65,8 @@ export interface DashboardDeps {
   getStats: () => DashboardStats;
   /** Resolved data directory (from `config.dataDir`). */
   dataDir: string;
+  updates: UpdateCheckService;
+  selfUpdate: SelfUpdateOrchestrator;
 }
 
 export interface DashboardStats {
@@ -153,6 +159,21 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       tokenId: ctx.tokenId,
     };
     c.set('session', resolved);
+
+    // Update-availability state for the shell (badge + modal). With no
+    // newer release known, this is a sync cache read and the capability
+    // probe (which may touch the Docker socket) is never reached.
+    let update: UpdateViewState | null = null;
+    const info = deps.updates.peek();
+    if (info) {
+      const phase = deps.selfUpdate.status().phase;
+      update = {
+        info,
+        capability: await deps.selfUpdate.capability(),
+        running: phase !== 'idle' && phase !== 'failed',
+      };
+    }
+    c.set('update', update);
     return next();
   });
 
@@ -179,7 +200,15 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     const collapsed = sidebarCollapsed(c);
     const counters = { pendingJudgments: stats.pendingJudgments };
     const csrf = csrfInput(session.session, deps.sessions, 'sidebar.toggle');
-    const sidebar = renderSidebar({ active: 'home', counters, collapsed, csrf });
+    const updateState = (c.get('update' as never) as UpdateViewState | undefined | null) ?? null;
+    const updateExtras = updateShellExtras(updateState, session.session, deps.sessions);
+    const sidebar = renderSidebar({
+      active: 'home',
+      counters,
+      collapsed,
+      csrf,
+      update: updateExtras.badge,
+    });
 
     const supersededMemories = Math.max(
       0,
@@ -494,6 +523,8 @@ ${ascBars(activity)}</pre
         sidebar,
         collapsed,
         counters,
+        updateBadge: updateExtras.badge,
+        updateModal: updateExtras.modal,
       }),
     );
   });
@@ -524,6 +555,14 @@ ${ascBars(activity)}</pre
   app.route(
     '/tokens',
     createTokensRouter({ tokens: deps.tokens, projects: deps.projects, sessions: deps.sessions }),
+  );
+  app.route(
+    '/update',
+    createUpdateRouter({
+      updates: deps.updates,
+      selfUpdate: deps.selfUpdate,
+      sessions: deps.sessions,
+    }),
   );
   app.route(
     '/maintenance',

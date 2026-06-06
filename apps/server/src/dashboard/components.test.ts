@@ -303,6 +303,23 @@ describe('renderSidebar', () => {
     });
     expect(out.__html).toContain('class="sb-mob-close"');
   });
+
+  it('renders the update badge next to the brand when provided', () => {
+    const out = renderSidebar({
+      active: 'home',
+      counters: {},
+      collapsed: false,
+      csrf,
+      update: raw('<a class="sb-update" href="/dashboard/update">UPDATE v0.22.0</a>'),
+    });
+    expect(out.__html).toMatch(/sb-brand[\s\S]*?sb-update[\s\S]*?sb-section/);
+    expect(out.__html).toContain('UPDATE v0.22.0');
+  });
+
+  it('renders no update badge by default', () => {
+    const out = renderSidebar({ active: 'home', counters: {}, collapsed: false, csrf });
+    expect(out.__html).not.toContain('sb-update');
+  });
 });
 
 describe('renderMobileBar', () => {
@@ -313,5 +330,11 @@ describe('renderMobileBar', () => {
     expect(out.__html).not.toContain('SELF-HOSTED');
     expect(out.__html).toContain('☰ MENU');
     expect(out.__html).toContain('class="mob-toggle"');
+  });
+
+  it('renders the update badge when provided, none by default', () => {
+    const withBadge = renderMobileBar('home', raw('<a class="sb-update" href="/x">UPD</a>'));
+    expect(withBadge.__html).toContain('sb-update');
+    expect(renderMobileBar('home').__html).not.toContain('sb-update');
   });
 });

@@ -19,6 +19,8 @@ services:
 
     volumes:
       - ./data:/data
+      # One-click updates from the dashboard. Root-equivalent on the host — read docs/updates.md first.
+      # - /var/run/docker.sock:/var/run/docker.sock
 
     env_file:
       - .env

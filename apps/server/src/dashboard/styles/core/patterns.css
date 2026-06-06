@@ -941,3 +941,155 @@ form .field label {
     flex-wrap: wrap;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   UPDATE AVAILABILITY — brand badge + global modal (self-update).
+   ───────────────────────────────────────────────────────────────── */
+.sb-update {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-2) var(--s-4) 0;
+  padding: 6px var(--s-3);
+  border: 1px solid var(--lime);
+  color: var(--lime);
+  font-family: var(--f-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  text-decoration: none;
+}
+.sb-update:hover {
+  background: var(--lime);
+  color: var(--lime-ink);
+}
+.sb-update .bn {
+  width: 6px;
+  height: 6px;
+  background: var(--lime);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sb-update:hover .bn {
+  background: var(--lime-ink);
+}
+.sb.is-collapsed .sb-update .label {
+  display: none;
+}
+.mob-bar .sb-update {
+  margin: 0;
+  flex-shrink: 0;
+}
+.mob-bar .sb-update .label {
+  display: none;
+}
+
+dialog.upd-modal {
+  width: min(640px, calc(100vw - 2 * var(--s-4)));
+}
+.upd-versions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  margin-bottom: var(--s-4);
+}
+.upd-versions code {
+  border: 1px solid var(--fg-faint);
+  padding: 2px 8px;
+  color: var(--fg-dim);
+}
+.upd-versions code.new {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+.upd-versions .when {
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.upd-changelog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-dim);
+  margin-bottom: var(--s-2);
+}
+.upd-changelog-head a {
+  color: var(--lime);
+  text-decoration: none;
+}
+.upd-changelog {
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--fg);
+  border: 1px solid var(--fg-faint);
+  background: var(--bg);
+  padding: var(--s-4);
+  margin: 0 0 var(--s-4);
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.upd-action {
+  margin: 0;
+}
+.upd-note {
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-4);
+}
+.upd-note.warn {
+  border-color: var(--warn);
+}
+.upd-note .lab {
+  display: block;
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--lime);
+  margin-bottom: var(--s-2);
+}
+.upd-note.warn .lab {
+  color: var(--warn);
+}
+.upd-note p {
+  margin: 0 0 var(--s-3);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.upd-cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  border: 1px solid var(--fg-faint);
+  background: var(--bg);
+  padding: var(--s-3) var(--s-4);
+}
+.upd-cmd code {
+  font-family: var(--f-mono);
+  font-size: 0.8rem;
+  color: var(--lime);
+  flex: 1 1 auto;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.upd-docs-link {
+  display: inline-block;
+  margin-top: var(--s-3);
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--lime);
+  text-decoration: none;
+}
