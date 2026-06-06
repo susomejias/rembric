@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.3](https://github.com/susomejias/rembric/compare/server-v0.21.2...server-v0.21.3) (2026-06-06)
+
+
+### Features
+
+* **server:** drop dashboard table id columns and sort active sessions first ([#107](https://github.com/susomejias/rembric/issues/107)) ([cc84a2b](https://github.com/susomejias/rembric/commit/cc84a2bd233cf7e147c3bbaad84799de95a0a084))
+
 ## [0.21.2](https://github.com/susomejias/rembric/compare/server-v0.21.1...server-v0.21.2) (2026-06-06)
 
 
