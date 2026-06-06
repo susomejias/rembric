@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { REMBRIC_VERSION } from '../version.js';
+
 import {
   backLink,
   btn,
@@ -288,6 +290,8 @@ describe('renderSidebar', () => {
       csrf,
     });
     expect(out.__html).toContain('<a class="sb-brand" href="/dashboard"');
+    expect(out.__html).toContain(`v${REMBRIC_VERSION}`);
+    expect(out.__html).not.toContain('SELF-HOSTED');
   });
 
   it('renders the close button (visible only at ≤980 px via CSS)', () => {
@@ -302,10 +306,11 @@ describe('renderSidebar', () => {
 });
 
 describe('renderMobileBar', () => {
-  it('renders REMBRIC + SELF-HOSTED + the ☰ MENU toggle', () => {
+  it('renders REMBRIC + version + the ☰ MENU toggle', () => {
     const out = renderMobileBar('home');
     expect(out.__html).toContain('REMBRIC');
-    expect(out.__html).toContain('SELF-HOSTED');
+    expect(out.__html).toContain(`v${REMBRIC_VERSION}`);
+    expect(out.__html).not.toContain('SELF-HOSTED');
     expect(out.__html).toContain('☰ MENU');
     expect(out.__html).toContain('class="mob-toggle"');
   });
