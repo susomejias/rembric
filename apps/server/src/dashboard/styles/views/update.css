@@ -1,0 +1,76 @@
+/* ─────────────────────────────────────────────────────────────────
+   UPDATE VIEW — offer page + install progress steps.
+   ───────────────────────────────────────────────────────────────── */
+.upd-page {
+  max-width: 760px;
+}
+
+.upd-progress {
+  max-width: 560px;
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-5);
+}
+.upd-progress-title {
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: var(--s-5);
+}
+.upd-progress-title .sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.62rem;
+  font-weight: 400;
+  color: var(--fg-dim);
+}
+
+.upd-step {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--fg-faint);
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+}
+.upd-step:last-of-type {
+  border-bottom: 0;
+}
+.upd-step .dot {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--fg-faint);
+  flex-shrink: 0;
+}
+.upd-step[data-state='active'] {
+  color: var(--fg);
+}
+.upd-step[data-state='active'] .dot {
+  border-color: var(--lime);
+  background: var(--lime);
+  animation: upd-blink 1s steps(2, start) infinite;
+}
+.upd-step[data-state='done'] {
+  color: var(--fg);
+}
+.upd-step[data-state='done'] .dot {
+  border-color: var(--lime);
+  background: var(--lime);
+}
+.upd-step .meta {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 0.66rem;
+}
+
+@keyframes upd-blink {
+  50% {
+    opacity: 0.35;
+  }
+}

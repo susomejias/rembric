@@ -4,7 +4,9 @@
  *
  * Per-route handlers call `renderPage(c, deps.sessions, body, opts)` and
  * get back the full HTML string — sidebar, mobile bar, view-head wrapper,
- * cookie-driven collapse state, and CSRF-protected toggle button included.
+ * cookie-driven collapse state, CSRF-protected toggle button, and the
+ * update badge/modal (when the auth middleware found a newer release)
+ * included.
  */
 
 import type { Context } from 'hono';
@@ -16,6 +18,7 @@ import { renderSidebar, type NavKey } from './components.js';
 import { csrfInput } from './csrf.js';
 import { raw, shell, type SafeHtml } from './templates.js';
 import type { ResolvedSession } from './types.js';
+import { updateShellExtras, type UpdateViewState } from './update-modal.js';
 
 const SIDEBAR_COOKIE = 'rbr-sb-collapsed';
 
@@ -36,11 +39,18 @@ export function renderPage(
   const resolved = c.get('session' as never) as ResolvedSession | undefined;
   const collapsed = getCookie(c, SIDEBAR_COOKIE) === '1';
   const csrf = resolved ? csrfInput(resolved.session, sessionsService, 'sidebar.toggle') : raw('');
+  const updateState = (c.get('update' as never) as UpdateViewState | undefined | null) ?? null;
+  const { badge, modal } = updateShellExtras(
+    updateState,
+    resolved?.session ?? null,
+    sessionsService,
+  );
   const sidebar = renderSidebar({
     active: opts.activeNav,
     counters: opts.counters ?? {},
     collapsed,
     csrf,
+    update: badge,
   });
   return shell(body, {
     title: opts.title,
@@ -50,5 +60,7 @@ export function renderPage(
     collapsed,
     flash: opts.flash,
     counters: opts.counters,
+    updateBadge: badge,
+    updateModal: modal,
   });
 }

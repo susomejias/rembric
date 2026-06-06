@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { sql } from 'drizzle-orm';
 
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
@@ -17,8 +19,15 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
+import { CapabilityDetector } from '../services/self-update/capability.js';
+import { DockerEngineApi } from '../services/self-update/engine-api.js';
+import {
+  createPreUpdateBackup,
+  SelfUpdateOrchestrator,
+} from '../services/self-update/orchestrator.js';
 import { SessionsService } from '../services/sessions.js';
 import { deriveSessionKey, TokensService } from '../services/tokens.js';
+import { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import type { DashboardStats } from './dashboard-router.js';
@@ -49,6 +58,10 @@ export interface BootstrappedServer {
 export interface BootstrapOverrides {
   /** Test-only seam: replace the in-process embedder (never operator config). */
   embedder?: Embedder;
+  /** Test-only seam: replace the release update check. */
+  updates?: UpdateCheckService;
+  /** Test-only seam: replace the self-update orchestrator. */
+  selfUpdate?: SelfUpdateOrchestrator;
 }
 
 export async function bootstrap(
@@ -195,6 +208,26 @@ export async function bootstrap(
     }),
   );
 
+  const updates =
+    overrides.updates ??
+    new UpdateCheckService({
+      enabled: env['REMBRIC_UPDATE_CHECK'] !== 'off',
+      // Test/smoke seam: point the release feed at a stub (docs/updates.md).
+      releasesUrl: env['REMBRIC_UPDATE_CHECK_URL'],
+    });
+  const selfUpdate =
+    overrides.selfUpdate ??
+    new SelfUpdateOrchestrator({
+      capability: new CapabilityDetector({ env }),
+      engineFactory: (socketPath) => new DockerEngineApi(socketPath),
+      backup: createPreUpdateBackup({
+        vacuumInto: (dest) => {
+          dbHandle.raw.prepare('VACUUM INTO ?').run(dest);
+        },
+        backupsDir: join(config.dataDir, 'backups'),
+      }),
+    });
+
   const rateLimiter = config.rateLimit.enabled
     ? new RateLimiter({
         ratePerSecond: config.rateLimit.ratePerSecond,
@@ -247,6 +280,8 @@ export async function bootstrap(
       memory: memorySvc,
       getStats: () => collectStats(dbHandle, agentSessionsSvc, relationsSvc),
       dataDir: config.dataDir,
+      updates,
+      selfUpdate,
     },
   });
 

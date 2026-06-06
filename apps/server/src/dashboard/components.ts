@@ -146,6 +146,8 @@ export interface SidebarOpts {
   counters: { pendingJudgments?: number };
   collapsed: boolean;
   csrf: SafeHtml;
+  /** Pre-rendered update badge (see `update-modal.ts::updateBadge`). */
+  update?: SafeHtml | null;
 }
 
 export function renderSidebar(opts: SidebarOpts): SafeHtml {
@@ -184,7 +186,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
           <small>v${REMBRIC_VERSION}</small>
         </div>
       </a>
-      ${sections}
+      ${opts.update ?? raw('')} ${sections}
       <div class="sb-foot">
         <div class="sb-foot-text">
           <form action="/dashboard/logout" method="post" style="margin:0">
@@ -208,7 +210,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
   `;
 }
 
-export function renderMobileBar(_active: NavKey | null): SafeHtml {
+export function renderMobileBar(_active: NavKey | null, update?: SafeHtml | null): SafeHtml {
   return html`
     <div class="mob-bar">
       <a class="brand" href="/dashboard">
@@ -218,6 +220,7 @@ export function renderMobileBar(_active: NavKey | null): SafeHtml {
           <small>v${REMBRIC_VERSION}</small>
         </div>
       </a>
+      ${update ?? raw('')}
       <a class="mob-toggle" href="#sidebar" aria-expanded="false">☰ MENU</a>
     </div>
   `;

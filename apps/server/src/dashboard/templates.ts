@@ -329,6 +329,10 @@ export interface ShellOptions {
   /** Pre-rendered sidebar (with CSRF). When omitted, the shell renders
    *  without a sidebar — used for the login page. */
   sidebar?: SafeHtml;
+  /** Pre-rendered update badge for the mobile bar (sidebar embeds its own). */
+  updateBadge?: SafeHtml | null;
+  /** Pre-rendered update-available dialog + script (see `update-modal.ts`). */
+  updateModal?: SafeHtml;
 }
 
 export function shell(body: SafeHtml, opts: ShellOptions): string {
@@ -353,7 +357,7 @@ export function shell(body: SafeHtml, opts: ShellOptions): string {
   const shellBody = opts.sidebar
     ? `<div class="app${collapsed ? ' is-collapsed' : ''}">
 ${opts.sidebar.__html}
-${renderMobileBar(opts.activeNav ?? null).__html}
+${renderMobileBar(opts.activeNav ?? null, opts.updateBadge ?? null).__html}
 <main class="main">
 ${flashHtml}
 ${body.__html}
@@ -383,6 +387,7 @@ ${links.join('\n')}
 </head>
 <body>
 ${shellBody}
+${opts.updateModal ? opts.updateModal.__html : ''}
 <dialog id="rbr-confirm" class="modal" data-tone="danger">
   <form method="dialog">
     <div class="modal-head">

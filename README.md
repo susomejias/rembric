@@ -252,6 +252,8 @@ Compose auto-merges the override on every `up`. Point your agent at `http://127.
 
 ### Upgrading
 
+**Auto-updater from the UI.** The dashboard checks for new releases (once a day, [opt-out](./docs/updates.md)) and shows a badge + changelog modal when one is out. Mount the Docker socket and the same modal gains a one-click **Update** button that backs up the database, pulls the new image, swaps the container with health-check and rollback, and reloads the page on the new version — see [docs/updates.md](./docs/updates.md) for setup and the security trade-off. Without the socket nothing breaks: you get the notification plus the manual flow below.
+
 Docker manages versions for you. With `REMBRIC_VERSION` unset in `.env`, the compose file pulls `:latest`:
 
 ```bash
@@ -259,7 +261,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Portainer / Arcane detect the new digest automatically and offer a "Recreate container" button — one click. For reproducible deploys, pin a specific version in `.env`:
+Portainer / Arcane detect the new digest automatically and offer a "Recreate container" button — one click. For reproducible deploys, pin a specific version in `.env` (this also disables the one-click updater — the dashboard explains why):
 
 ```ini
 REMBRIC_VERSION=0.13.0
@@ -308,12 +310,13 @@ All config via environment variables. With Docker, these live in `.env` and are 
 
 ### Server
 
-| Variable           | Default                           | Description                                                                                                   |
-| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `REMBRIC_HOST`     | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker. |
-| `REMBRIC_PORT`     | `8787`                            | Bind port.                                                                                                    |
-| `REMBRIC_DATA_DIR` | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.    |
-| `LOG_LEVEL`        | `info`                            | `debug` / `info` / `warn` / `error`.                                                                          |
+| Variable               | Default                           | Description                                                                                                                |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `REMBRIC_HOST`         | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker.              |
+| `REMBRIC_PORT`         | `8787`                            | Bind port.                                                                                                                 |
+| `REMBRIC_DATA_DIR`     | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.                 |
+| `LOG_LEVEL`            | `info`                            | `debug` / `info` / `warn` / `error`.                                                                                       |
+| `REMBRIC_UPDATE_CHECK` | `on`                              | `off` disables the daily release check (no badge, no modal, no GitHub API call). See [docs/updates.md](./docs/updates.md). |
 
 ### Hardware requirements
 
@@ -379,6 +382,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - [docs/docker.md](./docs/docker.md) — Docker operator guide (topologies, GHCR auth, upgrade/rollback, troubleshooting).
 - [docs/agents.md](./docs/agents.md) — per-client MCP config (Codex, Cursor, Windsurf, VS Code, Gemini, …).
 - [docs/backup.md](./docs/backup.md) — backup strategies and restore recipes for the SQLite data file.
+- [docs/updates.md](./docs/updates.md) — update notifications and the opt-in one-click auto-updater from the dashboard.
 - [docs/troubleshooting.md](./docs/troubleshooting.md) — common errors and recovery.
 
 ## Project status
