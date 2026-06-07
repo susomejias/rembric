@@ -623,6 +623,8 @@ This is a read-side display concern only. It SHALL NOT alter what is stored: the
 
 A `NULL` stored session summary SHALL be emitted as `null` (not coerced to an empty snippet). The default recent-session count SHALL remain `5` — this requirement governs per-field size, not item count.
 
+`recentSessions[]` SHALL additionally include a `title` field, emitted **verbatim** as stored (`s.title`) — the curated title when the agent set one via `memory.session_summary`, otherwise the auto-generated placeholder. `title` is bounded to ≤100 chars at write time, so it is a short label emitted as-is and is NOT passed through the snippet helper. No filtering or hiding logic SHALL be applied: a populated title is emitted as-is, and a `null` stored title (should one ever occur) is emitted as `null`.
+
 #### Scenario: A session summary longer than the bound is truncated in context
 
 - **GIVEN** a content-bearing session whose stored `summary` is longer than `CONTEXT_SNIPPET_CHARS`
@@ -654,6 +656,18 @@ A `NULL` stored session summary SHALL be emitted as `null` (not coerced to an em
 - **GIVEN** a session whose `summary` was truncated to a snippet in a `memory.context` response
 - **WHEN** the same session's row is read through a path that returns the summary directly (e.g. the agent-sessions service `getById` or the dashboard sessions view)
 - **THEN** the full, untruncated stored `summary` SHALL be returned
+
+#### Scenario: A curated session title is surfaced verbatim
+
+- **GIVEN** a session whose title was set via `memory.session_summary({ title })`
+- **WHEN** the agent calls `memory.context`
+- **THEN** the corresponding `recentSessions[].title` SHALL equal the stored title verbatim
+
+#### Scenario: An uncurated session's title is still surfaced verbatim
+
+- **GIVEN** a content-bearing session that was never summarized with a title (only the auto-generated placeholder exists)
+- **WHEN** the agent calls `memory.context`
+- **THEN** the corresponding `recentSessions[].title` SHALL equal the stored (placeholder) title verbatim — no hiding or nulling logic is applied
 
 ### Requirement: `memory.session_get` returns a session's full summary by id
 
