@@ -22,7 +22,7 @@ const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
  * retries with a shorter body), HTTP truncates (hook scripts cannot react
  * to an error). See `openspec/specs/sessions/spec.md`.
  */
-export const SUMMARY_MAX_CHARS = 16000;
+export const SUMMARY_MAX_CHARS = 10000;
 
 /** Suffix appended by `truncateSummary` when overflow trims content. */
 export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';

@@ -7,7 +7,7 @@ The snippet change already decoupled stored summary size from `memory.context` t
 ## What Changes
 
 - **Move the summary cap from the database to the server.** Drop the SQLite `CHECK (length(summary) <= 2000)` (added in migration `0011`) via a table-rebuild migration. The cap then lives **only** in `SUMMARY_MAX_CHARS` (already imported by the service, MCP zod schema, and HTTP truncation), making it a tunable: future cap changes become a one-line constant edit with **no further table rebuilds**. **BREAKING** for nothing on the wire — purely an internal constraint move.
-- **Raise `SUMMARY_MAX_CHARS`** to a value generous enough for a rich, multi-field handoff summary. Recommended default **16000** (the HTTP layer already accepts up to 20000 before truncating). **OPEN DECISION (see design):** exact value, and whether to keep a very generous DB `CHECK` (e.g. 1 MB) as a pathological-size guard versus a pure server-only cap.
+- **Raise `SUMMARY_MAX_CHARS`** to a value generous enough for a rich, multi-field handoff summary. Recommended default **10000** (the HTTP layer already accepts up to 20000 before truncating). **OPEN DECISION (see design):** exact value, and whether to keep a very generous DB `CHECK` (e.g. 1 MB) as a pathological-size guard versus a pure server-only cap.
 - **Add a new MCP tool `memory.get_session`** that returns a single session (by id) with its **full, untruncated** summary, scope-enforced. `memory.context` keeps emitting the 350-char snippet; agents call `memory.get_session` when the snippet is not enough (e.g. resuming a session surfaced in context). New MCP tool ⇒ this proposal is the required OpenSpec change for it.
 
 ## Capabilities

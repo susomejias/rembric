@@ -457,7 +457,7 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    const fullSummary = `Goal: ${'y'.repeat(700)}`; // over the 350 snippet bound, under the 16000 cap
+    const fullSummary = `Goal: ${'y'.repeat(700)}`; // over the 350 snippet bound, under the 10000 cap
     await client.callTool({
       name: 'memory.session_summary',
       arguments: { summary: fullSummary },

@@ -28,8 +28,8 @@ A table-rebuild migration recreates `sessions` without the `summary` `CHECK`. Th
 - _Alternative — keep the DB `CHECK` and rebuild whenever the cap changes:_ rejected; recurring rebuild cost and risk for a value that is purely a server policy.
 - _Alternative — keep duplicating (CHECK at the new value):_ rejected; same drift/rebuild problem, just at a higher number.
 
-**Decision 2 — New cap value. (OPEN — recommend 16000.)**
-The HTTP layer already accepts up to 20000 before truncating; 16000 leaves headroom while comfortably carrying a rich multi-field handoff summary. Alternatives: keep 2000 (defeats the purpose), 8000 (more conservative), 20000 (match the HTTP ceiling). Unbounded is rejected — a sanity ceiling protects storage and the context snippet's source. **Final value to be confirmed before/at apply.**
+**Decision 2 — New cap value. (OPEN — recommend 10000.)**
+The HTTP layer already accepts up to 20000 before truncating; 10000 leaves headroom while comfortably carrying a rich multi-field handoff summary. Alternatives: keep 2000 (defeats the purpose), 8000 (more conservative), 20000 (match the HTTP ceiling). Unbounded is rejected — a sanity ceiling protects storage and the context snippet's source. **Final value to be confirmed before/at apply.**
 
 **Decision 3 — Pure server-only cap vs a generous DB guard. (OPEN — recommend pure server-only.)**
 Pure server-only is simplest and matches the "cap is server policy" framing. A generous guard `CHECK` (e.g. `length(summary) <= 1048576`) would re-add a pathological-size backstop at the DB without pinning the operative cap (it would essentially never change, so no recurring rebuilds). Trade-off: the guard restores a last-line integrity net at the cost of one more constraint to reason about. **To be confirmed at apply.**
@@ -60,6 +60,6 @@ Return id, agent, status, started/ended timestamps, title, and the full `summary
 
 ## Open Questions
 
-- **Cap value** (Decision 2): 16000 recommended — confirm.
+- **Cap value** (Decision 2): 10000 recommended — confirm.
 - **Guard `CHECK`** (Decision 3): pure server-only vs a 1 MB pathological guard — confirm.
 - **Tool name / projection** (Decisions 4–5): `memory.get_session` and the returned fields — confirm naming and whether to include anything beyond `{ id, agent, status, startedAt, endedAt, title, summary }`.

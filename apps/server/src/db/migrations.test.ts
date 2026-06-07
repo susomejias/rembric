@@ -29,7 +29,7 @@ describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () 
         "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
       )
       .run();
-    // > the old 2000 cap and > the new 16000 server cap: the DB no longer
+    // > the old 2000 cap and > the new 10000 server cap: the DB no longer
     // enforces length; the cap lives only in SUMMARY_MAX_CHARS server-side.
     expect(() =>
       raw

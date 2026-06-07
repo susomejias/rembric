@@ -1,6 +1,6 @@
 ## 0. Confirm open decisions (before coding)
 
-- [x] 0.1 `SUMMARY_MAX_CHARS` = **16000**.
+- [x] 0.1 `SUMMARY_MAX_CHARS` = **10000**.
 - [x] 0.2 **Pure server-only** — drop the `summary` length `CHECK` entirely; no DB guard `CHECK`.
 - [x] 0.3 Tool name **`memory.get_session`**, projection `{ id, agent, status, startedAt, endedAt, title, summary }`.
 
