@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ProjectsService } from '../services/projects.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
@@ -322,15 +322,15 @@ describe('createApiRouter', () => {
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-trunc-summary/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'A'.repeat(5000) },
+        body: { summary: 'A'.repeat(SUMMARY_MAX_CHARS + 2000) },
       });
       expect(r.status).toBe(200);
       expect(r.body.ok).toBe(true);
       const row = agentSessions.getById('sess-trunc-summary');
-      expect(row?.summary?.length).toBe(2000);
+      expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
       expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
       // Response body echoes the truncated value.
-      expect((r.body.summary as string).length).toBe(2000);
+      expect((r.body.summary as string).length).toBe(SUMMARY_MAX_CHARS);
     });
 
     it('400 invalid_input on summary > 20_000 (wire DoS guard fires before truncation)', async () => {
@@ -409,13 +409,13 @@ describe('createApiRouter', () => {
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-trunc/end`, {
         token: adminToken.plaintext,
-        body: { summary: 'A'.repeat(5000), final: false },
+        body: { summary: 'A'.repeat(SUMMARY_MAX_CHARS + 2000), final: false },
       });
       expect(r.status).toBe(200);
       const row = agentSessions.getById('sess-end-trunc');
       expect(row?.status).toBe('ended');
       expect(row?.endedAt).not.toBeNull();
-      expect(row?.summary?.length).toBe(2000);
+      expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
       expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
     });
 

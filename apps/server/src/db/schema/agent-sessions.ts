@@ -62,9 +62,12 @@ export const agentSessions = sqliteTable(
      * Structured summary populated by memory.session_summary (final:true)
      * or by hook fallbacks (final:false). Mutable subject to the
      * `summary_final` precedence flag. Bounded to `SUMMARY_MAX_CHARS`
-     * (2000) by a SQLite CHECK constraint declared in migration
-     * `0011_summary_length_check.sql`; the service layer rejects oversize
-     * writes and the HTTP handler truncates with a `…[truncated]` suffix.
+     * by the server only (service rejects oversize, MCP zod + HTTP enforce
+     * the same constant); there is NO SQLite CHECK pinning the length — the
+     * `0011` CHECK was dropped in `0012_drop_summary_length_check.sql` so the
+     * cap is a tunable constant with no further table rebuilds. The full
+     * summary is read back via `memory.get_session`; `memory.context`
+     * returns only a snippet.
      */
     summary: text('summary'),
     /** Lock flag for `summary`. Once true, only final writes overwrite. */

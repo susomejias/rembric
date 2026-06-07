@@ -74,6 +74,10 @@ export const capturePassiveSchema = {
   sessionId: z.string().min(1).optional(),
 };
 
+export const getSessionSchema = {
+  sessionId: z.string().min(1),
+};
+
 export interface SessionsToolDeps {
   repos: Pick<Repositories, 'memory' | 'relations'>;
   agentSessions: AgentSessionsService;
@@ -144,6 +148,7 @@ export function buildSessionsHandlers(deps: SessionsToolDeps) {
     sessionEnd: handleSessionEnd.bind(null, deps),
     sessionSummary: handleSessionSummary.bind(null, deps),
     context: handleContext.bind(null, deps),
+    getSession: handleGetSession.bind(null, deps),
     timeline: handleTimeline.bind(null, deps),
     capturePassive: handleCapturePassive.bind(null, deps),
     doctor: handleDoctor.bind(null, deps),
@@ -452,6 +457,29 @@ function rejectIfDeleted(
   return null;
 }
 
+function handleGetSession(deps: SessionsToolDeps, args: { sessionId: string }) {
+  const scope = scopeFromContext(deps);
+  const row = deps.agentSessions.getById(args.sessionId);
+  if (
+    !row ||
+    row.deletedAt ||
+    (scope.kind === 'project' ? row.projectId !== scope.projectId : row.projectId !== null)
+  ) {
+    return mcpError('not_found', `session '${args.sessionId}' not found in this scope`);
+  }
+  return ok({
+    id: row.id,
+    agent: row.agent,
+    status: row.status,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    title: row.title,
+    summary: row.summary,
+  });
+}
+
+const CONTEXT_SNIPPET_CHARS = 350;
+
 function handleContext(
   deps: SessionsToolDeps,
   args: {
@@ -479,7 +507,7 @@ function handleContext(
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       status: s.status,
-      summary: s.summary,
+      summary: s.summary ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
     }));
 
   const recentMemories = deps.repos.memory
@@ -492,7 +520,7 @@ function handleContext(
     .map((m) => ({
       id: m.id,
       type: m.type,
-      snippet: snippet(m.content, 200),
+      snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
       status: m.status,
       createdAt: m.createdAt.toISOString(),
     }));
@@ -505,7 +533,7 @@ function handleContext(
     })
     .map((p) => ({
       id: p.id,
-      content: p.content,
+      content: snippet(p.content, CONTEXT_SNIPPET_CHARS),
       agent: p.agent,
       createdAt: p.createdAt,
     }));
@@ -526,8 +554,8 @@ function handleContext(
       judgmentId: r.judgmentId,
       sourceId: r.sourceId,
       targetId: r.targetId,
-      sourceSnippet: snippet(r.sourceContent, 200),
-      targetSnippet: snippet(r.targetContent, 200),
+      sourceSnippet: snippet(r.sourceContent, CONTEXT_SNIPPET_CHARS),
+      targetSnippet: snippet(r.targetContent, CONTEXT_SNIPPET_CHARS),
       ageMs: now - r.createdAt.getTime(),
     }));
 

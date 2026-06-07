@@ -2,9 +2,13 @@ import { createServer as createNetServer } from 'node:net';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
+import { agentSessions } from '../db/schema/agent-sessions.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
+import { ProjectsService } from '../services/projects.js';
 
 import { createTestDb } from './db.js';
 import { FakeEmbedder } from './embedder.js';
@@ -338,6 +342,217 @@ describe('MCP protocol conformance', () => {
     expect(ctxPayload.recentSessions).toHaveLength(1);
     expect(ctxPayload.recentSessions[0]?.id).toBe(usefulPayload.sessionId);
 
+    await client.close();
+  });
+
+  // Snippet tests run in global scope and END their session before closing.
+  // session_start resumes the transport's active session, and a lingering
+  // active session would pollute the global auto-stamp used by later tests —
+  // so each test cleans up. end() does not auto-curate a summary, so the
+  // null-summary case stays null after ending.
+  it('memory.context truncates a long session summary to ≤350 chars while storage stays full', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'long summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const fullSummary = `Goal: ${'x'.repeat(600)}`; // 606 chars, under the 2000 write cap, over the 350 display bound
+    const summarised = (await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: fullSummary, title: 'Long' },
+    })) as ToolResult;
+    expect(summarised.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.summary).not.toBeNull();
+    expect(seen?.summary?.length).toBeLessThanOrEqual(350);
+    expect(seen?.summary?.endsWith('…')).toBe(true);
+
+    // Storage is unaffected: the row still holds the full, untruncated summary.
+    const stored = createRepositories(server.dbHandle.db).agentSessions.getById(sessionId);
+    expect(stored?.summary).toBe(fullSummary);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context returns a short session summary verbatim (no ellipsis)', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'short summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const shortSummary = 'Goal: short session. Accomplished: nothing notable.';
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: shortSummary },
+    });
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.summary).toBe(shortSummary);
+    expect(seen?.summary?.endsWith('…')).toBe(false);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context emits null for a content-bearing session with no summary', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'no-summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    // Anchor a memory so the session is content-bearing without a summary.
+    // memory.save auto-stamps the active session_id, so no summary is written.
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'anchor row, no session summary' },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen).toBeDefined();
+    expect(seen?.summary).toBeNull();
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.get_session returns the FULL summary while memory.context returns a snippet', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'get_session full summary' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const fullSummary = `Goal: ${'y'.repeat(700)}`; // over the 350 snippet bound, under the 10000 cap
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: fullSummary },
+    });
+
+    // memory.context truncates to the snippet bound...
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.summary?.length).toBeLessThanOrEqual(350);
+
+    // ...while memory.get_session returns the full, untruncated summary.
+    const got = (await client.callTool({
+      name: 'memory.get_session',
+      arguments: { sessionId },
+    })) as ToolResult;
+    expect(got.isError).toBeFalsy();
+    const gotPayload = readJson(got) as { id: string; summary: string | null };
+    expect(gotPayload.id).toBe(sessionId);
+    expect(gotPayload.summary).toBe(fullSummary);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.get_session returns not_found for a cross-scope session', async () => {
+    // Create the project directly on the shared DB (single better-sqlite3
+    // connection) so the path-scoped connection resolves ctx.project to it.
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    projects.create({ slug: 'getsession-proj' });
+
+    // Start a session INSIDE the project (path-scoped → project scope).
+    const pinned = await connect({ projectSlug: 'getsession-proj' });
+    const started = (await pinned.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'project-scoped session' },
+    })) as ToolResult;
+    const startedPayload = readJson(started) as { sessionId: string; scope: string };
+    const { sessionId } = startedPayload;
+    // Guard: confirm the session really is project-scoped (not global).
+    expect(startedPayload.scope).toBe('project');
+    await pinned.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: lives in a project.' },
+    });
+    // In-scope get_session finds it.
+    const inScope = (await pinned.callTool({
+      name: 'memory.get_session',
+      arguments: { sessionId },
+    })) as ToolResult;
+    expect(inScope.isError).toBeFalsy();
+    await pinned.callTool({ name: 'memory.session_end', arguments: {} });
+    await pinned.close();
+
+    // Fetch from global scope → the project session is out of scope.
+    const globalClient = await connect();
+    const got = (await globalClient.callTool({
+      name: 'memory.get_session',
+      arguments: { sessionId },
+    })) as ToolResult;
+    expect(got.isError).toBe(true);
+    expect((readJson(got) as { code?: string }).code).toBe('not_found');
+    await globalClient.close();
+  });
+
+  it('memory.get_session returns not_found for a soft-deleted session', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'soon-deleted session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: about to be soft-deleted.' },
+    });
+
+    // Soft-delete the row directly (operator action; no agent-facing tool).
+    server.dbHandle.db
+      .update(agentSessions)
+      .set({ deletedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+
+    const got = (await client.callTool({
+      name: 'memory.get_session',
+      arguments: { sessionId },
+    })) as ToolResult;
+    expect(got.isError).toBe(true);
+    expect((readJson(got) as { code?: string }).code).toBe('not_found');
     await client.close();
   });
 
