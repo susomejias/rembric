@@ -51,6 +51,35 @@ Three causes:
 
 Each migration runs in one transaction, so partial migrations roll back. If startup still fails: restore the latest backup (see `docs/backup.md`), reset `_migrations` to drop the failed row, restart.
 
+## One-click updates
+
+### Dashboard still shows "Manual update" with the Docker socket mounted
+
+The container runs as the unprivileged `rembric` user, and on most Linux hosts `/var/run/docker.sock` is `root:docker` mode `660` — mounted but unreadable. The logs confirm it:
+
+```
+ℹ docker socket at /var/run/docker.sock is mounted but not usable (check group_add); one-click updates disabled
+```
+
+Grant the socket's group to the container and recreate it:
+
+```bash
+stat -c '%g' /var/run/docker.sock   # e.g. 991
+```
+
+```yaml
+services:
+  rembric:
+    group_add:
+      - '991'
+```
+
+Capability detection is cached for 30 s — reload the dashboard after `docker compose up -d`.
+
+### Update button missing on a pinned version
+
+If `.env` pins `REMBRIC_VERSION=x.y.z`, one-click is refused by design (the next `docker compose up` would silently revert a self-update). The modal explains the pin; see [docs/updates.md](./updates.md#pinned-versions-disable-one-click).
+
 ## MCP transport
 
 ### Pending judgments piling up in search annotations
