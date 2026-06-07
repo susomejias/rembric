@@ -448,12 +448,12 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.get_session returns the FULL summary while memory.context returns a snippet', async () => {
+  it('memory.session_get returns the FULL summary while memory.context returns a snippet', async () => {
     const client = await connect();
 
     const started = (await client.callTool({
       name: 'memory.session_start',
-      arguments: { agent: 'rembric-test', description: 'get_session full summary' },
+      arguments: { agent: 'rembric-test', description: 'session_get full summary' },
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
@@ -474,9 +474,9 @@ describe('MCP protocol conformance', () => {
     const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
     expect(seen?.summary?.length).toBeLessThanOrEqual(350);
 
-    // ...while memory.get_session returns the full, untruncated summary.
+    // ...while memory.session_get returns the full, untruncated summary.
     const got = (await client.callTool({
-      name: 'memory.get_session',
+      name: 'memory.session_get',
       arguments: { sessionId },
     })) as ToolResult;
     expect(got.isError).toBeFalsy();
@@ -488,7 +488,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.get_session returns not_found for a cross-scope session', async () => {
+  it('memory.session_get returns not_found for a cross-scope session', async () => {
     // Create the project directly on the shared DB (single better-sqlite3
     // connection) so the path-scoped connection resolves ctx.project to it.
     const projects = new ProjectsService(createRepositories(server.dbHandle.db));
@@ -508,9 +508,9 @@ describe('MCP protocol conformance', () => {
       name: 'memory.session_summary',
       arguments: { summary: 'Goal: lives in a project.' },
     });
-    // In-scope get_session finds it.
+    // In-scope session_get finds it.
     const inScope = (await pinned.callTool({
-      name: 'memory.get_session',
+      name: 'memory.session_get',
       arguments: { sessionId },
     })) as ToolResult;
     expect(inScope.isError).toBeFalsy();
@@ -520,7 +520,7 @@ describe('MCP protocol conformance', () => {
     // Fetch from global scope → the project session is out of scope.
     const globalClient = await connect();
     const got = (await globalClient.callTool({
-      name: 'memory.get_session',
+      name: 'memory.session_get',
       arguments: { sessionId },
     })) as ToolResult;
     expect(got.isError).toBe(true);
@@ -528,7 +528,7 @@ describe('MCP protocol conformance', () => {
     await globalClient.close();
   });
 
-  it('memory.get_session returns not_found for a soft-deleted session', async () => {
+  it('memory.session_get returns not_found for a soft-deleted session', async () => {
     const client = await connect();
     const started = (await client.callTool({
       name: 'memory.session_start',
@@ -548,7 +548,7 @@ describe('MCP protocol conformance', () => {
       .run();
 
     const got = (await client.callTool({
-      name: 'memory.get_session',
+      name: 'memory.session_get',
       arguments: { sessionId },
     })) as ToolResult;
     expect(got.isError).toBe(true);

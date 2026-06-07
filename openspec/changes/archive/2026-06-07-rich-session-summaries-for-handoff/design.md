@@ -34,27 +34,27 @@ The HTTP layer already accepts up to 20000 before truncating; 10000 leaves headr
 **Decision 3 — Pure server-only cap vs a generous DB guard. (OPEN — recommend pure server-only.)**
 Pure server-only is simplest and matches the "cap is server policy" framing. A generous guard `CHECK` (e.g. `length(summary) <= 1048576`) would re-add a pathological-size backstop at the DB without pinning the operative cap (it would essentially never change, so no recurring rebuilds). Trade-off: the guard restores a last-line integrity net at the cost of one more constraint to reason about. **To be confirmed at apply.**
 
-**Decision 4 — A dedicated `memory.get_session` tool, not an overload of `memory.get`.**
+**Decision 4 — A dedicated `memory.session_get` tool, not an overload of `memory.get`.**
 `memory.get` is contractually memory-row-only (cross-scope/unknown ids → `not_found`); overloading it with session semantics would muddy that contract. A dedicated tool is clearer and easier to scope-guard.
 
 - _Alternative — extend `memory.context` with a per-session full-fetch flag:_ rejected; context is a batch awareness payload, not a by-id fetch, and a flag that un-truncates would re-create the token cost we removed.
 - _Alternative — return the full summary in `memory.timeline`:_ rejected; timeline is about memory neighbours, not the session record.
 
-**Decision 5 — `memory.get_session` returns a bounded session projection.**
+**Decision 5 — `memory.session_get` returns a bounded session projection.**
 Return id, agent, status, started/ended timestamps, title, and the full `summary` — reusing `AgentSessionsService.getById` plus scope/soft-delete checks. Read-only.
 
 ## Risks / Trade-offs
 
 - **[Trade-off] Removing the DB `CHECK` drops the last-line integrity net for summary length** → Mitigated: CLAUDE.md confines all SQL to `db/`, every write goes through `AgentSessionsService` which enforces `SUMMARY_MAX_CHARS`, and there is no raw write path. Optionally restored by the Decision-3 guard `CHECK`.
 - **[Risk] Table-rebuild data loss / corruption** → Mitigated: relaxing a constraint rejects no existing rows; `INSERT … SELECT` copies all; the `migrate.ts` runner wraps the body in `PRAGMA foreign_keys=OFF` → `BEGIN IMMEDIATE` → `PRAGMA foreign_key_check` (pre-commit gate) → `COMMIT`, so it is atomic, and the `migration runner FK-safety` invariant test guards the pattern. The rebuild must recreate all indexes/triggers on `sessions`.
-- **[Risk] `memory.get_session` leaks cross-scope session content** → Mitigated: the handler resolves scope via the documented precedence and returns `not_found` for out-of-scope or soft-deleted ids, mirroring `memory.get`.
-- **[Trade-off] Larger stored summaries cost more disk and more tokens _when fetched in full_** → Accepted: full fetch is opt-in (`memory.get_session`), so the cost is paid only when an agent deliberately pulls the full text for a handoff; `memory.context` stays cheap.
+- **[Risk] `memory.session_get` leaks cross-scope session content** → Mitigated: the handler resolves scope via the documented precedence and returns `not_found` for out-of-scope or soft-deleted ids, mirroring `memory.get`.
+- **[Trade-off] Larger stored summaries cost more disk and more tokens _when fetched in full_** → Accepted: full fetch is opt-in (`memory.session_get`), so the cost is paid only when an agent deliberately pulls the full text for a handoff; `memory.context` stays cheap.
 
 ## Migration Plan
 
 1. Add a migration that rebuilds `sessions` without the `summary` `CHECK` (optionally with the generous guard `CHECK` from Decision 3): `CREATE TABLE sessions_new (… no value-pinning CHECK …)` → `INSERT INTO sessions_new SELECT * FROM sessions` → `DROP TABLE sessions` → `ALTER TABLE sessions_new RENAME TO sessions` → recreate all indexes/triggers. No manual pragmas (the runner supplies them).
 2. Raise `SUMMARY_MAX_CHARS` to the Decision-2 value.
-3. Register and implement `memory.get_session`.
+3. Register and implement `memory.session_get`.
 
 **Rollback:** revert the constant and the tool registration; the migration itself is forward-only (a relaxed constraint is harmless to leave in place). No data is lost in either direction.
 
@@ -62,4 +62,4 @@ Return id, agent, status, started/ended timestamps, title, and the full `summary
 
 - **Cap value** (Decision 2): 10000 recommended — confirm.
 - **Guard `CHECK`** (Decision 3): pure server-only vs a 1 MB pathological guard — confirm.
-- **Tool name / projection** (Decisions 4–5): `memory.get_session` and the returned fields — confirm naming and whether to include anything beyond `{ id, agent, status, startedAt, endedAt, title, summary }`.
+- **Tool name / projection** (Decisions 4–5): `memory.session_get` and the returned fields — confirm naming and whether to include anything beyond `{ id, agent, status, startedAt, endedAt, title, summary }`.

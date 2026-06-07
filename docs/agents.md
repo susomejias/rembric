@@ -24,7 +24,7 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 
 `memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, and pending judgments for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
 
-When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.get_session({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
+When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
 
 ## Validated configs
 

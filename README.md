@@ -112,7 +112,7 @@ Works with **any** agent that speaks MCP. One server, memories shared across all
    │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
    │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
    │   │  project.{use,list,current}│   │                               │  │
-   │   │  memory.get_session        │   │                               │  │
+   │   │  memory.session_get        │   │                               │  │
    │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
    │                 ▼                                ▼                    │
    │   ┌───────────────────────────────────────────────────────────────┐   │
