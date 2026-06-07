@@ -1,16 +1,8 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
 import type { ConsolidationRunSummary } from '../consolidation/index.js';
-import {
-  NotUndoableError,
-  PurgedRowMissingError,
-  undoOp as runUndoOp,
-  undoRun as runUndoRun,
-} from '../consolidation/operations.js';
-import type { Db } from '../db/client.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import { projects } from '../db/schema/projects.js';
+import { NotUndoableError, PurgedRowMissingError } from '../consolidation/operations.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
@@ -20,10 +12,13 @@ import { formatTs, html, raw, shortId } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface ConsolidationDeps {
-  db: Db;
+  repos: Repositories;
   sessions: SessionsService;
   /** Forced sweep across all scopes (same lambda as the admin endpoint). */
   triggerSweep: () => ConsolidationRunSummary;
+  /** Bound consolidation undo lambdas (wired in bootstrap). */
+  undoRun: (runId: string) => void;
+  undoOp: (opId: string) => void;
 }
 
 function getSession(c: Context): ResolvedSession | null {
@@ -31,14 +26,10 @@ function getSession(c: Context): ResolvedSession | null {
 }
 
 /** `project:<id>` → project slug when the project still exists; raw value otherwise. */
-function scopeLabel(db: Db, scope: string | null): string {
+function scopeLabel(repos: Repositories, scope: string | null): string {
   if (scope === null) return '—';
   if (!scope.startsWith('project:')) return scope;
-  const row = db
-    .select({ slug: projects.slug })
-    .from(projects)
-    .where(eq(projects.id, scope.slice('project:'.length)))
-    .get();
+  const row = repos.projects.adminFindById(scope.slice('project:'.length));
   return row?.slug ?? scope;
 }
 
@@ -73,29 +64,13 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const runsRaw = deps.db
-      .select()
-      .from(consolidationRuns)
-      .orderBy(desc(consolidationRuns.startedAt))
-      .limit(PAGE_SIZE + 1)
-      .offset(offset)
-      .all();
+    const runsRaw = deps.repos.consolidation.adminListRuns(PAGE_SIZE + 1, offset);
     const hasMore = runsRaw.length > PAGE_SIZE;
     const runs = runsRaw.slice(0, PAGE_SIZE);
 
     const opCountByRun = new Map<string, { total: number; reverted: number }>();
     for (const run of runs) {
-      const total = deps.db
-        .select({ v: sql<number>`count(*)` })
-        .from(consolidationOps)
-        .where(eq(consolidationOps.consolidationId, run.id))
-        .get();
-      const reverted = deps.db
-        .select({ v: sql<number>`count(*)` })
-        .from(consolidationOps)
-        .where(and(eq(consolidationOps.consolidationId, run.id), sql`reverted_at IS NOT NULL`))
-        .get();
-      opCountByRun.set(run.id, { total: total?.v ?? 0, reverted: reverted?.v ?? 0 });
+      opCountByRun.set(run.id, deps.repos.consolidation.adminOpCounts(run.id));
     }
 
     const rows = runs.map((r) => {
@@ -117,7 +92,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
             <a href="/dashboard/consolidation/${r.id}">${formatTs(r.startedAt)}</a>
           </td>
           <td class="muted">${formatTs(r.finishedAt)}</td>
-          <td>${scopeLabel(deps.db, r.scope)}</td>
+          <td>${scopeLabel(deps.repos, r.scope)}</td>
           <td>${status}</td>
         </tr>
       `;
@@ -195,7 +170,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
 
     const id = c.req.param('id');
-    const run = deps.db.select().from(consolidationRuns).where(eq(consolidationRuns.id, id)).get();
+    const run = deps.repos.consolidation.adminGetRun(id);
     if (!run) {
       return c.html(
         renderPage(c, deps.sessions, html`<p class="flash error">Run not found.</p>`, {
@@ -206,12 +181,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       );
     }
 
-    const ops = deps.db
-      .select()
-      .from(consolidationOps)
-      .where(eq(consolidationOps.consolidationId, id))
-      .orderBy(consolidationOps.appliedAt)
-      .all();
+    const ops = deps.repos.consolidation.adminListOps(id);
 
     const isPurgeOp = (t: string) => t === 'session_purge' || t === 'archived_memory_purge';
 
@@ -291,7 +261,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         </div>
         <div class="stat-card">
           <div class="label">Scope</div>
-          <div class="value">${scopeLabel(deps.db, run.scope)}</div>
+          <div class="value">${scopeLabel(deps.repos, run.scope)}</div>
         </div>
         ${run.llmModel
           ? html`<div class="stat-card">
@@ -389,7 +359,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     if (form instanceof Response) return form;
     const id = c.req.param('id');
     try {
-      runUndoRun(deps.db, id);
+      deps.undoRun(id);
     } catch (err) {
       return renderUndoError(c, err);
     }
@@ -402,9 +372,9 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'op.undo');
     if (form instanceof Response) return form;
     const opId = c.req.param('opId');
-    const op = deps.db.select().from(consolidationOps).where(eq(consolidationOps.id, opId)).get();
+    const op = deps.repos.consolidation.adminGetOp(opId);
     try {
-      runUndoOp(deps.db, opId);
+      deps.undoOp(opId);
     } catch (err) {
       return renderUndoError(c, err);
     }
@@ -413,6 +383,3 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
 
   return app;
 }
-
-// Suppress unused-import warning when the file is not exercising isNull.
-void isNull;

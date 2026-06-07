@@ -1,9 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { sql } from 'drizzle-orm';
-
-import type { Db } from '../db/index.js';
+import type { DbDiagnostics } from '../db/diagnostics.js';
 
 const MARKER_FILENAME = '.rembric-state.json';
 const MARKER_SCHEMA_VERSION = 1;
@@ -23,13 +21,8 @@ export interface StateMarker {
   counts: DataCounts;
 }
 
-export function queryCounts(db: Db): DataCounts {
-  const one = (table: string): number => {
-    const row = db.get<{ c: number }>(sql.raw(`SELECT COUNT(*) AS c FROM ${table}`)) as
-      | { c: number }
-      | undefined;
-    return row?.c ?? 0;
-  };
+export function queryCounts(diagnostics: DbDiagnostics): DataCounts {
+  const one = (table: string): number => diagnostics.countTableRows(table) ?? 0;
   return {
     memory: one('memory'),
     projects: one('projects'),
@@ -66,7 +59,7 @@ export function writeStateMarker(dataDir: string, counts: DataCounts): void {
 
 export interface GuardDeps {
   dataDir: string;
-  db: Db;
+  diagnostics: DbDiagnostics;
   env: NodeJS.ProcessEnv;
   log?: (line: string) => void;
 }
@@ -92,7 +85,7 @@ export class DataLossGuardError extends Error {
 
 export function assertDataLossGuard(deps: GuardDeps): GuardResult {
   const log = deps.log ?? ((l) => console.error(l));
-  const current = queryCounts(deps.db);
+  const current = queryCounts(deps.diagnostics);
   const previous = readStateMarker(deps.dataDir);
   const allowed = deps.env['REMBRIC_ALLOW_DATA_SHRINKAGE'] === '1';
 

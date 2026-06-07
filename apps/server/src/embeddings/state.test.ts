@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
 import { SCOPE_GLOBAL } from '../services/scope.js';
@@ -17,7 +18,7 @@ let mem: MemoryService;
 
 beforeEach(() => {
   db = createTestDb();
-  mem = new MemoryService(db.handle.db);
+  mem = new MemoryService(createRepositories(db.handle.db), db.handle.db);
 });
 
 afterEach(() => db.cleanup());
@@ -31,7 +32,7 @@ function vecCount(): number {
 
 describe('ensureVectorModel', () => {
   it('first run writes the marker without wiping an empty table', () => {
-    const { wiped } = ensureVectorModel(db.handle.db, db.dataDir);
+    const { wiped } = ensureVectorModel(createRepositories(db.handle.db), db.dataDir);
     expect(wiped).toBe(0);
     const marker = JSON.parse(readFileSync(join(db.dataDir, 'embedding-state.json'), 'utf8')) as {
       modelId: string;
@@ -40,12 +41,15 @@ describe('ensureVectorModel', () => {
   });
 
   it('matching marker is a no-op even with vectors present', async () => {
-    ensureVectorModel(db.handle.db, db.dataDir);
+    ensureVectorModel(createRepositories(db.handle.db), db.dataDir);
     mem.save({ type: 'feedback', content: 'row' }, SCOPE_GLOBAL);
-    await new EmbeddingWorker({ db: db.handle.db, embedder: new FakeEmbedder() }).processBatch();
+    await new EmbeddingWorker({
+      repos: createRepositories(db.handle.db),
+      embedder: new FakeEmbedder(),
+    }).processBatch();
     expect(vecCount()).toBe(1);
 
-    const { wiped } = ensureVectorModel(db.handle.db, db.dataDir);
+    const { wiped } = ensureVectorModel(createRepositories(db.handle.db), db.dataDir);
     expect(wiped).toBe(0);
     expect(vecCount()).toBe(1);
   });
@@ -54,17 +58,20 @@ describe('ensureVectorModel', () => {
     // Simulate the pre-upgrade era: vectors exist, no marker.
     mem.save({ type: 'feedback', content: 'old-vector-row' }, SCOPE_GLOBAL);
     mem.save({ type: 'feedback', content: 'old-vector-row-2' }, SCOPE_GLOBAL);
-    const worker = new EmbeddingWorker({ db: db.handle.db, embedder: new FakeEmbedder() });
+    const worker = new EmbeddingWorker({
+      repos: createRepositories(db.handle.db),
+      embedder: new FakeEmbedder(),
+    });
     await worker.processBatch();
     expect(vecCount()).toBe(2);
 
-    const { wiped } = ensureVectorModel(db.handle.db, db.dataDir);
+    const { wiped } = ensureVectorModel(createRepositories(db.handle.db), db.dataDir);
     expect(wiped).toBe(2);
     expect(vecCount()).toBe(0);
 
     // The regular drain refills — in batches, resumable by construction.
     const batched = new EmbeddingWorker({
-      db: db.handle.db,
+      repos: createRepositories(db.handle.db),
       embedder: new FakeEmbedder(),
       batchSize: 1,
     });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
@@ -65,8 +66,8 @@ function isErrorResponse(resp: unknown): boolean {
 
 beforeEach(() => {
   db = createTestDb();
-  projects = new ProjectsService(db.handle.db);
-  memory = new MemoryService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   handlers = buildHandlers({ memory });
   projectA = projects.create({ slug: 'test-rembric' });
   projectB = projects.create({ slug: 'other-project' });
@@ -459,8 +460,8 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
     const { eq } = await import('drizzle-orm');
 
-    agentSessions = new AgentSessionsService(db.handle.db);
-    const tokens = new TokensService(db.handle.db);
+    agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+    const tokens = new TokensService(createRepositories(db.handle.db));
     tokens.bootstrapAdmin('attachment-test-token-with-enough-entropy');
     const admin = db.handle.db
       .select()

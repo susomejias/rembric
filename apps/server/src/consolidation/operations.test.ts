@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -27,8 +28,8 @@ let runId: string;
 beforeEach(() => {
   db = createTestDb();
   clock = new TestClock();
-  projects = new ProjectsService(db.handle.db, clock.now);
-  memoryService = new MemoryService(db.handle.db, clock.now);
+  projects = new ProjectsService(createRepositories(db.handle.db), clock.now);
+  memoryService = new MemoryService(createRepositories(db.handle.db), db.handle.db, clock.now);
   projectId = projects.create({ slug: 'app' }).id;
 
   runId = 'test-run-id';
@@ -53,7 +54,7 @@ describe('applyMerge', () => {
       projectScope(projectId),
     );
 
-    const { mergedId, opId } = applyMerge(db.handle.db, {
+    const { mergedId, opId } = applyMerge(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'prefers tabs for indentation',
@@ -81,7 +82,7 @@ describe('applyMerge', () => {
     const a = memoryService.save({ type: 'user', content: 'p1' }, projectScope(projectId));
     const b = memoryService.save({ type: 'user', content: 'g1' }, SCOPE_GLOBAL);
     expect(() =>
-      applyMerge(db.handle.db, {
+      applyMerge(createRepositories(db.handle.db), db.handle.db, {
         consolidationId: runId,
         predecessors: [a, b],
         mergedContent: 'x',
@@ -96,7 +97,7 @@ describe('applyMerge', () => {
     memoryService.archive(a.id, projectScope(projectId));
     const aArchived = memoryService.unsafeGetById(a.id)!;
     expect(() =>
-      applyMerge(db.handle.db, {
+      applyMerge(createRepositories(db.handle.db), db.handle.db, {
         consolidationId: runId,
         predecessors: [aArchived, b],
         mergedContent: 'x',
@@ -110,7 +111,7 @@ describe('applySupersede', () => {
   it('appends losers to the winner replaces array and flips them to superseded', () => {
     const winner = memoryService.save({ type: 'user', content: 'winner' }, projectScope(projectId));
     const loser = memoryService.save({ type: 'user', content: 'loser' }, projectScope(projectId));
-    applySupersede(db.handle.db, {
+    applySupersede(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       winner,
       losers: [loser],
@@ -129,7 +130,7 @@ describe('applyDecay', () => {
     const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
     memoryService.archive(b.id, projectScope(projectId));
 
-    applyDecay(db.handle.db, {
+    applyDecay(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       ids: [a.id, b.id],
       reasoning: 'stale',
@@ -144,14 +145,14 @@ describe('undoOp / undoRun', () => {
   it('reverts a merge: predecessors active again, merged-into archived', () => {
     const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
     const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
-    const { mergedId, opId } = applyMerge(db.handle.db, {
+    const { mergedId, opId } = applyMerge(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged',
       reasoning: 'r',
     });
 
-    undoOp(db.handle.db, opId);
+    undoOp(createRepositories(db.handle.db), db.handle.db, opId);
 
     expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
     expect(memoryService.unsafeGetById(b.id)!.status).toBe('active');
@@ -168,29 +169,35 @@ describe('undoOp / undoRun', () => {
   it('refuses to undo an already-reverted op', () => {
     const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
     const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
-    const { opId } = applyMerge(db.handle.db, {
+    const { opId } = applyMerge(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged',
       reasoning: 'r',
     });
-    undoOp(db.handle.db, opId);
-    expect(() => undoOp(db.handle.db, opId)).toThrow(/already reverted/);
+    undoOp(createRepositories(db.handle.db), db.handle.db, opId);
+    expect(() => undoOp(createRepositories(db.handle.db), db.handle.db, opId)).toThrow(
+      /already reverted/,
+    );
   });
 
   it('undoRun reverses every op in reverse order', () => {
     const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
     const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
-    applyMerge(db.handle.db, {
+    applyMerge(createRepositories(db.handle.db), db.handle.db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged',
       reasoning: 'r',
     });
     const c = memoryService.save({ type: 'user', content: 'c' }, projectScope(projectId));
-    applyDecay(db.handle.db, { consolidationId: runId, ids: [c.id], reasoning: 'r' });
+    applyDecay(createRepositories(db.handle.db), db.handle.db, {
+      consolidationId: runId,
+      ids: [c.id],
+      reasoning: 'r',
+    });
 
-    const { reverted } = undoRun(db.handle.db, runId);
+    const { reverted } = undoRun(createRepositories(db.handle.db), db.handle.db, runId);
     expect(reverted.length).toBe(2);
     expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
     expect(memoryService.unsafeGetById(c.id)!.status).toBe('active');
@@ -203,7 +210,11 @@ describe('undoOp with purged rows', () => {
       { type: 'user', content: 'will-be-purged' },
       projectScope(projectId),
     );
-    applyDecay(db.handle.db, { consolidationId: runId, ids: [c.id], reasoning: 'r' });
+    applyDecay(createRepositories(db.handle.db), db.handle.db, {
+      consolidationId: runId,
+      ids: [c.id],
+      reasoning: 'r',
+    });
 
     const opId = db.handle.db
       .select()
@@ -216,7 +227,7 @@ describe('undoOp with purged rows', () => {
 
     let thrown: unknown;
     try {
-      undoOp(db.handle.db, opId);
+      undoOp(createRepositories(db.handle.db), db.handle.db, opId);
     } catch (err) {
       thrown = err;
     }
@@ -249,7 +260,7 @@ describe('undoOp with purged rows', () => {
 
     let thrown: unknown;
     try {
-      undoOp(db.handle.db, 'purge-op-1');
+      undoOp(createRepositories(db.handle.db), db.handle.db, 'purge-op-1');
     } catch (err) {
       thrown = err;
     }
@@ -271,6 +282,8 @@ describe('undoOp with purged rows', () => {
       })
       .run();
 
-    expect(() => undoOp(db.handle.db, 'purge-op-2')).toThrow(NotUndoableError);
+    expect(() => undoOp(createRepositories(db.handle.db), db.handle.db, 'purge-op-2')).toThrow(
+      NotUndoableError,
+    );
   });
 });

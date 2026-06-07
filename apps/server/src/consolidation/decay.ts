@@ -1,8 +1,4 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
-
-import type { Db } from '../db/client.js';
-import { confirmations } from '../db/schema/confirmations.js';
-import { memory } from '../db/schema/memory.js';
+import type { Repositories } from '../db/repositories/index.js';
 
 /**
  * Identify memories eligible for deterministic decay (archive).
@@ -31,35 +27,17 @@ export interface ScopeKey {
   projectId: string | null;
 }
 
-interface DecayRow {
-  id: string;
-}
-
 export function findDecayCandidates(
-  db: Db,
+  repos: Pick<Repositories, 'memory'>,
   scope: ScopeKey,
   thresholds: DecayThresholds = DEFAULT_DECAY,
   now: Date = new Date(),
 ): string[] {
   const cutoff = new Date(now.getTime() - thresholds.thresholdMs);
-
-  const scopeFilter =
-    scope.scope === 'global'
-      ? and(eq(memory.scope, 'global'), sql`${memory.projectId} IS NULL`)
-      : and(eq(memory.scope, 'project'), eq(memory.projectId, scope.projectId ?? ''));
-
-  const rows = db
-    .select({ id: memory.id })
-    .from(memory)
-    .where(
-      and(
-        eq(memory.status, 'active'),
-        lt(memory.lastSeenAt, cutoff),
-        scopeFilter,
-        sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}) < ${thresholds.confidenceFloor}`,
-      ),
-    )
-    .all() as DecayRow[];
-
-  return rows.map((r) => r.id);
+  return repos.memory.findDecayCandidateIds(
+    scope.scope,
+    scope.projectId,
+    cutoff,
+    thresholds.confidenceFloor,
+  );
 }

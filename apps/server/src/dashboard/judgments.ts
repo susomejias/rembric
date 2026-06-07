@@ -1,8 +1,8 @@
-import { sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import type { Db } from '../db/client.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
+import type { AdminRelationFilters, Repositories } from '../db/repositories/index.js';
+import type { RelationKind, RelationStatus } from '../db/schema/memory-relations.js';
+import type { RelationsService } from '../services/relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
@@ -18,7 +18,8 @@ function truncate(s: string | null, max: number): string {
 }
 
 export interface JudgmentsDeps {
-  db: Db;
+  repos: Repositories;
+  relations: RelationsService;
   sessions: SessionsService;
 }
 
@@ -41,9 +42,9 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const whereParts: ReturnType<typeof sql>[] = [];
+    const filters: AdminRelationFilters = {};
     if (VALID_STATUSES.has(statusFilter)) {
-      whereParts.push(sql`r.status = ${statusFilter}`);
+      filters.status = statusFilter as RelationStatus;
     }
     const KIND_VALUES = new Set([
       'supersedes',
@@ -54,36 +55,12 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
       'not_conflict',
     ]);
     if (kindFilter && KIND_VALUES.has(kindFilter)) {
-      whereParts.push(sql`r.relation = ${kindFilter}`);
+      filters.kind = kindFilter as RelationKind;
     } else if (kindFilter === 'pending') {
-      whereParts.push(sql`r.relation IS NULL`);
+      filters.kind = 'pending';
     }
-    const whereSql =
-      whereParts.length === 0 ? sql`` : sql` WHERE ${sql.join(whereParts, sql` AND `)}`;
 
-    const rows = deps.db.all<{
-      id: string;
-      judgment_id: string;
-      source_id: string;
-      target_id: string;
-      relation: string | null;
-      status: 'pending' | 'judged' | 'orphaned';
-      marked_by_actor: string | null;
-      created_at: number;
-      source_content: string;
-      target_content: string;
-    }>(sql`
-      SELECT r.id, r.judgment_id, r.source_id, r.target_id, r.relation,
-             r.status, r.marked_by_actor, r.created_at,
-             ms.content AS source_content,
-             mt.content AS target_content
-      FROM memory_relations r
-      JOIN memory ms ON ms.id = r.source_id
-      JOIN memory mt ON mt.id = r.target_id
-      ${whereSql}
-      ORDER BY r.created_at DESC
-      LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
-    `);
+    const rows = deps.repos.relations.adminListWithContent(filters, PAGE_SIZE + 1, offset);
 
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
@@ -135,7 +112,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
               r.status === 'pending'
                 ? html`
                     <form
-                      action="/dashboard/judgments/${r.judgment_id}/orphan"
+                      action="/dashboard/judgments/${r.judgmentId}/orphan"
                       method="post"
                       class="inline"
                       data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
@@ -152,13 +129,13 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
                 <td>${statusPill(r.status)}</td>
                 <td>${verdictPill(r.relation)}</td>
                 <td class="small">
-                  <a href="/dashboard/memories/${r.source_id}">${truncate(r.source_content, 60)}</a>
+                  <a href="/dashboard/memories/${r.sourceId}">${truncate(r.sourceContent, 60)}</a>
                   →
-                  <a href="/dashboard/memories/${r.target_id}">${truncate(r.target_content, 60)}</a>
+                  <a href="/dashboard/memories/${r.targetId}">${truncate(r.targetContent, 60)}</a>
                 </td>
-                <td class="small">${r.marked_by_actor ?? raw('<span class="muted">—</span>')}</td>
+                <td class="small">${r.markedByActor ?? raw('<span class="muted">—</span>')}</td>
                 <td class="muted">
-                  <a href="/dashboard/judgments/${r.id}">${formatTs(new Date(r.created_at))}</a>
+                  <a href="/dashboard/judgments/${r.id}">${formatTs(r.createdAt)}</a>
                 </td>
                 <td>${orphanForm}</td>
               </tr>
@@ -207,34 +184,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
 
     const id = c.req.param('id');
-    const row = deps.db.get<{
-      id: string;
-      judgment_id: string;
-      source_id: string;
-      target_id: string;
-      relation: string | null;
-      status: 'pending' | 'judged' | 'orphaned';
-      reason: string | null;
-      evidence: string | null;
-      confidence: number | null;
-      marked_by_kind: string | null;
-      marked_by_actor: string | null;
-      judged_at: number | null;
-      created_at: number;
-      source_content: string;
-      target_content: string;
-    }>(sql`
-      SELECT r.id, r.judgment_id, r.source_id, r.target_id, r.relation, r.status,
-             r.reason, r.evidence, r.confidence,
-             r.marked_by_kind, r.marked_by_actor,
-             r.judged_at, r.created_at,
-             ms.content AS source_content,
-             mt.content AS target_content
-      FROM memory_relations r
-      JOIN memory ms ON ms.id = r.source_id
-      JOIN memory mt ON mt.id = r.target_id
-      WHERE r.id = ${id}
-    `);
+    const row = deps.repos.relations.adminGetWithContent(id);
 
     if (!row) {
       return c.html(
@@ -248,10 +198,15 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
 
     let evidencePretty: string | null = null;
     if (row.evidence !== null && row.evidence !== undefined) {
-      try {
-        evidencePretty = JSON.stringify(JSON.parse(row.evidence), null, 2);
-      } catch {
-        evidencePretty = String(row.evidence);
+      if (typeof row.evidence === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(row.evidence);
+          evidencePretty = JSON.stringify(parsed, null, 2);
+        } catch {
+          evidencePretty = row.evidence;
+        }
+      } else {
+        evidencePretty = JSON.stringify(row.evidence, null, 2);
       }
     }
 
@@ -259,7 +214,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
       row.status === 'pending'
         ? html`
             <form
-              action="/dashboard/judgments/${row.judgment_id}/orphan"
+              action="/dashboard/judgments/${row.judgmentId}/orphan"
               method="post"
               class="inline"
               data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
@@ -299,35 +254,35 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         <div class="stat-card">
           <div class="label">Marked by</div>
           <div class="value">
-            ${row.marked_by_kind ?? '—'}
-            ${row.marked_by_actor
-              ? html`<span class="muted small"> · ${row.marked_by_actor}</span>`
+            ${row.markedByKind ?? '—'}
+            ${row.markedByActor
+              ? html`<span class="muted small"> · ${row.markedByActor}</span>`
               : raw('')}
           </div>
         </div>
         <div class="stat-card">
           <div class="label">Created</div>
-          <div class="value" style="font-size:.9rem">${formatTs(new Date(row.created_at))}</div>
+          <div class="value" style="font-size:.9rem">${formatTs(row.createdAt)}</div>
         </div>
         <div class="stat-card">
           <div class="label">Judged</div>
           <div class="value" style="font-size:.9rem">
-            ${row.judged_at !== null ? formatTs(new Date(row.judged_at)) : '—'}
+            ${row.judgedAt !== null ? formatTs(row.judgedAt) : '—'}
           </div>
         </div>
       </div>
 
       <h2>Source</h2>
       <p class="mono small">
-        <a href="/dashboard/memories/${row.source_id}">${shortId(row.source_id)}</a>
+        <a href="/dashboard/memories/${row.sourceId}">${shortId(row.sourceId)}</a>
       </p>
-      <pre>${row.source_content}</pre>
+      <pre>${row.sourceContent}</pre>
 
       <h2>Target</h2>
       <p class="mono small">
-        <a href="/dashboard/memories/${row.target_id}">${shortId(row.target_id)}</a>
+        <a href="/dashboard/memories/${row.targetId}">${shortId(row.targetId)}</a>
       </p>
-      <pre>${row.target_content}</pre>
+      <pre>${row.targetContent}</pre>
 
       <h2>Reason</h2>
       <p>${row.reason ?? raw('<span class="muted">—</span>')}</p>
@@ -336,7 +291,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
       ${evidencePretty ? html`<pre>${evidencePretty}</pre>` : html`<p class="muted">—</p>`}
 
       <h2>Judgment id</h2>
-      <p class="mono small">${escape(row.judgment_id)}</p>
+      <p class="mono small">${escape(row.judgmentId)}</p>
 
       <h2>Actions</h2>
       <p>${orphanForm}</p>
@@ -356,12 +311,8 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     if (form instanceof Response) return form;
 
     const judgmentId = c.req.param('judgmentId');
-    const result = deps.db
-      .update(memoryRelations)
-      .set({ status: 'orphaned' as const, markedByKind: 'system' as const, judgedAt: new Date() })
-      .where(sql`judgment_id = ${judgmentId} AND status = 'pending'`)
-      .run();
-    if (result.changes === 0) {
+    const orphaned = deps.relations.orphanByOperator(judgmentId);
+    if (!orphaned) {
       return c.html(
         renderPage(
           c,

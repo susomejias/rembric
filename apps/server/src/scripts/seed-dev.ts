@@ -15,6 +15,7 @@
  */
 
 import { type DbHandle, createDb } from '../db/index.js';
+import { createRepositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -82,7 +83,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     return { skipped: true, refused: true };
   }
 
-  const projectsSvc = new ProjectsService(deps.handle.db);
+  const projectsSvc = new ProjectsService(createRepositories(deps.handle.db));
 
   const existing = projectsSvc.findBySlug(DEMO_SLUG);
   if (existing && !deps.reset) {
@@ -94,10 +95,10 @@ export function runSeed(deps: SeedDeps): SeedResult {
     wipe(deps.handle);
   }
 
-  const tokensSvc = new TokensService(deps.handle.db);
-  const memorySvc = new MemoryService(deps.handle.db);
-  const relationsSvc = new RelationsService(deps.handle.db);
-  const sessionsSvc = new AgentSessionsService(deps.handle.db);
+  const tokensSvc = new TokensService(createRepositories(deps.handle.db));
+  const memorySvc = new MemoryService(createRepositories(deps.handle.db), deps.handle.db);
+  const relationsSvc = new RelationsService(createRepositories(deps.handle.db), deps.handle.db);
+  const sessionsSvc = new AgentSessionsService(createRepositories(deps.handle.db), deps.handle.db);
 
   // 1. Project.
   const proj = projectsSvc.create({ slug: DEMO_SLUG, displayName: 'Demo Project' });

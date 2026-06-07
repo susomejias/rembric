@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { ProjectsService } from '../services/projects.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
@@ -30,7 +31,7 @@ describe('runSeed', () => {
     expect(result.readerTokenPlaintext).toMatch(/^.{20,}$/);
     expect(result.writerTokenPlaintext).toMatch(/^.{20,}$/);
 
-    const projects = new ProjectsService(db.handle.db);
+    const projects = new ProjectsService(createRepositories(db.handle.db));
     const demo = projects.findBySlug('demo');
     expect(demo).toBeDefined();
     expect(demo!.displayName).toBe('Demo Project');
@@ -48,7 +49,7 @@ describe('runSeed', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
     // Confirm pre-state.
-    const projects = new ProjectsService(db.handle.db);
+    const projects = new ProjectsService(createRepositories(db.handle.db));
     expect(projects.findBySlug('demo')).toBeDefined();
 
     // Reset + reseed (env gate present).
@@ -70,7 +71,7 @@ describe('runSeed', () => {
   it('--reset without REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 refuses and preserves data', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
-    const projects = new ProjectsService(db.handle.db);
+    const projects = new ProjectsService(createRepositories(db.handle.db));
     const before = projects.findBySlug('demo');
     expect(before).toBeDefined();
     const beforeId = before!.id;

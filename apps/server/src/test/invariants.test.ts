@@ -19,7 +19,8 @@ import { describe, expect, it } from 'vitest';
  * SQL fragments appear.
  *
  * Allow-list exception: the operator-only maintenance purge paths
- * (`src/services/memory.ts::purgeDisconnectedArchived` and
+ * (`MemoryService.purgeDisconnectedArchived` executing via
+ * `db/repositories/memory-repository.ts` and
  * `src/services/agent-sessions.ts::purgeEmpty`) MAY emit `DELETE FROM
  * memory` and `DELETE FROM sessions` respectively. The check pins the
  * allowance to those exact files; introducing the same DELETE elsewhere
@@ -47,8 +48,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
     description:
-      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in services/memory.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/memory.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in db/repositories/memory-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/memory-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -65,8 +66,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
     description:
-      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in services/agent-sessions.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/agent-sessions.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in db/repositories/agent-sessions-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/agent-sessions-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern:
@@ -102,8 +103,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+prompts\b/i,
     description:
-      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in services/prompts.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/prompts.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in db/repositories/prompts-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/prompts-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern: /update\([^)]*prompts[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -180,20 +181,20 @@ describe('append-only invariants (static grep)', () => {
   // silently remove the purge implementation while keeping the allow-list
   // in place — invariant relaxation without enforcement is worse than no
   // allow-list at all.
-  it('allow-list anchors: services/memory.ts contains DELETE FROM memory', () => {
-    const file = join(srcRoot, 'services/memory.ts');
+  it('allow-list anchors: db/repositories/memory-repository.ts contains DELETE FROM memory', () => {
+    const file = join(srcRoot, 'db/repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
   });
 
-  it('allow-list anchors: services/agent-sessions.ts contains DELETE FROM sessions', () => {
-    const file = join(srcRoot, 'services/agent-sessions.ts');
+  it('allow-list anchors: db/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
+    const file = join(srcRoot, 'db/repositories/agent-sessions-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
   });
 
-  it('allow-list anchors: services/prompts.ts contains DELETE FROM prompts', () => {
-    const file = join(srcRoot, 'services/prompts.ts');
+  it('allow-list anchors: db/repositories/prompts-repository.ts contains DELETE FROM prompts', () => {
+    const file = join(srcRoot, 'db/repositories/prompts-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+prompts\b/i.test(src)).toBe(true);
   });
@@ -286,12 +287,17 @@ describe('image packaging invariants', () => {
  * every read/write through `MemoryService`. The scope-bypassing escape
  * hatches are `unsafeGetById` / `unsafeGetByIds`. Those must NOT be
  * called from the MCP layer (which would re-open the bug we just
- * closed). Allow-listed callers: the service itself (private helpers),
- * the consolidation engine (which legitimately crosses scopes), the
- * dashboard admin views, and tests.
+ * closed). Allow-listed callers: the repository that defines them, the
+ * service itself (private helpers), the consolidation engine (which
+ * legitimately crosses scopes), the dashboard admin views, and tests.
  */
 const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
-const SCOPE_BYPASS_ALLOWED_PREFIXES = ['services/memory.ts', 'consolidation/', 'dashboard/'];
+const SCOPE_BYPASS_ALLOWED_PREFIXES = [
+  'db/repositories/memory-repository.ts',
+  'services/memory.ts',
+  'consolidation/',
+  'dashboard/',
+];
 
 describe('scope-leak invariant', () => {
   const files = listSourceFiles(srcRoot);
@@ -320,6 +326,94 @@ describe('scope-leak invariant', () => {
         `memory.unsafeGetBy* called outside allow-list (consolidation/, dashboard/, services/memory.ts). ` +
           `Use the scoped API instead, or add a justification + extend the allow-list.\n${formatted}`,
       );
+    }
+  });
+});
+
+/**
+ * Data-access confinement invariant.
+ *
+ * ALL SQL — Drizzle query-builder calls, the drizzle-orm `sql` tag, and raw
+ * better-sqlite3 statement APIs — lives under `src/db/`. Services, dashboard
+ * handlers, MCP tools, the HTTP layer, consolidation, and embeddings are
+ * SQL-free consumers of the repository layer + `db/diagnostics.ts`.
+ */
+const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /from ['"]drizzle-orm['"]/, label: "import from 'drizzle-orm'" },
+  { pattern: /\.raw\.prepare\(/, label: 'raw.prepare(' },
+  { pattern: /\bdb\.(select|insert|update|delete)\(/, label: 'db.<builder>(' },
+  { pattern: /\bdb\.(all|get|run)\(/, label: 'db.<all|get|run>(' },
+  { pattern: /\bdb\.query\./, label: 'db.query.' },
+];
+
+describe('data-access confinement invariant', () => {
+  const files = listSourceFiles(srcRoot);
+
+  it('SQL executes only under src/db/', () => {
+    const offenders: { file: string; line: number; label: string; text: string }[] = [];
+    for (const file of files) {
+      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+      if (rel.startsWith('db/')) continue;
+      if (rel === 'scripts/seed-dev.ts') continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        for (const { pattern, label } of SQL_EXECUTION_PATTERNS) {
+          if (pattern.test(line)) offenders.push({ file: rel, line: i + 1, label, text: trimmed });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders
+        .map((o) => `  ${o.file}:${o.line}  [${o.label}]  ${o.text}`)
+        .join('\n');
+      throw new Error(
+        `SQL execution found outside src/db/. Move it into the repository layer or db/diagnostics.ts.\n${formatted}`,
+      );
+    }
+  });
+});
+
+/**
+ * Admin-method confinement invariant.
+ *
+ * `admin*`-prefixed repository reads are unscoped (they bypass the
+ * `(scope, project_id)` filter) and exist solely for the operator dashboard.
+ * Calling them anywhere else would leak cross-scope rows into agent-facing
+ * paths. Repository definitions and tests are exempt.
+ */
+const ADMIN_CALL_PATTERN = /\.admin[A-Z]\w*\(/;
+
+describe('admin-method confinement invariant', () => {
+  const files = listSourceFiles(srcRoot);
+
+  it('admin* repository methods are called only from src/dashboard/', () => {
+    const offenders: { file: string; line: number; text: string }[] = [];
+    for (const file of files) {
+      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+      if (rel.startsWith('dashboard/')) continue;
+      // The dashboard router renders the operator overview page directly.
+      if (rel === 'server/dashboard-router.ts') continue;
+      if (rel.startsWith('db/repositories/')) continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        if (ADMIN_CALL_PATTERN.test(line)) {
+          offenders.push({ file: rel, line: i + 1, text: trimmed });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
+      throw new Error(`admin* repository method called outside src/dashboard/.\n${formatted}`);
     }
   });
 });

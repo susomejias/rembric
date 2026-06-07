@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { SCOPE_GLOBAL } from '../services/scope.js';
@@ -25,7 +26,7 @@ describe('13.18 concurrency — 100 concurrent memory.save calls leave DB consis
   it('persists exactly 100 rows with the correct scope', async () => {
     const test = createTestDb();
     try {
-      const svc = new MemoryService(test.handle.db);
+      const svc = new MemoryService(createRepositories(test.handle.db), test.handle.db);
       const N = 100;
       const operations = [] as Promise<unknown>[];
       for (let i = 0; i < N; i++) {

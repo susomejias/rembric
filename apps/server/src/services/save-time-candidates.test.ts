@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory } from '../db/schema/memory.js';
 import { createTestDb, type TestDb } from '../test/index.js';
@@ -19,9 +20,9 @@ let relations: RelationsService;
 
 beforeEach(() => {
   db = createTestDb();
-  memorySvc = new MemoryService(db.handle.db);
-  projects = new ProjectsService(db.handle.db);
-  relations = new RelationsService(db.handle.db);
+  memorySvc = new MemoryService(createRepositories(db.handle.db), db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
+  relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
 });
 
 afterEach(() => db.cleanup());
@@ -130,7 +131,7 @@ describe('findSaveTimeCandidates', () => {
       SCOPE_GLOBAL,
     );
 
-    const cands = findSaveTimeCandidates(db.handle.db, b, { perSaveMax: 5 });
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, { perSaveMax: 5 });
     expect(cands.length).toBeGreaterThanOrEqual(1);
     expect(cands.some((c) => c.targetId === a.id)).toBe(true);
     expect(cands.every((c) => c.source === 'fts' || c.source === 'vec')).toBe(true);
@@ -144,7 +145,9 @@ describe('findSaveTimeCandidates', () => {
       { type: 'feedback', content: 'similar marker keyword extra' },
       SCOPE_GLOBAL,
     );
-    const cands = findSaveTimeCandidates(db.handle.db, recent, { perSaveMax: 3 });
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), recent, {
+      perSaveMax: 3,
+    });
     expect(cands.length).toBeLessThanOrEqual(3);
   });
 
@@ -162,7 +165,9 @@ describe('findSaveTimeCandidates', () => {
       scopeA,
     );
 
-    const cands = findSaveTimeCandidates(db.handle.db, saved, { perSaveMax: 5 });
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
+      perSaveMax: 5,
+    });
     // The global match must NOT appear because it has scope='global'.
     expect(cands.some((c) => c.targetId === _global.id)).toBe(false);
   });
@@ -178,7 +183,9 @@ describe('findSaveTimeCandidates', () => {
     );
     // second.memory.replaces contains first.memory.id; candidate
     // detection must not re-surface it.
-    const cands = findSaveTimeCandidates(db.handle.db, second.memory, { perSaveMax: 5 });
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), second.memory, {
+      perSaveMax: 5,
+    });
     expect(cands.some((c) => c.targetId === first.memory.id)).toBe(false);
   });
 });
@@ -197,7 +204,7 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
         (ops) => {
           const fresh = createTestDb();
           try {
-            const svc = new MemoryService(fresh.handle.db);
+            const svc = new MemoryService(createRepositories(fresh.handle.db), fresh.handle.db);
             for (const op of ops) {
               svc.saveWithTopicKey(
                 {

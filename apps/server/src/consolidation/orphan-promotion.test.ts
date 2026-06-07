@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps } from '../db/schema/consolidation.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import { MemoryService } from '../services/memory.js';
@@ -34,10 +35,11 @@ const orphanDeadlineMs = 60_000;
 
 beforeEach(() => {
   db = createTestDb();
-  memory = new MemoryService(db.handle.db);
-  relations = new RelationsService(db.handle.db);
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
+  relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
   runner = new ConsolidationRunner({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
+    tx: db.handle.db,
     relations,
     orphanDeadlineMs,
   });
@@ -105,7 +107,7 @@ describe('deadline orphaning', () => {
     const summary = runner.runAll({ force: true });
     const runId = summary.runs.find((r) => r.ops.orphaned > 0)!.runId;
 
-    undoRun(db.handle.db, runId);
+    undoRun(createRepositories(db.handle.db), db.handle.db, runId);
 
     const relAfter = db.handle.db
       .select()

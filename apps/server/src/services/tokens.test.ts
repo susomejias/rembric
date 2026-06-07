@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { isAuthorized, TokensService } from './tokens.js';
@@ -9,7 +10,7 @@ let tokens: TokensService;
 
 beforeEach(() => {
   db = createTestDb();
-  tokens = new TokensService(db.handle.db);
+  tokens = new TokensService(createRepositories(db.handle.db));
 });
 
 afterEach(() => {

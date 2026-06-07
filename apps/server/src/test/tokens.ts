@@ -1,4 +1,5 @@
 import type { DbHandle } from '../db/index.js';
+import { createRepositories } from '../db/repositories/index.js';
 import { TokensService, type CreatedToken, type TokenScope } from '../services/tokens.js';
 
 /**
@@ -10,5 +11,5 @@ export function mintTestToken(
   scope: TokenScope = '*',
   name = `test-${Math.random().toString(36).slice(2, 10)}`,
 ): CreatedToken {
-  return new TokensService(handle.db).create({ name, scope, projectId: null });
+  return new TokensService(createRepositories(handle.db)).create({ name, scope, projectId: null });
 }

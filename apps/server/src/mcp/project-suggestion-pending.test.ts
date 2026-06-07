@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema, type Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
@@ -60,21 +61,26 @@ function decode(resp: unknown): { isError: boolean; payload: Record<string, unkn
 
 beforeEach(() => {
   db = createTestDb();
-  projects = new ProjectsService(db.handle.db);
-  memory = new MemoryService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
-  agentSessions = new AgentSessionsService(db.handle.db);
-  prompts = new PromptsService(db.handle.db);
-  tokens = new TokensService(db.handle.db);
+  agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+  prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
+  tokens = new TokensService(createRepositories(db.handle.db));
   tokens.bootstrapAdmin('project-suggestion-pending-test-admin-zzz');
   adminToken = db.handle.db
     .select()
     .from(tokensSchema)
     .where(eq(tokensSchema.name, 'admin'))
     .get()!;
-  saveHandlers = buildHandlers({ memory, db: db.handle.db, router, projects });
+  saveHandlers = buildHandlers({
+    memory,
+    repos: createRepositories(db.handle.db),
+    router,
+    projects,
+  });
   sessionHandlers = buildSessionsHandlers({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
     agentSessions,
     memory,
     projects,

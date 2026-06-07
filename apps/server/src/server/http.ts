@@ -8,7 +8,7 @@ import {
 import { getRequestListener } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 
-import type { DbHandle } from '../db/client.js';
+import type { DbDiagnostics } from '../db/diagnostics.js';
 import { type McpTransportManager } from '../mcp/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -43,8 +43,8 @@ export interface CreateHttpServerOptions {
   projects: ProjectsService;
   dashboard: DashboardDeps;
   agentSessions: AgentSessionsService;
-  /** Database handle; used by `/healthz` to ping with `SELECT 1`. */
-  db: DbHandle;
+  /** DB diagnostics; used by `/healthz` to ping with `SELECT 1`. */
+  diagnostics: DbDiagnostics;
   /** Optional per-token rate limiter applied before MCP transport handoff. */
   rateLimiter?: RateLimiter | null;
   /**
@@ -72,7 +72,11 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
 
   honoApp.get(
     '/healthz',
-    createHealthzHandler({ tokens: opts.tokens, projects: opts.projects, db: opts.db }),
+    createHealthzHandler({
+      tokens: opts.tokens,
+      projects: opts.projects,
+      diagnostics: opts.diagnostics,
+    }),
   );
   honoApp.get('/', (c) => c.redirect('/dashboard'));
 
@@ -152,7 +156,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
 export interface HealthzDeps {
   tokens: TokensService;
   projects: ProjectsService;
-  db: DbHandle;
+  diagnostics: DbDiagnostics;
 }
 
 export function createHealthzHandler(deps: HealthzDeps) {
@@ -171,7 +175,7 @@ export function createHealthzHandler(deps: HealthzDeps) {
         tokens: deps.tokens,
         projects: deps.projects,
       });
-      deps.db.raw.prepare('SELECT 1').get();
+      deps.diagnostics.ping();
       return c.json({ ok: true, version: REMBRIC_VERSION });
     } catch (err) {
       if (err instanceof AuthError) {

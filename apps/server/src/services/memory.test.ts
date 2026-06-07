@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
 import { MemoryService } from './memory.js';
@@ -15,8 +16,8 @@ let projectId: string;
 beforeEach(() => {
   db = createTestDb();
   clock = new TestClock();
-  projects = new ProjectsService(db.handle.db, clock.now);
-  memory = new MemoryService(db.handle.db, clock.now);
+  projects = new ProjectsService(createRepositories(db.handle.db), clock.now);
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db, clock.now);
   projectId = projects.create({ slug: 'test-app' }).id;
 });
 

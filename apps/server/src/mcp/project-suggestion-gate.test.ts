@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import type { RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { ProjectsService } from '../services/projects.js';
@@ -35,7 +36,7 @@ function buildCtx(overrides: Partial<RequestContext> = {}): RequestContext {
 beforeEach(() => {
   db = createTestDb();
   router = new SessionRouter();
-  projects = new ProjectsService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
 });
 
 afterEach(() => db.cleanup());

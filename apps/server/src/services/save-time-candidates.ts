@@ -1,6 +1,4 @@
-import { sql } from 'drizzle-orm';
-
-import type { Db } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
 /**
@@ -50,34 +48,22 @@ export interface SaveCandidate {
 }
 
 export function findSaveTimeCandidates(
-  db: Db,
+  repos: Pick<Repositories, 'memory' | 'vectors'>,
   saved: Memory,
   opts: CandidateOptions,
 ): SaveCandidate[] {
   const poolSize = opts.poolSize ?? 20;
-  const scopeWhere =
-    saved.scope === 'project'
-      ? sql`scope = 'project' AND project_id = ${saved.projectId}`
-      : sql`scope = 'global' AND project_id IS NULL`;
 
-  // --- 1. vec kNN ----------------------------------------------------
-  // Only useful when the just-saved row has an embedding (the worker
-  // may not have processed it yet). When the row has no embedding the
-  // vec pass produces nothing — the FTS pass picks up the slack.
-  const vecRows = db.all<{ id: string; distance: number; content: string }>(
-    sql`
-      SELECT m.id AS id, vec_distance_cosine(v_self.embedding, v_other.embedding) AS distance, m.content AS content
-      FROM memory_vec v_self
-        JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
-        JOIN memory m ON m.id = v_other.memory_id
-      WHERE v_self.memory_id = ${saved.id}
-        AND ${scopeWhere}
-        AND m.status = 'active'
-        AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(saved.replaces)}))
-      ORDER BY distance ASC
-      LIMIT ${poolSize}
-    `,
-  );
+  // Vec kNN is only useful once the just-saved row has an embedding (the
+  // worker may not have processed it yet); otherwise the FTS pass below
+  // picks up the slack.
+  const vecRows = repos.vectors.knnByCosine({
+    memoryId: saved.id,
+    scope: saved.scope,
+    projectId: saved.projectId,
+    excludeIds: saved.replaces,
+    limit: poolSize,
+  });
   const vecPool: SaveCandidate[] = vecRows
     .map((r) => ({
       targetId: r.id,
@@ -87,26 +73,19 @@ export function findSaveTimeCandidates(
     }))
     .filter((c) => c.similarity >= VEC_THRESHOLD);
 
-  // --- 2. FTS5 lexical -----------------------------------------------
   // BM25 returns lower-is-better; normalize via 1/(1+|rank|) to a [0,1]
   // proxy, then keep matches above the configured threshold.
   const matchExpr = escapeFts(saved.content);
   const ftsPool: SaveCandidate[] = [];
   if (matchExpr.length > 0) {
-    const ftsRows = db.all<{ id: string; rank: number; content: string }>(
-      sql`
-        SELECT m.id AS id, memory_fts.rank AS rank, m.content AS content
-        FROM memory_fts
-          JOIN memory m ON m.rowid = memory_fts.rowid
-        WHERE memory_fts MATCH ${matchExpr}
-          AND m.id != ${saved.id}
-          AND ${scopeWhere}
-          AND m.status = 'active'
-          AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(saved.replaces)}))
-        ORDER BY rank
-        LIMIT ${poolSize}
-      `,
-    );
+    const ftsRows = repos.memory.searchBm25Candidates({
+      matchExpr,
+      excludeId: saved.id,
+      scope: saved.scope,
+      projectId: saved.projectId,
+      excludeIds: saved.replaces,
+      limit: poolSize,
+    });
     for (const r of ftsRows) {
       const sim = 1 / (1 + Math.abs(r.rank));
       if (sim >= FTS_THRESHOLD) {

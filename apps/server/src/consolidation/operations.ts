@@ -1,10 +1,9 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { consolidationOps, type ConsolidationOpType } from '../db/schema/consolidation.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
-import { memory, type Memory } from '../db/schema/memory.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type ConsolidationOpType } from '../db/schema/consolidation.js';
+import { type Memory } from '../db/schema/memory.js';
 
 /**
  * Atomic consolidation operations. Each runs inside a SQLite transaction; on
@@ -18,6 +17,8 @@ import { memory, type Memory } from '../db/schema/memory.js';
  *     and via undo back to active.
  */
 
+export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
+
 export interface MergeOpInput {
   consolidationId: string;
   predecessors: Memory[];
@@ -26,12 +27,15 @@ export interface MergeOpInput {
   reasoning: string;
 }
 
-export function applyMerge(db: Db, input: MergeOpInput): { mergedId: string; opId: string } {
+export function applyMerge(
+  repos: ConsolidationDeps,
+  tx: TransactionRunner,
+  input: MergeOpInput,
+): { mergedId: string; opId: string } {
   if (input.predecessors.length < 2) {
     throw new Error('applyMerge: requires at least two predecessors');
   }
 
-  // Sanity: all predecessors must share scope + project_id.
   const first = input.predecessors[0]!;
   for (const p of input.predecessors) {
     if (p.scope !== first.scope || p.projectId !== first.projectId) {
@@ -47,39 +51,30 @@ export function applyMerge(db: Db, input: MergeOpInput): { mergedId: string; opI
   const opId = ulid(now.getTime());
   const predecessorIds = input.predecessors.map((p) => p.id);
 
-  db.transaction((tx) => {
-    // 1. Insert the consolidated memory in active state.
-    tx.insert(memory)
-      .values({
-        id: mergedId,
-        scope: first.scope,
-        projectId: first.projectId,
-        type: first.type,
-        content: input.mergedContent,
-        tags: dedupeTags(input.predecessors),
-        status: 'active',
-        replaces: predecessorIds,
-        createdAt: now,
-        lastSeenAt: now,
-        source: { tokenName: 'consolidation' },
-      })
-      .run();
-
-    // 2. Transition predecessors to superseded.
-    tx.update(memory).set({ status: 'superseded' }).where(inArray(memory.id, predecessorIds)).run();
-
-    // 3. Journal entry.
-    tx.insert(consolidationOps)
-      .values({
-        id: opId,
-        consolidationId: input.consolidationId,
-        opType: 'merge',
-        affectedIds: predecessorIds,
-        createdId: mergedId,
-        reasoning: input.reasoning,
-        appliedAt: now,
-      })
-      .run();
+  tx.transaction(() => {
+    repos.memory.insert({
+      id: mergedId,
+      scope: first.scope,
+      projectId: first.projectId,
+      type: first.type,
+      content: input.mergedContent,
+      tags: dedupeTags(input.predecessors),
+      status: 'active',
+      replaces: predecessorIds,
+      createdAt: now,
+      lastSeenAt: now,
+      source: { tokenName: 'consolidation' },
+    });
+    repos.memory.markSupersededMany(predecessorIds);
+    repos.consolidation.insertOp({
+      id: opId,
+      consolidationId: input.consolidationId,
+      opType: 'merge',
+      affectedIds: predecessorIds,
+      createdId: mergedId,
+      reasoning: input.reasoning,
+      appliedAt: now,
+    });
   });
 
   return { mergedId, opId };
@@ -92,7 +87,11 @@ export interface SupersedeOpInput {
   reasoning: string;
 }
 
-export function applySupersede(db: Db, input: SupersedeOpInput): { opId: string } {
+export function applySupersede(
+  repos: ConsolidationDeps,
+  tx: TransactionRunner,
+  input: SupersedeOpInput,
+): { opId: string } {
   if (input.losers.length === 0) {
     throw new Error('applySupersede: at least one loser required');
   }
@@ -108,30 +107,19 @@ export function applySupersede(db: Db, input: SupersedeOpInput): { opId: string 
   const loserIds = input.losers.map((l) => l.id);
   const opId = ulid(now.getTime());
 
-  db.transaction((tx) => {
-    tx.update(memory).set({ status: 'superseded' }).where(inArray(memory.id, loserIds)).run();
-
-    // Read-modify-write `replaces` on the winner inside the transaction
-    // so the array surgery stays in JS where the schema is typed.
-    const w = tx
-      .select({ replaces: memory.replaces })
-      .from(memory)
-      .where(eq(memory.id, input.winner.id))
-      .get();
-    const nextReplaces = Array.from(new Set([...(w?.replaces ?? []), ...loserIds]));
-    tx.update(memory).set({ replaces: nextReplaces }).where(eq(memory.id, input.winner.id)).run();
-
-    tx.insert(consolidationOps)
-      .values({
-        id: opId,
-        consolidationId: input.consolidationId,
-        opType: 'supersede',
-        affectedIds: loserIds,
-        createdId: input.winner.id,
-        reasoning: input.reasoning,
-        appliedAt: now,
-      })
-      .run();
+  tx.transaction(() => {
+    repos.memory.markSupersededMany(loserIds);
+    const prev = repos.memory.findReplaces(input.winner.id) ?? [];
+    repos.memory.setReplaces(input.winner.id, Array.from(new Set([...prev, ...loserIds])));
+    repos.consolidation.insertOp({
+      id: opId,
+      consolidationId: input.consolidationId,
+      opType: 'supersede',
+      affectedIds: loserIds,
+      createdId: input.winner.id,
+      reasoning: input.reasoning,
+      appliedAt: now,
+    });
   });
 
   return { opId };
@@ -143,66 +131,60 @@ export interface DecayOpInput {
   reasoning: string;
 }
 
-export function applyDecay(db: Db, input: DecayOpInput): { opId: string } {
+export function applyDecay(
+  repos: ConsolidationDeps,
+  tx: TransactionRunner,
+  input: DecayOpInput,
+): { opId: string } {
   if (input.ids.length === 0) {
     throw new Error('applyDecay: no ids provided');
   }
   const now = new Date();
   const opId = ulid(now.getTime());
 
-  db.transaction((tx) => {
-    tx.update(memory)
-      .set({ status: 'archived' })
-      .where(and(inArray(memory.id, input.ids), eq(memory.status, 'active')))
-      .run();
-
-    tx.insert(consolidationOps)
-      .values({
-        id: opId,
-        consolidationId: input.consolidationId,
-        opType: 'decay',
-        affectedIds: input.ids,
-        reasoning: input.reasoning,
-        appliedAt: now,
-      })
-      .run();
+  tx.transaction(() => {
+    repos.memory.archiveActive(input.ids);
+    repos.consolidation.insertOp({
+      id: opId,
+      consolidationId: input.consolidationId,
+      opType: 'decay',
+      affectedIds: input.ids,
+      reasoning: input.reasoning,
+      appliedAt: now,
+    });
   });
 
   return { opId };
 }
 
 export function recordNoop(
-  db: Db,
+  repos: ConsolidationDeps,
   input: { consolidationId: string; affectedIds: string[]; reasoning: string },
 ): void {
   const now = new Date();
-  db.insert(consolidationOps)
-    .values({
-      id: ulid(now.getTime()),
-      consolidationId: input.consolidationId,
-      opType: 'noop',
-      affectedIds: input.affectedIds,
-      reasoning: input.reasoning,
-      appliedAt: now,
-    })
-    .run();
+  repos.consolidation.insertOp({
+    id: ulid(now.getTime()),
+    consolidationId: input.consolidationId,
+    opType: 'noop',
+    affectedIds: input.affectedIds,
+    reasoning: input.reasoning,
+    appliedAt: now,
+  });
 }
 
 export function recordFailed(
-  db: Db,
+  repos: ConsolidationDeps,
   input: { consolidationId: string; affectedIds: string[]; reasoning: string },
 ): void {
   const now = new Date();
-  db.insert(consolidationOps)
-    .values({
-      id: ulid(now.getTime()),
-      consolidationId: input.consolidationId,
-      opType: 'failed',
-      affectedIds: input.affectedIds,
-      reasoning: input.reasoning,
-      appliedAt: now,
-    })
-    .run();
+  repos.consolidation.insertOp({
+    id: ulid(now.getTime()),
+    consolidationId: input.consolidationId,
+    opType: 'failed',
+    affectedIds: input.affectedIds,
+    reasoning: input.reasoning,
+    appliedAt: now,
+  });
 }
 
 /**
@@ -214,7 +196,7 @@ export function recordFailed(
  * for backwards-compatible journaling.
  */
 export function recordOrphanPromote(
-  db: Db,
+  repos: ConsolidationDeps,
   input: {
     consolidationId: string;
     judgmentId: string;
@@ -226,25 +208,21 @@ export function recordOrphanPromote(
 ): { opId: string } {
   const now = new Date();
   const opId = ulid(now.getTime());
-  db.insert(consolidationOps)
-    .values({
-      id: opId,
-      consolidationId: input.consolidationId,
-      opType: 'orphan_promote',
-      affectedIds: [input.sourceId, input.targetId],
-      createdId: input.judgmentId,
-      reasoning: `${input.relation ?? 'orphaned'}: ${input.reasoning}`,
-      appliedAt: now,
-    })
-    .run();
+  repos.consolidation.insertOp({
+    id: opId,
+    consolidationId: input.consolidationId,
+    opType: 'orphan_promote',
+    affectedIds: [input.sourceId, input.targetId],
+    createdId: input.judgmentId,
+    reasoning: `${input.relation ?? 'orphaned'}: ${input.reasoning}`,
+    appliedAt: now,
+  });
   return { opId };
 }
 
 /**
- * Error raised by `undoOp` when one or more rows referenced by the op
- * have been physically removed by the maintenance purge paths. The
- * dashboard surfaces this with a structured copy listing the missing
- * ids; the op stays in its current state.
+ * Raised by `undoOp` when rows referenced by the op have been physically
+ * removed by the maintenance purge paths. The op stays in its current state.
  */
 export class PurgedRowMissingError extends Error {
   readonly code = 'purged_row_missing';
@@ -266,20 +244,14 @@ export class NotUndoableError extends Error {
 }
 
 /**
- * Undo a previously applied consolidation op. Re-activates the affected memories
- * and (for merges) archives the consolidated row so it no longer surfaces
- * in active retrieval.
+ * Undo a previously applied consolidation op. Re-activates the affected
+ * memories and (for merges) archives the consolidated row.
  *
- * Throws `PurgedRowMissingError` when one or more rows referenced by
- * `affected_ids` (or `created_id` for merge ops) have been physically
- * removed by `MemoryService.purgeDisconnectedArchived` or
- * `AgentSessionsService.purgeEmpty`. The op stays in its current state.
- *
- * Throws `NotUndoableError` for purge-op types — their effect cannot be
- * reversed because the rows are gone.
+ * Throws `PurgedRowMissingError` when rows referenced by the op have been
+ * physically removed; throws `NotUndoableError` for terminal purge ops.
  */
-export function undoOp(db: Db, opId: string): void {
-  const op = db.select().from(consolidationOps).where(eq(consolidationOps.id, opId)).get();
+export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: string): void {
+  const op = repos.consolidation.findOpById(opId);
   if (!op) throw new Error(`undoOp: ${opId} not found`);
   if (op.revertedAt) throw new Error(`undoOp: ${opId} already reverted`);
 
@@ -289,10 +261,8 @@ export function undoOp(db: Db, opId: string): void {
     );
   }
 
-  // Block undo when any affected row has been physically purged. We only
-  // check ops that operate on memory rows (merge/supersede/decay/archive).
-  // `orphan_promote` operates on relation rows, which are append-only and
-  // unaffected by the purge paths.
+  // `orphan_promote` operates on relation rows (append-only, unaffected by
+  // the purge paths); the others operate on memory rows.
   if (
     op.opType === 'merge' ||
     op.opType === 'supersede' ||
@@ -301,18 +271,7 @@ export function undoOp(db: Db, opId: string): void {
   ) {
     const expected = new Set<string>(op.affectedIds);
     if (op.opType === 'merge' && op.createdId) expected.add(op.createdId);
-
-    const existing =
-      expected.size > 0
-        ? new Set(
-            db
-              .select({ id: memory.id })
-              .from(memory)
-              .where(inArray(memory.id, Array.from(expected)))
-              .all()
-              .map((r) => r.id),
-          )
-        : new Set<string>();
+    const existing = repos.memory.existingIds([...expected]);
     const missing = [...expected].filter((id) => !existing.has(id));
     if (missing.length > 0) {
       throw new PurgedRowMissingError(missing);
@@ -321,78 +280,48 @@ export function undoOp(db: Db, opId: string): void {
 
   const now = new Date();
 
-  db.transaction((tx) => {
+  tx.transaction(() => {
     if (op.opType === 'merge' || op.opType === 'supersede') {
-      // Reactivate affected (predecessors / losers).
-      tx.update(memory).set({ status: 'active' }).where(inArray(memory.id, op.affectedIds)).run();
-      // Archive the merged-into / winner so the undo cancels its visibility.
+      repos.memory.reactivate(op.affectedIds);
       if (op.opType === 'merge' && op.createdId) {
-        tx.update(memory).set({ status: 'archived' }).where(eq(memory.id, op.createdId)).run();
+        repos.memory.archiveOne(op.createdId);
       }
     } else if (op.opType === 'decay' || op.opType === 'archive') {
-      tx.update(memory).set({ status: 'active' }).where(inArray(memory.id, op.affectedIds)).run();
+      repos.memory.reactivate(op.affectedIds);
     } else if (op.opType === 'orphan_promote' && op.createdId) {
-      // The createdId carries the judgment_id of the relation row that
-      // was promoted. Undo:
-      //   - relation 'supersedes' reverts the target memory to active
-      //     and drops the target id from the source's replaces[]
-      //   - other relations: simply flip the relation row back to pending
-      const judgmentId = op.createdId;
-      const rel = tx
-        .select()
-        .from(memoryRelations)
-        .where(eq(memoryRelations.judgmentId, judgmentId))
-        .get();
+      // createdId carries the promoted relation's judgment_id. Undo a
+      // 'supersedes' verdict by reactivating the target and stripping it
+      // from the source's replaces[]; then flip the row back to pending.
+      const rel = repos.relations.findByJudgmentId(op.createdId);
       if (rel) {
         if (rel.relation === 'supersedes' && rel.status === 'judged') {
-          tx.update(memory)
-            .set({ status: 'active' as const })
-            .where(eq(memory.id, rel.targetId))
-            .run();
-          const source = tx
-            .select({ replaces: memory.replaces })
-            .from(memory)
-            .where(eq(memory.id, rel.sourceId))
-            .get();
-          if (source) {
-            const stripped = source.replaces.filter((id) => id !== rel.targetId);
-            tx.update(memory).set({ replaces: stripped }).where(eq(memory.id, rel.sourceId)).run();
+          repos.memory.reactivateOne(rel.targetId);
+          const replaces = repos.memory.findReplaces(rel.sourceId);
+          if (replaces) {
+            repos.memory.setReplaces(
+              rel.sourceId,
+              replaces.filter((id) => id !== rel.targetId),
+            );
           }
         }
-        // Flip the relation row back to pending so the consolidator can
-        // pick it up again on its next pass.
-        tx.update(memoryRelations)
-          .set({
-            status: 'pending' as const,
-            relation: null,
-            reason: null,
-            confidence: null,
-            judgedAt: null,
-            markedByKind: null,
-            markedByActor: null,
-          })
-          .where(eq(memoryRelations.id, rel.id))
-          .run();
+        repos.relations.resetToPending(rel.id);
       }
-    } else {
-      // noop / failed: nothing to revert.
     }
 
-    tx.update(consolidationOps).set({ revertedAt: now }).where(eq(consolidationOps.id, opId)).run();
+    repos.consolidation.markReverted(opId, now);
   });
 }
 
-export function undoRun(db: Db, runId: string): { reverted: string[] } {
-  const ops = db
-    .select()
-    .from(consolidationOps)
-    .where(and(eq(consolidationOps.consolidationId, runId), sql`reverted_at IS NULL`))
-    .all();
-
+export function undoRun(
+  repos: ConsolidationDeps,
+  tx: TransactionRunner,
+  runId: string,
+): { reverted: string[] } {
+  const ops = repos.consolidation.listActiveOps(runId);
   const reverted: string[] = [];
   // Reverse order so dependent ops unwind cleanly.
   for (const op of [...ops].reverse()) {
-    undoOp(db, op.id);
+    undoOp(repos, tx, op.id);
     reverted.push(op.id);
   }
   return { reverted };
@@ -406,5 +335,4 @@ function dedupeTags(memories: Memory[]): string[] {
   return [...set];
 }
 
-// Type re-exported for downstream consumers.
 export type { ConsolidationOpType };

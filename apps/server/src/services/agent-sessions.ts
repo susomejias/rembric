@@ -1,9 +1,8 @@
-import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { agentSessions, type AgentSession } from '../db/schema/agent-sessions.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type AgentSession, type NewAgentSession } from '../db/schema/agent-sessions.js';
 
 import { DomainError } from './errors.js';
 
@@ -48,29 +47,6 @@ function assertSummaryWithinCap(callsite: string, summary: string | undefined): 
       `${callsite}: summary must be ≤${SUMMARY_MAX_CHARS} chars (got ${summary.length})`,
     );
   }
-}
-
-/**
- * Single source of truth for "this session has something worth surfacing".
- *
- * Consumed positively by `recentForContext` (filter to useful sessions) and
- * negatively by `countPurgeableEmpty` / `purgeEmpty` (must be empty to be
- * purgeable). Adding a new content-bearing table that anchors to a session
- * id (e.g. a future `tool_calls`) MUST update only this helper — every
- * call site picks the change up automatically.
- *
- * `alias` is the SQL identifier used to reference the sessions row in the
- * caller's query. Callers pass `'s'` (purge methods) or the table name
- * `'sessions'` (drizzle's implicit alias in `recentForContext`).
- */
-function sessionHasContentSql(alias: 's' | 'sessions') {
-  return sql.raw(
-    `(${alias}.summary IS NOT NULL` +
-      ` OR ${alias}.title_final = 1` +
-      ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
-      ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
-      ` OR EXISTS (SELECT 1 FROM confirmations WHERE session_id = ${alias}.id))`,
-  );
 }
 
 /**
@@ -156,30 +132,27 @@ export interface RecentForContextInput {
 
 export class AgentSessionsService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'agentSessions' | 'consolidation'>,
+    private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   start(input: StartSessionInput): AgentSession {
     const ts = this.now();
-    const row = this.db
-      .insert(agentSessions)
-      .values({
-        id: ulid(ts.getTime()),
-        tokenId: input.tokenId,
-        projectId: input.projectId,
-        agent: input.agent,
-        description: input.description ?? null,
-        title: computePlaceholderTitle(input.cwd ?? null, ts),
-        startedAt: ts,
-        endedAt: null,
-        summary: null,
-        summaryFinal: false,
-        titleFinal: false,
-        status: 'active',
-      })
-      .returning()
-      .get();
+    const row = this.repos.agentSessions.insert({
+      id: ulid(ts.getTime()),
+      tokenId: input.tokenId,
+      projectId: input.projectId,
+      agent: input.agent,
+      description: input.description ?? null,
+      title: computePlaceholderTitle(input.cwd ?? null, ts),
+      startedAt: ts,
+      endedAt: null,
+      summary: null,
+      summaryFinal: false,
+      titleFinal: false,
+      status: 'active',
+    });
     if (!row) throw new DomainError('conflict', 'sessions.start: insert returned no row');
     return row;
   }
@@ -211,24 +184,20 @@ export class AgentSessionsService {
       return { session: existing, created: false };
     }
     const ts = this.now();
-    const row = this.db
-      .insert(agentSessions)
-      .values({
-        id: input.id,
-        tokenId: input.tokenId,
-        projectId: input.projectId,
-        agent: input.agent,
-        description: input.description ?? null,
-        title: computePlaceholderTitle(input.cwd ?? null, ts),
-        startedAt: ts,
-        endedAt: null,
-        summary: null,
-        summaryFinal: false,
-        titleFinal: false,
-        status: 'active',
-      })
-      .returning()
-      .get();
+    const row = this.repos.agentSessions.insert({
+      id: input.id,
+      tokenId: input.tokenId,
+      projectId: input.projectId,
+      agent: input.agent,
+      description: input.description ?? null,
+      title: computePlaceholderTitle(input.cwd ?? null, ts),
+      startedAt: ts,
+      endedAt: null,
+      summary: null,
+      summaryFinal: false,
+      titleFinal: false,
+      status: 'active',
+    });
     if (!row) throw new DomainError('conflict', 'sessions.ensure: insert returned no row');
     return { session: row, created: true };
   }
@@ -281,7 +250,7 @@ export class AgentSessionsService {
       input.title,
       incomingFinal,
     );
-    const set: Partial<typeof agentSessions.$inferInsert> = {};
+    const set: Partial<NewAgentSession> = {};
     if (summaryUpdate.changed) {
       set.summary = summaryUpdate.value;
       set.summaryFinal = summaryUpdate.final;
@@ -293,12 +262,7 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.db
-      .update(agentSessions)
-      .set(set)
-      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
-      .returning()
-      .get();
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -345,7 +309,7 @@ export class AgentSessionsService {
       incomingFinal,
     );
     if (existing.status === 'ended') {
-      const set: Partial<typeof agentSessions.$inferInsert> = {};
+      const set: Partial<NewAgentSession> = {};
       if (summaryUpdate.changed) {
         set.summary = summaryUpdate.value;
         set.summaryFinal = summaryUpdate.final;
@@ -357,16 +321,11 @@ export class AgentSessionsService {
       if (Object.keys(set).length === 0) {
         return existing;
       }
-      const updated = this.db
-        .update(agentSessions)
-        .set(set)
-        .where(eq(agentSessions.id, sessionId))
-        .returning()
-        .get();
+      const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: false });
       return updated ?? existing;
     }
     const ts = this.now();
-    const set: Partial<typeof agentSessions.$inferInsert> = {
+    const set: Partial<NewAgentSession> = {
       status: 'ended',
       endedAt: ts,
     };
@@ -378,12 +337,7 @@ export class AgentSessionsService {
       set.title = titleUpdate.value;
       set.titleFinal = titleUpdate.final;
     }
-    const updated = this.db
-      .update(agentSessions)
-      .set(set)
-      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
-      .returning()
-      .get();
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -412,7 +366,7 @@ export class AgentSessionsService {
   }
 
   getById(sessionId: string): AgentSession | undefined {
-    return this.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
+    return this.repos.agentSessions.getById(sessionId);
   }
 
   /**
@@ -424,27 +378,9 @@ export class AgentSessionsService {
     tokenId: string;
     projectId: string | null;
   }): AgentSession | null {
-    const conditions = [
-      eq(agentSessions.tokenId, input.tokenId),
-      eq(agentSessions.status, 'active'),
-      // Soft-deleted sessions must NOT be surfaced as "the active session
-      // for transport" — callers that auto-resolve a sessionId would
-      // otherwise stamp memories onto a deleted row.
-      isNull(agentSessions.deletedAt),
-    ];
-    if (input.projectId === null) {
-      conditions.push(isNull(agentSessions.projectId));
-    } else {
-      conditions.push(eq(agentSessions.projectId, input.projectId));
-    }
-    const row = this.db
-      .select()
-      .from(agentSessions)
-      .where(and(...conditions))
-      .orderBy(desc(agentSessions.startedAt))
-      .limit(1)
-      .get();
-    return row ?? null;
+    // Soft-deleted sessions must NOT surface here — auto-resolution would
+    // otherwise stamp memories onto a deleted row.
+    return this.repos.agentSessions.findActiveForTransport(input.tokenId, input.projectId) ?? null;
   }
 
   /**
@@ -458,17 +394,7 @@ export class AgentSessionsService {
    */
   recentForContext(input: RecentForContextInput): AgentSession[] {
     const limit = clamp(input.limit ?? 5, 1, 25);
-    const scopeCondition =
-      input.projectId === null
-        ? isNull(agentSessions.projectId)
-        : eq(agentSessions.projectId, input.projectId);
-    return this.db
-      .select()
-      .from(agentSessions)
-      .where(and(scopeCondition, isNull(agentSessions.deletedAt), sessionHasContentSql('sessions')))
-      .orderBy(desc(agentSessions.startedAt))
-      .limit(limit)
-      .all();
+    return this.repos.agentSessions.recentForContext(input.projectId, limit);
   }
 
   /**
@@ -493,13 +419,11 @@ export class AgentSessionsService {
     if (existing.deletedAt) {
       return existing;
     }
-    const ts = this.now();
-    const updated = this.db
-      .update(agentSessions)
-      .set({ deletedAt: ts })
-      .where(eq(agentSessions.id, sessionId))
-      .returning()
-      .get();
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      { deletedAt: this.now() },
+      { requireActive: false },
+    );
     if (!updated) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
@@ -520,12 +444,11 @@ export class AgentSessionsService {
     if (!existing.deletedAt) {
       return existing;
     }
-    const updated = this.db
-      .update(agentSessions)
-      .set({ deletedAt: null })
-      .where(eq(agentSessions.id, sessionId))
-      .returning()
-      .get();
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      { deletedAt: null },
+      { requireActive: false },
+    );
     if (!updated) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
@@ -544,19 +467,11 @@ export class AgentSessionsService {
     } = {},
   ): AgentSession[] {
     const limit = clamp(input.limit ?? 50, 1, 500);
-    const conditions = [];
-    if (!input.includeDeleted) {
-      conditions.push(isNull(agentSessions.deletedAt));
-    }
-    if (input.status) {
-      conditions.push(eq(agentSessions.status, input.status));
-    }
-    const query = this.db
-      .select()
-      .from(agentSessions)
-      .orderBy(desc(agentSessions.startedAt))
-      .limit(limit);
-    return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
+    return this.repos.agentSessions.list({
+      limit,
+      status: input.status,
+      includeDeleted: input.includeDeleted,
+    });
   }
 
   /**
@@ -566,12 +481,8 @@ export class AgentSessionsService {
    */
   abandonStale(input: { olderThanMs: number }): { abandoned: number } {
     const cutoff = new Date(this.now().getTime() - input.olderThanMs);
-    const result = this.db
-      .update(agentSessions)
-      .set({ status: 'abandoned', endedAt: this.now() })
-      .where(and(eq(agentSessions.status, 'active'), lt(agentSessions.startedAt, cutoff)))
-      .run();
-    return { abandoned: result.changes };
+    const abandoned = this.repos.agentSessions.abandonActiveOlderThan(cutoff, this.now());
+    return { abandoned };
   }
 
   /**
@@ -602,13 +513,11 @@ export class AgentSessionsService {
     if (existing.status === 'ended') {
       throw new DomainError('session_already_ended', `session '${sessionId}' is already ended`);
     }
-    const ts = this.now();
-    const updated = this.db
-      .update(agentSessions)
-      .set({ status: 'abandoned', endedAt: ts })
-      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.status, 'active')))
-      .returning()
-      .get();
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      { status: 'abandoned', endedAt: this.now() },
+      { requireActive: true },
+    );
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -628,30 +537,19 @@ export class AgentSessionsService {
    * appears in `/dashboard/sessions`.
    */
   countByStatus(): Record<'active' | 'ended' | 'abandoned', number> {
-    const rows = this.db
-      .select({ status: agentSessions.status, count: sql<number>`count(*)` })
-      .from(agentSessions)
-      .where(isNull(agentSessions.deletedAt))
-      .groupBy(agentSessions.status)
-      .all();
     const out: Record<'active' | 'ended' | 'abandoned', number> = {
       active: 0,
       ended: 0,
       abandoned: 0,
     };
-    for (const row of rows) {
-      const k = row.status;
-      out[k] = Number(row.count);
+    for (const row of this.repos.agentSessions.countByStatus()) {
+      out[row.status] = Number(row.count);
     }
     return out;
   }
 
-  /** Total memory rows referencing this session. */
   memoryCount(sessionId: string): number {
-    const row = this.db.get<{ v: number }>(
-      sql`SELECT COUNT(*) AS v FROM memory WHERE session_id = ${sessionId}`,
-    ) as { v: number } | undefined;
-    return row?.v ?? 0;
+    return this.repos.agentSessions.memoryCount(sessionId);
   }
 
   /**
@@ -666,15 +564,7 @@ export class AgentSessionsService {
    */
   countPurgeableEmpty(): number {
     const cutoff = this.now().getTime() - SESSION_PURGE_GRACE_MS;
-    const row = this.db.get<{ v: number }>(sql`
-      SELECT COUNT(*) AS v FROM sessions s
-       WHERE s.status IN ('ended','abandoned')
-         AND s.deleted_at IS NULL
-         AND s.ended_at IS NOT NULL
-         AND s.ended_at < ${cutoff}
-         AND NOT ${sessionHasContentSql('s')}
-    `) as { v: number } | undefined;
-    return row?.v ?? 0;
+    return this.repos.agentSessions.countPurgeableEmpty(cutoff);
   }
 
   /**
@@ -701,49 +591,33 @@ export class AgentSessionsService {
     const ts = this.now();
     const cutoff = ts.getTime() - SESSION_PURGE_GRACE_MS;
 
-    return this.db.transaction((tx): { deletedIds: string[] } => {
-      const eligible = tx.all<{ id: string }>(sql`
-        SELECT s.id FROM sessions s
-         WHERE s.status IN ('ended','abandoned')
-           AND s.deleted_at IS NULL
-           AND s.ended_at IS NOT NULL
-           AND s.ended_at < ${cutoff}
-           AND NOT ${sessionHasContentSql('s')}
-      `);
-      const deletedIds = eligible.map((r) => r.id);
+    return this.tx.transaction((): { deletedIds: string[] } => {
+      const deletedIds = this.repos.agentSessions.findPurgeableEmptyIds(cutoff);
       if (deletedIds.length === 0) {
         return { deletedIds: [] };
       }
 
-      const placeholders = sql.join(
-        deletedIds.map((id) => sql`${id}`),
-        sql.raw(', '),
-      );
-      tx.run(sql`DELETE FROM sessions WHERE id IN (${placeholders})`);
+      this.repos.agentSessions.purgeByIds(deletedIds);
 
       const runId = ulid(ts.getTime());
-      tx.insert(consolidationRuns)
-        .values({
-          id: runId,
-          startedAt: ts,
-          finishedAt: ts,
-          llmProvider: null,
-          llmModel: null,
-          scope: 'maintenance',
-          summary: JSON.stringify({ kind: 'session_purge', deleted: deletedIds.length }),
-        })
-        .run();
-      tx.insert(consolidationOps)
-        .values({
-          id: ulid(ts.getTime()),
-          consolidationId: runId,
-          opType: 'session_purge',
-          affectedIds: deletedIds,
-          createdId: null,
-          reasoning: SESSION_PURGE_REASONING,
-          appliedAt: ts,
-        })
-        .run();
+      this.repos.consolidation.insertRun({
+        id: runId,
+        startedAt: ts,
+        finishedAt: ts,
+        llmProvider: null,
+        llmModel: null,
+        scope: 'maintenance',
+        summary: JSON.stringify({ kind: 'session_purge', deleted: deletedIds.length }),
+      });
+      this.repos.consolidation.insertOp({
+        id: ulid(ts.getTime()),
+        consolidationId: runId,
+        opType: 'session_purge',
+        affectedIds: deletedIds,
+        createdId: null,
+        reasoning: SESSION_PURGE_REASONING,
+        appliedAt: ts,
+      });
 
       return { deletedIds };
     });
@@ -807,7 +681,3 @@ function clamp(value: number, min: number, max: number): number {
   if (value > max) return max;
   return value;
 }
-
-// Maintained import for downstream consumers that pull `gt` from drizzle
-// when filtering session timestamps.
-void gt;

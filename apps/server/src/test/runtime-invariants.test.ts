@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { applyMerge, applySupersede, undoOp } from '../consolidation/operations.js';
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
@@ -18,7 +19,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   beforeAll(() => {
     testDb = createTestDb();
-    const projects = new ProjectsService(testDb.handle.db);
+    const projects = new ProjectsService(createRepositories(testDb.handle.db));
     const x = projects.create({ slug: 'proj-x' });
     const y = projects.create({ slug: 'proj-y' });
     projXScope = projectScope(x.id);
@@ -27,7 +28,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
   afterAll(() => testDb.cleanup());
 
   it('13.8 active → archived → undo back to active', () => {
-    const svc = new MemoryService(testDb.handle.db);
+    const svc = new MemoryService(createRepositories(testDb.handle.db), testDb.handle.db);
     const m = svc.save({ type: 'feedback', content: 'fsm-test-1' }, SCOPE_GLOBAL);
     expect(m.status).toBe('active');
 
@@ -44,7 +45,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.8 active → superseded via merge, then undo flips back to active', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({
@@ -59,7 +60,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const a = svc.save({ type: 'feedback', content: 'merge-test-A' }, SCOPE_GLOBAL);
     const b = svc.save({ type: 'feedback', content: 'merge-test-B' }, SCOPE_GLOBAL);
 
-    const { opId, mergedId } = applyMerge(db, {
+    const { opId, mergedId } = applyMerge(createRepositories(db), db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged-AB',
@@ -70,7 +71,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('superseded');
     expect(db.select().from(memory).where(eq(memory.id, mergedId)).get()!.status).toBe('active');
 
-    undoOp(db, opId);
+    undoOp(createRepositories(db), db, opId);
     expect(db.select().from(memory).where(eq(memory.id, a.id)).get()!.status).toBe('active');
     expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('active');
     // Merged row is archived (not deleted) by undo; the table is append-only.
@@ -79,7 +80,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.9 a merge across two projects fails before any row mutates', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({
@@ -95,7 +96,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const b = svc.save({ type: 'reference', content: 'cross-scope-B' }, projYScope);
 
     expect(() =>
-      applyMerge(db, {
+      applyMerge(createRepositories(db), db, {
         consolidationId: runId,
         predecessors: [a, b],
         mergedContent: 'should-not-happen',
@@ -110,7 +111,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.9 a supersede across project and global fails before any mutation', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({
@@ -126,7 +127,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const loser = svc.save({ type: 'reference', content: 'proj-loser' }, projXScope);
 
     expect(() =>
-      applySupersede(db, {
+      applySupersede(createRepositories(db), db, {
         consolidationId: runId,
         winner,
         losers: [loser],

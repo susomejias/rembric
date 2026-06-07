@@ -29,6 +29,13 @@ Single Node process, single SQLite file. Server layers at `apps/server/src/{serv
 
 Path-scoping contract (in `apps/server/src/mcp/tools.ts`): `/mcp/<slug>` rejects `scope='global'` with `scope_locked`; `/mcp` rejects `scope='project'` with `project_required` unless an active project exists.
 
+### Data access pattern
+
+- ALL SQL (Drizzle builder or raw) lives under `apps/server/src/db/`: one repository per aggregate in `db/repositories/`, DB-level introspection (PRAGMA/dbstat/VACUUM/ping) in `db/diagnostics.ts`. Services orchestrate (scope resolution, validation, transactions); dashboard handlers call `admin*` repository reads + service mutations. No SQL in services/dashboard/mcp/server — grep-enforced by `invariants.test.ts` (data-access confinement).
+- **Scope still resolved at the service layer.** Services compute the `Scope` (`resolveEffectiveProject`/`scopeFromContext`) and pass it down; scoped repository methods _require_ it as a parameter. Unscoped reads carry the `admin*` prefix and are callable ONLY from `src/dashboard/` (+ the dashboard router) — grep-enforced. Cross-scope service reads keep the `unsafe*` prefix.
+- Services own `db.transaction()`; repositories never open transactions (single synchronous connection means repo calls inside a service tx participate automatically).
+- Never hand-write row/DTO shapes. Derive from schema types: `$inferSelect`/`$inferInsert` for entities, `Pick<Entity, …> & { … }` for join projections, schema-derived aliases (`MemoryStatus`, `RelationKind`) for filter params.
+
 ### Table-rebuild migrations (SQLite)
 
 SQLite has no `ALTER TABLE … ADD CONSTRAINT`, `ALTER COLUMN`, or change-nullability. To add a `CHECK`, change a type, or flip NOT NULL you have to do the rebuild dance (`CREATE TABLE x_new (…)` → `INSERT … SELECT *` → `DROP TABLE x` → `ALTER TABLE x_new RENAME TO x` → recreate indexes/triggers). With `foreign_keys = ON` (the default set by `db/client.ts`), `DROP TABLE` on a parent of any populated child table fails with `FOREIGN KEY constraint failed`. `PRAGMA foreign_keys` cannot be changed inside a transaction, and `PRAGMA defer_foreign_keys` does **not** defer the DROP-TABLE check (it only defers per-row FK violations).
@@ -52,7 +59,7 @@ Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active pr
 - No floating promises (ESLint enforces).
 - `import type` for types; imports ordered builtin → external → internal → relative (auto-fixed).
 - Co-located tests `**/*.test.ts` (each workspace). Invariant tests under `apps/server/src/**/__tests__/invariants/` are sacred.
-- **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR.
+- **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR. **Banner/section-divider comments (`// ──────`, `// === API ===`), structural labels that just name the block below, and docstrings that paraphrase the signature are an anti-pattern — do not add them.** A licit comment documents one concrete non-obvious fact (a why, an invariant, an ordering constraint), nothing more.
 
 ## Skills
 

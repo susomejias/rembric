@@ -1,13 +1,10 @@
 import { join } from 'node:path';
 
-import { sql } from 'drizzle-orm';
-
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
 import { ConsolidationRunner } from '../consolidation/index.js';
-import { createDb, type DbHandle } from '../db/index.js';
-import { consolidationRuns } from '../db/schema/consolidation.js';
-import { memory } from '../db/schema/memory.js';
-import { projects as projectsTable } from '../db/schema/projects.js';
+import { undoOp, undoRun } from '../consolidation/operations.js';
+import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
+import { createDb, createRepositories, type DbHandle, type Repositories } from '../db/index.js';
 import { EMBEDDING_MODEL_ID, loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
@@ -79,13 +76,15 @@ export async function bootstrap(
   }
 
   const dbHandle = createDb({ dataDir: config.dataDir });
+  const repos = createRepositories(dbHandle.db);
+  const dbDiagnostics = createDiagnostics(dbHandle);
 
-  const tokens = new TokensService(dbHandle.db);
-  const projects = new ProjectsService(dbHandle.db);
-  const memorySvc = new MemoryService(dbHandle.db);
-  const agentSessionsSvc = new AgentSessionsService(dbHandle.db);
-  const promptsSvc = new PromptsService(dbHandle.db);
-  const relationsSvc = new RelationsService(dbHandle.db);
+  const tokens = new TokensService(repos);
+  const projects = new ProjectsService(repos);
+  const memorySvc = new MemoryService(repos, dbHandle.db);
+  const agentSessionsSvc = new AgentSessionsService(repos, dbHandle.db);
+  const promptsSvc = new PromptsService(repos, dbHandle.db);
+  const relationsSvc = new RelationsService(repos, dbHandle.db);
   const sessionRouter = new SessionRouter();
 
   // Mark inflight sessions from a prior run as abandoned. The router is
@@ -119,7 +118,7 @@ export async function bootstrap(
   if (!sessionSecretBase) {
     throw new Error('session secret is missing; set REMBRIC_SESSION_SECRET or REMBRIC_ADMIN_TOKEN');
   }
-  const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
+  const sessions = new SessionsService(repos, deriveSessionKey(sessionSecretBase));
 
   // In-process embedder + drain worker — fills memory_vec so save-time
   // candidate detection has vectors to kNN over. The model loads eagerly
@@ -134,16 +133,16 @@ export async function bootstrap(
       `  ✓ embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`,
     );
   }
-  const vectorReset = ensureVectorModel(dbHandle.db, config.dataDir);
+  const vectorReset = ensureVectorModel(repos, config.dataDir);
   if (vectorReset.wiped > 0) {
     console.error(
       `  ↻ embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
     );
   }
   const embeddingWorker = new EmbeddingWorker({
-    db: dbHandle.db,
+    repos,
     embedder,
-    onDrained: () => logSimilarityDistribution(dbHandle.db),
+    onDrained: () => logSimilarityDistribution(repos),
   });
 
   const embedTick = (): void => {
@@ -160,7 +159,8 @@ export async function bootstrap(
 
   // Doctor report builder — captures live services for `memory.doctor`.
   const buildDoctorReport = buildDoctorReportFactory({
-    dbHandle,
+    diagnostics: dbDiagnostics,
+    repos,
     agentSessions: agentSessionsSvc,
   });
 
@@ -168,7 +168,8 @@ export async function bootstrap(
   // LLM, no cron. Triggered lazily on session start (throttled per scope)
   // and manually via POST /admin/consolidation/run.
   const runner = new ConsolidationRunner({
-    db: dbHandle.db,
+    repos,
+    tx: dbHandle.db,
     relations: relationsSvc,
     orphanDeadlineMs: config.judgments.orphanDeadlineMs,
   });
@@ -200,7 +201,7 @@ export async function bootstrap(
       },
       embedNow: (memoryId, content) => embeddingWorker.embedNow(memoryId, content),
       router: sessionRouter,
-      db: dbHandle.db,
+      repos,
       doctor: buildDoctorReport,
       sweep: sweepOnSessionStart,
       orphanAfterMs: config.judgments.orphanAfterMs,
@@ -221,9 +222,7 @@ export async function bootstrap(
       capability: new CapabilityDetector({ env }),
       engineFactory: (socketPath) => new DockerEngineApi(socketPath),
       backup: createPreUpdateBackup({
-        vacuumInto: (dest) => {
-          dbHandle.raw.prepare('VACUUM INTO ?').run(dest);
-        },
+        vacuumInto: (dest) => dbDiagnostics.vacuumInto(dest),
         backupsDir: join(config.dataDir, 'backups'),
       }),
     });
@@ -236,7 +235,7 @@ export async function bootstrap(
     : null;
 
   try {
-    assertDataLossGuard({ dataDir: config.dataDir, db: dbHandle.db, env });
+    assertDataLossGuard({ dataDir: config.dataDir, diagnostics: dbDiagnostics, env });
   } catch (err) {
     if (err instanceof DataLossGuardError) {
       dbHandle.close();
@@ -245,11 +244,11 @@ export async function bootstrap(
     throw err;
   }
 
-  printBootstrapBanner(config, queryCounts(dbHandle.db));
+  printBootstrapBanner(config, queryCounts(dbDiagnostics));
 
   const markerTimer = setInterval(() => {
     try {
-      writeStateMarker(config.dataDir, queryCounts(dbHandle.db));
+      writeStateMarker(config.dataDir, queryCounts(dbDiagnostics));
     } catch (err) {
       console.error(
         'state marker refresh failed:',
@@ -266,23 +265,27 @@ export async function bootstrap(
     tokens,
     projects,
     agentSessions: agentSessionsSvc,
-    db: dbHandle,
+    diagnostics: dbDiagnostics,
     rateLimiter,
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
     dashboard: {
-      db: dbHandle.db,
+      repos,
+      diagnostics: dbDiagnostics,
       tokens,
       sessions,
       agentSessions: agentSessionsSvc,
       projects,
       prompts: promptsSvc,
       memory: memorySvc,
-      getStats: () => collectStats(dbHandle, agentSessionsSvc, relationsSvc),
+      relations: relationsSvc,
+      getStats: () => collectStats(repos, agentSessionsSvc, relationsSvc),
       dataDir: config.dataDir,
       updates,
       selfUpdate,
       triggerSweep: () => runner.runAll({ force: true }),
+      undoRun: (runId) => undoRun(repos, dbHandle.db, runId),
+      undoOp: (opId) => undoOp(repos, dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
       orphanDeadlineMs: config.judgments.orphanDeadlineMs,
     },
@@ -297,7 +300,7 @@ export async function bootstrap(
     shutdown: async () => {
       clearInterval(markerTimer);
       try {
-        writeStateMarker(config.dataDir, queryCounts(dbHandle.db));
+        writeStateMarker(config.dataDir, queryCounts(dbDiagnostics));
       } catch (err) {
         console.error(
           'state marker write on shutdown failed:',
@@ -349,7 +352,8 @@ function printReadyBanner(url: string, firstRun: boolean): void {
  * captures the live services so this can be called inside any handler.
  */
 function buildDoctorReportFactory(deps: {
-  dbHandle: DbHandle;
+  diagnostics: DbDiagnostics;
+  repos: Repositories;
   agentSessions: AgentSessionsService;
 }): () => DoctorReport {
   return () => {
@@ -359,41 +363,16 @@ function buildDoctorReportFactory(deps: {
     let integrity = 'unknown';
     let sizeBytes = 0;
     try {
-      const jmRow = deps.dbHandle.raw
-        .prepare<[], { journal_mode: string }>('PRAGMA journal_mode')
-        .get();
-      journalMode = jmRow?.journal_mode ?? 'unknown';
-      const checkRow = deps.dbHandle.raw
-        .prepare<[], Record<string, string>>('PRAGMA quick_check')
-        .get();
-      if (checkRow) {
-        // SQLite returns the first (and only) column as the result; the
-        // column name is the PRAGMA name. Read the first value.
-        const firstValue = Object.values(checkRow)[0];
-        integrity = firstValue ?? 'unknown';
-      }
-      const sizeRow = deps.dbHandle.raw
-        .prepare<
-          [],
-          { page_count: number; page_size: number }
-        >('SELECT (SELECT page_count FROM pragma_page_count) AS page_count, (SELECT page_size FROM pragma_page_size) AS page_size')
-        .get();
-      sizeBytes = (sizeRow?.page_count ?? 0) * (sizeRow?.page_size ?? 0);
+      journalMode = deps.diagnostics.readJournalMode();
+      integrity = deps.diagnostics.quickCheck();
+      sizeBytes = deps.diagnostics.readDbSize().totalBytes;
     } catch (err) {
       warnings.push(`db pragma read failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (integrity !== 'ok') warnings.push(`db integrity: ${integrity}`);
 
-    const lastConsolidation = deps.dbHandle.db
-      .select({
-        startedAt: consolidationRuns.startedAt,
-        summary: consolidationRuns.summary,
-      })
-      .from(consolidationRuns)
-      .orderBy(sql`started_at DESC`)
-      .limit(1)
-      .get();
+    const lastConsolidation = deps.repos.consolidation.latestRun();
 
     let lastRunOps: Record<string, number> = {};
     if (lastConsolidation?.summary) {
@@ -404,10 +383,7 @@ function buildDoctorReportFactory(deps: {
       }
     }
 
-    const backlogRow = deps.dbHandle.db.get<{ v: number }>(
-      sql`SELECT COUNT(*) AS v FROM memory m LEFT JOIN memory_vec v ON v.memory_id = m.id WHERE v.memory_id IS NULL AND m.status != 'archived'`,
-    ) as { v: number } | undefined;
-    const backlog = backlogRow?.v ?? 0;
+    const backlog = deps.repos.vectors.backlogCount();
     if (backlog > 100) {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
@@ -428,43 +404,19 @@ function buildDoctorReportFactory(deps: {
 }
 
 function collectStats(
-  dbHandle: DbHandle,
+  repos: Repositories,
   agentSessionsSvc: AgentSessionsService,
   relationsSvc: RelationsService,
 ): DashboardStats {
-  const totalRow = dbHandle.db
-    .select({ value: sql<number>`count(*)` })
-    .from(memory)
-    .get();
-  const activeRow = dbHandle.db
-    .select({ value: sql<number>`count(*)` })
-    .from(memory)
-    .where(sql`status = 'active'`)
-    .get();
-  const archivedRow = dbHandle.db
-    .select({ value: sql<number>`count(*)` })
-    .from(memory)
-    .where(sql`status = 'archived'`)
-    .get();
-  const projectsRow = dbHandle.db
-    .select({ value: sql<number>`count(*)` })
-    .from(projectsTable)
-    .get();
-  const consolidationRow = dbHandle.db
-    .select({ startedAt: consolidationRuns.startedAt })
-    .from(consolidationRuns)
-    .orderBy(sql`started_at DESC`)
-    .limit(1)
-    .get();
-
+  const consolidationRow = repos.consolidation.latestRun();
   const sessionsByStatus = agentSessionsSvc.countByStatus();
   const relationsByStatus = relationsSvc.countByStatus();
 
   return {
-    totalMemories: totalRow?.value ?? 0,
-    activeMemories: activeRow?.value ?? 0,
-    archivedMemories: archivedRow?.value ?? 0,
-    projects: projectsRow?.value ?? 0,
+    totalMemories: repos.memory.countAll(),
+    activeMemories: repos.memory.countByStatus('active'),
+    archivedMemories: repos.memory.countByStatus('archived'),
+    projects: repos.projects.count(),
     lastConsolidationAt: consolidationRow?.startedAt ?? null,
     activeSessions: sessionsByStatus.active,
     pendingJudgments: relationsByStatus.pending,

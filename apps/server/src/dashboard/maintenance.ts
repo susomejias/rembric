@@ -1,7 +1,6 @@
-import { sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import type { Db } from '../db/client.js';
+import type { DbDiagnostics } from '../db/diagnostics.js';
 import { type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type MemoryService } from '../services/memory.js';
@@ -16,7 +15,7 @@ import { html, raw } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface MaintenanceDeps {
-  db: Db;
+  diagnostics: DbDiagnostics;
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
   memory: MemoryService;
@@ -84,41 +83,27 @@ const BREAKDOWN_TABLES = [
   'projects',
 ];
 
-function readBreakdown(db: Db): DbBreakdown {
-  const sizeRow = db.get<{ page_count: number; page_size: number; freelist_count: number }>(
-    sql`SELECT
-          (SELECT page_count FROM pragma_page_count) AS page_count,
-          (SELECT page_size  FROM pragma_page_size)  AS page_size,
-          (SELECT freelist_count FROM pragma_freelist_count) AS freelist_count`,
-  ) as { page_count: number; page_size: number; freelist_count: number } | undefined;
-
-  const pageSize = sizeRow?.page_size ?? 0;
-  const totalBytes = (sizeRow?.page_count ?? 0) * pageSize;
-  const freelistBytes = (sizeRow?.freelist_count ?? 0) * pageSize;
+function readBreakdown(diagnostics: DbDiagnostics): DbBreakdown {
+  const size = diagnostics.readDbSize();
+  const totalBytes = size.totalBytes;
+  const freelistBytes = size.freelistBytes;
 
   const perTable: DbBreakdown['perTable'] = [];
   let source: DbBreakdown['source'] = 'row-counts';
-  try {
-    const rows = db.all<{ name: string; bytes: number }>(
-      sql`SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name`,
-    );
-    if (rows.length > 0) {
-      source = 'dbstat';
-      const byName = new Map(rows.map((r) => [r.name, r.bytes]));
-      for (const t of BREAKDOWN_TABLES) {
-        const b = byName.get(t);
-        if (b == null) continue;
-        perTable.push({ name: t, bytes: b, rowCount: countRows(db, t) });
-      }
-      perTable.sort((a, b) => b.bytes - a.bytes);
+  const byName = diagnostics.readDbstatBytes();
+  if (byName && byName.size > 0) {
+    source = 'dbstat';
+    for (const t of BREAKDOWN_TABLES) {
+      const b = byName.get(t);
+      if (b == null) continue;
+      perTable.push({ name: t, bytes: b, rowCount: diagnostics.countTableRows(t) });
     }
-  } catch {
-    /* dbstat module not compiled in — fall back to row counts. */
+    perTable.sort((a, b) => b.bytes - a.bytes);
   }
 
   if (perTable.length === 0) {
     for (const t of BREAKDOWN_TABLES) {
-      const rc = countRows(db, t);
+      const rc = diagnostics.countTableRows(t);
       if (rc == null) continue;
       perTable.push({ name: t, bytes: 0, rowCount: rc });
     }
@@ -126,17 +111,6 @@ function readBreakdown(db: Db): DbBreakdown {
   }
 
   return { totalBytes, freelistBytes, perTable, source };
-}
-
-function countRows(db: Db, table: string): number | null {
-  try {
-    const row = db.get<{ v: number }>(sql.raw(`SELECT COUNT(*) AS v FROM "${table}"`)) as
-      | { v: number }
-      | undefined;
-    return row?.v ?? 0;
-  } catch {
-    return null;
-  }
 }
 
 function formatBytes(bytes: number): string {
@@ -162,7 +136,7 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     const emptyCount = deps.agentSessions.countPurgeableEmpty();
     const archivedCount = deps.memory.countPurgeableDisconnectedArchived();
     const deletedPromptsCount = deps.prompts.countPurgeableDeleted();
-    const breakdown = readBreakdown(deps.db);
+    const breakdown = readBreakdown(deps.diagnostics);
 
     const flashBanner =
       purgedSessions !== null

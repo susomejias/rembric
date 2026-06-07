@@ -12,6 +12,14 @@ import * as schema from './schema/index.js';
 export type Schema = typeof schema;
 export type Db = BetterSQLite3Database<Schema>;
 
+/**
+ * Transaction-only view of the Db handed to services. Services own
+ * transaction boundaries but never execute SQL themselves — repository
+ * methods called inside the callback share the single synchronous
+ * better-sqlite3 connection and therefore participate automatically.
+ */
+export type TransactionRunner = Pick<Db, 'transaction'>;
+
 export interface CreateDbOptions {
   /** Directory containing the SQLite file. Created (0700) if missing. */
   dataDir: string;

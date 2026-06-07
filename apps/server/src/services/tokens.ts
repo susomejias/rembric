@@ -1,10 +1,9 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
-import { and, eq, isNull } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { tokens, type Token } from '../db/schema/tokens.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type Token } from '../db/schema/tokens.js';
 
 import { DomainError } from './errors.js';
 
@@ -50,13 +49,12 @@ export interface ResolvedToken {
 
 export class TokensService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'tokens'>,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   count(): number {
-    const row = this.db.select({ id: tokens.id }).from(tokens).limit(1).all();
-    return row.length;
+    return this.repos.tokens.count();
   }
 
   create(input: CreateTokenInput): CreatedToken {
@@ -69,44 +67,35 @@ export class TokensService {
     const plaintext = generatePlaintextToken();
     const hash = hashToken(plaintext);
     const ts = this.now();
-    const row = this.db
-      .insert(tokens)
-      .values({
-        id: ulid(ts.getTime()),
-        name: input.name,
-        hash,
-        scope: input.scope,
-        projectId: input.projectId ?? null,
-        createdAt: ts,
-        expiresAt: input.expiresAt ?? null,
-        revokedAt: null,
-      })
-      .returning()
-      .get();
+    const row = this.repos.tokens.insert({
+      id: ulid(ts.getTime()),
+      name: input.name,
+      hash,
+      scope: input.scope,
+      projectId: input.projectId ?? null,
+      createdAt: ts,
+      expiresAt: input.expiresAt ?? null,
+      revokedAt: null,
+    });
     if (!row) throw new DomainError('conflict', 'tokens.create: insert did not return a row');
     return { plaintext, token: row };
   }
 
   list(): Token[] {
-    return this.db.select().from(tokens).all();
+    return this.repos.tokens.listAll();
   }
 
   findByName(name: string): Token | undefined {
-    return this.db.select().from(tokens).where(eq(tokens.name, name)).get();
+    return this.repos.tokens.findByName(name);
   }
 
   findById(id: string): Token | undefined {
-    return this.db.select().from(tokens).where(eq(tokens.id, id)).get();
+    return this.repos.tokens.findById(id);
   }
 
   revoke(name: string): void {
-    const ts = this.now();
-    const result = this.db
-      .update(tokens)
-      .set({ revokedAt: ts })
-      .where(and(eq(tokens.name, name), isNull(tokens.revokedAt)))
-      .run();
-    if (result.changes === 0) {
+    const changes = this.repos.tokens.revokeByName(name, this.now());
+    if (changes === 0) {
       throw new DomainError(
         'token_not_found',
         `tokens.revoke: '${name}' not found or already revoked`,
@@ -120,7 +109,7 @@ export class TokensService {
    * not expired.
    */
   authenticate(plaintext: string): ResolvedToken {
-    const all = this.db.select().from(tokens).all();
+    const all = this.repos.tokens.listAll();
     for (const row of all) {
       if (verifyToken(plaintext, row.hash)) {
         if (row.revokedAt) {
@@ -150,19 +139,16 @@ export class TokensService {
     }
     const hash = hashToken(adminTokenPlaintext);
     const ts = this.now();
-    this.db
-      .insert(tokens)
-      .values({
-        id: ulid(ts.getTime()),
-        name: 'admin',
-        hash,
-        scope: '*',
-        projectId: null,
-        createdAt: ts,
-        expiresAt: null,
-        revokedAt: null,
-      })
-      .run();
+    this.repos.tokens.insert({
+      id: ulid(ts.getTime()),
+      name: 'admin',
+      hash,
+      scope: '*',
+      projectId: null,
+      createdAt: ts,
+      expiresAt: null,
+      revokedAt: null,
+    });
   }
 }
 
