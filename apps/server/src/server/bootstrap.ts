@@ -138,16 +138,16 @@ export async function bootstrap(
       `  ✓ embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`,
     );
   }
-  const vectorReset = ensureVectorModel(dbHandle.db, config.dataDir);
+  const vectorReset = ensureVectorModel(repos, config.dataDir);
   if (vectorReset.wiped > 0) {
     console.error(
       `  ↻ embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
     );
   }
   const embeddingWorker = new EmbeddingWorker({
-    db: dbHandle.db,
+    repos,
     embedder,
-    onDrained: () => logSimilarityDistribution(dbHandle.db),
+    onDrained: () => logSimilarityDistribution(repos),
   });
 
   const embedTick = (): void => {

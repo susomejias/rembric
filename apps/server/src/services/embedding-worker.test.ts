@@ -29,7 +29,7 @@ beforeEach(() => {
   mem = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   embedder = new FakeEmbedder();
   worker = new EmbeddingWorker({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
     embedder,
     batchSize: 50,
   });

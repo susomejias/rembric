@@ -1,6 +1,4 @@
-import { sql } from 'drizzle-orm';
-
-import type { Db } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { Embedder } from '../embeddings/embedder.js';
 
 /**
@@ -15,17 +13,12 @@ import type { Embedder } from '../embeddings/embedder.js';
  */
 
 export interface EmbeddingWorkerOptions {
-  db: Db;
+  repos: Pick<Repositories, 'vectors'>;
   embedder: Embedder;
   /** How many memories to embed per call. Defaults to 25. */
   batchSize?: number;
   /** Fired once each time the queue drains after having had work. */
   onDrained?: () => void;
-}
-
-interface PendingRow {
-  id: string;
-  content: string;
 }
 
 export class EmbeddingWorker {
@@ -46,10 +39,7 @@ export class EmbeddingWorker {
   async embedNow(memoryId: string, content: string): Promise<boolean> {
     try {
       const vector = await this.opts.embedder.embed(content);
-      this.opts.db.run(sql`
-          INSERT INTO memory_vec (memory_id, embedding)
-          VALUES (${memoryId}, ${Buffer.from(vector.buffer)})
-        `);
+      this.opts.repos.vectors.insertEmbedding(memoryId, Buffer.from(vector.buffer));
       return true;
     } catch (err) {
       // Benign race with the drain (row already embedded) or an inference
@@ -67,15 +57,7 @@ export class EmbeddingWorker {
    * number of embeddings successfully inserted.
    */
   async processBatch(): Promise<{ processed: number; failed: number }> {
-    const pending = this.opts.db.all<PendingRow>(sql`
-      SELECT m.id AS id, m.content AS content
-      FROM memory m
-      LEFT JOIN memory_vec v ON v.memory_id = m.id
-      WHERE v.memory_id IS NULL
-        AND m.status != 'archived'
-      ORDER BY m.created_at ASC
-      LIMIT ${this.batchSize}
-    `);
+    const pending = this.opts.repos.vectors.findMissingEmbeddings(this.batchSize);
     if (pending.length === 0) {
       if (this.hadWork) {
         this.hadWork = false;
@@ -91,10 +73,7 @@ export class EmbeddingWorker {
     for (const row of pending) {
       try {
         const vector = await this.opts.embedder.embed(row.content);
-        this.opts.db.run(sql`
-            INSERT INTO memory_vec (memory_id, embedding)
-            VALUES (${row.id}, ${Buffer.from(vector.buffer)})
-          `);
+        this.opts.repos.vectors.insertEmbedding(row.id, Buffer.from(vector.buffer));
         processed++;
       } catch {
         // Skip this row for now; the worker retries it on the next call.

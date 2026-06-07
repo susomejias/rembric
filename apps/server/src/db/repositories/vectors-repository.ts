@@ -55,6 +55,34 @@ export class VectorsRepository {
     return row?.v ?? 0;
   }
 
+  insertEmbedding(memoryId: string, embedding: Buffer): void {
+    this.db.run(
+      sql`INSERT INTO memory_vec (memory_id, embedding) VALUES (${memoryId}, ${embedding})`,
+    );
+  }
+
+  /** Non-archived memories still missing an embedding, oldest first. */
+  findMissingEmbeddings(limit: number): { id: string; content: string }[] {
+    return this.db.all<{ id: string; content: string }>(sql`
+      SELECT m.id AS id, m.content AS content
+      FROM memory m
+      LEFT JOIN memory_vec v ON v.memory_id = m.id
+      WHERE v.memory_id IS NULL
+        AND m.status != 'archived'
+      ORDER BY m.created_at ASC
+      LIMIT ${limit}
+    `);
+  }
+
+  backlogCount(): number {
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v FROM memory m
+      LEFT JOIN memory_vec v ON v.memory_id = m.id
+      WHERE v.memory_id IS NULL AND m.status != 'archived'
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
   deleteAll(): void {
     this.db.run(sql`DELETE FROM memory_vec`);
   }
