@@ -11,17 +11,18 @@ const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
 
 /**
  * Single source of truth for the maximum length (UTF-16 code units) of
- * `sessions.summary`. Enforced at: (a) the service layer below via
- * `assertSummaryWithinCap`, (b) the MCP zod schema in `sessions-tools.ts`,
- * (c) the HTTP handler in `api-router.ts` via `truncateSummary`, (d) the
- * SQLite `CHECK` constraint on the `sessions.summary` column.
+ * `sessions.summary`. Enforced SERVER-SIDE ONLY at: (a) the service layer
+ * below via `assertSummaryWithinCap`, (b) the MCP zod schema in
+ * `sessions-tools.ts`, (c) the HTTP handler in `api-router.ts` via
+ * `truncateSummary`. There is NO SQLite `CHECK` pinning this value — the
+ * `0011` constraint was dropped in `0012_drop_summary_length_check.sql`, so
+ * this constant is a tunable: change it here and no table rebuild is needed.
  *
  * The asymmetry between (b) and (c) is deliberate: MCP rejects (the agent
  * retries with a shorter body), HTTP truncates (hook scripts cannot react
- * to an error). See `openspec/specs/sessions/spec.md` and the design notes
- * in the `summary-length-cap` change.
+ * to an error). See `openspec/specs/sessions/spec.md`.
  */
-export const SUMMARY_MAX_CHARS = 2000;
+export const SUMMARY_MAX_CHARS = 16000;
 
 /** Suffix appended by `truncateSummary` when overflow trims content. */
 export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';

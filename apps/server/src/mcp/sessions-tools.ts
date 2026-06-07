@@ -74,6 +74,10 @@ export const capturePassiveSchema = {
   sessionId: z.string().min(1).optional(),
 };
 
+export const getSessionSchema = {
+  sessionId: z.string().min(1),
+};
+
 export interface SessionsToolDeps {
   repos: Pick<Repositories, 'memory' | 'relations'>;
   agentSessions: AgentSessionsService;
@@ -144,6 +148,7 @@ export function buildSessionsHandlers(deps: SessionsToolDeps) {
     sessionEnd: handleSessionEnd.bind(null, deps),
     sessionSummary: handleSessionSummary.bind(null, deps),
     context: handleContext.bind(null, deps),
+    getSession: handleGetSession.bind(null, deps),
     timeline: handleTimeline.bind(null, deps),
     capturePassive: handleCapturePassive.bind(null, deps),
     doctor: handleDoctor.bind(null, deps),
@@ -450,6 +455,27 @@ function rejectIfDeleted(
     );
   }
   return null;
+}
+
+function handleGetSession(deps: SessionsToolDeps, args: { sessionId: string }) {
+  const scope = scopeFromContext(deps);
+  const row = deps.agentSessions.getById(args.sessionId);
+  if (
+    !row ||
+    row.deletedAt ||
+    (scope.kind === 'project' ? row.projectId !== scope.projectId : row.projectId !== null)
+  ) {
+    return mcpError('not_found', `session '${args.sessionId}' not found in this scope`);
+  }
+  return ok({
+    id: row.id,
+    agent: row.agent,
+    status: row.status,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    title: row.title,
+    summary: row.summary,
+  });
 }
 
 const CONTEXT_SNIPPET_CHARS = 350;

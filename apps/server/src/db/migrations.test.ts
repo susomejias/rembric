@@ -13,7 +13,7 @@ import { migrate } from './migrate.js';
 
 const fullMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
-describe('migration 0011_summary_length_check', () => {
+describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () => {
   let db: TestDb;
 
   beforeEach(() => {
@@ -22,23 +22,31 @@ describe('migration 0011_summary_length_check', () => {
 
   afterEach(() => db.cleanup());
 
-  it('rejects a direct INSERT with summary > 2000 chars via SQLITE_CONSTRAINT_CHECK', () => {
+  it('no longer rejects a direct INSERT with an oversized summary (the 0011 CHECK was dropped)', () => {
     const raw = db.handle.raw;
     raw
       .prepare(
         "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
       )
       .run();
+    // > the old 2000 cap and > the new 16000 server cap: the DB no longer
+    // enforces length; the cap lives only in SUMMARY_MAX_CHARS server-side.
     expect(() =>
       raw
         .prepare(
           "INSERT INTO sessions (id, token_id, agent, started_at, summary, status) VALUES ('s1', 'tok1', 'claude', 0, ?, 'active')",
         )
-        .run('a'.repeat(2001)),
-    ).toThrow(/CHECK constraint failed/);
+        .run('a'.repeat(20_000)),
+    ).not.toThrow();
+    const len = (
+      raw.prepare("SELECT length(summary) AS len FROM sessions WHERE id = 's1'").get() as {
+        len: number;
+      }
+    ).len;
+    expect(len).toBe(20_000);
   });
 
-  it('rejects a direct UPDATE that would push summary over 2000 chars', () => {
+  it('no longer rejects a direct UPDATE with an oversized summary', () => {
     const raw = db.handle.raw;
     raw
       .prepare(
@@ -51,15 +59,11 @@ describe('migration 0011_summary_length_check', () => {
       )
       .run();
     expect(() =>
-      raw.prepare("UPDATE sessions SET summary = ? WHERE id = 's2'").run('a'.repeat(2001)),
-    ).toThrow(/CHECK constraint failed/);
-    const after = raw.prepare("SELECT summary FROM sessions WHERE id = 's2'").get() as {
-      summary: string;
-    };
-    expect(after.summary).toBe('short');
+      raw.prepare("UPDATE sessions SET summary = ? WHERE id = 's2'").run('a'.repeat(20_000)),
+    ).not.toThrow();
   });
 
-  it('accepts summary at exactly 2000 chars and NULL summary', () => {
+  it('accepts a 2000-char summary (old cap) and NULL summary unchanged', () => {
     const raw = db.handle.raw;
     raw
       .prepare(
@@ -102,7 +106,7 @@ describe('migration 0011_summary_length_check', () => {
 // (prompts/memory/confirmations all reference it) and the table-rebuild
 // dance dropped a populated parent under `foreign_keys=ON`. The fix is
 // `PRAGMA defer_foreign_keys = ON` at the top of the migration.
-describe('migration 0011 with referencing children', () => {
+describe('migrations 0011 + 0012 with referencing children', () => {
   let dataDir: string;
   let slicedDir: string;
   let raw: Database.Database;
@@ -152,9 +156,9 @@ describe('migration 0011 with referencing children', () => {
       .run();
     raw
       .prepare(
-        "INSERT INTO sessions (id, token_id, project_id, agent, started_at, summary, status) VALUES ('sess1', 'tok1', 'proj1', 'claude', 0, 'short', 'active')",
+        "INSERT INTO sessions (id, token_id, project_id, agent, started_at, summary, status) VALUES ('sess1', 'tok1', 'proj1', 'claude', 0, ?, 'active')",
       )
-      .run();
+      .run('a'.repeat(2000));
 
     // FK children referencing sess1
     raw
@@ -179,9 +183,14 @@ describe('migration 0011 with referencing children', () => {
       .map((r) => r.filename);
     expect(before).not.toContain('0011_summary_length_check.sql');
 
-    // Re-run migrations against the FULL dir → only 0011 is new and runs.
+    // Re-run migrations against the FULL dir → 0011 and 0012 are new and run.
+    // Both rebuild `sessions` while it is a populated FK parent, so this
+    // exercises the FK-safe dance for both migrations.
     const result = migrate(raw, { migrationsDir: fullMigrationsDir });
-    expect(result.applied).toEqual(['0011_summary_length_check.sql']);
+    expect(result.applied).toEqual([
+      '0011_summary_length_check.sql',
+      '0012_drop_summary_length_check.sql',
+    ]);
 
     // FK integrity after the rebuild.
     const fkViolations = raw.prepare('PRAGMA foreign_key_check').all();
@@ -194,7 +203,9 @@ describe('migration 0011 with referencing children', () => {
         { id: string; summary: string | null }
       >("SELECT id, summary FROM sessions WHERE id = 'sess1'")
       .get();
-    expect(session).toEqual({ id: 'sess1', summary: 'short' });
+    // The 2000-char summary survives both rebuilds verbatim (loss-free).
+    expect(session?.id).toBe('sess1');
+    expect(session?.summary?.length).toBe(2000);
 
     const childSessIds = raw
       .prepare<[], { src: string; sid: string | null }>(
@@ -207,9 +218,10 @@ describe('migration 0011 with referencing children', () => {
       expect(row.sid).toBe('sess1');
     }
 
-    // CHECK constraint is now in effect.
+    // After 0012 the summary CHECK is gone — an oversized direct UPDATE
+    // succeeds at the DB level (the cap is enforced server-side only).
     expect(() =>
-      raw.prepare("UPDATE sessions SET summary = ? WHERE id = 'sess1'").run('a'.repeat(2001)),
-    ).toThrow(/CHECK constraint failed/);
+      raw.prepare("UPDATE sessions SET summary = ? WHERE id = 'sess1'").run('a'.repeat(20_000)),
+    ).not.toThrow();
   });
 });

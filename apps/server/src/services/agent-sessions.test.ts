@@ -5,7 +5,7 @@ import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { AgentSessionsService } from './agent-sessions.js';
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import { ProjectsService } from './projects.js';
 import { TokensService } from './tokens.js';
 
@@ -103,31 +103,34 @@ describe('AgentSessionsService', () => {
     expect(() => sessions.summarize(s.id, { tokenId, summary: '   ' })).toThrow(/non-empty/);
   });
 
-  describe('summary length cap (SUMMARY_MAX_CHARS = 2000)', () => {
-    it('writeSummary rejects summary of length > 2000 and leaves the row unchanged', () => {
+  describe('summary length cap (SUMMARY_MAX_CHARS)', () => {
+    const tooLong = 'a'.repeat(SUMMARY_MAX_CHARS + 1);
+    const cap = String(SUMMARY_MAX_CHARS);
+
+    it('writeSummary rejects a summary longer than the cap and leaves the row unchanged', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-      expect(() =>
-        sessions.writeSummary(s.id, { tokenId, summary: 'a'.repeat(2001), final: true }),
-      ).toThrow(/2000/);
+      expect(() => sessions.writeSummary(s.id, { tokenId, summary: tooLong, final: true })).toThrow(
+        cap,
+      );
       const after = sessions.getById(s.id);
       expect(after?.summary).toBeNull();
       expect(after?.summaryFinal).toBe(false);
     });
 
-    it('writeSummary accepts summary of exactly 2000 chars', () => {
+    it('writeSummary accepts a summary of exactly the cap', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
       const updated = sessions.writeSummary(s.id, {
         tokenId,
-        summary: 'a'.repeat(2000),
+        summary: 'a'.repeat(SUMMARY_MAX_CHARS),
         final: true,
       });
-      expect(updated.summary?.length).toBe(2000);
+      expect(updated.summary?.length).toBe(SUMMARY_MAX_CHARS);
       expect(updated.summaryFinal).toBe(true);
     });
 
     it('end rejects oversized summary atomically with the transition', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-      expect(() => sessions.end(s.id, { tokenId, summary: 'a'.repeat(2001) })).toThrow(/2000/);
+      expect(() => sessions.end(s.id, { tokenId, summary: tooLong })).toThrow(cap);
       const after = sessions.getById(s.id);
       expect(after?.status).toBe('active');
       expect(after?.endedAt).toBeNull();
@@ -136,9 +139,7 @@ describe('AgentSessionsService', () => {
 
     it('summarize (legacy wrapper) inherits the cap', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-      expect(() => sessions.summarize(s.id, { tokenId, summary: 'a'.repeat(2001) })).toThrow(
-        /2000/,
-      );
+      expect(() => sessions.summarize(s.id, { tokenId, summary: tooLong })).toThrow(cap);
       const after = sessions.getById(s.id);
       expect(after?.status).toBe('active');
     });
@@ -153,7 +154,7 @@ describe('AgentSessionsService', () => {
 
     it('truncates oversize input with the …[truncated] suffix and lands at exactly the cap', async () => {
       const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
-      const out = truncateSummary('a'.repeat(5000));
+      const out = truncateSummary('a'.repeat(SUMMARY_MAX_CHARS + 1000));
       expect(out.length).toBe(SUMMARY_MAX_CHARS);
       expect(out.endsWith('…[truncated]')).toBe(true);
     });

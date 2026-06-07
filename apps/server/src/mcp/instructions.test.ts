@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
+
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from './instructions.js';
 
 describe('MCP initialize instructions', () => {
@@ -59,13 +61,13 @@ describe('MCP initialize instructions', () => {
     }
   });
 
-  it('surfaces the summary length cap (2000) inline in both variants', () => {
+  it('surfaces the summary length cap inline in both variants', () => {
     const variants = [
       buildInstructions({ requestedSlug: null }),
       buildInstructions({ requestedSlug: 'rembric' }),
     ];
     for (const text of variants) {
-      expect(text).toContain('2000');
+      expect(text).toContain(String(SUMMARY_MAX_CHARS));
     }
   });
 
