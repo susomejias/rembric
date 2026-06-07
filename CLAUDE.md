@@ -31,7 +31,9 @@ Path-scoping contract (in `apps/server/src/mcp/tools.ts`): `/mcp/<slug>` rejects
 
 ### Data access pattern
 
-- ALL SQL (Drizzle builder or raw) lives under `apps/server/src/db/`: one repository per aggregate in `db/repositories/`, DB-level introspection in `db/diagnostics.ts`. Services orchestrate (scope resolution, validation, transactions); dashboard handlers call `admin*` repository reads + service mutations. No SQL in services/dashboard/mcp/server.
+- ALL SQL (Drizzle builder or raw) lives under `apps/server/src/db/`: one repository per aggregate in `db/repositories/`, DB-level introspection (PRAGMA/dbstat/VACUUM/ping) in `db/diagnostics.ts`. Services orchestrate (scope resolution, validation, transactions); dashboard handlers call `admin*` repository reads + service mutations. No SQL in services/dashboard/mcp/server — grep-enforced by `invariants.test.ts` (data-access confinement).
+- **Scope still resolved at the service layer.** Services compute the `Scope` (`resolveEffectiveProject`/`scopeFromContext`) and pass it down; scoped repository methods _require_ it as a parameter. Unscoped reads carry the `admin*` prefix and are callable ONLY from `src/dashboard/` (+ the dashboard router) — grep-enforced. Cross-scope service reads keep the `unsafe*` prefix.
+- Services own `db.transaction()`; repositories never open transactions (single synchronous connection means repo calls inside a service tx participate automatically).
 - Never hand-write row/DTO shapes. Derive from schema types: `$inferSelect`/`$inferInsert` for entities, `Pick<Entity, …> & { … }` for join projections, schema-derived aliases (`MemoryStatus`, `RelationKind`) for filter params.
 
 ### Table-rebuild migrations (SQLite)

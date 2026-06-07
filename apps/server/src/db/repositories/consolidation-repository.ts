@@ -46,6 +46,15 @@ export class ConsolidationRepository {
     );
   }
 
+  latestRun(): Pick<ConsolidationRun, 'startedAt' | 'summary'> | undefined {
+    return this.db
+      .select({ startedAt: consolidationRuns.startedAt, summary: consolidationRuns.summary })
+      .from(consolidationRuns)
+      .orderBy(desc(consolidationRuns.startedAt))
+      .limit(1)
+      .get();
+  }
+
   findOpById(opId: string): ConsolidationOp | undefined {
     return this.db.select().from(consolidationOps).where(eq(consolidationOps.id, opId)).get();
   }

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createDiagnostics } from '../db/diagnostics.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import {
@@ -26,7 +27,7 @@ describe('data-loss guard', () => {
 
     const result = assertDataLossGuard({
       dataDir: db.dataDir,
-      db: db.handle.db,
+      diagnostics: createDiagnostics(db.handle),
       env: {},
       log: () => {},
     });
@@ -60,7 +61,7 @@ describe('data-loss guard', () => {
     // wait a tick so last_seen_at can change
     const result = assertDataLossGuard({
       dataDir: db.dataDir,
-      db: db.handle.db,
+      diagnostics: createDiagnostics(db.handle),
       env: {},
       log: () => {},
     });
@@ -83,7 +84,7 @@ describe('data-loss guard', () => {
     try {
       assertDataLossGuard({
         dataDir: db.dataDir,
-        db: db.handle.db,
+        diagnostics: createDiagnostics(db.handle),
         env: {},
         log: () => {},
       });
@@ -112,7 +113,7 @@ describe('data-loss guard', () => {
     const lines: string[] = [];
     const result = assertDataLossGuard({
       dataDir: db.dataDir,
-      db: db.handle.db,
+      diagnostics: createDiagnostics(db.handle),
       env: { REMBRIC_ALLOW_DATA_SHRINKAGE: '1' },
       log: (l) => lines.push(l),
     });
@@ -132,7 +133,7 @@ describe('data-loss guard', () => {
 
     const result = assertDataLossGuard({
       dataDir: db.dataDir,
-      db: db.handle.db,
+      diagnostics: createDiagnostics(db.handle),
       env: {},
       log: () => {},
     });
@@ -153,7 +154,7 @@ describe('data-loss guard', () => {
 
     const result = assertDataLossGuard({
       dataDir: db.dataDir,
-      db: db.handle.db,
+      diagnostics: createDiagnostics(db.handle),
       env: {},
       log: () => {},
     });
@@ -175,7 +176,7 @@ describe('data-loss guard', () => {
     try {
       assertDataLossGuard({
         dataDir: db.dataDir,
-        db: db.handle.db,
+        diagnostics: createDiagnostics(db.handle),
         env: {},
         log: () => {},
       });

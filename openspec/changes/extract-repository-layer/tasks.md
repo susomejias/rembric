@@ -22,23 +22,23 @@ Phases mirror design.md Decision 7. Each numbered group lands green (`pnpm run t
 ## 3. Phase 3 — Services consume repositories
 
 - [x] 3.1 `MemoryService` → `MemoryRepository`: move all builder + raw SQL (FTS5 search, topic-key lookup, `json_each` chain traversal, purge predicate + `DELETE FROM memory`); update invariant allow-list + positive anchor from `services/memory.ts` to the repository in the same commit; service keeps scope resolution, validation, transactions; existing `memory.test.ts` assertions pass unchanged
-- [ ] 3.2 `RelationsService` → `RelationsRepository`: move raw WHEREs and bulk IN queries (convert to builder where expressible); `relations` tests pass unchanged
+- [x] 3.2 `RelationsService` → `RelationsRepository`: move raw WHEREs and bulk IN queries (convert to builder where expressible); `relations` tests pass unchanged
 - [x] 3.3 `PromptsService` → `PromptsRepository` incl. `DELETE FROM prompts` purge; allow-list + anchor move in same commit
 - [x] 3.4 `AgentSessionsService` + `SessionsService` → `AgentSessionsRepository` incl. `DELETE FROM sessions` purge; allow-list + anchor move in same commit. NOTE: `SessionsService` (dashboard cookies) gets its own `DashboardSessionsRepository` — `dashboard_sessions` was a 9th aggregate missed in the design's repo list (its `DELETE` is legitimate; cookie sessions are not append-only)
 - [x] 3.5 `ProjectsService` and `TokensService` → their repositories (pure builder moves)
 - [x] 3.6 `save-time-candidates.ts` → `VectorsRepository.knnByCosine(...)` and `MemoryRepository` FTS/BM25 method; decide here whether `embedding-worker.ts` shares `VectorsRepository` (design open question) and move its SQL accordingly
-- [ ] 3.7 `consolidation/{decay,operations,runner}.ts` → `ConsolidationRepository` + `MemoryRepository`; convert the runner throttle raw WHERE (`runner.ts:100`) to builder; consolidation + sweep tests pass unchanged
+- [x] 3.7 `consolidation/{decay,operations,runner}.ts` → `ConsolidationRepository` + `MemoryRepository`; convert the runner throttle raw WHERE (`runner.ts:100`) to builder; consolidation + sweep tests pass unchanged
 - [x] 3.8 `embeddings/state.ts` → `VectorsRepository` (count + similarity percentile sample) and `embedding-worker.ts` (shares `VectorsRepository`)
 - [x] 3.8b **(scope correction)** `mcp/sessions-tools.ts` (memory.context recentMemories + pendingJudgments, memory.timeline neighbor/window queries, memory.stats status/type counts) and `mcp/project-tools.ts` (per-project memory counts) hold raw SQL the initial analysis missed — move into the relevant repositories so the phase-4 invariant can pass
-- [ ] 3.9 Stop injecting `Db` into all service constructors; services receive repositories only; typecheck proves no service module imports from `db/schema` or executes SQL
+- [x] 3.9 Stop injecting `Db` into all service constructors; services receive repositories only; typecheck proves no service module imports from `db/schema` or executes SQL
 
 ## 4. Phase 4 — Closure and enforcement
 
-- [ ] 4.1 Convert `server/bootstrap.ts` PRAGMA/backup/backlog/stat queries and `server/data-loss-guard.ts` row counts to `diagnostics.ts` / repository calls
-- [ ] 4.2 Add SQL-confinement rule to `invariants.test.ts`: SQL-execution patterns (`db.select(`, `db.insert(`, `db.update(`, `db.delete(`, `db.all(`, `db.get(`, `db.run(`, `db.query.`, `sql` tag import from drizzle-orm, `raw.prepare(`, `.exec(`) forbidden outside `src/db/` (exempt: `*.test.ts`, `scripts/seed-dev.ts`); suite fails naming the file on violation
-- [ ] 4.3 Add admin-callsite rule to `invariants.test.ts`: `.admin<PascalCase>` invocations forbidden outside `src/dashboard/` (exempt: `src/db/repositories/`, tests); suite fails naming the file on violation
-- [ ] 4.4 Update CLAUDE.md Architecture section: repository layer, restated scope invariant (services resolve scope, repositories require it), diagnostics module
-- [ ] 4.5 Full gate: `pnpm run typecheck && pnpm run lint && pnpm test` green; `git grep` confirms zero `sql\`` outside `src/db/` in non-test files
+- [x] 4.1 Convert `server/bootstrap.ts` PRAGMA/backup/backlog/stat queries and `server/data-loss-guard.ts` row counts to `diagnostics.ts` / repository calls
+- [x] 4.2 Add SQL-confinement rule to `invariants.test.ts`: SQL-execution patterns (`db.select(`, `db.insert(`, `db.update(`, `db.delete(`, `db.all(`, `db.get(`, `db.run(`, `db.query.`, `sql` tag import from drizzle-orm, `raw.prepare(`, `.exec(`) forbidden outside `src/db/` (exempt: `*.test.ts`, `scripts/seed-dev.ts`); suite fails naming the file on violation
+- [x] 4.3 Add admin-callsite rule to `invariants.test.ts`: `.admin<PascalCase>` invocations forbidden outside `src/dashboard/` (exempt: `src/db/repositories/`, tests); suite fails naming the file on violation
+- [x] 4.4 Update CLAUDE.md Architecture section: repository layer, restated scope invariant (services resolve scope, repositories require it), diagnostics module
+- [x] 4.5 Full gate: `pnpm run typecheck && pnpm run lint && pnpm test` green; `git grep` confirms zero `sql\`` outside `src/db/` in non-test files
 
 ## 5. Validation (operator-assisted)
 

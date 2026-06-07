@@ -339,6 +339,11 @@ export class MemoryRepository {
     return row?.value ?? 0;
   }
 
+  countAll(): number {
+    const row = this.db.select({ value: count() }).from(memory).get();
+    return row?.value ?? 0;
+  }
+
   countConfirmations(memoryId: string): number {
     const row = this.db
       .select({ value: count() })

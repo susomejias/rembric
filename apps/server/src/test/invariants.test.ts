@@ -331,6 +331,94 @@ describe('scope-leak invariant', () => {
 });
 
 /**
+ * Data-access confinement invariant.
+ *
+ * ALL SQL — Drizzle query-builder calls, the drizzle-orm `sql` tag, and raw
+ * better-sqlite3 statement APIs — lives under `src/db/`. Services, dashboard
+ * handlers, MCP tools, the HTTP layer, consolidation, and embeddings are
+ * SQL-free consumers of the repository layer + `db/diagnostics.ts`.
+ */
+const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /from ['"]drizzle-orm['"]/, label: "import from 'drizzle-orm'" },
+  { pattern: /\.raw\.prepare\(/, label: 'raw.prepare(' },
+  { pattern: /\bdb\.(select|insert|update|delete)\(/, label: 'db.<builder>(' },
+  { pattern: /\bdb\.(all|get|run)\(/, label: 'db.<all|get|run>(' },
+  { pattern: /\bdb\.query\./, label: 'db.query.' },
+];
+
+describe('data-access confinement invariant', () => {
+  const files = listSourceFiles(srcRoot);
+
+  it('SQL executes only under src/db/', () => {
+    const offenders: { file: string; line: number; label: string; text: string }[] = [];
+    for (const file of files) {
+      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+      if (rel.startsWith('db/')) continue;
+      if (rel === 'scripts/seed-dev.ts') continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        for (const { pattern, label } of SQL_EXECUTION_PATTERNS) {
+          if (pattern.test(line)) offenders.push({ file: rel, line: i + 1, label, text: trimmed });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders
+        .map((o) => `  ${o.file}:${o.line}  [${o.label}]  ${o.text}`)
+        .join('\n');
+      throw new Error(
+        `SQL execution found outside src/db/. Move it into the repository layer or db/diagnostics.ts.\n${formatted}`,
+      );
+    }
+  });
+});
+
+/**
+ * Admin-method confinement invariant.
+ *
+ * `admin*`-prefixed repository reads are unscoped (they bypass the
+ * `(scope, project_id)` filter) and exist solely for the operator dashboard.
+ * Calling them anywhere else would leak cross-scope rows into agent-facing
+ * paths. Repository definitions and tests are exempt.
+ */
+const ADMIN_CALL_PATTERN = /\.admin[A-Z]\w*\(/;
+
+describe('admin-method confinement invariant', () => {
+  const files = listSourceFiles(srcRoot);
+
+  it('admin* repository methods are called only from src/dashboard/', () => {
+    const offenders: { file: string; line: number; text: string }[] = [];
+    for (const file of files) {
+      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+      if (rel.startsWith('dashboard/')) continue;
+      // The dashboard router renders the operator overview page directly.
+      if (rel === 'server/dashboard-router.ts') continue;
+      if (rel.startsWith('db/repositories/')) continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          continue;
+        }
+        if (ADMIN_CALL_PATTERN.test(line)) {
+          offenders.push({ file: rel, line: i + 1, text: trimmed });
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
+      throw new Error(`admin* repository method called outside src/dashboard/.\n${formatted}`);
+    }
+  });
+});
+
+/**
  * Plugin version lock-step invariant.
  *
  * The Rembric plugin is shipped to four agent clients (Claude Code, Codex

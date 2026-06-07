@@ -32,6 +32,11 @@ export class ProjectsRepository {
       .all();
   }
 
+  count(): number {
+    const row = this.db.select({ value: count() }).from(projects).get();
+    return row?.value ?? 0;
+  }
+
   listAllIds(): string[] {
     return this.db
       .select({ id: projects.id })

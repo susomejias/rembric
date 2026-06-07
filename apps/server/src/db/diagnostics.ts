@@ -91,6 +91,11 @@ export function vacuumInto(handle: DbHandle, dest: string): void {
  * Handle-bound facade for consumers that must not hold the raw database
  * handle themselves (the dashboard maintenance page).
  */
+/** Liveness ping for the healthz endpoint. Throws on a dead connection. */
+export function ping(handle: DbHandle): void {
+  handle.raw.prepare('SELECT 1').get();
+}
+
 export interface DbDiagnostics {
   readDbSize(): DbSizeInfo;
   readJournalMode(): string;
@@ -98,6 +103,7 @@ export interface DbDiagnostics {
   readDbstatBytes(): Map<string, number> | null;
   countTableRows(table: string): number | null;
   vacuumInto(dest: string): void;
+  ping(): void;
 }
 
 export function createDiagnostics(handle: DbHandle): DbDiagnostics {
@@ -108,5 +114,6 @@ export function createDiagnostics(handle: DbHandle): DbDiagnostics {
     readDbstatBytes: () => readDbstatBytes(handle),
     countTableRows: (table) => countTableRows(handle, table),
     vacuumInto: (dest) => vacuumInto(handle, dest),
+    ping: () => ping(handle),
   };
 }
