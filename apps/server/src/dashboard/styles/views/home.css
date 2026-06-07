@@ -73,3 +73,29 @@
     justify-content: flex-start;
   }
 }
+
+/* activity card — the bars box fills the available card area */
+.act-card {
+  display: flex;
+  flex-direction: column;
+}
+.act-card .card-body {
+  flex: 1;
+  display: flex;
+}
+.act-card .act-bars {
+  flex: 1;
+  display: grid;
+  align-content: center;
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.9;
+  color: var(--fg-dim);
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+  /* No inner box — the surrounding card is the frame. */
+  border: 0;
+  background: transparent;
+  padding: 0;
+}

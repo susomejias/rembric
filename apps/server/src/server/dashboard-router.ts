@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
+import { DEFAULT_MIN_INTERVAL_MS, type ConsolidationRunSummary } from '../consolidation/index.js';
 import { createAssetsMiddleware } from '../dashboard/assets.js';
 import {
   btn,
@@ -67,6 +68,11 @@ export interface DashboardDeps {
   dataDir: string;
   updates: UpdateCheckService;
   selfUpdate: SelfUpdateOrchestrator;
+  /** Forced sweep across all scopes (same lambda as the admin endpoint). */
+  triggerSweep: () => ConsolidationRunSummary;
+  /** Resolved judgment aging thresholds (from `config.judgments`). */
+  orphanAfterMs: number;
+  orphanDeadlineMs: number;
 }
 
 export interface DashboardStats {
@@ -284,17 +290,19 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         id: string;
         started_at: number;
         finished_at: number | null;
-        llm_model: string | null;
         scope: string | null;
+        scope_slug: string | null;
         total_ops: number;
         reverted_ops: number;
       }>(sql`
-      SELECT r.id, r.started_at, r.finished_at, r.llm_model, r.scope,
+      SELECT r.id, r.started_at, r.finished_at, r.scope,
+             p.slug AS scope_slug,
              (SELECT COUNT(*) FROM consolidation_ops o
               WHERE o.consolidation_id = r.id) AS total_ops,
              (SELECT COUNT(*) FROM consolidation_ops o
               WHERE o.consolidation_id = r.id AND o.reverted_at IS NOT NULL) AS reverted_ops
       FROM consolidation_runs r
+      LEFT JOIN projects p ON p.id = substr(r.scope, 9)
       ORDER BY r.started_at DESC
       LIMIT 1
     `)[0] ?? null;
@@ -417,7 +425,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         <div>
           ${sectionBar({
             name: 'RECENT SESSIONS',
-            meta: 'TIMELINE / NEWEST FIRST',
+            meta: 'NEWEST FIRST',
             more: raw('<a href="/dashboard/sessions" style="color:var(--lime)">OPEN ALL ›</a>'),
           })}
           ${recentSessions.length === 0
@@ -467,7 +475,9 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <span class="sub"
             >${lastRun
               ? html`${relTime(lastRun.finished_at ?? lastRun.started_at)} ·
-                ${lastRun.scope ?? 'global'}`
+                ${lastRun.scope === 'global'
+                  ? 'global'
+                  : (lastRun.scope_slug ?? lastRun.scope ?? 'global')}`
               : 'NEVER'}</span
           >
         </div>
@@ -479,32 +489,31 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         <div class="cell">
           <span class="lab"><span class="bn warn"></span> ORPHANED PENDINGS</span>
           <span class="val ${orphanedJ > 0 ? 'warn' : 'lime'}">${orphanedJ}</span>
-          <span class="sub">AUTO-PROMOTED FROM PENDING &gt; 96H</span>
+          <span class="sub"
+            >RE-EXPOSED &gt; ${fmtWindow(deps.orphanAfterMs)} · ORPHANED &gt;
+            ${fmtWindow(deps.orphanDeadlineMs)}</span
+          >
         </div>
         <div class="cell">
-          <span class="lab"><span class="bn"></span> NEXT RUN</span>
+          <span class="lab"><span class="bn"></span> TRIGGER</span>
           <span class="val" style="font-family:var(--f-mono);font-size:0.9rem"
-            >${process.env.CONSOLIDATION_CRON ?? '03:00 UTC'}</span
+            >ON SESSION START</span
           >
-          <span class="sub">MODEL ${lastRun?.llm_model ?? '—'}</span>
+          <span class="sub"
+            >THROTTLED ${fmtWindow(DEFAULT_MIN_INTERVAL_MS)} / SCOPE · MANUAL FROM
+            CONSOLIDATION</span
+          >
         </div>
       </div>
 
       <div class="row-2">
-        <div class="card">
+        <div class="card act-card">
           <div class="card-head">
             <span><span class="bn"></span> <b>ACTIVITY · 7 DAYS</b></span>
             <span>MEMORIES CREATED · PER DAY</span>
           </div>
-          <div
-            class="card-body"
-            style="display:flex;align-items:center;justify-content:center;overflow-x:auto;min-height:220px;padding:var(--s-6) var(--s-5)"
-          >
-            <pre
-              style="font-family:var(--f-mono);font-size:0.98rem;line-height:1.65;color:var(--fg-dim);margin:0;white-space:pre;text-align:left"
-            >
-${ascBars(activity)}</pre
-            >
+          <div class="card-body">
+            <pre class="act-bars">${ascBars(activity)}</pre>
           </div>
         </div>
         <div class="card">
@@ -553,7 +562,14 @@ ${ascBars(activity)}</pre
     createPromptsRouter({ db: deps.db, prompts: deps.prompts, sessions: deps.sessions }),
   );
   app.route('/judgments', createJudgmentsRouter({ db: deps.db, sessions: deps.sessions }));
-  app.route('/consolidation', createConsolidationRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route(
+    '/consolidation',
+    createConsolidationRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      triggerSweep: deps.triggerSweep,
+    }),
+  );
   app.route(
     '/projects',
     createProjectsRouter({ projects: deps.projects, sessions: deps.sessions }),
@@ -645,6 +661,11 @@ function relTime(input: number | Date): string {
   if (d < 30) return `${d}D AGO`;
   const mo = Math.floor(d / 30);
   return `${mo}MO AGO`;
+}
+
+function fmtWindow(ms: number): string {
+  const h = Math.round(ms / 3_600_000);
+  return h >= 48 ? `${Math.round(h / 24)}D` : `${h}H`;
 }
 
 function shortDisplayId(id: string): string {

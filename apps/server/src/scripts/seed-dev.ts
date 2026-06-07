@@ -226,8 +226,8 @@ export function runSeed(deps: SeedDeps): SeedResult {
       agent: 'codex-cli',
       cwd: '/Users/dev/demo',
       summary:
-        'Goal: investigate why the consolidation runs view rendered an empty week.\nDiscoveries: CONSOLIDATION_CRON=0 3 * * * had never fired because the daemon was restarted at 02:55 each night.\nFix: switched to "30 3 * * *" so the daemon is always warm when the cron tick lands.\nNext: monitor for a week to confirm.',
-      title: 'Diagnose consolidation cron miss',
+        'Goal: investigate why the consolidation runs view rendered an empty week.\nDiscoveries: the lazy sweep only fires on session start, throttled to one run per scope per day — no agent had opened a session against this project all week.\nFix: forced a run with the dashboard "Run sweep now" button and confirmed the journal populated.\nNext: monitor that regular agent sessions keep the sweep cadence.',
+      title: 'Diagnose missing consolidation runs',
     },
     {
       agent: 'hermes',
@@ -329,8 +329,8 @@ export function runSeed(deps: SeedDeps): SeedResult {
     {
       relation: 'conflicts_with',
       topicKey: 'demo-judged-conflicts',
-      source: 'Run consolidator nightly at 03:00 UTC (matches default CONSOLIDATION_CRON).',
-      target: 'Run consolidator every 6h to keep orphan promotions snappy.',
+      source: 'Rely on the lazy session-start sweep only; never force manual consolidation runs.',
+      target: 'Force a manual sweep after every bulk import so decay stays current.',
     },
     {
       relation: 'related',

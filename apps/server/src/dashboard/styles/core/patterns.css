@@ -753,6 +753,8 @@ form .field label {
   }
   .mob-bar {
     display: flex;
+    /* .main's own top padding provides the gap below the bar. */
+    margin-bottom: 0;
   }
   .sb .sb-foot {
     margin-top: 0;
@@ -763,7 +765,8 @@ form .field label {
     gap: var(--s-1);
   }
   .main {
-    padding: var(--s-4) var(--s-5) var(--s-7);
+    /* Same top inset as the desktop main (--s-6) below the sticky bar. */
+    padding: var(--s-6) var(--s-5) var(--s-7);
     overflow-x: hidden;
   }
   .view-head h1 {
@@ -911,7 +914,9 @@ form .field label {
     line-height: 1;
   }
   .main {
-    padding: var(--s-3) var(--s-4) var(--s-6);
+    /* Top inset one step above the side gutters, mirroring the wider
+       breakpoints (s-6/s-5 at ≤980, s-5/s-4 here). */
+    padding: var(--s-5) var(--s-4) var(--s-6);
   }
   .stat .stat-v {
     font-size: 2.4rem;
@@ -996,9 +1001,7 @@ form .field label {
   margin: 0;
   flex-shrink: 0;
 }
-.mob-bar .sb-update .label {
-  display: none;
-}
+/* The slot label stays visible on mobile — a bare dot reads as noise. */
 
 dialog.upd-modal {
   width: min(640px, calc(100vw - 2 * var(--s-4)));

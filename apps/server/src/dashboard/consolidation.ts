@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
+import type { ConsolidationRunSummary } from '../consolidation/index.js';
 import {
   NotUndoableError,
   PurgedRowMissingError,
@@ -9,6 +10,7 @@ import {
 } from '../consolidation/operations.js';
 import type { Db } from '../db/client.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
+import { projects } from '../db/schema/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
@@ -20,10 +22,44 @@ import type { ResolvedSession } from './types.js';
 export interface ConsolidationDeps {
   db: Db;
   sessions: SessionsService;
+  /** Forced sweep across all scopes (same lambda as the admin endpoint). */
+  triggerSweep: () => ConsolidationRunSummary;
 }
 
 function getSession(c: Context): ResolvedSession | null {
   return (c.get('session') as ResolvedSession | undefined) ?? null;
+}
+
+/** `project:<id>` → project slug when the project still exists; raw value otherwise. */
+function scopeLabel(db: Db, scope: string | null): string {
+  if (scope === null) return '—';
+  if (!scope.startsWith('project:')) return scope;
+  const row = db
+    .select({ slug: projects.slug })
+    .from(projects)
+    .where(eq(projects.id, scope.slice('project:'.length)))
+    .get();
+  return row?.slug ?? scope;
+}
+
+/** Sweep runs store `{"archives":N,"orphaned":M}`; legacy LLM runs store prose. */
+function formatRunSummary(summary: string | null): string {
+  if (summary === null) return '—';
+  try {
+    const parsed: unknown = JSON.parse(summary);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Record<string, unknown>)['archives'] === 'number' &&
+      typeof (parsed as Record<string, unknown>)['orphaned'] === 'number'
+    ) {
+      const ops = parsed as { archives: number; orphaned: number };
+      return `${ops.archives} archived · ${ops.orphaned} orphaned`;
+    }
+  } catch {
+    // Legacy prose summary — fall through to the raw text.
+  }
+  return summary;
 }
 
 export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
@@ -81,12 +117,25 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
             <a href="/dashboard/consolidation/${r.id}">${formatTs(r.startedAt)}</a>
           </td>
           <td class="muted">${formatTs(r.finishedAt)}</td>
-          <td>${r.scope ?? '—'}</td>
-          <td>${r.llmModel ?? '—'}</td>
+          <td>${scopeLabel(deps.db, r.scope)}</td>
           <td>${status}</td>
         </tr>
       `;
     });
+
+    const sweepForm = html`
+      <form
+        action="/dashboard/consolidation/run"
+        method="post"
+        class="inline"
+        data-confirm="Force a consolidation sweep across all scopes now? Ops are journaled and reversible."
+        data-confirm-label="RUN SWEEP"
+        data-confirm-tone="warn"
+      >
+        ${csrfInput(session.session, deps.sessions, 'sweep.run')}
+        <button class="warn" type="submit">Run sweep now</button>
+      </form>
+    `;
 
     const body = html`
       ${viewHead({
@@ -95,11 +144,11 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         hl: 'Rembric',
         meta: [{ k: 'RUNS', v: String(runs.length) }],
       })}
+      <p>${sweepForm}</p>
       ${runs.length === 0
         ? html`<p class="muted">
-            No runs yet. The deterministic sweep runs on session start (throttled per scope);
-            trigger one manually via <code>POST /admin/consolidation/run</code> with the admin
-            bearer token.
+            No runs yet. The deterministic sweep runs on session start (throttled per scope); force
+            one with “Run sweep now”.
           </p>`
         : html`
             <div class="tbl-host">
@@ -109,7 +158,6 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
                     <th>started</th>
                     <th>finished</th>
                     <th>scope</th>
-                    <th>model</th>
                     <th>status</th>
                   </tr>
                 </thead>
@@ -131,6 +179,15 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     return c.html(
       renderPage(c, deps.sessions, body, { title: 'Consolidation', activeNav: 'consolidation' }),
     );
+  });
+
+  app.post('/run', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'sweep.run');
+    if (form instanceof Response) return form;
+    deps.triggerSweep();
+    return c.redirect('/dashboard/consolidation');
   });
 
   app.get('/:id', (c) => {
@@ -234,12 +291,14 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         </div>
         <div class="stat-card">
           <div class="label">Scope</div>
-          <div class="value">${run.scope ?? '—'}</div>
+          <div class="value">${scopeLabel(deps.db, run.scope)}</div>
         </div>
-        <div class="stat-card">
-          <div class="label">Model</div>
-          <div class="value" style="font-size:.9rem">${run.llmModel ?? '—'}</div>
-        </div>
+        ${run.llmModel
+          ? html`<div class="stat-card">
+              <div class="label">Model</div>
+              <div class="value" style="font-size:.9rem">${run.llmModel}</div>
+            </div>`
+          : raw('')}
         <div class="stat-card">
           <div class="label">Ops</div>
           <div class="value">${ops.length}</div>
@@ -247,7 +306,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       </div>
 
       <h2>Summary</h2>
-      <pre>${run.summary ?? '—'}</pre>
+      <pre>${formatRunSummary(run.summary)}</pre>
 
       <h2>Ops</h2>
       ${ops.length === 0
