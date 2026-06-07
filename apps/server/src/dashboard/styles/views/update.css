@@ -4,6 +4,16 @@
 .upd-page {
   max-width: 760px;
 }
+.upd-page .upd-note + .upd-action {
+  margin-top: var(--s-4);
+}
+.upd-last-checked {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-dim);
+}
 
 .upd-progress {
   max-width: 560px;

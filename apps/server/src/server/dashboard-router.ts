@@ -174,6 +174,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       };
     }
     c.set('update', update);
+    c.set('updateCheckEnabled', deps.updates.enabled);
     return next();
   });
 
@@ -201,7 +202,12 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     const counters = { pendingJudgments: stats.pendingJudgments };
     const csrf = csrfInput(session.session, deps.sessions, 'sidebar.toggle');
     const updateState = (c.get('update' as never) as UpdateViewState | undefined | null) ?? null;
-    const updateExtras = updateShellExtras(updateState, session.session, deps.sessions);
+    const updateExtras = updateShellExtras(
+      updateState,
+      session.session,
+      deps.sessions,
+      deps.updates.enabled,
+    );
     const sidebar = renderSidebar({
       active: 'home',
       counters,

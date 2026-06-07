@@ -11,10 +11,10 @@ import type { SessionsService } from '../services/sessions.js';
 import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
-import { viewHead } from './components.js';
-import { readFormAndVerifyCsrf } from './csrf.js';
+import { btn, viewHead } from './components.js';
+import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { html, raw, type SafeHtml } from './templates.js';
+import { formatTs, html, raw, type SafeHtml } from './templates.js';
 import type { ResolvedSession } from './types.js';
 import { updateActionBlock, updateChangelog, updateSummary } from './update-modal.js';
 import type { UpdateViewState } from './update-modal.js';
@@ -172,7 +172,7 @@ export function createUpdateRouter(deps: UpdateDeps): Hono {
 
     if (running) {
       const body = html`
-        ${viewHead({ num: '09', title: 'Updating Rembric.', hl: 'Updating' })}
+        ${viewHead({ num: '09', title: 'Rembric Updates.', hl: 'Rembric' })}
         <div class="upd-progress" data-upd-progress data-initial-version="${REMBRIC_VERSION}">
           <div class="upd-progress-title">
             INSTALLING v${status.targetVersion ?? ''}
@@ -194,15 +194,23 @@ export function createUpdateRouter(deps: UpdateDeps): Hono {
 
     const state = getUpdateState(c);
     const err = c.req.query('err');
+    const checked = c.req.query('checked');
     const flash = err
       ? ({ kind: 'error', text: updateErrorText(err) } as const)
-      : status.phase === 'failed' && status.error
-        ? ({ kind: 'error', text: `Last update attempt failed: ${status.error}` } as const)
-        : undefined;
+      : checked === 'none'
+        ? ({ kind: 'success', text: 'Checked — no newer release is known.' } as const)
+        : checked === 'error'
+          ? ({
+              kind: 'error',
+              text: 'The release check could not reach GitHub (offline or rate-limited) — this is expected on air-gapped hosts.',
+            } as const)
+          : status.phase === 'failed' && status.error
+            ? ({ kind: 'error', text: `Last update attempt failed: ${status.error}` } as const)
+            : undefined;
 
     const body = state
       ? html`
-          ${viewHead({ num: '09', title: 'Update Available.', hl: 'Update' })}
+          ${viewHead({ num: '09', title: 'Rembric Updates.', hl: 'Rembric' })}
           <div class="upd-page" data-upd-watch data-initial-version="${REMBRIC_VERSION}">
             ${updateSummary(state.info)} ${updateChangelog(state.info)}
             ${updateActionBlock(state, session.session, deps.sessions)}
@@ -212,17 +220,8 @@ export function createUpdateRouter(deps: UpdateDeps): Hono {
           </script>
         `
       : html`
-          ${viewHead({ num: '09', title: 'Updates.', hl: 'Updates' })}
-          <div class="upd-page">
-            <div class="upd-note">
-              <span class="lab">UP TO DATE</span>
-              <p>
-                You are running <code>v${REMBRIC_VERSION}</code> — no newer release is known. The
-                check runs at most once a day and can be disabled with
-                <code>REMBRIC_UPDATE_CHECK=off</code>.
-              </p>
-            </div>
-          </div>
+          ${viewHead({ num: '09', title: 'Rembric Updates.', hl: 'Rembric' })}
+          <div class="upd-page">${upToDateBlock(session, deps)}</div>
         `;
 
     return c.html(
@@ -233,6 +232,20 @@ export function createUpdateRouter(deps: UpdateDeps): Hono {
         flash,
       }),
     );
+  });
+
+  app.post('/check', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'update.check');
+    if (form instanceof Response) return form;
+
+    if (!deps.updates.enabled) return c.redirect('/dashboard/update');
+    const { outcome } = await deps.updates.checkNow();
+    // A found update needs no flash — the refreshed cache re-renders the
+    // page as the full "Update Available" view.
+    if (outcome === 'update') return c.redirect('/dashboard/update');
+    return c.redirect(`/dashboard/update?checked=${outcome}`);
   });
 
   app.post('/start', async (c) => {
@@ -261,6 +274,39 @@ export function createUpdateRouter(deps: UpdateDeps): Hono {
   });
 
   return app;
+}
+
+function upToDateBlock(session: ResolvedSession, deps: UpdateDeps): SafeHtml {
+  if (!deps.updates.enabled) {
+    return html`
+      <div class="upd-note">
+        <span class="lab">UPDATE CHECK DISABLED</span>
+        <p>
+          This deployment sets <code>REMBRIC_UPDATE_CHECK=off</code>, so Rembric never contacts
+          GitHub and cannot know whether <code>v${REMBRIC_VERSION}</code> is the latest release.
+          Remove the variable and restart to re-enable the check.
+        </p>
+      </div>
+    `;
+  }
+  const lastChecked = deps.updates.lastCheckedAt;
+  return html`
+    <div class="upd-note">
+      <span class="lab">UP TO DATE</span>
+      <p>
+        You are running <code>v${REMBRIC_VERSION}</code> — no newer release is known. The check runs
+        automatically at most once a day and can be disabled with
+        <code>REMBRIC_UPDATE_CHECK=off</code>.
+      </p>
+      ${lastChecked
+        ? html`<p class="upd-last-checked">LAST CHECKED ${formatTs(lastChecked)}</p>`
+        : raw('')}
+    </div>
+    <form action="/dashboard/update/check" method="post" class="upd-action">
+      ${csrfInput(session.session, deps.sessions, 'update.check')}
+      ${btn({ variant: 'secondary', label: 'CHECK NOW →', type: 'submit' })}
+    </form>
+  `;
 }
 
 function updateErrorText(code: string): string {

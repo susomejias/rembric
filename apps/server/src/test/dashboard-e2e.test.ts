@@ -796,6 +796,147 @@ describe('dashboard E2E — self-update surface', () => {
   });
 });
 
+describe('dashboard E2E — manual update check', () => {
+  let server: BootstrappedServer;
+  let baseUrl: string;
+  const ADMIN_TOKEN = 'integration-admin-token-with-enough-entropy-chk';
+
+  // Mutable release feed the fake fetch serves — tests flip outcomes.
+  const feed = { mode: 'old' as 'old' | 'new' | 'fail' };
+
+  beforeAll(async () => {
+    const { UpdateCheckService } = await import('../services/update-check.js');
+    const { SelfUpdateOrchestrator } = await import('../services/self-update/orchestrator.js');
+
+    const tmp = createTestDb();
+    tmp.cleanup();
+    const port = await findFreePort();
+
+    const fakeFetch = (() => {
+      if (feed.mode === 'fail') return Promise.reject(new Error('offline'));
+      const tag = feed.mode === 'new' ? 'server-v9.9.9' : 'server-v0.0.1';
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              tag_name: tag,
+              body: '## manual-check changelog',
+              html_url: 'https://github.com/susomejias/rembric/releases',
+              published_at: '2026-06-01T00:00:00Z',
+              prerelease: false,
+              draft: false,
+            },
+          ]),
+          { status: 200 },
+        ),
+      );
+    }) as typeof fetch;
+    const updates = new UpdateCheckService({ enabled: true, fetchImpl: fakeFetch });
+
+    const fakeDetector = {
+      detect: () => Promise.resolve({ state: 'manual', reason: 'no-socket' }),
+      detectCached: () => Promise.resolve({ state: 'manual', reason: 'no-socket' }),
+    } as unknown as ConstructorParameters<typeof SelfUpdateOrchestrator>[0]['capability'];
+    const selfUpdate = new SelfUpdateOrchestrator({
+      capability: fakeDetector,
+      engineFactory: () => {
+        throw new Error('engine must not be reached in these tests');
+      },
+      backup: () => {
+        throw new Error('backup must not be reached in these tests');
+      },
+      log: () => {},
+    });
+
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder(), updates, selfUpdate },
+    );
+    baseUrl = `http://127.0.0.1:${port}`;
+  }, 30_000);
+
+  afterAll(async () => {
+    await server.shutdown();
+  });
+
+  async function login(): Promise<CookieJar> {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    return jar;
+  }
+
+  async function armCsrf(jar: CookieJar): Promise<string> {
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    const csrf = extractCsrf(await page.text(), '/dashboard/update/check');
+    expect(csrf).toBeTruthy();
+    return csrf!;
+  }
+
+  it('renders the quiet UP TO DATE slot in sidebar and mobile bar when no update is known', async () => {
+    const jar = await login();
+    const home = await get(baseUrl, '/dashboard', jar);
+    const body = await home.text();
+    expect(body.match(/sb-update is-quiet/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(body).toContain('UP TO DATE ›');
+    expect(body).not.toContain('id="rbr-update"');
+  });
+
+  it('up-to-date page offers CHECK NOW with CSRF and shows last-checked', async () => {
+    const jar = await login();
+    const page = await get(baseUrl, '/dashboard/update', jar);
+    const body = await page.text();
+    expect(body).toContain('UP TO DATE');
+    expect(body).toContain('action="/dashboard/update/check"');
+    expect(body).toContain('CHECK NOW');
+    expect(body).toContain('LAST CHECKED');
+    // Read-only action — no confirmation modal on the form itself.
+    const formTag = /<form[^>]*action="\/dashboard\/update\/check"[^>]*>/.exec(body)?.[0];
+    expect(formTag).toBeTruthy();
+    expect(formTag).not.toContain('data-confirm');
+    expect(extractCsrf(body, '/dashboard/update/check')).toBeTruthy();
+  });
+
+  it('check without CSRF returns 403', async () => {
+    const jar = await login();
+    const res = await postForm(baseUrl, '/dashboard/update/check', jar, {});
+    expect(res.status).toBe(403);
+  });
+
+  it('manual check walks none → error → update', async () => {
+    const jar = await login();
+
+    feed.mode = 'old';
+    let res = await postForm(baseUrl, '/dashboard/update/check', jar, { csrf: await armCsrf(jar) });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('checked=none');
+    let body = await (await get(baseUrl, '/dashboard/update?checked=none', jar)).text();
+    expect(body).toContain('no newer release is known');
+
+    feed.mode = 'fail';
+    res = await postForm(baseUrl, '/dashboard/update/check', jar, { csrf: await armCsrf(jar) });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('checked=error');
+    body = await (await get(baseUrl, '/dashboard/update?checked=error', jar)).text();
+    expect(body).toContain('could not reach GitHub');
+
+    feed.mode = 'new';
+    res = await postForm(baseUrl, '/dashboard/update/check', jar, { csrf: await armCsrf(jar) });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).not.toContain('checked=');
+    body = await (await get(baseUrl, '/dashboard/update', jar)).text();
+    expect(body).toContain('v9.9.9');
+    expect(body).toContain('manual-check changelog');
+    expect(body).not.toContain('action="/dashboard/update/check"');
+    expect(body).toContain('sb-update');
+    expect(body).not.toContain('is-quiet');
+  });
+});
+
 describe('dashboard E2E — zero-action compatibility', () => {
   // openspec/specs/self-update: a deployment without the Docker socket and
   // without any new configuration boots and operates identically, with the
@@ -842,9 +983,13 @@ describe('dashboard E2E — zero-action compatibility', () => {
     expect(body).not.toContain('sb-update');
     expect(body).not.toContain('id="rbr-update"');
 
-    // The update page itself degrades to the up-to-date notice.
+    // The update page itself degrades to the disabled notice — no
+    // manual-check form, no claim about being up to date.
     const page = await get(baseUrl, '/dashboard/update', jar);
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('UP TO DATE');
+    const pageBody = await page.text();
+    expect(pageBody).toContain('UPDATE CHECK DISABLED');
+    expect(pageBody).not.toContain('action="/dashboard/update/check"');
+    expect(pageBody).not.toContain('UP TO DATE');
   });
 });

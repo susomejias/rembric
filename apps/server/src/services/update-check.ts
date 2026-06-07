@@ -42,6 +42,8 @@ export interface UpdateCheckOptions {
   now?: () => number;
 }
 
+export type ManualCheckOutcome = 'update' | 'none' | 'error';
+
 export function parseSemver(v: string): [number, number, number] | null {
   const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(v.trim());
   if (!m) return null;
@@ -62,24 +64,34 @@ export function semverGt(a: string, b: string): boolean {
 
 export class UpdateCheckService {
   private readonly currentVersion: string;
-  private readonly enabled: boolean;
+  private readonly checkEnabled: boolean;
   private readonly fetchImpl: typeof fetch;
   private readonly releasesUrl: string;
   private readonly intervalMs: number;
   private readonly now: () => number;
 
   private cache: UpdateInfo | null = null;
-  private lastCheckedAt = 0;
+  private lastCheckedAtMs = 0;
+  private lastFetchFailed = false;
   private etag: string | null = null;
   private inflight: Promise<UpdateInfo | null> | null = null;
 
   constructor(opts: UpdateCheckOptions = {}) {
     this.currentVersion = opts.currentVersion ?? REMBRIC_VERSION;
-    this.enabled = opts.enabled ?? process.env['REMBRIC_UPDATE_CHECK'] !== 'off';
+    this.checkEnabled = opts.enabled ?? process.env['REMBRIC_UPDATE_CHECK'] !== 'off';
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.releasesUrl = opts.releasesUrl ?? DEFAULT_RELEASES_URL;
     this.intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
     this.now = opts.now ?? Date.now;
+  }
+
+  get enabled(): boolean {
+    return this.checkEnabled;
+  }
+
+  /** Most recent check (manual or automatic) this process lifetime. */
+  get lastCheckedAt(): Date | null {
+    return this.lastCheckedAtMs ? new Date(this.lastCheckedAtMs) : null;
   }
 
   /**
@@ -87,8 +99,8 @@ export class UpdateCheckService {
    * `null` until a refresh has found a strictly newer version.
    */
   peek(): UpdateInfo | null {
-    if (!this.enabled) return null;
-    if (this.now() - this.lastCheckedAt >= this.intervalMs && !this.inflight) {
+    if (!this.checkEnabled) return null;
+    if (this.now() - this.lastCheckedAtMs >= this.intervalMs && !this.inflight) {
       // Background kick; silent-failure contract means errors are dropped.
       void this.refresh().catch(() => {});
     }
@@ -97,7 +109,7 @@ export class UpdateCheckService {
 
   /** Refresh now (awaitable; used by tests and the update view). */
   async refresh(): Promise<UpdateInfo | null> {
-    if (!this.enabled) return null;
+    if (!this.checkEnabled) return null;
     if (this.inflight) return this.inflight;
     this.inflight = this.doRefresh().finally(() => {
       this.inflight = null;
@@ -105,17 +117,38 @@ export class UpdateCheckService {
     return this.inflight;
   }
 
+  /**
+   * Operator-initiated check: bypasses the 24h window and, unlike the
+   * automatic path, reports whether GitHub was actually reached.
+   */
+  async checkNow(): Promise<{ outcome: ManualCheckOutcome; info: UpdateInfo | null }> {
+    if (!this.checkEnabled) return { outcome: 'none', info: null };
+    const info = await this.refresh();
+    if (this.lastFetchFailed) return { outcome: 'error', info };
+    return { outcome: info ? 'update' : 'none', info };
+  }
+
   private async doRefresh(): Promise<UpdateInfo | null> {
-    this.lastCheckedAt = this.now();
+    this.lastCheckedAtMs = this.now();
     try {
       const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
       if (this.etag) headers['if-none-match'] = this.etag;
       const res = await this.fetchImpl(this.releasesUrl, { headers });
-      if (res.status === 304) return this.cache;
-      if (!res.ok) return this.cache;
+      if (res.status === 304) {
+        this.lastFetchFailed = false;
+        return this.cache;
+      }
+      if (!res.ok) {
+        this.lastFetchFailed = true;
+        return this.cache;
+      }
       this.etag = res.headers.get('etag');
       const releases = (await res.json()) as GithubRelease[];
-      if (!Array.isArray(releases)) return this.cache;
+      if (!Array.isArray(releases)) {
+        this.lastFetchFailed = true;
+        return this.cache;
+      }
+      this.lastFetchFailed = false;
       const latest = releases.find(
         (r) =>
           !r.draft &&
@@ -137,6 +170,7 @@ export class UpdateCheckService {
         : null;
       return this.cache;
     } catch {
+      this.lastFetchFailed = true;
       return this.cache;
     }
   }
