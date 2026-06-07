@@ -31,9 +31,9 @@ services:
     volumes:
       - ./data:/data
       - /var/run/docker.sock:/var/run/docker.sock
-    # Only needed if the socket is not world-accessible on your host:
-    # group_add:
-    #   - '<docker-gid>'   # stat -c '%g' /var/run/docker.sock
+    # Required on most Linux hosts (socket is root:docker mode 660):
+    group_add:
+      - '<docker-gid>' # stat -c '%g' /var/run/docker.sock
 ```
 
 Then `docker compose up -d` once. The dashboard detects the socket at runtime — no flag, no restart loop.
@@ -41,7 +41,7 @@ Then `docker compose up -d` once. The dashboard detects the socket at runtime �
 > [!WARNING]
 > **Mounting the Docker socket is root-equivalent on the host.** Anyone who obtains your admin token can then control Docker on the machine, not just your memory data. Only enable this on hosts where you accept that trade, keep the port off the public internet (Tailscale/WireGuard/reverse proxy), and consider the loopback-only override from the README when agent and server share a host.
 
-The container itself keeps running as the unprivileged `rembric` user. If the socket is mounted but not readable by that user (the usual cause is the docker group id), the dashboard degrades to the copy-paste flow and logs a single hint about `group_add`.
+The container itself keeps running as the unprivileged `rembric` user. If the socket is mounted but not readable by that user, the dashboard degrades to the copy-paste flow and logs a single hint about `group_add` — see [troubleshooting](./troubleshooting.md#dashboard-still-shows-manual-update-with-the-docker-socket-mounted).
 
 ### Pinned versions disable one-click
 
