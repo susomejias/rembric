@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';
@@ -338,6 +339,109 @@ describe('MCP protocol conformance', () => {
     expect(ctxPayload.recentSessions).toHaveLength(1);
     expect(ctxPayload.recentSessions[0]?.id).toBe(usefulPayload.sessionId);
 
+    await client.close();
+  });
+
+  // Snippet tests run in global scope and END their session before closing.
+  // session_start resumes the transport's active session, and a lingering
+  // active session would pollute the global auto-stamp used by later tests —
+  // so each test cleans up. end() does not auto-curate a summary, so the
+  // null-summary case stays null after ending.
+  it('memory.context truncates a long session summary to ≤350 chars while storage stays full', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'long summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const fullSummary = `Goal: ${'x'.repeat(600)}`; // 606 chars, under the 2000 write cap, over the 350 display bound
+    const summarised = (await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: fullSummary, title: 'Long' },
+    })) as ToolResult;
+    expect(summarised.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.summary).not.toBeNull();
+    expect(seen?.summary?.length).toBeLessThanOrEqual(350);
+    expect(seen?.summary?.endsWith('…')).toBe(true);
+
+    // Storage is unaffected: the row still holds the full, untruncated summary.
+    const stored = createRepositories(server.dbHandle.db).agentSessions.getById(sessionId);
+    expect(stored?.summary).toBe(fullSummary);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context returns a short session summary verbatim (no ellipsis)', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'short summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const shortSummary = 'Goal: short session. Accomplished: nothing notable.';
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: shortSummary },
+    });
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.summary).toBe(shortSummary);
+    expect(seen?.summary?.endsWith('…')).toBe(false);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context emits null for a content-bearing session with no summary', async () => {
+    const client = await connect();
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'no-summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    // Anchor a memory so the session is content-bearing without a summary.
+    // memory.save auto-stamps the active session_id, so no summary is written.
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'anchor row, no session summary' },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen).toBeDefined();
+    expect(seen?.summary).toBeNull();
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
     await client.close();
   });
 

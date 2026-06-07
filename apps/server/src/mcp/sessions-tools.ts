@@ -452,6 +452,8 @@ function rejectIfDeleted(
   return null;
 }
 
+const CONTEXT_SNIPPET_CHARS = 350;
+
 function handleContext(
   deps: SessionsToolDeps,
   args: {
@@ -479,7 +481,7 @@ function handleContext(
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       status: s.status,
-      summary: s.summary,
+      summary: s.summary ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
     }));
 
   const recentMemories = deps.repos.memory
@@ -492,7 +494,7 @@ function handleContext(
     .map((m) => ({
       id: m.id,
       type: m.type,
-      snippet: snippet(m.content, 200),
+      snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
       status: m.status,
       createdAt: m.createdAt.toISOString(),
     }));
@@ -505,7 +507,7 @@ function handleContext(
     })
     .map((p) => ({
       id: p.id,
-      content: p.content,
+      content: snippet(p.content, CONTEXT_SNIPPET_CHARS),
       agent: p.agent,
       createdAt: p.createdAt,
     }));
@@ -526,8 +528,8 @@ function handleContext(
       judgmentId: r.judgmentId,
       sourceId: r.sourceId,
       targetId: r.targetId,
-      sourceSnippet: snippet(r.sourceContent, 200),
-      targetSnippet: snippet(r.targetContent, 200),
+      sourceSnippet: snippet(r.sourceContent, CONTEXT_SNIPPET_CHARS),
+      targetSnippet: snippet(r.targetContent, CONTEXT_SNIPPET_CHARS),
       ageMs: now - r.createdAt.getTime(),
     }));
 
