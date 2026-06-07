@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.6](https://github.com/susomejias/rembric/compare/server-v0.21.5...server-v0.21.6) (2026-06-07)
+
+
+### Refactor
+
+* **server:** extract repository layer (confine all SQL to src/db/) ([#114](https://github.com/susomejias/rembric/issues/114)) ([b8f68c2](https://github.com/susomejias/rembric/commit/b8f68c24d0408573aee0b35d2264e31011be8ba2))
+
 ## [0.21.5](https://github.com/susomejias/rembric/compare/server-v0.21.4...server-v0.21.5) (2026-06-07)
 
 
