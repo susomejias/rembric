@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { applyMerge, applySupersede, undoOp } from '../consolidation/operations.js';
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
@@ -27,7 +28,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
   afterAll(() => testDb.cleanup());
 
   it('13.8 active → archived → undo back to active', () => {
-    const svc = new MemoryService(testDb.handle.db);
+    const svc = new MemoryService(createRepositories(testDb.handle.db), testDb.handle.db);
     const m = svc.save({ type: 'feedback', content: 'fsm-test-1' }, SCOPE_GLOBAL);
     expect(m.status).toBe('active');
 
@@ -44,7 +45,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.8 active → superseded via merge, then undo flips back to active', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({
@@ -79,7 +80,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.9 a merge across two projects fails before any row mutates', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({
@@ -110,7 +111,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.9 a supersede across project and global fails before any mutation', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(db);
+    const svc = new MemoryService(createRepositories(db), db);
     const runId = ulid();
     db.insert(consolidationRuns)
       .values({

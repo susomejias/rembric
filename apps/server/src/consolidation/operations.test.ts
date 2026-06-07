@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -28,7 +29,7 @@ beforeEach(() => {
   db = createTestDb();
   clock = new TestClock();
   projects = new ProjectsService(db.handle.db, clock.now);
-  memoryService = new MemoryService(db.handle.db, clock.now);
+  memoryService = new MemoryService(createRepositories(db.handle.db), db.handle.db, clock.now);
   projectId = projects.create({ slug: 'app' }).id;
 
   runId = 'test-run-id';

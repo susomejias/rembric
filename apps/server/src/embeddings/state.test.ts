@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
 import { SCOPE_GLOBAL } from '../services/scope.js';
@@ -17,7 +18,7 @@ let mem: MemoryService;
 
 beforeEach(() => {
   db = createTestDb();
-  mem = new MemoryService(db.handle.db);
+  mem = new MemoryService(createRepositories(db.handle.db), db.handle.db);
 });
 
 afterEach(() => db.cleanup());

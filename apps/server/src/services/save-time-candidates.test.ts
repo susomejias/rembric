@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory } from '../db/schema/memory.js';
 import { createTestDb, type TestDb } from '../test/index.js';
@@ -19,7 +20,7 @@ let relations: RelationsService;
 
 beforeEach(() => {
   db = createTestDb();
-  memorySvc = new MemoryService(db.handle.db);
+  memorySvc = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(db.handle.db);
   relations = new RelationsService(db.handle.db);
 });
@@ -197,7 +198,7 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
         (ops) => {
           const fresh = createTestDb();
           try {
-            const svc = new MemoryService(fresh.handle.db);
+            const svc = new MemoryService(createRepositories(fresh.handle.db), fresh.handle.db);
             for (const op of ops) {
               svc.saveWithTopicKey(
                 {

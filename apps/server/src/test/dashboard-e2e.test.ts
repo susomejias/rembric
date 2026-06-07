@@ -2,6 +2,7 @@ import { createServer as createNetServer } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { REMBRIC_VERSION } from '../version.js';
 
@@ -616,7 +617,7 @@ describe('dashboard E2E', () => {
     const { SCOPE_GLOBAL } = await import('../services/scope.js');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
-    const memSvc = new MemoryService(handle.db);
+    const memSvc = new MemoryService(createRepositories(handle.db), handle.db);
     const a = memSvc.save({ type: 'feedback', content: 'judged-row-source-content' }, SCOPE_GLOBAL);
     const b = memSvc.save({ type: 'feedback', content: 'judged-row-target-content' }, SCOPE_GLOBAL);
     const rel = new RelationsService(handle.db).compare({

@@ -15,6 +15,7 @@
  */
 
 import { type DbHandle, createDb } from '../db/index.js';
+import { createRepositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -95,7 +96,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   }
 
   const tokensSvc = new TokensService(deps.handle.db);
-  const memorySvc = new MemoryService(deps.handle.db);
+  const memorySvc = new MemoryService(createRepositories(deps.handle.db), deps.handle.db);
   const relationsSvc = new RelationsService(deps.handle.db);
   const sessionsSvc = new AgentSessionsService(deps.handle.db);
 

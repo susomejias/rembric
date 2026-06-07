@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
@@ -66,7 +67,7 @@ function isErrorResponse(resp: unknown): boolean {
 beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(db.handle.db);
-  memory = new MemoryService(db.handle.db);
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   handlers = buildHandlers({ memory });
   projectA = projects.create({ slug: 'test-rembric' });
   projectB = projects.create({ slug: 'other-project' });

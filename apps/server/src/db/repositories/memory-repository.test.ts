@@ -163,10 +163,10 @@ describe('MemoryRepository', () => {
         .run();
     });
 
-    it('findById / findByIds / adminGetByIds', () => {
-      expect(repo.findById('03A')?.content).toBe('global one');
-      expect(repo.findById('nope')).toBeUndefined();
-      expect(repo.findByIds([])).toEqual([]);
+    it('unsafeGetById / unsafeGetByIds / adminGetByIds', () => {
+      expect(repo.unsafeGetById('03A')?.content).toBe('global one');
+      expect(repo.unsafeGetById('nope')).toBeUndefined();
+      expect(repo.unsafeGetByIds([])).toEqual([]);
       expect(
         repo
           .adminGetByIds(['03A', '03B'])

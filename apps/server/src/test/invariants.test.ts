@@ -19,7 +19,8 @@ import { describe, expect, it } from 'vitest';
  * SQL fragments appear.
  *
  * Allow-list exception: the operator-only maintenance purge paths
- * (`src/services/memory.ts::purgeDisconnectedArchived` and
+ * (`MemoryService.purgeDisconnectedArchived` executing via
+ * `db/repositories/memory-repository.ts` and
  * `src/services/agent-sessions.ts::purgeEmpty`) MAY emit `DELETE FROM
  * memory` and `DELETE FROM sessions` respectively. The check pins the
  * allowance to those exact files; introducing the same DELETE elsewhere
@@ -47,8 +48,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
     description:
-      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in services/memory.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/memory.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in db/repositories/memory-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/memory-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -180,8 +181,8 @@ describe('append-only invariants (static grep)', () => {
   // silently remove the purge implementation while keeping the allow-list
   // in place — invariant relaxation without enforcement is worse than no
   // allow-list at all.
-  it('allow-list anchors: services/memory.ts contains DELETE FROM memory', () => {
-    const file = join(srcRoot, 'services/memory.ts');
+  it('allow-list anchors: db/repositories/memory-repository.ts contains DELETE FROM memory', () => {
+    const file = join(srcRoot, 'db/repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
   });
@@ -286,12 +287,17 @@ describe('image packaging invariants', () => {
  * every read/write through `MemoryService`. The scope-bypassing escape
  * hatches are `unsafeGetById` / `unsafeGetByIds`. Those must NOT be
  * called from the MCP layer (which would re-open the bug we just
- * closed). Allow-listed callers: the service itself (private helpers),
- * the consolidation engine (which legitimately crosses scopes), the
- * dashboard admin views, and tests.
+ * closed). Allow-listed callers: the repository that defines them, the
+ * service itself (private helpers), the consolidation engine (which
+ * legitimately crosses scopes), the dashboard admin views, and tests.
  */
 const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
-const SCOPE_BYPASS_ALLOWED_PREFIXES = ['services/memory.ts', 'consolidation/', 'dashboard/'];
+const SCOPE_BYPASS_ALLOWED_PREFIXES = [
+  'db/repositories/memory-repository.ts',
+  'services/memory.ts',
+  'consolidation/',
+  'dashboard/',
+];
 
 describe('scope-leak invariant', () => {
   const files = listSourceFiles(srcRoot);

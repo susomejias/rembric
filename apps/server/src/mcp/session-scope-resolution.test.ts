@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema, type Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
@@ -68,7 +69,7 @@ function decode(resp: unknown): { isError: boolean; payload: Record<string, unkn
 beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(db.handle.db);
-  memory = new MemoryService(db.handle.db);
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(db.handle.db);
   prompts = new PromptsService(db.handle.db);

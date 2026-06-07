@@ -1,16 +1,8 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { confirmations } from '../db/schema/confirmations.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import {
-  memory,
-  type Memory,
-  type MemorySource,
-  type MemoryStatus,
-  type MemoryType,
-} from '../db/schema/memory.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
+import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
@@ -90,7 +82,8 @@ export interface MemoryWithHistory {
 
 export class MemoryService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'memory' | 'consolidation'>,
+    private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -121,55 +114,43 @@ export class MemoryService {
     const ts = this.now();
     const id = ulid(ts.getTime());
 
-    return this.db.transaction((tx): SaveResult => {
+    return this.tx.transaction((): SaveResult => {
       // Locate any prior active row in the same (scope, project_id, topic_key).
       let supersededByTopicKey: Memory | null = null;
       let replacesPrefix: string[] = [];
       if (topicKey !== null) {
-        const scopeClause =
-          scope.kind === 'project'
-            ? sql`scope = 'project' AND project_id = ${scope.projectId}`
-            : sql`scope = 'global' AND project_id IS NULL`;
-        const prior = tx
-          .select()
-          .from(memory)
-          .where(sql`${scopeClause} AND topic_key = ${topicKey} AND status = 'active'`)
-          .limit(1)
-          .get();
+        const prior = this.repos.memory.findActiveByTopicKey({
+          scope: scope.kind === 'global' ? 'global' : 'project',
+          projectId: scope.kind === 'project' ? scope.projectId : null,
+          topicKey,
+        });
         if (prior) {
           supersededByTopicKey = prior;
           replacesPrefix = [prior.id];
         }
       }
 
-      const inserted = tx
-        .insert(memory)
-        .values({
-          id,
-          scope: scope.kind === 'global' ? 'global' : 'project',
-          projectId: scope.kind === 'project' ? scope.projectId : null,
-          type: input.type,
-          content: input.content,
-          tags: input.tags ?? [],
-          status: 'active',
-          replaces: replacesPrefix,
-          createdAt: ts,
-          lastSeenAt: ts,
-          source: input.source ?? null,
-          sessionId: input.sessionId ?? null,
-          topicKey,
-        })
-        .returning()
-        .get();
+      const inserted = this.repos.memory.insert({
+        id,
+        scope: scope.kind === 'global' ? 'global' : 'project',
+        projectId: scope.kind === 'project' ? scope.projectId : null,
+        type: input.type,
+        content: input.content,
+        tags: input.tags ?? [],
+        status: 'active',
+        replaces: replacesPrefix,
+        createdAt: ts,
+        lastSeenAt: ts,
+        source: input.source ?? null,
+        sessionId: input.sessionId ?? null,
+        topicKey,
+      });
       if (!inserted) {
         throw new DomainError('conflict', 'memory.save: insert did not return a row');
       }
 
       if (supersededByTopicKey) {
-        tx.update(memory)
-          .set({ status: 'superseded' as const })
-          .where(and(eq(memory.id, supersededByTopicKey.id), eq(memory.status, 'active')))
-          .run();
+        this.repos.memory.markSuperseded(supersededByTopicKey.id);
       }
 
       return { memory: inserted, supersededByTopicKey };
@@ -188,8 +169,8 @@ export class MemoryService {
 
     const predecessors = this.collectPredecessors(found);
     const head = this.findHead(found);
-    const confirmationCount = this.countConfirmations(head.id);
-    this.touchLastSeen(head.id);
+    const confirmationCount = this.repos.memory.countConfirmations(head.id);
+    this.repos.memory.touchLastSeen(head.id, this.now());
     return { memory: found, predecessors, head, confirmationCount };
   }
 
@@ -203,58 +184,26 @@ export class MemoryService {
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
 
-    const scopeClause =
-      scope.kind === 'global'
-        ? sql`(m.scope = 'global' AND m.project_id IS NULL)`
-        : sql`(m.scope = 'project' AND m.project_id = ${scope.projectId})`;
-    const typeClause = input.type ? sql`AND m.type = ${input.type}` : sql``;
-    const tagClause = input.tag
-      ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${input.tag})`
-      : sql``;
-    const statusClause = sql`AND m.status = ${status}`;
-
-    const ids = input.query
-      ? this.db
-          .all<{ id: string }>(
-            sql`
-              SELECT m.id
-              FROM memory m
-              JOIN memory_fts f ON f.rowid = m.rowid
-              WHERE memory_fts MATCH ${input.query}
-                AND ${scopeClause}
-                ${statusClause}
-                ${typeClause}
-                ${tagClause}
-              ORDER BY rank, m.created_at DESC
-              LIMIT ${limit} OFFSET ${offset}
-            `,
-          )
-          .map((r) => r.id)
-      : this.db
-          .all<{ id: string }>(
-            sql`
-              SELECT m.id
-              FROM memory m
-              WHERE ${scopeClause}
-                ${statusClause}
-                ${typeClause}
-                ${tagClause}
-              ORDER BY m.created_at DESC
-              LIMIT ${limit} OFFSET ${offset}
-            `,
-          )
-          .map((r) => r.id);
-
+    const ids = this.repos.memory.searchMemoryIds({
+      query: input.query,
+      scope: scope.kind === 'global' ? 'global' : 'project',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      status,
+      type: input.type,
+      tag: input.tag,
+      limit,
+      offset,
+    });
     if (ids.length === 0) return [];
 
-    const raw = this.db.select().from(memory).where(inArray(memory.id, ids)).all();
+    const raw = this.repos.memory.unsafeGetByIds(ids);
     const byId = new Map(raw.map((m) => [m.id, m]));
     const ordered: Memory[] = [];
     for (const id of ids) {
       const m = byId.get(id);
       if (m) ordered.push(m);
     }
-    this.touchLastSeenBatch(ids);
+    this.repos.memory.touchLastSeenBatch(ids, this.now());
     return ordered;
   }
 
@@ -270,16 +219,13 @@ export class MemoryService {
     }
     const head = this.findHead(found);
     const ts = this.now();
-    this.db
-      .insert(confirmations)
-      .values({
-        id: ulid(ts.getTime()),
-        memoryId: head.id,
-        eventTs: ts,
-        source: source ?? null,
-      })
-      .run();
-    this.touchLastSeen(head.id);
+    this.repos.memory.insertConfirmation({
+      id: ulid(ts.getTime()),
+      memoryId: head.id,
+      eventTs: ts,
+      source: source ?? null,
+    });
+    this.repos.memory.touchLastSeen(head.id, ts);
   }
 
   archive(id: string, scope: Scope): void {
@@ -293,56 +239,21 @@ export class MemoryService {
         `memory.archive: id=${id} is not in 'active' state (current=${existing.status})`,
       );
     }
-    const ts = this.now();
-    this.db
-      .update(memory)
-      .set({ status: 'archived', lastSeenAt: ts })
-      .where(and(eq(memory.id, id), eq(memory.status, 'active')))
-      .run();
+    this.repos.memory.markArchived(id, this.now());
   }
 
   // ────────────────────────────────────────────────────────────────────
   //  Operator-only physical purge.
   //
-  //  The ONE escape hatch in the otherwise append-only contract for the
-  //  `memory` table. The invariant test white-lists ONLY this file for
-  //  `DELETE FROM memory`. Predicate MUST stay in lock-step with
-  //  `countPurgeableDisconnectedArchived` and with the spec at
+  //  Predicate lives in MemoryRepository (the single file allow-listed
+  //  for `DELETE FROM memory`); this service keeps the gating and the
+  //  journaling. MUST stay in lock-step with the spec at
   //  `openspec/specs/memory/spec.md::"Memories MAY be physically purged
   //  when archived and disconnected"`.
   // ────────────────────────────────────────────────────────────────────
 
-  /**
-   * Count rows that match the disconnected-archived purge predicate.
-   *
-   * Predicate (in lock-step with `purgeDisconnectedArchived`):
-   *   - status = 'archived'
-   *   - no other memory row references this id in its `replaces` JSON
-   *   - no consolidation_ops row references this id via `affected_ids`
-   *     or `created_id`
-   *   - no memory_relations row references this id as source or target
-   *   - no confirmations row references this id as `memory_id`
-   */
   countPurgeableDisconnectedArchived(): number {
-    const row = this.db.get<{ v: number }>(sql`
-      SELECT COUNT(*) AS v FROM memory m
-       WHERE m.status = 'archived'
-         AND NOT EXISTS (
-             SELECT 1 FROM memory m2, json_each(m2.replaces) je
-              WHERE je.value = m.id)
-         AND NOT EXISTS (
-             SELECT 1 FROM consolidation_ops co
-              WHERE co.created_id = m.id
-                 OR EXISTS (
-                     SELECT 1 FROM json_each(co.affected_ids) je2
-                      WHERE je2.value = m.id))
-         AND NOT EXISTS (
-             SELECT 1 FROM memory_relations r
-              WHERE r.source_id = m.id OR r.target_id = m.id)
-         AND NOT EXISTS (
-             SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)
-    `) as { v: number } | undefined;
-    return row?.v ?? 0;
+    return this.repos.memory.countPurgeableDisconnectedArchived();
   }
 
   /**
@@ -350,9 +261,6 @@ export class MemoryService {
    * other row in the graph. Drops the embedding (`memory_vec`) and FTS
    * (`memory_fts`) shadow rows in the same transaction. Journals the
    * deletion as `consolidation_ops.op_type='archived_memory_purge'`.
-   *
-   * The base-row deletion runs LAST so the FTS/vec triggers don't observe
-   * a half-deleted state.
    */
   purgeDisconnectedArchived(input: { adminBypass: true }): { deletedIds: string[] } {
     if (input?.adminBypass !== true) {
@@ -363,63 +271,33 @@ export class MemoryService {
     }
     const ts = this.now();
 
-    return this.db.transaction((tx): { deletedIds: string[] } => {
-      const eligible = tx.all<{ id: string }>(sql`
-        SELECT m.id FROM memory m
-         WHERE m.status = 'archived'
-           AND NOT EXISTS (
-               SELECT 1 FROM memory m2, json_each(m2.replaces) je
-                WHERE je.value = m.id)
-           AND NOT EXISTS (
-               SELECT 1 FROM consolidation_ops co
-                WHERE co.created_id = m.id
-                   OR EXISTS (
-                       SELECT 1 FROM json_each(co.affected_ids) je2
-                        WHERE je2.value = m.id))
-           AND NOT EXISTS (
-               SELECT 1 FROM memory_relations r
-                WHERE r.source_id = m.id OR r.target_id = m.id)
-           AND NOT EXISTS (
-               SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)
-      `);
-      const deletedIds = eligible.map((r) => r.id);
+    return this.tx.transaction((): { deletedIds: string[] } => {
+      const deletedIds = this.repos.memory.findPurgeableDisconnectedArchivedIds();
       if (deletedIds.length === 0) {
         return { deletedIds: [] };
       }
 
-      const placeholders = sql.join(
-        deletedIds.map((id) => sql`${id}`),
-        sql.raw(', '),
-      );
-      // Drop derived data first; the base-row DELETE fires the FTS/vec
-      // triggers only on rows that already have their shadow rows gone,
-      // avoiding a half-deleted intermediate state.
-      tx.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
-      tx.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
+      this.repos.memory.purgeByIds(deletedIds);
 
       const runId = ulid(ts.getTime());
-      tx.insert(consolidationRuns)
-        .values({
-          id: runId,
-          startedAt: ts,
-          finishedAt: ts,
-          llmProvider: null,
-          llmModel: null,
-          scope: 'maintenance',
-          summary: JSON.stringify({ kind: 'archived_memory_purge', deleted: deletedIds.length }),
-        })
-        .run();
-      tx.insert(consolidationOps)
-        .values({
-          id: ulid(ts.getTime()),
-          consolidationId: runId,
-          opType: 'archived_memory_purge',
-          affectedIds: deletedIds,
-          createdId: null,
-          reasoning: ARCHIVED_MEMORY_PURGE_REASONING,
-          appliedAt: ts,
-        })
-        .run();
+      this.repos.consolidation.insertRun({
+        id: runId,
+        startedAt: ts,
+        finishedAt: ts,
+        llmProvider: null,
+        llmModel: null,
+        scope: 'maintenance',
+        summary: JSON.stringify({ kind: 'archived_memory_purge', deleted: deletedIds.length }),
+      });
+      this.repos.consolidation.insertOp({
+        id: ulid(ts.getTime()),
+        consolidationId: runId,
+        opType: 'archived_memory_purge',
+        affectedIds: deletedIds,
+        createdId: null,
+        reasoning: ARCHIVED_MEMORY_PURGE_REASONING,
+        appliedAt: ts,
+      });
 
       return { deletedIds };
     });
@@ -434,17 +312,12 @@ export class MemoryService {
 
   /** @internal */
   unsafeGetById(id: string): Memory | undefined {
-    return this.db.select().from(memory).where(eq(memory.id, id)).get();
+    return this.repos.memory.unsafeGetById(id);
   }
 
   /** @internal */
   unsafeGetByIds(ids: readonly string[]): Memory[] {
-    if (ids.length === 0) return [];
-    return this.db
-      .select()
-      .from(memory)
-      .where(inArray(memory.id, [...ids]))
-      .all();
+    return this.repos.memory.unsafeGetByIds(ids);
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -475,47 +348,15 @@ export class MemoryService {
     let current = start;
     const visited = new Set<string>([start.id]);
     for (let i = 0; i < 64; i++) {
-      const row = this.db
-        .all<{ id: string }>(
-          sql`
-            SELECT m.id
-            FROM memory m, json_each(m.replaces) je
-            WHERE je.value = ${current.id}
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          `,
-        )
-        .at(0);
-      if (!row || visited.has(row.id)) break;
-      const next = this.unsafeGetById(row.id);
+      const successorId = this.repos.memory.findSuccessorId(current.id);
+      if (!successorId || visited.has(successorId)) break;
+      const next = this.unsafeGetById(successorId);
       if (!next) break;
       visited.add(next.id);
       current = next;
       if (current.status === 'active') return current;
     }
     return current;
-  }
-
-  private countConfirmations(memoryId: string): number {
-    const row = this.db
-      .select({ value: sql<number>`count(*)` })
-      .from(confirmations)
-      .where(eq(confirmations.memoryId, memoryId))
-      .get();
-    return row?.value ?? 0;
-  }
-
-  private touchLastSeen(id: string): void {
-    this.db.update(memory).set({ lastSeenAt: this.now() }).where(eq(memory.id, id)).run();
-  }
-
-  private touchLastSeenBatch(ids: readonly string[]): void {
-    if (ids.length === 0) return;
-    this.db
-      .update(memory)
-      .set({ lastSeenAt: this.now() })
-      .where(inArray(memory.id, [...ids]))
-      .run();
   }
 }
 

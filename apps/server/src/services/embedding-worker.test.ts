@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
@@ -25,7 +26,7 @@ let worker: EmbeddingWorker;
 
 beforeEach(() => {
   db = createTestDb();
-  mem = new MemoryService(db.handle.db);
+  mem = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   embedder = new FakeEmbedder();
   worker = new EmbeddingWorker({
     db: db.handle.db,

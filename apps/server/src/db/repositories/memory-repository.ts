@@ -13,13 +13,14 @@ import {
 } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
-import { confirmations } from '../schema/confirmations.js';
+import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
   memory,
   type Memory,
   type MemoryScope,
   type MemoryStatus,
   type MemoryType,
+  type NewMemory,
 } from '../schema/memory.js';
 
 export interface FindActiveByScopeOpts {
@@ -28,6 +29,17 @@ export interface FindActiveByScopeOpts {
   includeGlobal?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface SearchMemoryIdsOpts {
+  query?: string;
+  scope: MemoryScope;
+  projectId: string | null;
+  status: MemoryStatus;
+  type?: MemoryType;
+  tag?: string;
+  limit: number;
+  offset: number;
 }
 
 export interface AdminListMemoriesOpts {
@@ -41,9 +53,7 @@ export interface AdminListMemoriesOpts {
 export class MemoryRepository {
   constructor(private readonly db: Db) {}
 
-  findById(id: string): Memory | undefined {
-    return this.db.select().from(memory).where(eq(memory.id, id)).get();
-  }
+  // ── scoped reads ───────────────────────────────────────────────────
 
   findActiveByScope(opts: FindActiveByScopeOpts): Memory[] {
     const projectFilter =
@@ -72,13 +82,99 @@ export class MemoryRepository {
     return query.all();
   }
 
-  findByIds(ids: readonly string[]): Memory[] {
+  findActiveByTopicKey(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    topicKey: string;
+  }): Memory | undefined {
+    const scopeClause =
+      opts.scope === 'project'
+        ? sql`scope = 'project' AND project_id = ${opts.projectId}`
+        : sql`scope = 'global' AND project_id IS NULL`;
+    return this.db
+      .select()
+      .from(memory)
+      .where(sql`${scopeClause} AND topic_key = ${opts.topicKey} AND status = 'active'`)
+      .limit(1)
+      .get();
+  }
+
+  /**
+   * Scope-restricted id search, FTS5-ranked when `query` is present.
+   * Verbatim move of the former MemoryService SQL — the scope filter is
+   * enforced at the SQL level so callers cannot widen it.
+   */
+  searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
+    const scopeClause =
+      opts.scope === 'global'
+        ? sql`(m.scope = 'global' AND m.project_id IS NULL)`
+        : sql`(m.scope = 'project' AND m.project_id = ${opts.projectId})`;
+    const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
+    const tagClause = opts.tag
+      ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
+      : sql``;
+    const statusClause = sql`AND m.status = ${opts.status}`;
+
+    const rows = opts.query
+      ? this.db.all<{ id: string }>(
+          sql`
+            SELECT m.id
+            FROM memory m
+            JOIN memory_fts f ON f.rowid = m.rowid
+            WHERE memory_fts MATCH ${opts.query}
+              AND ${scopeClause}
+              ${statusClause}
+              ${typeClause}
+              ${tagClause}
+            ORDER BY rank, m.created_at DESC
+            LIMIT ${opts.limit} OFFSET ${opts.offset}
+          `,
+        )
+      : this.db.all<{ id: string }>(
+          sql`
+            SELECT m.id
+            FROM memory m
+            WHERE ${scopeClause}
+              ${statusClause}
+              ${typeClause}
+              ${tagClause}
+            ORDER BY m.created_at DESC
+            LIMIT ${opts.limit} OFFSET ${opts.offset}
+          `,
+        );
+    return rows.map((r) => r.id);
+  }
+
+  // ── unsafe* — deliberate cross-scope reads (services) ──────────────
+
+  /** @internal */
+  unsafeGetById(id: string): Memory | undefined {
+    return this.db.select().from(memory).where(eq(memory.id, id)).get();
+  }
+
+  /** @internal */
+  unsafeGetByIds(ids: readonly string[]): Memory[] {
     if (ids.length === 0) return [];
     return this.db
       .select()
       .from(memory)
       .where(inArray(memory.id, [...ids]))
       .all();
+  }
+
+  /** Newest memory whose `replaces[]` contains `id` (one supersede hop). */
+  findSuccessorId(id: string): string | undefined {
+    return this.db
+      .all<{ id: string }>(
+        sql`
+          SELECT m.id
+          FROM memory m, json_each(m.replaces) je
+          WHERE je.value = ${id}
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        `,
+      )
+      .at(0)?.id;
   }
 
   countByStatus(status: MemoryStatus): number {
@@ -88,6 +184,98 @@ export class MemoryRepository {
       .where(eq(memory.status, status))
       .get();
     return row?.value ?? 0;
+  }
+
+  countConfirmations(memoryId: string): number {
+    const row = this.db
+      .select({ value: count() })
+      .from(confirmations)
+      .where(eq(confirmations.memoryId, memoryId))
+      .get();
+    return row?.value ?? 0;
+  }
+
+  // ── writes (services own the surrounding transactions) ────────────
+
+  insert(values: NewMemory): Memory | undefined {
+    return this.db.insert(memory).values(values).returning().get();
+  }
+
+  markSuperseded(id: string): void {
+    this.db
+      .update(memory)
+      .set({ status: 'superseded' as const })
+      .where(and(eq(memory.id, id), eq(memory.status, 'active')))
+      .run();
+  }
+
+  markArchived(id: string, lastSeenAt: Date): void {
+    this.db
+      .update(memory)
+      .set({ status: 'archived', lastSeenAt })
+      .where(and(eq(memory.id, id), eq(memory.status, 'active')))
+      .run();
+  }
+
+  touchLastSeen(id: string, lastSeenAt: Date): void {
+    this.db.update(memory).set({ lastSeenAt }).where(eq(memory.id, id)).run();
+  }
+
+  touchLastSeenBatch(ids: readonly string[], lastSeenAt: Date): void {
+    if (ids.length === 0) return;
+    this.db
+      .update(memory)
+      .set({ lastSeenAt })
+      .where(inArray(memory.id, [...ids]))
+      .run();
+  }
+
+  insertConfirmation(values: NewConfirmation): void {
+    this.db.insert(confirmations).values(values).run();
+  }
+
+  // ── operator-only physical purge ───────────────────────────────────
+  //
+  //  The ONE escape hatch in the otherwise append-only contract for the
+  //  `memory` table. The invariant test white-lists ONLY this file for
+  //  `DELETE FROM memory`. Predicate MUST stay in lock-step between the
+  //  count and the id selection, and with the spec at
+  //  `openspec/specs/memory/spec.md::"Memories MAY be physically purged
+  //  when archived and disconnected"`.
+
+  countPurgeableDisconnectedArchived(): number {
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v FROM memory m
+       WHERE ${PURGE_PREDICATE}
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
+  findPurgeableDisconnectedArchivedIds(): string[] {
+    return this.db
+      .all<{ id: string }>(
+        sql`
+        SELECT m.id FROM memory m
+         WHERE ${PURGE_PREDICATE}
+      `,
+      )
+      .map((r) => r.id);
+  }
+
+  /**
+   * Physically delete the given memory rows plus their `memory_vec`
+   * shadow rows. Derived data is dropped first so the FTS/vec triggers
+   * never observe a half-deleted state. Callers run this inside a
+   * transaction together with the journaling inserts.
+   */
+  purgeByIds(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    const placeholders = sql.join(
+      ids.map((id) => sql`${id}`),
+      sql.raw(', '),
+    );
+    this.db.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
+    this.db.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
   }
 
   // ── admin* — unscoped dashboard reads ──────────────────────────────
@@ -110,7 +298,7 @@ export class MemoryRepository {
         `,
       )
       .map((r) => r.id);
-    return this.findByIds(ids);
+    return this.unsafeGetByIds(ids);
   }
 
   adminList(opts: AdminListMemoriesOpts): Memory[] {
@@ -132,7 +320,11 @@ export class MemoryRepository {
   }
 
   adminGetByIds(ids: readonly string[]): Memory[] {
-    return this.findByIds(ids);
+    return this.unsafeGetByIds(ids);
+  }
+
+  adminCountConfirmations(memoryId: string): number {
+    return this.countConfirmations(memoryId);
   }
 
   /** Memory count per agent session, keyed by session id. */
@@ -170,13 +362,30 @@ export class MemoryRepository {
       .orderBy(day)
       .all();
   }
-
-  adminCountConfirmations(memoryId: string): number {
-    const row = this.db
-      .select({ value: count() })
-      .from(confirmations)
-      .where(eq(confirmations.memoryId, memoryId))
-      .get();
-    return row?.value ?? 0;
-  }
 }
+
+/**
+ * Disconnected-archived purge predicate, shared verbatim by the count
+ * and the id selection:
+ *   - status = 'archived'
+ *   - no other memory row references this id in its `replaces` JSON
+ *   - no consolidation_ops row references this id via `affected_ids`
+ *     or `created_id`
+ *   - no memory_relations row references this id as source or target
+ *   - no confirmations row references this id as `memory_id`
+ */
+const PURGE_PREDICATE = sql`m.status = 'archived'
+         AND NOT EXISTS (
+             SELECT 1 FROM memory m2, json_each(m2.replaces) je
+              WHERE je.value = m.id)
+         AND NOT EXISTS (
+             SELECT 1 FROM consolidation_ops co
+              WHERE co.created_id = m.id
+                 OR EXISTS (
+                     SELECT 1 FROM json_each(co.affected_ids) je2
+                      WHERE je2.value = m.id))
+         AND NOT EXISTS (
+             SELECT 1 FROM memory_relations r
+              WHERE r.source_id = m.id OR r.target_id = m.id)
+         AND NOT EXISTS (
+             SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)`;

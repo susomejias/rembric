@@ -6,10 +6,22 @@ import {
   consolidationRuns,
   type ConsolidationOp,
   type ConsolidationRun,
+  type NewConsolidationOp,
+  type NewConsolidationRun,
 } from '../schema/consolidation.js';
 
 export class ConsolidationRepository {
   constructor(private readonly db: Db) {}
+
+  // ── journaling writes ──────────────────────────────────────────────
+
+  insertRun(values: NewConsolidationRun): void {
+    this.db.insert(consolidationRuns).values(values).run();
+  }
+
+  insertOp(values: NewConsolidationOp): void {
+    this.db.insert(consolidationOps).values(values).run();
+  }
 
   // ── admin* — unscoped dashboard reads ──────────────────────────────
 
