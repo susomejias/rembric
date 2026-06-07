@@ -189,16 +189,30 @@ export function updateBadge(latestVersion: string): SafeHtml {
   `;
 }
 
+/** Quiet brand-block slot: no update known, check enabled. */
+export function upToDateSlot(): SafeHtml {
+  return html`
+    <a class="sb-update is-quiet" href="/dashboard/update" title="Check for updates">
+      <span class="bn"></span>
+      <span class="label">UP TO DATE ›</span>
+    </a>
+  `;
+}
+
 /**
  * Badge + modal pair for the page shell, derived from the per-request
- * update state set by the dashboard auth middleware.
+ * update state set by the dashboard auth middleware. With no update
+ * known the slot degrades to the quiet link (or nothing when the
+ * check is disabled) so `/dashboard/update` stays reachable.
  */
 export function updateShellExtras(
   state: UpdateViewState | null,
   session: DashboardSession | null,
   sessions: SessionsService,
+  checkEnabled = false,
 ): { badge: SafeHtml | null; modal: SafeHtml | undefined } {
-  if (!state || !session) return { badge: null, modal: undefined };
+  if (!session) return { badge: null, modal: undefined };
+  if (!state) return { badge: checkEnabled ? upToDateSlot() : null, modal: undefined };
   return {
     badge: updateBadge(state.info.latestVersion),
     modal: renderUpdateModal(state, session, sessions),

@@ -40,10 +40,12 @@ export function renderPage(
   const collapsed = getCookie(c, SIDEBAR_COOKIE) === '1';
   const csrf = resolved ? csrfInput(resolved.session, sessionsService, 'sidebar.toggle') : raw('');
   const updateState = (c.get('update' as never) as UpdateViewState | undefined | null) ?? null;
+  const checkEnabled = (c.get('updateCheckEnabled' as never) as boolean | undefined) ?? false;
   const { badge, modal } = updateShellExtras(
     updateState,
     resolved?.session ?? null,
     sessionsService,
+    checkEnabled,
   );
   const sidebar = renderSidebar({
     active: opts.activeNav,

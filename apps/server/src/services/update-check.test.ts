@@ -127,6 +127,70 @@ describe('UpdateCheckService', () => {
     expect(calls[1]?.headers['if-none-match']).toBe('W/"abc"');
   });
 
+  it('checkNow bypasses the 24h window and reports update', async () => {
+    let t = 0;
+    const { fetchImpl, calls } = fakeFetch([
+      { status: 200, body: [release({ tag_name: 'server-v0.21.1' })] },
+      { status: 200, body: [release()] },
+    ]);
+    const s = svc({ fetchImpl, now: () => t, intervalMs: 1000 });
+    expect(await s.checkNow()).toEqual({ outcome: 'none', info: null });
+    t = 1; // deep inside the interval — peek would not refetch
+    const second = await s.checkNow();
+    expect(calls.length).toBe(2);
+    expect(second.outcome).toBe('update');
+    expect(second.info?.latestVersion).toBe('0.22.0');
+    expect(s.peek()?.latestVersion).toBe('0.22.0');
+  });
+
+  it('checkNow reports none on same/older release and on 304', async () => {
+    const { fetchImpl } = fakeFetch([
+      { status: 200, body: [release({ tag_name: 'server-v0.21.1' })], etag: 'W/"abc"' },
+      { status: 304 },
+    ]);
+    const s = svc({ fetchImpl });
+    expect((await s.checkNow()).outcome).toBe('none');
+    expect((await s.checkNow()).outcome).toBe('none');
+  });
+
+  it('checkNow reports error on network failure and non-OK status', async () => {
+    const failing = svc({ fetchImpl: () => Promise.reject(new Error('offline')) });
+    expect((await failing.checkNow()).outcome).toBe('error');
+
+    const rateLimited = svc({ fetchImpl: fakeFetch([{ status: 403, body: {} }]).fetchImpl });
+    expect((await rateLimited.checkNow()).outcome).toBe('error');
+  });
+
+  it('checkNow error does not lose a previously cached update', async () => {
+    const { fetchImpl } = fakeFetch([{ status: 200, body: [release()] }, { status: 500 }]);
+    const s = svc({ fetchImpl });
+    expect((await s.checkNow()).outcome).toBe('update');
+    const after = await s.checkNow();
+    expect(after.outcome).toBe('error');
+    expect(after.info?.latestVersion).toBe('0.22.0');
+  });
+
+  it('checkNow on a disabled service never fetches', async () => {
+    const { fetchImpl, calls } = fakeFetch([{ status: 200, body: [release()] }]);
+    const s = svc({ fetchImpl, enabled: false });
+    expect(await s.checkNow()).toEqual({ outcome: 'none', info: null });
+    expect(calls.length).toBe(0);
+    expect(s.enabled).toBe(false);
+  });
+
+  it('lastCheckedAt reflects manual and automatic checks', async () => {
+    let t = 5000;
+    const { fetchImpl } = fakeFetch([{ status: 200, body: [release()] }]);
+    const s = svc({ fetchImpl, now: () => t, intervalMs: 1000 });
+    expect(s.lastCheckedAt).toBeNull();
+    await s.checkNow();
+    expect(s.lastCheckedAt?.getTime()).toBe(5000);
+    t = 7000;
+    s.peek(); // stale — background refresh fires
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.lastCheckedAt?.getTime()).toBe(7000);
+  });
+
   it('peek respects the 24h interval', async () => {
     let t = 0;
     const { fetchImpl, calls } = fakeFetch([{ status: 200, body: [release()] }]);

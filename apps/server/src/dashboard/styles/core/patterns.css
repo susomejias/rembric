@@ -974,6 +974,21 @@ form .field label {
 .sb-update:hover .bn {
   background: var(--lime-ink);
 }
+.sb-update.is-quiet {
+  border-color: var(--fg-faint);
+  color: var(--fg-dim);
+}
+.sb-update.is-quiet .bn {
+  background: var(--fg-dim);
+}
+.sb-update.is-quiet:hover {
+  background: transparent;
+  border-color: var(--fg-dim);
+  color: var(--fg);
+}
+.sb-update.is-quiet:hover .bn {
+  background: var(--fg);
+}
 .sb.is-collapsed .sb-update .label {
   display: none;
 }
