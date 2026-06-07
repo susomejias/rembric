@@ -226,7 +226,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
       agent: 'codex-cli',
       cwd: '/Users/dev/demo',
       summary:
-        'Goal: investigate why the consolidation runs view rendered an empty week.\nDiscoveries: the lazy sweep only fires on session start, throttled to one run per scope per 6h — no agent had opened a session against this project all week.\nFix: forced a run with the dashboard "Run sweep now" button and confirmed the journal populated.\nNext: monitor that regular agent sessions keep the sweep cadence.',
+        'Goal: investigate why the consolidation runs view rendered an empty week.\nDiscoveries: the lazy sweep only fires on session start, throttled to one run per scope per day — no agent had opened a session against this project all week.\nFix: forced a run with the dashboard "Run sweep now" button and confirmed the journal populated.\nNext: monitor that regular agent sessions keep the sweep cadence.',
       title: 'Diagnose missing consolidation runs',
     },
     {

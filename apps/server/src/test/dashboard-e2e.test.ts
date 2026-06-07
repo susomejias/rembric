@@ -470,7 +470,7 @@ describe('dashboard E2E', () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('ON SESSION START');
-    expect(body).toContain('THROTTLED 6H / SCOPE');
+    expect(body).toContain('THROTTLED 24H / SCOPE');
     expect(body).toMatch(/RE-EXPOSED &gt; \d+[HD] · ORPHANED &gt;\s*\d+[HD]/);
     expect(body).not.toContain('NEXT RUN');
     expect(body).not.toContain('03:00 UTC');
