@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.8](https://github.com/susomejias/rembric/compare/server-v0.21.7...server-v0.21.8) (2026-06-07)
+
+
+### Features
+
+* **server:** rename memory.get_session → memory.session_get (+ docs) ([#118](https://github.com/susomejias/rembric/issues/118)) ([2a9958d](https://github.com/susomejias/rembric/commit/2a9958df9885b9da9c6717eefeda2a38b9514b04))
+
 ## [0.21.7](https://github.com/susomejias/rembric/compare/server-v0.21.6...server-v0.21.7) (2026-06-07)
 
 
