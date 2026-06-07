@@ -1,10 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { Db } from '../db/client.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
-import { memory } from '../db/schema/memory.js';
+import type { Repositories } from '../db/repositories/index.js';
+import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
@@ -77,7 +75,7 @@ export const capturePassiveSchema = {
 };
 
 export interface SessionsToolDeps {
-  db: Db;
+  repos: Pick<Repositories, 'memory' | 'relations'>;
   agentSessions: AgentSessionsService;
   memory: MemoryService;
   projects: ProjectsService;
@@ -484,32 +482,20 @@ function handleContext(
       summary: s.summary,
     }));
 
-  const memoryStatusClause = includeArchived ? sql`` : sql`AND m.status != 'archived'`;
-  const memoryScopeClause =
-    scope.kind === 'project'
-      ? sql`m.scope = 'project' AND m.project_id = ${scope.projectId}`
-      : sql`m.scope = 'global' AND m.project_id IS NULL`;
-  const recentMemoryRows = deps.db.all<{
-    id: string;
-    type: string;
-    content: string;
-    status: string;
-    created_at: number;
-  }>(sql`
-      SELECT m.id, m.type, m.content, m.status, m.created_at
-      FROM memory m
-      WHERE ${memoryScopeClause}
-      ${memoryStatusClause}
-      ORDER BY COALESCE(m.last_seen_at, m.created_at) DESC
-      LIMIT ${memoriesLimit}
-    `);
-  const recentMemories = recentMemoryRows.map((r) => ({
-    id: r.id,
-    type: r.type,
-    snippet: snippet(r.content, 200),
-    status: r.status,
-    createdAt: new Date(r.created_at).toISOString(),
-  }));
+  const recentMemories = deps.repos.memory
+    .recentForContext({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      includeArchived,
+      limit: memoriesLimit,
+    })
+    .map((m) => ({
+      id: m.id,
+      type: m.type,
+      snippet: snippet(m.content, 200),
+      status: m.status,
+      createdAt: m.createdAt.toISOString(),
+    }));
 
   const promptsLimit = clamp(args.prompts ?? 10, 0, 50);
   const recentPrompts = deps.prompts
@@ -529,37 +515,21 @@ function handleContext(
   // are deterministically orphaned by the sweep after the deadline.
   const now = Date.now();
   const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
-  const relScopeClause =
-    scope.kind === 'project'
-      ? sql`ms.scope = 'project' AND ms.project_id = ${scope.projectId} AND mt.scope = 'project' AND mt.project_id = ${scope.projectId}`
-      : sql`ms.scope = 'global' AND ms.project_id IS NULL AND mt.scope = 'global' AND mt.project_id IS NULL`;
-  const pendingRows = deps.db.all<{
-    judgment_id: string;
-    source_id: string;
-    target_id: string;
-    created_at: number;
-    source_content: string;
-    target_content: string;
-  }>(sql`
-      SELECT r.judgment_id, r.source_id, r.target_id, r.created_at,
-             ms.content AS source_content, mt.content AS target_content
-      FROM memory_relations r
-        JOIN memory ms ON ms.id = r.source_id
-        JOIN memory mt ON mt.id = r.target_id
-      WHERE r.status = 'pending'
-        AND r.created_at < ${pendingCutoff}
-        AND ${relScopeClause}
-      ORDER BY r.created_at ASC
-      LIMIT 5
-    `);
-  const pendingJudgments = pendingRows.map((r) => ({
-    judgmentId: r.judgment_id,
-    sourceId: r.source_id,
-    targetId: r.target_id,
-    sourceSnippet: snippet(r.source_content, 200),
-    targetSnippet: snippet(r.target_content, 200),
-    ageMs: now - r.created_at,
-  }));
+  const pendingJudgments = deps.repos.relations
+    .listPendingOlderThanInScope({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      cutoffMs: pendingCutoff,
+      limit: 5,
+    })
+    .map((r) => ({
+      judgmentId: r.judgmentId,
+      sourceId: r.sourceId,
+      targetId: r.targetId,
+      sourceSnippet: snippet(r.sourceContent, 200),
+      targetSnippet: snippet(r.targetContent, 200),
+      ageMs: now - r.createdAt.getTime(),
+    }));
 
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
@@ -591,21 +561,20 @@ function handleTimeline(
   const t = target.memory;
 
   if (t.sessionId) {
-    const beforeRows = deps.db
-      .select()
-      .from(memory)
-      .where(sql`session_id = ${t.sessionId} AND created_at < ${t.createdAt} AND id != ${t.id}`)
-      .orderBy(desc(memory.createdAt))
-      .limit(before)
-      .all()
-      .reverse();
-    const afterRows = deps.db
-      .select()
-      .from(memory)
-      .where(sql`session_id = ${t.sessionId} AND created_at > ${t.createdAt} AND id != ${t.id}`)
-      .orderBy(memory.createdAt)
-      .limit(after)
-      .all();
+    const beforeRows = deps.repos.memory.sessionNeighbors({
+      sessionId: t.sessionId,
+      pivotCreatedAt: t.createdAt,
+      pivotId: t.id,
+      direction: 'before',
+      limit: before,
+    });
+    const afterRows = deps.repos.memory.sessionNeighbors({
+      sessionId: t.sessionId,
+      pivotCreatedAt: t.createdAt,
+      pivotId: t.id,
+      direction: 'after',
+      limit: after,
+    });
     return ok({
       target: { id: t.id, createdAt: t.createdAt },
       before: beforeRows.map(serializeMemory),
@@ -617,31 +586,24 @@ function handleTimeline(
   // Fallback: ±2h window around created_at, scoped to (scope, project_id).
   const windowMs = 2 * 3600 * 1000;
   const targetMs = t.createdAt.getTime();
-  const loMs = targetMs - windowMs;
-  const hiMs = targetMs + windowMs;
-  const scopeFilter =
-    scope.kind === 'project'
-      ? sql`scope = 'project' AND project_id = ${scope.projectId}`
-      : sql`scope = 'global' AND project_id IS NULL`;
-  const beforeRows = deps.db
-    .select()
-    .from(memory)
-    .where(
-      sql`${scopeFilter} AND created_at >= ${loMs} AND created_at < ${targetMs} AND id != ${t.id}`,
-    )
-    .orderBy(desc(memory.createdAt))
-    .limit(before)
-    .all()
-    .reverse();
-  const afterRows = deps.db
-    .select()
-    .from(memory)
-    .where(
-      sql`${scopeFilter} AND created_at > ${targetMs} AND created_at <= ${hiMs} AND id != ${t.id}`,
-    )
-    .orderBy(memory.createdAt)
-    .limit(after)
-    .all();
+  const window = {
+    scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+    pivotId: t.id,
+    loMs: targetMs - windowMs,
+    hiMs: targetMs + windowMs,
+    pivotMs: targetMs,
+  };
+  const beforeRows = deps.repos.memory.windowNeighbors({
+    ...window,
+    direction: 'before',
+    limit: before,
+  });
+  const afterRows = deps.repos.memory.windowNeighbors({
+    ...window,
+    direction: 'after',
+    limit: after,
+  });
   return ok({
     target: { id: t.id, createdAt: t.createdAt },
     before: beforeRows.map(serializeMemory),
@@ -706,30 +668,10 @@ function handleDoctor(deps: SessionsToolDeps, _args: Record<string, never>) {
 function handleStats(deps: SessionsToolDeps, _args: Record<string, never>) {
   void _args;
   const scope = scopeFromContext(deps);
-  const scopeFilter =
-    scope.kind === 'project'
-      ? sql`scope = 'project' AND project_id = ${scope.projectId}`
-      : sql`scope = 'global' AND project_id IS NULL`;
-
-  const byStatus = deps.db
-    .all<{
-      status: string;
-      n: number;
-    }>(sql`SELECT status, COUNT(*) AS n FROM memory WHERE ${scopeFilter} GROUP BY status`)
-    .reduce<Record<string, number>>((acc, r) => {
-      acc[r.status] = Number(r.n);
-      return acc;
-    }, {});
-
-  const byType = deps.db
-    .all<{
-      type: string;
-      n: number;
-    }>(sql`SELECT type, COUNT(*) AS n FROM memory WHERE ${scopeFilter} GROUP BY type`)
-    .reduce<Record<string, number>>((acc, r) => {
-      acc[r.type] = Number(r.n);
-      return acc;
-    }, {});
+  const { byStatus, byType } = deps.repos.memory.countByStatusAndTypeInScope(
+    scope.kind === 'project' ? 'project' : 'global',
+    scope.kind === 'project' ? scope.projectId : null,
+  );
 
   const sessionsByStatus = deps.agentSessions.countByStatus();
 
@@ -758,7 +700,7 @@ function snippet(content: string, max: number): string {
   return content.slice(0, max - 1) + '…';
 }
 
-function serializeMemory(m: typeof memory.$inferSelect) {
+function serializeMemory(m: Memory) {
   return {
     id: m.id,
     type: m.type,
@@ -768,8 +710,3 @@ function serializeMemory(m: typeof memory.$inferSelect) {
     sessionId: m.sessionId,
   };
 }
-
-// Maintained imports for downstream consumers.
-void eq;
-void isNull;
-void agentSessions;

@@ -1,7 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import type { Db } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -64,7 +63,6 @@ export interface CreateMcpServerOptions {
   /** Inline save-time embedding (see ToolDeps.embedNow). */
   embedNow?: (memoryId: string, content: string) => Promise<boolean>;
   router: SessionRouter;
-  db: Db;
   repos: Repositories;
   doctor: () => DoctorReport;
   /** Fire-and-forget consolidation sweep, invoked after session start. */
@@ -135,7 +133,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
 
   // ── Session lifecycle + research + observability tools ────────────
   const sessions = buildSessionsHandlers({
-    db: opts.db,
+    repos: opts.repos,
     agentSessions: opts.agentSessions,
     memory: opts.memory,
     projects: opts.projects,
@@ -243,7 +241,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   // `getServer` so the roots-discovery helper can call
   // `server.server.listRoots()` on the underlying transport.
   const projectHandlers = buildProjectHandlers({
-    db: opts.db,
+    repos: opts.repos,
     projects: opts.projects,
     agentSessions: opts.agentSessions,
     router: opts.router,

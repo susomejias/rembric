@@ -129,6 +129,121 @@ export class MemoryRepository {
     );
   }
 
+  /** Recent in-scope memories (memory.context), newest by last-seen/created. */
+  recentForContext(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    includeArchived: boolean;
+    limit: number;
+  }): Memory[] {
+    const conditions: SQL[] = [
+      opts.scope === 'project'
+        ? (and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? '')) as SQL)
+        : (and(eq(memory.scope, 'global'), isNull(memory.projectId)) as SQL),
+    ];
+    if (!opts.includeArchived) conditions.push(sql`${memory.status} != 'archived'`);
+    return this.db
+      .select()
+      .from(memory)
+      .where(and(...conditions))
+      .orderBy(sql`COALESCE(${memory.lastSeenAt}, ${memory.createdAt}) DESC`)
+      .limit(opts.limit)
+      .all();
+  }
+
+  /** Timeline neighbors within the same session, before/after a pivot. */
+  sessionNeighbors(opts: {
+    sessionId: string;
+    pivotCreatedAt: Date;
+    pivotId: string;
+    direction: 'before' | 'after';
+    limit: number;
+  }): Memory[] {
+    const cmp =
+      opts.direction === 'before'
+        ? sql`${memory.createdAt} < ${opts.pivotCreatedAt.getTime()}`
+        : sql`${memory.createdAt} > ${opts.pivotCreatedAt.getTime()}`;
+    const rows = this.db
+      .select()
+      .from(memory)
+      .where(and(eq(memory.sessionId, opts.sessionId), cmp, sql`${memory.id} != ${opts.pivotId}`))
+      .orderBy(opts.direction === 'before' ? desc(memory.createdAt) : memory.createdAt)
+      .limit(opts.limit)
+      .all();
+    return opts.direction === 'before' ? rows.reverse() : rows;
+  }
+
+  /** Timeline fallback: in-scope neighbors within a created_at window. */
+  windowNeighbors(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    pivotId: string;
+    loMs: number;
+    hiMs: number;
+    pivotMs: number;
+    direction: 'before' | 'after';
+    limit: number;
+  }): Memory[] {
+    const scopeFilter =
+      opts.scope === 'project'
+        ? and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? ''))
+        : and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    const windowCmp =
+      opts.direction === 'before'
+        ? sql`${memory.createdAt} >= ${opts.loMs} AND ${memory.createdAt} < ${opts.pivotMs}`
+        : sql`${memory.createdAt} > ${opts.pivotMs} AND ${memory.createdAt} <= ${opts.hiMs}`;
+    const rows = this.db
+      .select()
+      .from(memory)
+      .where(and(scopeFilter, windowCmp, sql`${memory.id} != ${opts.pivotId}`))
+      .orderBy(opts.direction === 'before' ? desc(memory.createdAt) : memory.createdAt)
+      .limit(opts.limit)
+      .all();
+    return opts.direction === 'before' ? rows.reverse() : rows;
+  }
+
+  /** memory.stats: counts grouped by `status` and by `type` within scope. */
+  countByStatusAndTypeInScope(
+    scope: MemoryScope,
+    projectId: string | null,
+  ): {
+    byStatus: Record<string, number>;
+    byType: Record<string, number>;
+  } {
+    const scopeFilter =
+      scope === 'project'
+        ? and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? ''))
+        : and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    const statusRows = this.db
+      .select({ status: memory.status, n: count() })
+      .from(memory)
+      .where(scopeFilter)
+      .groupBy(memory.status)
+      .all();
+    const typeRows = this.db
+      .select({ type: memory.type, n: count() })
+      .from(memory)
+      .where(scopeFilter)
+      .groupBy(memory.type)
+      .all();
+    const byStatus: Record<string, number> = {};
+    for (const r of statusRows) byStatus[r.status] = r.n;
+    const byType: Record<string, number> = {};
+    for (const r of typeRows) byType[r.type] = r.n;
+    return { byStatus, byType };
+  }
+
+  /** Per-project active+total memory counts for the project list tool. */
+  countByProject(): { projectId: string; n: number }[] {
+    return this.db
+      .select({ projectId: memory.projectId, n: count() })
+      .from(memory)
+      .where(isNotNull(memory.projectId))
+      .groupBy(memory.projectId)
+      .all()
+      .filter((r): r is { projectId: string; n: number } => r.projectId !== null);
+  }
+
   searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
     const scopeClause =
       opts.scope === 'global'

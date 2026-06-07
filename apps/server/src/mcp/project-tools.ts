@@ -1,9 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { Db } from '../db/client.js';
-import { memory } from '../db/schema/memory.js';
+import type { Repositories } from '../db/repositories/index.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -36,7 +34,7 @@ export const projectListSchema = {
 export const projectCurrentSchema = {} as const;
 
 export interface ProjectToolDeps {
-  db: Db;
+  repos: Pick<Repositories, 'memory'>;
   projects: ProjectsService;
   agentSessions: AgentSessionsService;
   router: SessionRouter;
@@ -161,17 +159,10 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
   const includeArchived = args.includeArchived === true;
   const rows = deps.projects.list(includeArchived);
   // Memory counts per project — one extra query, batched.
-  const counts = deps.db
-    .all<{
-      project_id: string;
-      n: number;
-    }>(
-      sql`SELECT project_id, COUNT(*) AS n FROM ${memory} WHERE project_id IS NOT NULL GROUP BY project_id`,
-    )
-    .reduce<Record<string, number>>((acc, r) => {
-      acc[r.project_id] = Number(r.n);
-      return acc;
-    }, {});
+  const counts = deps.repos.memory.countByProject().reduce<Record<string, number>>((acc, r) => {
+    acc[r.projectId] = r.n;
+    return acc;
+  }, {});
 
   return ok({
     projects: rows.map((p) => ({

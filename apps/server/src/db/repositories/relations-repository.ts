@@ -21,7 +21,7 @@ import {
   type RelationKind,
   type RelationStatus,
 } from '../schema/memory-relations.js';
-import { memory, type Memory } from '../schema/memory.js';
+import { memory, type Memory, type MemoryScope } from '../schema/memory.js';
 
 export interface JudgedVerdict {
   relation: RelationKind;
@@ -234,6 +234,47 @@ export class RelationsRepository {
       .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
       .where(eq(memoryRelations.id, id))
       .get();
+  }
+
+  /**
+   * Aged pending relations whose source AND target both lie in `scope`,
+   * with joined content — feeds memory.context.pendingJudgments[].
+   */
+  listPendingOlderThanInScope(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    cutoffMs: number;
+    limit: number;
+  }): AdminRelationWithContent[] {
+    const scopeFilter =
+      opts.scope === 'project'
+        ? and(
+            eq(sourceMemory.scope, 'project'),
+            eq(sourceMemory.projectId, opts.projectId ?? ''),
+            eq(targetMemory.scope, 'project'),
+            eq(targetMemory.projectId, opts.projectId ?? ''),
+          )
+        : and(
+            eq(sourceMemory.scope, 'global'),
+            isNull(sourceMemory.projectId),
+            eq(targetMemory.scope, 'global'),
+            isNull(targetMemory.projectId),
+          );
+    return this.db
+      .select(withContentSelection)
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          eq(memoryRelations.status, 'pending'),
+          lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
+          scopeFilter,
+        ),
+      )
+      .orderBy(memoryRelations.createdAt)
+      .limit(opts.limit)
+      .all();
   }
 
   adminRecentJudged(limit: number): AdminRelationWithContent[] {

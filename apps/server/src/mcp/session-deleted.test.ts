@@ -73,7 +73,7 @@ beforeEach(() => {
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
   handlers = buildSessionsHandlers({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
     agentSessions,
     memory,
     projects,

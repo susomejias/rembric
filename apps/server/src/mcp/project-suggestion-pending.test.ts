@@ -80,7 +80,7 @@ beforeEach(() => {
     projects,
   });
   sessionHandlers = buildSessionsHandlers({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
     agentSessions,
     memory,
     projects,
