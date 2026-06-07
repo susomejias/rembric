@@ -619,7 +619,7 @@ The `memory.context` handler (`handleContext` in `apps/server/src/mcp/sessions-t
 
 The four fields SHALL share the one constant; no per-field literal truncation length SHALL remain in `handleContext`.
 
-This is a read-side display concern only. It SHALL NOT alter what is stored: the `sessions.summary` column, the `SUMMARY_MAX_CHARS = 2000` write cap, the `summary_final` precedence rule, prompt rows, and memory rows are all unaffected. The full values SHALL remain retrievable verbatim through every other surface (`memory.get`, the dashboard, and any read path that returns a row directly).
+This is a read-side display concern only. It SHALL NOT alter what is stored: the `sessions.summary` column, the `SUMMARY_MAX_CHARS` write cap, the `summary_final` precedence rule, prompt rows, and memory rows are all unaffected. The full values SHALL remain retrievable verbatim through every other surface (`memory.get`, the dashboard, and any read path that returns a row directly).
 
 A `NULL` stored session summary SHALL be emitted as `null` (not coerced to an empty snippet). The default recent-session count SHALL remain `5` — this requirement governs per-field size, not item count.
 
