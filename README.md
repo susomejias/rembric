@@ -18,6 +18,8 @@
   <a href="#configuration">Configuration</a> ·
   <a href="#project-status">Project status</a> ·
   <a href="#contributing">Contributing</a>
+  <br/>
+  <sub>More docs: <a href="./docs/agents.md">Agent integration</a> · <a href="./docs/updates.md">Updates</a> · <a href="./docs/troubleshooting.md">Troubleshooting</a> · <a href="./docs/docker.md">Docker</a> · <a href="./docs/backup.md">Backup</a> · <a href="./docs/embeddings.md">Embeddings</a> · <a href="./docs/relations.md">Relations</a></sub>
 </p>
 
 ---
@@ -110,6 +112,7 @@ Works with **any** agent that speaks MCP. One server, memories shared across all
    │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
    │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
    │   │  project.{use,list,current}│   │                               │  │
+   │   │  memory.get_session        │   │                               │  │
    │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
    │                 ▼                                ▼                    │
    │   ┌───────────────────────────────────────────────────────────────┐   │
