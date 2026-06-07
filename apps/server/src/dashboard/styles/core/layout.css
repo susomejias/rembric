@@ -290,16 +290,18 @@
   flex-shrink: 0;
   object-fit: contain;
 }
+/* Stacked like the sidebar brand: REMBRIC over the version. Always
+   fits next to the update slot + menu toggle, no truncation games. */
 .mob-bar .brand .label-stack {
   min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--s-2);
-  flex-wrap: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 .mob-bar .brand .label-stack > div {
   font-size: 0.78rem;
   letter-spacing: 0.12em;
+  line-height: 1.2;
 }
 .mob-bar .brand .label-stack small {
   color: var(--fg-dim);
@@ -307,11 +309,7 @@
   font-size: 0.6rem;
   letter-spacing: 0.14em;
   white-space: nowrap;
-}
-.mob-bar .brand .label-stack small::before {
-  content: '·';
-  margin-right: var(--s-2);
-  color: var(--fg-faint);
+  line-height: 1.2;
 }
 .mob-bar .brand .sect {
   color: var(--fg-dim);

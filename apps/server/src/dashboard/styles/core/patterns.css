@@ -996,9 +996,7 @@ form .field label {
   margin: 0;
   flex-shrink: 0;
 }
-.mob-bar .sb-update .label {
-  display: none;
-}
+/* The slot label stays visible on mobile — a bare dot reads as noise. */
 
 dialog.upd-modal {
   width: min(640px, calc(100vw - 2 * var(--s-4)));

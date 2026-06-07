@@ -507,20 +507,13 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       </div>
 
       <div class="row-2">
-        <div class="card">
+        <div class="card act-card">
           <div class="card-head">
             <span><span class="bn"></span> <b>ACTIVITY · 7 DAYS</b></span>
             <span>MEMORIES CREATED · PER DAY</span>
           </div>
-          <div
-            class="card-body"
-            style="display:flex;align-items:center;justify-content:center;overflow-x:auto;min-height:220px;padding:var(--s-6) var(--s-5)"
-          >
-            <pre
-              style="font-family:var(--f-mono);font-size:0.98rem;line-height:1.65;color:var(--fg-dim);margin:0;white-space:pre;text-align:left"
-            >
-${ascBars(activity)}</pre
-            >
+          <div class="card-body">
+            <pre class="act-bars">${ascBars(activity)}</pre>
           </div>
         </div>
         <div class="card">
