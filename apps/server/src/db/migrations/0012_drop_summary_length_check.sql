@@ -6,7 +6,7 @@
 -- truncates summaries to a display snippet (see
 -- snippet-context-session-summaries), so a larger stored summary no longer
 -- inflates the context payload; richer summaries support multi-agent /
--- cross-client handoff via `memory.get_session`.
+-- cross-client handoff via `memory.session_get`.
 --
 -- Loss-free: relaxing a constraint rejects no existing rows (every stored
 -- summary is <= 2000 and trivially satisfies the unconstrained column);

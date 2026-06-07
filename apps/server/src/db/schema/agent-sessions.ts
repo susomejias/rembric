@@ -66,7 +66,7 @@ export const agentSessions = sqliteTable(
      * the same constant); there is NO SQLite CHECK pinning the length — the
      * `0011` CHECK was dropped in `0012_drop_summary_length_check.sql` so the
      * cap is a tunable constant with no further table rebuilds. The full
-     * summary is read back via `memory.get_session`; `memory.context`
+     * summary is read back via `memory.session_get`; `memory.context`
      * returns only a snippet.
      */
     summary: text('summary'),

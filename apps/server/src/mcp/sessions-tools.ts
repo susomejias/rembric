@@ -74,7 +74,7 @@ export const capturePassiveSchema = {
   sessionId: z.string().min(1).optional(),
 };
 
-export const getSessionSchema = {
+export const sessionGetSchema = {
   sessionId: z.string().min(1),
 };
 
@@ -148,7 +148,7 @@ export function buildSessionsHandlers(deps: SessionsToolDeps) {
     sessionEnd: handleSessionEnd.bind(null, deps),
     sessionSummary: handleSessionSummary.bind(null, deps),
     context: handleContext.bind(null, deps),
-    getSession: handleGetSession.bind(null, deps),
+    sessionGet: handleSessionGet.bind(null, deps),
     timeline: handleTimeline.bind(null, deps),
     capturePassive: handleCapturePassive.bind(null, deps),
     doctor: handleDoctor.bind(null, deps),
@@ -457,7 +457,7 @@ function rejectIfDeleted(
   return null;
 }
 
-function handleGetSession(deps: SessionsToolDeps, args: { sessionId: string }) {
+function handleSessionGet(deps: SessionsToolDeps, args: { sessionId: string }) {
   const scope = scopeFromContext(deps);
   const row = deps.agentSessions.getById(args.sessionId);
   if (

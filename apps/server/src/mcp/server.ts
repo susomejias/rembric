@@ -27,7 +27,7 @@ import {
   buildSessionsHandlers,
   capturePassiveSchema,
   contextSchema,
-  getSessionSchema,
+  sessionGetSchema,
   type DoctorReport,
   savePromptSchema,
   searchPromptsSchema,
@@ -183,13 +183,13 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     sessions.context,
   );
   server.registerTool(
-    'memory.get_session',
+    'memory.session_get',
     {
       description:
         "Fetch one session by id with its FULL, untruncated summary — memory.context only returns a short snippet. Scope-enforced: a cross-scope or soft-deleted id returns not_found. Use to resume work surfaced in memory.context when the snippet isn't enough (cross-client / multi-agent handoff).",
-      inputSchema: getSessionSchema,
+      inputSchema: sessionGetSchema,
     },
-    sessions.getSession,
+    sessions.sessionGet,
   );
   server.registerTool(
     'memory.timeline',
