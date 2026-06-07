@@ -66,8 +66,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
     description:
-      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in services/agent-sessions.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/agent-sessions.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in db/repositories/agent-sessions-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/agent-sessions-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern:
@@ -187,8 +187,8 @@ describe('append-only invariants (static grep)', () => {
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
   });
 
-  it('allow-list anchors: services/agent-sessions.ts contains DELETE FROM sessions', () => {
-    const file = join(srcRoot, 'services/agent-sessions.ts');
+  it('allow-list anchors: db/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
+    const file = join(srcRoot, 'db/repositories/agent-sessions-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
   });

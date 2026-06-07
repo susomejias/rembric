@@ -260,7 +260,7 @@ describe('dashboard E2E', () => {
     const handle = createDb({ dataDir });
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
     const proj = new ProjectsService(handle.db).create({ slug: 'e2e-order-proj' });
-    const agentSessions = new AgentSessionsService(handle.db);
+    const agentSessions = new AgentSessionsService(createRepositories(handle.db), handle.db);
     // Older active session first, then a newer session that ends — plain
     // started_at DESC would render the ended one on top.
     const activeOld = agentSessions.start({ tokenId: admin!.id, projectId: proj.id, agent: 'e2e' });
@@ -307,7 +307,7 @@ describe('dashboard E2E', () => {
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
     void tokensSvc;
     const proj = new ProjectsService(handle.db).create({ slug: 'e2e-del-proj' });
-    const sess = new AgentSessionsService(handle.db).start({
+    const sess = new AgentSessionsService(createRepositories(handle.db), handle.db).start({
       tokenId: admin!.id,
       projectId: proj.id,
       agent: 'e2e',
@@ -371,7 +371,7 @@ describe('dashboard E2E', () => {
     const handle = createDb({ dataDir });
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
     const proj = new ProjectsService(handle.db).create({ slug: 'e2e-abandon-proj' });
-    const agentSessions = new AgentSessionsService(handle.db);
+    const agentSessions = new AgentSessionsService(createRepositories(handle.db), handle.db);
     const sess = agentSessions.start({
       tokenId: admin!.id,
       projectId: proj.id,
@@ -396,7 +396,9 @@ describe('dashboard E2E', () => {
     expect(afterBody).toContain('marked as abandoned');
 
     const handle2 = createDb({ dataDir });
-    const row = new AgentSessionsService(handle2.db).getById(sess.id);
+    const row = new AgentSessionsService(createRepositories(handle2.db), handle2.db).getById(
+      sess.id,
+    );
     handle2.close();
     expect(row?.status).toBe('abandoned');
     expect(row?.endedAt).toBeInstanceOf(Date);

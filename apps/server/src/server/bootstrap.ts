@@ -87,7 +87,7 @@ export async function bootstrap(
   const tokens = new TokensService(dbHandle.db);
   const projects = new ProjectsService(dbHandle.db);
   const memorySvc = new MemoryService(repos, dbHandle.db);
-  const agentSessionsSvc = new AgentSessionsService(dbHandle.db);
+  const agentSessionsSvc = new AgentSessionsService(repos, dbHandle.db);
   const promptsSvc = new PromptsService(repos, dbHandle.db);
   const relationsSvc = new RelationsService(repos, dbHandle.db);
   const sessionRouter = new SessionRouter();
@@ -123,7 +123,7 @@ export async function bootstrap(
   if (!sessionSecretBase) {
     throw new Error('session secret is missing; set REMBRIC_SESSION_SECRET or REMBRIC_ADMIN_TOKEN');
   }
-  const sessions = new SessionsService(dbHandle.db, deriveSessionKey(sessionSecretBase));
+  const sessions = new SessionsService(repos, deriveSessionKey(sessionSecretBase));
 
   // In-process embedder + drain worker — fills memory_vec so save-time
   // candidate detection has vectors to kNN over. The model loads eagerly

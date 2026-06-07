@@ -23,8 +23,8 @@ Phases mirror design.md Decision 7. Each numbered group lands green (`pnpm run t
 
 - [x] 3.1 `MemoryService` → `MemoryRepository`: move all builder + raw SQL (FTS5 search, topic-key lookup, `json_each` chain traversal, purge predicate + `DELETE FROM memory`); update invariant allow-list + positive anchor from `services/memory.ts` to the repository in the same commit; service keeps scope resolution, validation, transactions; existing `memory.test.ts` assertions pass unchanged
 - [ ] 3.2 `RelationsService` → `RelationsRepository`: move raw WHEREs and bulk IN queries (convert to builder where expressible); `relations` tests pass unchanged
-- [ ] 3.3 `PromptsService` → `PromptsRepository` incl. `DELETE FROM prompts` purge; allow-list + anchor move in same commit
-- [ ] 3.4 `AgentSessionsService` + `SessionsService` → `AgentSessionsRepository` incl. `DELETE FROM sessions` purge; allow-list + anchor move in same commit
+- [x] 3.3 `PromptsService` → `PromptsRepository` incl. `DELETE FROM prompts` purge; allow-list + anchor move in same commit
+- [x] 3.4 `AgentSessionsService` + `SessionsService` → `AgentSessionsRepository` incl. `DELETE FROM sessions` purge; allow-list + anchor move in same commit. NOTE: `SessionsService` (dashboard cookies) gets its own `DashboardSessionsRepository` — `dashboard_sessions` was a 9th aggregate missed in the design's repo list (its `DELETE` is legitimate; cookie sessions are not append-only)
 - [ ] 3.5 `ProjectsService` and `TokensService` → their repositories (pure builder moves)
 - [ ] 3.6 `save-time-candidates.ts` → `VectorsRepository.knnByCosine(...)` and `MemoryRepository` FTS/BM25 method; decide here whether `embedding-worker.ts` shares `VectorsRepository` (design open question) and move its SQL accordingly
 - [ ] 3.7 `consolidation/{decay,operations,runner}.ts` → `ConsolidationRepository` + `MemoryRepository`; convert the runner throttle raw WHERE (`runner.ts:100`) to builder; consolidation + sweep tests pass unchanged

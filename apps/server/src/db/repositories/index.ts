@@ -2,6 +2,7 @@ import type { Db } from '../client.js';
 
 import { AgentSessionsRepository } from './agent-sessions-repository.js';
 import { ConsolidationRepository } from './consolidation-repository.js';
+import { DashboardSessionsRepository } from './dashboard-sessions-repository.js';
 import { MemoryRepository } from './memory-repository.js';
 import { ProjectsRepository } from './projects-repository.js';
 import { PromptsRepository } from './prompts-repository.js';
@@ -11,12 +12,16 @@ import { VectorsRepository } from './vectors-repository.js';
 
 export {
   AgentSessionsRepository,
-  type AdminListSessionsOpts,
   type AdminRecentSession,
   type AdminSessionDetail,
   type AdminSessionRow,
+  type ListSessionsOpts,
 } from './agent-sessions-repository.js';
 export { ConsolidationRepository } from './consolidation-repository.js';
+export {
+  DashboardSessionsRepository,
+  type ResolvedDashboardSession,
+} from './dashboard-sessions-repository.js';
 export {
   MemoryRepository,
   type AdminListMemoriesOpts,
@@ -41,6 +46,7 @@ export interface Repositories {
   tokens: TokensRepository;
   consolidation: ConsolidationRepository;
   vectors: VectorsRepository;
+  dashboardSessions: DashboardSessionsRepository;
 }
 
 export function createRepositories(db: Db): Repositories {
@@ -53,5 +59,6 @@ export function createRepositories(db: Db): Repositories {
     tokens: new TokensRepository(db),
     consolidation: new ConsolidationRepository(db),
     vectors: new VectorsRepository(db),
+    dashboardSessions: new DashboardSessionsRepository(db),
   };
 }

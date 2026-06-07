@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { ProjectsService } from '../services/projects.js';
@@ -47,7 +48,7 @@ async function call(
 
 beforeEach(() => {
   db = createTestDb();
-  agentSessions = new AgentSessionsService(db.handle.db);
+  agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(db.handle.db);
   tokens = new TokensService(db.handle.db);
 

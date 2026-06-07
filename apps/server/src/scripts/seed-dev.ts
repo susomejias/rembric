@@ -98,7 +98,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const tokensSvc = new TokensService(deps.handle.db);
   const memorySvc = new MemoryService(createRepositories(deps.handle.db), deps.handle.db);
   const relationsSvc = new RelationsService(createRepositories(deps.handle.db), deps.handle.db);
-  const sessionsSvc = new AgentSessionsService(deps.handle.db);
+  const sessionsSvc = new AgentSessionsService(createRepositories(deps.handle.db), deps.handle.db);
 
   // 1. Project.
   const proj = projectsSvc.create({ slug: DEMO_SLUG, displayName: 'Demo Project' });

@@ -37,7 +37,7 @@ Wiring is constructor injection: `bootstrap.ts` creates `DbHandle { db: Drizzle,
 
 ### Decision 1: Repositories per aggregate, owning sibling FTS/vec tables
 
-`MemoryRepository` owns `memory` + `memory_fts`; `PromptsRepository` owns `prompts` + `prompts_fts`; `VectorsRepository` owns `memory_vec` and the sqlite-vec kNN queries; `ConsolidationRepository` owns `consolidation_ops` + `consolidation_runs`; plus `relations`, `agent-sessions`, `projects`, `tokens`.
+`MemoryRepository` owns `memory` + `memory_fts`; `PromptsRepository` owns `prompts` + `prompts_fts`; `VectorsRepository` owns `memory_vec` and the sqlite-vec kNN queries; `ConsolidationRepository` owns `consolidation_ops` + `consolidation_runs`; plus `relations`, `agent-sessions`, `projects`, `tokens`. (Added during phase 3.4: a 9th `DashboardSessionsRepository` for `dashboard_sessions` — the cookie-auth table, distinct from agent `sessions`; missed in the initial enumeration. Its `DELETE` is legitimate, not a purge escape hatch — cookie sessions are not append-only.)
 
 _Alternatives considered:_ (a) per-table repositories — rejected: FTS shadow tables are an implementation detail of their content table, splitting them forces two-repo choreography for one logical read; (b) a single `Database` god-object — rejected: recreates the problem with extra steps; (c) function modules instead of classes (style of `db/queries.ts`) — rejected: services are constructor-injected classes, and class repos give one injection point per aggregate and a natural place for the `admin*` naming convention.
 

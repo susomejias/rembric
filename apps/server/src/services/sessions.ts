@@ -1,14 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { and, eq, gt } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { dashboardSessions, type DashboardSession } from '../db/schema/sessions.js';
-import { tokens } from '../db/schema/tokens.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type DashboardSession } from '../db/schema/sessions.js';
 
 import { DomainError } from './errors.js';
-import { isAuthorized } from './tokens.js';
 
 /**
  * Backing store for `/dashboard` cookie sessions.
@@ -33,7 +30,7 @@ export interface SessionContext {
 
 export class SessionsService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'dashboardSessions'>,
     private readonly sessionKey: Buffer,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -49,18 +46,14 @@ export class SessionsService {
     const id = ulid(ts.getTime());
     const csrfSecret = randomBytes(32).toString('base64url');
 
-    const session = this.db
-      .insert(dashboardSessions)
-      .values({
-        id,
-        tokenId,
-        csrfSecret,
-        createdAt: ts,
-        expiresAt,
-        lastSeenAt: ts,
-      })
-      .returning()
-      .get();
+    const session = this.repos.dashboardSessions.insert({
+      id,
+      tokenId,
+      csrfSecret,
+      createdAt: ts,
+      expiresAt,
+      lastSeenAt: ts,
+    });
 
     if (!session) throw new DomainError('conflict', 'sessions.create: insert returned no row');
 
@@ -75,24 +68,11 @@ export class SessionsService {
     if (!sessionId) return null;
 
     const ts = this.now();
-    const row = this.db
-      .select({
-        session: dashboardSessions,
-        tokenScope: tokens.scope,
-      })
-      .from(dashboardSessions)
-      .innerJoin(tokens, eq(tokens.id, dashboardSessions.tokenId))
-      .where(and(gt(dashboardSessions.expiresAt, ts), eq(dashboardSessions.id, sessionId)))
-      .get();
-
+    const row = this.repos.dashboardSessions.resolveActive(sessionId, ts);
     if (!row) return null;
 
     // Touch lastSeenAt so the dashboard "current sessions" view is useful.
-    this.db
-      .update(dashboardSessions)
-      .set({ lastSeenAt: ts })
-      .where(eq(dashboardSessions.id, sessionId))
-      .run();
+    this.repos.dashboardSessions.touchLastSeen(sessionId, ts);
 
     return {
       session: row.session,
@@ -103,7 +83,7 @@ export class SessionsService {
 
   /** Delete a session by id (logout). */
   destroy(sessionId: string): void {
-    this.db.delete(dashboardSessions).where(eq(dashboardSessions.id, sessionId)).run();
+    this.repos.dashboardSessions.deleteById(sessionId);
   }
 
   /**
@@ -140,6 +120,3 @@ export class SessionsService {
     return sessionId;
   }
 }
-
-// Maintained import for downstream services that combine scope + session.
-void isAuthorized;

@@ -460,7 +460,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
     const { eq } = await import('drizzle-orm');
 
-    agentSessions = new AgentSessionsService(db.handle.db);
+    agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
     const tokens = new TokensService(db.handle.db);
     tokens.bootstrapAdmin('attachment-test-token-with-enough-entropy');
     const admin = db.handle.db
