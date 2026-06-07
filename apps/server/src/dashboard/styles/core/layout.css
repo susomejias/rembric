@@ -377,8 +377,6 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding-bottom: var(--s-5);
-  border-bottom: 1px solid var(--fg-faint);
   margin-bottom: var(--s-6);
   gap: var(--s-5);
 }
