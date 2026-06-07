@@ -425,7 +425,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         <div>
           ${sectionBar({
             name: 'RECENT SESSIONS',
-            meta: 'TIMELINE / NEWEST FIRST',
+            meta: 'NEWEST FIRST',
             more: raw('<a href="/dashboard/sessions" style="color:var(--lime)">OPEN ALL ›</a>'),
           })}
           ${recentSessions.length === 0
