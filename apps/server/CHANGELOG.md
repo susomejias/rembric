@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.4](https://github.com/susomejias/rembric/compare/server-v0.21.3...server-v0.21.4) (2026-06-07)
+
+
+### Features
+
+* **server:** manual update check from the dashboard ([#109](https://github.com/susomejias/rembric/issues/109)) ([88321fe](https://github.com/susomejias/rembric/commit/88321fe065ead06eb549c3c8b1d56fc89f8b80e8))
+
 ## [0.21.3](https://github.com/susomejias/rembric/compare/server-v0.21.2...server-v0.21.3) (2026-06-06)
 
 
