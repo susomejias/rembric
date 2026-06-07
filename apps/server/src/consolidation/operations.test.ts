@@ -28,7 +28,7 @@ let runId: string;
 beforeEach(() => {
   db = createTestDb();
   clock = new TestClock();
-  projects = new ProjectsService(db.handle.db, clock.now);
+  projects = new ProjectsService(createRepositories(db.handle.db), clock.now);
   memoryService = new MemoryService(createRepositories(db.handle.db), db.handle.db, clock.now);
   projectId = projects.create({ slug: 'app' }).id;
 

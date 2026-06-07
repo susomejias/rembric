@@ -83,7 +83,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     return { skipped: true, refused: true };
   }
 
-  const projectsSvc = new ProjectsService(deps.handle.db);
+  const projectsSvc = new ProjectsService(createRepositories(deps.handle.db));
 
   const existing = projectsSvc.findBySlug(DEMO_SLUG);
   if (existing && !deps.reset) {
@@ -95,7 +95,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     wipe(deps.handle);
   }
 
-  const tokensSvc = new TokensService(deps.handle.db);
+  const tokensSvc = new TokensService(createRepositories(deps.handle.db));
   const memorySvc = new MemoryService(createRepositories(deps.handle.db), deps.handle.db);
   const relationsSvc = new RelationsService(createRepositories(deps.handle.db), deps.handle.db);
   const sessionsSvc = new AgentSessionsService(createRepositories(deps.handle.db), deps.handle.db);

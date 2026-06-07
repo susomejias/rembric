@@ -49,8 +49,8 @@ async function call(
 beforeEach(() => {
   db = createTestDb();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-  projects = new ProjectsService(db.handle.db);
-  tokens = new TokensService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db));
 
   tokens.bootstrapAdmin(ADMIN_BOOTSTRAP);
   const admin = db.handle.db

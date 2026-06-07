@@ -20,8 +20,8 @@ let projectId: string;
 beforeEach(() => {
   db = createTestDb();
   sessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-  projects = new ProjectsService(db.handle.db);
-  tokens = new TokensService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db));
 
   tokens.bootstrapAdmin('test-admin-token-with-enough-entropy');
   const admin = db.handle.db

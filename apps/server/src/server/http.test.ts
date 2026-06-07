@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { ProjectsService } from '../services/projects.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
@@ -34,8 +35,8 @@ async function call(token?: string): Promise<{ status: number; body: Record<stri
 
 beforeEach(() => {
   db = createTestDb();
-  tokens = new TokensService(db.handle.db);
-  projects = new ProjectsService(db.handle.db);
+  tokens = new TokensService(createRepositories(db.handle.db));
+  projects = new ProjectsService(createRepositories(db.handle.db));
   app = mount();
 });
 

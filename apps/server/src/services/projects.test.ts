@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { ProjectsService, SLUG_REGEX } from './projects.js';
@@ -9,7 +10,7 @@ let projects: ProjectsService;
 
 beforeEach(() => {
   db = createTestDb();
-  projects = new ProjectsService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
 });
 
 afterEach(() => {

@@ -21,7 +21,7 @@ let relations: RelationsService;
 beforeEach(() => {
   db = createTestDb();
   memorySvc = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  projects = new ProjectsService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
   relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
 });
 

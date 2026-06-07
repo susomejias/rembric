@@ -25,7 +25,7 @@ let projectId: string;
 beforeEach(() => {
   db = createTestDb();
   prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
-  projects = new ProjectsService(db.handle.db);
+  projects = new ProjectsService(createRepositories(db.handle.db));
   projectId = projects.create({ slug: 'prompt-tests' }).id;
 });
 

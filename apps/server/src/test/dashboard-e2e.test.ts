@@ -259,7 +259,9 @@ describe('dashboard E2E', () => {
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
-    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-order-proj' });
+    const proj = new ProjectsService(createRepositories(handle.db)).create({
+      slug: 'e2e-order-proj',
+    });
     const agentSessions = new AgentSessionsService(createRepositories(handle.db), handle.db);
     // Older active session first, then a newer session that ends — plain
     // started_at DESC would render the ended one on top.
@@ -303,10 +305,12 @@ describe('dashboard E2E', () => {
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
-    const tokensSvc = new TokensService(handle.db);
+    const tokensSvc = new TokensService(createRepositories(handle.db));
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
     void tokensSvc;
-    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-del-proj' });
+    const proj = new ProjectsService(createRepositories(handle.db)).create({
+      slug: 'e2e-del-proj',
+    });
     const sess = new AgentSessionsService(createRepositories(handle.db), handle.db).start({
       tokenId: admin!.id,
       projectId: proj.id,
@@ -370,7 +374,9 @@ describe('dashboard E2E', () => {
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
-    const proj = new ProjectsService(handle.db).create({ slug: 'e2e-abandon-proj' });
+    const proj = new ProjectsService(createRepositories(handle.db)).create({
+      slug: 'e2e-abandon-proj',
+    });
     const agentSessions = new AgentSessionsService(createRepositories(handle.db), handle.db);
     const sess = agentSessions.start({
       tokenId: admin!.id,

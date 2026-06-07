@@ -1,8 +1,7 @@
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { projects, type Project } from '../db/schema/projects.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type Project } from '../db/schema/projects.js';
 
 import { DomainError } from './errors.js';
 
@@ -33,14 +32,14 @@ export interface ProjectView extends Project {
 
 export class ProjectsService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'projects'>,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   /** Look up a project by slug. Returns `undefined` if missing. Never inserts. */
   findBySlug(slug: string): Project | undefined {
     if (slug.length === 0) return undefined;
-    return this.db.select().from(projects).where(eq(projects.slug, slug)).get();
+    return this.repos.projects.findBySlug(slug);
   }
 
   /**
@@ -57,16 +56,12 @@ export class ProjectsService {
       );
     }
     const ts = this.now();
-    const inserted = this.db
-      .insert(projects)
-      .values({
-        id: ulid(ts.getTime()),
-        slug: input.slug,
-        displayName: input.displayName ?? null,
-        createdAt: ts,
-      })
-      .returning()
-      .get();
+    const inserted = this.repos.projects.insert({
+      id: ulid(ts.getTime()),
+      slug: input.slug,
+      displayName: input.displayName ?? null,
+      createdAt: ts,
+    });
     if (!inserted) {
       throw new DomainError('conflict', `projects.create: slug '${input.slug}' already exists`);
     }
@@ -74,59 +69,28 @@ export class ProjectsService {
   }
 
   getById(id: string): Project | undefined {
-    return this.db.select().from(projects).where(eq(projects.id, id)).get();
+    return this.repos.projects.findById(id);
   }
 
   list(includeArchived = false): ProjectView[] {
-    const rows = includeArchived
-      ? this.db.select().from(projects).orderBy(asc(projects.createdAt)).all()
-      : this.db
-          .select()
-          .from(projects)
-          .where(isNull(projects.archivedAt))
-          .orderBy(asc(projects.createdAt))
-          .all();
-    return rows.map((row) => ({
-      ...row,
-      label: row.displayName ?? row.slug,
-    }));
+    return this.repos.projects.listOrdered(includeArchived).map(withLabel);
   }
 
   listArchived(): ProjectView[] {
-    const rows = this.db
-      .select()
-      .from(projects)
-      .where(isNotNull(projects.archivedAt))
-      .orderBy(asc(projects.createdAt))
-      .all();
-    return rows.map((row) => ({
-      ...row,
-      label: row.displayName ?? row.slug,
-    }));
+    return this.repos.projects.listArchived().map(withLabel);
   }
 
   rename(id: string, displayName: string): Project {
     if (displayName.trim().length === 0) {
       throw new DomainError('invalid_input', 'projects.rename: displayName must be non-empty');
     }
-    const updated = this.db
-      .update(projects)
-      .set({ displayName })
-      .where(eq(projects.id, id))
-      .returning()
-      .get();
+    const updated = this.repos.projects.updateDisplayName(id, displayName);
     if (!updated) throw new DomainError('project_not_found', `projects.rename: id=${id}`);
     return updated;
   }
 
   archive(id: string): Project {
-    const ts = this.now();
-    const updated = this.db
-      .update(projects)
-      .set({ archivedAt: ts })
-      .where(and(eq(projects.id, id), isNull(projects.archivedAt)))
-      .returning()
-      .get();
+    const updated = this.repos.projects.setArchivedAt(id, this.now(), true);
     if (!updated) {
       const existing = this.getById(id);
       if (!existing) throw new DomainError('project_not_found', `projects.archive: id=${id}`);
@@ -136,12 +100,7 @@ export class ProjectsService {
   }
 
   unarchive(id: string): Project {
-    const updated = this.db
-      .update(projects)
-      .set({ archivedAt: null })
-      .where(eq(projects.id, id))
-      .returning()
-      .get();
+    const updated = this.repos.projects.setArchivedAt(id, null, false);
     if (!updated) throw new DomainError('project_not_found', `projects.unarchive: id=${id}`);
     return updated;
   }
@@ -173,12 +132,7 @@ export class ProjectsService {
     const maxDistance = opts.maxDistance ?? 3;
     if (input.length === 0) return [];
 
-    const allSlugs = this.db
-      .select({ slug: projects.slug })
-      .from(projects)
-      .where(isNull(projects.archivedAt))
-      .all()
-      .map((r) => r.slug);
+    const allSlugs = this.repos.projects.listActiveSlugs();
 
     type Ranked = { slug: string; distance: number };
     const ranked: Ranked[] = [];
@@ -190,6 +144,10 @@ export class ProjectsService {
     ranked.sort((a, b) => a.distance - b.distance || a.slug.localeCompare(b.slug));
     return ranked.slice(0, limit).map((r) => r.slug);
   }
+}
+
+function withLabel(row: Project): ProjectView {
+  return { ...row, label: row.displayName ?? row.slug };
 }
 
 /**
