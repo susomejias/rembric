@@ -24,7 +24,8 @@ beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(createRepositories(db.handle.db));
   runner = new ConsolidationRunner({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
+    tx: db.handle.db,
     relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
   });
 });

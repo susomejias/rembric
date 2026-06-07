@@ -245,6 +245,91 @@ export class MemoryRepository {
       .run();
   }
 
+  markSupersededMany(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    this.db
+      .update(memory)
+      .set({ status: 'superseded' as const })
+      .where(inArray(memory.id, [...ids]))
+      .run();
+  }
+
+  /** Archive the given ids that are currently active (decay pass). */
+  archiveActive(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    this.db
+      .update(memory)
+      .set({ status: 'archived' as const })
+      .where(and(inArray(memory.id, [...ids]), eq(memory.status, 'active')))
+      .run();
+  }
+
+  archiveOne(id: string): void {
+    this.db
+      .update(memory)
+      .set({ status: 'archived' as const })
+      .where(eq(memory.id, id))
+      .run();
+  }
+
+  reactivate(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    this.db
+      .update(memory)
+      .set({ status: 'active' as const })
+      .where(inArray(memory.id, [...ids]))
+      .run();
+  }
+
+  reactivateOne(id: string): void {
+    this.db
+      .update(memory)
+      .set({ status: 'active' as const })
+      .where(eq(memory.id, id))
+      .run();
+  }
+
+  /** Subset of `ids` that still exist (purge-safety check before undo). */
+  existingIds(ids: readonly string[]): Set<string> {
+    if (ids.length === 0) return new Set();
+    const rows = this.db
+      .select({ id: memory.id })
+      .from(memory)
+      .where(inArray(memory.id, [...ids]))
+      .all();
+    return new Set(rows.map((r) => r.id));
+  }
+
+  findReplaces(id: string): string[] | undefined {
+    return this.db.select({ replaces: memory.replaces }).from(memory).where(eq(memory.id, id)).get()
+      ?.replaces;
+  }
+
+  findDecayCandidateIds(
+    scope: MemoryScope,
+    projectId: string | null,
+    cutoff: Date,
+    confidenceFloor: number,
+  ): string[] {
+    const scopeFilter =
+      scope === 'global'
+        ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
+        : and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? ''));
+    return this.db
+      .select({ id: memory.id })
+      .from(memory)
+      .where(
+        and(
+          eq(memory.status, 'active'),
+          sql`${memory.lastSeenAt} < ${cutoff.getTime()}`,
+          scopeFilter,
+          sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}) < ${confidenceFloor}`,
+        ),
+      )
+      .all()
+      .map((r) => r.id);
+  }
+
   markArchived(id: string, lastSeenAt: Date): void {
     this.db
       .update(memory)

@@ -95,6 +95,23 @@ export class RelationsRepository {
       .get();
   }
 
+  /** Reset a judged/orphaned row back to pending (consolidation undo). */
+  resetToPending(id: string): void {
+    this.db
+      .update(memoryRelations)
+      .set({
+        status: 'pending' as const,
+        relation: null,
+        reason: null,
+        confidence: null,
+        judgedAt: null,
+        markedByKind: null,
+        markedByActor: null,
+      })
+      .where(eq(memoryRelations.id, id))
+      .run();
+  }
+
   findBySourceAndTarget(sourceId: string, targetId: string): MemoryRelation | undefined {
     return this.db
       .select()

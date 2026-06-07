@@ -1,15 +1,12 @@
-import { sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { consolidationRuns } from '../db/schema/consolidation.js';
-import { memory } from '../db/schema/memory.js';
-import { projects } from '../db/schema/projects.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { RelationsService } from '../services/relations.js';
 
 import type { ScopeKey } from './candidates.js';
 import { findDecayCandidates, DEFAULT_DECAY, type DecayThresholds } from './decay.js';
-import { applyDecay, recordOrphanPromote } from './operations.js';
+import { applyDecay, recordOrphanPromote, type ConsolidationDeps } from './operations.js';
 
 /**
  * Deterministic consolidation sweep (change `remove-llm-consolidation`).
@@ -29,7 +26,8 @@ import { applyDecay, recordOrphanPromote } from './operations.js';
  */
 
 export interface ConsolidationRunnerOptions {
-  db: Db;
+  repos: ConsolidationDeps & Pick<Repositories, 'projects'>;
+  tx: TransactionRunner;
   relations: RelationsService;
   decay?: DecayThresholds;
   /** Pending relations older than this are orphaned by the sweep. */
@@ -62,8 +60,9 @@ export class ConsolidationRunner {
   /** Sweep the global scope and every project. Manual trigger passes force. */
   runAll(opts?: { force?: boolean }): ConsolidationRunSummary {
     const scopes: ScopeKey[] = [{ scope: 'global', projectId: null }];
-    const projectRows = this.opts.db.select({ id: projects.id }).from(projects).all();
-    for (const p of projectRows) scopes.push({ scope: 'project', projectId: p.id });
+    for (const id of this.opts.repos.projects.listAllIds()) {
+      scopes.push({ scope: 'project', projectId: id });
+    }
     return this.sweep(scopes, opts);
   }
 
@@ -92,15 +91,8 @@ export class ConsolidationRunner {
   }
 
   private recentlySwept(scope: ScopeKey, now: Date = new Date()): boolean {
-    const scopeStr = scopeString(scope);
-    const cutoff = new Date(now.getTime() - (this.opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS));
-    const recent = this.opts.db
-      .select({ id: consolidationRuns.id })
-      .from(consolidationRuns)
-      .where(sql`scope = ${scopeStr} AND started_at > ${cutoff.getTime()}`)
-      .limit(1)
-      .get();
-    return recent !== undefined;
+    const cutoff = now.getTime() - (this.opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS);
+    return this.opts.repos.consolidation.recentRunExists(scopeString(scope), cutoff);
   }
 
   runScope(scope: ScopeKey): ScopeRunResult {
@@ -108,24 +100,21 @@ export class ConsolidationRunner {
     const runId = ulid(now.getTime());
     const ops: ScopeRunResult['ops'] = { archives: 0, orphaned: 0 };
 
-    this.opts.db
-      .insert(consolidationRuns)
-      .values({
-        id: runId,
-        startedAt: now,
-        scope: scopeString(scope),
-      })
-      .run();
+    this.opts.repos.consolidation.insertRun({
+      id: runId,
+      startedAt: now,
+      scope: scopeString(scope),
+    });
 
     // 1. Decay.
     const decayIds = findDecayCandidates(
-      this.opts.db,
+      this.opts.repos,
       scope,
       this.opts.decay ?? DEFAULT_DECAY,
       now,
     );
     if (decayIds.length > 0) {
-      applyDecay(this.opts.db, {
+      applyDecay(this.opts.repos, this.opts.tx, {
         consolidationId: runId,
         ids: decayIds,
         reasoning: `last_seen_at older than ${(this.opts.decay ?? DEFAULT_DECAY).thresholdMs}ms with low confidence`,
@@ -136,14 +125,7 @@ export class ConsolidationRunner {
     // 2. Deadline orphaning.
     ops.orphaned = this.orphanExpired(runId, scope);
 
-    this.opts.db
-      .update(consolidationRuns)
-      .set({
-        finishedAt: new Date(),
-        summary: JSON.stringify(ops),
-      })
-      .where(sql`id = ${runId}`)
-      .run();
+    this.opts.repos.consolidation.finishRun(runId, new Date(), JSON.stringify(ops));
 
     return { scope, runId, ops };
   }
@@ -159,16 +141,8 @@ export class ConsolidationRunner {
 
     let orphaned = 0;
     for (const row of pending) {
-      const a = this.opts.db
-        .select()
-        .from(memory)
-        .where(sql`id = ${row.sourceId}`)
-        .get();
-      const b = this.opts.db
-        .select()
-        .from(memory)
-        .where(sql`id = ${row.targetId}`)
-        .get();
+      const a = this.opts.repos.memory.findScopeTupleById(row.sourceId);
+      const b = this.opts.repos.memory.findScopeTupleById(row.targetId);
 
       let reason: string | null = null;
       if (!a || !b) {
@@ -185,7 +159,7 @@ export class ConsolidationRunner {
 
       try {
         this.opts.relations.orphan(row.judgmentId, reason);
-        recordOrphanPromote(this.opts.db, {
+        recordOrphanPromote(this.opts.repos, {
           consolidationId: runId,
           judgmentId: row.judgmentId,
           sourceId: row.sourceId,

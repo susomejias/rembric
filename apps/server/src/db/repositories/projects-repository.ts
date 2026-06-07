@@ -32,6 +32,14 @@ export class ProjectsRepository {
       .all();
   }
 
+  listAllIds(): string[] {
+    return this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .all()
+      .map((r) => r.id);
+  }
+
   listActiveSlugs(): string[] {
     return this.db
       .select({ slug: projects.slug })

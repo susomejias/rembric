@@ -172,7 +172,8 @@ export async function bootstrap(
   // LLM, no cron. Triggered lazily on session start (throttled per scope)
   // and manually via POST /admin/consolidation/run.
   const runner = new ConsolidationRunner({
-    db: dbHandle.db,
+    repos,
+    tx: dbHandle.db,
     relations: relationsSvc,
     orphanDeadlineMs: config.judgments.orphanDeadlineMs,
   });
@@ -290,8 +291,8 @@ export async function bootstrap(
       updates,
       selfUpdate,
       triggerSweep: () => runner.runAll({ force: true }),
-      undoRun: (runId) => undoRun(dbHandle.db, runId),
-      undoOp: (opId) => undoOp(dbHandle.db, opId),
+      undoRun: (runId) => undoRun(repos, dbHandle.db, runId),
+      undoOp: (opId) => undoOp(repos, dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
       orphanDeadlineMs: config.judgments.orphanDeadlineMs,
     },

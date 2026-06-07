@@ -38,7 +38,8 @@ beforeEach(() => {
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
   runner = new ConsolidationRunner({
-    db: db.handle.db,
+    repos: createRepositories(db.handle.db),
+    tx: db.handle.db,
     relations,
     orphanDeadlineMs,
   });
@@ -106,7 +107,7 @@ describe('deadline orphaning', () => {
     const summary = runner.runAll({ force: true });
     const runId = summary.runs.find((r) => r.ops.orphaned > 0)!.runId;
 
-    undoRun(db.handle.db, runId);
+    undoRun(createRepositories(db.handle.db), db.handle.db, runId);
 
     const relAfter = db.handle.db
       .select()

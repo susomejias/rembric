@@ -1,4 +1,4 @@
-import { count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -19,6 +19,47 @@ export class ConsolidationRepository {
 
   insertOp(values: NewConsolidationOp): void {
     this.db.insert(consolidationOps).values(values).run();
+  }
+
+  finishRun(id: string, finishedAt: Date, summary: string): void {
+    this.db
+      .update(consolidationRuns)
+      .set({ finishedAt, summary })
+      .where(eq(consolidationRuns.id, id))
+      .run();
+  }
+
+  /** A non-finished/recent run exists for this scope since `cutoffMs` (throttle). */
+  recentRunExists(scope: string, cutoffMs: number): boolean {
+    return (
+      this.db
+        .select({ id: consolidationRuns.id })
+        .from(consolidationRuns)
+        .where(
+          and(
+            eq(consolidationRuns.scope, scope),
+            sql`${consolidationRuns.startedAt} > ${cutoffMs}`,
+          ),
+        )
+        .limit(1)
+        .get() !== undefined
+    );
+  }
+
+  findOpById(opId: string): ConsolidationOp | undefined {
+    return this.db.select().from(consolidationOps).where(eq(consolidationOps.id, opId)).get();
+  }
+
+  listActiveOps(runId: string): ConsolidationOp[] {
+    return this.db
+      .select()
+      .from(consolidationOps)
+      .where(and(eq(consolidationOps.consolidationId, runId), isNull(consolidationOps.revertedAt)))
+      .all();
+  }
+
+  markReverted(opId: string, revertedAt: Date): void {
+    this.db.update(consolidationOps).set({ revertedAt }).where(eq(consolidationOps.id, opId)).run();
   }
 
   adminListRuns(limit: number, offset: number): ConsolidationRun[] {

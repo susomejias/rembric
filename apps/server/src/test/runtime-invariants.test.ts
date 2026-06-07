@@ -60,7 +60,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const a = svc.save({ type: 'feedback', content: 'merge-test-A' }, SCOPE_GLOBAL);
     const b = svc.save({ type: 'feedback', content: 'merge-test-B' }, SCOPE_GLOBAL);
 
-    const { opId, mergedId } = applyMerge(db, {
+    const { opId, mergedId } = applyMerge(createRepositories(db), db, {
       consolidationId: runId,
       predecessors: [a, b],
       mergedContent: 'merged-AB',
@@ -71,7 +71,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('superseded');
     expect(db.select().from(memory).where(eq(memory.id, mergedId)).get()!.status).toBe('active');
 
-    undoOp(db, opId);
+    undoOp(createRepositories(db), db, opId);
     expect(db.select().from(memory).where(eq(memory.id, a.id)).get()!.status).toBe('active');
     expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('active');
     // Merged row is archived (not deleted) by undo; the table is append-only.
@@ -96,7 +96,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const b = svc.save({ type: 'reference', content: 'cross-scope-B' }, projYScope);
 
     expect(() =>
-      applyMerge(db, {
+      applyMerge(createRepositories(db), db, {
         consolidationId: runId,
         predecessors: [a, b],
         mergedContent: 'should-not-happen',
@@ -127,7 +127,7 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const loser = svc.save({ type: 'reference', content: 'proj-loser' }, projXScope);
 
     expect(() =>
-      applySupersede(db, {
+      applySupersede(createRepositories(db), db, {
         consolidationId: runId,
         winner,
         losers: [loser],
