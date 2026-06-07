@@ -22,7 +22,7 @@ beforeEach(() => {
   db = createTestDb();
   memorySvc = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(db.handle.db);
-  relations = new RelationsService(db.handle.db);
+  relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
 });
 
 afterEach(() => db.cleanup());

@@ -21,7 +21,7 @@ Phases mirror design.md Decision 7. Each numbered group lands green (`pnpm run t
 
 ## 3. Phase 3 — Services consume repositories
 
-- [ ] 3.1 `MemoryService` → `MemoryRepository`: move all builder + raw SQL (FTS5 search, topic-key lookup, `json_each` chain traversal, purge predicate + `DELETE FROM memory`); update invariant allow-list + positive anchor from `services/memory.ts` to the repository in the same commit; service keeps scope resolution, validation, transactions; existing `memory.test.ts` assertions pass unchanged
+- [x] 3.1 `MemoryService` → `MemoryRepository`: move all builder + raw SQL (FTS5 search, topic-key lookup, `json_each` chain traversal, purge predicate + `DELETE FROM memory`); update invariant allow-list + positive anchor from `services/memory.ts` to the repository in the same commit; service keeps scope resolution, validation, transactions; existing `memory.test.ts` assertions pass unchanged
 - [ ] 3.2 `RelationsService` → `RelationsRepository`: move raw WHEREs and bulk IN queries (convert to builder where expressible); `relations` tests pass unchanged
 - [ ] 3.3 `PromptsService` → `PromptsRepository` incl. `DELETE FROM prompts` purge; allow-list + anchor move in same commit
 - [ ] 3.4 `AgentSessionsService` + `SessionsService` → `AgentSessionsRepository` incl. `DELETE FROM sessions` purge; allow-list + anchor move in same commit

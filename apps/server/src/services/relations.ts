@@ -1,14 +1,12 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import {
-  memoryRelations,
   type MemoryRelation,
   type MarkedByKind,
   type RelationKind,
 } from '../db/schema/memory-relations.js';
-import { memory } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
 
@@ -60,7 +58,6 @@ export interface RelationView {
   /** `kind` from the receiver's POV: outgoing (`supersedes`) vs incoming (`superseded_by`). */
   kind: RelationKind | 'superseded_by' | 'pending_conflict';
   targetId: string;
-  snippet?: string;
   judgmentId?: string;
   status: 'pending' | 'judged' | 'orphaned';
   reason?: string | null;
@@ -69,7 +66,8 @@ export interface RelationView {
 
 export class RelationsService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'relations' | 'memory'>,
+    private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -83,20 +81,16 @@ export class RelationsService {
     this.assertSameScope(input.sourceId, input.targetId);
 
     const ts = this.now();
-    const row = this.db
-      .insert(memoryRelations)
-      .values({
-        id: ulid(ts.getTime()),
-        judgmentId: ulid(ts.getTime()),
-        sourceId: input.sourceId,
-        targetId: input.targetId,
-        relation: null,
-        status: 'pending',
-        markedByKind: input.markedByKind ?? null,
-        createdAt: ts,
-      })
-      .returning()
-      .get();
+    const row = this.repos.relations.insert({
+      id: ulid(ts.getTime()),
+      judgmentId: ulid(ts.getTime()),
+      sourceId: input.sourceId,
+      targetId: input.targetId,
+      relation: null,
+      status: 'pending',
+      markedByKind: input.markedByKind ?? null,
+      createdAt: ts,
+    });
     if (!row) {
       throw new DomainError('conflict', 'relations.createPending: insert returned no row');
     }
@@ -108,18 +102,9 @@ export class RelationsService {
    * `relation='supersedes'`, atomically transitions the target memory
    * to `superseded` and appends the target id to the source memory's
    * `replaces` array. Other relations are pure annotations.
-   *
-   * Re-judging an already-`judged` row throws `judgment_already_closed`.
-   * Re-judging an `orphaned` row also throws — the consolidator already
-   * said "we can't decide" and the agent has lost the context window
-   * that the original save offered.
    */
   judge(judgmentId: string, input: JudgeInput): MemoryRelation {
-    const existing = this.db
-      .select()
-      .from(memoryRelations)
-      .where(eq(memoryRelations.judgmentId, judgmentId))
-      .get();
+    const existing = this.repos.relations.findByJudgmentId(judgmentId);
     if (!existing) {
       throw new DomainError(
         'memory_not_found',
@@ -134,23 +119,21 @@ export class RelationsService {
     }
 
     const ts = this.now();
-    const updated = this.db.transaction((tx) => {
+    const updated = this.tx.transaction(() => {
       // 1. Transition relation → judged.
-      const next = tx
-        .update(memoryRelations)
-        .set({
+      const next = this.repos.relations.markJudged(
+        existing.id,
+        {
           relation: input.relation,
-          status: 'judged',
           reason: input.reason ?? null,
           evidence: input.evidence ?? null,
           confidence: input.confidence ?? null,
           markedByKind: input.kind,
           markedByActor: input.actor,
           judgedAt: ts,
-        })
-        .where(and(eq(memoryRelations.id, existing.id), eq(memoryRelations.status, 'pending')))
-        .returning()
-        .get();
+        },
+        { requirePending: true },
+      );
       if (!next) {
         throw new DomainError(
           'conflict',
@@ -160,7 +143,7 @@ export class RelationsService {
 
       // 2. Side effect for `supersedes`: target → superseded, source.replaces += target.id.
       if (input.relation === 'supersedes') {
-        applySupersedesSideEffect(tx, existing.sourceId, existing.targetId);
+        this.applySupersedesSideEffect(existing.sourceId, existing.targetId);
       }
       return next;
     });
@@ -178,36 +161,25 @@ export class RelationsService {
   compare(input: CompareInput): MemoryRelation {
     this.assertSameScope(input.sourceId, input.targetId);
 
-    const existing = this.db
-      .select()
-      .from(memoryRelations)
-      .where(
-        and(
-          eq(memoryRelations.sourceId, input.sourceId),
-          eq(memoryRelations.targetId, input.targetId),
-        ),
-      )
-      .get();
+    const existing = this.repos.relations.findBySourceAndTarget(input.sourceId, input.targetId);
 
     const ts = this.now();
 
     if (existing) {
-      const updated = this.db.transaction((tx) => {
-        const next = tx
-          .update(memoryRelations)
-          .set({
+      const updated = this.tx.transaction(() => {
+        const next = this.repos.relations.markJudged(
+          existing.id,
+          {
             relation: input.relation,
-            status: 'judged',
             reason: input.reason ?? null,
             evidence: input.evidence ?? null,
             confidence: input.confidence,
             markedByKind: input.kind ?? 'agent',
             markedByActor: input.actor,
             judgedAt: ts,
-          })
-          .where(eq(memoryRelations.id, existing.id))
-          .returning()
-          .get();
+          },
+          { requirePending: false },
+        );
         if (!next) {
           throw new DomainError(
             'conflict',
@@ -215,7 +187,7 @@ export class RelationsService {
           );
         }
         if (input.relation === 'supersedes') {
-          applySupersedesSideEffect(tx, input.sourceId, input.targetId);
+          this.applySupersedesSideEffect(input.sourceId, input.targetId);
         }
         return next;
       });
@@ -223,31 +195,27 @@ export class RelationsService {
     }
 
     // Fresh row.
-    const inserted = this.db.transaction((tx) => {
-      const row = tx
-        .insert(memoryRelations)
-        .values({
-          id: ulid(ts.getTime()),
-          judgmentId: ulid(ts.getTime()),
-          sourceId: input.sourceId,
-          targetId: input.targetId,
-          relation: input.relation,
-          status: 'judged',
-          reason: input.reason ?? null,
-          evidence: input.evidence ?? null,
-          confidence: input.confidence,
-          markedByKind: input.kind ?? 'agent',
-          markedByActor: input.actor,
-          judgedAt: ts,
-          createdAt: ts,
-        })
-        .returning()
-        .get();
+    const inserted = this.tx.transaction(() => {
+      const row = this.repos.relations.insert({
+        id: ulid(ts.getTime()),
+        judgmentId: ulid(ts.getTime()),
+        sourceId: input.sourceId,
+        targetId: input.targetId,
+        relation: input.relation,
+        status: 'judged',
+        reason: input.reason ?? null,
+        evidence: input.evidence ?? null,
+        confidence: input.confidence,
+        markedByKind: input.kind ?? 'agent',
+        markedByActor: input.actor,
+        judgedAt: ts,
+        createdAt: ts,
+      });
       if (!row) {
         throw new DomainError('conflict', 'relations.compare: insert returned no row');
       }
       if (input.relation === 'supersedes') {
-        applySupersedesSideEffect(tx, input.sourceId, input.targetId);
+        this.applySupersedesSideEffect(input.sourceId, input.targetId);
       }
       return row;
     });
@@ -260,18 +228,11 @@ export class RelationsService {
    * confident verdict.
    */
   orphan(judgmentId: string, reason: string): MemoryRelation {
-    const ts = this.now();
-    const updated = this.db
-      .update(memoryRelations)
-      .set({
-        status: 'orphaned',
-        reason,
-        markedByKind: 'consolidator',
-        judgedAt: ts,
-      })
-      .where(and(eq(memoryRelations.judgmentId, judgmentId), eq(memoryRelations.status, 'pending')))
-      .returning()
-      .get();
+    const updated = this.repos.relations.markOrphanedPending(judgmentId, {
+      reason,
+      markedByKind: 'consolidator',
+      judgedAt: this.now(),
+    });
     if (!updated) {
       throw new DomainError(
         'memory_not_found',
@@ -288,21 +249,16 @@ export class RelationsService {
    * false when the judgment is missing or already closed.
    */
   orphanByOperator(judgmentId: string): boolean {
-    const result = this.db
-      .update(memoryRelations)
-      .set({ status: 'orphaned' as const, markedByKind: 'system' as const, judgedAt: this.now() })
-      .where(and(eq(memoryRelations.judgmentId, judgmentId), eq(memoryRelations.status, 'pending')))
-      .run();
-    return result.changes > 0;
+    const updated = this.repos.relations.markOrphanedPending(judgmentId, {
+      markedByKind: 'system',
+      judgedAt: this.now(),
+    });
+    return updated !== undefined;
   }
 
   /** Fetch a relation row by `judgmentId`. */
   findByJudgmentId(judgmentId: string): MemoryRelation | undefined {
-    return this.db
-      .select()
-      .from(memoryRelations)
-      .where(eq(memoryRelations.judgmentId, judgmentId))
-      .get();
+    return this.repos.relations.findByJudgmentId(judgmentId);
   }
 
   /**
@@ -313,14 +269,7 @@ export class RelationsService {
    * annotations.
    */
   listForMemory(memoryId: string, limit = 10): RelationView[] {
-    const rows = this.db
-      .select()
-      .from(memoryRelations)
-      .where(
-        sql`(source_id = ${memoryId} OR target_id = ${memoryId})
-          AND (relation IS NULL OR relation != 'not_conflict')`,
-      )
-      .all();
+    const rows = this.repos.relations.listTouching(memoryId);
 
     const out: RelationView[] = [];
     for (const r of rows) {
@@ -363,26 +312,7 @@ export class RelationsService {
    */
   listForMemories(memoryIds: readonly string[], capPerMemory = 10): Map<string, RelationView[]> {
     if (memoryIds.length === 0) return new Map();
-    const idSet = sql.join(
-      memoryIds.map((id) => sql`${id}`),
-      sql`, `,
-    );
-    const rows = this.db.all<{
-      id: string;
-      judgment_id: string;
-      source_id: string;
-      target_id: string;
-      relation: RelationKind | null;
-      status: 'pending' | 'judged' | 'orphaned';
-      reason: string | null;
-      confidence: number | null;
-    }>(
-      sql`SELECT id, judgment_id, source_id, target_id, relation, status, reason, confidence
-         FROM memory_relations
-         WHERE (source_id IN (${idSet}) OR target_id IN (${idSet}))
-           AND (relation IS NULL OR relation != 'not_conflict')
-           AND status != 'orphaned'`,
-    );
+    const rows = this.repos.relations.listTouchingAny(memoryIds);
 
     const out = new Map<string, RelationView[]>();
     for (const id of memoryIds) out.set(id, []);
@@ -391,10 +321,10 @@ export class RelationsService {
       // Each row gets annotated against BOTH endpoints if both are in
       // the input set; that mirrors how `listForMemory` would behave
       // when called individually.
-      for (const id of [r.source_id, r.target_id]) {
+      for (const id of [r.sourceId, r.targetId]) {
         if (!memoryIds.includes(id)) continue;
-        const isSource = r.source_id === id;
-        const otherId = isSource ? r.target_id : r.source_id;
+        const isSource = r.sourceId === id;
+        const otherId = isSource ? r.targetId : r.sourceId;
         if (r.status === 'pending') {
           appendCapped(
             out,
@@ -402,7 +332,7 @@ export class RelationsService {
             {
               kind: 'pending_conflict',
               targetId: otherId,
-              judgmentId: r.judgment_id,
+              judgmentId: r.judgmentId,
               status: 'pending',
             },
             capPerMemory,
@@ -434,13 +364,7 @@ export class RelationsService {
    */
   findPendingOlderThan(cutoffMs: number, limit: number): MemoryRelation[] {
     const cutoff = new Date(this.now().getTime() - cutoffMs);
-    return this.db
-      .select()
-      .from(memoryRelations)
-      .where(and(eq(memoryRelations.status, 'pending'), lt(memoryRelations.createdAt, cutoff)))
-      .orderBy(memoryRelations.createdAt)
-      .limit(limit)
-      .all();
+    return this.repos.relations.findPendingOlderThan(cutoff, limit);
   }
 
   /** Count rows by status. Used by `memory.stats` and the dashboard. */
@@ -450,12 +374,7 @@ export class RelationsService {
       judged: 0,
       orphaned: 0,
     };
-    const rows = this.db
-      .select({ status: memoryRelations.status, count: sql<number>`count(*)` })
-      .from(memoryRelations)
-      .groupBy(memoryRelations.status)
-      .all();
-    for (const r of rows) {
+    for (const r of this.repos.relations.countRowsByStatus()) {
       out[r.status] = Number(r.count);
     }
     return out;
@@ -463,16 +382,8 @@ export class RelationsService {
 
   /** @internal — exposed for cross-scope invariant tests. */
   private assertSameScope(sourceId: string, targetId: string): void {
-    const a = this.db
-      .select({ scope: memory.scope, projectId: memory.projectId })
-      .from(memory)
-      .where(eq(memory.id, sourceId))
-      .get();
-    const b = this.db
-      .select({ scope: memory.scope, projectId: memory.projectId })
-      .from(memory)
-      .where(eq(memory.id, targetId))
-      .get();
+    const a = this.repos.memory.findScopeTupleById(sourceId);
+    const b = this.repos.memory.findScopeTupleById(targetId);
     if (!a || !b) {
       throw new DomainError(
         'memory_not_found',
@@ -486,6 +397,24 @@ export class RelationsService {
       );
     }
   }
+
+  /**
+   * Atomic side effect of judging `supersedes`: target → status='superseded',
+   * source's `replaces` array gains the target's id (deduplicated).
+   *
+   * Runs inside the surrounding transaction so a failure rolls back the
+   * relation update too.
+   */
+  private applySupersedesSideEffect(sourceId: string, targetId: string): void {
+    const source = this.repos.memory.findScopeTupleById(sourceId);
+    if (!source) {
+      throw new DomainError('memory_not_found', `relations.judge: source ${sourceId} disappeared`);
+    }
+    const nextReplaces = Array.from(new Set<string>([...source.replaces, targetId]));
+
+    this.repos.memory.markSuperseded(targetId);
+    this.repos.memory.setReplaces(sourceId, nextReplaces);
+  }
 }
 
 function appendCapped<T>(map: Map<string, T[]>, key: string, value: T, cap: number): void {
@@ -496,29 +425,4 @@ function appendCapped<T>(map: Map<string, T[]>, key: string, value: T, cap: numb
   }
   if (arr.length >= cap) return;
   arr.push(value);
-}
-
-/**
- * Atomic side effect of judging `supersedes`: target → status='superseded',
- * source's `replaces` array gains the target's id (deduplicated).
- *
- * Called inside the surrounding transaction so a failure rolls back the
- * relation update too.
- */
-function applySupersedesSideEffect(tx: Db, sourceId: string, targetId: string): void {
-  const source = tx
-    .select({ replaces: memory.replaces })
-    .from(memory)
-    .where(eq(memory.id, sourceId))
-    .get();
-  if (!source) {
-    throw new DomainError('memory_not_found', `relations.judge: source ${sourceId} disappeared`);
-  }
-  const nextReplaces = Array.from(new Set<string>([...source.replaces, targetId]));
-
-  tx.update(memory)
-    .set({ status: 'superseded' as const })
-    .where(and(eq(memory.id, targetId), eq(memory.status, 'active')))
-    .run();
-  tx.update(memory).set({ replaces: nextReplaces }).where(eq(memory.id, sourceId)).run();
 }

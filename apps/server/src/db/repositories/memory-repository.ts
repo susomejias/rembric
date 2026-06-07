@@ -162,6 +162,21 @@ export class MemoryRepository {
       .all();
   }
 
+  /** Minimal scope tuple for same-scope assertions; no content leaks. */
+  findScopeTupleById(
+    id: string,
+  ): { scope: MemoryScope; projectId: string | null; replaces: string[] } | undefined {
+    return this.db
+      .select({ scope: memory.scope, projectId: memory.projectId, replaces: memory.replaces })
+      .from(memory)
+      .where(eq(memory.id, id))
+      .get();
+  }
+
+  setReplaces(id: string, replaces: string[]): void {
+    this.db.update(memory).set({ replaces }).where(eq(memory.id, id)).run();
+  }
+
   /** Newest memory whose `replaces[]` contains `id` (one supersede hop). */
   findSuccessorId(id: string): string | undefined {
     return this.db

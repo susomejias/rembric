@@ -620,7 +620,7 @@ describe('dashboard E2E', () => {
     const memSvc = new MemoryService(createRepositories(handle.db), handle.db);
     const a = memSvc.save({ type: 'feedback', content: 'judged-row-source-content' }, SCOPE_GLOBAL);
     const b = memSvc.save({ type: 'feedback', content: 'judged-row-target-content' }, SCOPE_GLOBAL);
-    const rel = new RelationsService(handle.db).compare({
+    const rel = new RelationsService(createRepositories(handle.db), handle.db).compare({
       sourceId: a.id,
       targetId: b.id,
       relation: 'supersedes',

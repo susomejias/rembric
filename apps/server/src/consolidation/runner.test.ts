@@ -1,6 +1,7 @@
 import { desc } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
@@ -24,7 +25,7 @@ beforeEach(() => {
   projects = new ProjectsService(db.handle.db);
   runner = new ConsolidationRunner({
     db: db.handle.db,
-    relations: new RelationsService(db.handle.db),
+    relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
   });
 });
 

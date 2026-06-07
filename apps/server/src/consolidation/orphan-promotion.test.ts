@@ -36,7 +36,7 @@ const orphanDeadlineMs = 60_000;
 beforeEach(() => {
   db = createTestDb();
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  relations = new RelationsService(db.handle.db);
+  relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
   runner = new ConsolidationRunner({
     db: db.handle.db,
     relations,
