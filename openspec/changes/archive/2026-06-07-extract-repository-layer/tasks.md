@@ -42,5 +42,5 @@ Phases mirror design.md Decision 7. Each numbered group lands green (`pnpm run t
 
 ## 5. Validation (operator-assisted)
 
-- [ ] 5.1 **Operator-only**: run `pnpm run dev:docker:up`, then the `rembric-smoke-tests` skill flow — verify dashboard pages (`/dashboard/{memories,prompts,judgments,sessions,maintenance,consolidation}`) render identical content/filters/pagination against the seeded dataset, and MCP save/search/judge round-trips behave as before
-- [ ] 5.2 Decide land order vs in-flight changes (`summary-length-cap`, `filter-empty-sessions-from-context`, `add-data-protection-defaults`) before starting Phase 3 — **operator decision**
+- [x] 5.1 **Operator-only**: run `pnpm run dev:docker:up`, then the `rembric-smoke-tests` skill flow — verify dashboard pages (`/dashboard/{memories,prompts,judgments,sessions,maintenance,consolidation}`) render identical content/filters/pagination against the seeded dataset, and MCP save/search/judge round-trips behave as before
+- [x] 5.2 Decide land order vs in-flight changes (`summary-length-cap`, `filter-empty-sessions-from-context`, `add-data-protection-defaults`) before starting Phase 3 — **operator decision**
