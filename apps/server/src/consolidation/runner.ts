@@ -53,7 +53,7 @@ export interface ScopeRunResult {
 }
 
 const DEFAULT_ORPHAN_DEADLINE_MS = 14 * 86_400_000;
-const DEFAULT_MIN_INTERVAL_MS = 6 * 3_600_000;
+export const DEFAULT_MIN_INTERVAL_MS = 6 * 3_600_000;
 const ORPHAN_BATCH = 50;
 
 export class ConsolidationRunner {

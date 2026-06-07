@@ -418,6 +418,66 @@ describe('dashboard E2E', () => {
     expect(body).toContain('Judgments');
   });
 
+  it('manual sweep button forces a consolidation run via CSRF round-trip', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const page = await get(baseUrl, '/dashboard/consolidation', jar);
+    expect(page.status).toBe(200);
+    const pageBody = await page.text();
+    const csrf = extractCsrf(pageBody, '/dashboard/consolidation/run');
+    expect(csrf).toBeTruthy();
+    expect(pageBody).not.toContain('<th>model</th>');
+
+    const res = await postForm(baseUrl, '/dashboard/consolidation/run', jar, { csrf: csrf! });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/dashboard/consolidation');
+
+    const after = await get(baseUrl, '/dashboard/consolidation', jar);
+    const afterBody = await after.text();
+    expect(afterBody).toContain('data-href="/dashboard/consolidation/');
+
+    // Sweep run detail renders the legible summary and no Model card.
+    const idMatch = /data-href="(\/dashboard\/consolidation\/[A-Z0-9]+)"/.exec(afterBody);
+    expect(idMatch).toBeTruthy();
+    const detail = await get(baseUrl, idMatch![1]!, jar);
+    const detailBody = await detail.text();
+    expect(detailBody).toMatch(/\d+ archived · \d+ orphaned/);
+    expect(detailBody).not.toContain('<div class="label">Model</div>');
+  });
+
+  it('manual sweep without csrf returns 403 and runs nothing', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const res = await postForm(baseUrl, '/dashboard/consolidation/run', jar, {});
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('csrf_invalid');
+  });
+
+  it('manual sweep unauthenticated redirects to login', async () => {
+    const jar: CookieJar = { cookie: null };
+    const res = await postForm(baseUrl, '/dashboard/consolidation/run', jar, {});
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/dashboard/login');
+  });
+
+  it('home consolidation health shows the trigger model, no cron or model copy', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const res = await get(baseUrl, '/dashboard', jar);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('ON SESSION START');
+    expect(body).toContain('THROTTLED 6H / SCOPE');
+    expect(body).toMatch(/RE-EXPOSED &gt; \d+[HD] · ORPHANED &gt;\s*\d+[HD]/);
+    expect(body).not.toContain('NEXT RUN');
+    expect(body).not.toContain('03:00 UTC');
+    expect(body).not.toContain('MODEL ');
+    expect(body).not.toContain('AUTO-PROMOTED');
+  });
+
   it('projects page renders a create form and a POST mints the project', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
@@ -442,6 +502,32 @@ describe('dashboard E2E', () => {
     const afterBody = await after.text();
     expect(afterBody).toContain('e2e-created-project');
     expect(afterBody).toContain('E2E Created');
+  });
+
+  it('consolidation scope cells render the project slug, not the raw ULID', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    // 'e2e-created-project' exists from the previous test; force a sweep so
+    // a project-scoped run lands in the listing.
+    const page = await get(baseUrl, '/dashboard/consolidation', jar);
+    const csrf = extractCsrf(await page.text(), '/dashboard/consolidation/run');
+    await postForm(baseUrl, '/dashboard/consolidation/run', jar, { csrf: csrf! });
+
+    const list = await get(baseUrl, '/dashboard/consolidation', jar);
+    const listBody = await list.text();
+    expect(listBody).toContain('<td>e2e-created-project</td>');
+    expect(listBody).not.toMatch(/<td>project:01[A-Z0-9]+<\/td>/);
+
+    // Detail page shows the slug in the Scope stat card too.
+    const rowRe =
+      /<tr data-href="(\/dashboard\/consolidation\/[A-Z0-9]+)">[\s\S]*?<td>e2e-created-project<\/td>/;
+    const row = rowRe.exec(listBody);
+    expect(row).toBeTruthy();
+    const detail = await get(baseUrl, row![1]!, jar);
+    const detailBody = await detail.text();
+    expect(detailBody).toContain('e2e-created-project');
+    expect(detailBody).not.toMatch(/<div class="value">project:01[A-Z0-9]+<\/div>/);
   });
 
   it('project create rejects an invalid slug with a flash error in the redirect', async () => {

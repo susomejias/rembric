@@ -31,7 +31,7 @@ export type {
   ConsolidationOpType,
 } from './operations.js';
 
-export { ConsolidationRunner } from './runner.js';
+export { ConsolidationRunner, DEFAULT_MIN_INTERVAL_MS } from './runner.js';
 export type {
   ConsolidationRunnerOptions,
   ConsolidationRunSummary,

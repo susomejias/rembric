@@ -282,6 +282,9 @@ export async function bootstrap(
       dataDir: config.dataDir,
       updates,
       selfUpdate,
+      triggerSweep: () => runner.runAll({ force: true }),
+      orphanAfterMs: config.judgments.orphanAfterMs,
+      orphanDeadlineMs: config.judgments.orphanDeadlineMs,
     },
   });
 
