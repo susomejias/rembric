@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.5](https://github.com/susomejias/rembric/compare/server-v0.21.4...server-v0.21.5) (2026-06-07)
+
+
+### Features
+
+* **server:** align consolidation dashboard with the deterministic sweep ([#111](https://github.com/susomejias/rembric/issues/111)) ([dcc8299](https://github.com/susomejias/rembric/commit/dcc829937821ff8a812d4349364ddd14c98d69f7))
+
 ## [0.21.4](https://github.com/susomejias/rembric/compare/server-v0.21.3...server-v0.21.4) (2026-06-07)
 
 
