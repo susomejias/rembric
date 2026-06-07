@@ -2,7 +2,6 @@ import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { sql } from 'drizzle-orm';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
@@ -39,12 +38,14 @@ import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import { updateShellExtras, type UpdateViewState } from '../dashboard/update-modal.js';
 import { createUpdateRouter } from '../dashboard/update.js';
-import type { Db } from '../db/client.js';
+import type { DbDiagnostics } from '../db/diagnostics.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
+import type { RelationsService } from '../services/relations.js';
 import type { SelfUpdateOrchestrator } from '../services/self-update/orchestrator.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
@@ -56,13 +57,15 @@ const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SIDEBAR_COOKIE = 'rbr-sb-collapsed';
 
 export interface DashboardDeps {
-  db: Db;
+  repos: Repositories;
+  diagnostics: DbDiagnostics;
   tokens: TokensService;
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
   projects: ProjectsService;
   prompts: PromptsService;
   memory: MemoryService;
+  relations: RelationsService;
   getStats: () => DashboardStats;
   /** Resolved data directory (from `config.dataDir`). */
   dataDir: string;
@@ -70,6 +73,9 @@ export interface DashboardDeps {
   selfUpdate: SelfUpdateOrchestrator;
   /** Forced sweep across all scopes (same lambda as the admin endpoint). */
   triggerSweep: () => ConsolidationRunSummary;
+  /** Bound consolidation undo lambdas (wired in bootstrap). */
+  undoRun: (runId: string) => void;
+  undoOp: (opId: string) => void;
   /** Resolved judgment aging thresholds (from `config.judgments`). */
   orphanAfterMs: number;
   orphanDeadlineMs: number;
@@ -229,83 +235,27 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
 
     const supersededColor = supersededMemories > 0 ? 'warn' : 'lime';
 
-    const archivedProjects =
-      deps.db.all<{ n: number }>(
-        sql`SELECT COUNT(*) AS n FROM projects WHERE archived_at IS NOT NULL`,
-      )[0]?.n ?? 0;
+    const archivedProjects = deps.repos.projects.adminCountArchived();
+    const orphanedJ = deps.repos.relations.adminCountByStatus('orphaned');
+    const activity = sevenDayActivity(deps.repos);
+    const recentJudgedRows = deps.repos.relations.adminRecentJudged(4);
+    const recentSessions = deps.repos.agentSessions.adminRecent(5);
 
-    const orphanedJ =
-      deps.db.all<{ n: number }>(
-        sql`SELECT COUNT(*) AS n FROM memory_relations WHERE status = 'orphaned'`,
-      )[0]?.n ?? 0;
-
-    const activity = sevenDayActivity(deps.db);
-
-    const recentJudgedRows = deps.db.all<{
-      id: string;
-      judgment_id: string;
-      relation: string;
-      judged_at: number;
-      marked_by_kind: string | null;
-      source_id: string;
-      target_id: string;
-      source_content: string;
-      target_content: string;
-    }>(sql`
-      SELECT r.id, r.judgment_id, r.relation, r.judged_at, r.marked_by_kind,
-             r.source_id, r.target_id,
-             ms.content AS source_content,
-             mt.content AS target_content
-      FROM memory_relations r
-      JOIN memory ms ON ms.id = r.source_id
-      JOIN memory mt ON mt.id = r.target_id
-      WHERE r.status = 'judged'
-      ORDER BY r.judged_at DESC
-      LIMIT 4
-    `);
-
-    const recentSessions = deps.db.all<{
-      id: string;
-      agent: string;
-      started_at: number;
-      ended_at: number | null;
-      status: string;
-      project_slug: string | null;
-      summary: string | null;
-      mem_count: number;
-    }>(sql`
-      SELECT s.id, s.agent, s.started_at, s.ended_at, s.status,
-             p.slug AS project_slug,
-             s.summary,
-             (SELECT COUNT(*) FROM memory m WHERE m.session_id = s.id) AS mem_count
-      FROM sessions s
-      LEFT JOIN projects p ON p.id = s.project_id
-      WHERE s.deleted_at IS NULL
-      ORDER BY s.started_at DESC
-      LIMIT 5
-    `);
-
-    const lastRun =
-      deps.db.all<{
-        id: string;
-        started_at: number;
-        finished_at: number | null;
-        scope: string | null;
-        scope_slug: string | null;
-        total_ops: number;
-        reverted_ops: number;
-      }>(sql`
-      SELECT r.id, r.started_at, r.finished_at, r.scope,
-             p.slug AS scope_slug,
-             (SELECT COUNT(*) FROM consolidation_ops o
-              WHERE o.consolidation_id = r.id) AS total_ops,
-             (SELECT COUNT(*) FROM consolidation_ops o
-              WHERE o.consolidation_id = r.id AND o.reverted_at IS NOT NULL) AS reverted_ops
-      FROM consolidation_runs r
-      LEFT JOIN projects p ON p.id = substr(r.scope, 9)
-      ORDER BY r.started_at DESC
-      LIMIT 1
-    `)[0] ?? null;
+    const lastRunRow = deps.repos.consolidation.adminListRuns(1, 0).at(0) ?? null;
+    const lastRunCounts = lastRunRow
+      ? deps.repos.consolidation.adminOpCounts(lastRunRow.id)
+      : { total: 0, reverted: 0 };
+    const lastRun = lastRunRow
+      ? {
+          ...lastRunRow,
+          scopeSlug: lastRunRow.scope?.startsWith('project:')
+            ? (deps.repos.projects.adminFindById(lastRunRow.scope.slice('project:'.length))?.slug ??
+              null)
+            : null,
+          totalOps: lastRunCounts.total,
+          revertedOps: lastRunCounts.reverted,
+        }
+      : null;
 
     const dbPath = join(deps.dataDir, 'data.db');
     const dbPathDisplay = displayPath(dbPath);
@@ -390,20 +340,20 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                         <div class="pair">
                           <div class="met">
                             ${verdictPill(r.relation)}
-                            <span>${relTime(r.judged_at)}</span>
-                            ${r.marked_by_kind
-                              ? html`<span>·</span><span class="fg-dim">${r.marked_by_kind}</span>`
+                            <span>${r.judgedAt ? relTime(r.judgedAt) : '—'}</span>
+                            ${r.markedByKind
+                              ? html`<span>·</span><span class="fg-dim">${r.markedByKind}</span>`
                               : raw('')}
                           </div>
                           <div class="mem">
-                            <a href="/dashboard/memories/${r.source_id}" class="txt"
-                              >${truncate(r.source_content, 70)}</a
+                            <a href="/dashboard/memories/${r.sourceId}" class="txt"
+                              >${truncate(r.sourceContent, 70)}</a
                             >
                           </div>
                           <div class="mem">
                             <span class="arrow">↳</span>
-                            <a href="/dashboard/memories/${r.target_id}" class="txt"
-                              >${truncate(r.target_content, 70)}</a
+                            <a href="/dashboard/memories/${r.targetId}" class="txt"
+                              >${truncate(r.targetContent, 70)}</a
                             >
                           </div>
                         </div>
@@ -439,16 +389,16 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                         class="tl-item"
                         style="text-decoration:none;color:inherit"
                       >
-                        <div class="when">${relTime(s.started_at)}</div>
+                        <div class="when">${relTime(s.startedAt)}</div>
                         <div class="who">
                           <span class="agent">▸ ${s.agent}</span>
-                          ${s.project_slug
-                            ? html`<span class="proj">/ ${s.project_slug}</span>`
+                          ${s.projectSlug
+                            ? html`<span class="proj">/ ${s.projectSlug}</span>`
                             : raw('<span class="pill global">GLOBAL</span>')}
                           <span class="desc">${truncate(s.summary ?? '—', 60)}</span>
                         </div>
                         <div class="right">
-                          <span><b>${s.mem_count}</b> MEM</span>
+                          <span><b>${s.memCount}</b> MEM</span>
                           ${statusPill(s.status === 'active' ? 'active' : 'judged')}
                         </div>
                       </a>
@@ -474,17 +424,17 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <span class="val ${lastRun ? 'lime' : 'dim'}">${lastRun ? 'OK' : '—'}</span>
           <span class="sub"
             >${lastRun
-              ? html`${relTime(lastRun.finished_at ?? lastRun.started_at)} ·
+              ? html`${relTime(lastRun.finishedAt ?? lastRun.startedAt)} ·
                 ${lastRun.scope === 'global'
                   ? 'global'
-                  : (lastRun.scope_slug ?? lastRun.scope ?? 'global')}`
+                  : (lastRun.scopeSlug ?? lastRun.scope ?? 'global')}`
               : 'NEVER'}</span
           >
         </div>
         <div class="cell">
           <span class="lab"><span class="bn"></span> OPS APPLIED</span>
-          <span class="val">${lastRun?.total_ops ?? 0}</span>
-          <span class="sub">${lastRun?.reverted_ops ?? 0} REVERTED</span>
+          <span class="val">${lastRun?.totalOps ?? 0}</span>
+          <span class="sub">${lastRun?.revertedOps ?? 0} REVERTED</span>
         </div>
         <div class="cell">
           <span class="lab"><span class="bn warn"></span> ORPHANED PENDINGS</span>
@@ -547,27 +497,36 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
   // ── resource routers ────────────────────────────────────────────
   app.route(
     '/memories',
-    createMemoriesRouter({ db: deps.db, memory: deps.memory, sessions: deps.sessions }),
+    createMemoriesRouter({ repos: deps.repos, memory: deps.memory, sessions: deps.sessions }),
   );
   app.route(
     '/sessions',
     createSessionsRouter({
-      db: deps.db,
+      repos: deps.repos,
       sessions: deps.sessions,
       agentSessions: deps.agentSessions,
     }),
   );
   app.route(
     '/prompts',
-    createPromptsRouter({ db: deps.db, prompts: deps.prompts, sessions: deps.sessions }),
+    createPromptsRouter({ repos: deps.repos, prompts: deps.prompts, sessions: deps.sessions }),
   );
-  app.route('/judgments', createJudgmentsRouter({ db: deps.db, sessions: deps.sessions }));
+  app.route(
+    '/judgments',
+    createJudgmentsRouter({
+      repos: deps.repos,
+      relations: deps.relations,
+      sessions: deps.sessions,
+    }),
+  );
   app.route(
     '/consolidation',
     createConsolidationRouter({
-      db: deps.db,
+      repos: deps.repos,
       sessions: deps.sessions,
       triggerSweep: deps.triggerSweep,
+      undoRun: deps.undoRun,
+      undoOp: deps.undoOp,
     }),
   );
   app.route(
@@ -589,7 +548,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
   app.route(
     '/maintenance',
     createMaintenanceRouter({
-      db: deps.db,
+      diagnostics: deps.diagnostics,
       sessions: deps.sessions,
       agentSessions: deps.agentSessions,
       memory: deps.memory,
@@ -603,17 +562,11 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
 
 /* ── helpers used by the Overview body ─────────────────────────── */
 
-function sevenDayActivity(db: Db): number[] {
+function sevenDayActivity(repos: Repositories): number[] {
   // Bucket the last 7 days into integer-day keys; SQLite stores ms.
   const todayMs = startOfUtcDay(Date.now());
   const sevenAgo = todayMs - 6 * 24 * 60 * 60 * 1000;
-  const rows = db.all<{ day: number; n: number }>(sql`
-    SELECT (created_at / 86400000) AS day, COUNT(*) AS n
-    FROM memory
-    WHERE created_at >= ${sevenAgo}
-    GROUP BY day
-    ORDER BY day
-  `);
+  const rows = repos.memory.adminCountCreatedByDay(new Date(sevenAgo));
   const map = new Map<number, number>();
   for (const r of rows) map.set(r.day, r.n);
   const out: number[] = [];

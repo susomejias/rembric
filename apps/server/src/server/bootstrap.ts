@@ -4,7 +4,9 @@ import { sql } from 'drizzle-orm';
 
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
 import { ConsolidationRunner } from '../consolidation/index.js';
-import { createDb, type DbHandle } from '../db/index.js';
+import { undoOp, undoRun } from '../consolidation/operations.js';
+import { createDiagnostics } from '../db/diagnostics.js';
+import { createDb, createRepositories, type DbHandle } from '../db/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { projects as projectsTable } from '../db/schema/projects.js';
@@ -79,6 +81,8 @@ export async function bootstrap(
   }
 
   const dbHandle = createDb({ dataDir: config.dataDir });
+  const repos = createRepositories(dbHandle.db);
+  const dbDiagnostics = createDiagnostics(dbHandle);
 
   const tokens = new TokensService(dbHandle.db);
   const projects = new ProjectsService(dbHandle.db);
@@ -271,18 +275,22 @@ export async function bootstrap(
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
     dashboard: {
-      db: dbHandle.db,
+      repos,
+      diagnostics: dbDiagnostics,
       tokens,
       sessions,
       agentSessions: agentSessionsSvc,
       projects,
       prompts: promptsSvc,
       memory: memorySvc,
+      relations: relationsSvc,
       getStats: () => collectStats(dbHandle, agentSessionsSvc, relationsSvc),
       dataDir: config.dataDir,
       updates,
       selfUpdate,
       triggerSweep: () => runner.runAll({ force: true }),
+      undoRun: (runId) => undoRun(dbHandle.db, runId),
+      undoOp: (opId) => undoOp(dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
       orphanDeadlineMs: config.judgments.orphanDeadlineMs,
     },

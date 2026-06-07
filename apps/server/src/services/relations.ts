@@ -281,6 +281,21 @@ export class RelationsService {
     return updated;
   }
 
+  /**
+   * Operator-only: close a pending judgment as orphaned from the
+   * dashboard. Unlike `orphan` (the consolidator path) this marks the
+   * row `markedByKind='system'` and leaves `reason` untouched. Returns
+   * false when the judgment is missing or already closed.
+   */
+  orphanByOperator(judgmentId: string): boolean {
+    const result = this.db
+      .update(memoryRelations)
+      .set({ status: 'orphaned' as const, markedByKind: 'system' as const, judgedAt: this.now() })
+      .where(and(eq(memoryRelations.judgmentId, judgmentId), eq(memoryRelations.status, 'pending')))
+      .run();
+    return result.changes > 0;
+  }
+
   /** Fetch a relation row by `judgmentId`. */
   findByJudgmentId(judgmentId: string): MemoryRelation | undefined {
     return this.db

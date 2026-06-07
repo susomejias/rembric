@@ -1,12 +1,6 @@
-import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import type { Db } from '../db/client.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
-import { memory } from '../db/schema/memory.js';
-import { projects } from '../db/schema/projects.js';
-import { prompts as promptsTbl } from '../db/schema/prompts.js';
-import { tokens } from '../db/schema/tokens.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';
@@ -18,7 +12,7 @@ import { formatTs, html, raw, scopePill, shortId, statusPill } from './templates
 import type { ResolvedSession } from './types.js';
 
 export interface SessionsDeps {
-  db: Db;
+  repos: Repositories;
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
 }
@@ -42,71 +36,27 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const baseQuery = (opts: { activeFirst: boolean }) =>
-      deps.db
-        .select({
-          id: agentSessions.id,
-          agent: agentSessions.agent,
-          title: agentSessions.title,
-          description: agentSessions.description,
-          startedAt: agentSessions.startedAt,
-          endedAt: agentSessions.endedAt,
-          status: agentSessions.status,
-          deletedAt: agentSessions.deletedAt,
-          projectId: agentSessions.projectId,
-          tokenName: tokens.name,
-          tokenRevokedAt: tokens.revokedAt,
-          projectSlug: projects.slug,
-        })
-        .from(agentSessions)
-        .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
-        .leftJoin(projects, eq(projects.id, agentSessions.projectId))
-        .orderBy(
-          ...(opts.activeFirst
-            ? [sql`CASE WHEN ${agentSessions.status} = 'active' THEN 0 ELSE 1 END`]
-            : []),
-          desc(agentSessions.startedAt),
-        )
-        .limit(PAGE_SIZE + 1)
-        .offset(offset);
-
-    const visibleRowsRaw = baseQuery({ activeFirst: true })
-      .where(isNull(agentSessions.deletedAt))
-      .all();
+    const visibleRowsRaw = deps.repos.agentSessions.adminList({
+      deleted: false,
+      activeFirst: true,
+      limit: PAGE_SIZE + 1,
+      offset,
+    });
     const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
     const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
     const deletedRowsRaw = includeDeleted
-      ? baseQuery({ activeFirst: false }).where(isNotNull(agentSessions.deletedAt)).all()
+      ? deps.repos.agentSessions.adminList({
+          deleted: true,
+          activeFirst: false,
+          limit: PAGE_SIZE + 1,
+          offset,
+        })
       : [];
     const deletedHasMore = deletedRowsRaw.length > PAGE_SIZE;
     const deletedRows = deletedRowsRaw.slice(0, PAGE_SIZE);
 
-    // Per-session memory counts in one query.
-    const countRows = deps.db
-      .all<{
-        session_id: string;
-        n: number;
-      }>(
-        sql`SELECT session_id, COUNT(*) AS n FROM memory WHERE session_id IS NOT NULL GROUP BY session_id`,
-      )
-      .reduce<Record<string, number>>((acc, r) => {
-        acc[r.session_id] = Number(r.n);
-        return acc;
-      }, {});
-    void memory;
-
-    // Per-session prompt counts (non-deleted only).
-    const promptCountRows = deps.db
-      .all<{
-        session_id: string;
-        n: number;
-      }>(
-        sql`SELECT session_id, COUNT(*) AS n FROM prompts WHERE session_id IS NOT NULL AND deleted_at IS NULL GROUP BY session_id`,
-      )
-      .reduce<Record<string, number>>((acc, r) => {
-        acc[r.session_id] = Number(r.n);
-        return acc;
-      }, {});
+    const countRows = deps.repos.memory.adminCountBySession();
+    const promptCountRows = deps.repos.prompts.adminCountBySession();
 
     const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => {
       const displayTitle = titleCascade(r.title, r.description, r.id);
@@ -273,27 +223,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
 
     const id = c.req.param('id');
-    const row = deps.db
-      .select({
-        id: agentSessions.id,
-        agent: agentSessions.agent,
-        title: agentSessions.title,
-        description: agentSessions.description,
-        startedAt: agentSessions.startedAt,
-        endedAt: agentSessions.endedAt,
-        status: agentSessions.status,
-        summary: agentSessions.summary,
-        deletedAt: agentSessions.deletedAt,
-        projectId: agentSessions.projectId,
-        tokenName: tokens.name,
-        tokenRevokedAt: tokens.revokedAt,
-        projectSlug: projects.slug,
-      })
-      .from(agentSessions)
-      .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
-      .leftJoin(projects, eq(projects.id, agentSessions.projectId))
-      .where(eq(agentSessions.id, id))
-      .get();
+    const row = deps.repos.agentSessions.adminGetDetail(id);
 
     if (!row) {
       return c.html(
@@ -305,19 +235,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       );
     }
 
-    const memories = deps.db
-      .select()
-      .from(memory)
-      .where(sql`session_id = ${id}`)
-      .orderBy(memory.createdAt)
-      .all();
-
-    const sessionPrompts = deps.db
-      .select()
-      .from(promptsTbl)
-      .where(sql`session_id = ${id} AND deleted_at IS NULL`)
-      .orderBy(promptsTbl.createdAt)
-      .all();
+    const memories = deps.repos.memory.adminListBySession(id);
+    const sessionPrompts = deps.repos.prompts.adminListBySession(id);
 
     const memoriesCount = memories.length;
     const actionForm = row.deletedAt
@@ -583,6 +502,3 @@ function titleCascade(
   if (description && description.length > 0) return description;
   return shortId(id);
 }
-
-// Maintained import to keep `and` available if future filters compose.
-void and;

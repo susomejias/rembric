@@ -29,6 +29,11 @@ Single Node process, single SQLite file. Server layers at `apps/server/src/{serv
 
 Path-scoping contract (in `apps/server/src/mcp/tools.ts`): `/mcp/<slug>` rejects `scope='global'` with `scope_locked`; `/mcp` rejects `scope='project'` with `project_required` unless an active project exists.
 
+### Data access pattern
+
+- ALL SQL (Drizzle builder or raw) lives under `apps/server/src/db/`: one repository per aggregate in `db/repositories/`, DB-level introspection in `db/diagnostics.ts`. Services orchestrate (scope resolution, validation, transactions); dashboard handlers call `admin*` repository reads + service mutations. No SQL in services/dashboard/mcp/server.
+- Never hand-write row/DTO shapes. Derive from schema types: `$inferSelect`/`$inferInsert` for entities, `Pick<Entity, …> & { … }` for join projections, schema-derived aliases (`MemoryStatus`, `RelationKind`) for filter params.
+
 ### Table-rebuild migrations (SQLite)
 
 SQLite has no `ALTER TABLE … ADD CONSTRAINT`, `ALTER COLUMN`, or change-nullability. To add a `CHECK`, change a type, or flip NOT NULL you have to do the rebuild dance (`CREATE TABLE x_new (…)` → `INSERT … SELECT *` → `DROP TABLE x` → `ALTER TABLE x_new RENAME TO x` → recreate indexes/triggers). With `foreign_keys = ON` (the default set by `db/client.ts`), `DROP TABLE` on a parent of any populated child table fails with `FOREIGN KEY constraint failed`. `PRAGMA foreign_keys` cannot be changed inside a transaction, and `PRAGMA defer_foreign_keys` does **not** defer the DROP-TABLE check (it only defers per-row FK violations).

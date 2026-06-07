@@ -1,10 +1,7 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import type { Db } from '../db/client.js';
-import { confirmations } from '../db/schema/confirmations.js';
-import { memory, type Memory } from '../db/schema/memory.js';
-import { projects } from '../db/schema/projects.js';
+import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
+import type { Memory } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
@@ -17,7 +14,7 @@ import { escape, formatTs, html, raw, scopePill, shortId, statusPill } from './t
 import type { ResolvedSession } from './types.js';
 
 export interface MemoriesDeps {
-  db: Db;
+  repos: Repositories;
   memory: MemoryService;
   sessions: SessionsService;
 }
@@ -41,59 +38,31 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const projectRows = deps.db.select().from(projects).all();
+    const projectRows = deps.repos.projects.adminListAll();
     const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
-    const conditions = [eq(memory.status, statusFilter as 'active' | 'superseded' | 'archived')];
-    if (typeFilter) {
-      conditions.push(eq(memory.type, typeFilter as Memory['type']));
-    }
+    let project: AdminListMemoriesOpts['project'];
     if (projectFilter === '__global__') {
-      conditions.push(eq(memory.scope, 'global'));
-      conditions.push(isNull(memory.projectId));
+      project = { kind: 'global' };
     } else if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
-      if (p) {
-        conditions.push(eq(memory.scope, 'project'));
-        conditions.push(eq(memory.projectId, p.id));
-      }
+      if (p) project = { kind: 'project', projectId: p.id };
     }
 
     let rows: Memory[];
     if (query) {
-      const ids = deps.db
-        .all<{ id: string }>(
-          sql`
-            SELECT m.id
-            FROM memory m
-            JOIN memory_fts f ON f.rowid = m.rowid
-            WHERE memory_fts MATCH ${query}
-            ORDER BY rank, m.created_at DESC
-            LIMIT ${PAGE_SIZE} OFFSET ${offset}
-          `,
-        )
-        .map((r) => r.id);
-      rows =
-        ids.length === 0
-          ? []
-          : deps.db
-              .select()
-              .from(memory)
-              .where(sql`id IN ${ids}`)
-              .all()
-              .filter((m) =>
-                clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter),
-              );
+      rows = deps.repos.memory
+        .adminSearchFts(query, PAGE_SIZE, offset)
+        .filter((m) => clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter));
     } else {
-      rows = deps.db
-        .select()
-        .from(memory)
-        .where(and(...conditions))
-        .orderBy(desc(memory.createdAt))
-        .limit(PAGE_SIZE + 1)
-        .offset(offset)
-        .all();
+      rows = deps.repos.memory.adminList({
+        status: statusFilter as Memory['status'],
+        type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+        project,
+        limit: PAGE_SIZE + 1,
+        offset,
+      });
     }
 
     const hasMore = rows.length > PAGE_SIZE;
@@ -234,22 +203,9 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       );
     }
 
-    const project = row.projectId
-      ? deps.db.select().from(projects).where(eq(projects.id, row.projectId)).get()
-      : null;
-    const predecessors =
-      row.replaces.length === 0
-        ? []
-        : deps.db
-            .select()
-            .from(memory)
-            .where(sql`id IN ${row.replaces}`)
-            .all();
-    const confirmCountRow = deps.db
-      .select({ v: sql<number>`count(*)` })
-      .from(confirmations)
-      .where(eq(confirmations.memoryId, row.id))
-      .get();
+    const project = row.projectId ? deps.repos.projects.adminFindById(row.projectId) : null;
+    const predecessors = deps.repos.memory.adminGetByIds(row.replaces);
+    const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
 
     const archiveButton =
       row.status === 'active'
@@ -334,7 +290,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         </div>
         <div class="stat-card">
           <div class="label">Confirms</div>
-          <div class="value">${confirmCountRow?.v ?? 0}</div>
+          <div class="value">${confirmCount}</div>
         </div>
         <div class="stat-card">
           <div class="label">Created</div>

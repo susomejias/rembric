@@ -1,10 +1,7 @@
-import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 
-import type { Db } from '../db/client.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
-import { projects } from '../db/schema/projects.js';
-import { prompts as promptsTbl, type Prompt } from '../db/schema/prompts.js';
+import type { AdminListPromptsOpts, Repositories } from '../db/repositories/index.js';
+import type { Prompt } from '../db/schema/prompts.js';
 import { DomainError } from '../services/errors.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
@@ -16,7 +13,7 @@ import { escape, formatTs, html, raw, shortId } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface PromptsDeps {
-  db: Db;
+  repos: Repositories;
   prompts: PromptsService;
   sessions: SessionsService;
 }
@@ -43,69 +40,42 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
-    const projectRows = deps.db.select().from(projects).all();
+    const projectRows = deps.repos.projects.adminListAll();
     const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
-    const conditions = [];
-    if (!includeDeleted) {
-      conditions.push(isNull(promptsTbl.deletedAt));
-    }
+    let project: AdminListPromptsOpts['project'];
     if (projectFilter === '__global__') {
-      conditions.push(isNull(promptsTbl.projectId));
+      project = { kind: 'global' };
     } else if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
-      if (p) conditions.push(eq(promptsTbl.projectId, p.id));
-    }
-    if (agentFilter) {
-      conditions.push(eq(promptsTbl.agent, agentFilter));
-    }
-    if (sessionFilter) {
-      // Operator pastes shortId; match by prefix against the session id.
-      conditions.push(sql`${promptsTbl.sessionId} LIKE ${sessionFilter + '%'}`);
+      if (p) project = { kind: 'project', projectId: p.id };
     }
 
     let rows: Prompt[];
     if (query) {
-      const ids = deps.db
-        .all<{ id: string }>(
-          sql`
-            SELECT p.id
-            FROM prompts p
-            JOIN prompts_fts f ON f.rowid = p.rowid
-            WHERE prompts_fts MATCH ${query}
-            ORDER BY rank, p.created_at DESC
-            LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
-          `,
-        )
-        .map((r) => r.id);
-      rows =
-        ids.length === 0
-          ? []
-          : deps.db
-              .select()
-              .from(promptsTbl)
-              .where(sql`id IN ${ids}`)
-              .all()
-              .filter((p) =>
-                matchesFilters(
-                  p,
-                  projectBySlug,
-                  includeDeleted,
-                  projectFilter,
-                  agentFilter,
-                  sessionFilter,
-                ),
-              );
+      rows = deps.repos.prompts
+        .adminSearchFts(query, PAGE_SIZE + 1, offset)
+        .filter((p) =>
+          matchesFilters(
+            p,
+            projectBySlug,
+            includeDeleted,
+            projectFilter,
+            agentFilter,
+            sessionFilter,
+          ),
+        );
     } else {
-      const wherePredicate = conditions.length > 0 ? and(...conditions) : undefined;
-      const q = deps.db
-        .select()
-        .from(promptsTbl)
-        .orderBy(desc(promptsTbl.createdAt))
-        .limit(PAGE_SIZE + 1)
-        .offset(offset);
-      rows = wherePredicate ? q.where(wherePredicate).all() : q.all();
+      rows = deps.repos.prompts.adminList({
+        includeDeleted,
+        project,
+        agent: agentFilter || undefined,
+        // Operator pastes shortId; match by prefix against the session id.
+        sessionIdPrefix: sessionFilter || undefined,
+        limit: PAGE_SIZE + 1,
+        offset,
+      });
     }
 
     const hasMore = rows.length > PAGE_SIZE;
@@ -364,6 +334,4 @@ function matchesFilters(
 }
 
 // Maintained imports for downstream consumers.
-void agentSessions;
 void backLink;
-void isNotNull;
