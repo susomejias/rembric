@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.7](https://github.com/susomejias/rembric/compare/server-v0.21.6...server-v0.21.7) (2026-06-07)
+
+
+### Features
+
+* **server:** bound memory.context snippets + server-side summary cap & memory.get_session ([#116](https://github.com/susomejias/rembric/issues/116)) ([2572a81](https://github.com/susomejias/rembric/commit/2572a81c84ea6cf54c9a968118e8b7d9102966ea))
+
 ## [0.21.6](https://github.com/susomejias/rembric/compare/server-v0.21.5...server-v0.21.6) (2026-06-07)
 
 
