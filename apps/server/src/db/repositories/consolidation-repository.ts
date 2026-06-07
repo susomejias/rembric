@@ -13,8 +13,6 @@ import {
 export class ConsolidationRepository {
   constructor(private readonly db: Db) {}
 
-  // ── journaling writes ──────────────────────────────────────────────
-
   insertRun(values: NewConsolidationRun): void {
     this.db.insert(consolidationRuns).values(values).run();
   }
@@ -22,8 +20,6 @@ export class ConsolidationRepository {
   insertOp(values: NewConsolidationOp): void {
     this.db.insert(consolidationOps).values(values).run();
   }
-
-  // ── admin* — unscoped dashboard reads ──────────────────────────────
 
   adminListRuns(limit: number, offset: number): ConsolidationRun[] {
     return this.db

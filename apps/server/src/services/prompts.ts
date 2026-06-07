@@ -1,9 +1,8 @@
-import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import type { Db } from '../db/client.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import { prompts, type Prompt } from '../db/schema/prompts.js';
+import type { TransactionRunner } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
+import { type Prompt } from '../db/schema/prompts.js';
 
 import { DomainError } from './errors.js';
 import { type Scope } from './scope.js';
@@ -67,7 +66,8 @@ export interface SearchByScopeResult {
 
 export class PromptsService {
   constructor(
-    private readonly db: Db,
+    private readonly repos: Pick<Repositories, 'prompts' | 'consolidation'>,
+    private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -101,29 +101,25 @@ export class PromptsService {
 
   private insertRow(input: SavePromptInput, replaces?: string[]): Prompt {
     const ts = this.now();
-    const row = this.db
-      .insert(prompts)
-      .values({
-        id: ulid(ts.getTime()),
-        sessionId: input.sessionId ?? null,
-        projectId: input.projectId ?? null,
-        content: input.content,
-        title: input.title,
-        tags: input.tags ?? null,
-        replaces: replaces ?? null,
-        agent: input.agent ?? null,
-        createdAt: ts,
-        deletedAt: null,
-      })
-      .returning()
-      .get();
+    const row = this.repos.prompts.insert({
+      id: ulid(ts.getTime()),
+      sessionId: input.sessionId ?? null,
+      projectId: input.projectId ?? null,
+      content: input.content,
+      title: input.title,
+      tags: input.tags ?? null,
+      replaces: replaces ?? null,
+      agent: input.agent ?? null,
+      createdAt: ts,
+      deletedAt: null,
+    });
     if (!row) throw new DomainError('conflict', 'prompts.save: insert returned no row');
     return row;
   }
 
   private saveWithReplaces(input: SavePromptInput, predecessorId: string): Prompt {
-    return this.db.transaction((tx): Prompt => {
-      const predecessor = tx.select().from(prompts).where(eq(prompts.id, predecessorId)).get();
+    return this.tx.transaction((): Prompt => {
+      const predecessor = this.repos.prompts.findById(predecessorId);
       if (!predecessor) {
         throw new DomainError('prompt_not_found', `prompt '${predecessorId}' not found`);
       }
@@ -141,24 +137,20 @@ export class PromptsService {
       }
 
       const ts = this.now();
-      tx.update(prompts).set({ deletedAt: ts }).where(eq(prompts.id, predecessorId)).run();
+      this.repos.prompts.setDeletedAt(predecessorId, ts);
 
-      const inserted = tx
-        .insert(prompts)
-        .values({
-          id: ulid(ts.getTime()),
-          sessionId: input.sessionId ?? null,
-          projectId: input.projectId ?? null,
-          content: input.content,
-          title: input.title,
-          tags: input.tags ?? null,
-          replaces: [predecessorId],
-          agent: input.agent ?? null,
-          createdAt: ts,
-          deletedAt: null,
-        })
-        .returning()
-        .get();
+      const inserted = this.repos.prompts.insert({
+        id: ulid(ts.getTime()),
+        sessionId: input.sessionId ?? null,
+        projectId: input.projectId ?? null,
+        content: input.content,
+        title: input.title,
+        tags: input.tags ?? null,
+        replaces: [predecessorId],
+        agent: input.agent ?? null,
+        createdAt: ts,
+        deletedAt: null,
+      });
       if (!inserted) {
         throw new DomainError('conflict', 'prompts.save: refine insert returned no row');
       }
@@ -180,13 +172,7 @@ export class PromptsService {
     if (existing.deletedAt) {
       return existing;
     }
-    const ts = this.now();
-    const updated = this.db
-      .update(prompts)
-      .set({ deletedAt: ts })
-      .where(eq(prompts.id, id))
-      .returning()
-      .get();
+    const updated = this.repos.prompts.setDeletedAt(id, this.now());
     if (!updated) {
       throw new DomainError('prompt_not_found', `prompt '${id}' not found`);
     }
@@ -205,12 +191,7 @@ export class PromptsService {
     if (!existing.deletedAt) {
       return existing;
     }
-    const updated = this.db
-      .update(prompts)
-      .set({ deletedAt: null })
-      .where(eq(prompts.id, id))
-      .returning()
-      .get();
+    const updated = this.repos.prompts.setDeletedAt(id, null);
     if (!updated) {
       throw new DomainError('prompt_not_found', `prompt '${id}' not found`);
     }
@@ -230,44 +211,33 @@ export class PromptsService {
     }
     const ts = this.now();
 
-    return this.db.transaction((tx): { deletedIds: string[] } => {
-      const eligible = tx.all<{ id: string }>(sql`
-        SELECT id FROM prompts WHERE deleted_at IS NOT NULL
-      `);
-      const deletedIds = eligible.map((r) => r.id);
+    return this.tx.transaction((): { deletedIds: string[] } => {
+      const deletedIds = this.repos.prompts.findDeletedIds();
       if (deletedIds.length === 0) {
         return { deletedIds: [] };
       }
 
-      const placeholders = sql.join(
-        deletedIds.map((id) => sql`${id}`),
-        sql.raw(', '),
-      );
-      tx.run(sql`DELETE FROM prompts WHERE id IN (${placeholders})`);
+      this.repos.prompts.purgeByIds(deletedIds);
 
       const runId = ulid(ts.getTime());
-      tx.insert(consolidationRuns)
-        .values({
-          id: runId,
-          startedAt: ts,
-          finishedAt: ts,
-          llmProvider: null,
-          llmModel: null,
-          scope: 'maintenance',
-          summary: JSON.stringify({ kind: 'prompt_purge', deleted: deletedIds.length }),
-        })
-        .run();
-      tx.insert(consolidationOps)
-        .values({
-          id: ulid(ts.getTime()),
-          consolidationId: runId,
-          opType: 'prompt_purge',
-          affectedIds: deletedIds,
-          createdId: null,
-          reasoning: PROMPT_PURGE_REASONING,
-          appliedAt: ts,
-        })
-        .run();
+      this.repos.consolidation.insertRun({
+        id: runId,
+        startedAt: ts,
+        finishedAt: ts,
+        llmProvider: null,
+        llmModel: null,
+        scope: 'maintenance',
+        summary: JSON.stringify({ kind: 'prompt_purge', deleted: deletedIds.length }),
+      });
+      this.repos.consolidation.insertOp({
+        id: ulid(ts.getTime()),
+        consolidationId: runId,
+        opType: 'prompt_purge',
+        affectedIds: deletedIds,
+        createdId: null,
+        reasoning: PROMPT_PURGE_REASONING,
+        appliedAt: ts,
+      });
 
       return { deletedIds };
     });
@@ -275,14 +245,11 @@ export class PromptsService {
 
   /** Count prompts currently eligible for `purgeDeleted` (soft-deleted rows). */
   countPurgeableDeleted(): number {
-    const row = this.db.get<{ v: number }>(
-      sql`SELECT COUNT(*) AS v FROM prompts WHERE deleted_at IS NOT NULL`,
-    ) as { v: number } | undefined;
-    return row?.v ?? 0;
+    return this.repos.prompts.countDeleted();
   }
 
   findById(id: string): Prompt | undefined {
-    return this.db.select().from(prompts).where(eq(prompts.id, id)).get();
+    return this.repos.prompts.findById(id);
   }
 
   /**
@@ -293,15 +260,7 @@ export class PromptsService {
    */
   recentForContext(input: RecentForContextInput): Prompt[] {
     const limit = clamp(input.limit ?? 10, 1, 50);
-    const scopeCondition =
-      input.projectId === null ? isNull(prompts.projectId) : eq(prompts.projectId, input.projectId);
-    return this.db
-      .select()
-      .from(prompts)
-      .where(and(scopeCondition, isNull(prompts.deletedAt)))
-      .orderBy(desc(prompts.createdAt))
-      .limit(limit)
-      .all();
+    return this.repos.prompts.recentForContext(input.projectId, limit);
   }
 
   /**
@@ -323,80 +282,16 @@ export class PromptsService {
     const offset = Math.max(0, input.offset ?? 0);
     const projectId = input.scope.kind === 'project' ? input.scope.projectId : null;
 
-    const conditions: SQL[] = [];
-    conditions.push(
-      projectId === null ? isNull(prompts.projectId) : eq(prompts.projectId, projectId),
-    );
-    if (!input.includeDeleted) {
-      conditions.push(isNull(prompts.deletedAt));
-    }
-    if (input.sessionId) {
-      conditions.push(eq(prompts.sessionId, input.sessionId));
-    }
-    if (input.agent) {
-      conditions.push(eq(prompts.agent, input.agent));
-    }
-    const wherePredicate = and(...conditions);
-
-    const useFts = typeof input.query === 'string' && input.query.trim().length > 0;
-
-    if (useFts) {
-      const ftsFilters: ReturnType<typeof sql>[] = [];
-      if (projectId === null) {
-        ftsFilters.push(sql`p.project_id IS NULL`);
-      } else {
-        ftsFilters.push(sql`p.project_id = ${projectId}`);
-      }
-      if (!input.includeDeleted) {
-        ftsFilters.push(sql`p.deleted_at IS NULL`);
-      }
-      if (input.sessionId) {
-        ftsFilters.push(sql`p.session_id = ${input.sessionId}`);
-      }
-      if (input.agent) {
-        ftsFilters.push(sql`p.agent = ${input.agent}`);
-      }
-      const ftsWhere = sql.join(ftsFilters, sql` AND `);
-
-      const matchedIds = this.db.all<{ id: string }>(sql`
-        SELECT p.id FROM prompts p
-          JOIN prompts_fts f ON f.rowid = p.rowid
-         WHERE prompts_fts MATCH ${input.query}
-           AND ${ftsWhere}
-         ORDER BY rank
-         LIMIT ${limit} OFFSET ${offset}
-      `);
-      const totalRow = this.db.get<{ v: number }>(sql`
-        SELECT COUNT(*) AS v FROM prompts p
-          JOIN prompts_fts f ON f.rowid = p.rowid
-         WHERE prompts_fts MATCH ${input.query}
-           AND ${ftsWhere}
-      `) as { v: number } | undefined;
-      const total = totalRow?.v ?? 0;
-
-      if (matchedIds.length === 0) {
-        return { prompts: [], total: Number(total), clamped };
-      }
-
-      const ids = matchedIds.map((r) => r.id);
-      const rows = this.db.select().from(prompts).where(inArray(prompts.id, ids)).all();
-      const rankOrder = new Map(ids.map((id, idx) => [id, idx] as const));
-      rows.sort((a, b) => (rankOrder.get(a.id) ?? 0) - (rankOrder.get(b.id) ?? 0));
-      return { prompts: rows, total: Number(total), clamped };
-    }
-
-    const rows = this.db
-      .select()
-      .from(prompts)
-      .where(wherePredicate)
-      .orderBy(desc(prompts.createdAt))
-      .limit(limit)
-      .offset(offset)
-      .all();
-    const totalRow = this.db.get<{ v: number }>(sql`
-      SELECT COUNT(*) AS v FROM (${this.db.select().from(prompts).where(wherePredicate)})
-    `) as { v: number } | undefined;
-    return { prompts: rows, total: Number(totalRow?.v ?? 0), clamped };
+    const { prompts, total } = this.repos.prompts.searchByScope({
+      projectId,
+      query: input.query,
+      sessionId: input.sessionId,
+      agent: input.agent,
+      includeDeleted: input.includeDeleted,
+      limit,
+      offset,
+    });
+    return { prompts, total, clamped };
   }
 }
 

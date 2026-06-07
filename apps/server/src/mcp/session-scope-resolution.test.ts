@@ -72,7 +72,7 @@ beforeEach(() => {
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(db.handle.db);
-  prompts = new PromptsService(db.handle.db);
+  prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(db.handle.db);
   tokens.bootstrapAdmin('scope-resolution-test-admin-zzz');
   adminToken = db.handle.db

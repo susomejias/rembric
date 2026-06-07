@@ -83,8 +83,6 @@ const withContentSelection = {
 export class RelationsRepository {
   constructor(private readonly db: Db) {}
 
-  // ── service-facing reads/writes ────────────────────────────────────
-
   insert(values: NewMemoryRelation): MemoryRelation | undefined {
     return this.db.insert(memoryRelations).values(values).returning().get();
   }
@@ -185,8 +183,6 @@ export class RelationsRepository {
       .groupBy(memoryRelations.status)
       .all();
   }
-
-  // ── admin* — unscoped dashboard reads ──────────────────────────────
 
   adminListWithContent(
     filters: AdminRelationFilters,

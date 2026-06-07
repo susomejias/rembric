@@ -88,7 +88,7 @@ export async function bootstrap(
   const projects = new ProjectsService(dbHandle.db);
   const memorySvc = new MemoryService(repos, dbHandle.db);
   const agentSessionsSvc = new AgentSessionsService(dbHandle.db);
-  const promptsSvc = new PromptsService(dbHandle.db);
+  const promptsSvc = new PromptsService(repos, dbHandle.db);
   const relationsSvc = new RelationsService(repos, dbHandle.db);
   const sessionRouter = new SessionRouter();
 

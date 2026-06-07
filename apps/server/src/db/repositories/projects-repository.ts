@@ -6,8 +6,6 @@ import { projects, type Project } from '../schema/projects.js';
 export class ProjectsRepository {
   constructor(private readonly db: Db) {}
 
-  // ── admin* — unscoped dashboard reads ──────────────────────────────
-
   adminListAll(): Project[] {
     return this.db.select().from(projects).all();
   }

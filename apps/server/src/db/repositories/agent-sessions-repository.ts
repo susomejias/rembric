@@ -58,8 +58,6 @@ const listSelection = {
 export class AgentSessionsRepository {
   constructor(private readonly db: Db) {}
 
-  // ── admin* — unscoped dashboard reads ──────────────────────────────
-
   adminList(opts: AdminListSessionsOpts): AdminSessionRow[] {
     return this.db
       .select(listSelection)

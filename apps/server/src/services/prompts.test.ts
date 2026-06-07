@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps } from '../db/schema/consolidation.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
@@ -23,7 +24,7 @@ let projectId: string;
 
 beforeEach(() => {
   db = createTestDb();
-  prompts = new PromptsService(db.handle.db);
+  prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(db.handle.db);
   projectId = projects.create({ slug: 'prompt-tests' }).id;
 });

@@ -87,11 +87,6 @@ export class MemoryService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  // ────────────────────────────────────────────────────────────────────
-  //  Scoped API — every call requires a Scope. Rows outside scope are
-  //  invisible.
-  // ────────────────────────────────────────────────────────────────────
-
   save(input: SaveMemoryInput, scope: Scope): Memory {
     const { memory: m } = this.saveWithTopicKey(input, scope);
     return m;
@@ -242,16 +237,9 @@ export class MemoryService {
     this.repos.memory.markArchived(id, this.now());
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  //  Operator-only physical purge.
-  //
-  //  Predicate lives in MemoryRepository (the single file allow-listed
-  //  for `DELETE FROM memory`); this service keeps the gating and the
-  //  journaling. MUST stay in lock-step with the spec at
-  //  `openspec/specs/memory/spec.md::"Memories MAY be physically purged
-  //  when archived and disconnected"`.
-  // ────────────────────────────────────────────────────────────────────
-
+  // Purge predicate + DELETE live in MemoryRepository (the only file
+  // allow-listed for `DELETE FROM memory`); this service keeps the gating
+  // and journaling. Spec: openspec/specs/memory/spec.md.
   countPurgeableDisconnectedArchived(): number {
     return this.repos.memory.countPurgeableDisconnectedArchived();
   }
@@ -303,13 +291,8 @@ export class MemoryService {
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  //  Scope-bypassing API — for the consolidation engine and dashboard
-  //  admin views ONLY. Marked `unsafe*` so any call site reads as a
-  //  deliberate cross-scope operation. A grep gate in CI prevents new
-  //  uses outside the allow-listed modules.
-  // ────────────────────────────────────────────────────────────────────
-
+  // `unsafe*` = deliberate cross-scope read; a CI grep gate pins call
+  // sites to the allow-listed modules (consolidation, dashboard).
   /** @internal */
   unsafeGetById(id: string): Memory | undefined {
     return this.repos.memory.unsafeGetById(id);
@@ -319,12 +302,6 @@ export class MemoryService {
   unsafeGetByIds(ids: readonly string[]): Memory[] {
     return this.repos.memory.unsafeGetByIds(ids);
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  //  Private helpers (do not leak rows outside scope on their own —
-  //  callers are always scoped methods or marked-unsafe consolidation
-  //  paths).
-  // ────────────────────────────────────────────────────────────────────
 
   private collectPredecessors(start: Memory): Memory[] {
     const visited = new Set<string>([start.id]);

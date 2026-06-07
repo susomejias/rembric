@@ -1,10 +1,3 @@
-/**
- * Repository layer: ALL SQL (Drizzle builder and raw) for application
- * tables lives in these classes, one per aggregate. Services consume the
- * scope-required methods; dashboard handlers consume the `admin*`-prefixed
- * unscoped reads. Database-level introspection lives in `../diagnostics.ts`.
- */
-
 import type { Db } from '../client.js';
 
 import { AgentSessionsRepository } from './agent-sessions-repository.js';

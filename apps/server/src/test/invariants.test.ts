@@ -103,8 +103,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+prompts\b/i,
     description:
-      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in services/prompts.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['services/prompts.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in db/repositories/prompts-repository.ts or the dev seed reset in scripts/seed-dev.ts',
+    allow: ['db/repositories/prompts-repository.ts', 'scripts/seed-dev.ts'],
   },
   {
     pattern: /update\([^)]*prompts[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -193,8 +193,8 @@ describe('append-only invariants (static grep)', () => {
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
   });
 
-  it('allow-list anchors: services/prompts.ts contains DELETE FROM prompts', () => {
-    const file = join(srcRoot, 'services/prompts.ts');
+  it('allow-list anchors: db/repositories/prompts-repository.ts contains DELETE FROM prompts', () => {
+    const file = join(srcRoot, 'db/repositories/prompts-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+prompts\b/i.test(src)).toBe(true);
   });

@@ -57,7 +57,7 @@ Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active pr
 - No floating promises (ESLint enforces).
 - `import type` for types; imports ordered builtin → external → internal → relative (auto-fixed).
 - Co-located tests `**/*.test.ts` (each workspace). Invariant tests under `apps/server/src/**/__tests__/invariants/` are sacred.
-- **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR.
+- **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR. **Banner/section-divider comments (`// ──────`, `// === API ===`), structural labels that just name the block below, and docstrings that paraphrase the signature are an anti-pattern — do not add them.** A licit comment documents one concrete non-obvious fact (a why, an invariant, an ordering constraint), nothing more.
 
 ## Skills
 

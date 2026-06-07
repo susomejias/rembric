@@ -65,7 +65,7 @@ beforeEach(() => {
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(db.handle.db);
-  prompts = new PromptsService(db.handle.db);
+  prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(db.handle.db);
   tokens.bootstrapAdmin('project-suggestion-pending-test-admin-zzz');
   adminToken = db.handle.db

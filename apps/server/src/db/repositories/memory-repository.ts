@@ -53,8 +53,6 @@ export interface AdminListMemoriesOpts {
 export class MemoryRepository {
   constructor(private readonly db: Db) {}
 
-  // ── scoped reads ───────────────────────────────────────────────────
-
   findActiveByScope(opts: FindActiveByScopeOpts): Memory[] {
     const projectFilter =
       opts.scope === 'project' && opts.projectId
@@ -99,11 +97,6 @@ export class MemoryRepository {
       .get();
   }
 
-  /**
-   * Scope-restricted id search, FTS5-ranked when `query` is present.
-   * Verbatim move of the former MemoryService SQL — the scope filter is
-   * enforced at the SQL level so callers cannot widen it.
-   */
   searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
     const scopeClause =
       opts.scope === 'global'
@@ -144,8 +137,6 @@ export class MemoryRepository {
         );
     return rows.map((r) => r.id);
   }
-
-  // ── unsafe* — deliberate cross-scope reads (services) ──────────────
 
   /** @internal */
   unsafeGetById(id: string): Memory | undefined {
@@ -210,8 +201,6 @@ export class MemoryRepository {
     return row?.value ?? 0;
   }
 
-  // ── writes (services own the surrounding transactions) ────────────
-
   insert(values: NewMemory): Memory | undefined {
     return this.db.insert(memory).values(values).returning().get();
   }
@@ -249,8 +238,6 @@ export class MemoryRepository {
     this.db.insert(confirmations).values(values).run();
   }
 
-  // ── operator-only physical purge ───────────────────────────────────
-  //
   //  The ONE escape hatch in the otherwise append-only contract for the
   //  `memory` table. The invariant test white-lists ONLY this file for
   //  `DELETE FROM memory`. Predicate MUST stay in lock-step between the
@@ -292,8 +279,6 @@ export class MemoryRepository {
     this.db.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
     this.db.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
   }
-
-  // ── admin* — unscoped dashboard reads ──────────────────────────────
 
   /**
    * FTS5 keyword search across ALL scopes, hydrated rows. Rank-ordered id
