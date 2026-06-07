@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import type { Db } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
@@ -64,6 +65,7 @@ export interface CreateMcpServerOptions {
   embedNow?: (memoryId: string, content: string) => Promise<boolean>;
   router: SessionRouter;
   db: Db;
+  repos: Repositories;
   doctor: () => DoctorReport;
   /** Fire-and-forget consolidation sweep, invoked after session start. */
   sweep?: (projectId: string | null) => void;
@@ -104,7 +106,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     relations: opts.relations,
     candidates: opts.candidates,
     embedNow: opts.embedNow,
-    db: opts.db,
+    repos: opts.repos,
     router: opts.router,
     projects: opts.projects,
     agentSessions: opts.agentSessions,

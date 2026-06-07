@@ -73,7 +73,12 @@ beforeEach(() => {
     .from(tokensSchema)
     .where(eq(tokensSchema.name, 'admin'))
     .get()!;
-  saveHandlers = buildHandlers({ memory, db: db.handle.db, router, projects });
+  saveHandlers = buildHandlers({
+    memory,
+    repos: createRepositories(db.handle.db),
+    router,
+    projects,
+  });
   sessionHandlers = buildSessionsHandlers({
     db: db.handle.db,
     agentSessions,

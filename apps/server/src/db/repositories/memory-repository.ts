@@ -97,6 +97,38 @@ export class MemoryRepository {
       .get();
   }
 
+  /**
+   * BM25 FTS5 candidate search for save-time detection: active in-scope
+   * rows matching `matchExpr`, excluding the saved row and its links.
+   */
+  searchBm25Candidates(opts: {
+    matchExpr: string;
+    excludeId: string;
+    scope: MemoryScope;
+    projectId: string | null;
+    excludeIds: string[];
+    limit: number;
+  }): { id: string; rank: number; content: string }[] {
+    const scopeWhere =
+      opts.scope === 'project'
+        ? sql`scope = 'project' AND project_id = ${opts.projectId}`
+        : sql`scope = 'global' AND project_id IS NULL`;
+    return this.db.all<{ id: string; rank: number; content: string }>(
+      sql`
+        SELECT m.id AS id, memory_fts.rank AS rank, m.content AS content
+        FROM memory_fts
+          JOIN memory m ON m.rowid = memory_fts.rowid
+        WHERE memory_fts MATCH ${opts.matchExpr}
+          AND m.id != ${opts.excludeId}
+          AND ${scopeWhere}
+          AND m.status = 'active'
+          AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
+        ORDER BY rank
+        LIMIT ${opts.limit}
+      `,
+    );
+  }
+
   searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
     const scopeClause =
       opts.scope === 'global'

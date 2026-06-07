@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import type { Db } from '../db/client.js';
+import type { Repositories } from '../db/repositories/index.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -78,8 +78,8 @@ export interface ToolDeps {
   relations?: RelationsService;
   /** Optional — when present, controls candidate detection thresholds. */
   candidates?: CandidateOptions;
-  /** Optional — db handle needed for save-time candidate queries. */
-  db?: Db;
+  /** Optional — repositories needed for save-time candidate queries. */
+  repos?: Pick<Repositories, 'memory' | 'vectors'>;
   /**
    * Optional — embeds the just-saved row inline so vec candidate
    * detection has a self-vector to kNN from.
@@ -310,13 +310,13 @@ async function handleSave(
       similarity: number;
       source: 'vec' | 'fts';
     }[] = [];
-    if (deps.db && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
+    if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
       try {
         // Give the new row its vector before detection runs, so the vec
         // pass has a self-vector to kNN from (model is warm by boot
         // contract; on failure detection degrades to FTS5 for this save).
         if (deps.embedNow) await deps.embedNow(m.id, m.content);
-        const detected = findSaveTimeCandidates(deps.db, m, deps.candidates);
+        const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
         for (const c of detected) {
           // Skip the topic_key supersede target — we already wrote that relation.
           if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;

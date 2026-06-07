@@ -205,6 +205,7 @@ export async function bootstrap(
       embedNow: (memoryId, content) => embeddingWorker.embedNow(memoryId, content),
       router: sessionRouter,
       db: dbHandle.db,
+      repos,
       doctor: buildDoctorReport,
       sweep: sweepOnSessionStart,
       orphanAfterMs: config.judgments.orphanAfterMs,

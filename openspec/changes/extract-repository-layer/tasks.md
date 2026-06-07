@@ -26,9 +26,10 @@ Phases mirror design.md Decision 7. Each numbered group lands green (`pnpm run t
 - [x] 3.3 `PromptsService` → `PromptsRepository` incl. `DELETE FROM prompts` purge; allow-list + anchor move in same commit
 - [x] 3.4 `AgentSessionsService` + `SessionsService` → `AgentSessionsRepository` incl. `DELETE FROM sessions` purge; allow-list + anchor move in same commit. NOTE: `SessionsService` (dashboard cookies) gets its own `DashboardSessionsRepository` — `dashboard_sessions` was a 9th aggregate missed in the design's repo list (its `DELETE` is legitimate; cookie sessions are not append-only)
 - [x] 3.5 `ProjectsService` and `TokensService` → their repositories (pure builder moves)
-- [ ] 3.6 `save-time-candidates.ts` → `VectorsRepository.knnByCosine(...)` and `MemoryRepository` FTS/BM25 method; decide here whether `embedding-worker.ts` shares `VectorsRepository` (design open question) and move its SQL accordingly
+- [x] 3.6 `save-time-candidates.ts` → `VectorsRepository.knnByCosine(...)` and `MemoryRepository` FTS/BM25 method; decide here whether `embedding-worker.ts` shares `VectorsRepository` (design open question) and move its SQL accordingly
 - [ ] 3.7 `consolidation/{decay,operations,runner}.ts` → `ConsolidationRepository` + `MemoryRepository`; convert the runner throttle raw WHERE (`runner.ts:100`) to builder; consolidation + sweep tests pass unchanged
-- [ ] 3.8 `embeddings/state.ts` → `VectorsRepository` (count + similarity percentile sample)
+- [ ] 3.8 `embeddings/state.ts` → `VectorsRepository` (count + similarity percentile sample) and `embedding-worker.ts` (shares `VectorsRepository`)
+- [ ] 3.8b **(scope correction)** `mcp/sessions-tools.ts` (memory.context recentMemories + pendingJudgments, memory.timeline neighbor/window queries, memory.stats status/type counts) and `mcp/project-tools.ts` (per-project memory counts) hold raw SQL the initial analysis missed — move into the relevant repositories so the phase-4 invariant can pass
 - [ ] 3.9 Stop injecting `Db` into all service constructors; services receive repositories only; typecheck proves no service module imports from `db/schema` or executes SQL
 
 ## 4. Phase 4 — Closure and enforcement
