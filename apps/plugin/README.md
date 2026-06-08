@@ -9,6 +9,14 @@ Memory for AI coding agents, backed by your self-hosted [Rembric](https://github
 | **Hermes Agent** | `.hermes-plugin/`   | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                          | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)       |
 | **opencode**     | `.opencode-plugin/` | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` and paste the printed MCP block into `~/.config/opencode/opencode.json` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)   |
 
+**Prefer one entry point?** The unified installer at [`apps/plugin/install.sh`](./install.sh) wraps all of the above plus the server in a single brand-styled menu that detects which clients you have and at which version, and routes install / update / uninstall to each client's real mechanism (the per-client scripts for Hermes/opencode, the marketplace CLIs for Claude/Codex):
+
+```bash
+# inspect-first (recommended); or pipe straight to sh; pin with --ref=<tag>
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh -o rembric-install.sh
+less rembric-install.sh && sh rembric-install.sh
+```
+
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
 
 > **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).

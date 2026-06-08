@@ -235,6 +235,21 @@ docker compose logs -f rembric
 
 MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
 
+### One installer for everything (optional)
+
+If you'd rather not juggle the server files and four separate plugin installs, there's a single brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin — detecting what you have and at which version:
+
+```bash
+# inspect-first (recommended)
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh -o rembric-install.sh
+less rembric-install.sh && sh rembric-install.sh
+
+# or the one-liner
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh | sh
+```
+
+Pin a release for reproducibility with `--ref=<tag>`. The server step is prepare-only — it writes `docker-compose.yml` + `.env` and prints the `docker compose up -d` for you to run; it never invokes Docker. The Docker block above remains the canonical server path.
+
 ### Running on a remote host (LXC, NAS, server) — the canonical case
 
 The compose file publishes port `8787` on **all interfaces** of the host so your agent on another machine can reach it. Point the plugin at `http://<host-ip>:8787` (LAN) or `http://rembric.tailnet:8787` (Tailscale). Don't expose port 8787 directly to the public internet — front it with Tailscale, WireGuard, or your reverse proxy of choice. The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`.

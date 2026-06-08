@@ -2,6 +2,8 @@
 
 For **Claude Code**, use the bundled plugin — see [`apps/plugin/README.md`](../apps/plugin/README.md). Rembric also ships first-class plugins for **Codex CLI**, **Hermes Agent**, and **opencode** — see the sections below.
 
+> **One installer for all of them.** [`apps/plugin/install.sh`](../apps/plugin/install.sh) is a single brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. It delegates to each client's real mechanism (the per-client scripts for Hermes/opencode, the marketplace CLIs for Claude/Codex), so the per-client instructions below remain the source of truth. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Pin a release with `--ref=<tag>`.
+
 > **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
 
 ## Connection shape

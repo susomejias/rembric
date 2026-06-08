@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts', '../plugin/.opencode-plugin/*.test.ts'],
+    include: ['src/**/*.test.ts', '../plugin/.opencode-plugin/*.test.ts', '../plugin/*.test.ts'],
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,
     coverage: {
