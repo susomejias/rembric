@@ -133,3 +133,13 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin
 ```
 
 `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
+
+## Uninstall
+
+Run the uninstaller. It removes the three installed plugin files and disables the plugin, and is idempotent:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/uninstall.sh | sh
+```
+
+It **deliberately leaves** your credentials (`${HERMES_HOME:-~/.hermes}/.env`) and any `.rembric` project markers in place — it prints what it left so you can remove them by hand if you want. Honours `HERMES_HOME` like the installer.
