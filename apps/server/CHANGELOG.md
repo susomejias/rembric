@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.9](https://github.com/susomejias/rembric/compare/server-v0.21.8...server-v0.21.9) (2026-06-08)
+
+
+### Features
+
+* **server:** expose session title in memory.context ([#120](https://github.com/susomejias/rembric/issues/120)) ([8becbbd](https://github.com/susomejias/rembric/commit/8becbbd18c053836126510eb8198f205955a99cf))
+
 ## [0.21.8](https://github.com/susomejias/rembric/compare/server-v0.21.7...server-v0.21.8) (2026-06-07)
 
 
