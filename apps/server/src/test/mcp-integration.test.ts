@@ -448,6 +448,64 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.context surfaces a session title verbatim and untruncated', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'titled session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const title = 'T'.repeat(100); // max title length — proves it is emitted whole, never snippet-truncated
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: titled session test.', title },
+    });
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; title: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen?.title).toBe(title);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context surfaces an uncurated (placeholder) session title verbatim, not null', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'untitled session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    // Content-bearing via an anchored memory; never summarized with a title → placeholder stands.
+    await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'feedback', content: 'anchor row, placeholder title' },
+    });
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; title: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen).toBeDefined();
+    expect(typeof seen?.title).toBe('string');
+    expect((seen?.title ?? '').length).toBeGreaterThan(0);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
   it('memory.session_get returns the FULL summary while memory.context returns a snippet', async () => {
     const client = await connect();
 

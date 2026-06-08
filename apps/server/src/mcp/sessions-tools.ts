@@ -507,6 +507,7 @@ function handleContext(
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       status: s.status,
+      title: s.title,
       summary: s.summary ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
     }));
 
