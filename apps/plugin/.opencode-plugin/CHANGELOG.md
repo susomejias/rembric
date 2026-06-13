@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.10.0...opencode-plugin-v0.11.0) (2026-06-13)
+
+
+### Features
+
+* **plugin:** unified TUI installer for server + all clients ([#122](https://github.com/susomejias/rembric/issues/122)) ([3be359a](https://github.com/susomejias/rembric/commit/3be359aec1cc97a1d1623b30db76212a82fb2d59))
+
 ## [0.10.0](https://github.com/susomejias/rembric/compare/opencode-plugin-v0.10.0...opencode-plugin-v0.10.0) (2026-05-22)
 
 ### Miscellaneous Chores
