@@ -80,4 +80,14 @@ describe('MCP initialize instructions', () => {
       expect(text).toContain('memory.context');
     }
   });
+
+  it('points at memory.about for update guidance in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('memory.about');
+    }
+  });
 });
