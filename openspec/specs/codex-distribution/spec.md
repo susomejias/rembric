@@ -197,7 +197,13 @@ Codex install material SHALL document the credential flow given Codex's lack of 
 
 ### Requirement: `docs/agents.md` recommends the plugin install as primary
 
-The Codex section of `docs/agents.md` SHALL recommend the marketplace plugin install as the primary path, document the credential flow, document the platform-required enablement steps for plugin hooks (which Codex gates behind an under-development feature flag and a per-hook trust review as of `codex-cli 0.130.0`), and retain a manual `config.toml` fallback for users who do not want the plugin. The "trust each of the N plugin-bundled hooks" guidance SHALL be updated to enumerate the now-FIVE hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`) — superseding the previous "4 plugin-bundled hooks" wording.
+The Codex section of `docs/agents.md` SHALL recommend the **TUI installer** (`apps/plugin/install.sh` / the root shim) as the primary install path. It SHALL retain the Codex marketplace plugin install (`codex plugin marketplace add … && codex plugin install rembric`) and the manual `config.toml` fallback, but both SHALL appear under an explicitly-labelled "Manual / advanced" subsection, not as the lead instruction. The section SHALL document the credential flow, and the platform-required enablement steps for plugin hooks (which Codex gates behind an under-development feature flag and a per-hook trust review as of `codex-cli 0.130.0`). The "trust each of the N plugin-bundled hooks" guidance SHALL enumerate the FIVE hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`).
+
+#### Scenario: Codex section leads with the TUI installer
+
+- **WHEN** a reader opens the Codex section of `docs/agents.md`
+- **THEN** the first install instruction SHALL be the TUI installer
+- **AND** the `codex plugin marketplace add` / `codex plugin install` commands and the manual `config.toml` SHALL appear only under a manual / advanced heading
 
 #### Scenario: Platform-required hook enablement enumerates five hooks
 
