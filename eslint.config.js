@@ -29,6 +29,7 @@ export default tseslint.config(
             'commitlint.config.js',
             'apps/server/drizzle.config.ts',
             'apps/server/vitest.config.ts',
+            'install.test.ts',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -65,7 +66,7 @@ export default tseslint.config(
     // type-checked rule set doesn't have full type info for them after the
     // monorepo restructure (tsconfig.json moved to apps/server/). Disable
     // type-checked rules for these files.
-    files: ['eslint.config.js', 'commitlint.config.js'],
+    files: ['eslint.config.js', 'commitlint.config.js', 'install.test.ts'],
     extends: [tseslint.configs.disableTypeChecked],
   },
   prettier,

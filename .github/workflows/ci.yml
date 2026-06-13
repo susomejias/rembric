@@ -53,6 +53,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Installer e2e (headless)
+        run: pnpm run e2e:installer
+
       - name: Build (artifact sanity)
         run: pnpm run build
 
@@ -77,6 +80,10 @@ jobs:
           target: runtime
           platforms: linux/amd64
           push: false
+          # Load into the daemon as :latest so the installer e2e below can bring
+          # it up without pulling from GHCR (REMBRIC_NO_PULL).
+          load: true
+          tags: ghcr.io/susomejias/rembric:latest
           cache-from: type=gha,scope=docker-build-check-runtime
           cache-to: type=gha,mode=max,scope=docker-build-check-runtime
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
@@ -95,3 +102,24 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker-build-check-dev
           secrets: |
             hf_token=${{ secrets.HF_TOKEN }}
+
+      # Real end-to-end of the installer's server bring-up: drive the actual
+      # `install.sh --server --up` against the locally-built image (REMBRIC_NO_PULL
+      # so it uses the loaded :latest, no GHCR), then assert the server answers.
+      - name: Installer e2e — server --up against the built image
+        run: |
+          set -eu
+          REPO="$PWD"; T="$(mktemp -d)"; cd "$T"
+          REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 REMBRIC_UPDATE_CHECK=off REMBRIC_NO_PULL=1 \
+            sh "$REPO/install.sh" --server --action=install --up --token=ci-e2e-token --port=8787
+          ok=
+          for _ in $(seq 1 45); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-e2e-token' http://127.0.0.1:8787/healthz || true)
+            [ "$c" = 200 ] && { ok=1; break; }
+            sleep 2
+          done
+          if [ -z "$ok" ]; then echo "::error::/healthz never returned 200"; docker compose logs || true; exit 1; fi
+          d=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/dashboard || true)
+          echo "healthz=200 dashboard=$d"
+          case "$d" in 200 | 302) ;; *) echo "::error::unexpected /dashboard status $d"; exit 1 ;; esac
+          docker compose down

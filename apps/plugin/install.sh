@@ -17,10 +17,10 @@
 #   REMBRIC_SRC="$(pwd)" sh apps/plugin/install.sh
 #
 # Non-interactive (CI / no TTY):
-#   REMBRIC_NONINTERACTIVE=1 sh install.sh --client=opencode --action=install
+#   REMBRIC_NONINTERACTIVE=1 sh install.sh --agent=opencode --action=install
 #   sh install.sh --server
 #
-# Flags: --server | --client=<a,b,..> | --action=install|update|uninstall
+# Flags: --server | --agent=<a,b,..> | --action=install|update|uninstall
 #        --ref=<tag>  (pin the git ref; default main)
 
 set -eu
@@ -35,19 +35,29 @@ NONINTERACTIVE="${REMBRIC_NONINTERACTIVE:-0}"
 RAW_BASE="https://raw.githubusercontent.com/susomejias/rembric"
 
 ARG_SERVER=0
-ARG_CLIENTS=''
+ARG_AGENTS=''
 ARG_ACTION=''
 ARG_UP=0
+ARG_STATUS=0
+ARG_JSON=0
+ARG_TOKEN=''
+ARG_TOKEN_SET=0
+ARG_PORT=''
+ARG_HELP=0
 
 for arg in "$@"; do
   case "$arg" in
     --server) ARG_SERVER=1 ;;
-    --client=*) ARG_CLIENTS="${arg#--client=}" ;;
+    --agent=*) ARG_AGENTS="${arg#--agent=}" ;;
     --action=*) ARG_ACTION="${arg#--action=}" ;;
     --ref=*) REF="${arg#--ref=}" ;;
     --up) ARG_UP=1 ;;
+    --status) ARG_STATUS=1 ;;
+    --json) ARG_JSON=1 ;;
+    --token=*) ARG_TOKEN="${arg#--token=}"; ARG_TOKEN_SET=1 ;;
+    --port=*) ARG_PORT="${arg#--port=}" ;;
     --noninteractive) NONINTERACTIVE=1 ;;
-    -h|--help) ARG_ACTION='help' ;;
+    -h|--help) ARG_HELP=1 ;;
     *) printf '[rembric] error: unknown argument %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -76,19 +86,61 @@ setup_colors
 
 say() { printf '%s\n' "$*"; }
 hr()  { printf '%s────────────────────────────────────────────────────%s\n' "$DIM" "$RESET"; }
+
+# Block-letter REMBRIC wordmark rows + display width (hardcoded — the rows are
+# multibyte █, so we can't measure width portably).
+WM1='██████  ███████ ███    ███ ██████  ██████  ██  ██████'
+WM2='██   ██ ██      ████  ████ ██   ██ ██   ██ ██ ██'
+WM3='██████  █████   ██ ████ ██ ██████  ██████  ██ ██'
+WM4='██   ██ ██      ██  ██  ██ ██   ██ ██   ██ ██ ██'
+WM5='██   ██ ███████ ██      ██ ██████  ██   ██ ██  ██████'
+WM_W=54
+BANNER_DONE=0
+_wm_static() { printf '  %s\n  %s\n  %s\n  %s\n  %s\n' "$WM1" "$WM2" "$WM3" "$WM4" "$WM5"; }
+# Horizontal left-to-right reveal: each frame reprints the full lime banner then
+# overlays plain spaces on the right of every row (1-byte, so no multibyte
+# truncation), shrinking the overlay so the banner wipes in from the left. The
+# final frame has zero overlay = full banner. Plays once, interactive TTY only.
+_wm_anim() {
+  printf '\033[?25l'
+  _w=0
+  while :; do
+    printf '%s' "$LIME"; _wm_static; printf '%s' "$RESET"
+    printf '\033[5A'                                   # back up to row 1
+    _i=0
+    while [ "$_i" -lt 5 ]; do
+      [ $((WM_W - _w)) -gt 0 ] && printf '\033[%dG%*s' "$((3 + _w))" "$((WM_W - _w))" ''
+      printf '\033[1E'                                 # next row, column 1
+      _i=$((_i + 1))
+    done
+    [ "$_w" -ge "$WM_W" ] && break
+    sleep 0.03 2>/dev/null || true
+    printf '\033[5A'                                   # back up to redraw next frame
+    _w=$((_w + 6))
+  done
+  printf '\033[?25h'
+}
 wordmark() {
-  # Block-letter REMBRIC in lime when colour is active; plain line otherwise.
+  # Block-letter REMBRIC + hero tagline in lime when colour is active; plain
+  # one-liner otherwise (headless / NO_COLOR / non-tty). Animate the reveal only
+  # on the first interactive render; later redraws are instant.
   if [ -z "$LIME" ]; then printf '\n  rembric installer\n'; return; fi
-  printf '\n%s' "$LIME"
-  printf '  %s\n' '██████  ███████ ███    ███ ██████  ██████  ██  ██████'
-  printf '  %s\n' '██   ██ ██      ████  ████ ██   ██ ██   ██ ██ ██'
-  printf '  %s\n' '██████  █████   ██ ████ ██ ██████  ██████  ██ ██'
-  printf '  %s\n' '██   ██ ██      ██  ██  ██ ██   ██ ██   ██ ██ ██'
-  printf '  %s\n' '██   ██ ███████ ██      ██ ██████  ██   ██ ██  ██████'
-  printf '%s\n' "$RESET"
+  printf '\n'
+  if [ "$BANNER_DONE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
+    _wm_anim
+  else
+    printf '%s' "$LIME"; _wm_static; printf '%s' "$RESET"
+  fi
+  printf '\n'
+  printf '%s  Persistent memory for AI coding agents — self-hosted, MCP-native, append-only.%s\n' "$DIM" "$RESET"
+  printf '%s  One Docker image, one SQLite file.%s\n' "$DIM" "$RESET"
+  BANNER_DONE=1
 }
 banner() {
   wordmark
+  printf '\n'
+  # Always announce the source (supply-chain transparency): the local clone path,
+  # or the remote ref artifacts are fetched from.
   printf '%s  source: %s%s\n' "$DIM" "$([ -n "$REMBRIC_SRC" ] && echo "local:$REMBRIC_SRC" || echo "ref:$REF")" "$RESET"
   hr
 }
@@ -286,24 +338,120 @@ vercmp() {
 # ── status table ────────────────────────────────────────────────────────────
 print_table() {
   load_manifest
+  # Caption makes clear the rows are about the Rembric PLUGIN per agent — the
+  # action installs/updates the plugin, not the agent itself.
+  printf '%s  Rembric plugin per agent — "install"/"update" target the plugin, not the agent%s\n' "$DIM" "$RESET"
+  # Columns: DETECTED = agent found on this machine · PLUGIN = installed rembric
+  # plugin version · LATEST = latest plugin version · ACTION = what to do.
   # Pad on plain text only — ANSI escapes count toward printf field width and
-  # would skew the columns. Colour is wrapped around the pre-padded cells.
-  printf '%s  %-10s %-8s %-11s %-11s %s%s\n' "$BOLD" "CLIENT" "PRESENT" "INSTALLED" "AVAILABLE" "ACTION" "$RESET"
+  # would skew the columns; colour wraps the pre-padded cells.
+  printf '%s  %-10s %-9s %-11s %-11s %s%s\n' "$BOLD" "AGENT" "DETECTED" "PLUGIN" "LATEST" "ACTION" "$RESET"
   for c in claude codex hermes opencode; do
-    if client_present "$c"; then presc="${LIME}$(printf '%-8s' yes)${RESET}"; else presc="${DIM}$(printf '%-8s' no)${RESET}"; fi
+    if client_present "$c"; then detc="${LIME}$(printf '%-9s' yes)${RESET}"; else detc="${DIM}$(printf '%-9s' no)${RESET}"; fi
     inst=$(installed_version "$c" 2>/dev/null || true)
     avail=$(available_version "$(component_key "$c")")
     state=$(vercmp "$inst" "$avail")
     case "$state" in
       none)    act="${DIM}up to date${RESET}" ;;
-      update)  act="${WARN}update -> $avail${RESET}" ;;
-      install) act="${LIME}install $avail${RESET}" ;;
+      update)  act="${WARN}update${RESET}" ;;
+      install) act="${LIME}install${RESET}" ;;
       ahead)   act="${DIM}ahead${RESET}" ;;
       *)       act="${DIM}-${RESET}" ;;
     esac
-    printf '  %-10s %s %-11s %-11s %s\n' "$c" "$presc" "${inst:--}" "${avail:--}" "$act"
+    printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${avail:--}" "$act"
   done
   hr
+}
+
+# ── server detection (best-effort, via docker) ──────────────────────────────
+# server_state echoes a single token: running | exited | paused | created |
+# dead | absent (no container) | unknown (no docker / daemon unreachable).
+server_state() {
+  command -v docker >/dev/null 2>&1 || { echo unknown; return; }
+  docker ps >/dev/null 2>&1 || { echo unknown; return; }
+  _st=$(docker container inspect rembric --format '{{.State.Status}}' 2>/dev/null) || { echo absent; return; }
+  echo "${_st:-absent}"
+}
+# Version the running/stopped container was built from = its image tag (e.g.
+# 0.21.9, or 'latest'). Empty when there is no rembric container.
+server_image_version() { docker inspect rembric --format '{{.Config.Image}}' 2>/dev/null | sed -n 's/.*://p'; }
+
+# Latest published server release from GitHub Releases (tag `server-v<semver>`),
+# same source the dashboard's update-check uses. Best-effort: empty on offline /
+# rate-limit / no curl / REMBRIC_UPDATE_CHECK=off. REMBRIC_RELEASES_URL overrides
+# the endpoint (for tests). NOTE: a running `:latest` image can't be compared to
+# this without a digest, so it's informational, not a hard "you're behind".
+server_latest_release() {
+  [ "${REMBRIC_UPDATE_CHECK:-on}" = "off" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  _rurl="${REMBRIC_RELEASES_URL:-https://api.github.com/repos/susomejias/rembric/releases}"
+  _rbody=$(curl -fsSL --max-time 4 "$_rurl" 2>/dev/null) || return 0
+  printf '%s' "$_rbody" \
+    | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"server-v[0-9]+\.[0-9]+\.[0-9]+"' \
+    | sed -E 's/.*server-v([0-9.]+)".*/\1/' | sort -V | tail -1
+}
+
+# NOTE: no "available" for the server — the installer pulls the `:latest`
+# image (or a pinned REMBRIC_VERSION), so the authoritative "is there a newer
+# release" check is the dashboard's (GitHub Releases), not the repo manifest.
+# We report only the docker-observable state + the running image tag.
+server_status_print() {
+  _ss=$(server_state); _sv=$(server_image_version); _lr=$(server_latest_release)
+  case "$_ss" in
+    running) _sc="$LIME"; _msg=running ;;
+    exited|paused|created|dead) _sc="$WARN"; _msg="$_ss" ;;
+    absent) _sc="$DIM"; _msg="not installed" ;;
+    *) _sc="$DIM"; _msg="unknown (docker unavailable)" ;;
+  esac
+  _extra=''
+  [ -n "$_sv" ] && _extra=" · version $_sv"
+  if [ -n "$_lr" ]; then
+    _extra="$_extra · latest release $_lr"
+    case "$_sv" in
+      [0-9]*.[0-9]*.[0-9]*)
+        if [ "$_sv" != "$_lr" ] && [ "$(printf '%s\n%s\n' "$_sv" "$_lr" | sort -V | tail -1)" = "$_lr" ]; then
+          _extra="$_extra ${WARN}(update available)${RESET}"
+        fi ;;
+    esac
+  fi
+  printf '  %sSERVER%s  %s%s%s%s\n' "$BOLD" "$RESET" "$_sc" "$_msg" "$RESET" "$_extra"
+}
+
+# do_status: headless, machine-friendly view of the server + per-agent plugin
+# versions for agents driving the installer as a CLI. Text shows a SERVER line
+# then the agent table; --json emits {server, agents}. Payload only (no banner).
+json_str() { if [ -z "$1" ]; then printf 'null'; else printf '"%s"' "$1"; fi; }
+do_status() {
+  load_manifest
+  if [ "$ARG_JSON" = "1" ]; then
+    printf '{"server":{"state":"%s","version":%s,"latest_release":%s},"agents":[' \
+      "$(server_state)" "$(json_str "$(server_image_version)")" "$(json_str "$(server_latest_release)")"
+    _f=1
+    for c in claude codex hermes opencode; do
+      if client_present "$c"; then _p=true; else _p=false; fi
+      _inst=$(installed_version "$c" 2>/dev/null || true)
+      _avail=$(available_version "$(component_key "$c")")
+      _state=$(vercmp "$_inst" "$_avail")
+      if [ "$_f" = "1" ]; then _f=0; else printf ','; fi
+      printf '{"agent":"%s","present":%s,"installed":%s,"available":%s,"action":"%s"}' \
+        "$c" "$_p" "$(json_str "$_inst")" "$(json_str "$_avail")" "$_state"
+    done
+    printf ']}\n'
+    return 0
+  fi
+  server_status_print
+  say ""
+  print_table
+}
+
+# write_token: set REMBRIC_ADMIN_TOKEN in ./.env to an arbitrary value safely
+# (awk -v avoids sed delimiter/regex issues with user-supplied tokens).
+write_token() {
+  if grep -q '^REMBRIC_ADMIN_TOKEN=' ./.env; then
+    _tmp=$(mktemp); awk -v v="$1" '/^REMBRIC_ADMIN_TOKEN=/{print "REMBRIC_ADMIN_TOKEN=" v; next} {print}' ./.env > "$_tmp" && mv "$_tmp" ./.env
+  else
+    printf 'REMBRIC_ADMIN_TOKEN=%s\n' "$1" >> ./.env
+  fi
 }
 
 # gen_token → a 64-char hex admin token (openssl, or /dev/urandom via od).
@@ -334,13 +482,33 @@ bring_up() {
     return 0
   fi
   # Pull first so a stale local `latest` tag can't shadow the published image
-  # (and to actually fetch the new version on update); skipped silently offline.
-  docker compose pull 2>/dev/null || say "  ${DIM}(pull skipped — using local image)${RESET}"
-  if docker compose up -d; then
-    say "  ${LIME}Up.${RESET} Dashboard: ${BOLD}http://127.0.0.1:8787/dashboard${RESET}  (adjust host/port to your setup)"
+  # (and to actually fetch the new version on update); skipped silently offline,
+  # or explicitly via REMBRIC_NO_PULL=1 (air-gapped / use the local image as-is).
+  if [ "${REMBRIC_NO_PULL:-0}" = "1" ]; then
+    say "  ${DIM}(pull skipped — REMBRIC_NO_PULL)${RESET}"
+  else
+    docker compose pull 2>/dev/null || say "  ${DIM}(pull skipped — using local image)${RESET}"
+  fi
+  # Capture so a daemon error (e.g. a name conflict) becomes a friendly message
+  # instead of a raw dump; `up -d` output is short, so we re-print it on success.
+  # `if x=$(…); then` keeps the capture set -e-safe (a bare `x=$(failing)` aborts).
+  if _up=$(docker compose up -d 2>&1); then _rc=0; else _rc=$?; fi
+  if [ "$_rc" = "0" ]; then
+    say "  ${LIME}Up.${RESET} Dashboard: ${BOLD}http://127.0.0.1:${ARG_PORT:-8787}/dashboard${RESET}  (adjust host to your setup)"
     [ -n "${tok:-}" ] && say "  Log in with admin token: ${BOLD}${tok}${RESET}"
   else
-    say "  ${DANGER}docker compose up failed${RESET} — see output above; files are ready to retry."
+    case "$_up" in
+      *"already in use"*|*Conflict*)
+        say "  ${WARN}A Rembric container named 'rembric' is already running${RESET} — left untouched."
+        say "  ${DIM}Refusing to clobber an existing install.${RESET} You can either:"
+        say "    • keep using it — open its dashboard, or"
+        say "    • replace it: ${BOLD}docker rm -f rembric${RESET}  (or 'docker compose down' in its install dir), then re-run."
+        ;;
+      *)
+        printf '%s\n' "$_up" | tail -4
+        say "  ${DANGER}docker compose up failed${RESET} — files are ready to retry."
+        ;;
+    esac
   fi
 }
 
@@ -373,7 +541,10 @@ do_server() {
   fi
   tok=$(sed -n 's/^REMBRIC_ADMIN_TOKEN=//p' ./.env | head -1)
 
-  if [ -n "$tok" ]; then
+  if [ "$ARG_TOKEN_SET" = "1" ]; then
+    tok="$ARG_TOKEN"; write_token "$tok"
+    say "  Admin token (provided): ${BOLD}${tok}${RESET}"
+  elif [ -n "$tok" ]; then
     say "  ./.env already configured — left untouched."
     say "  Admin token (from ./.env): ${BOLD}${tok}${RESET}"
   else
@@ -391,14 +562,19 @@ do_server() {
       tok=$(gen_token) || return 1
       gen=1
     fi
-    if grep -q '^REMBRIC_ADMIN_TOKEN=' ./.env; then
-      tmp=$(mktemp); sed "s|^REMBRIC_ADMIN_TOKEN=.*|REMBRIC_ADMIN_TOKEN=${tok}|" ./.env > "$tmp" && mv "$tmp" ./.env
-    else
-      printf 'REMBRIC_ADMIN_TOKEN=%s\n' "$tok" >> ./.env
-    fi
+    write_token "$tok"
     if [ "$gen" = "1" ]; then say "  Generated admin token: ${BOLD}${tok}${RESET}"
     else say "  Admin token (yours): ${BOLD}${tok}${RESET}"; fi
     say "  ${DIM}(saved in ./.env — needed to log into the dashboard)${RESET}"
+  fi
+
+  if [ -n "$ARG_PORT" ]; then
+    if grep -q '^REMBRIC_PORT=' ./.env; then
+      _tmp=$(mktemp); awk -v v="$ARG_PORT" '/^REMBRIC_PORT=/{print "REMBRIC_PORT=" v; next} {print}' ./.env > "$_tmp" && mv "$_tmp" ./.env
+    else
+      printf 'REMBRIC_PORT=%s\n' "$ARG_PORT" >> ./.env
+    fi
+    say "  Port: ${BOLD}${ARG_PORT}${RESET}  ${DIM}(REMBRIC_PORT in ./.env)${RESET}"
   fi
 
   bring_up
@@ -466,6 +642,29 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   return 0
 }
 
+# Required post-install/upgrade steps per agent (the platform bits the installer
+# can't do for you). Surfaced after a successful install/update so the user
+# isn't left with a half-wired plugin. Full walkthrough: docs/agents.md.
+post_install_notes() {
+  case "$1" in
+    claude)
+      say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code." ;;
+    codex)
+      say "  ${BOLD}Next${RESET} (one-time — required or hooks won't fire):"
+      say "    1) ${BOLD}codex features enable plugin_hooks${RESET}"
+      say "    2) open ${BOLD}/hooks${RESET} in Codex and trust the 5 rembric hooks"
+      say "    3) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
+      say "    ${DIM}details: docs/agents.md${RESET}" ;;
+    hermes)
+      say "  ${BOLD}Next:${RESET}"
+      say "    1) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
+      say "    2) ${BOLD}hermes plugins enable rembric${RESET}"
+      say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}" ;;
+    opencode)
+      say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode." ;;
+  esac
+}
+
 do_client() { # $1 client, $2 action
   c="$1"; action="$2"
   say "${BOLD}${c} (${action})${RESET}"
@@ -475,22 +674,35 @@ do_client() { # $1 client, $2 action
       if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
     claude|codex) marketplace_cmds "$c" "$action" ;;
   esac
+  if [ "$action" != "uninstall" ]; then post_install_notes "$c"; fi
   return 0
 }
 
 usage() {
   cat >&2 <<EOF
-rembric installer
+rembric installer — interactive TUI, or a headless CLI for agents/automation.
 
 Interactive:   sh install.sh
-Server:        sh install.sh --server [--up]
-Plugins:       sh install.sh --client=opencode,hermes --action=install|update|uninstall
-Pin a ref:     sh install.sh --ref=server-v0.21.9 ...
-Local testing: REMBRIC_SRC="\$(pwd)" sh apps/plugin/install.sh
+Status:        sh install.sh --status [--json]
+Server:        sh install.sh --server [--token=<tok>] [--port=<n>] [--up]
+Plugins:       sh install.sh --agent=opencode,hermes --action=install|update|uninstall
 
---up   run 'docker compose up -d' after preparing the server (needs docker)
+Flags:
+  --status            print the agent/version table headless (no menu); exit
+  --json              machine-readable output for --status
+  --server            prepare the server (docker-compose.yml + .env + token)
+  --agent=<a,b,..>   one or more of: claude codex hermes opencode
+  --action=<a>        install | update | uninstall
+  --token=<tok>       admin token for --server (default: auto-generate)
+  --port=<n>          REMBRIC_PORT for --server (default: 8787)
+  --up                run 'docker compose pull && up -d' after --server (needs docker)
+  --ref=<tag>         git ref to install from (default: main)
+  -h, --help          this help
 
-Clients: claude codex hermes opencode
+Env: REMBRIC_NONINTERACTIVE=1 (force headless) · REMBRIC_SRC=<clone> (read from
+     disk, no network) · REMBRIC_REF=<tag> · NO_COLOR · REMBRIC_NO_PULL=1
+     (skip 'docker compose pull' on --up) · REMBRIC_UPDATE_CHECK=off (skip the
+     GitHub release lookup in --status).
 EOF
 }
 
@@ -499,7 +711,7 @@ EOF
 # with a clear, actionable error listing everything missing at once.
 preflight() {
   _missing=''
-  for _t in sed grep sort mktemp; do
+  for _t in sed awk grep sort mktemp; do
     command -v "$_t" >/dev/null 2>&1 || _missing="$_missing $_t"
   done
   if [ -z "$REMBRIC_SRC" ]; then
@@ -530,23 +742,27 @@ server_deps_report() {
 }
 
 # ── dispatch ────────────────────────────────────────────────────────────────
-if [ "$ARG_ACTION" = "help" ]; then usage; exit 0; fi
+if [ "$ARG_HELP" = "1" ]; then usage; exit 0; fi
 
 # Verify the universally-required tools up front (curl only in remote mode).
 preflight || exit 1
+
+# --status is a read-only query (CLI / agent use): print and exit, no banner,
+# regardless of TTY. With --json the output is the JSON payload only.
+if [ "$ARG_STATUS" = "1" ]; then do_status; exit 0; fi
 
 # Non-interactive / no-TTY → require explicit flags, never guess.
 if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
   banner
   did=0
   [ "$ARG_SERVER" = "1" ] && { do_server "${ARG_ACTION:-install}"; did=1; }
-  if [ -n "$ARG_CLIENTS" ]; then
-    [ -z "$ARG_ACTION" ] && { printf '[rembric] error: --client requires --action\n' >&2; usage; exit 2; }
+  if [ -n "$ARG_AGENTS" ]; then
+    [ -z "$ARG_ACTION" ] && { printf '[rembric] error: --agent requires --action\n' >&2; usage; exit 2; }
     load_manifest
     OLDIFS=$IFS; IFS=','
-    for c in $ARG_CLIENTS; do
+    for c in $ARG_AGENTS; do
       case "$c" in claude|codex|hermes|opencode) do_client "$c" "$ARG_ACTION"; did=1 ;;
-        *) printf '[rembric] error: unknown client %s\n' "$c" >&2; IFS=$OLDIFS; exit 2 ;; esac
+        *) printf '[rembric] error: unknown agent %s\n' "$c" >&2; IFS=$OLDIFS; exit 2 ;; esac
     done
     IFS=$OLDIFS
   fi
@@ -566,6 +782,8 @@ while :; do
   case "$MENU_INDEX" in
     0)
       screen
+      server_status_print
+      say ""
       arrow_menu "Server action" "install" "update"
       case "$MENU_INDEX" in
         0) screen; do_server install; pause ;;
@@ -574,7 +792,7 @@ while :; do
     1)
       screen
       print_table
-      arrow_menu "Which client?" "claude" "codex" "hermes" "opencode"
+      arrow_menu "Which agent?" "claude" "codex" "hermes" "opencode"
       case "$MENU_INDEX" in
         0) c=claude ;; 1) c=codex ;; 2) c=hermes ;; 3) c=opencode ;; *) c='' ;;
       esac
