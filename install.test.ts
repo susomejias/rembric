@@ -26,6 +26,19 @@ const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
 const INSTALL_SH = join(REPO_ROOT, 'apps', 'plugin', 'install.sh');
 const ROOT_SHIM = join(REPO_ROOT, 'install.sh');
 
+// The installer reports each agent's "available" plugin version from
+// .release-please-manifest.json per component. Derive expectations from the
+// same source so a release-please bump doesn't break these tests.
+const MANIFEST = JSON.parse(
+  readFileSync(join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'),
+) as Record<string, string>;
+const PLUGIN_VERSION: Record<string, string> = {
+  claude: MANIFEST['apps/plugin/.claude-plugin'],
+  codex: MANIFEST['apps/plugin/.codex-plugin'],
+  hermes: MANIFEST['apps/plugin/.hermes-plugin'],
+  opencode: MANIFEST['apps/plugin/.opencode-plugin'],
+};
+
 interface RunOpts {
   cwd?: string;
   home?: string;
@@ -249,7 +262,7 @@ describe('agent CLI flags', () => {
     expect(data.agents.map((d) => d.agent)).toEqual(['claude', 'codex', 'hermes', 'opencode']);
     for (const d of data.agents) {
       expect(typeof d.present).toBe('boolean');
-      expect(d.available).toBe('0.10.0'); // from .release-please-manifest.json at the ref
+      expect(d.available).toBe(PLUGIN_VERSION[d.agent]); // from .release-please-manifest.json at the ref
       expect(d.installed).toBeNull(); // clean HOME → nothing installed
       expect(typeof d.action).toBe('string');
     }
@@ -280,7 +293,7 @@ describe('agent CLI flags', () => {
     expect(out).toContain('AGENT');
     expect(out).toContain('PLUGIN'); // clarifies the rows are about the plugin, not the agent
     expect(out).toContain('claude');
-    expect(out).toContain('0.10.0');
+    expect(out).toContain(PLUGIN_VERSION.claude);
   });
 
   it('--token sets the admin token verbatim on server install', () => {
