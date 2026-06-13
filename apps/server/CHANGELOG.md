@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.11](https://github.com/susomejias/rembric/compare/server-v0.21.10...server-v0.21.11) (2026-06-13)
+
+
+### Features
+
+* **mcp:** add memory.about update-guidance tool ([#129](https://github.com/susomejias/rembric/issues/129)) ([0a57244](https://github.com/susomejias/rembric/commit/0a572448fa45dee149de7d1a05d85515ff6f8cd5))
+
 ## [0.21.10](https://github.com/susomejias/rembric/compare/server-v0.21.9...server-v0.21.10) (2026-06-13)
 
 
