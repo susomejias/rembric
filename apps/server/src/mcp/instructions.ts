@@ -19,9 +19,9 @@ export interface InstructionsContext {
 
 const BASE = `Rembric memory.
 
-Call memory.save after: bug fix · decision · discovery · config change · pattern · user preference. If the topic is evolving, pass topic_key (memory.suggest_topic_key) so the prior row supersedes. Close save candidates[] with memory.judge.
+Call memory.save after: bug fix · decision · discovery · config change · pattern · preference. Evolving topic? pass topic_key (memory.suggest_topic_key) to supersede the prior row. Close save candidates[] with memory.judge.
 Call memory.search for past work or "what did we do".
-Call memory.session_summary({title, summary≤${SUMMARY_MAX_CHARS} chars}) before saying "done": title ≤100 chars (real work, not cwd). Summary covers Goal · Discoveries · Accomplished · Next Steps · Files.
+Call memory.session_summary({title, summary≤${SUMMARY_MAX_CHARS} chars}) before ending any turn with real work: title ≤100 chars (real work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.
 After /compact: call memory.context if detail is missing.
 To update Rembric: call memory.about.`;
 

@@ -52,7 +52,7 @@ When the MCP server is constructed, its `instructions` field SHALL be populated 
 
 The instructions SHALL include:
 
-1. The session-close protocol sentence directing the agent to call `memory.session_summary({title, summary})` before declaring work "done". The sentence SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (≤2000 chars). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 800-character ceiling.
+1. The session-close protocol sentence directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn — rather than to the literal word "done" (which the agent can trivially evade by not using it). The sentence SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (≤2000 chars). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 800-character ceiling.
 2. **The post-compact recovery clause** — a short instruction directing the agent that after any compaction event, when the compacted summary lacks specific detail (exact file paths, prior decisions, concrete error messages), it MUST call `memory.context` (or `memory.search` for keyword lookup) BEFORE responding to the user's pending prompt. The phrasing SHALL stay concise (≤60 chars of new content) so the total stays under the 800-char cap.
 3. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins). The phrasing SHALL stay concise (≤40 chars of new content) so the total stays under the 800-char cap.
 
@@ -64,6 +64,12 @@ The instructions SHALL include:
 - **AND** the instructions SHALL contain the substring `2000` (the summary length cap)
 - **AND** the instructions SHALL contain the substring `memory.context` (the post-compact recovery clause)
 - **AND** the instructions SHALL contain the substring `memory.about` (the update-guidance pointer)
+
+#### Scenario: The session-summary trigger is bound to ending a working turn
+
+- **WHEN** either variant of `buildInstructions(ctx)` is built
+- **THEN** the instructions SHALL phrase the `memory.session_summary` trigger as firing before ending any turn in which real work happened
+- **AND** the instructions SHALL NOT bind the trigger solely to the literal phrase `before saying "done"`
 
 #### Scenario: An MCP client connects on `/mcp` without a project
 

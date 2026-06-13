@@ -10,6 +10,7 @@ Rembric is multi-machine by construction: the server runs on one host (e.g. a VP
 - The tool takes no parameters, performs no side effects, does NOT detect installed clients, and does NOT diff versions. It delegates to the TUI installer and the Docker flow; it reimplements neither (honoring the "installer is the single install/maintenance path" contract).
 - The tool MUST be guidance-only: it surfaces commands for the operator to run and MUST NOT execute `curl|sh` or `docker` itself; no client should auto-run them.
 - Extend the MCP `initialize.instructions` block (`buildInstructions`) to **cite `memory.about`** as where to learn how to update, staying within the existing 800-char cap. This serves Claude Code and Codex (the clients that consume `instructions`). opencode and Hermes do not consume that block, so they discover the tool via its keyword-rich MCP manifest description; the Hermes `system_prompt_block` (hard ≤300-char cap, already saturated) is intentionally NOT modified.
+- **Strengthen the session-summary trigger** in the same `instructions` block: rebind it from the easily-evaded literal `before saying "done"` to `before ending any turn with real work`, and compact adjacent clauses (save line, summary structure label) to absorb the cost while staying under the 800-char cap. This is a standard, server-side-only nudge — no hook, no plugin change, no `UserPromptSubmit` injection.
 
 ## Capabilities
 
@@ -19,7 +20,7 @@ Rembric is multi-machine by construction: the server runs on one host (e.g. a VP
 
 ### Modified Capabilities
 
-- `mcp-api`: adds a new requirement for the read-only `memory.about` tool (two-axis, guidance-only, no params, no side effects), and extends the existing `initialize.instructions` requirement to cite `memory.about` while preserving the 800-char cap.
+- `mcp-api`: adds a new requirement for the read-only `memory.about` tool (two-axis, guidance-only, no params, no side effects), and extends the existing `initialize.instructions` requirement to (a) cite `memory.about` and (b) bind the session-summary trigger to ending a working turn rather than the literal word "done" — both while preserving the 800-char cap.
 
 ## Impact
 

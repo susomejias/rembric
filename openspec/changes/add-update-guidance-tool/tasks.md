@@ -14,12 +14,13 @@
 
 - [x] 3.1 In `apps/server/src/mcp/instructions.ts`, add the shortest possible update-guidance clause naming `memory.about` (≤40 chars of new content) to the shared `BASE` block, so both the path-scoped and unscoped variants carry it.
 - [x] 3.2 Verify both `buildInstructions({requestedSlug:'demo'})` and `buildInstructions({requestedSlug:null})` stay ≤800 chars after the addition.
+- [x] 3.3 Strengthen the session-summary trigger in `BASE`: rebind `before saying "done"` → `before ending any turn with real work`; compact adjacent clauses (save line, `Summary covers` → `summary:`) to absorb the cost under the 800-char cap. Instructions-only — no hook/plugin change.
 
 ## 4. Tests
 
 - [x] 4.1 Add a unit test for `buildAboutReport()` asserting: `server.version === REMBRIC_VERSION`; both axes present; `plugins.note` contains the "server cannot see plugins" wording; the installer URL/flags match the canonical entrypoint; `plugins.status` uses `--status --json` and carries no mutating flag; the report contains no executed side effects (pure function returns the same object on repeat calls).
 - [x] 4.2 Add an MCP-level test that calling `memory.about` returns the report and performs no DB access (e.g. against the same harness used by the `memory.doctor` test).
-- [x] 4.3 Extend `apps/server/src/mcp/instructions.test.ts`: both variants contain the substring `memory.about`, remain ≤800 chars, and existing assertions (`memory.session_summary`, `memory.context`, `2000`, scope notes) still pass.
+- [x] 4.3 Extend `apps/server/src/mcp/instructions.test.ts`: both variants contain the substring `memory.about`, remain ≤800 chars, assert the session-summary trigger is bound to `before ending any turn with real work` (and NOT to `before saying "done"`), and existing assertions (`memory.session_summary`, `memory.context`, `2000`, `before`, scope notes) still pass.
 - [x] 4.4 Run `pnpm run typecheck`, `pnpm run lint`, and `pnpm vitest run apps/server/src/mcp/` green.
 
 ## 5. Verification
