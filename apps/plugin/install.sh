@@ -656,7 +656,8 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
 # Required post-install/upgrade steps per agent (the platform bits the installer
 # can't do for you). Surfaced after a successful install/update so the user
 # isn't left with a half-wired plugin. Full walkthrough: docs/agents.md.
-post_install_notes() {
+post_install_notes() { # $1 client, $2 action (install|update)
+  action="${2:-install}"
   case "$1" in
     claude)
       say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code." ;;
@@ -667,10 +668,16 @@ post_install_notes() {
       say "    3) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
       say "    ${DIM}details: docs/agents.md${RESET}" ;;
     hermes)
-      say "  ${BOLD}Next:${RESET}"
-      say "    1) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
-      say "    2) ${BOLD}hermes plugins enable rembric${RESET}"
-      say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}" ;;
+      # On update the plugin is already installed + enabled — only the gateway
+      # needs to reload the new files. The full wiring is install-only.
+      if [ "$action" = "update" ]; then
+        say "  ${BOLD}Next:${RESET} ${BOLD}hermes gateway restart${RESET}  ${DIM}— reload the gateway so it picks up the updated plugin${RESET}"
+      else
+        say "  ${BOLD}Next:${RESET}"
+        say "    1) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
+        say "    2) ${BOLD}hermes plugins enable rembric${RESET}"
+        say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
+      fi ;;
     opencode)
       say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode." ;;
   esac
@@ -685,7 +692,7 @@ do_client() { # $1 client, $2 action
       if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
     claude|codex) marketplace_cmds "$c" "$action" ;;
   esac
-  if [ "$action" != "uninstall" ]; then post_install_notes "$c"; fi
+  if [ "$action" != "uninstall" ]; then post_install_notes "$c" "$action"; fi
   return 0
 }
 

@@ -221,6 +221,14 @@ describe('agent routing', () => {
     expect(hermes.out).toContain('hermes gateway restart');
   });
 
+  it('hermes update only reminds to restart the gateway (already installed/enabled)', () => {
+    const { code, out } = run(['--agent=hermes', '--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('hermes gateway restart');
+    // The install-only wiring step must not be suggested on an update.
+    expect(out).not.toContain('hermes plugins install rembric');
+  });
+
   it('uninstall does not print post-install "Next" steps', () => {
     const { out } = run(['--agent=codex', '--action=uninstall'], { home });
     expect(out).not.toContain('Next');
