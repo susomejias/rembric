@@ -218,9 +218,28 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 
 </details>
 
-## Quickstart (Docker)
+## Quickstart
 
-Docker is the canonical install path. The image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (see [Hardware requirements](#hardware-requirements)).
+**One installer does everything.** A single brand-styled menu prepares the server (writes `docker-compose.yml` + `.env`, generates your admin token) and installs / updates / uninstalls every client plugin — detecting what you have and at which version. It is the recommended way to install, set up, upgrade, and remove Rembric.
+
+```bash
+# inspect-first (recommended)
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh
+less rembric-install.sh && sh rembric-install.sh
+
+# or the one-liner
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
+```
+
+Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>`.
+
+Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (see [Hardware requirements](#hardware-requirements)).
+
+MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
+
+### Manual / advanced — set up the server by hand
+
+Prefer to skip the installer? Fetch the compose file and env template and bring it up yourself:
 
 ```bash
 mkdir rembric && cd rembric
@@ -232,23 +251,6 @@ curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.examp
 docker compose up -d
 docker compose logs -f rembric
 ```
-
-MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
-
-### One installer for everything (optional)
-
-If you'd rather not juggle the server files and four separate plugin installs, there's a single brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin — detecting what you have and at which version:
-
-```bash
-# inspect-first (recommended)
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh -o rembric-install.sh
-less rembric-install.sh && sh rembric-install.sh
-
-# or the one-liner
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh | sh
-```
-
-Pin a release for reproducibility with `--ref=<tag>`. The server step is prepare-only — it writes `docker-compose.yml` + `.env` and prints the `docker compose up -d` for you to run; it never invokes Docker. The Docker block above remains the canonical server path.
 
 ### Running on a remote host (LXC, NAS, server) — the canonical case
 

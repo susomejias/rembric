@@ -4,6 +4,15 @@ Memory for [Hermes Agent](https://hermes-agent.nousresearch.com), backed by your
 
 ## Install
 
+Use the **TUI installer** — the single recommended path. It runs the manual steps below for you and handles update/uninstall too:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
+# → Plugins → hermes → install
+```
+
+### Manual install
+
 Two commands, no `git clone` needed:
 
 ```sh
@@ -126,7 +135,7 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Re-run the installer. The script is idempotent — it overwrites the three files.
+Use the TUI installer (`Plugins → hermes → update`). Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
@@ -136,7 +145,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin
 
 ## Uninstall
 
-Run the uninstaller. It removes the three installed plugin files and disables the plugin, and is idempotent:
+Use the TUI installer (`Plugins → hermes → uninstall`). Manual fallback — run the uninstaller; it removes the three installed plugin files, disables the plugin, and is idempotent:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/uninstall.sh | sh
