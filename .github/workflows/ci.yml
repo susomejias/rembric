@@ -111,6 +111,10 @@ jobs:
           set -eu
           TOK=ci-e2e-token-0123456789   # >=16 chars (server rejects shorter)
           REPO="$PWD"; T="$(mktemp -d)"; cd "$T"
+          # The image runs as uid 10001; on rootful Linux docker the ./data bind
+          # would be auto-created root-owned and the server couldn't open its DB.
+          # Pre-create it world-writable (Docker Desktop sidesteps this locally).
+          mkdir -p data && chmod 0777 data
           REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 REMBRIC_UPDATE_CHECK=off REMBRIC_NO_PULL=1 \
             sh "$REPO/install.sh" --server --action=install --up --token="$TOK" --port=8787
           ok=
