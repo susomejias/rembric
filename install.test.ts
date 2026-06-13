@@ -284,9 +284,19 @@ describe('agent CLI flags', () => {
   });
 
   it('--token sets the admin token verbatim on server install', () => {
-    const { code } = run(['--server', '--action=install', '--token=tok_ABC_123'], { cwd: dir });
+    const { code } = run(['--server', '--action=install', '--token=tok_ABC_1234567890'], {
+      cwd: dir,
+    });
     expect(code).toBe(0);
-    expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(/^REMBRIC_ADMIN_TOKEN=tok_ABC_123$/m);
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(
+      /^REMBRIC_ADMIN_TOKEN=tok_ABC_1234567890$/m,
+    );
+  });
+
+  it('--token shorter than 16 chars is refused (server would reject it)', () => {
+    const { code, out } = run(['--server', '--action=install', '--token=short'], { cwd: dir });
+    expect(code).not.toBe(0);
+    expect(out).toContain('too short');
   });
 
   it('--port writes REMBRIC_PORT on server install', () => {
@@ -336,13 +346,13 @@ esac
   it('--up honours --port (dashboard URL) and --token (login line)', () => {
     const bin = fakeDockerDir('ok');
     const { code, out } = run(
-      ['--server', '--action=install', '--up', '--port=8799', '--token=tok_xyz_123'],
+      ['--server', '--action=install', '--up', '--port=8799', '--token=tok_xyz_1234567890'],
       { cwd: dir, path: `${bin}:${process.env.PATH}` },
     );
     rmSync(bin, { recursive: true, force: true });
     expect(code).toBe(0);
     expect(out).toContain('127.0.0.1:8799/dashboard');
-    expect(out).toContain('Log in with admin token: tok_xyz_123');
+    expect(out).toContain('Log in with admin token: tok_xyz_1234567890');
   });
 
   it('REMBRIC_NO_PULL skips `docker compose pull` but still brings the stack up', () => {

@@ -109,14 +109,15 @@ jobs:
       - name: Installer e2e — server --up against the built image
         run: |
           set -eu
+          TOK=ci-e2e-token-0123456789   # >=16 chars (server rejects shorter)
           REPO="$PWD"; T="$(mktemp -d)"; cd "$T"
           REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 REMBRIC_UPDATE_CHECK=off REMBRIC_NO_PULL=1 \
-            sh "$REPO/install.sh" --server --action=install --up --token=ci-e2e-token --port=8787
+            sh "$REPO/install.sh" --server --action=install --up --token="$TOK" --port=8787
           ok=
-          for _ in $(seq 1 45); do
-            c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-e2e-token' http://127.0.0.1:8787/healthz || true)
+          for _ in $(seq 1 60); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" http://127.0.0.1:8787/healthz || true)
             [ "$c" = 200 ] && { ok=1; break; }
-            sleep 2
+            sleep 3
           done
           if [ -z "$ok" ]; then echo "::error::/healthz never returned 200"; docker compose logs || true; exit 1; fi
           d=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/dashboard || true)

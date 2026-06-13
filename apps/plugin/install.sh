@@ -542,6 +542,10 @@ do_server() {
   tok=$(sed -n 's/^REMBRIC_ADMIN_TOKEN=//p' ./.env | head -1)
 
   if [ "$ARG_TOKEN_SET" = "1" ]; then
+    if [ "${#ARG_TOKEN}" -lt 16 ]; then
+      say "  ${DANGER}--token too short${RESET} — REMBRIC_ADMIN_TOKEN needs at least 16 characters (the server refuses to boot otherwise)."
+      return 1
+    fi
     tok="$ARG_TOKEN"; write_token "$tok"
     say "  Admin token (provided): ${BOLD}${tok}${RESET}"
   elif [ -n "$tok" ]; then
@@ -551,6 +555,10 @@ do_server() {
     [ "$env_new" = "0" ] && say "  ${WARN}./.env exists but REMBRIC_ADMIN_TOKEN is empty${RESET} — setting it now."
     if [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
       tok=$(ask "  Paste REMBRIC_ADMIN_TOKEN, or leave blank to auto-generate:")
+    fi
+    if [ -n "$tok" ] && [ "${#tok}" -lt 16 ]; then
+      say "  ${DANGER}Token too short${RESET} — REMBRIC_ADMIN_TOKEN needs at least 16 characters."
+      return 1
     fi
     gen=0
     if [ -z "$tok" ]; then
