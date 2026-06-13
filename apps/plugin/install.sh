@@ -628,15 +628,18 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
     claude)
       add="claude plugin marketplace add https://github.com/susomejias/rembric.git"
       ins="claude plugin install rembric@rembric"
+      upd="claude plugin update rembric@rembric"
       rem="claude plugin uninstall rembric@rembric" ;;
     codex)
       add="codex plugin marketplace add https://github.com/susomejias/rembric.git"
       ins="codex plugin install rembric"
+      upd="codex plugin marketplace upgrade rembric"
       rem="codex plugin uninstall rembric" ;;
   esac
   case "$action" in
-    install|update) say "  Run:"; say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
-    uninstall)      say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
+    install)   say "  Run:"; say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
+    update)    say "  Run:"; say "    ${BOLD}$upd${RESET}"; cmd="$upd"; add='' ;;
+    uninstall) say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
   esac
   if [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ] && client_present "$c"; then
     yn=$(ask "  Run these now? [y/N]")

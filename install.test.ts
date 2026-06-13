@@ -191,6 +191,19 @@ describe('agent routing', () => {
     expect(out).toContain('Left in place');
   });
 
+  it('claude/codex update use their real upgrade commands, not re-install', () => {
+    const claude = run(['--agent=claude', '--action=update'], { home });
+    expect(claude.code).toBe(0);
+    expect(claude.out).toContain('claude plugin update rembric@rembric');
+    expect(claude.out).not.toContain('claude plugin install'); // update ≠ re-install
+    expect(claude.out).not.toContain('marketplace add'); // marketplace already added
+
+    const codex = run(['--agent=codex', '--action=update'], { home });
+    expect(codex.code).toBe(0);
+    expect(codex.out).toContain('codex plugin marketplace upgrade rembric');
+    expect(codex.out).not.toContain('codex plugin install');
+  });
+
   it('a comma-separated --agent list drives multiple agents in one run', () => {
     const { code, out } = run(['--agent=codex,claude', '--action=install'], { home });
     expect(code).toBe(0);
