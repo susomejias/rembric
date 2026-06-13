@@ -11,11 +11,11 @@
 </p>
 
 <p align="center">
-  <a href="#architecture">Architecture</a> ·
-  <a href="#dashboard">Dashboard</a> ·
-  <a href="#quickstart">Quickstart</a> ·
   <a href="#supported-agents">Supported agents</a> ·
+  <a href="#quickstart">Quickstart</a> ·
   <a href="#configuration">Configuration</a> ·
+  <a href="#dashboard">Dashboard</a> ·
+  <a href="#architecture">Architecture</a> ·
   <a href="#project-status">Project status</a> ·
   <a href="#contributing">Contributing</a>
   <br/>
@@ -49,20 +49,28 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
       <sub>native provider · MCP</sub>
     </td>
   </tr>
+</table>
+
+<details>
+<summary><b>Any other MCP client</b> — Cursor · Windsurf · Claude Desktop · Cline · Goose · Kilo Code · Roo Code · Gemini CLI · …</summary>
+
+<br>
+
+<table>
   <tr>
-    <td align="center" valign="top">
+    <td align="center" valign="top" width="25%">
       <a href="./docs/agents.md#any-other-mcp-client"><img src="https://www.freelogovectors.net/wp-content/uploads/2025/06/cursor-logo-freelogovectors.net_.png" alt="Cursor" width="64" height="64" /><br/><b>Cursor</b></a><br/>
       <sub>MCP server</sub>
     </td>
-    <td align="center" valign="top">
+    <td align="center" valign="top" width="25%">
       <a href="./docs/agents.md#any-other-mcp-client"><img src="https://exafunction.github.io/public/brand/windsurf-black-symbol.svg?size=120" alt="Windsurf" width="64" height="64" /><br/><b>Windsurf</b></a><br/>
       <sub>MCP server</sub>
     </td>
-    <td align="center" valign="top">
+    <td align="center" valign="top" width="25%">
       <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/anthropics.png?size=120" alt="Claude Desktop" width="64" height="64" /><br/><b>Claude Desktop</b></a><br/>
       <sub>MCP server</sub>
     </td>
-    <td align="center" valign="top">
+    <td align="center" valign="top" width="25%">
       <a href="./docs/agents.md#any-other-mcp-client"><img src="https://github.com/cline.png?size=120" alt="Cline" width="64" height="64" /><br/><b>Cline</b></a><br/>
       <sub>MCP server</sub>
     </td>
@@ -87,65 +95,171 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
   </tr>
 </table>
 
-Works with **any** agent that speaks MCP. One server, memories shared across all of them.
+</details>
 
-## Architecture
+## Quickstart
 
-```
-                  ┌─────────────────────────────────────────────────┐
-                  │              Agents (MCP clients)               │
-                  │     Claude Code · Codex CLI · Cursor · …        │
-                  └────────────────────────┬────────────────────────┘
-                                           │
-                                           │  HTTP(S) + Bearer token
-                                           │  URL path: /mcp/<slug>  (or /mcp + project.use)
-                                           ▼
-   ┌───────────────────────────────────────────────────────────────────────┐
-   │                       rembric  (single Node process)                  │
-   │                                                                       │
-   │   ┌────────────────────────────┐   ┌───────────────────────────────┐  │
-   │   │  /mcp       /mcp/<slug>    │   │  /dashboard                   │  │
-   │   │  Streamable HTTP transport │   │  SSR HTML + HTMX              │  │
-   │   │  + initialize.instructions │   │                               │  │
-   │   │  memory.{save,search,…}    │   │  /memories /sessions          │  │
-   │   │  memory.session_*          │   │  /prompts /judgments          │  │
-   │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
-   │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
-   │   │  project.{use,list,current}│   │                               │  │
-   │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
-   │                 ▼                                ▼                    │
-   │   ┌───────────────────────────────────────────────────────────────┐   │
-   │   │  Service layer                                                │   │
-   │   │   MemoryService · PromptsService · RelationsService           │   │
-   │   │   ProjectsService · TokensService · AgentSessionsService      │   │
-   │   │   SessionRouter                                               │   │
-   │   └───────────────────────────────┬───────────────────────────────┘   │
-   │                                   ▼                                   │
-   │   ┌───────────────────────────────────────────────────────────────┐   │
-   │   │  SQLite (Drizzle, append-only + tombstones)                   │   │
-   │   │   memory · projects · tokens · sessions · prompts             │   │
-   │   │   memory_relations · consolidation_{runs,ops}                 │   │
-   │   │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)│   │
-   │   └───────────────────────────────▲───────────────────────────────┘   │
-   │   ┌───────────────────────────────┴───────────────────────────────┐   │
-   │   │  In-process background work (no external services)            │   │
-   │   │   embedder: gte-multilingual-base, ONNX q8, loaded at boot    │   │
-   │   │   drain worker (every 30s) fills memory_vec                   │   │
-   │   │   deterministic sweep: decay + deadline orphaning             │   │
-   │   └───────────────────────────────────────────────────────────────┘   │
-   └───────────────────────────────────────────────────────────────────────┘
+**One installer does everything.** A single brand-styled menu prepares the server (writes `docker-compose.yml` + `.env`, generates your admin token) and installs / updates / uninstalls every agent plugin — detecting what you have and at which version. It is the recommended way to install, set up, upgrade, and remove Rembric.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
 ```
 
-Single Node process, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`); the `pnpm dlx rembric` path stays available as a power-user fallback during the dual-publish window.
+Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>`.
 
-Four load-bearing invariants:
+Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (2 GB recommended; the in-process embedder is why — see [docs/embeddings.md](./docs/embeddings.md)).
 
-- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible.
-- **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
-- **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
-- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
+MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
 
-See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
+<details>
+<summary><b>Prefer to read it before running?</b> — download the installer, inspect it, then execute</summary>
+
+<br>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh
+less rembric-install.sh        # skim it
+sh rembric-install.sh
+```
+
+</details>
+
+<details>
+<summary><b>Manual / advanced</b> — set up the server by hand, remote vs loopback, upgrade, rollback, backups</summary>
+
+<br>
+
+### Set up the server by hand
+
+Prefer to skip the installer? Fetch the compose file and env template and bring it up yourself:
+
+```bash
+mkdir rembric && cd rembric
+curl -fsSLO https://raw.githubusercontent.com/susomejias/rembric/main/docker-compose.yml
+curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.example -o .env
+
+# edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`) — that's it
+
+docker compose up -d
+docker compose logs -f rembric
+```
+
+### Running on a remote host (LXC, NAS, server) — the canonical case
+
+The compose file publishes port `8787` on **all interfaces** of the host so your agent on another machine can reach it. Point the plugin at `http://<host-ip>:8787` (LAN) or `http://rembric.tailnet:8787` (Tailscale). Don't expose port 8787 directly to the public internet — front it with Tailscale, WireGuard, or your reverse proxy of choice. The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`.
+
+### Running on the same host as your agent — loopback override
+
+If you want to restrict the published port to loopback (stricter posture, same-host dev only), drop a `docker-compose.override.yml` next to the canonical compose:
+
+```yaml
+services:
+  rembric:
+    ports: !override
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+```
+
+Compose auto-merges the override on every `up`. Point your agent at `http://127.0.0.1:8787`. See [`docs/docker.md`](./docs/docker.md) for the full topology guide.
+
+### Upgrading
+
+**Auto-updater from the UI.** The dashboard checks for new releases (once a day, [opt-out](./docs/updates.md)) and shows a badge + changelog modal when one is out. Mount the Docker socket and the same modal gains a one-click **Update** button that backs up the database, pulls the new image, swaps the container with health-check and rollback, and reloads the page on the new version — see [docs/updates.md](./docs/updates.md) for setup and the security trade-off. Without the socket nothing breaks: you get the notification plus the manual flow below.
+
+Docker manages versions for you. With `REMBRIC_VERSION` unset in `.env`, the compose file pulls `:latest`:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Portainer / Arcane detect the new digest automatically and offer a "Recreate container" button — one click. For reproducible deploys, pin a specific version in `.env` (this also disables the one-click updater — the dashboard explains why):
+
+```ini
+REMBRIC_VERSION=0.21.9
+```
+
+### Rolling back
+
+Bump `REMBRIC_VERSION` to a previous tag in `.env` and re-run `docker compose up -d`. The bind-mounted `./data/` directory is untouched, so your memory stays intact across version flips.
+
+See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR auth, named-volume vs bind-mount, troubleshooting).
+
+### Backups
+
+```bash
+# while the container is running (WAL-safe online backup):
+docker compose exec rembric sqlite3 /data/data.db ".backup /data/backup-$(date +%Y%m%d).db"
+mv ./data/backup-*.db ./backups/
+
+# or stop + copy for a cold backup:
+docker compose down
+cp ./data/data.db ./backups/data-$(date +%Y%m%d).db
+docker compose up -d
+```
+
+**Do not bind-mount `./data/` onto NFS / SMB / network filesystems** — SQLite's POSIX locking guarantees don't hold there, and you'll eventually corrupt the DB.
+
+</details>
+
+## Configuration
+
+All config via environment variables. With Docker, these live in `.env` and are loaded automatically by `docker compose up`. Required: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).
+
+| Variable               | Default                           | Description                                                                                                                |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `REMBRIC_HOST`         | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker.              |
+| `REMBRIC_PORT`         | `8787`                            | Bind port.                                                                                                                 |
+| `REMBRIC_DATA_DIR`     | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.                 |
+| `LOG_LEVEL`            | `info`                            | `debug` / `info` / `warn` / `error`.                                                                                       |
+| `REMBRIC_UPDATE_CHECK` | `on`                              | `off` disables the daily release check (no badge, no modal, no GitHub API call). See [docs/updates.md](./docs/updates.md). |
+
+<details>
+<summary><b>Advanced configuration</b> — hardware, consolidation sweep, rate limiting, sessions, candidate detection</summary>
+
+<br>
+
+### Hardware requirements
+
+**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), loaded at boot (~1.1 s from the baked image; a broken model fails the boot instead of degrading silently), ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
+
+The engine is code, not configuration: there is no model selector, no threshold knob, no off switch. The model class is pinned (≤350M params, ≤800 MB RSS); changing it is a breaking architectural change.
+
+### Consolidation sweep
+
+Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
+
+| Variable                      | Default      | Description                                                                                     |
+| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `JUDGMENT_ORPHAN_AFTER_MS`    | `86400000`   | Age (ms) past which pending judgments surface in `memory.context` for the agent to close. 24h.  |
+| `JUDGMENT_ORPHAN_DEADLINE_MS` | `1209600000` | Age (ms) past which unjudged pendings are orphaned by the sweep (journaled, undoable). 14 days. |
+
+### Rate limiting
+
+Per-token token-bucket limiter on `/mcp` requests. Disabled by default — single-user localhost deployments don't need it. Enable when exposing the server to multiple agents that might burst-call.
+
+| Variable             | Default | Description                                                                                                |
+| -------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `RATE_LIMIT_ENABLED` | `false` | Master toggle. `true` activates the limiter; misbehaving tokens get `429 rate_limited` with `Retry-After`. |
+| `RATE_LIMIT_RPS`     | `10`    | Refill rate per token, in requests per second.                                                             |
+| `RATE_LIMIT_BURST`   | `30`    | Burst capacity per token. The first N requests after a quiet period are free; beyond that, RPS applies.    |
+
+### Sessions
+
+| Variable                   | Default    | Description                                                                                                                                                    |
+| -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_ABANDON_AFTER_MS` | `86400000` | At server startup, sessions with `status='active'` whose `started_at` is older than this are flipped to `abandoned`. Default 24h; floor 1min, ceiling 30 days. |
+
+### Candidate detection (save-time judgment)
+
+Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
+
+| Variable                  | Default | Description                                                                                                                                     |
+| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted and re-surface via `memory.context`). |
+| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                                              |
+| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                                                       |
+
+</details>
 
 ## Dashboard
 
@@ -218,83 +332,14 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 
 </details>
 
-## Quickstart (Docker)
+<details>
+<summary><b>Operating Rembric</b> — tokens, projects, sessions, prompts, and the irreversible maintenance purges</summary>
 
-Docker is the canonical install path. The image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (see [Hardware requirements](#hardware-requirements)).
-
-```bash
-mkdir rembric && cd rembric
-curl -fsSLO https://raw.githubusercontent.com/susomejias/rembric/main/docker-compose.yml
-curl -fsSL  https://raw.githubusercontent.com/susomejias/rembric/main/.env.example -o .env
-
-# edit .env:  set REMBRIC_ADMIN_TOKEN (e.g. `openssl rand -hex 32`) — that's it
-
-docker compose up -d
-docker compose logs -f rembric
-```
-
-MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
-
-### Running on a remote host (LXC, NAS, server) — the canonical case
-
-The compose file publishes port `8787` on **all interfaces** of the host so your agent on another machine can reach it. Point the plugin at `http://<host-ip>:8787` (LAN) or `http://rembric.tailnet:8787` (Tailscale). Don't expose port 8787 directly to the public internet — front it with Tailscale, WireGuard, or your reverse proxy of choice. The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`.
-
-### Running on the same host as your agent — loopback override
-
-If you want to restrict the published port to loopback (stricter posture, same-host dev only), drop a `docker-compose.override.yml` next to the canonical compose:
-
-```yaml
-services:
-  rembric:
-    ports: !override
-      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
-```
-
-Compose auto-merges the override on every `up`. Point your agent at `http://127.0.0.1:8787`. See [`docs/docker.md`](./docs/docker.md) for the full topology guide.
-
-### Upgrading
-
-**Auto-updater from the UI.** The dashboard checks for new releases (once a day, [opt-out](./docs/updates.md)) and shows a badge + changelog modal when one is out. Mount the Docker socket and the same modal gains a one-click **Update** button that backs up the database, pulls the new image, swaps the container with health-check and rollback, and reloads the page on the new version — see [docs/updates.md](./docs/updates.md) for setup and the security trade-off. Without the socket nothing breaks: you get the notification plus the manual flow below.
-
-Docker manages versions for you. With `REMBRIC_VERSION` unset in `.env`, the compose file pulls `:latest`:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Portainer / Arcane detect the new digest automatically and offer a "Recreate container" button — one click. For reproducible deploys, pin a specific version in `.env` (this also disables the one-click updater — the dashboard explains why):
-
-```ini
-REMBRIC_VERSION=0.13.0
-```
-
-### Rolling back
-
-Bump `REMBRIC_VERSION` to a previous tag in `.env` and re-run `docker compose up -d`. The bind-mounted `./data/` directory is untouched, so your memory stays intact across version flips.
-
-See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR auth, named-volume vs bind-mount, troubleshooting).
-
-### Backups
-
-```bash
-# while the container is running (WAL-safe online backup):
-docker compose exec rembric sqlite3 /data/data.db ".backup /data/backup-$(date +%Y%m%d).db"
-mv ./data/backup-*.db ./backups/
-
-# or stop + copy for a cold backup:
-docker compose down
-cp ./data/data.db ./backups/data-$(date +%Y%m%d).db
-docker compose up -d
-```
-
-**Do not bind-mount `./data/` onto NFS / SMB / network filesystems** — SQLite's POSIX locking guarantees don't hold there, and you'll eventually corrupt the DB.
-
-## Operating Rembric
+<br>
 
 Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (port `8788` in the dev stack). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, browse and soft-delete curated user prompts at `/dashboard/prompts` (FTS5 search over content + tags; refined predecessors show a `REFINED` badge), trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
 
-## Dashboard maintenance (manual purges)
+### Maintenance (manual purges)
 
 The dashboard exposes `/dashboard/maintenance` for three **irreversible**, **operator-triggered** physical purges. All are gated to dashboard sessions whose underlying token has scope `*` (admin):
 
@@ -306,64 +351,74 @@ Each click shows a count and a confirmation modal. The deletion is journaled in 
 
 To reclaim file-level disk after a large purge, run `VACUUM` against the SQLite file. The maintenance page surfaces the freelist size so you know how much would be reclaimed.
 
-## Configuration
+</details>
 
-All config via environment variables. With Docker, these live in `.env` and are loaded automatically by `docker compose up`. Required: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).
+## Architecture
 
-### Server
+Single Node process, single SQLite file, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`). Agents reach it over HTTP(S) + a bearer token at `/mcp/<slug>` (or `/mcp` + `project.use`); the operator dashboard is served from the same process.
 
-| Variable               | Default                           | Description                                                                                                                |
-| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `REMBRIC_HOST`         | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker.              |
-| `REMBRIC_PORT`         | `8787`                            | Bind port.                                                                                                                 |
-| `REMBRIC_DATA_DIR`     | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.                 |
-| `LOG_LEVEL`            | `info`                            | `debug` / `info` / `warn` / `error`.                                                                                       |
-| `REMBRIC_UPDATE_CHECK` | `on`                              | `off` disables the daily release check (no badge, no modal, no GitHub API call). See [docs/updates.md](./docs/updates.md). |
+Four load-bearing invariants:
 
-### Hardware requirements
+- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible.
+- **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
+- **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
+- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
-**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), loaded at boot (~1.1 s from the baked image; a broken model fails the boot instead of degrading silently), ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
+See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
 
-The engine is code, not configuration: there is no model selector, no threshold knob, no off switch. The model class is pinned (≤350M params, ≤800 MB RSS); changing it is a breaking architectural change.
+<details>
+<summary><b>Process diagram</b> — transports, service layer, storage, in-process background work</summary>
 
-### Consolidation sweep
+<br>
 
-Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
+```
+                  ┌─────────────────────────────────────────────────┐
+                  │              Agents (MCP clients)               │
+                  │     Claude Code · Codex CLI · Cursor · …        │
+                  └────────────────────────┬────────────────────────┘
+                                           │
+                                           │  HTTP(S) + Bearer token
+                                           │  URL path: /mcp/<slug>  (or /mcp + project.use)
+                                           ▼
+   ┌───────────────────────────────────────────────────────────────────────┐
+   │                       rembric  (single Node process)                  │
+   │                                                                       │
+   │   ┌────────────────────────────┐   ┌───────────────────────────────┐  │
+   │   │  /mcp       /mcp/<slug>    │   │  /dashboard                   │  │
+   │   │  Streamable HTTP transport │   │  SSR HTML + HTMX              │  │
+   │   │  + initialize.instructions │   │                               │  │
+   │   │  memory.{save,search,…}    │   │  /memories /sessions          │  │
+   │   │  memory.session_*          │   │  /prompts /judgments          │  │
+   │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
+   │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
+   │   │  project.{use,list,current}│   │                               │  │
+   │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
+   │                 ▼                                ▼                    │
+   │   ┌───────────────────────────────────────────────────────────────┐   │
+   │   │  Service layer                                                │   │
+   │   │   MemoryService · PromptsService · RelationsService           │   │
+   │   │   ProjectsService · TokensService · AgentSessionsService      │   │
+   │   │   SessionRouter                                               │   │
+   │   └───────────────────────────────┬───────────────────────────────┘   │
+   │                                   ▼                                   │
+   │   ┌───────────────────────────────────────────────────────────────┐   │
+   │   │  SQLite (Drizzle, append-only + tombstones)                   │   │
+   │   │   memory · projects · tokens · sessions · prompts             │   │
+   │   │   memory_relations · consolidation_{runs,ops}                 │   │
+   │   │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)│   │
+   │   └───────────────────────────────▲───────────────────────────────┘   │
+   │   ┌───────────────────────────────┴───────────────────────────────┐   │
+   │   │  In-process background work (no external services)            │   │
+   │   │   embedder: gte-multilingual-base, ONNX q8, loaded at boot    │   │
+   │   │   drain worker (every 30s) fills memory_vec                   │   │
+   │   │   deterministic sweep: decay + deadline orphaning             │   │
+   │   └───────────────────────────────────────────────────────────────┘   │
+   └───────────────────────────────────────────────────────────────────────┘
+```
 
-| Variable                      | Default      | Description                                                                                     |
-| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
-| `JUDGMENT_ORPHAN_AFTER_MS`    | `86400000`   | Age (ms) past which pending judgments surface in `memory.context` for the agent to close. 24h.  |
-| `JUDGMENT_ORPHAN_DEADLINE_MS` | `1209600000` | Age (ms) past which unjudged pendings are orphaned by the sweep (journaled, undoable). 14 days. |
-
-### Rate limiting
-
-Per-token token-bucket limiter on `/mcp` requests. Disabled by default — single-user localhost deployments don't need it. Enable when exposing the server to multiple agents that might burst-call.
-
-| Variable             | Default | Description                                                                                                |
-| -------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
-| `RATE_LIMIT_ENABLED` | `false` | Master toggle. `true` activates the limiter; misbehaving tokens get `429 rate_limited` with `Retry-After`. |
-| `RATE_LIMIT_RPS`     | `10`    | Refill rate per token, in requests per second.                                                             |
-| `RATE_LIMIT_BURST`   | `30`    | Burst capacity per token. The first N requests after a quiet period are free; beyond that, RPS applies.    |
-
-### Sessions
-
-| Variable                   | Default    | Description                                                                                                                                                    |
-| -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SESSION_ABANDON_AFTER_MS` | `86400000` | At server startup, sessions with `status='active'` whose `started_at` is older than this are flipped to `abandoned`. Default 24h; floor 1min, ceiling 30 days. |
-
-### Candidate detection (save-time judgment)
-
-Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
-
-| Variable                  | Default | Description                                                                                                                                     |
-| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted and re-surface via `memory.context`). |
-| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                                              |
-| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                                                       |
+</details>
 
 ## Development
-
-### Hacking on Rembric itself
 
 ```bash
 pnpm install

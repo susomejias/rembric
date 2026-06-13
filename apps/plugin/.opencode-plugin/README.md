@@ -8,9 +8,18 @@ This plugin shares the same HTTP API and MCP bridge as the Claude Code, Codex CL
 
 ## Install
 
+Use the **TUI installer** — the single recommended path. It runs both manual steps below for you (and handles update/uninstall):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
+# → Plugins → opencode → install
+```
+
+### Manual install
+
 Two steps. Run them in order.
 
-### 1. Run the install script
+#### 1. Run the install script
 
 One-line install — no checkout required:
 
@@ -33,7 +42,7 @@ PLUGIN_SRC="$(pwd)/plugin/.opencode-plugin" BIN_SRC="$(pwd)/plugin/bin" \
   sh plugin/.opencode-plugin/install.sh
 ```
 
-### 2. Paste the MCP block into `opencode.json`
+#### 2. Paste the MCP block into `opencode.json`
 
 The install script prints a snippet at the end. Paste it into one of:
 
@@ -70,9 +79,11 @@ The slug regex is `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Invalid slugs are reje
 
 ## Update
 
-opencode does not cache plugins by version — re-run the curl-pipe-sh command above. The script fetches the latest files from `main` and overwrites the three installed files. Restart opencode.
+Use the TUI installer (`Plugins → opencode → update`). Manual fallback — opencode does not cache plugins by version, so re-run the curl-pipe-sh command above; it fetches the latest files from `main` and overwrites the installed files. Restart opencode.
 
 ## Uninstall
+
+Use the TUI installer (`Plugins → opencode → uninstall`). Manual fallback:
 
 ```bash
 bash plugin/.opencode-plugin/uninstall.sh

@@ -4,6 +4,15 @@ Memory for [Hermes Agent](https://hermes-agent.nousresearch.com), backed by your
 
 ## Install
 
+Use the **TUI installer** — the single recommended path. It runs the manual steps below for you and handles update/uninstall too:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
+# → Plugins → hermes → install
+```
+
+### Manual install
+
 Two commands, no `git clone` needed:
 
 ```sh
@@ -126,10 +135,20 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Re-run the installer. The script is idempotent — it overwrites the three files.
+Use the TUI installer (`Plugins → hermes → update`). Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
 `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
+
+## Uninstall
+
+Use the TUI installer (`Plugins → hermes → uninstall`). Manual fallback — run the uninstaller; it removes the three installed plugin files, disables the plugin, and is idempotent:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/uninstall.sh | sh
+```
+
+It **deliberately leaves** your credentials (`${HERMES_HOME:-~/.hermes}/.env`) and any `.rembric` project markers in place — it prints what it left so you can remove them by hand if you want. Honours `HERMES_HOME` like the installer.

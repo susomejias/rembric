@@ -47,7 +47,15 @@ The repository root SHALL contain a `CODE_OF_CONDUCT.md` file based on Contribut
 
 `README.md` SHALL describe Rembric's current distribution and install path without referencing distribution mechanisms that have been removed. References to "npm package", "operator CLI", or any other deprecated install mechanism SHALL NOT appear in the README. The README SHALL link to `docs/backup.md` from a prominent install-or-quickstart-adjacent section. The README SHALL link to `SECURITY.md` from the same nav header as `Contributing`.
 
-The README's plugin install URLs SHALL point at `https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.<client>-plugin/install.sh` for the curl-pipe-sh clients (Hermes, opencode), and at `https://github.com/susomejias/rembric` for the marketplace-driven clients (Claude Code, Codex CLI — both consumed via `<client> plugin marketplace add <repo-url>`). The legacy `plugin/.<client>-plugin/install.sh` URLs SHALL NOT appear in the README; the README's table of supported agents SHALL only show the canonical `apps/plugin/...` URLs.
+The README's primary, lead install/upgrade instruction SHALL be the **TUI installer** (the repo-root `install.sh` shim, canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`). The manual Docker quickstart (`curl docker-compose.yml` + `.env.example` + `docker compose up -d`) and the per-client commands SHALL remain in the README only under an explicitly-labelled "Manual / advanced" section, never as the primary path.
+
+When the README does show per-client install URLs (in the manual section), they SHALL point at `https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.<client>-plugin/install.sh` for the curl-pipe-sh clients (Hermes, opencode), and at `https://github.com/susomejias/rembric` for the marketplace-driven clients (Claude Code, Codex CLI — both consumed via `<client> plugin marketplace add <repo-url>`). The legacy `plugin/.<client>-plugin/install.sh` URLs SHALL NOT appear in the README; any per-client URL shown SHALL be the canonical `apps/plugin/...` form.
+
+#### Scenario: README leads with the TUI installer
+
+- **WHEN** a third party reads the README's install/quickstart section top-to-bottom
+- **THEN** the first install/upgrade command presented SHALL be the TUI installer (`.../main/install.sh`)
+- **AND** the manual Docker quickstart and per-client commands SHALL appear only below, under a heading that marks them as manual / advanced
 
 #### Scenario: README stale-claim regression
 
@@ -61,7 +69,7 @@ The README's plugin install URLs SHALL point at `https://raw.githubusercontent.c
 
 #### Scenario: README plugin install URLs point at apps/plugin
 
-- **WHEN** a third party copies the install command for a curl-pipe-sh client (Hermes or opencode) from the README
+- **WHEN** a third party copies a per-client install command (Hermes or opencode) from the README's manual section
 - **THEN** the URL SHALL begin with `https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/`
 - **AND** the URL SHALL NOT begin with `https://raw.githubusercontent.com/susomejias/rembric/main/plugin/` (legacy form, now returns HTTP 404)
 

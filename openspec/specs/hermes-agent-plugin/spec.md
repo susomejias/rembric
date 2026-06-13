@@ -8,13 +8,13 @@ TBD - created by archiving change add-hermes-agent-plugin. Update Purpose after 
 
 ### Requirement: Plugin source location
 
-The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to `apps/plugin/.claude-plugin/`, `apps/plugin/.codex-plugin/`, and `apps/plugin/.opencode-plugin/`. The directory SHALL contain exactly four files at the top level: `plugin.yaml`, `__init__.py`, `install.sh`, `README.md`. A nested `apps/plugin/.hermes-plugin/tests/` directory MAY exist for Python unittest sources and SHALL NOT ship to end users (the `install.sh` whitelist of three shipped files — `plugin.yaml`, `__init__.py`, `README.md` — is what guarantees this; nothing else under `apps/plugin/.hermes-plugin/` is copied).
+The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to `apps/plugin/.claude-plugin/`, `apps/plugin/.codex-plugin/`, and `apps/plugin/.opencode-plugin/`. The directory SHALL contain exactly five files at the top level: `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, `README.md`. A nested `apps/plugin/.hermes-plugin/tests/` directory MAY exist for Python unittest sources and SHALL NOT ship to end users (the `install.sh` whitelist of three shipped files — `plugin.yaml`, `__init__.py`, `README.md` — is what guarantees this; nothing else under `apps/plugin/.hermes-plugin/` is copied). `uninstall.sh` is a local-execution maintenance script and, like `install.sh`, is NOT itself copied into the user's plugin directory.
 
-#### Scenario: Plugin tree contains the four top-level files
+#### Scenario: Plugin tree contains the five top-level files
 
 - **WHEN** the repository is at HEAD
-- **THEN** `ls apps/plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, `README.md`, and the `tests/` directory
-- **AND** the only nested directory permitted under `apps/plugin/.hermes-plugin/` is `tests/`, and its contents SHALL NOT be referenced by `install.sh`
+- **THEN** `ls apps/plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, `README.md`, and the `tests/` directory
+- **AND** the only nested directory permitted under `apps/plugin/.hermes-plugin/` is `tests/`, and its contents SHALL NOT be referenced by `install.sh` or `uninstall.sh`
 
 ### Requirement: Plugin manifest declares lifecycle hooks
 
@@ -225,11 +225,40 @@ The plugin's README and docs SHALL NOT recommend a `git clone + cp -r` two-step 
 - **AND** no plugin files SHALL be installed
 - **AND** the user SHALL find the corrected install command in the README / docs / release notes
 
+### Requirement: Uninstall via local script
+
+The plugin SHALL be removable through a script at `apps/plugin/.hermes-plugin/uninstall.sh`, mirroring the conservative, idempotent semantics of `apps/plugin/.opencode-plugin/uninstall.sh`. The script SHALL:
+
+- Be POSIX-compatible and run cleanly such that re-running it on an already-clean system is a no-op that still exits zero (idempotent).
+- Honour `HERMES_HOME` (default `${HOME}/.hermes`).
+- Remove the three installed plugin files (`plugin.yaml`, `__init__.py`, `README.md`) from `${HERMES_HOME}/plugins/rembric/` if present, then `rmdir` the `rembric` plugin directory when it is empty.
+- Run `hermes plugins disable rembric` on a best-effort basis (failure SHALL NOT abort the uninstall).
+- NOT remove operator-owned state: it SHALL leave `${HERMES_HOME}/.env`, any stored credentials, and any `.rembric` project markers untouched.
+- Print which files were removed, which were already absent, and an explicit list of what it deliberately left in place (the `.env` credentials and `.rembric` files), so the operator can remove them manually if desired.
+
+#### Scenario: Uninstall removes plugin files and reports
+
+- **WHEN** the plugin is installed at `${HOME}/.hermes/plugins/rembric/` and the user runs `sh apps/plugin/.hermes-plugin/uninstall.sh`
+- **THEN** the three plugin files SHALL be removed and the now-empty `rembric` directory SHALL be `rmdir`-ed
+- **AND** stdout SHALL list the removed files and the deliberately-left-behind state
+
+#### Scenario: Uninstall is idempotent
+
+- **WHEN** `uninstall.sh` runs against a system where the plugin is already absent
+- **THEN** it SHALL exit zero
+- **AND** it SHALL report the files as already absent without erroring
+
+#### Scenario: Uninstall preserves credentials and project markers
+
+- **WHEN** `uninstall.sh` completes
+- **THEN** `${HERMES_HOME}/.env` and any `.rembric` files SHALL remain on disk
+- **AND** stdout SHALL name them as deliberately left in place
+
 ### Requirement: User documentation
 
 The plugin's `README.md` (at `apps/plugin/.hermes-plugin/README.md`) SHALL include, in this order:
 
-1. A one-line install command using `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh`, followed by `hermes plugins install rembric` (or equivalent) to trigger the `requires_env` prompts.
+1. The **TUI installer** as the primary install/upgrade instruction (the root `install.sh` shim, canonical URL `.../main/install.sh`, or `--agent=hermes`). The per-client manual install — `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh` followed by `hermes plugins install rembric` to trigger the `requires_env` prompts — SHALL be retained below under an explicitly-labelled "Manual install" heading, not as the lead instruction.
 2. A description of what Hermes prompts for during install (the three `requires_env` vars) and where the answers are persisted (`${HERMES_HOME:-~/.hermes}/.env`).
 3. A two-block `~/.hermes/config.yaml` example showing **both** the `mcp_servers.rembric` block (registering the bundled bridge via `node` or `npx`) AND the `memory: provider: rembric` block, so users wire both the tool surface and the lifecycle in one go.
 4. A short "Project slug resolution" section explaining the four-step cascade in plain prose.
@@ -239,9 +268,15 @@ The README SHALL NOT mention `~/.rembric/.env`, `${XDG_CONFIG_HOME}/rembric/.env
 
 The repository's root `README.md` SHALL be updated to list Hermes Agent under "Supported clients" alongside Claude Code, Codex CLI, and opencode, with a link to the plugin README at `apps/plugin/.hermes-plugin/README.md`.
 
-`docs/agents.md` SHALL gain (or retain, after path swap) a "Hermes Agent" section mirroring the structure of the existing Claude Code and Codex CLI sections, covering install (including the `requires_env` prompt flow), config, env vars, slug resolution, and a pointer to the plugin README at the new path.
+`docs/agents.md` SHALL gain (or retain, after path swap) a "Hermes Agent" section mirroring the structure of the existing Claude Code and Codex CLI sections, leading with the TUI installer and covering install (including the `requires_env` prompt flow as the manual fallback), config, env vars, slug resolution, and a pointer to the plugin README at the new path.
 
 `apps/plugin/README.md` and `apps/plugin/CHANGELOG.md` SHALL be updated to include Hermes alongside the other clients.
+
+#### Scenario: README leads with the TUI, manual curl-installer retained below
+
+- **WHEN** a user reads `apps/plugin/.hermes-plugin/README.md` top-to-bottom
+- **THEN** the first install instruction SHALL be the TUI installer
+- **AND** the `curl … install.sh | sh` + `hermes plugins install rembric` flow SHALL appear under an explicit "Manual install" heading
 
 #### Scenario: README pairs provider and bridge in the config example
 

@@ -1,17 +1,39 @@
 # Rembric — agent plugins
 
-Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, four per-client surfaces:
+Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, four per-client surfaces.
 
-| Client           | Manifest dir        | Install                                                                                                                                                                                      | Docs                                                                       |
-| ---------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **Claude Code**  | `.claude-plugin/`   | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                           | this file                                                                  |
-| **Codex CLI**    | `.codex-plugin/`    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin install rembric`                                                                                     | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
-| **Hermes Agent** | `.hermes-plugin/`   | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                          | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)       |
-| **opencode**     | `.opencode-plugin/` | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` and paste the printed MCP block into `~/.config/opencode/opencode.json` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)   |
+**Install everything with the TUI.** The single installer prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version:
+
+```bash
+# inspect-first (recommended); or pipe straight to sh; pin a release with --ref=<tag>
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh
+less rembric-install.sh && sh rembric-install.sh
+```
+
+It is an orchestrator — it routes to each client's real mechanism (the per-client scripts for Hermes/opencode, the marketplace CLIs for Claude/Codex), which remain available as the manual fallback below.
+
+| Client           | Manifest dir        | Docs                                                                       |
+| ---------------- | ------------------- | -------------------------------------------------------------------------- |
+| **Claude Code**  | `.claude-plugin/`   | this file                                                                  |
+| **Codex CLI**    | `.codex-plugin/`    | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
+| **Hermes Agent** | `.hermes-plugin/`   | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)       |
+| **opencode**     | `.opencode-plugin/` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)   |
+
+<details>
+<summary><strong>Manual install</strong> (per-client, fallback — what the TUI runs under the hood)</summary>
+
+| Client           | Manual command                                                                                                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Claude Code**  | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                            |
+| **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin install rembric`                                                                                      |
+| **Hermes Agent** | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                           |
+| **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` then paste the printed MCP block into `~/.config/opencode/opencode.json` |
+
+</details>
 
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
 
-> **Using Codex CLI?** The same `plugin/` tree ships a Codex manifest too. After `codex plugin install rembric` you also need two one-time Codex-side steps for hooks to fire: run `codex features enable plugin_hooks`, then approve the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+> **Using Codex CLI?** However you install, two one-time Codex-side steps are needed for hooks to fire: run `codex features enable plugin_hooks`, then approve the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
 
 ## What you get
 
@@ -30,7 +52,9 @@ Proactive memory protocol ("save after decisions, fixes, conventions, preference
 
 ## Install
 
-### As a teammate (marketplace install)
+Use the TUI installer (top of this file) and pick **Plugins → claude → install** — it runs the marketplace commands below for you and handles updates/uninstall too.
+
+### Manual install (marketplace)
 
 ```bash
 claude plugin marketplace add https://github.com/susomejias/rembric.git

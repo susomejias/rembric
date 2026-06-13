@@ -1,6 +1,8 @@
 # Agent integration
 
-For **Claude Code**, use the bundled plugin — see [`apps/plugin/README.md`](../apps/plugin/README.md). Rembric also ships first-class plugins for **Codex CLI**, **Hermes Agent**, and **opencode** — see the sections below.
+Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, and **opencode**.
+
+> **Install with the TUI — the single, recommended path.** [`install.sh`](../install.sh) (canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`) is one brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Pin a release with `--ref=<tag>`. The per-client commands in the sections below are what the installer runs under the hood — documented here as the **manual fallback**.
 
 > **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
 
@@ -46,7 +48,7 @@ When a session's snippet isn't enough — typically when **resuming work in anot
 
 ### Codex CLI (recommended: bundled plugin)
 
-Use the Codex marketplace install — the plugin ships from the same `apps/plugin/` directory as the Claude Code plugin (one source tree, two manifests):
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → codex). The marketplace commands below are the manual fallback the installer runs for you — the plugin ships from the same `apps/plugin/` directory as the Claude Code plugin (one source tree, two manifests):
 
 ```bash
 codex plugin marketplace add https://github.com/susomejias/rembric.git
@@ -145,7 +147,7 @@ Restart `codex` after the update so the bridge and hooks re-spawn from the new c
 
 ### Hermes Agent (memory provider plugin)
 
-Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `apps/plugin/.hermes-plugin/`. Two pieces compose:
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → hermes). The `curl | sh` flow below is the manual fallback. Hermes Agent (Nous Research) loads Rembric as a native Python `MemoryProvider` from `apps/plugin/.hermes-plugin/`. Two pieces compose:
 
 > **Plugin `0.6.0+` required against Rembric `0.13.0+`.** The provider's `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` to `/healthz` (the server made the endpoint bearer-gated in `0.13.0`). The env var was already required for every other call; this just tightens an existing requirement. Running plugin `0.5.x` against server `0.13+` will silently disable the memory provider — upgrade in lock-step.
 
@@ -239,7 +241,7 @@ Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider
 
 ### opencode (bundled plugin)
 
-[opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → opencode). The `curl | sh` two-step below is the manual fallback. [opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
 
 v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-output capture (`tool.execute.after`); their HTTP endpoints (`/api/<slug>/prompts/passive`, `/api/<slug>/observations/passive`) do not exist on Rembric's API yet and land in a follow-up change.
 
