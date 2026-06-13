@@ -1,5 +1,5 @@
 {
-  "apps/server": "0.21.10",
+  "apps/server": "0.21.11",
   "apps/plugin": "0.11.1",
   "apps/plugin/.claude-plugin": "0.11.1",
   "apps/plugin/.codex-plugin": "0.11.1",
