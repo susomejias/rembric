@@ -38,6 +38,7 @@ ARG_SERVER=0
 ARG_AGENTS=''
 ARG_ACTION=''
 ARG_UP=0
+ARG_YES=0
 ARG_STATUS=0
 ARG_JSON=0
 ARG_TOKEN=''
@@ -52,6 +53,7 @@ for arg in "$@"; do
     --action=*) ARG_ACTION="${arg#--action=}" ;;
     --ref=*) REF="${arg#--ref=}" ;;
     --up) ARG_UP=1 ;;
+    --yes|-y) ARG_YES=1 ;;
     --status) ARG_STATUS=1 ;;
     --json) ARG_JSON=1 ;;
     --token=*) ARG_TOKEN="${arg#--token=}"; ARG_TOKEN_SET=1 ;;
@@ -641,7 +643,14 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
     update)    say "  Run:"; say "    ${BOLD}$upd${RESET}"; cmd="$upd"; add='' ;;
     uninstall) say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
   esac
-  if [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ] && client_present "$c"; then
+  # --yes is the headless opt-in: run the marketplace command(s) without a
+  # prompt, but only when the client binary is actually present (nothing to run
+  # otherwise). Without --yes, an interactive TTY still gets the [y/N] prompt
+  # and a piped/headless run only prints.
+  if [ "$ARG_YES" = "1" ] && client_present "$c"; then
+    [ -n "${add:-}" ] && eval "$add" || true
+    eval "$cmd" || true
+  elif [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ] && client_present "$c"; then
     yn=$(ask "  Run these now? [y/N]")
     case "$yn" in
       y|Y)
@@ -722,6 +731,8 @@ Flags:
   --token=<tok>       admin token for --server (default: auto-generate)
   --port=<n>          REMBRIC_PORT for --server (default: 8787)
   --up                run 'docker compose pull && up -d' after --server (needs docker)
+  --yes, -y           run the Claude/Codex marketplace commands when the client
+                      binary is present (headless opt-in; does not start Docker — use --up)
   --ref=<tag>         git ref to install from (default: main)
   -h, --help          this help
 

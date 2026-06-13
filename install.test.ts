@@ -262,6 +262,82 @@ describe('agent routing', () => {
   });
 });
 
+describe('--yes runs the marketplace command (stubbed client binary)', () => {
+  // A fake `claude`/`codex` first on PATH lets us assert the run-through
+  // headlessly: the stub echoes a sentinel with its args so we can tell
+  // "executed" from "merely printed". Core tools live in /usr/bin:/bin, so the
+  // absent-binary case points PATH there (claude/codex are not system bins).
+  const CORE_PATH = '/usr/bin:/bin';
+  function fakeClientBinDir(name: 'claude' | 'codex'): string {
+    const d = mkdtempSync(join(tmpdir(), 'rembric-fakeclient-'));
+    writeFileSync(join(d, name), `#!/bin/sh\necho "RAN:${name} $*"\n`);
+    chmodSync(join(d, name), 0o755);
+    return d;
+  }
+
+  it('--yes executes the claude update command when the claude binary is present', () => {
+    const bin = fakeClientBinDir('claude');
+    const { code, out } = run(['--agent=claude', '--action=update', '--yes'], {
+      home,
+      path: `${bin}:${CORE_PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out).toContain('claude plugin update rembric@rembric'); // still printed
+    expect(out).toContain('RAN:claude plugin update rembric@rembric'); // and executed
+  });
+
+  it('-y is an alias for --yes', () => {
+    const bin = fakeClientBinDir('claude');
+    const { code, out } = run(['--agent=claude', '--action=update', '-y'], {
+      home,
+      path: `${bin}:${CORE_PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out).toContain('RAN:claude plugin update rembric@rembric');
+  });
+
+  it('--yes executes the codex upgrade command when the codex binary is present', () => {
+    const bin = fakeClientBinDir('codex');
+    const { code, out } = run(['--agent=codex', '--action=update', '--yes'], {
+      home,
+      path: `${bin}:${CORE_PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out).toContain('RAN:codex plugin marketplace upgrade rembric');
+  });
+
+  it('without --yes a headless run only prints, never executes', () => {
+    const bin = fakeClientBinDir('claude');
+    const { code, out } = run(['--agent=claude', '--action=update'], {
+      home,
+      path: `${bin}:${CORE_PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out).toContain('claude plugin update rembric@rembric'); // printed
+    expect(out).not.toContain('RAN:claude'); // not executed
+  });
+
+  it('--yes with an absent client binary prints but executes nothing', () => {
+    const { code, out } = run(['--agent=codex', '--action=update', '--yes'], {
+      home,
+      path: CORE_PATH, // no codex on PATH
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('codex plugin marketplace upgrade rembric'); // printed
+    expect(out).not.toContain('RAN:codex'); // nothing ran
+  });
+
+  it('--help documents the --yes / -y flag', () => {
+    const { out } = run(['--help']);
+    expect(out).toContain('--yes');
+    expect(out).toContain('-y');
+  });
+});
+
 describe('root install.sh shim', () => {
   it('--help is identical to the plugin installer (pure forwarder)', () => {
     const root = run(['--help'], { script: ROOT_SHIM });

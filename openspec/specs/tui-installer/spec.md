@@ -152,7 +152,7 @@ For each of the four clients the installer SHALL determine (a) whether the clien
 
 ### Requirement: Per-client install / update / uninstall routing
 
-For each present client the installer SHALL offer Install, Update, and Uninstall, routing each to that client's real primitive. For opencode and Hermes, install/update SHALL delegate to the client `install.sh` (re-running it performs an update) and uninstall SHALL delegate to the client `uninstall.sh`. For Claude Code and Codex, the installer SHALL print the client's marketplace CLI commands for each action and, only when the client binary is detected on `PATH`, MAY offer to run them; the installer SHALL NOT create or rely on a repo-side install script for these two clients.
+For each present client the installer SHALL offer Install, Update, and Uninstall, routing each to that client's real primitive. For opencode and Hermes, install/update SHALL delegate to the client `install.sh` (re-running it performs an update) and uninstall SHALL delegate to the client `uninstall.sh`. For Claude Code and Codex, the installer SHALL print the client's marketplace CLI commands for each action and, only when the client binary is detected on `PATH`, MAY offer to run them; the installer SHALL NOT create or rely on a repo-side install script for these two clients. The offer to run the marketplace commands SHALL be presented as an interactive `[y/N]` prompt when a controlling terminal is available; in addition, when the opt-in `--yes` flag (alias `-y`) is set the installer SHALL execute those commands directly without prompting, including under headless invocation (e.g. `curl … | sh`), but still ONLY when the client binary is detected on `PATH`. When `--yes` is set but the client binary is absent, the installer SHALL print the commands and SHALL NOT execute anything. When `--yes` is not set and there is no controlling terminal, the installer SHALL only print the commands, as today.
 
 #### Scenario: opencode update re-runs its installer
 
@@ -170,6 +170,22 @@ For each present client the installer SHALL offer Install, Update, and Uninstall
 - **WHEN** the user selects Install for Claude Code and the `claude` binary is on `PATH`
 - **THEN** the installer MAY offer to run the `/plugin marketplace add` + `/plugin install` commands
 - **AND** when the binary is absent, the installer SHALL print the commands for the user to run manually
+
+#### Scenario: --yes executes the marketplace command headlessly when the binary is present
+
+- **WHEN** the installer runs headless as `--agent=claude --action=update --yes` (or `-y`) and the `claude` binary is on `PATH`
+- **THEN** it SHALL execute `claude plugin update rembric@rembric` directly without any prompt
+- **AND** the same SHALL hold for Codex (`codex plugin marketplace upgrade rembric`) and for the install/uninstall actions of both clients
+
+#### Scenario: --yes with an absent binary executes nothing
+
+- **WHEN** the installer runs headless as `--agent=codex --action=update --yes` and the `codex` binary is NOT on `PATH`
+- **THEN** it SHALL print the marketplace command(s) and SHALL NOT execute anything
+
+#### Scenario: Without --yes a headless run only prints
+
+- **WHEN** the installer runs headless as `--agent=claude --action=update` (no `--yes`) and the `claude` binary is on `PATH`
+- **THEN** it SHALL only print the marketplace command and SHALL NOT execute it
 
 ### Requirement: Conservative uninstall across clients
 
@@ -232,8 +248,9 @@ The installer SHALL be fully drivable headlessly as a CLI so agents/automation c
 - `--json` — with `--status`, emit a machine-readable object `{ "server": {…}, "agents": [...] }` and nothing else on stdout so it parses cleanly. The `server` object carries `state` (docker container state: `running`/`exited`/`paused`/`created`/`dead`/`absent`/`unknown`), `version` (the running/stopped container's image tag, or null), and `latest_release` (the newest published server release from GitHub Releases — tag `server-v<semver>` — or null). Each `agents` entry carries `agent`, `present` boolean, `installed` (semver or null), `available` (semver or null), `action`.
 - `--token=<value>` — set `REMBRIC_ADMIN_TOKEN` for `--server` install verbatim instead of auto-generating; the value SHALL be written safely regardless of special characters, and a value shorter than 16 characters SHALL be refused with a clear error (the server's minimum) rather than producing a crash-looping server.
 - `--port=<n>` — set `REMBRIC_PORT` in the generated `.env` for `--server`, and the printed dashboard URL SHALL reflect it.
+- `--yes` (alias `-y`) — opt-in auto-confirm for the Claude Code / Codex marketplace run-through. When set, the installer SHALL execute the marketplace command(s) for the requested `--action` directly (no prompt), but ONLY when the client binary is detected on `PATH`; with an absent binary it prints and executes nothing. The flag SHALL default to off, so omitting it preserves the print-only headless behavior and the interactive `[y/N]` prompt on a real TTY. `--yes` SHALL NOT auto-start the Docker bring-up (that stays gated on `--up`).
 
-The `--up` bring-up SHALL honour `REMBRIC_NO_PULL=1` to skip `docker compose pull` and use the locally-present image as-is (air-gapped operators, and the CI end-to-end test that brings the freshly-built image up). The installer SHALL report the server status (docker-observable state + running image tag) in `--status` and in the interactive Server screen. It SHALL also surface `latest_release` — the newest published server release from the GitHub Releases API (tag `server-v<semver>`), the same source the dashboard's update-check uses — on a **best-effort** basis: a single short-timeout `curl` (overridable via `REMBRIC_RELEASES_URL`), silently omitted when offline, rate-limited, `curl`-less, or when `REMBRIC_UPDATE_CHECK=off`. Because a running `:latest` image cannot be compared to a release without a digest, `latest_release` is informational; an "update available" hint is shown ONLY when the running tag is itself a semver older than `latest_release`. The server's "available" is NOT taken from the repo manifest (that is the source-tree version, not a published release). `--status` SHALL work regardless of TTY. An unknown flag SHALL exit non-zero with an error. `--help` SHALL document the full flag set.
+The `--up` bring-up SHALL honour `REMBRIC_NO_PULL=1` to skip `docker compose pull` and use the locally-present image as-is (air-gapped operators, and the CI end-to-end test that brings the freshly-built image up). The installer SHALL report the server status (docker-observable state + running image tag) in `--status` and in the interactive Server screen. It SHALL also surface `latest_release` — the newest published server release from the GitHub Releases API (tag `server-v<semver>`), the same source the dashboard's update-check uses — on a **best-effort** basis: a single short-timeout `curl` (overridable via `REMBRIC_RELEASES_URL`), silently omitted when offline, rate-limited, `curl`-less, or when `REMBRIC_UPDATE_CHECK=off`. Because a running `:latest` image cannot be compared to a release without a digest, `latest_release` is informational; an "update available" hint is shown ONLY when the running tag is itself a semver older than `latest_release`. The server's "available" is NOT taken from the repo manifest (that is the source-tree version, not a published release). `--status` SHALL work regardless of TTY. An unknown flag SHALL exit non-zero with an error. `--help` SHALL document the full flag set, including `--yes`/`-y`.
 
 #### Scenario: `--status --json` is clean machine-readable output
 
@@ -258,6 +275,11 @@ The `--up` bring-up SHALL honour `REMBRIC_NO_PULL=1` to skip `docker compose pul
 - **WHEN** an agent runs `install.sh --server --action=install --token=<tok> --port=<n>` headless
 - **THEN** `./.env` SHALL contain `REMBRIC_ADMIN_TOKEN=<tok>` (verbatim) and `REMBRIC_PORT=<n>`
 - **AND** no prompt SHALL be shown
+
+#### Scenario: `--help` documents the `--yes` flag
+
+- **WHEN** a user runs `install.sh --help`
+- **THEN** the usage output SHALL list `--yes` (and its `-y` alias) and describe it as the opt-in that runs the Claude/Codex marketplace commands when the binary is present
 
 ### Requirement: Hero tagline and one-time banner reveal
 
