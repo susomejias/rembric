@@ -10,6 +10,7 @@ import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
 import type { CandidateOptions } from '../services/save-time-candidates.js';
 
+import { handleAbout } from './about-tool.js';
 import { buildInstructions } from './instructions.js';
 import {
   buildProjectHandlers,
@@ -235,6 +236,15 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       inputSchema: {},
     },
     sessions.doctor,
+  );
+  server.registerTool(
+    'memory.about',
+    {
+      description:
+        'Read-only guidance to update/upgrade Rembric: returns the running server version + the canonical installer commands to update client plugins. Call when the operator asks how to update or upgrade Rembric (server or plugins). Surfaces commands for the operator to run; never executes them.',
+      inputSchema: {},
+    },
+    handleAbout,
   );
   server.registerTool(
     'memory.stats',
