@@ -191,6 +191,19 @@ describe('agent routing', () => {
     expect(out).toContain('Left in place');
   });
 
+  it('claude/codex update use their real upgrade commands, not re-install', () => {
+    const claude = run(['--agent=claude', '--action=update'], { home });
+    expect(claude.code).toBe(0);
+    expect(claude.out).toContain('claude plugin update rembric@rembric');
+    expect(claude.out).not.toContain('claude plugin install'); // update ≠ re-install
+    expect(claude.out).not.toContain('marketplace add'); // marketplace already added
+
+    const codex = run(['--agent=codex', '--action=update'], { home });
+    expect(codex.code).toBe(0);
+    expect(codex.out).toContain('codex plugin marketplace upgrade rembric');
+    expect(codex.out).not.toContain('codex plugin install');
+  });
+
   it('a comma-separated --agent list drives multiple agents in one run', () => {
     const { code, out } = run(['--agent=codex,claude', '--action=install'], { home });
     expect(code).toBe(0);
@@ -206,6 +219,14 @@ describe('agent routing', () => {
     expect(hermes.out).toContain('hermes plugins install rembric'); // triggers requires_env prompts
     expect(hermes.out).toContain('hermes plugins enable rembric');
     expect(hermes.out).toContain('hermes gateway restart');
+  });
+
+  it('hermes update only reminds to restart the gateway (already installed/enabled)', () => {
+    const { code, out } = run(['--agent=hermes', '--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('hermes gateway restart');
+    // The install-only wiring step must not be suggested on an update.
+    expect(out).not.toContain('hermes plugins install rembric');
   });
 
   it('uninstall does not print post-install "Next" steps', () => {
