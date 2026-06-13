@@ -229,6 +229,18 @@ describe('agent routing', () => {
     expect(out).not.toContain('hermes plugins install rembric');
   });
 
+  it('opencode/claude update notes drop the install-only wiring (just restart)', () => {
+    const opencode = run(['--agent=opencode', '--action=update'], { home });
+    expect(opencode.code).toBe(0);
+    expect(opencode.out).toContain('restart opencode');
+    expect(opencode.out).not.toContain('paste the printed MCP block'); // install-only
+
+    const claude = run(['--agent=claude', '--action=update'], { home });
+    expect(claude.code).toBe(0);
+    expect(claude.out).toContain('restart Claude Code');
+    expect(claude.out).not.toContain('prompts for the server URL'); // install-only
+  });
+
   it('uninstall does not print post-install "Next" steps', () => {
     const { out } = run(['--agent=codex', '--action=uninstall'], { home });
     expect(out).not.toContain('Next');

@@ -660,7 +660,11 @@ post_install_notes() { # $1 client, $2 action (install|update)
   action="${2:-install}"
   case "$1" in
     claude)
-      say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code." ;;
+      if [ "$action" = "update" ]; then
+        say "  ${BOLD}Next:${RESET} restart Claude Code so it loads the updated plugin."
+      else
+        say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code."
+      fi ;;
     codex)
       say "  ${BOLD}Next${RESET} (one-time — required or hooks won't fire):"
       say "    1) ${BOLD}codex features enable plugin_hooks${RESET}"
@@ -679,7 +683,11 @@ post_install_notes() { # $1 client, $2 action (install|update)
         say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
       fi ;;
     opencode)
-      say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode." ;;
+      if [ "$action" = "update" ]; then
+        say "  ${BOLD}Next:${RESET} restart opencode so it loads the updated plugin."
+      else
+        say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
+      fi ;;
   esac
 }
 
