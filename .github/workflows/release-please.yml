@@ -41,7 +41,7 @@ jobs:
     # auto-issued token).
     #
     # Gating: only runs when the `server` component was released. Plugin-only
-    # releases (claude-code-plugin, codex-plugin, hermes-plugin, opencode-plugin) do NOT trigger Docker
+    # releases (plugin-shared, opencode-plugin, hermes-plugin) do NOT trigger Docker
     # publish.
     needs: release-please
     if: ${{ needs.release-please.outputs.server_release_created == 'true' || github.event.inputs.force_publish == 'true' }}

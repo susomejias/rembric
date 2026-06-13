@@ -10,7 +10,7 @@ Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,herm
 ## Mandatory workflow
 
 1. **OpenSpec change first.** Run `/opsx:propose` (or amend an existing change). Plugin work always touches ≥2 specs and ≥3 files. Skipping the change is the failure mode that produces drift.
-2. **Per-component versioning.** Each `apps/plugin/.X-plugin/` is its own release-please component and bumps based on its own paths changing. The `claude-code` and `codex` components are **linked** via the `bridge-bundlers` linked-versions group, so shared changes under `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/commands/`, or `apps/plugin/scripts/` cascade-bump both together. The `hermes` and `opencode` components bump **independently** — their `install.sh` re-fetches from `main` at install time, so shared `bin/` changes reach those users on the next install without coordinated release. Removed the old lock-step rule that required bumping all four plugin manifests in the same commit.
+2. **Per-component versioning (four components, NO linked-versions group).** `plugin-shared` (`apps/plugin`, excluding `.opencode-plugin` + `.hermes-plugin`) owns the shared assets **and** the Claude Code + Codex surfaces — the two clients' `plugin.json` versions are `extra-files` of it, so a change to shared `bin/`/`hooks/`/`commands/`/`scripts/` OR to `.claude-plugin/`/`.codex-plugin/` bumps all three in lock-step (they bundle the cached bridge). `opencode-plugin` and `hermes-plugin` bump **independently** — their `install.sh` re-fetches from `main` at install time, so shared changes reach those users on the next install without a coordinated release. There is **no `linked-versions` group**: it was removed because release-please hardcodes the grouped PR title without `${version}`, so grouped release PRs never auto-tagged on merge. Every release PR now carries a version in its title and tags itself.
 3. **End-to-end against `pnpm run dev:docker:up`** before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
 4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
 
@@ -91,7 +91,7 @@ Honest > glossing-over.
 If any answer is "no" or "I don't know", stop and resolve it.
 
 - [ ] OpenSpec change open or amended for this work
-- [ ] Per-component versioning respected (release-please bumps each `apps/plugin/.X-plugin/` from its own paths; `claude-code`+`codex` linked via `bridge-bundlers`; `hermes`+`opencode` independent)
+- [ ] Per-component versioning respected (four components, no linked-versions: `plugin-shared` owns shared + Claude + Codex; `opencode-plugin` + `hermes-plugin` independent)
 - [ ] No duplication of `parseDotenv` / `SLUG_RE` / endpoint strings without justification
 - [ ] `pnpm vitest run` + `pnpm run typecheck` + `pnpm run lint` + `openspec validate <change> --strict` all clean
 - [ ] Exercised against `pnpm run dev:docker:up` (or explicitly told the user what isn't verified)
