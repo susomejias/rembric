@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/susomejias/rembric/compare/codex-plugin-v0.11.1...codex-plugin-v0.12.0) (2026-06-13)
+
+
+### Miscellaneous Chores
+
+* **codex-plugin:** Synchronize plugin-suite versions
+
 ## [0.11.1](https://github.com/susomejias/rembric/compare/codex-plugin-v0.11.0...codex-plugin-v0.11.1) (2026-06-13)
 
 
