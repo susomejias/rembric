@@ -289,6 +289,54 @@ describe('image packaging invariants', () => {
 });
 
 /**
+ * Distroless node-path invariant.
+ *
+ * The runtime image is distroless (gcr.io/distroless/nodejs22): node lives at
+ * /nodejs/bin/node and there is NO bare `node` on PATH. Every place that execs
+ * node *against the runtime image* must use the absolute path or it dies with
+ * `exec: "node": executable file not found in $PATH`. This regressed in prod
+ * (self-update upgrader + compose healthcheck) when the image moved to
+ * distroless — these tests pin each call site so it can't happen again.
+ */
+describe('distroless runtime node-path invariants', () => {
+  const NODE = '/nodejs/bin/node';
+
+  it('runtime stage is distroless AND its ENTRYPOINT + HEALTHCHECK use the absolute node path', () => {
+    const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
+    const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
+    expect(runtimeIdx).toBeGreaterThan(-1);
+    const runtime = dockerfile.slice(runtimeIdx);
+    // The reason node isn't on PATH — if this ever changes, revisit every NODE path below.
+    expect(/^FROM\s+\S*distroless\S*/.test(runtime.split('\n')[0] ?? '')).toBe(true);
+
+    const entry = runtime.match(/^ENTRYPOINT\s+(\[.*\])/m);
+    expect(entry).not.toBeNull();
+    expect(entry![1]).toContain(NODE);
+
+    const health = runtime.match(/HEALTHCHECK[\s\S]*?CMD\s+(\[.*\])/);
+    expect(health).not.toBeNull();
+    expect(health![1]).toContain(NODE);
+
+    // No bare-`node` exec form anywhere in the runtime stage.
+    expect(/\[\s*"node"\s*[,\]]/.test(runtime)).toBe(false);
+  });
+
+  it('docker-compose healthcheck uses the absolute node path (runs in the distroless image)', () => {
+    const compose = readFileSync(join(repoRoot, 'docker-compose.yml'), 'utf8');
+    expect(compose).toContain(NODE);
+    // A bare `- node` list entry would exec `node` and mark the container unhealthy.
+    expect(/^\s*-\s*node\s*$/m.test(compose)).toBe(false);
+  });
+
+  it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
+    const orch = readFileSync(join(srcRoot, 'services/self-update/orchestrator.ts'), 'utf8');
+    expect(orch).toContain(`'${NODE}'`);
+    // The bare-`node` default that bricked the upgrader must be gone.
+    expect(/\[\s*'node'\s*,/.test(orch)).toBe(false);
+  });
+});
+
+/**
  * Scope-leak invariant.
  *
  * Application-level RLS is enforced by passing a `Scope` argument into

@@ -175,7 +175,14 @@ export class SelfUpdateOrchestrator {
     const name = `rembric-upgrader-${this.now()}`;
     const created = await engine.createContainer(name, {
       Image: imageRef,
-      Entrypoint: this.deps.helperEntrypoint ?? ['node', '/app/dist/scripts/upgrade-helper.js'],
+      // Absolute node path: the new image is distroless (gcr.io/distroless/nodejs22),
+      // which ships node at /nodejs/bin/node and puts NO bare `node` on PATH. A bare
+      // `node` here fails the upgrader with "exec: node: not found" (regressed the
+      // self-update when the runtime image moved to distroless).
+      Entrypoint: this.deps.helperEntrypoint ?? [
+        '/nodejs/bin/node',
+        '/app/dist/scripts/upgrade-helper.js',
+      ],
       // Root inside the one-shot upgrader sidesteps host docker-GID
       // mismatches; it only ever talks to the socket it is handed.
       User: 'root',
