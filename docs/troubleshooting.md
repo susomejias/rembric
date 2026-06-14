@@ -80,6 +80,10 @@ Capability detection is cached for 30 s — reload the dashboard after `docker c
 
 If `.env` pins `REMBRIC_VERSION=x.y.z`, one-click is refused by design (the next `docker compose up` would silently revert a self-update). The modal explains the pin; see [docs/updates.md](./updates.md#pinned-versions-disable-one-click).
 
+### `exec: "node": executable file not found in $PATH` when updating to v0.21.14+
+
+The runtime image moved to a distroless base in v0.21.14 (node is at `/nodejs/bin/node`, not bare `node`). Updating _from_ a pre-fix version (≤ v0.21.14) via the dashboard fails this way, because the old server launches the upgrader with bare `node`. Your live container is untouched — you keep serving the old version. This is a one-time hop; see [docs/updates.md](./updates.md#updating-across-the-distroless-boundary-one-time-v02114).
+
 ## MCP transport
 
 ### Pending judgments piling up in search annotations
