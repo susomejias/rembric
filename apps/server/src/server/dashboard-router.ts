@@ -597,7 +597,10 @@ function ascBars(data: number[]): string {
   }
   const lines = data.map((v, i) => {
     const w = Math.round((v / max) * widthMax);
-    return `${labels[i]}  ${'█'.repeat(w)} ${String(v).padStart(3)}`;
+    // Pad the bar region to widthMax so every count lands in the same
+    // right-hand column — otherwise zero-days (no bar) print their value
+    // flush against the label, misaligned with barred days.
+    return `${labels[i]}  ${'█'.repeat(w).padEnd(widthMax)} ${String(v).padStart(3)}`;
   });
   return lines.join('\n');
 }

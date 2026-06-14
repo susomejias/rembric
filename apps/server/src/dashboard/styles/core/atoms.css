@@ -70,6 +70,13 @@
 .pill.pending::before {
   background: var(--fg-dim);
 }
+.pill.needs_review {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn), transparent 70%);
+}
+.pill.needs_review::before {
+  background: var(--warn);
+}
 .pill.judged::before {
   background: var(--lime);
 }
