@@ -24,7 +24,12 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 
 ## Reading prior context
 
-`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, and pending judgments for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
+`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, pending judgments, and memories needing review for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
+
+Two of its lists ask the agent to act, and they are deliberately different shapes:
+
+- `pendingJudgments[]` — **pairwise** conflicts (source ↔ target) surfaced at save time and aged past the orphan threshold; close each with `memory.judge`. See [docs/relations.md](./relations.md).
+- `needsReview[]` — **unary** memories (one memory, no counterpart) that have not been re-affirmed within their type's shelf life. `reviewState` (also carried on every `memory.search` / `memory.get` row) flips to `needs_review` when the affirmation baseline — `max(created_at, last confirmation)` — plus the per-type TTL has elapsed. It is a read-time derivation: nothing is stored, no sweep runs. Resolve each entry with the verb that fits: `memory.confirm` if it's still true (records a confirmation, advancing the baseline), `memory.save` + `topic_key` if it changed, or `memory.judge` if it contradicts another memory. Reading a memory does **not** clear `needs_review` — only affirmation does.
 
 When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
 

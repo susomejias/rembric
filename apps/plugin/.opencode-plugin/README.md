@@ -4,7 +4,7 @@ Memory + session lifecycle for [opencode](https://opencode.ai), backed by a self
 
 This plugin shares the same HTTP API and MCP bridge as the Claude Code, Codex CLI, and Hermes Agent plugins. Per-project path-scoping uses the same `.rembric` convention.
 
-**Scope**: the plugin handles session lifecycle and compaction signals via the `event` dispatcher (`session.created`, `session.deleted`, `session.compacted`, `server.instance.disposed`), accumulates transcripts via `chat.message` and `message.updated`, flushes summaries on `session.idle` (per-turn debounced) and `session.compacted` (compaction milestone), and injects post-compaction guidance via `experimental.session.compacting`. The `chat.message` handler also appends a recall nudge to `output.parts` when the user prompt matches the cross-client recall regex (`remember|recall|acordate|qué hicimos|what did we do`), for paridad with the Claude Code / Codex CLI `UserPromptSubmit` hook.
+**Scope**: the plugin handles session lifecycle and compaction signals via the `event` dispatcher (`session.created`, `session.deleted`, `session.compacted`, `server.instance.disposed`), accumulates transcripts via `chat.message` and `message.updated`, flushes summaries on `session.idle` (per-turn debounced) and `session.compacted` (compaction milestone), and injects post-compaction guidance via `experimental.session.compacting`. The `chat.message` handler also appends a recall nudge to `output.parts` when the user prompt matches the cross-client recall regex (`remember|recall|acuérdate|qué hicimos|what did we do`), for paridad with the Claude Code / Codex CLI `UserPromptSubmit` hook.
 
 ## Install
 

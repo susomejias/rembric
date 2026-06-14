@@ -5,6 +5,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
+import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
@@ -78,6 +79,17 @@ export interface MemoryWithHistory {
   predecessors: Memory[];
   head: Memory;
   confirmationCount: number;
+  /** Derived review state of the active head; null when the head is not active. */
+  reviewState: ReviewState | null;
+  /** Derived re-verification deadline of the head; null when no TTL applies. */
+  reviewAfter: Date | null;
+}
+
+/** A single `needsReview` context entry: the stale memory plus its derived timing. */
+export interface NeedsReviewItem {
+  memory: Memory;
+  reviewAfter: Date;
+  reviewBaseline: Date;
 }
 
 export class MemoryService {
@@ -165,8 +177,76 @@ export class MemoryService {
     const predecessors = this.collectPredecessors(found);
     const head = this.findHead(found);
     const confirmationCount = this.repos.memory.countConfirmations(head.id);
+    const lastConfirmedAt =
+      this.repos.memory.latestConfirmationTsByIds([head.id]).get(head.id) ?? null;
+    const { reviewState, reviewAfter } = deriveReviewState(
+      { type: head.type, createdAt: head.createdAt, status: head.status, lastConfirmedAt },
+      this.now(),
+    );
     this.repos.memory.touchLastSeen(head.id, this.now());
-    return { memory: found, predecessors, head, confirmationCount };
+    return { memory: found, predecessors, head, confirmationCount, reviewState, reviewAfter };
+  }
+
+  /**
+   * Derive the read-time review state for a batch of memories (used by
+   * `memory.search`). Confirmation timestamps are fetched in one grouped
+   * query; non-active rows map to a null state. Read-only.
+   */
+  reviewStateForMemories(
+    memories: readonly Memory[],
+  ): Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }> {
+    const out = new Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }>();
+    if (memories.length === 0) return out;
+    const now = this.now();
+    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(memories.map((m) => m.id));
+    for (const m of memories) {
+      const { reviewState, reviewAfter } = deriveReviewState(
+        {
+          type: m.type,
+          createdAt: m.createdAt,
+          status: m.status,
+          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+        },
+        now,
+      );
+      out.set(m.id, { reviewState, reviewAfter });
+    }
+    return out;
+  }
+
+  /**
+   * Active in-scope memories past their review shelf life, oldest affirmation
+   * baseline first — the `needsReview` channel of `memory.context`. Scope is
+   * resolved here (service layer) and passed to the scoped repository read.
+   */
+  needsReviewForContext(scope: Scope, limit: number): NeedsReviewItem[] {
+    if (limit <= 0) return [];
+    const now = this.now();
+    const rows = this.repos.memory.findNeedsReview({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      nowMs: now.getTime(),
+      limit,
+      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
+        (e): e is [MemoryType, number] => typeof e[1] === 'number',
+      ),
+    });
+    if (rows.length === 0) return [];
+    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+    const items: NeedsReviewItem[] = [];
+    for (const m of rows) {
+      const { reviewAfter, reviewBaseline } = deriveReviewState(
+        {
+          type: m.type,
+          createdAt: m.createdAt,
+          status: m.status,
+          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+        },
+        now,
+      );
+      if (reviewAfter && reviewBaseline) items.push({ memory: m, reviewAfter, reviewBaseline });
+    }
+    return items;
   }
 
   /**

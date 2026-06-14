@@ -53,11 +53,16 @@ Cap: 10 per memory in search, 50 in `memory.get`. One JOIN keyed on both source_
 
 ## When to call which tool
 
-| Situation                                          | Call                                           |
-| -------------------------------------------------- | ---------------------------------------------- |
-| Save a memory that evolves a known topic           | `memory.save({topic_key})`                     |
-| Don't know the canonical topic_key                 | `memory.suggest_topic_key` first, then save    |
-| Save returned `candidates[]`                       | `memory.judge({judgmentId, relation})`         |
-| Two arbitrary memories analyzed independently      | `memory.compare({memoryIdA, memoryIdB, …})`    |
-| Search results have `pending_conflict` annotations | `memory.judge` using the embedded `judgmentId` |
-| `memory.context` returned `pendingJudgments[]`     | `memory.judge` each entry's `judgmentId`       |
+| Situation                                            | Call                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Save a memory that evolves a known topic             | `memory.save({topic_key})`                                                                   |
+| Don't know the canonical topic_key                   | `memory.suggest_topic_key` first, then save                                                  |
+| Save returned `candidates[]`                         | `memory.judge({judgmentId, relation})`                                                       |
+| Two arbitrary memories analyzed independently        | `memory.compare({memoryIdA, memoryIdB, …})`                                                  |
+| Search results have `pending_conflict` annotations   | `memory.judge` using the embedded `judgmentId`                                               |
+| `memory.context` returned `pendingJudgments[]`       | `memory.judge` each entry's `judgmentId`                                                     |
+| A row's `reviewState` is `needs_review` (still true) | `memory.confirm` — records a confirmation, advancing the affirmation baseline                |
+| A `needs_review` memory has changed                  | `memory.save({topic_key})` — supersedes the prior row                                        |
+| `memory.context` returned `needsReview[]`            | resolve each: `memory.confirm` / `memory.save({topic_key})` / `memory.judge` if it conflicts |
+
+> `needsReview` is a **separate axis** from the judgment graph above. The relations here are **pairwise** (conflicts between two memories, closed by `memory.judge`). `needsReview` is **unary** time-based staleness — a single memory whose shelf life elapsed without re-affirmation — and it is **derived at read time** from `max(created_at, last confirmation) + per-type TTL`; it is never stored and never runs a sweep. It only overlaps the judgment graph when a stale memory turns out to contradict another, at which point the normal `memory.judge` flow takes over.

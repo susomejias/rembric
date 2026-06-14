@@ -450,6 +450,67 @@ export class MemoryRepository {
       .map((r) => r.id);
   }
 
+  /** Latest confirmation `event_ts` per memory id (the affirmation baseline source). */
+  latestConfirmationTsByIds(ids: readonly string[]): Map<string, Date> {
+    const out = new Map<string, Date>();
+    if (ids.length === 0) return out;
+    const rows = this.db
+      .select({
+        memoryId: confirmations.memoryId,
+        latest: sql<number>`MAX(${confirmations.eventTs})`,
+      })
+      .from(confirmations)
+      .where(inArray(confirmations.memoryId, [...ids]))
+      .groupBy(confirmations.memoryId)
+      .all();
+    for (const r of rows) {
+      if (r.latest != null) out.set(r.memoryId, new Date(Number(r.latest)));
+    }
+    return out;
+  }
+
+  /**
+   * Active in-scope memories past their review shelf life, oldest affirmation
+   * baseline first. The per-type TTL ladder is built from `ttlByType` (passed
+   * by the service so the constant lives in exactly one place); a type absent
+   * from `ttlByType` has no TTL and is excluded. Read-only; no transaction.
+   */
+  findNeedsReview(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    nowMs: number;
+    limit: number;
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+  }): Memory[] {
+    if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
+    const scopeFilter =
+      opts.scope === 'global'
+        ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
+        : and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? ''));
+
+    const ttlCase = sql.join(
+      opts.ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
+      sql` `,
+    );
+    const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
+    const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}), ${memory.createdAt}))`;
+
+    return this.db
+      .select()
+      .from(memory)
+      .where(
+        and(
+          eq(memory.status, 'active'),
+          scopeFilter,
+          sql`${ttlExpr} IS NOT NULL`,
+          sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
+        ),
+      )
+      .orderBy(sql`${baselineExpr} ASC`)
+      .limit(opts.limit)
+      .all();
+  }
+
   markArchived(id: string, lastSeenAt: Date): void {
     this.db
       .update(memory)

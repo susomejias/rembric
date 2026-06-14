@@ -42,7 +42,7 @@ const MAX_TRANSCRIPT_CHARS = 19_500;
 const MAX_ENTRY_CHARS = 2000;
 const MAX_ENTRIES_PER_SESSION = 200;
 const MAX_TITLE_CHARS = 100;
-const RECALL_REGEX = /remember|recall|acordate|qué hicimos|what did we do/i;
+const RECALL_REGEX = /remember|recall|acuérdate|qué hicimos|what did we do/i;
 const RECALL_NUDGE =
   'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
 

@@ -133,6 +133,8 @@ The `Candidate` type:
 
 The `memory.search` response SHALL include a `relations` array on each result row, populated in a single JOIN over `memory_relations`. Annotation kinds: `supersedes`, `superseded_by`, `conflicts_with`, `related`, `compatible`, `scoped`, `pending_conflict`. Each annotation SHALL include the target id and (when judged) a short snippet of the target's content.
 
+Each result row SHALL additionally carry the derived review metadata for the memory (see the `memory` capability): `reviewState` (`'fresh'` | `'needs_review'`) for `active` rows, and `reviewAfter` when non-null. These fields are informational metadata only — they SHALL NOT change result ordering, scope isolation, or which rows are returned. Rows that are not `active` SHALL omit `reviewState`.
+
 #### Scenario: A search result row reports its relations
 
 - **WHEN** `memory.search` returns memory N which has a judged `supersedes` relation to memory M and a pending relation to memory Q
@@ -144,14 +146,29 @@ The `memory.search` response SHALL include a `relations` array on each result ro
 - **WHEN** the cap is 10
 - **THEN** the response SHALL include the 10 most recent annotations; the rest are accessible via the dashboard
 
+#### Scenario: A search result row reports its review state
+
+- **GIVEN** an `active` memory N whose derived `reviewState` is `'needs_review'`
+- **WHEN** `memory.search` returns N
+- **THEN** the result row SHALL include `reviewState: 'needs_review'` and a non-null `reviewAfter`
+- **AND** the presence of `reviewState` SHALL NOT alter N's position in the result ordering
+
 ### Requirement: The `memory.get` tool MUST return the memory and its history
 
 `memory.get` SHALL accept an `id` and SHALL return the memory's content, status, scope, project, tags, source, and the full chain of predecessors derived from `replaces`, plus the confirmation count for the current head.
+
+For an `active` memory, the response SHALL additionally include the derived review metadata (see the `memory` capability): `reviewState` (`'fresh'` | `'needs_review'`) and `reviewAfter` when non-null. For non-`active` memories these fields SHALL be omitted.
 
 #### Scenario: Retrieve a merged memory
 
 - **WHEN** an authenticated client calls `memory.get` with the id of a merged memory M
 - **THEN** the response SHALL include M's content, M's predecessor ids, their content snapshots, and the confirmation count against M
+
+#### Scenario: memory.get reports review state for an active memory
+
+- **GIVEN** an `active` memory M whose derived `reviewState` is `'fresh'`
+- **WHEN** an authenticated client calls `memory.get('M')`
+- **THEN** the response SHALL include `reviewState: 'fresh'` and `reviewAfter` (the non-null derived timestamp for M's type)
 
 ### Requirement: The `memory.confirm` tool MUST follow the supersedes chain
 
@@ -262,11 +279,30 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments }`, with each list scoped to the request context (global vs path-scoped project)
+- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments, needsReview }`, with each list scoped to the request context (global vs path-scoped project)
 - **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 5`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
 - **AND** `recentMemories` SHALL be ordered by `last_seen_at DESC` with `includeArchived = false` (default) filtering out `status = 'archived'` rows
 - **AND** `pendingJudgments` SHALL contain at most 5 pending relations in scope with `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)`, oldest first, each entry carrying `{ judgmentId, sourceId, targetId, sourceSnippet, targetSnippet, ageMs }` so the agent can close them with `memory.judge` without further reads
+- **AND** `needsReview` SHALL contain at most 3 `active` in-scope memories whose derived `reviewState = 'needs_review'` (see the `memory` capability), ordered oldest `reviewBaseline` first, each entry carrying `{ id, type, snippet, reviewAfter, ageMs }` (where `snippet` uses the same per-row cap as the other context lists, `ageMs = now - reviewBaseline` the time since last affirmation) so the agent can re-affirm with `memory.confirm`, supersede with `memory.save` + `topic_key`, or — when it contradicts another memory — fall through to the existing `memory.judge` flow. The list is kept small by COUNT (only the 3 oldest) because it is recurring (every `memory.context`) and usually populated
+
+#### Scenario: `needsReview` is unary and disjoint from `pendingJudgments`
+
+- **GIVEN** a scope containing one `active` memory past its review shelf life AND one aged pending relation between two other memories
+- **WHEN** an MCP client calls `memory.context`
+- **THEN** the stale single memory SHALL appear only in `needsReview` (carrying `id`, not `sourceId`/`targetId`) and the aged relation SHALL appear only in `pendingJudgments` — no entry SHALL appear in both lists
+
+#### Scenario: `needsReview` respects scope
+
+- **GIVEN** an `active` memory past its review shelf life that belongs to project B
+- **WHEN** an MCP client calls `memory.context` on a connection scoped to project A (or the global endpoint)
+- **THEN** that memory SHALL NOT appear in `needsReview`
+
+#### Scenario: `needsReview` excludes non-active and within-shelf-life memories
+
+- **GIVEN** in scope: an `archived` memory past its shelf life, and an `active` memory still within its shelf life
+- **WHEN** an MCP client calls `memory.context`
+- **THEN** neither SHALL appear in `needsReview`
 
 #### Scenario: `memory.context.recentSessions` backfills past empty sessions
 

@@ -318,3 +318,67 @@ describe('memory.purgeDisconnectedArchived', () => {
     );
   });
 });
+
+describe('derived review state', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('needsReviewForContext surfaces a stale memory and memory.confirm clears it', () => {
+    const m = memory.save({ type: 'project', content: 'ship v1 by Q2' }, projectScope(projectId));
+
+    expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
+
+    clock.advance(100 * DAY); // project TTL is 3 months (~90 days)
+    const stale = memory.needsReviewForContext(projectScope(projectId), 5);
+    expect(stale).toHaveLength(1);
+    expect(stale[0]!.memory.id).toBe(m.id);
+    expect(stale[0]!.reviewAfter.getTime()).toBeLessThanOrEqual(clock.value.getTime());
+
+    memory.confirm(m.id, projectScope(projectId));
+    expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
+  });
+
+  it('a reference (no TTL) never needs review', () => {
+    memory.save({ type: 'reference', content: 'dashboard: https://x' }, projectScope(projectId));
+    clock.advance(400 * DAY);
+    expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
+  });
+
+  it('needsReview respects scope isolation', () => {
+    const otherId = projects.create({ slug: 'other-app' }).id;
+    memory.save({ type: 'project', content: 'A goal' }, projectScope(projectId));
+    clock.advance(100 * DAY);
+
+    expect(memory.needsReviewForContext(projectScope(otherId), 5)).toHaveLength(0);
+    expect(memory.needsReviewForContext(SCOPE_GLOBAL, 5)).toHaveLength(0);
+    expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(1);
+  });
+
+  it('excludes archived memories from needsReview', () => {
+    const m = memory.save({ type: 'project', content: 'old plan' }, projectScope(projectId));
+    clock.advance(100 * DAY);
+    memory.archive(m.id, projectScope(projectId));
+    expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
+  });
+
+  it('memory.get exposes reviewState/reviewAfter for an active head', () => {
+    const m = memory.save(
+      { type: 'feedback', content: 'prefers terse PRs' },
+      projectScope(projectId),
+    );
+    const fresh = memory.get(m.id, projectScope(projectId));
+    expect(fresh?.reviewState).toBe('fresh');
+    expect(fresh?.reviewAfter).toBeInstanceOf(Date);
+
+    clock.advance(200 * DAY); // feedback TTL is 6 months (~180 days)
+    const stale = memory.get(m.id, projectScope(projectId));
+    expect(stale?.reviewState).toBe('needs_review');
+  });
+
+  it('reviewStateForMemories maps each searched row', () => {
+    memory.save({ type: 'project', content: 'find me tabs' }, projectScope(projectId));
+    clock.advance(100 * DAY);
+    const results = memory.search({ query: 'tabs' }, projectScope(projectId));
+    const review = memory.reviewStateForMemories(results);
+    expect(review.get(results[0]!.id)?.reviewState).toBe('needs_review');
+  });
+});

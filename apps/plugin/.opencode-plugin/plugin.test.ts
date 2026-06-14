@@ -169,7 +169,7 @@ describe('RembricPlugin handlers', () => {
     const cases = [
       'remember what we did yesterday',
       'please recall the auth fix',
-      'acordate cuando hicimos la migración?',
+      'acuérdate cuando hicimos la migración?',
       'What did we do with the JWT?',
       '¿qué hicimos con el login?',
     ];

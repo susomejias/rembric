@@ -12,7 +12,7 @@
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "remember|recall|acordate|qué hicimos|what did we do",
+        "matcher": "remember|recall|acuérdate|qué hicimos|what did we do",
         "hooks": [
           {
             "type": "command",
