@@ -121,6 +121,26 @@ Build time is the goal; size is a byproduct. We measured the real image (arm64) 
 
 The runtime image is built in two workflows — CI's `docker-build-check` (load into daemon) and the release publish (push-by-digest). To avoid two drifting copies of the build config (`target: runtime`, cache, hf secret, platform), both now call a single composite action `.github/actions/build-runtime-image` with `mode: load | digest`. The divergent steps stay inline because they genuinely differ (installer e2e / boot smoke / per-arch digest smoke + merge) — over-abstracting those would hurt readability. The `target: runtime` invariant test now asserts against the action file (one source of truth) and that the publish workflow references the action.
 
+## Security review — build cache poisoning
+
+The shared cache (Decision 5) was reviewed for a cache-poisoning vector: can an untrusted PR inject layers into the cache the **publish** later consumes? Verdict: **the GHA cache as configured is safe.**
+
+Facts: `docker-build-check` runs on `pull_request` **and** `push: main` and always `cache-to`s `runtime-<arch>`; the publish runs on `main` (workflow_call) and reads/writes the same scope; the model bake uses `--mount=type=secret` (not ARG/ENV); ci.yml runs with `permissions: contents: read`.
+
+Why it's safe — GHA cache is **branch-isolated**:
+
+| Writes `runtime-<arch>`                                           | Readable by the publish (on `main`)?                               |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `docker-build-check` on **push:main** (post-merge, reviewed code) | ✅ yes — already-trusted code                                      |
+| `docker-build-check` on a **PR**                                  | ❌ no — a PR's cache lives under the PR ref; `main` never reads it |
+| **fork** PR                                                       | ❌ no — read-only token, cache isolated to the fork scope          |
+
+Same scope _name_ (`runtime-amd64`) ≠ shared entry: GHA partitions entries by branch, and a `main` run only restores from `main` (+ its own ref). So only code merged to `main` (write access + branch protection — outside the threat model) can write the cache the publish consumes. Plus: `--mount=type=secret` never persists the HF token into a layer/cache; buildkit validates layers by content-digest + input hash; and the 3-signal smoke + eager-embedder boot run on the **actually-built image**, so an adulterated image is caught before any tag is promoted.
+
+**The real edge — why registry cache was NOT adopted:** a `type=registry` `:buildcache-*` tag in GHCR is **global** (no branch isolation). If it were ever wired with `cache-to: registry` on `pull_request`, a PR could overwrite the buildcache the publish reads → real poisoning. Rules if it is ever adopted: `cache-to: registry` only on `push:main`/release (never `pull_request`); PRs stay on branch-isolated GHA. A public repo also makes such a buildcache publicly _readable_ (exposes OSS build layers + the public model; no secrets via the secret mount, but it is surface). The marginal restore-speed upside did not justify this edge, so the implementation stays on GHA cache.
+
+Hardening applied: ci.yml declares explicit `permissions: contents: read` (no job pushes images/packages, so the token never needs more) — explicit least-privilege over relying on the default.
+
 ## Spec drift cleaned up in passing
 
 The current `development-environment` spec text references `docker/build-push-action@v5` and a `600 MB` size ceiling, but the implementation already uses `@v7` and a recalibrated `1500 MB`. Since this change rewrites the publish requirement, the modified text aligns to the implemented reality (`@v7`, 1500 MB, per-arch). No behavior change beyond the matrix/distroless work; just removing stale drift in the requirement being edited.
