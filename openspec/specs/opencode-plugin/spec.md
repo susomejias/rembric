@@ -63,13 +63,13 @@ An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the bu
 
 The plugin module SHALL be importable in a Node/Bun environment that has `@opencode-ai/plugin` available as a peer dependency. The repository SHALL NOT add `@opencode-ai/plugin` to its own `dependencies` or `devDependencies` — it is consumed only at the user's runtime when opencode loads the plugin file.
 
-A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first five lines of `plugin.ts`, wrapped on the line above and below by `// x-release-please-start-version` and `// x-release-please-end` (release-please's standard annotation for updating arbitrary text in non-package files). opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics, and the `x-release-please-*` wrappers are what let release-please's `opencode-plugin` component find and update the version via the `extra-files` generic updater (NOT in lock-step with other plugin components — opencode versions independently).
+A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear in the first five lines of `plugin.ts`, wrapped on the line above and below by `// x-release-please-start-version` and `// x-release-please-end` (release-please's standard annotation for updating arbitrary text in non-package files). opencode has no manifest to declare a version; the comment is the only place to record it for diagnostics, and the `x-release-please-*` wrappers are what let the unified `plugin` release-please component find and update the version via its `extra-files` generic updater (in lock-step with the other clients — all four share the one `plugin` version).
 
 #### Scenario: Plugin file declares its version
 
 - **WHEN** the file is read at HEAD
 - **THEN** one of the first five lines matches `^// @rembric-plugin-version \d+\.\d+\.\d+$`
-- **AND** the captured version equals the most recent `opencode-plugin-vX.Y.Z` git tag
+- **AND** the captured version equals the most recent `plugin-vX.Y.Z` git tag
 
 #### Scenario: Plugin module loads under Bun
 
@@ -78,12 +78,12 @@ A version comment of the form `// @rembric-plugin-version <semver>` SHALL appear
 - **AND** the exported `RembricPlugin` is an async function
 - **AND** calling `RembricPlugin(ctx)` returns a Promise whose resolved value is a plain object with event-handler properties
 
-#### Scenario: Version is managed by the opencode-plugin release-please component
+#### Scenario: Version is managed by the unified plugin release-please component
 
-- **WHEN** a commit modifies only files under `apps/plugin/.opencode-plugin/`
-- **THEN** release-please's `opencode-plugin` component SHALL stage a version bump for the `// @rembric-plugin-version` comment in `plugin.ts`
-- **AND** the bump SHALL be independent of `claude-code-plugin`, `codex-plugin`, `hermes-plugin`, and `server`
-- **AND** a `opencode-plugin-vX.Y.Z` git tag SHALL be created when the release-please PR is merged
+- **WHEN** a commit modifies any file under `apps/plugin/`
+- **THEN** the unified `plugin` component SHALL stage a version bump for the `// @rembric-plugin-version` comment in `plugin.ts` (alongside every other client carrier)
+- **AND** all four clients SHALL share the one `plugin` version (independent only of `server`)
+- **AND** a `plugin-vX.Y.Z` git tag SHALL be created when the release-please PR is merged
 
 ### Requirement: MCP transport reuses the existing stdio bridge
 
@@ -431,24 +431,23 @@ The README SHALL NOT include an "npm install" path.
 - **AND** under a "Manual install" heading the two manual steps SHALL appear in order: step 1 (run install.sh) before step 2 (paste MCP snippet)
 - **AND** no section mentions npm
 
-### Requirement: Plugin version managed by release-please as an independent component
+### Requirement: Plugin version managed by the unified plugin release-please component
 
-The version recorded in `apps/plugin/.opencode-plugin/plugin.ts`'s `// @rembric-plugin-version` comment SHALL track the `opencode-plugin` release-please component's version. opencode is configured as an **independent component** with `release-type: simple` in `release-please-config.json` — `simple` (not `node`) because the `node-workspace` plugin reads a `package.json` for every `node` component and opencode has none; `simple` keeps it out of the dependency graph. There is no `linked-versions` group at all. The Claude Code and Codex surfaces are their own independent components (`claude-code-plugin`, `codex-plugin`) that declare `@rembric/plugin` as a dependency, so the `node-workspace` plugin (`merge: false`) cascades a patch bump to them when shared assets change. `opencode-plugin` declares NO dependency on `@rembric/plugin` and is therefore outside the cascade graph. The rationale: opencode's `install.sh` re-fetches shared assets (`apps/plugin/bin/`, `apps/plugin/scripts/`) from `main` at install time, so shared-asset changes reach opencode installs without requiring a coordinated version bump.
+The version recorded in `apps/plugin/.opencode-plugin/plugin.ts`'s `// @rembric-plugin-version` comment SHALL track the single unified `plugin` release-please component (covering all of `apps/plugin/`, package `@rembric/plugin`, tag `plugin-vX.Y.Z`). opencode is NO LONGER a separate release-please component; its version carrier is updated by the `plugin` component via an `extra-files` generic updater on `plugin.ts` (between the `x-release-please-*` markers). There is no `node-workspace` plugin and no per-client component.
 
-Likewise, `apps/plugin/.hermes-plugin/plugin.yaml::version` is its own independent release-please component outside the cascade graph for the same reason.
+All four plugin clients (claude, codex, opencode, hermes) share the single `plugin` version — they never diverge. Operators do NOT hand-edit version surfaces; Conventional Commits drive bumps via release-please.
 
-Operators do NOT hand-edit any of the version surfaces. Conventional Commits drive bumps via release-please.
+#### Scenario: An opencode-scoped change bumps the unified plugin component
 
-#### Scenario: opencode-scoped change bumps only the opencode-plugin component
+- **WHEN** a Conventional Commit touching `apps/plugin/.opencode-plugin/` lands on `main`
+- **THEN** release-please SHALL open (or update) a release PR for the `plugin` component, bumping `plugin-vX.Y.Z` and writing the new version into the `// @rembric-plugin-version` comment (alongside every other client carrier)
+- **AND** no separate `opencode-plugin` component / `opencode-plugin-v*` tag SHALL exist
 
-- **WHEN** a Conventional Commit scoped to `opencode` (e.g. `feat(opencode): ...`) lands on `main`
-- **THEN** release-please opens (or updates) a release PR that bumps only the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts` and the manifest entry for the `opencode-plugin` component — `plugin-shared`, `claude-code-plugin`, `codex-plugin`, and `hermes-plugin` are untouched
-
-#### Scenario: Shared-asset change cascades to the client components but not opencode
+#### Scenario: A shared-asset change bumps the one plugin version (all clients together)
 
 - **WHEN** a Conventional Commit modifies a shared file under `apps/plugin/bin/` or `apps/plugin/scripts/`
-- **THEN** release-please bumps `plugin-shared` and cascades a `+patch` to `claude-code-plugin` and `codex-plugin` via `node-workspace`
-- **AND** `opencode-plugin` and `hermes-plugin` remain on their previous versions and pick up the shared change at next install (their installers re-fetch from `main`)
+- **THEN** release-please SHALL bump the single `plugin` component, and the opencode `// @rembric-plugin-version` comment SHALL move to the same new version as every other client
+- **AND** the server image SHALL NOT be rebuilt (the `plugin` release does not trigger `publish-docker`)
 
 ### Requirement: Docs and dashboard help mention opencode
 
