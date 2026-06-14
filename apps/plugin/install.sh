@@ -320,16 +320,12 @@ client_present() { # $1 client → 0 present, 1 absent
 }
 
 component_key() { # $1 client → manifest component key
-  # Each client is its own release-please component. Claude + Codex carry their
-  # own versions and receive a node-workspace patch-cascade when the shared
-  # `@rembric/plugin` (apps/plugin) bumps. opencode + hermes are independent
-  # re-fetchers (their installers re-fetch shared assets from main).
-  case "$1" in
-    claude)   echo "apps/plugin/.claude-plugin" ;;
-    codex)    echo "apps/plugin/.codex-plugin" ;;
-    hermes)   echo "apps/plugin/.hermes-plugin" ;;
-    opencode) echo "apps/plugin/.opencode-plugin" ;;
-  esac
+  # All four clients ship under the single unified `plugin` release-please
+  # component (`apps/plugin`) — they share one version, so the "available"
+  # version is the same manifest entry for every client. (The per-client
+  # manifest keys / node-workspace cascade were retired in
+  # unify-plugin-release-track.)
+  echo "apps/plugin"
 }
 
 # vercmp $1 installed $2 available → echo: none|update|ahead|unknown

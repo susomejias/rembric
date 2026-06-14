@@ -15,6 +15,13 @@ permissions:
   pull-requests: write
   packages: write
 
+# Serialize runs on main so a rapid second merge never cancels the first
+# run's tag-minting. cancel-in-progress: false queues instead of cancelling —
+# the proximate fix for missing component tags (and lost release anchors).
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -40,9 +47,9 @@ jobs:
     # same workflow run via workflow_call (which IS permitted with the
     # auto-issued token).
     #
-    # Gating: only runs when the `server` component was released. Plugin-only
-    # releases (plugin-shared, claude-code-plugin, codex-plugin, opencode-plugin, hermes-plugin) do NOT trigger Docker
-    # publish.
+    # Gating: only runs when the `server` component was released. A `plugin`
+    # release (the unified plugin track covering all four clients) does NOT
+    # trigger Docker publish.
     needs: release-please
     if: ${{ needs.release-please.outputs.server_release_created == 'true' || github.event.inputs.force_publish == 'true' }}
     uses: ./.github/workflows/docker-publish.yml
