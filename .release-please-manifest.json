@@ -1,6 +1,6 @@
 {
   "apps/server": "0.21.11",
-  "apps/plugin": "0.11.1",
+  "apps/plugin": "0.12.0",
   "apps/plugin/.hermes-plugin": "0.11.0",
   "apps/plugin/.opencode-plugin": "0.11.1"
 }
