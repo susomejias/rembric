@@ -292,7 +292,7 @@ A handler that resolves scope using only `ctx.project` and falls through directl
 #### Scenario: Path-less connection with router pin returns project scope
 
 - **GIVEN** a token connected to `/mcp` (path-less)
-- **AND** an agent has called `project.use({slug: 'foo', create: true})` successfully
+- **AND** an agent has called `project.use({slug: 'foo', autocreate: true})` successfully
 - **WHEN** the agent calls `memory.context`
 - **THEN** the response SHALL include `scope: "project:<foo.id>"` and the project's recent memories
 
