@@ -1,0 +1,8 @@
+{
+  "name": "@rembric/plugin-claude-code",
+  "version": "0.12.0",
+  "private": true,
+  "dependencies": {
+    "@rembric/plugin": "workspace:*"
+  }
+}
