@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.14](https://github.com/susomejias/rembric/compare/server-v0.21.13...server-v0.21.14) (2026-06-14)
+
+
+### Performance
+
+* **ci:** native per-arch docker builds (no QEMU) + slim distroless runtime ([#156](https://github.com/susomejias/rembric/issues/156)) ([8d17d14](https://github.com/susomejias/rembric/commit/8d17d14b3c0efe0c2298ea2594d8440d0e2db767))
+
 ## [0.21.13](https://github.com/susomejias/rembric/compare/server-v0.21.12...server-v0.21.13) (2026-06-14)
 
 
