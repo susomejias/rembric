@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.15](https://github.com/susomejias/rembric/compare/server-v0.21.14...server-v0.21.15) (2026-06-14)
+
+
+### Bug Fixes
+
+* **self-update:** use absolute /nodejs/bin/node in distroless image ([#158](https://github.com/susomejias/rembric/issues/158)) ([5277100](https://github.com/susomejias/rembric/commit/5277100da02850b1e2ee9c1aee9bf39809dbb786))
+
 ## [0.21.14](https://github.com/susomejias/rembric/compare/server-v0.21.13...server-v0.21.14) (2026-06-14)
 
 
