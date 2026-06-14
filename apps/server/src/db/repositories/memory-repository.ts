@@ -487,9 +487,40 @@ export class MemoryRepository {
       opts.scope === 'global'
         ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
         : and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? ''));
+    return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, 0);
+  }
 
+  /**
+   * Unscoped sibling of `findNeedsReview` for the operator dashboard. Optional
+   * project filter mirrors `adminList`; `undefined` spans all scopes. Paginates
+   * with limit/offset so the dashboard `review=needs_review` filter is correct.
+   */
+  adminFindNeedsReview(opts: {
+    project?: AdminListMemoriesOpts['project'];
+    nowMs: number;
+    limit: number;
+    offset: number;
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+  }): Memory[] {
+    if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
+    let scopeFilter: SQL | undefined;
+    if (opts.project?.kind === 'global') {
+      scopeFilter = and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    } else if (opts.project?.kind === 'project') {
+      scopeFilter = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
+    }
+    return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, opts.offset);
+  }
+
+  private runNeedsReview(
+    scopeFilter: SQL | undefined,
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>,
+    nowMs: number,
+    limit: number,
+    offset: number,
+  ): Memory[] {
     const ttlCase = sql.join(
-      opts.ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
+      ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
       sql` `,
     );
     const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
@@ -503,11 +534,12 @@ export class MemoryRepository {
           eq(memory.status, 'active'),
           scopeFilter,
           sql`${ttlExpr} IS NOT NULL`,
-          sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
+          sql`${baselineExpr} + ${ttlExpr} <= ${nowMs}`,
         ),
       )
       .orderBy(sql`${baselineExpr} ASC`)
-      .limit(opts.limit)
+      .limit(limit)
+      .offset(offset)
       .all();
   }
 

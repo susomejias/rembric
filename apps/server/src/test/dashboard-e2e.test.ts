@@ -701,6 +701,66 @@ describe('dashboard E2E', () => {
     expect(missing.status).toBe(404);
     expect(await missing.text()).toContain('Judgment not found');
   });
+
+  it('memories review state: needs_review badge, filter, and detail card', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+
+    const { createDb } = await import('../db/index.js');
+    const { MemoryService } = await import('../services/memory.js');
+    const { SCOPE_GLOBAL } = await import('../services/scope.js');
+    const handle = createDb({ dataDir: server.config.dataDir });
+    const DAY = 24 * 60 * 60 * 1000;
+    // `project` TTL is 3 months → 120d-old + unaffirmed = needs_review.
+    const staleSvc = new MemoryService(
+      createRepositories(handle.db),
+      handle.db,
+      () => new Date(Date.now() - 120 * DAY),
+    );
+    const freshSvc = new MemoryService(createRepositories(handle.db), handle.db);
+    const stale = staleSvc.save(
+      { type: 'project', content: 'reviewbadge-stale-marker' },
+      SCOPE_GLOBAL,
+    );
+    const fresh = freshSvc.save(
+      { type: 'project', content: 'reviewbadge-fresh-marker' },
+      SCOPE_GLOBAL,
+    );
+    // `reference` has no TTL → never needs review even when ancient.
+    const ref = staleSvc.save(
+      { type: 'reference', content: 'reviewbadge-reference-marker' },
+      SCOPE_GLOBAL,
+    );
+    handle.close();
+
+    // Filter: only the stale project row surfaces; fresh + no-TTL are excluded.
+    const filtered = await get(baseUrl, '/dashboard/memories?review=needs_review', jar);
+    expect(filtered.status).toBe(200);
+    const fbody = await filtered.text();
+    expect(fbody).toContain('reviewbadge-stale-marker');
+    expect(fbody).toContain('pill needs_review');
+    expect(fbody).not.toContain('reviewbadge-fresh-marker');
+    expect(fbody).not.toContain('reviewbadge-reference-marker');
+
+    // The list carries a dedicated review column (separate from status).
+    const list = await get(baseUrl, '/dashboard/memories?review=needs_review', jar);
+    expect(await list.text()).toContain('<th>review</th>');
+
+    // Detail of the stale memory shows the review card; the fresh one does not
+    // render the needs_review badge.
+    const staleDetail = await get(baseUrl, `/dashboard/memories/${stale.id}`, jar);
+    const sdBody = await staleDetail.text();
+    expect(sdBody).toContain('Review');
+    expect(sdBody).toContain('pill needs_review');
+    expect(sdBody).toContain('Review after');
+
+    const freshDetail = await get(baseUrl, `/dashboard/memories/${fresh.id}`, jar);
+    expect(await freshDetail.text()).not.toContain('pill needs_review');
+
+    // No-TTL reference: detail omits the review card entirely.
+    const refDetail = await get(baseUrl, `/dashboard/memories/${ref.id}`, jar);
+    expect(await refDetail.text()).not.toContain('pill needs_review');
+  });
 });
 
 describe('dashboard E2E — self-update surface', () => {
