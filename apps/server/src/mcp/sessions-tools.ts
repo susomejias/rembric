@@ -494,8 +494,8 @@ function handleContext(
   },
 ) {
   const scope = scopeFromContext(deps);
-  const sessionsLimit = clamp(args.sessions ?? 5, 0, 25);
-  const memoriesLimit = clamp(args.memories ?? 20, 0, 100);
+  const sessionsLimit = clamp(args.sessions ?? 3, 0, 25);
+  const memoriesLimit = clamp(args.memories ?? 10, 0, 100);
   const clamped =
     (args.sessions ?? 0) > 25 || (args.prompts ?? 0) > 50 || (args.memories ?? 0) > 100;
   const includeArchived = args.includeArchived === true;
@@ -530,7 +530,7 @@ function handleContext(
       createdAt: m.createdAt.toISOString(),
     }));
 
-  const promptsLimit = clamp(args.prompts ?? 10, 0, 50);
+  const promptsLimit = clamp(args.prompts ?? 5, 0, 50);
   const recentPrompts = deps.prompts
     .recentForContext({
       projectId: scope.kind === 'project' ? scope.projectId : null,

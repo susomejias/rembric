@@ -306,6 +306,21 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.context caps recentMemories at the default of 10 when no size arg is given', async () => {
+    const client = await connect();
+    for (let i = 0; i < 12; i++) {
+      await client.callTool({
+        name: 'memory.save',
+        arguments: { scope: 'global', type: 'project', content: `ctx-default-cap-marker-${i}` },
+      });
+    }
+    const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
+    const payload = readJson(ctx) as { recentMemories: unknown[]; clamped: boolean };
+    expect(payload.recentMemories.length).toBeLessThanOrEqual(10);
+    expect(payload.clamped).toBe(false);
+    await client.close();
+  });
+
   it('memory.context backfills past empty sessions to return useful older ones', async () => {
     const client = await connect();
 

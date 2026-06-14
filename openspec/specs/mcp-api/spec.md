@@ -280,7 +280,8 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
 - **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments, needsReview }`, with each list scoped to the request context (global vs path-scoped project)
-- **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 5`
+- **AND** when a size argument is omitted the default SHALL be `sessions = 3`, `memories = 10`, `prompts = 5` (kept small because the snapshot is read every session start; callers needing more pass explicit args, still bounded by the maxima below)
+- **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 3`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
 - **AND** `recentMemories` SHALL be ordered by `last_seen_at DESC` with `includeArchived = false` (default) filtering out `status = 'archived'` rows
 - **AND** `pendingJudgments` SHALL contain at most 5 pending relations in scope with `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)`, oldest first, each entry carrying `{ judgmentId, sourceId, targetId, sourceSnippet, targetSnippet, ageMs }` so the agent can close them with `memory.judge` without further reads
@@ -303,6 +304,13 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 - **GIVEN** in scope: an `archived` memory past its shelf life, and an `active` memory still within its shelf life
 - **WHEN** an MCP client calls `memory.context`
 - **THEN** neither SHALL appear in `needsReview`
+
+#### Scenario: `memory.context` default sizes when size args are omitted
+
+- **GIVEN** a scope with more than 10 active memories, more than 5 non-deleted prompts, and more than 3 content-bearing sessions
+- **WHEN** an MCP client calls `memory.context` with no size arguments
+- **THEN** `recentMemories` SHALL contain at most 10 rows, `recentPrompts` at most 5, and `recentSessions` at most 3
+- **AND** `clamped` SHALL be `false` (defaults are not clamping)
 
 #### Scenario: `memory.context.recentSessions` backfills past empty sessions
 
