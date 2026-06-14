@@ -62,7 +62,7 @@ jobs:
       - name: Build (artifact sanity)
         run: pnpm run build
 
-  docker-build:
+  docker-build-check:
     # Safety net that mirrors the release-publish path so a build break is
     # caught at PR time, not at publish. The publish builds the (distroless)
     # runtime stage NATIVELY on two arches — so this check does too:
@@ -177,19 +177,3 @@ jobs:
             || { echo "::error::arm64 embedder did not load"; docker logs rembric-arm64-smoke; exit 1; }
           echo "arm64 boot smoke: healthz=200, embedder loaded ✓"
           docker rm -f rembric-arm64-smoke
-
-  # Stable, matrix-independent gate. Branch protection requires the check named
-  # `docker-build-check`; the matrix legs report parameterized names
-  # (`docker-build (amd64, …)`), so this single job re-exposes the fixed name
-  # and passes only when EVERY matrix leg succeeded. `if: always()` + explicit
-  # result check so a failed/cancelled leg blocks instead of silently skipping.
-  docker-build-check:
-    needs: docker-build
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Require all docker-build matrix legs to pass
-        run: |
-          result='${{ needs.docker-build.result }}'
-          echo "docker-build matrix result: $result"
-          [ "$result" = success ] || { echo "::error::docker-build matrix did not pass ($result)"; exit 1; }
