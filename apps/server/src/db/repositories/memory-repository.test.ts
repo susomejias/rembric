@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { REVIEW_TTL_MS } from '../../services/review.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { confirmations } from '../schema/confirmations.js';
 import { memory, type NewMemory } from '../schema/memory.js';
@@ -208,5 +209,112 @@ describe('MemoryRepository', () => {
       .run();
     expect(repo.adminCountConfirmations('04A')).toBe(2);
     expect(repo.adminCountConfirmations('missing')).toBe(0);
+  });
+
+  describe('review reads', () => {
+    const PROJECT_TTL = REVIEW_TTL_MS.project!;
+    const ttlByType = Object.entries(REVIEW_TTL_MS).filter(
+      (e): e is [NonNullable<NewMemory['type']>, number] => typeof e[1] === 'number',
+    );
+
+    it('latestConfirmationTsByIds returns the max event_ts per id; empty for no input', () => {
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'm1', content: 'x' })])
+        .run();
+      t.handle.db
+        .insert(confirmations)
+        .values([
+          { id: 'k1', memoryId: 'm1', eventTs: new Date(5_000) },
+          { id: 'k2', memoryId: 'm1', eventTs: new Date(9_000) },
+        ])
+        .run();
+      const map = repo.latestConfirmationTsByIds(['m1', 'absent']);
+      expect(map.get('m1')?.getTime()).toBe(9_000);
+      expect(map.has('absent')).toBe(false);
+      expect(repo.latestConfirmationTsByIds([]).size).toBe(0);
+    });
+
+    it('findNeedsReview returns active in-scope rows past their TTL, oldest baseline first', () => {
+      const past = new Date(10_000);
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'old1', content: 'oldest', createdAt: new Date(1_000) }),
+          row({ id: 'old2', content: 'newer', createdAt: past }),
+          row({ id: 'fresh', content: 'within ttl', createdAt: new Date(50_000) }),
+          row({ id: 'ref', content: 'no ttl type', type: 'reference', createdAt: new Date(1) }),
+          row({ id: 'arch', content: 'archived', status: 'archived', createdAt: new Date(1) }),
+        ])
+        .run();
+      const nowMs = past.getTime() + PROJECT_TTL + 1; // old1 & old2 past; fresh within
+      const found = repo.findNeedsReview({
+        scope: 'global',
+        projectId: null,
+        nowMs,
+        limit: 10,
+        ttlByType,
+      });
+      expect(found.map((m) => m.id)).toEqual(['old1', 'old2']); // oldest baseline first; ref/arch/fresh excluded
+    });
+
+    it('findNeedsReview uses the latest confirmation as the baseline', () => {
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'c', content: 'confirmed recently', createdAt: new Date(1_000) })])
+        .run();
+      const nowMs = 1_000 + PROJECT_TTL + 1; // would be stale by created_at alone
+      expect(
+        repo
+          .findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType })
+          .map((m) => m.id),
+      ).toEqual(['c']);
+      t.handle.db
+        .insert(confirmations)
+        .values([{ id: 'cc', memoryId: 'c', eventTs: new Date(nowMs - 1) }])
+        .run();
+      expect(
+        repo.findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType }),
+      ).toHaveLength(0);
+    });
+
+    it('findNeedsReview is scope-isolated and respects limit', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'g', content: 'global', createdAt: new Date(1) }),
+          row({
+            id: 'a1',
+            content: 'pa',
+            scope: 'project',
+            projectId: 'p1',
+            createdAt: new Date(1),
+          }),
+          row({
+            id: 'a2',
+            content: 'pa2',
+            scope: 'project',
+            projectId: 'p1',
+            createdAt: new Date(2),
+          }),
+        ])
+        .run();
+      const nowMs = PROJECT_TTL + 1_000;
+      expect(
+        repo
+          .findNeedsReview({ scope: 'project', projectId: 'p1', nowMs, limit: 10, ttlByType })
+          .map((m) => m.id),
+      ).toEqual(['a1', 'a2']);
+      expect(
+        repo
+          .findNeedsReview({ scope: 'project', projectId: 'p1', nowMs, limit: 1, ttlByType })
+          .map((m) => m.id),
+      ).toEqual(['a1']);
+      expect(
+        repo
+          .findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType })
+          .map((m) => m.id),
+      ).toEqual(['g']);
+    });
   });
 });

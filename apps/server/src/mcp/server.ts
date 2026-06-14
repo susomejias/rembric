@@ -81,10 +81,10 @@ const SAVE_DESCRIPTION =
   'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, content. Optional: tags[], topic_key. If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 
 const SEARCH_DESCRIPTION =
-  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recordá", "acordate". Supports FTS5 keyword search + type/tag/status/limit filters. Path-scoped connections see only that project; unscoped see globals only.';
+  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Supports FTS5 keyword search + type/tag/status/limit filters. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory).';
 
 const GET_DESCRIPTION =
-  'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history.';
+  'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
 
 const CONFIRM_DESCRIPTION =
   'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it.';
@@ -178,7 +178,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.context',
     {
       description:
-        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at). Call this when starting work on something that might have been touched before. Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
+        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), pendingJudgments (aged unresolved relation pairs to close with memory.judge), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory). Call this when starting work on something that might have been touched before. Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
       inputSchema: contextSchema,
     },
     sessions.context,

@@ -394,20 +394,29 @@ async function handleSearch(
           10,
         )
       : null;
+    // Derived review metadata (batched confirmation lookup) — informational
+    // only; never affects ordering or which rows are returned.
+    const review = deps.memory.reviewStateForMemories(memories);
     return ok({
       count: memories.length,
-      memories: memories.map((m) => ({
-        id: m.id,
-        scope: m.scope,
-        projectId: m.projectId,
-        type: m.type,
-        content: m.content,
-        tags: m.tags,
-        status: m.status,
-        createdAt: m.createdAt,
-        lastSeenAt: m.lastSeenAt,
-        relations: relations?.get(m.id) ?? [],
-      })),
+      memories: memories.map((m) => {
+        const r = review.get(m.id);
+        return {
+          id: m.id,
+          scope: m.scope,
+          projectId: m.projectId,
+          type: m.type,
+          content: m.content,
+          tags: m.tags,
+          status: m.status,
+          createdAt: m.createdAt,
+          lastSeenAt: m.lastSeenAt,
+          relations: relations?.get(m.id) ?? [],
+          ...(r && r.reviewState !== null
+            ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
+            : {}),
+        };
+      }),
     });
   } catch (err) {
     return errToMcp(err);
@@ -456,6 +465,9 @@ async function handleGet(deps: ToolDeps, args: { id: string }) {
       })),
       confirmationCount: result.confirmationCount,
       relations: deps.relations ? deps.relations.listForMemory(result.memory.id, 50) : [],
+      ...(result.reviewState !== null
+        ? { reviewState: result.reviewState, reviewAfter: result.reviewAfter ?? null }
+        : {}),
     });
   } catch (err) {
     return errToMcp(err);

@@ -88,7 +88,7 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 #### UserPromptSubmit
 
 - Type: `command`.
-- Matcher: `remember|recall|acordate|qué hicimos|what did we do` (case-insensitive).
+- Matcher: `remember|recall|acuérdate|qué hicimos|what did we do` (case-insensitive).
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh`.
 - Behaviour unchanged from prior spec.
 

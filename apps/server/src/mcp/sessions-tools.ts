@@ -479,6 +479,10 @@ function handleSessionGet(deps: SessionsToolDeps, args: { sessionId: string }) {
 }
 
 const CONTEXT_SNIPPET_CHARS = 350;
+// needsReview is recurring (every memory.context) and usually populated, so
+// it is kept frugal on COUNT (only the 3 oldest). Its snippet uses the same
+// CONTEXT_SNIPPET_CHARS cap as the other lists for a homogeneous payload.
+const NEEDS_REVIEW_MAX = 3;
 
 function handleContext(
   deps: SessionsToolDeps,
@@ -560,12 +564,25 @@ function handleContext(
       ageMs: now - r.createdAt.getTime(),
     }));
 
+  // Active memories past their review shelf life — re-affirm with
+  // memory.confirm, supersede with memory.save + topic_key, or judge if they
+  // contradict another memory. Unary (one memory, no counterpart), disjoint
+  // from pendingJudgments. Derived read-time state; nothing is mutated.
+  const needsReview = deps.memory.needsReviewForContext(scope, NEEDS_REVIEW_MAX).map((it) => ({
+    id: it.memory.id,
+    type: it.memory.type,
+    snippet: snippet(it.memory.content, CONTEXT_SNIPPET_CHARS),
+    reviewAfter: it.reviewAfter.toISOString(),
+    ageMs: now - it.reviewBaseline.getTime(),
+  }));
+
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
     recentSessions,
     recentPrompts,
     recentMemories,
     pendingJudgments,
+    needsReview,
     clamped,
   });
 }

@@ -364,7 +364,7 @@ Four load-bearing invariants:
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
-See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
+Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
 
 <details>
 <summary><b>Process diagram</b> — transports, service layer, storage, in-process background work</summary>
@@ -415,6 +415,8 @@ See [docs/relations.md](./docs/relations.md) for the relation taxonomy.
    │   └───────────────────────────────────────────────────────────────┘   │
    └───────────────────────────────────────────────────────────────────────┘
 ```
+
+Two staleness axes, deliberately distinct: **decay** runs in the background sweep above (access + confidence, keyed on `last_seen_at` → archives); **review** is derived in the request path on `memory.search` / `memory.get` / `memory.context` (affirmation, keyed on `max(created_at, last confirmation) + per-type TTL` → flags `needs_review`). Review adds no table, no tool, and no background work — it is computed at read time and cleared by `memory.confirm`.
 
 </details>
 

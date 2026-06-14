@@ -891,4 +891,62 @@ describe('MCP protocol conformance', () => {
 
     await client.close();
   });
+
+  it('memory.context surfaces needsReview, search/get expose reviewState, confirm clears it', async () => {
+    const client = await connect();
+
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: { scope: 'global', type: 'project', content: 'needsreviewmarkeraaa goal' },
+    })) as ToolResult;
+    const id = (readJson(saved) as { id: string }).id;
+
+    // Age it past the `project` shelf life (3 months) via created_at.
+    server.dbHandle.raw
+      .prepare(`UPDATE memory SET created_at = ? WHERE id = ?`)
+      .run(Date.now() - 100 * 86_400_000, id);
+
+    const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
+    const payload = readJson(ctx) as {
+      needsReview: {
+        id: string;
+        type: string;
+        snippet: string;
+        reviewAfter: string;
+        ageMs: number;
+      }[];
+      pendingJudgments: { judgmentId: string }[];
+    };
+    expect(payload.needsReview).toHaveLength(1);
+    expect(payload.needsReview[0]?.id).toBe(id);
+    expect(payload.needsReview[0]?.snippet).toContain('needsreviewmarkeraaa');
+    expect(payload.needsReview[0]?.ageMs).toBeGreaterThan(0);
+    expect(typeof payload.needsReview[0]?.reviewAfter).toBe('string');
+    // Unary needsReview is disjoint from pairwise pendingJudgments.
+    expect(payload.pendingJudgments).toHaveLength(0);
+
+    const searched = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'needsreviewmarkeraaa' },
+    })) as ToolResult;
+    const sPayload = readJson(searched) as { memories: { id: string; reviewState?: string }[] };
+    expect(sPayload.memories.find((m) => m.id === id)?.reviewState).toBe('needs_review');
+
+    const got = (await client.callTool({ name: 'memory.get', arguments: { id } })) as ToolResult;
+    expect((readJson(got) as { reviewState?: string }).reviewState).toBe('needs_review');
+
+    const confirmed = (await client.callTool({
+      name: 'memory.confirm',
+      arguments: { id },
+    })) as ToolResult;
+    expect(confirmed.isError).toBeFalsy();
+
+    const ctxAfter = (await client.callTool({
+      name: 'memory.context',
+      arguments: {},
+    })) as ToolResult;
+    expect((readJson(ctxAfter) as { needsReview: unknown[] }).needsReview).toHaveLength(0);
+
+    await client.close();
+  });
 });

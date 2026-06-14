@@ -65,7 +65,7 @@ Therefore Codex's mapping of lifecycle events to HTTP endpoints diverges from Cl
 - **AND** the `hooks` object SHALL NOT contain `PreCompact`, `PostCompact`, or `SessionEnd` (Codex does not support these events)
 - **AND** every hook entry SHALL be `type: "command"` — Codex does not support `type: "mcp_tool"` for hooks
 - **AND** the `SessionStart` hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh codex-cli` (reused from the Claude Code plugin; the `agent` arg differs)
-- **AND** the `UserPromptSubmit` hook SHALL declare the matcher `remember|recall|acordate|qué hicimos|what did we do` and invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh` (reused)
+- **AND** the `UserPromptSubmit` hook SHALL declare the matcher `remember|recall|acuérdate|qué hicimos|what did we do` and invoke `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh` (reused)
 
 #### Scenario: Codex Stop wires to a per-turn summary writer
 
