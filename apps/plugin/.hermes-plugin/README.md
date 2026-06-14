@@ -117,7 +117,9 @@ The provider implements three lifecycle methods that map 1:1 to Rembric's HTTP s
 - `on_pre_compress(messages)` → joins messages into a transcript, caps at 20,000 chars, `POST /api/<slug>/sessions/<id>/summary`.
 - `on_session_end(messages)` → `POST /api/<slug>/sessions/<id>/end`.
 
-The other `MemoryProvider` methods (`prefetch`, `system_prompt_block`, `sync_turn`, `on_memory_write`, `queue_prefetch`) are intentional no-ops — those operations live exclusively on the MCP surface, so the bridge (wired via `mcp_servers.rembric`) handles them when the agent calls `memory.search` / `memory.context` / `memory.save` directly.
+`system_prompt_block()` returns the unified Rembric nudge — the same SAVE/RECALL/SUMMARIZE text the server hands Claude Code / Codex CLI / opencode via the MCP `initialize.instructions` block. Hermes does not consume that MCP block and exposes no per-turn hook, so this method is its only nudging surface; the text is kept byte-identical to the server's `buildInstructions()` BASE.
+
+The remaining `MemoryProvider` methods (`prefetch`, `sync_turn`, `on_memory_write`, `queue_prefetch`) are intentional no-ops — those operations live exclusively on the MCP surface, so the bridge (wired via `mcp_servers.rembric`) handles them when the agent calls `memory.search` / `memory.context` / `memory.save` directly.
 
 ## Troubleshooting
 

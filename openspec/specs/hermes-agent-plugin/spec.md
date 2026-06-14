@@ -76,7 +76,7 @@ The file SHALL expose a module-level `register(ctx)` function that calls `ctx.re
 - `on_session_switch(new_session_id, *, parent_session_id="", reset=False, **kwargs)` SHALL override per the "Provider MUST override on_session_switch" requirement.
 - `get_tool_schemas` SHALL return `[]`. The provider contributes no agent-callable tools.
 - `handle_tool_call(name, args)` SHALL return `json.dumps({"error": "unknown_tool", "hint": "register the rembric MCP bridge in mcp_servers.rembric to access memory tools"})`.
-- `system_prompt_block` SHALL return a single-paragraph block (**≤300 chars**) directing the agent to (a) call `memory.session_summary({title, summary})` before declaring work done — title ≤100 chars descriptive of what was actually worked on; summary follows Goal · Discoveries · Accomplished · Next Steps · Files — AND (b) call `memory.context` after any compaction event when the compact summary lacks detail (file paths, specific decisions, errors). This is the Hermes-side counterpart to Claude/Codex's `initialize.instructions` nudge, which now also carries the memory.context post-compact recovery guidance for symmetry.
+- `system_prompt_block` SHALL return the unified Rembric nudge — the SAME text as the server's `initialize.instructions` BASE (the SAVE/RECALL/SUMMARIZE flows defined by the `mcp-api` capability), kept byte-identical across the TS/Python boundary. It SHALL therefore direct the agent to SAVE proactively (`memory.save` the moment something noteworthy happens, with the `topic_key` supersede and `candidates[]`→`memory.judge` paths), RECALL on-demand (`memory.context`/`memory.search` when starting/resuming work, after `/compact`, or asked "what did we do", only if prior detail is missing), and SUMMARIZE at the end of every working turn (`memory.session_summary({title, summary})`, never ending a working turn silent — the trigger SHALL NOT be bound to the literal word "done"; title ≤100 chars, NOT the cwd; summary follows Goal · Discoveries · Accomplished · Next Steps · Files), plus the `memory.about` update pointer. The block SHALL be ≤1000 chars — a self-imposed token-budget ceiling matching the server's `INSTRUCTIONS_MAX_LENGTH`, NOT a Hermes contract: upstream `agent/memory_manager.py::build_system_prompt` joins provider blocks with no truncation or length cap. Hermes does NOT consume the MCP server's `initialize.instructions` block and exposes no per-turn hook, so this method is its ONLY nudging surface.
 - `prefetch(query, **kwargs)` SHALL return `""`.
 - `queue_prefetch(query, **kwargs)` SHALL be a no-op (return `None`).
 - `sync_turn(user, assistant, **kwargs)` SHALL be a no-op.
@@ -125,13 +125,14 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentia
 
 (Unchanged from the prior spec.)
 
-#### Scenario: system_prompt_block emits the session-close protocol AND memory.context post-compact guidance
+#### Scenario: system_prompt_block emits the proactive session-close protocol AND memory.context recovery guidance
 
 - **WHEN** Hermes calls `provider.system_prompt_block()`
 - **THEN** the returned string SHALL be non-empty and SHALL contain the substring `memory.session_summary`
 - **AND** SHALL contain a reference to `title` and the structure `Goal · Discoveries · Accomplished · Next Steps · Files`
-- **AND** SHALL contain the substring `memory.context` (new — post-compact recovery guidance)
-- **AND** SHALL be ≤300 chars total (unchanged cap — the new content MUST fit within the existing cap, requiring concise phrasing)
+- **AND** SHALL phrase the trigger as firing at the end of every working turn (never silent) and SHALL NOT bind it solely to the literal word "done"
+- **AND** SHALL contain the substrings `memory.context`, `memory.save`, and `memory.about` (the unified RECALL / SAVE / update flows)
+- **AND** SHALL be ≤1000 chars total (self-imposed budget matching the server's `INSTRUCTIONS_MAX_LENGTH`; Hermes applies no truncation)
 
 #### Scenario: handle_tool_call returns a defensive error
 
