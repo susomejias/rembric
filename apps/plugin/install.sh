@@ -320,9 +320,12 @@ client_present() { # $1 client → 0 present, 1 absent
 }
 
 component_key() { # $1 client → manifest component key
+  # Claude + Codex are the single `plugin-shared` component (keyed at apps/plugin):
+  # they bundle the cached bridge and bump together. opencode + hermes are
+  # independent components (their installers re-fetch shared assets from main).
   case "$1" in
-    claude)   echo "apps/plugin/.claude-plugin" ;;
-    codex)    echo "apps/plugin/.codex-plugin" ;;
+    claude)   echo "apps/plugin" ;;
+    codex)    echo "apps/plugin" ;;
     hermes)   echo "apps/plugin/.hermes-plugin" ;;
     opencode) echo "apps/plugin/.opencode-plugin" ;;
   esac

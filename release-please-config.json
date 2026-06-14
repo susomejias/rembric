@@ -36,34 +36,8 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "exclude-paths": [
-        "apps/plugin/.claude-plugin",
-        "apps/plugin/.codex-plugin",
-        "apps/plugin/.hermes-plugin",
-        "apps/plugin/.opencode-plugin"
-      ]
-    },
-    "apps/plugin/.claude-plugin": {
-      "release-type": "simple",
-      "component": "claude-code-plugin",
-      "package-name": "@rembric/plugin-claude-code",
-      "include-component-in-tag": true,
-      "include-v-in-tag": true,
-      "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"]
-    },
-    "apps/plugin/.codex-plugin": {
-      "release-type": "simple",
-      "component": "codex-plugin",
-      "package-name": "@rembric/plugin-codex",
-      "include-component-in-tag": true,
-      "include-v-in-tag": true,
-      "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["plugin.json"]
+      "exclude-paths": ["apps/plugin/.opencode-plugin", "apps/plugin/.hermes-plugin"],
+      "extra-files": [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
     },
     "apps/plugin/.hermes-plugin": {
       "release-type": "simple",
@@ -87,12 +61,5 @@
       "bump-patch-for-minor-pre-major": false,
       "extra-files": [{ "type": "generic", "path": "plugin.ts" }]
     }
-  },
-  "plugins": [
-    {
-      "type": "linked-versions",
-      "groupName": "plugin-suite",
-      "components": ["plugin-shared", "claude-code-plugin", "codex-plugin", "opencode-plugin"]
-    }
-  ]
+  }
 }

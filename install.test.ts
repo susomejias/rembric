@@ -33,8 +33,9 @@ const MANIFEST = JSON.parse(
   readFileSync(join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'),
 ) as Record<string, string>;
 const PLUGIN_VERSION: Record<string, string> = {
-  claude: MANIFEST['apps/plugin/.claude-plugin'],
-  codex: MANIFEST['apps/plugin/.codex-plugin'],
+  // Claude + Codex are the single `plugin-shared` component, keyed at apps/plugin.
+  claude: MANIFEST['apps/plugin'],
+  codex: MANIFEST['apps/plugin'],
   hermes: MANIFEST['apps/plugin/.hermes-plugin'],
   opencode: MANIFEST['apps/plugin/.opencode-plugin'],
 };
