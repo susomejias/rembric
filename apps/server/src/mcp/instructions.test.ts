@@ -5,12 +5,12 @@ import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from './instructions.js';
 
 describe('MCP initialize instructions', () => {
-  it('emits ≤ 800 characters for the unscoped variant', () => {
+  it('emits ≤ 1000 characters for the unscoped variant', () => {
     const text = buildInstructions({ requestedSlug: null });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
   });
 
-  it('emits ≤ 800 characters for the path-scoped variant', () => {
+  it('emits ≤ 1000 characters for the path-scoped variant', () => {
     const text = buildInstructions({ requestedSlug: 'rembric' });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
   });
@@ -87,8 +87,19 @@ describe('MCP initialize instructions', () => {
       buildInstructions({ requestedSlug: 'rembric' }),
     ];
     for (const text of variants) {
-      expect(text).toContain('before ending any turn with real work');
+      expect(text).toContain('before ending any working turn');
       expect(text).not.toContain('before saying "done"');
+    }
+  });
+
+  it('keeps recall on-demand rather than unconditional at session start', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('memory.context');
+      expect(text).toContain('if you lack prior detail');
     }
   });
 

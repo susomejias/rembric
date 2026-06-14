@@ -233,11 +233,11 @@ The active Rembric project is signalled per directory by a `.rembric` config fil
 
 **Bootstrap for new slugs:**
 
-- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the `rembric-memory` skill — can call `project.use({slug, create: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
+- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the `rembric-memory` skill — can call `project.use({slug, autocreate: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
 
 **Manual override during a session:**
 
-- The agent can always call `project.use({slug: 'something-else', create: true})` to switch scope mid-session. This is independent of the bridge's URL path.
+- The agent can call `project.use({slug: 'something-else', confirmSwitch: true})` to switch scope (allowed only when no session is active — close it first via `memory.session_summary`; add `autocreate: true` if the target project does not exist yet). This is independent of the bridge's URL path.
 
 ## Token budget
 

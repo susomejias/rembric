@@ -151,7 +151,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_start',
     {
       description:
-        'Start an agent session. Call this once when the user begins a task you intend to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt }.',
+        'Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode providers POST to the sessions endpoint on startup). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt }.',
       inputSchema: sessionStartSchema,
     },
     sessions.sessionStart,
@@ -169,7 +169,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_summary',
     {
       description:
-        'Save the end-of-session summary AND a short title. Call this BEFORE saying "done"/"listo". Args: { summary (<=2000 chars, server rejects longer with invalid_input — keep it tight), title? (<=100 chars, descriptive of work done) }. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.',
+        'Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=2000 chars, server rejects longer with invalid_input — keep it tight), title? (<=100 chars, descriptive of work done, NOT the cwd) }. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.',
       inputSchema: sessionSummarySchema,
     },
     sessions.sessionSummary,
@@ -178,7 +178,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.context',
     {
       description:
-        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), pendingJudgments (aged unresolved relation pairs to close with memory.judge), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory). Call this when starting work on something that might have been touched before. Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
+        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), pendingJudgments (aged unresolved relation pairs to close with memory.judge), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory). Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
       inputSchema: contextSchema,
     },
     sessions.context,
@@ -205,7 +205,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.capture_passive',
     {
       description:
-        'Extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found.',
+        'Bulk-save learnings: extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls.',
       inputSchema: capturePassiveSchema,
     },
     sessions.capturePassive,

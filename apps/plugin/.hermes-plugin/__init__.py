@@ -305,17 +305,31 @@ class RembricMemoryProvider(MemoryProvider):
         )
 
     def system_prompt_block(self) -> str:
-        # Permanent nudge so the model knows to write a structured summary
-        # before declaring work done, AND to recover detail after /compact
-        # via memory.context. Parity with the MCP server's
-        # initialize.instructions block served to Claude Code / Codex CLI.
-        # Hard cap: ≤300 chars (asserted by tests).
+        # Hermes does NOT consume the MCP server's initialize.instructions and
+        # exposes no per-turn hook, so this is its ONLY nudging surface. It
+        # returns the SAME unified nudge as the server's buildInstructions()
+        # BASE (the SAVE/RECALL/SUMMARIZE flows) — one version for every
+        # client. The text is duplicated across the TS/Python boundary (no
+        # cross-language sharing is possible) and MUST be kept byte-identical
+        # to instructions.ts::BASE; content tests on both sides guard drift.
+        # No cap comes from Hermes (upstream build_system_prompt joins blocks
+        # with no truncation); the ≤1000-char ceiling is our own token budget.
         return (
-            "Rembric: before declaring work done, call "
-            "memory.session_summary({title, summary}). Title ≤100 chars "
-            "describing what was actually worked on. Summary ≤2000 chars "
-            "covers Goal · Discoveries · Accomplished · Next Steps · Files. "
-            "After /compact: call memory.context if detail is missing."
+            "Rembric — persistent memory across sessions. Use these tools "
+            "proactively, not only when asked; each tool's description has the "
+            "exact mechanics.\n\n"
+            "SAVE: the moment it happens — bug fix · decision · discovery · "
+            "config change · pattern · preference — call memory.save (don't "
+            "batch to session end). Evolving a prior topic? pass topic_key to "
+            "supersede it; resolve candidates[] with memory.judge.\n"
+            "RECALL: starting/resuming work, after /compact, or asked \"what "
+            "did we do\"? Call memory.context (memory.search for keyword "
+            "lookup) if you lack prior detail.\n"
+            "SUMMARIZE: before ending any working turn, call "
+            "memory.session_summary({title≤100 (the work, not cwd), "
+            "summary≤2000}) — never end silent: Goal · Discoveries · "
+            "Accomplished · Next Steps · Files.\n"
+            "Update Rembric itself: memory.about."
         )
 
     def prefetch(self, query: str, **kwargs: Any) -> str:

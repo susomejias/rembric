@@ -1,13 +1,15 @@
 /**
  * Build the MCP `initialize.instructions` block.
  *
- * Supported clients (Claude Code, Codex CLI) inject this string directly
- * into the LLM's system prompt. Hard constraint: ≤ 800 characters per
- * variant — verified by a unit test. Anything longer is either bug or
- * documentation creep.
+ * All four clients (Claude Code, Codex CLI, Hermes Agent, opencode) inject
+ * this string into the LLM's system prompt on connect; for in-process
+ * clients with no per-turn hook it is the ONLY nudging surface. The block
+ * is a directive crib-sheet of three proactive flows (SAVE / RECALL /
+ * SUMMARIZE) that cite their tools; precise mechanics live in each tool's
+ * own `description`.
  *
  * Two variants per scope (project-scoped vs unscoped). The body is the
- * same crib-sheet protocol; only the trailing scope note diverges.
+ * same protocol; only the trailing scope note diverges.
  */
 
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
@@ -17,22 +19,27 @@ export interface InstructionsContext {
   requestedSlug: string | null;
 }
 
-const BASE = `Rembric memory.
+const BASE = `Rembric — persistent memory across sessions. Use these tools proactively, not only when asked; each tool's description has the exact mechanics.
 
-Call memory.save after: bug fix · decision · discovery · config change · pattern · preference. Evolving topic? pass topic_key (memory.suggest_topic_key) to supersede the prior row. Close save candidates[] with memory.judge.
-Call memory.search for past work or "what did we do".
-Call memory.session_summary({title, summary≤${SUMMARY_MAX_CHARS} chars}) before ending any turn with real work: title ≤100 chars (real work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.
-After /compact: call memory.context if detail is missing.
-To update Rembric: call memory.about.`;
+SAVE: the moment it happens — bug fix · decision · discovery · config change · pattern · preference — call memory.save (don't batch to session end). Evolving a prior topic? pass topic_key to supersede it; resolve candidates[] with memory.judge.
+RECALL: starting/resuming work, after /compact, or asked "what did we do"? Call memory.context (memory.search for keyword lookup) if you lack prior detail.
+SUMMARIZE: before ending any working turn, call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — never end silent: Goal · Discoveries · Accomplished · Next Steps · Files.
+Update Rembric itself: memory.about.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>
   `\n\nThis connection is path-scoped to '${slug}'. scope='global' is rejected; open /mcp for user-wide memory.`;
 
-const UNSCOPED_NOTE = `\n\nProject scope: auto-detected from your client's MCP roots when supported. Otherwise call project.use({slug, create:true}) to pin (and create on first use). project.current reports the active project.`;
+const UNSCOPED_NOTE = `\n\nProject scope: auto-detected from your client's MCP roots when supported. Otherwise call project.use({slug, autocreate:true}) to pin (and create on first use). project.current reports the active project.`;
 
 export function buildInstructions(ctx: InstructionsContext): string {
   return ctx.requestedSlug ? BASE + PATH_SCOPED_NOTE(ctx.requestedSlug) : BASE + UNSCOPED_NOTE;
 }
 
-/** Hard limit; CI test enforces. */
-export const INSTRUCTIONS_MAX_LENGTH = 800;
+/**
+ * Self-imposed token budget, NOT a client or protocol limit: the MCP spec
+ * defines `InitializeResult.instructions` as a free-form string with no max
+ * length, and none of the four clients truncates it. The cap exists only to
+ * keep the system-prompt cost bounded and guard against doc-creep. CI test
+ * (`instructions.test.ts`) enforces it against both variants.
+ */
+export const INSTRUCTIONS_MAX_LENGTH = 1000;

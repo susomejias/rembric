@@ -29,7 +29,7 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 - The MCP bridge MUST live OUTSIDE `~/.config/opencode/plugins/` because opencode auto-loads every JS/TS file in that directory as a plugin. Canonical location: `~/.config/rembric/bin/rembric-bridge.mjs`.
 - opencode does NOT support `${env.*}` substitution in `opencode.json::mcp.<name>.url`. Path-scoping via `.rembric` therefore requires the stdio bridge (which builds the URL at spawn time) — `type: "remote"` would force per-project `./opencode.json` files. The shared bridge gives Claude/Codex/opencode identical UX.
 - `session.deleted` fires ONLY on explicit user delete from the UI — NOT on session close or process quit. Treat it as in-memory cleanup, not a server-side end signal.
-- **Sub-agent filtering is mandatory v1**. Detect via `event.properties.info.parentID` (truthy) OR `info.title.endsWith(" subagent)")`. Without the filter, a single conversation spawning sub-agents inflates session count dramatically (engram observed 170 sessions per 1 real conversation; their issue #116).
+- **Sub-agent filtering is mandatory v1**. Detect via `event.properties.info.parentID` (truthy) OR `info.title.endsWith(" subagent)")`. Without the filter, a single conversation spawning sub-agents inflates session count dramatically (a single conversation has been observed producing ~170 session rows in similar memory plugins).
 - Bun's ESM resolver accepts absolute paths in `import` statements. `install.sh` sed-substitutes the dev-time relative import (`from '../bin/rembric-dotenv.mjs'`) with the absolute installed path before copying.
 
 ## All shell-hook clients (Claude + Codex)

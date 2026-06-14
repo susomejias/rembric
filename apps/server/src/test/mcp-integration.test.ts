@@ -117,14 +117,14 @@ describe('MCP protocol conformance', () => {
     const globalInstructions = globalClient.getInstructions();
     expect(globalInstructions).toMatch(/project\.use/);
     expect(globalInstructions).not.toContain('X-Rembric-Project');
-    expect((globalInstructions ?? '').length).toBeLessThanOrEqual(800);
+    expect((globalInstructions ?? '').length).toBeLessThanOrEqual(1000);
     await globalClient.close();
 
     // Path-scoped /mcp/<slug> connection — instructions name the slug.
     const projClient = await connect({ projectSlug: 'integration-proj' });
     const projInstructions = projClient.getInstructions();
     expect(projInstructions).toContain("'integration-proj'");
-    expect((projInstructions ?? '').length).toBeLessThanOrEqual(800);
+    expect((projInstructions ?? '').length).toBeLessThanOrEqual(1000);
     await projClient.close();
   });
 
