@@ -104,3 +104,9 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 
 - **WHEN** `apps/server/src/test/invariants.test.ts` runs the "Dockerfile stage order" check
 - **THEN** the test SHALL parse `apps/server/Dockerfile`, identify all `FROM ... AS <name>` lines in order, and assert the final entry's name is `runtime`
+
+#### Scenario: Dockerfile declares stage labels (invariant test)
+
+- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "image labels" check
+- **THEN** the test SHALL verify the `runtime` stage block contains a line matching `LABEL rembric.stage=runtime`
+- **AND** the test SHALL verify the `dev` stage block contains a line matching `LABEL rembric.stage=dev`

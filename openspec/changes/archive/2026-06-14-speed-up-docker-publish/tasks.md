@@ -59,4 +59,4 @@
 
 ## 5. Spec
 
-- [ ] 5.1 Land the `development-environment` spec delta (modified publish requirement + scenarios) into `openspec/specs/development-environment/spec.md` on archive.
+- [x] 5.1 Land the `development-environment` spec delta (modified publish requirement + scenarios) into `openspec/specs/development-environment/spec.md` on archive.
