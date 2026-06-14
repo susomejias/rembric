@@ -257,9 +257,17 @@ describe('image packaging invariants', () => {
     expect(/LABEL\s+rembric\.stage=dev\b/.test(devBlock)).toBe(true);
   });
 
-  it('docker-publish.yml: `Build and push` step uses target: runtime', () => {
-    const yml = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
-    expect(/target:\s*runtime\b/.test(yml)).toBe(true);
+  it('build-runtime-image action targets the runtime stage (shared by CI + publish)', () => {
+    // The runtime build moved into a composite action used by both
+    // docker-publish.yml (mode=digest) and ci.yml's docker-build-check
+    // (mode=load), so the `target: runtime` guard lives there now.
+    const action = readFileSync(
+      join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
+      'utf8',
+    );
+    expect(/target:\s*runtime\b/.test(action)).toBe(true);
+    const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    expect(/uses:\s*\.\/\.github\/actions\/build-runtime-image\b/.test(publish)).toBe(true);
   });
 
   it('docker-publish.yml: post-publish smoke test references all three signals', () => {
