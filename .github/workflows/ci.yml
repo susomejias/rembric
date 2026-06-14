@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -60,37 +63,48 @@ jobs:
         run: pnpm run build
 
   docker-build-check:
-    # Catches Dockerfile / dependency / native-module regressions before
-    # they reach a release publish. Single-arch (linux/amd64 native on
-    # ubuntu-latest) — multi-arch is validated only at release publish
-    # time via .github/workflows/docker-publish.yml.
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Safety net that mirrors the release-publish path so a build break is
+    # caught at PR time, not at publish. The publish builds the (distroless)
+    # runtime stage NATIVELY on two arches — so this check does too:
+    #   • amd64 (ubuntu-latest)      — builds runtime + dev, then the full
+    #                                   installer e2e (install.sh --server --up).
+    #   • arm64 (ubuntu-24.04-arm)   — builds runtime, then a boot smoke. The
+    #                                   embedder loads EAGERLY at boot, so a
+    #                                   clean boot proves the arm64 glibc native
+    #                                   modules (onnxruntime-node, better-sqlite3,
+    #                                   sqlite-vec) + baked model actually work.
+    # Both native arm runners are free for public repos. No QEMU.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
+      # Same composite action the release publish uses (mode=load here vs
+      # mode=digest there) — one place defines how the runtime image is built.
+      # Loaded as :latest so the e2e / boot smoke below bring it up without
+      # pulling from GHCR (REMBRIC_NO_PULL).
       - name: Build runtime (prod) target
-        uses: docker/build-push-action@v7
+        uses: ./.github/actions/build-runtime-image
         with:
-          context: .
-          file: ./apps/server/Dockerfile
-          target: runtime
-          platforms: linux/amd64
-          push: false
-          # Load into the daemon as :latest so the installer e2e below can bring
-          # it up without pulling from GHCR (REMBRIC_NO_PULL).
-          load: true
-          tags: ghcr.io/susomejias/rembric:latest
-          cache-from: type=gha,scope=docker-build-check-runtime
-          cache-to: type=gha,mode=max,scope=docker-build-check-runtime
+          image: ghcr.io/susomejias/rembric
+          platform: linux/${{ matrix.arch }}
+          mode: load
+          # Shared scope with docker-publish.yml so a release build reuses the
+          # layers CI just built on the merge-to-main commit (warm publish).
+          cache-scope: runtime-${{ matrix.arch }}
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
+          hf-token: ${{ secrets.HF_TOKEN }}
 
       - name: Build dev target
+        if: matrix.arch == 'amd64'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -98,15 +112,21 @@ jobs:
           target: dev
           platforms: linux/amd64
           push: false
-          cache-from: type=gha,scope=docker-build-check-dev
+          # Import the runtime leg's builder layers (incl. the baked model) so the
+          # dev build reuses them instead of re-fetching — dev now COPYs the model
+          # from the builder stage.
+          cache-from: |
+            type=gha,scope=runtime-amd64
+            type=gha,scope=docker-build-check-dev
           cache-to: type=gha,mode=max,scope=docker-build-check-dev
           secrets: |
             hf_token=${{ secrets.HF_TOKEN }}
 
-      # Real end-to-end of the installer's server bring-up: drive the actual
-      # `install.sh --server --up` against the locally-built image (REMBRIC_NO_PULL
-      # so it uses the loaded :latest, no GHCR), then assert the server answers.
+      # amd64: real end-to-end of the installer's server bring-up — drive the
+      # actual `install.sh --server --up` against the locally-built image
+      # (REMBRIC_NO_PULL → uses the loaded :latest, no GHCR), then assert.
       - name: Installer e2e — server --up against the built image
+        if: matrix.arch == 'amd64'
         run: |
           set -eu
           TOK=ci-e2e-token-0123456789   # >=16 chars (server rejects shorter)
@@ -128,3 +148,32 @@ jobs:
           echo "healthz=200 dashboard=$d"
           case "$d" in 200 | 302) ;; *) echo "::error::unexpected /dashboard status $d"; exit 1 ;; esac
           docker compose down
+
+      # arm64: boot smoke — run the just-built distroless image natively and
+      # wait for /healthz. A clean boot proves the arm64 glibc native modules +
+      # the eagerly-loaded embedding model work (the install.sh path is
+      # exercised on amd64; here we only need to confirm the arm64 image runs).
+      - name: Boot smoke — arm64 distroless runtime
+        if: matrix.arch == 'arm64'
+        run: |
+          set -eu
+          TOK=ci-e2e-token-0123456789
+          D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
+          docker run -d --name rembric-arm64-smoke \
+            -e REMBRIC_ADMIN_TOKEN="$TOK" \
+            -v "$D/data:/data" \
+            -p 127.0.0.1:8787:8787 \
+            ghcr.io/susomejias/rembric:latest
+          ok=
+          for _ in $(seq 1 60); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" http://127.0.0.1:8787/healthz || true)
+            [ "$c" = 200 ] && { ok=1; break; }
+            sleep 3
+          done
+          if [ -z "$ok" ]; then echo "::error::arm64 /healthz never returned 200"; docker logs rembric-arm64-smoke || true; exit 1; fi
+          # Assert the embedder warmed (eager load); its absence means the native
+          # modules failed silently before listening.
+          docker logs rembric-arm64-smoke 2>&1 | grep -q 'embedding model loaded' \
+            || { echo "::error::arm64 embedder did not load"; docker logs rembric-arm64-smoke; exit 1; }
+          echo "arm64 boot smoke: healthz=200, embedder loaded ✓"
+          docker rm -f rembric-arm64-smoke

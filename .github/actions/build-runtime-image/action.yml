@@ -1,0 +1,69 @@
+name: Build runtime image
+description: >
+  Build the (distroless) `runtime` stage of apps/server/Dockerfile for a single
+  native platform. Shared by CI's docker-build-check (mode=load) and the release
+  publish (mode=digest, push-by-digest). Caller handles checkout + GHCR login.
+
+inputs:
+  image:
+    description: Image name (no tag), e.g. ghcr.io/owner/rembric.
+    required: true
+  platform:
+    description: Single build platform, e.g. linux/amd64.
+    required: true
+  mode:
+    description: "'load' (build + load into the daemon as <image>:latest) or 'digest' (push by digest, no tag)."
+    required: true
+  cache-scope:
+    description: GHA cache scope (keep per-arch to avoid cross-eviction).
+    required: true
+  hf-token:
+    description: Hugging Face read token for the model bake (optional; falls back to anonymous + retry).
+    required: false
+    default: ''
+
+outputs:
+  digest:
+    description: The pushed image digest (mode=digest only).
+    value: ${{ steps.digest.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@v4
+
+    - name: Build (load into daemon)
+      if: inputs.mode == 'load'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./apps/server/Dockerfile
+        target: runtime
+        platforms: ${{ inputs.platform }}
+        push: false
+        load: true
+        tags: ${{ inputs.image }}:latest
+        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
+        secrets: |
+          hf_token=${{ inputs.hf-token }}
+
+    - name: Build and push by digest (native — no QEMU)
+      id: build_digest
+      if: inputs.mode == 'digest'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./apps/server/Dockerfile
+        target: runtime
+        platforms: ${{ inputs.platform }}
+        outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
+        secrets: |
+          hf_token=${{ inputs.hf-token }}
+
+    - name: Surface digest
+      id: digest
+      shell: bash
+      run: echo "digest=${{ steps.build_digest.outputs.digest }}" >> "$GITHUB_OUTPUT"

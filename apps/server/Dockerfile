@@ -47,6 +47,33 @@ RUN pnpm deploy --filter=@rembric/server --prod --legacy /prod-out \
     && cd /prod-out \
     && pnpm rebuild better-sqlite3 sqlite-vec onnxruntime-node
 
+# Drop onnxruntime-node's non-target prebuilt libs (~185MB). It bundles binaries
+# for darwin + win32 + BOTH linux arches, but its loader only ever requires the
+# running platform/arch:
+#   onnxruntime-node/dist/binding.js:
+#     require(`../bin/napi-v6/${process.platform}/${process.arch}/…node`)
+# so every other platform/arch is unreachable in this single-arch Linux image —
+# provably safe, no quality change (the exact same lib runs). We assert the
+# target binding survives so a future layout change fails the build loudly
+# instead of shipping a broken image (the embedder also loads eagerly at boot).
+ARG TARGETARCH
+RUN set -eux; cd /prod-out/node_modules; \
+    case "$TARGETARCH" in \
+      amd64) ort_arch=x64 ;; \
+      arm64) ort_arch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH for onnxruntime-node prune" >&2; exit 1 ;; \
+    esac; \
+    found=; \
+    for napi in .pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/*/; do \
+      [ -d "$napi" ] || continue; \
+      rm -rf "${napi}darwin" "${napi}win32"; \
+      if [ -d "${napi}linux" ]; then \
+        find "${napi}linux" -mindepth 1 -maxdepth 1 -type d ! -name "$ort_arch" -exec rm -rf {} +; \
+        [ -f "${napi}linux/${ort_arch}/onnxruntime_binding.node" ] && found=1; \
+      fi; \
+    done; \
+    [ -n "$found" ]
+
 
 FROM node:22-bookworm-slim AS dev
 
@@ -67,10 +94,10 @@ COPY --chown=rembric:rembric apps/server/package.json ./apps/server/package.json
 COPY --chown=rembric:rembric apps/plugin/package.json ./apps/plugin/package.json
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
-# Bake the embedding model into the dev image too (same cache-friendly
-# ordering as the builder stage; dev parity with the runtime image).
-COPY --chown=rembric:rembric apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
-RUN --mount=type=secret,id=hf_token,env=HF_TOKEN cd /app/apps/server && node scripts/fetch-model.mjs /app/models
+# Reuse the model the builder already fetched + functionally validated —
+# don't re-download/re-validate it (~300MB) a second time. Dev parity with
+# the runtime image, and one model bake per build instead of two.
+COPY --from=builder --chown=rembric:rembric /models /app/models
 
 COPY --chown=rembric:rembric apps/server ./apps/server
 
@@ -95,20 +122,21 @@ ENTRYPOINT []
 CMD ["sh", "-c", "pnpm run build:css && node scripts/copy-assets.mjs && tsx src/scripts/seed-dev.ts --reset && exec tsx watch src/server-entrypoint.ts"]
 
 
-FROM node:22-bookworm-slim AS runtime
+# Distroless keeps glibc (so the prebuilt onnxruntime-node / better-sqlite3 /
+# sqlite-vec binaries work unchanged) while dropping the shell + apt userland.
+# No shell means: numeric USER (no useradd), exec-form HEALTHCHECK.
+FROM gcr.io/distroless/nodejs22-debian12 AS runtime
 
 LABEL rembric.stage=runtime
 
-RUN useradd -r -u 10001 -m rembric
-
 WORKDIR /app
 
-COPY --from=builder --chown=rembric:rembric /prod-out/dist          ./dist
-COPY --from=builder --chown=rembric:rembric /prod-out/node_modules  ./node_modules
-COPY --from=builder --chown=rembric:rembric /prod-out/package.json  ./
-COPY --from=builder --chown=rembric:rembric /models                 ./models
+COPY --from=builder --chown=10001:10001 /prod-out/dist          ./dist
+COPY --from=builder --chown=10001:10001 /prod-out/node_modules  ./node_modules
+COPY --from=builder --chown=10001:10001 /prod-out/package.json  ./
+COPY --from=builder --chown=10001:10001 /models                 ./models
 
-USER rembric
+USER 10001:10001
 
 ENV REMBRIC_DATA_DIR=/data \
     REMBRIC_HOST=0.0.0.0 \
@@ -117,7 +145,9 @@ ENV REMBRIC_DATA_DIR=/data \
 VOLUME ["/data"]
 EXPOSE 8787
 
+# Absolute node path: distroless ships it at /nodejs/bin/node and does not
+# guarantee a bare `node` on PATH.
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s \
-  CMD node -e "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-ENTRYPOINT ["node", "/app/dist/server-entrypoint.js"]
+ENTRYPOINT ["/nodejs/bin/node", "/app/dist/server-entrypoint.js"]
