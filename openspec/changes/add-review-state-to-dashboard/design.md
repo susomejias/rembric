@@ -45,14 +45,18 @@ The time math has one home (`services/review.ts`). The dashboard imports the pur
 ## Rendering
 
 ```
-/dashboard/memories — list row:
-   #ab12  project  "ship v1 by Q2…"   [ACTIVE] [needs_review]   2026-02-01
-                                        status    review badge
-                                        (only active rows past their shelf life)
+/dashboard/memories — columns:  SCOPE | PROJECT | TYPE | CONTENT | STATUS | REVIEW | CREATED
 
-filter form:  [ project ▾ ] [ type ▾ ] [ status ▾ ] [ review ▾ ] [ search ____ ]
-                                                      (any | needs_review)
+   project  demo  project  "ship v1 by Q2…"   [ACTIVE]   [needs_review]   2026-02-01
+   project  demo  reference "runbook…"        [ACTIVE]   —                2026-05-10
+                                                status     review column
+                                                (separate axis: needs_review only on active rows past shelf life)
+
+filter form:  [ scope ▾ ] [ status ▾ ] [ type ▾ ] [ review ▾ ] [ search ____ ]
+                                                    (any | needs_review)
 ```
+
+`review` is its **own column**, not a second pill in the `status` cell — `status` is the lifecycle axis (active/superseded/archived) and `review` is the orthogonal freshness axis. Rendering them in one cell read as two competing statuses; a dedicated column makes the orthogonality legible.
 
 Detail page metadata block gains: `REVIEW: needs_review` + `REVIEW AFTER: <ts via formatTs>` (omitted when the type has no TTL or the row is not active).
 

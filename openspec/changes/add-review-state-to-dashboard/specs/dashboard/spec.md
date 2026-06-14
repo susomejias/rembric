@@ -4,7 +4,7 @@
 
 The `/dashboard/memories` view SHALL support filtering by project, type, status, **review state**, and free-text search, and SHALL paginate results. All filtering SHALL be performed server-side; the form SHALL be progressively enhanced with HTMX so it updates without a full page reload.
 
-The view SHALL render a `needs_review` badge next to the `status` pill for each `active` row whose derived `reviewState = 'needs_review'` (derivation per the `memory` capability). The badge SHALL use the existing `.pill` atom and the locked palette — no new design token is introduced. The filter form SHALL include a `review` control with values `(any)` (default) and `needs_review`; when `review = needs_review` the list SHALL show only `active` memories deriving `needs_review`, computed server-side with the per-type TTL pushed into SQL so pagination is correct, respecting the current project filter and preserving all active filters across HTMX swaps.
+The view SHALL render review state in a dedicated `review` column (separate from `status`, because review is an orthogonal axis — a freshness signal, not a lifecycle value): each `active` row whose derived `reviewState = 'needs_review'` (derivation per the `memory` capability) SHALL show a `needs_review` badge in that column; all other rows SHALL show a neutral placeholder. The badge SHALL use the existing `.pill` atom and the locked palette — no new design token is introduced. The filter form SHALL include a `review` control with values `(any)` (default) and `needs_review`; when `review = needs_review` the list SHALL show only `active` memories deriving `needs_review`, computed server-side with the per-type TTL pushed into SQL so pagination is correct, respecting the current project filter and preserving all active filters across HTMX swaps.
 
 #### Scenario: Filtering by status
 
@@ -20,8 +20,8 @@ The view SHALL render a `needs_review` badge next to the `status` pill for each 
 
 - **GIVEN** an `active` memory whose derived `reviewState = 'needs_review'`
 - **WHEN** the operator views it on `/dashboard/memories` (under any filter that includes it)
-- **THEN** its row SHALL render a `needs_review` badge next to the `status` pill
-- **AND** a `fresh`, `superseded`, `archived`, or no-TTL-type row SHALL NOT render the badge
+- **THEN** its row SHALL render a `needs_review` badge in the `review` column (distinct from the `status` column)
+- **AND** a `fresh`, `superseded`, `archived`, or no-TTL-type row SHALL show the neutral placeholder, not the badge
 
 #### Scenario: Badge and filter agree
 

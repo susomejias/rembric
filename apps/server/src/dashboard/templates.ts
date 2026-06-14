@@ -438,6 +438,11 @@ export function statusPill(status: string): SafeHtml {
   return raw(`<span class="pill ${cls}">${cls}</span>`);
 }
 
+/** Badge for the derived `needs_review` state; rendered only when applicable. */
+export function reviewPill(): SafeHtml {
+  return raw('<span class="pill needs_review">needs_review</span>');
+}
+
 export function scopePill(scope: string): SafeHtml {
   const cls = escape(scope);
   const label = scope === 'global' ? 'GLOBAL' : 'PROJECT';

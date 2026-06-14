@@ -8,7 +8,7 @@ This lets an operator answer "what is stale in this project and worth re-verifyi
 
 ## What Changes
 
-- `/dashboard/memories` list: each `active` row whose derived `reviewState = 'needs_review'` SHALL render a `needs_review` badge next to the existing `status` pill, built from the existing `.pill` atom (no new design token).
+- `/dashboard/memories` list: a dedicated `review` column (separate from `status`, since review is an orthogonal freshness axis, not a lifecycle value) renders a `needs_review` badge for each `active` row whose derived `reviewState = 'needs_review'`, built from the existing `.pill` atom (no new design token); other rows show a neutral placeholder.
 - `/dashboard/memories` filter form: add a `review` filter (`(any)` default · `needs_review`). When `review = needs_review`, the list SHALL show only `active` memories deriving `needs_review`, server-side, respecting the existing project filter and pagination, and preserving all other active filters across HTMX swaps.
 - `/dashboard/memories/:id` detail: surface the derived `reviewState` and `reviewAfter` (when set) in the metadata block, alongside the existing status/confirmation-count fields.
 - Derivation stays in the handler via the shared pure `deriveReviewState`; confirmation timestamps and the filtered id set come from new **`admin*`** (unscoped) repository reads — no SQL leaves `db/`.
