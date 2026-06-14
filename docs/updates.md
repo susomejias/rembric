@@ -77,6 +77,36 @@ Anything written between the backup and the restore is lost — that window is t
 
 **Bad release** (healthy but misbehaving): pin the previous version in `.env` and `docker compose up -d`. Your data directory is untouched by updates; if you also need the pre-update state of the database, stop the container and copy `data/backups/pre-update-v<target>-<ts>.sqlite` over `data/data.db` (remove `data.db-wal` / `data.db-shm` first).
 
+## Updating across the distroless boundary (one-time, v0.21.14)
+
+Starting with the runtime image shipped in **v0.21.14**, Rembric runs on a **distroless** base: Node lives at `/nodejs/bin/node` and there is **no bare `node` on `PATH`**. Crossing this boundary takes one manual step, because the _old_ server (≤ v0.21.14) drives the upgrade and still calls bare `node`.
+
+**Symptom** — the dashboard one-click update fails with:
+
+```
+error during container init: exec: "node": executable file not found in $PATH
+```
+
+Your running container is **not** harmed: the swap fails while launching the upgrader, before the live container is touched, so you keep serving the old version. (A manual `docker compose pull && up` with an old compose file instead starts fine but shows the container `unhealthy` — same cause: the old compose health check runs bare `node`.)
+
+**Why** — the image moved to distroless in v0.21.14; the self-update orchestrator and the compose health check in versions **≤ v0.21.14** still invoke bare `node`. Both were fixed in **v0.21.15**, but the fix only takes effect once a fixed version is the _source_ of an update — so the bookworm→distroless hop itself cannot be done from the dashboard. The fix lives in the version you are updating _from_, not the one you are going _to_.
+
+**Fix — do this once to reach ≥ v0.21.15:**
+
+- **Installer / TUI (recommended):** re-run the installer's server update. It re-fetches `docker-compose.yml` (with the corrected `/nodejs/bin/node` health check) and brings the stack up via `docker compose`, bypassing the broken self-update path. Nothing else to touch.
+
+- **Manual** — in your compose directory:
+
+  ```bash
+  docker rm $(docker ps -aq --filter name=rembric-upgrader) 2>/dev/null   # clear failed upgraders
+  # new image is distroless → point the compose health check at the absolute node path
+  sed -i 's#^\(\s*-\s*\)node$#\1/nodejs/bin/node#' docker-compose.yml
+  docker compose pull && docker compose up -d
+  docker ps --filter name=rembric                                          # expect: Up (healthy)
+  ```
+
+**After this** you are on ≥ v0.21.15 and the dashboard one-click update works normally again — the orchestrator launches the upgrader with `/nodejs/bin/node`, and recreated containers use the image's own health check, independent of your local compose file.
+
 ## Testing the flow locally
 
 For development, point the release feed at a stub and serve the image from a local registry:
