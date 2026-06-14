@@ -214,7 +214,7 @@ Non-sub-agent sessions SHALL be registered exactly once per plugin lifetime via 
 - Adds `id` to `knownSessions`.
 - POSTs `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": <id>, "agent": "opencode", "cwd": <ctx.directory>}` if a slug resolved successfully. The body SHALL OMIT `cwd` entirely (NOT send `null`) when `ctx.directory` is unavailable, matching the bug fix recorded in memory `01KRY3ZAF86NRK5Y8K3N0JJ9M6`.
 
-The handler SHALL emit one stderr diagnostic line per `session.created` event of the form `[rembric] session.created id=<id> parentID=<parentID|""> title=<title|""> subagent=<true|false>`. This is mandatory: it makes engram-style heuristic drift visible in opencode's debug logs (design.md risk register).
+The handler SHALL emit one stderr diagnostic line per `session.created` event of the form `[rembric] session.created id=<id> parentID=<parentID|""> title=<title|""> subagent=<true|false>`. This is mandatory: it makes sub-agent heuristic drift visible in opencode's debug logs (design.md risk register).
 
 #### Scenario: Top-level session is registered exactly once
 
