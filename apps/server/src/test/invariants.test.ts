@@ -489,12 +489,13 @@ describe('apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for s
   });
 });
 
-// Per-component versioning (see openspec/changes/restructure-monorepo-apps-layout):
-// the previous "all four version sources agree" invariant is removed. Each
-// apps/plugin/.X-plugin/ now versions independently via its own release-please
-// component. claude-code + codex are linked via release-please's
-// linked-versions plugin (cluster `bridge-bundlers`); hermes and opencode
-// bump independently. Drift between components is intentional, not a bug.
+// Plugin versioning (see openspec/changes/unify-plugin-release-track): all of
+// apps/plugin/ versions under ONE unified release-please `plugin` component,
+// so every client carrier (.claude-plugin/{package,plugin}.json,
+// .codex-plugin/{package,plugin}.json, .hermes-plugin/plugin.yaml,
+// .opencode-plugin/plugin.ts) shares a single version. There is no
+// node-workspace cascade and no per-client component. (A future invariant
+// could assert all carriers agree; not enforced today.)
 
 // Install URL drift guard. The `restructure-monorepo-apps-layout` change
 // moved the shared plugin tree from `plugin/` to `apps/plugin/` and

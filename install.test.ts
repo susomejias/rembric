@@ -33,12 +33,12 @@ const MANIFEST = JSON.parse(
   readFileSync(join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'),
 ) as Record<string, string>;
 const PLUGIN_VERSION: Record<string, string> = {
-  // Each client is its own release-please component (Claude + Codex receive a
-  // node-workspace patch-cascade from the shared `apps/plugin` package).
-  claude: MANIFEST['apps/plugin/.claude-plugin'],
-  codex: MANIFEST['apps/plugin/.codex-plugin'],
-  hermes: MANIFEST['apps/plugin/.hermes-plugin'],
-  opencode: MANIFEST['apps/plugin/.opencode-plugin'],
+  // All clients ship under the single unified `plugin` release-please component
+  // (`apps/plugin`) — one shared version (unify-plugin-release-track).
+  claude: MANIFEST['apps/plugin'],
+  codex: MANIFEST['apps/plugin'],
+  hermes: MANIFEST['apps/plugin'],
+  opencode: MANIFEST['apps/plugin'],
 };
 
 interface RunOpts {
