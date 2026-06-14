@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.13](https://github.com/susomejias/rembric/compare/server-v0.21.12...server-v0.21.13) (2026-06-14)
+
+
+### Features
+
+* strengthen the memory protocol nudge (proactive save/recall/summarize) across all four clients ([#153](https://github.com/susomejias/rembric/issues/153)) ([c18d4b5](https://github.com/susomejias/rembric/commit/c18d4b58526d9d672e2083809c001750e1c2a52f))
+
 ## [0.21.12](https://github.com/susomejias/rembric/compare/server-v0.21.11...server-v0.21.12) (2026-06-14)
 
 
