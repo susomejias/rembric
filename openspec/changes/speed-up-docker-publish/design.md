@@ -11,7 +11,7 @@
         │                │  build-push-action  target=runtime       │
         │                │    platforms: <single arch>              │
         │                │    push-by-digest=true (NO tags)          │
-        │                │    cache scope: publish-<arch>            │
+        │                │    cache scope: runtime-<arch> (CI-shared)│
         │                │  → export DIGEST                          │
         │                │  SMOKE its own digest natively (3 sigs)   │
         │                │  upload digest as artifact                │
@@ -74,7 +74,7 @@ Runtime-stage changes required by distroless (no shell, no `useradd`):
 - Replace `RUN useradd -r -u 10001 … rembric` + `USER rembric` with **numeric `USER 10001:10001`**; `COPY --from=builder --chown=10001:10001 …`. The installer e2e pre-creates `./data` `0777`, so a numeric uid opens the DB fine.
 - Entrypoint already `["node", "/app/dist/server-entrypoint.js"]` — distroless `ENTRYPOINT` is `node`, so keep the exec-form entrypoint (it overrides cleanly).
 
-**Honest size expectation:** image is ~1.26 GB today; the model (~340 MB) + onnxruntime (~280 MB) are ~50 % and architectural. Distroless trims the OS layer only — expect **~1.26 GB → ~1.10–1.15 GB (~10 %)**, plus a real security win (no shell/package manager). The size-signal ceiling (currently 1500 MB) stays comfortably above; it is now checked per-arch.
+**Measured size:** distroless alone took the runtime image 1030 MB → 893 MB (−137 MB); the `onnxruntime-node` prune (Decision 7) took it to **701 MB** (−329 MB total), plus a real security win (no shell/package manager). The size-signal ceiling (1500 MB) stays comfortably above; it is now checked per-arch.
 
 Fallback if distroless proves troublesome in the installer e2e: stay on `node:22-bookworm-slim` for runtime (no size win, no risk). The base swap is independently revertable from the speed change.
 
