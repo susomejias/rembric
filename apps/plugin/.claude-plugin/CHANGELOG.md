@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.2](https://github.com/susomejias/rembric/compare/claude-code-plugin-v0.12.1...claude-code-plugin-v0.12.2) (2026-06-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rembric/plugin bumped to 0.13.0
+
 ## [0.12.1](https://github.com/susomejias/rembric/compare/claude-code-plugin-v0.12.0...claude-code-plugin-v0.12.1) (2026-06-14)
 
 
