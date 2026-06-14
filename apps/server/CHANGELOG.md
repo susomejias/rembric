@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.21.12](https://github.com/susomejias/rembric/compare/server-v0.21.11...server-v0.21.12) (2026-06-14)
+
+
+### Features
+
+* **dashboard:** surface review state on /dashboard/memories ([#149](https://github.com/susomejias/rembric/issues/149)) ([7b3ea4e](https://github.com/susomejias/rembric/commit/7b3ea4eb2bd192dcf2466d436b2e153c22e18b57))
+* **mcp:** trim memory.context default list sizes ([#142](https://github.com/susomejias/rembric/issues/142)) ([7a8edfd](https://github.com/susomejias/rembric/commit/7a8edfd51b9f62dbda8390fe03e44e3ee5d13c79))
+* **memory:** derived review state (needs_review) axis ([#141](https://github.com/susomejias/rembric/issues/141)) ([f0f4347](https://github.com/susomejias/rembric/commit/f0f4347dc408366f8798ab08be5e24fa3de42df3))
+
 ## [0.21.11](https://github.com/susomejias/rembric/compare/server-v0.21.10...server-v0.21.11) (2026-06-13)
 
 
