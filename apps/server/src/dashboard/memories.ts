@@ -1,16 +1,26 @@
 import { Hono, type Context } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
-import type { Memory } from '../db/schema/memory.js';
+import type { Memory, MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
+import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/review.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { escape, formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
+import {
+  escape,
+  formatTs,
+  html,
+  raw,
+  reviewPill,
+  scopePill,
+  shortId,
+  statusPill,
+} from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface MemoriesDeps {
@@ -34,6 +44,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const projectFilter = url.searchParams.get('project') ?? '';
     const statusFilter = url.searchParams.get('status') ?? 'active';
     const typeFilter = url.searchParams.get('type') ?? '';
+    const reviewFilter = url.searchParams.get('review') ?? '';
+    const wantNeedsReview = reviewFilter === 'needs_review';
     const query = url.searchParams.get('q') ?? '';
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
@@ -50,11 +62,25 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       if (p) project = { kind: 'project', projectId: p.id };
     }
 
+    const ttlByType = Object.entries(REVIEW_TTL_MS).filter(
+      (e): e is [MemoryType, number] => typeof e[1] === 'number',
+    );
+    const nowMs = Date.now();
+
     let rows: Memory[];
     if (query) {
       rows = deps.repos.memory
         .adminSearchFts(query, PAGE_SIZE, offset)
         .filter((m) => clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter));
+    } else if (wantNeedsReview) {
+      // needs_review implies active; the SQL path filters + paginates correctly.
+      rows = deps.repos.memory.adminFindNeedsReview({
+        project,
+        nowMs,
+        limit: PAGE_SIZE + 1,
+        offset,
+        ttlByType,
+      });
     } else {
       rows = deps.repos.memory.adminList({
         status: statusFilter as Memory['status'],
@@ -63,6 +89,31 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         limit: PAGE_SIZE + 1,
         offset,
       });
+    }
+
+    // Derived review state per row for the badge (and to refine the FTS path
+    // when the needs_review filter is combined with a text query).
+    const reviewById = new Map<string, ReviewState | null>();
+    if (rows.length > 0) {
+      const lastConfirmed = deps.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+      const at = new Date(nowMs);
+      for (const m of rows) {
+        reviewById.set(
+          m.id,
+          deriveReviewState(
+            {
+              type: m.type,
+              createdAt: m.createdAt,
+              status: m.status,
+              lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+            },
+            at,
+          ).reviewState,
+        );
+      }
+    }
+    if (wantNeedsReview && query) {
+      rows = rows.filter((m) => reviewById.get(m.id) === 'needs_review');
     }
 
     const hasMore = rows.length > PAGE_SIZE;
@@ -79,6 +130,11 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           <td>${m.type}</td>
           <td><a href="/dashboard/memories/${m.id}">${truncate(m.content, 100)}</a></td>
           <td>${statusPill(m.status)}</td>
+          <td>
+            ${reviewById.get(m.id) === 'needs_review'
+              ? reviewPill()
+              : raw('<span class="muted">—</span>')}
+          </td>
           <td class="muted">${formatTs(m.createdAt)}</td>
         </tr>
       `;
@@ -103,6 +159,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       raw(`<option value="">all types</option>`),
       ...(['user', 'feedback', 'project', 'reference'] as const).map((t) =>
         raw(`<option value="${t}"${typeFilter === t ? ' selected' : ''}>${t}</option>`),
+      ),
+    ];
+    const reviewOptions = [
+      raw(`<option value="">any review</option>`),
+      raw(
+        `<option value="needs_review"${wantNeedsReview ? ' selected' : ''}>needs_review</option>`,
       ),
     ];
 
@@ -144,6 +206,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
             ${typeOptions}
           </select>
         </span>
+        <span class="group">
+          <span class="k">REVIEW</span>
+          <select name="review">
+            ${reviewOptions}
+          </select>
+        </span>
         <span class="group search">
           <span class="k">SEARCH</span>
           <input type="search" name="q" value="${query}" placeholder="FTS5 keyword, tag, topic" />
@@ -163,13 +231,14 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               <th>type</th>
               <th>content</th>
               <th>status</th>
+              <th>review</th>
               <th>created</th>
             </tr>
           </thead>
           <tbody>
             ${visible.length === 0
               ? html`<tr>
-                  <td colspan="6" class="muted">No memories match this filter.</td>
+                  <td colspan="7" class="muted">No memories match this filter.</td>
                 </tr>`
               : rowsHtml}
           </tbody>
@@ -206,6 +275,26 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const project = row.projectId ? deps.repos.projects.adminFindById(row.projectId) : null;
     const predecessors = deps.repos.memory.adminGetByIds(row.replaces);
     const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
+    const lastConfirmedAt =
+      deps.repos.memory.latestConfirmationTsByIds([row.id]).get(row.id) ?? null;
+    const { reviewState, reviewAfter } = deriveReviewState(
+      { type: row.type, createdAt: row.createdAt, status: row.status, lastConfirmedAt },
+      new Date(),
+    );
+    // Shown only for an active row whose type has a TTL (reviewAfter set).
+    const reviewCard =
+      reviewState !== null && reviewAfter !== null
+        ? html`
+            <div class="stat-card">
+              <div class="label">Review</div>
+              <div class="value">
+                ${reviewState === 'needs_review' ? reviewPill() : raw('fresh')}
+              </div>
+              <div class="label" style="margin-top:.4rem">Review after</div>
+              <div class="value" style="font-size:.9rem">${formatTs(reviewAfter)}</div>
+            </div>
+          `
+        : raw('');
 
     const archiveButton =
       row.status === 'active'
@@ -296,6 +385,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           <div class="label">Created</div>
           <div class="value" style="font-size:.9rem">${formatTs(row.createdAt)}</div>
         </div>
+        ${reviewCard}
       </div>
 
       <h2>Content</h2>

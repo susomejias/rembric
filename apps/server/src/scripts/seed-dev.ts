@@ -214,6 +214,48 @@ export function runSeed(deps: SeedDeps): SeedResult {
     }
   }
 
+  // 3b. Backdated memories so the derived `needs_review` review state is
+  // visible in the dashboard (badge + `review` filter) on a fresh seed.
+  // A MemoryService with a past clock stamps an old created_at via the
+  // normal save path (no raw UPDATE) — review is derived from that.
+  const DAY = 24 * 60 * 60 * 1000;
+  const staleSeeds: Array<{
+    type: 'project' | 'feedback' | 'user' | 'reference';
+    content: string;
+    ageDays: number;
+  }> = [
+    {
+      type: 'project',
+      content: 'Goal: ship the review-state dashboard surface this sprint.',
+      ageDays: 120,
+    },
+    {
+      type: 'feedback',
+      content: 'Prefer terse PRs; lead with the why, then the diff.',
+      ageDays: 220,
+    },
+    {
+      type: 'user',
+      content: 'Operator is a backend engineer; comfortable with SQLite internals.',
+      ageDays: 400,
+    },
+    {
+      type: 'reference',
+      content: 'Runbook: dashboards live behind Tailscale (no TTL — should stay fresh).',
+      ageDays: 400,
+    },
+  ];
+  for (const s of staleSeeds) {
+    const past = new Date(Date.now() - s.ageDays * DAY);
+    const backdated = new MemoryService(
+      createRepositories(deps.handle.db),
+      deps.handle.db,
+      () => past,
+    );
+    backdated.save({ type: s.type, content: s.content }, scope);
+    memoryCount += 1;
+  }
+
   // 4. Ended sessions with realistic summaries.
   const endedSessions = [
     {
