@@ -28,9 +28,9 @@
 
 - [x] 5.1 Dry-run PASSED (2026-06-14, throwaway branch): node-workspace resolved `@rembric/plugin`→client edges despite clients not being pnpm members (`@rembric/plugin bumped to 0.12.1` in both client PRs); lockfile untouched
 - [x] 5.2 Dry-run PASSED: three separate version-titled PRs (`plugin-shared 0.12.1`, `claude-code-plugin`, `codex-plugin`), no combined PR
-- [ ] 5.3 Create anchor tags `claude-code-plugin-v<seed>` and `codex-plugin-v<seed>` at the migration HEAD (seed = current client `plugin.json` version) so the first cascade is a clean `+patch`, not a pre-migration history re-scan (dry-run showed an inflated `0.13.0` minor without anchors)
-- [ ] 5.4 After landing config + anchor tags, re-run the dry-run and confirm the next shared change cascades a `+patch` (not minor) to both clients, and a Claude-only change produces ONLY a `claude-code-plugin` PR
-- [ ] 5.5 Merge a real release PR and confirm it auto-tags (`<component>-vX.Y.Z`) with no "untagged, merged release PRs outstanding" abort
+- [x] 5.3 Create anchor tags `claude-code-plugin-v<seed>` and `codex-plugin-v<seed>` at the migration HEAD (seed = current client `plugin.json` version) so the first cascade is a clean `+patch`, not a pre-migration history re-scan (dry-run showed an inflated `0.13.0` minor without anchors)
+- [x] 5.4 After landing config + anchor tags, re-run the dry-run and confirm the next shared change cascades a `+patch` (not minor) to both clients, and a Claude-only change produces ONLY a `claude-code-plugin` PR
+- [x] 5.5 Merged config #136 + 3 release PRs (#137/#138/#139); tags \*-v0.12.1 auto-created, release-please success, no abort. #139 needed manual manifest conflict resolution (adjacent-line cascade conflict).
 
 ## 6. Archive
 

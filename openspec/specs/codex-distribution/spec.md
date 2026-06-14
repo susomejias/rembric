@@ -177,12 +177,19 @@ The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugi
 - **AND** Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution in args SHALL keep working
 - **AND** Claude Code's keychain-driven `${user_config.*}` substitution into the `env` map SHALL remain the canonical credential path under Claude Code
 
-#### Scenario: Claude Code and Codex version-bump together when shared bin or hooks change
+#### Scenario: A shared-asset change cascades a patch bump to both client components
 
 - **WHEN** any file under `apps/plugin/bin/`, `apps/plugin/hooks/`, `apps/plugin/commands/`, or `apps/plugin/scripts/` is modified
-- **THEN** release-please SHALL bump the single `plugin-shared` component, which owns both the Claude Code and Codex client surfaces (there is no `linked-versions` group)
-- **AND** `apps/plugin/.claude-plugin/plugin.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` SHALL update together via the `plugin-shared` component's `extra-files` updaters, in lock-step with `apps/plugin/package.json::version`
+- **THEN** release-please SHALL bump the `plugin-shared` component (`@rembric/plugin`) AND, via the `node-workspace` plugin, cascade a `+patch` bump to BOTH the independent `claude-code-plugin` and `codex-plugin` components (which declare `@rembric/plugin` as a dependency)
+- **AND** each client bump SHALL land in its OWN separate, version-titled release PR — `merge: false` keeps `node-workspace` from combining them, and there is no `linked-versions` group
+- **AND** for each client, `apps/plugin/.<client>-plugin/package.json::version` (primary) and `apps/plugin/.<client>-plugin/plugin.json::version` (via that component's `extra-files`) SHALL update together
 - **AND** the `hermes-plugin` and `opencode-plugin` component versions SHALL NOT change
+
+#### Scenario: A Codex-only change bumps only codex-plugin
+
+- **WHEN** a contributor merges a commit modifying only files under `apps/plugin/.codex-plugin/`
+- **THEN** release-please SHALL open a release PR bumping only `codex-plugin` (tag `codex-plugin-vX.Y.Z`)
+- **AND** `claude-code-plugin`, `plugin-shared`, `opencode-plugin`, and `hermes-plugin` versions SHALL remain unchanged
 
 ### Requirement: End-user credential flow
 
