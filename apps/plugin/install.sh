@@ -320,12 +320,13 @@ client_present() { # $1 client → 0 present, 1 absent
 }
 
 component_key() { # $1 client → manifest component key
-  # Claude + Codex are the single `plugin-shared` component (keyed at apps/plugin):
-  # they bundle the cached bridge and bump together. opencode + hermes are
-  # independent components (their installers re-fetch shared assets from main).
+  # Each client is its own release-please component. Claude + Codex carry their
+  # own versions and receive a node-workspace patch-cascade when the shared
+  # `@rembric/plugin` (apps/plugin) bumps. opencode + hermes are independent
+  # re-fetchers (their installers re-fetch shared assets from main).
   case "$1" in
-    claude)   echo "apps/plugin" ;;
-    codex)    echo "apps/plugin" ;;
+    claude)   echo "apps/plugin/.claude-plugin" ;;
+    codex)    echo "apps/plugin/.codex-plugin" ;;
     hermes)   echo "apps/plugin/.hermes-plugin" ;;
     opencode) echo "apps/plugin/.opencode-plugin" ;;
   esac

@@ -33,9 +33,10 @@ const MANIFEST = JSON.parse(
   readFileSync(join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'),
 ) as Record<string, string>;
 const PLUGIN_VERSION: Record<string, string> = {
-  // Claude + Codex are the single `plugin-shared` component, keyed at apps/plugin.
-  claude: MANIFEST['apps/plugin'],
-  codex: MANIFEST['apps/plugin'],
+  // Each client is its own release-please component (Claude + Codex receive a
+  // node-workspace patch-cascade from the shared `apps/plugin` package).
+  claude: MANIFEST['apps/plugin/.claude-plugin'],
+  codex: MANIFEST['apps/plugin/.codex-plugin'],
   hermes: MANIFEST['apps/plugin/.hermes-plugin'],
   opencode: MANIFEST['apps/plugin/.opencode-plugin'],
 };
