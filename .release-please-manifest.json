@@ -2,7 +2,7 @@
   "apps/server": "0.21.12",
   "apps/plugin": "0.13.0",
   "apps/plugin/.claude-plugin": "0.12.2",
-  "apps/plugin/.codex-plugin": "0.12.2",
+  "apps/plugin/.codex-plugin": "0.13.0",
   "apps/plugin/.hermes-plugin": "0.11.0",
   "apps/plugin/.opencode-plugin": "0.11.1"
 }
