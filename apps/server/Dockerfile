@@ -94,10 +94,10 @@ COPY --chown=rembric:rembric apps/server/package.json ./apps/server/package.json
 COPY --chown=rembric:rembric apps/plugin/package.json ./apps/plugin/package.json
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
-# Bake the embedding model into the dev image too (same cache-friendly
-# ordering as the builder stage; dev parity with the runtime image).
-COPY --chown=rembric:rembric apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
-RUN --mount=type=secret,id=hf_token,env=HF_TOKEN cd /app/apps/server && node scripts/fetch-model.mjs /app/models
+# Reuse the model the builder already fetched + functionally validated —
+# don't re-download/re-validate it (~300MB) a second time. Dev parity with
+# the runtime image, and one model bake per build instead of two.
+COPY --from=builder --chown=rembric:rembric /models /app/models
 
 COPY --chown=rembric:rembric apps/server ./apps/server
 

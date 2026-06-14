@@ -107,7 +107,12 @@ jobs:
           target: dev
           platforms: linux/amd64
           push: false
-          cache-from: type=gha,scope=docker-build-check-dev
+          # Import the runtime leg's builder layers (incl. the baked model) so the
+          # dev build reuses them instead of re-fetching — dev now COPYs the model
+          # from the builder stage.
+          cache-from: |
+            type=gha,scope=docker-build-check-runtime-amd64
+            type=gha,scope=docker-build-check-dev
           cache-to: type=gha,mode=max,scope=docker-build-check-dev
           secrets: |
             hf_token=${{ secrets.HF_TOKEN }}
