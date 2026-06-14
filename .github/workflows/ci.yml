@@ -94,7 +94,9 @@ jobs:
           image: ghcr.io/susomejias/rembric
           platform: linux/${{ matrix.arch }}
           mode: load
-          cache-scope: docker-build-check-runtime-${{ matrix.arch }}
+          # Shared scope with docker-publish.yml so a release build reuses the
+          # layers CI just built on the merge-to-main commit (warm publish).
+          cache-scope: runtime-${{ matrix.arch }}
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
           hf-token: ${{ secrets.HF_TOKEN }}
 
@@ -111,7 +113,7 @@ jobs:
           # dev build reuses them instead of re-fetching — dev now COPYs the model
           # from the builder stage.
           cache-from: |
-            type=gha,scope=docker-build-check-runtime-amd64
+            type=gha,scope=runtime-amd64
             type=gha,scope=docker-build-check-dev
           cache-to: type=gha,mode=max,scope=docker-build-check-dev
           secrets: |

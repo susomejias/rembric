@@ -81,7 +81,11 @@ jobs:
           image: ${{ env.IMAGE }}
           platform: ${{ matrix.platform }}
           mode: digest
-          cache-scope: publish-${{ matrix.arch }}
+          # Shared with ci.yml's docker-build-check runtime build (same scope
+          # name): the merge-to-main that precedes a release already built this
+          # exact runtime image in CI, so the publish imports those builder
+          # layers (model bake, install, native compile) warm instead of cold.
+          cache-scope: runtime-${{ matrix.arch }}
           hf-token: ${{ secrets.hf_token }}
 
       - name: Smoke test this arch's digest (three independent signals)

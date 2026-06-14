@@ -27,6 +27,17 @@
 - [x] 1d.2 Validated: real arm64 build → 701 MB (from 893 distroless / 1030 bookworm), boots healthy, embedder loads in ~843ms.
 - [x] 1d.3 Decision recorded: `onnxruntime-web` `.wasm` prune (−120 MB) REJECTED — couples to transformers.js backend-selection internals (fragility). Out of scope.
 
+## 1e. Build-time — stop the dev stage re-baking the model
+
+- [x] 1e.1 Dockerfile dev stage: replace the `fetch-model.mjs` re-bake with `COPY --from=builder /models /app/models` (builder already fetched + validated it). One model bake per build instead of two.
+- [x] 1e.2 `ci.yml` dev build step: `cache-from` the runtime leg's builder scope (`docker-build-check-runtime-amd64`) so the dev build reuses the baked model layer rather than re-fetching. Trims the amd64 `docker-build-check` leg.
+- [x] 1e.3 Measured on GitHub (first run): arm64 native `docker-build` = 3m56s (was 6–8m emulated); amd64 leg = 8m20s cold (runtime 5m25s + dev + e2e). Publish builds runtime only → ~5.5m cold / fast warm. Warm-cache + dev-reuse timing confirmed on the follow-up run.
+
+## 1f. Cache — share the runtime build cache between CI and publish
+
+- [x] 1f.1 Unify the runtime cache scope to `runtime-${arch}` in BOTH `ci.yml` docker-build-check and `docker-publish.yml` (were siloed `docker-build-check-runtime-*` / `publish-*`). A release is preceded by a merge-to-main that builds the same runtime image in CI, so the publish imports those builder layers warm instead of cold.
+- [x] 1f.2 CI dev build `cache-from` updated to the unified `runtime-amd64` scope (keeps its own `docker-build-check-dev` for export).
+
 ## 2. Dockerfile — distroless runtime stage
 
 - [x] 2.1 Change the `runtime` `FROM` to `gcr.io/distroless/nodejs22-debian12` (keep it the **last** stage).

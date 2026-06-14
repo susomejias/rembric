@@ -29,7 +29,7 @@
                                   └──────────────────────────────────────┘
 ```
 
-Wall-clock: `max(amd64, arm64)` native build (~2–3 min each, in parallel) + merge (~30 s) ≈ **~3 min**, down from 8–10.
+Wall-clock: the two arches build in parallel, so publish ≈ `max(amd64, arm64)` runtime build + merge (~30 s). **Measured on GitHub** (cold cache): arm64 native runtime build ≈ 3 min (was 6–8 min _emulated_ — the QEMU win), amd64 native runtime build ≈ 5.5 min. So publish ≈ **~5.5 min cold, down from 8–10**, and considerably less on a warm cache (the model-bake + install layers are cached unless the lockfile / `fetch-model.mjs` change — the normal release case). Note amd64 was _always_ native; killing QEMU only sped up the arm64 leg, and parallelism means it no longer adds to wall-clock. (The CI `docker-build-check` amd64 leg is longer still — it also builds the dev stage + runs the installer e2e — but that is not the publish path.)
 
 ## Decision 1 — Native runners over QEMU (the lever that matters)
 
@@ -78,9 +78,12 @@ Runtime-stage changes required by distroless (no shell, no `useradd`):
 
 Fallback if distroless proves troublesome in the installer e2e: stay on `node:22-bookworm-slim` for runtime (no size win, no risk). The base swap is independently revertable from the speed change.
 
-## Decision 5 — Per-arch cache scopes
+## Decision 5 — Per-arch cache scopes, shared between CI and publish
 
-Today both arches share one `type=gha,mode=max` cache; with the matrix, each arch gets its own scope (`scope=publish-amd64` / `scope=publish-arm64`) so they don't evict each other and each restores only its own layers. (Keeps within GHA's 10 GB/repo cache budget better than one combined `mode=max` blob.)
+Two axes:
+
+- **Per-arch:** each arch gets its own scope so they don't evict each other and each restores only its own layers (keeps within GHA's 10 GB/repo budget better than one combined `mode=max` blob).
+- **Shared across workflows:** CI's `docker-build-check` runtime build and the publish build use the **same scope name** (`runtime-amd64` / `runtime-arm64`), not siloed `docker-build-check-*` / `publish-*` scopes. A release is always preceded by a merge-to-`main`, which runs `docker-build-check` on `main` and populates the scope; the publish (a `workflow_call` running on `main`) then imports those builder layers — model bake, `pnpm install`, native compile — **warm instead of cold**. GHA cache rules make this work: writes on `main` are readable by other `main` workflows; PR branches read `main`'s cache as fallback but write to their own branch (no cross-pollution). Correctness is unaffected either way — buildkit validates cache layers by content hash, and the smoke tests run on the actually-built image regardless of cache hits. (The CI dev build keeps its own `docker-build-check-dev` scope but `cache-from`s `runtime-amd64` to reuse the baked-model layer.)
 
 ## Decision 6 — Widen `docker-build-check` to mirror the publish path
 
@@ -110,7 +113,7 @@ Build time is the goal; size is a byproduct. We measured the real image (arm64) 
 
 **The base is NOT the lever** — 117 of its 147 MB is the Node binary, which any Node base must carry. Alpine is rejected (musl breaks `onnxruntime-node`). So distroless is already at the floor.
 
-**Kept — `onnxruntime-node` cross-platform prune (−185 MB, zero fragility):** its loader is `require(\`../bin/napi-v6/${process.platform}/${process.arch}/onnxruntime_binding.node\`)` (`dist/binding.js`), so on a single-arch Linux image every other platform/arch is provably unreachable. The **same lib runs** — no quality change. The prune operates on the `.pnpm`store layout that`pnpm deploy --legacy` preserves (`.pnpm/onnxruntime-node@_/node_modules/onnxruntime-node/bin/_/`), and **fails the build loudly** if the target binding is missing after pruning (guards against future layout drift — never a silent break or silent no-op). Measured result: 893 → **701 MB**, boot + eager embedder load confirmed.
+**Kept — `onnxruntime-node` cross-platform prune (−185 MB, zero fragility):** its loader is `require(\`../bin/napi-v6/${process.platform}/${process.arch}/onnxruntime*binding.node\`)` (`dist/binding.js`), so on a single-arch Linux image every other platform/arch is provably unreachable. The **same lib runs** — no quality change. The prune operates on the `.pnpm`store layout that`pnpm deploy --legacy` preserves (`.pnpm/onnxruntime-node@*/node*modules/onnxruntime-node/bin/*/`), and **fails the build loudly** if the target binding is missing after pruning (guards against future layout drift — never a silent break or silent no-op). Measured result: 893 → **701 MB**, boot + eager embedder load confirmed.
 
 **Rejected — `onnxruntime-web` `.wasm` prune (−120 MB):** would save more, but relies on `@huggingface/transformers` always selecting the Node backend (`onnx.js: ONNX = ONNX_NODE`). That couples the image to a dependency's internal backend-selection logic — a future bump could turn into a hard-to-diagnose CI failure. Per the explicit "no fragility for ~200 MB" constraint, it stays.
 
