@@ -96,6 +96,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       tokens: opts.tokens,
       projects: opts.projects,
       diagnostics: opts.diagnostics,
+      oauth: opts.oauth?.service ?? null,
     }),
   );
   honoApp.get('/', (c) => c.redirect('/dashboard'));
@@ -114,6 +115,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       tokens: opts.tokens,
       projects: opts.projects,
       sweep: opts.sweep,
+      oauth: opts.oauth?.service ?? null,
     }),
   );
 
@@ -200,6 +202,8 @@ export interface HealthzDeps {
   tokens: TokensService;
   projects: ProjectsService;
   diagnostics: DbDiagnostics;
+  /** OAuth access-token fallback, so /healthz auth matches /mcp. Null when OAuth is off. */
+  oauth?: OAuthService | null;
 }
 
 export function createHealthzHandler(deps: HealthzDeps) {
@@ -217,6 +221,7 @@ export function createHealthzHandler(deps: HealthzDeps) {
         pathSlug: undefined,
         tokens: deps.tokens,
         projects: deps.projects,
+        oauth: deps.oauth ?? null,
       });
       deps.diagnostics.ping();
       return c.json({ ok: true, version: REMBRIC_VERSION });

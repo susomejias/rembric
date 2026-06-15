@@ -186,9 +186,15 @@ describe('OAuth local E2E (live server)', () => {
     const tokens = (await tokenRes.json()) as { access_token: string; refresh_token: string };
     expect(tokens.access_token).toBeTruthy();
 
-    // 8. The minted access token authenticates /mcp (not 401).
+    // 8. The minted access token authenticates /mcp (not 401)...
     const mcp = await mcpStatus(tokens.access_token);
     expect(mcp.status).not.toBe(401);
+
+    // ...and /healthz too — auth is unified across bearer surfaces, not /mcp-only.
+    const health = await fetch(`${base}/healthz`, {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(health.status).toBe(200);
 
     // 9. Refresh rotates to a new access token.
     const refresh = await fetch(`${base}/token`, {
