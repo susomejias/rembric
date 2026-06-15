@@ -22,12 +22,7 @@ import type {
 import type { Response } from 'express';
 
 import { signAuthRequest, type AuthRequest } from '../services/oauth-areq.js';
-import {
-  OAuthError,
-  resolveGrantedScope,
-  type OAuthService,
-  type TokenPair,
-} from '../services/oauth.js';
+import { OAuthError, type OAuthService, type TokenPair } from '../services/oauth.js';
 
 /**
  * Implements the MCP SDK's `OAuthServerProvider` so the vetted SDK
@@ -103,11 +98,7 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
       _client: OAuthClientInformationFull,
       authorizationCode: string,
     ): Promise<string> {
-      try {
-        return Promise.resolve(oauth.challengeForCode(authorizationCode));
-      } catch (err) {
-        return Promise.reject(toSdkError(err));
-      }
+      return settled(() => oauth.challengeForCode(authorizationCode));
     },
 
     exchangeAuthorizationCode(
@@ -116,32 +107,20 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
       _codeVerifier?: string,
       redirectUri?: string,
     ): Promise<OAuthTokens> {
-      try {
-        return Promise.resolve(
-          toOAuthTokens(
-            oauth.redeemCode({
-              code: authorizationCode,
-              clientId: client.client_id,
-              redirectUri,
-            }),
-          ),
-        );
-      } catch (err) {
-        return Promise.reject(toSdkError(err));
-      }
+      return settled(() =>
+        toOAuthTokens(
+          oauth.redeemCode({ code: authorizationCode, clientId: client.client_id, redirectUri }),
+        ),
+      );
     },
 
     exchangeRefreshToken(
       client: OAuthClientInformationFull,
       refreshToken: string,
     ): Promise<OAuthTokens> {
-      try {
-        return Promise.resolve(
-          toOAuthTokens(oauth.refresh({ refreshToken, clientId: client.client_id })),
-        );
-      } catch (err) {
-        return Promise.reject(toSdkError(err));
-      }
+      return settled(() =>
+        toOAuthTokens(oauth.refresh({ refreshToken, clientId: client.client_id })),
+      );
     },
 
     verifyAccessToken(token: string): Promise<AuthInfo> {
@@ -167,9 +146,17 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
   };
 }
 
-/** Default the requested scope the same way the consent screen will grant it. */
-export function defaultGrantedScope(scope: string | undefined): string {
-  return resolveGrantedScope(scope);
+/**
+ * Run a synchronous provider operation, mapping our `OAuthError` to the SDK's
+ * error classes so the token handler renders the right 400-class response
+ * (rather than a generic 500). Returns a rejected promise on failure.
+ */
+function settled<T>(fn: () => T): Promise<T> {
+  try {
+    return Promise.resolve(fn());
+  } catch (err) {
+    return Promise.reject(toSdkError(err));
+  }
 }
 
 function toClientInfo(

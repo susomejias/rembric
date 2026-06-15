@@ -123,23 +123,20 @@ export async function bootstrap(
   const sessions = new SessionsService(repos, deriveSessionKey(sessionSecretBase));
 
   // OAuth 2.1 authorization server — enabled only when REMBRIC_PUBLIC_URL is
-  // set (config.oauth.issuer). The SDK router owns the protocol; our service
-  // owns persistence/logic; the consent screen lives in the dashboard.
+  // set (`config.oauth.issuer` is non-null iff enabled). The SDK router owns
+  // the protocol; our service owns persistence/logic; consent lives in the
+  // dashboard.
+  const oauthIssuer = config.oauth.issuer;
   const oauthAreqKey = deriveOAuthAreqKey(sessionSecretBase);
-  const oauthService =
-    config.oauth.enabled && config.oauth.issuer
-      ? new OAuthService(
-          { oauth: repos.oauth },
-          { accessTtlMs: config.oauth.accessTtlMs, refreshTtlMs: config.oauth.refreshTtlMs },
-        )
-      : null;
+  const oauthService = oauthIssuer
+    ? new OAuthService(
+        { oauth: repos.oauth },
+        { accessTtlMs: config.oauth.accessTtlMs, refreshTtlMs: config.oauth.refreshTtlMs },
+      )
+    : null;
   const oauthProvider =
-    oauthService && config.oauth.issuer
-      ? createOAuthProvider({
-          oauth: oauthService,
-          issuer: config.oauth.issuer,
-          areqKey: oauthAreqKey,
-        })
+    oauthService && oauthIssuer
+      ? createOAuthProvider({ oauth: oauthService, issuer: oauthIssuer, areqKey: oauthAreqKey })
       : null;
 
   // In-process embedder + drain worker — fills memory_vec so save-time
@@ -292,11 +289,11 @@ export async function bootstrap(
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
     oauth:
-      oauthService && oauthProvider && config.oauth.issuer
+      oauthService && oauthProvider && oauthIssuer
         ? {
             provider: oauthProvider,
             service: oauthService,
-            issuer: config.oauth.issuer,
+            issuer: oauthIssuer,
             scopesSupported: ['mcp', 'read'],
           }
         : null,
