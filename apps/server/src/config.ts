@@ -210,8 +210,6 @@ function stripTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-
 function isAllowedIssuerUrl(value: string): boolean {
   let url: URL;
   try {
@@ -219,8 +217,13 @@ function isAllowedIssuerUrl(value: string): boolean {
   } catch {
     return false;
   }
+  // Mirror the MCP SDK's checkIssuerUrl exactly: it rejects a query/fragment
+  // and permits a non-https issuer only for localhost / 127.0.0.1. Validating
+  // the same rules here turns a bad REMBRIC_PUBLIC_URL into a clean config
+  // error instead of an unhandled crash inside the SDK router at boot.
+  if (url.search || url.hash) return false;
   if (url.protocol === 'https:') return true;
-  return url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname);
+  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
 }
 
 /** Redact secrets from a config for safe logging. */

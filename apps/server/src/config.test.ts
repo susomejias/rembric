@@ -67,6 +67,18 @@ describe('loadConfig — OAuth', () => {
     }
   });
 
+  it('rejects issuer forms the MCP SDK would reject (avoids a boot crash)', () => {
+    // The SDK's checkIssuerUrl throws on these; reject them as clean config
+    // errors instead. http loopback is limited to localhost / 127.0.0.1.
+    for (const issuer of [
+      'http://[::1]:8787',
+      'https://rembric.example.com/mcp?x=1',
+      'https://rembric.example.com/#frag',
+    ]) {
+      expect(() => loadConfig(env({ REMBRIC_PUBLIC_URL: issuer })), issuer).toThrow(ConfigError);
+    }
+  });
+
   it('rejects a non-URL issuer', () => {
     expect(() => loadConfig(env({ REMBRIC_PUBLIC_URL: 'not-a-url' }))).toThrow(ConfigError);
   });
