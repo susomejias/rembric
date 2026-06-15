@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.17](https://github.com/susomejias/rembric/compare/server-v0.21.16...server-v0.21.17) (2026-06-15)
+
+
+### Bug Fixes
+
+* **server:** echo OAuth scope vocabulary in /token + ChatGPT connector docs ([#163](https://github.com/susomejias/rembric/issues/163)) ([4a76535](https://github.com/susomejias/rembric/commit/4a76535a34b1ad6639282b352bda37254f980aaf))
+
 ## [0.21.16](https://github.com/susomejias/rembric/compare/server-v0.21.15...server-v0.21.16) (2026-06-15)
 
 
