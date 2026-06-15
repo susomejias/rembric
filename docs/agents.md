@@ -1,6 +1,6 @@
 # Agent integration
 
-Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, and **opencode**.
+Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, and **opencode**. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no plugin) — see [ChatGPT](#chatgpt-custom-mcp-connector-over-oauth).
 
 > **Install with the TUI — the single, recommended path.** [`install.sh`](../install.sh) (canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`) is one brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Pin a release with `--ref=<tag>`. The per-client commands in the sections below are what the installer runs under the hood — documented here as the **manual fallback**.
 
@@ -36,6 +36,45 @@ Two of its lists ask the agent to act, and they are deliberately different shape
 When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
 
 ## Validated configs
+
+### ChatGPT (custom MCP connector over OAuth)
+
+ChatGPT connects as a **custom MCP connector** (no plugin, no static token) using the OAuth path above. Validated end-to-end (connect → consent → `memory.*`).
+
+1. **Enable OAuth on the server**: set `REMBRIC_PUBLIC_URL` to the public **https** origin (e.g. `https://memory.example.com`) — the OAuth issuer, **without** the `/mcp` suffix. ChatGPT reaches the server from OpenAI's backend, so a public HTTPS endpoint is required (`http://localhost` works only for local clients, not ChatGPT). Recreate the container so it loads the env.
+2. **Add the connector** in ChatGPT → Settings → Apps → Developer mode → new connector:
+   - URL: `https://memory.example.com/mcp/<slug>` (the `/<slug>` binds it to that project; omit for global).
+   - Authentication: **OAuth**. Leave the advanced panel alone — the server advertises Dynamic Client Registration, so ChatGPT registers itself automatically (no client id/secret).
+3. **Consent**: the browser lands on the Rembric consent screen → sign in with your `REMBRIC_ADMIN_TOKEN` → **Authorize**. ChatGPT manages the token (refresh included) from then on.
+
+Per-project = one connector per `/mcp/<slug>`. Developer mode is a beta ChatGPT feature; on Business/Enterprise an admin can publish the connector workspace-wide.
+
+ChatGPT has no session-lifecycle hooks (those are plugin-only), so drive the flow from the model with a custom instruction. Recommended (Settings → Personalization → Custom instructions), tuned to use Rembric as the long-term memory:
+
+```text
+Use Rembric (connected via MCP) as my canonical long-term memory. It is the
+source of truth about who I am, my preferences, decisions, and work context —
+above your built-in memory.
+
+- BEFORE your first substantive reply in a conversation, or whenever the request
+  depends on who I am / my preferences / prior work: call memory.context (or
+  memory.search by topic) and ground your answer in what it returns. Don't
+  assume; if Rembric doesn't have it, say so.
+- The MOMENT something durable comes up (a preference, decision, stable fact
+  about me, discovery, config): save it immediately with memory.save. If it
+  updates something already stored, pass topic_key to supersede it.
+- If memory.save returns candidates[] (possible conflicts), resolve them with
+  memory.judge.
+- If your built-in memory and Rembric disagree, Rembric wins; reconcile by
+  saving the correct version to Rembric.
+- Before closing a work topic: call memory.session_summary (title + goal /
+  findings / done / next steps).
+
+Do this as a natural part of the flow; don't ask permission unless the content
+is sensitive.
+```
+
+> ChatGPT calls MCP tools when it judges them relevant, not on every turn — occasionally you'll still nudge it ("save that to Rembric"). The tool descriptions already prompt proactive use; the instruction reinforces it.
 
 ### Claude Code (plain JSON, if not using the plugin)
 

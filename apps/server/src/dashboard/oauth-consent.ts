@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 
 import { verifyAuthRequest } from '../services/oauth-areq.js';
-import { resolveGrantedScope, type OAuthService } from '../services/oauth.js';
+import { grantedOAuthScope, resolveGrantedScope, type OAuthService } from '../services/oauth.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { btn, flash } from './components.js';
@@ -38,13 +38,12 @@ export function createOAuthConsentRouter(deps: OAuthConsentDeps): Hono {
     if (!client) return c.html(renderError('Unknown OAuth client.'), 400);
 
     const session = c.get('session' as never) as ResolvedSession;
-    const granted = resolveGrantedScope(areq.scope);
     return c.html(
       renderConsent({
         blob,
         clientName: client.clientName ?? areq.clientId,
         redirectHost: safeHost(areq.redirectUri),
-        granted,
+        grantedScope: grantedOAuthScope(areq.scope),
         csrf: csrfInput(session.session, deps.sessions, FORM),
       }),
     );
@@ -65,12 +64,11 @@ export function createOAuthConsentRouter(deps: OAuthConsentDeps): Hono {
       );
     }
 
-    const scope = resolveGrantedScope(areq.scope);
     const code = deps.oauth.issueCode({
       clientId: areq.clientId,
       redirectUri: areq.redirectUri,
       codeChallenge: areq.codeChallenge,
-      scope,
+      scope: grantedOAuthScope(areq.scope),
       subject: session.tokenId,
     });
     return c.redirect(buildRedirect(areq.redirectUri, { code, state: areq.state }));
@@ -120,12 +118,12 @@ function renderConsent(o: {
   blob: string;
   clientName: string;
   redirectHost: string;
-  granted: string;
+  grantedScope: string;
   csrf: ReturnType<typeof csrfInput>;
 }): string {
   // `html` escapes every interpolated string once — do NOT pre-escape here
   // (that double-encodes, e.g. "&" → "&amp;amp;").
-  const access = o.granted === 'read:*' ? 'Read-only' : 'Read & write';
+  const access = resolveGrantedScope(o.grantedScope) === 'read:*' ? 'Read-only' : 'Read & write';
   return consentShell(html`
     ${consentBrand()}
     <h1><span class="hl-lime">Authorize</span> Application.</h1>
@@ -136,7 +134,8 @@ function renderConsent(o: {
     <div class="consent-grant">
       <span class="lbl">Granted access</span>
       <span class="val"
-        ><span style="color:var(--lime)">${access}</span> · scope <code>${o.granted}</code></span
+        ><span style="color:var(--lime)">${access}</span> · scope
+        <code>${o.grantedScope}</code></span
       >
     </div>
     <p class="consent-note">

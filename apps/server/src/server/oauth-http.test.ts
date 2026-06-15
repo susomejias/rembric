@@ -91,13 +91,14 @@ describe('OAuth authorization server over HTTP (SDK router + our provider)', () 
     const client = (await regRes.json()) as { client_id: string };
     expect(client.client_id).toMatch(/^oauthc_/);
 
-    // Simulate consent approval: mint a code for the registered client.
+    // Simulate consent approval: mint a code with the granted OAuth scope
+    // (the advertised vocabulary, as the consent screen stores it).
     const { verifier, challenge } = pkce();
     const code = oauth.issueCode({
       clientId: client.client_id,
       redirectUri: REDIRECT,
       codeChallenge: challenge,
-      scope: '*',
+      scope: 'mcp',
       subject: 'operator',
     });
 
@@ -111,10 +112,12 @@ describe('OAuth authorization server over HTTP (SDK router + our provider)', () 
     expect(tok.status).toBe(200);
     expect(tok.body.access_token).toBeTruthy();
     expect(tok.body.token_type).toBe('Bearer');
+    // /token echoes the requested OAuth scope vocabulary, NOT the internal "*".
+    expect(tok.body.scope).toBe('mcp');
     const refreshToken = tok.body.refresh_token as string;
     expect(refreshToken).toBeTruthy();
 
-    // Resolve the minted access token through the service (same path /mcp uses).
+    // ...while the internal authz scope derives to the write-capable TokenScope.
     expect(oauth.authenticateAccessToken(tok.body.access_token as string)?.scope).toBe('*');
 
     const refreshed = await form('/token', {

@@ -13,7 +13,7 @@ import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
-import { OAuthService } from '../services/oauth.js';
+import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
@@ -294,7 +294,7 @@ export async function bootstrap(
             provider: oauthProvider,
             service: oauthService,
             issuer: oauthIssuer,
-            scopesSupported: ['mcp', 'read'],
+            scopesSupported: [...SUPPORTED_OAUTH_SCOPES],
           }
         : null,
     dashboard: {
