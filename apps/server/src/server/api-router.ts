@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { truncateSummary, type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
+import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
 import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
@@ -30,6 +31,8 @@ export interface ApiRouterDeps {
   agentSessions: AgentSessionsService;
   tokens: TokensService;
   projects: ProjectsService;
+  /** OAuth access-token fallback, so /api auth matches /mcp. Null when OAuth is off. */
+  oauth?: OAuthService | null;
   /**
    * Fire-and-forget consolidation sweep (decay + deadline orphaning),
    * invoked after a session is created. Throttled and error-isolated by
@@ -194,6 +197,7 @@ function authMiddleware(deps: ApiRouterDeps) {
         pathSlug: slug,
         tokens: deps.tokens,
         projects: deps.projects,
+        oauth: deps.oauth ?? null,
       });
       c.set('rembricCtx', ctx);
     } catch (err) {

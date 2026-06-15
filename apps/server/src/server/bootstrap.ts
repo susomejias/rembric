@@ -13,6 +13,7 @@ import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
+import { OAuthService } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
@@ -23,7 +24,7 @@ import {
   SelfUpdateOrchestrator,
 } from '../services/self-update/orchestrator.js';
 import { SessionsService } from '../services/sessions.js';
-import { deriveSessionKey, TokensService } from '../services/tokens.js';
+import { deriveOAuthAreqKey, deriveSessionKey, TokensService } from '../services/tokens.js';
 import { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
@@ -36,6 +37,7 @@ import {
   type DataCounts,
 } from './data-loss-guard.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
+import { createOAuthProvider } from './oauth-provider.js';
 import { RateLimiter } from './rate-limit.js';
 import { SessionRouter } from './session-router.js';
 
@@ -119,6 +121,23 @@ export async function bootstrap(
     throw new Error('session secret is missing; set REMBRIC_SESSION_SECRET or REMBRIC_ADMIN_TOKEN');
   }
   const sessions = new SessionsService(repos, deriveSessionKey(sessionSecretBase));
+
+  // OAuth 2.1 authorization server — enabled only when REMBRIC_PUBLIC_URL is
+  // set (`config.oauth.issuer` is non-null iff enabled). The SDK router owns
+  // the protocol; our service owns persistence/logic; consent lives in the
+  // dashboard.
+  const oauthIssuer = config.oauth.issuer;
+  const oauthAreqKey = deriveOAuthAreqKey(sessionSecretBase);
+  const oauthService = oauthIssuer
+    ? new OAuthService(
+        { oauth: repos.oauth },
+        { accessTtlMs: config.oauth.accessTtlMs, refreshTtlMs: config.oauth.refreshTtlMs },
+      )
+    : null;
+  const oauthProvider =
+    oauthService && oauthIssuer
+      ? createOAuthProvider({ oauth: oauthService, issuer: oauthIssuer, areqKey: oauthAreqKey })
+      : null;
 
   // In-process embedder + drain worker — fills memory_vec so save-time
   // candidate detection has vectors to kNN over. The model loads eagerly
@@ -269,6 +288,15 @@ export async function bootstrap(
     rateLimiter,
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
+    oauth:
+      oauthService && oauthProvider && oauthIssuer
+        ? {
+            provider: oauthProvider,
+            service: oauthService,
+            issuer: oauthIssuer,
+            scopesSupported: ['mcp', 'read'],
+          }
+        : null,
     dashboard: {
       repos,
       diagnostics: dbDiagnostics,
@@ -288,6 +316,8 @@ export async function bootstrap(
       undoOp: (opId) => undoOp(repos, dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
       orphanDeadlineMs: config.judgments.orphanDeadlineMs,
+      oauth: oauthService,
+      oauthAreqKey: oauthService ? oauthAreqKey : null,
     },
   });
 
@@ -332,6 +362,9 @@ function printBootstrapBanner(config: Config, counts: DataCounts): void {
   console.error(
     `[bootstrap] counts: memory=${counts.memory} projects=${counts.projects} sessions=${counts.sessions} tokens=${counts.tokens} prompts=${counts.prompts}`,
   );
+  if (config.oauth.enabled) {
+    console.error(`[bootstrap] oauth: enabled, issuer=${config.oauth.issuer}`);
+  }
 }
 
 function printReadyBanner(url: string, firstRun: boolean): void {

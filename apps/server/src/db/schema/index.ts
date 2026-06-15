@@ -8,6 +8,7 @@ export * from './projects.js';
 export * from './confirmations.js';
 export * from './consolidation.js';
 export * from './tokens.js';
+export * from './oauth.js';
 export * from './sessions.js';
 export * from './agent-sessions.js';
 export * from './prompts.js';

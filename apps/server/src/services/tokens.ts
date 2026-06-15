@@ -210,3 +210,8 @@ export function isAuthorized(
 export function deriveSessionKey(baseSecret: string): Buffer {
   return createHmac('sha256', baseSecret).update('rembric:session').digest();
 }
+
+/** Derive a distinct HMAC key for signing the OAuth consent hand-off. */
+export function deriveOAuthAreqKey(baseSecret: string): Buffer {
+  return createHmac('sha256', baseSecret).update('rembric:oauth-areq').digest();
+}

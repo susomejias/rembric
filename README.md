@@ -205,13 +205,14 @@ docker compose up -d
 
 All config via environment variables. With Docker, these live in `.env` and are loaded automatically by `docker compose up`. Required: `REMBRIC_ADMIN_TOKEN` (used to log into the dashboard and mint other tokens).
 
-| Variable               | Default                           | Description                                                                                                                |
-| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `REMBRIC_HOST`         | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker.              |
-| `REMBRIC_PORT`         | `8787`                            | Bind port.                                                                                                                 |
-| `REMBRIC_DATA_DIR`     | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.                 |
-| `LOG_LEVEL`            | `info`                            | `debug` / `info` / `warn` / `error`.                                                                                       |
-| `REMBRIC_UPDATE_CHECK` | `on`                              | `off` disables the daily release check (no badge, no modal, no GitHub API call). See [docs/updates.md](./docs/updates.md). |
+| Variable               | Default                           | Description                                                                                                                                                                                                                                                 |
+| ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REMBRIC_HOST`         | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address. Pinned to `0.0.0.0` inside the container so the published port works; never override in Docker.                                                                                                                                               |
+| `REMBRIC_PORT`         | `8787`                            | Bind port.                                                                                                                                                                                                                                                  |
+| `REMBRIC_DATA_DIR`     | `~/.rembric` (`/data` in Docker)  | Where the SQLite file lives. Pinned to `/data` inside the container; bind-mount `./data:/data` in compose.                                                                                                                                                  |
+| `LOG_LEVEL`            | `info`                            | `debug` / `info` / `warn` / `error`.                                                                                                                                                                                                                        |
+| `REMBRIC_UPDATE_CHECK` | `on`                              | `off` disables the daily release check (no badge, no modal, no GitHub API call). See [docs/updates.md](./docs/updates.md).                                                                                                                                  |
+| `REMBRIC_PUBLIC_URL`   | _unset_                           | Set to the public https issuer (`http://localhost` allowed for local testing) to enable the OAuth 2.1 authorization server, so OAuth clients (Claude Code, ChatGPT) connect without a static token. Off when unset. See [docs/agents.md](./docs/agents.md). |
 
 <details>
 <summary><b>Advanced configuration</b> — hardware, consolidation sweep, rate limiting, sessions, candidate detection</summary>

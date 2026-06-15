@@ -33,6 +33,69 @@ describe('loadConfig — types and ranges', () => {
   });
 });
 
+describe('loadConfig — OAuth', () => {
+  it('is disabled by default', () => {
+    const config = loadConfig(env());
+    expect(config.oauth.enabled).toBe(false);
+    expect(config.oauth.issuer).toBeNull();
+    expect(config.oauth.accessTtlMs).toBe(3_600_000);
+    expect(config.oauth.refreshTtlMs).toBe(30 * 86_400_000);
+  });
+
+  it('enables when REMBRIC_PUBLIC_URL is a valid https origin', () => {
+    const config = loadConfig(env({ REMBRIC_PUBLIC_URL: 'https://rembric.example.com' }));
+    expect(config.oauth.enabled).toBe(true);
+    expect(config.oauth.issuer).toBe('https://rembric.example.com');
+  });
+
+  it('strips a trailing slash from the issuer', () => {
+    const config = loadConfig(env({ REMBRIC_PUBLIC_URL: 'https://rembric.example.com/' }));
+    expect(config.oauth.issuer).toBe('https://rembric.example.com');
+  });
+
+  it('rejects a non-https issuer on a public host', () => {
+    expect(() => loadConfig(env({ REMBRIC_PUBLIC_URL: 'http://rembric.example.com' }))).toThrow(
+      ConfigError,
+    );
+  });
+
+  it('allows http for loopback hosts (local testing)', () => {
+    for (const issuer of ['http://localhost:8787', 'http://127.0.0.1:8787']) {
+      const config = loadConfig(env({ REMBRIC_PUBLIC_URL: issuer }));
+      expect(config.oauth.enabled).toBe(true);
+      expect(config.oauth.issuer).toBe(issuer);
+    }
+  });
+
+  it('rejects issuer forms the MCP SDK would reject (avoids a boot crash)', () => {
+    // The SDK's checkIssuerUrl throws on these; reject them as clean config
+    // errors instead. http loopback is limited to localhost / 127.0.0.1.
+    for (const issuer of [
+      'http://[::1]:8787',
+      'https://rembric.example.com/mcp?x=1',
+      'https://rembric.example.com/#frag',
+    ]) {
+      expect(() => loadConfig(env({ REMBRIC_PUBLIC_URL: issuer })), issuer).toThrow(ConfigError);
+    }
+  });
+
+  it('rejects a non-URL issuer', () => {
+    expect(() => loadConfig(env({ REMBRIC_PUBLIC_URL: 'not-a-url' }))).toThrow(ConfigError);
+  });
+
+  it('parses custom TTLs (seconds) into ms', () => {
+    const config = loadConfig(
+      env({
+        REMBRIC_PUBLIC_URL: 'https://rembric.example.com',
+        REMBRIC_OAUTH_ACCESS_TTL: '900',
+        REMBRIC_OAUTH_REFRESH_TTL: '604800',
+      }),
+    );
+    expect(config.oauth.accessTtlMs).toBe(900_000);
+    expect(config.oauth.refreshTtlMs).toBe(604_800_000);
+  });
+});
+
 describe('loadConfig — removed env vars degrade gracefully', () => {
   // Upgrade contract (`remove-llm-consolidation` + `embed-embeddings-in-process`):
   // environments still defining chat-LLM, cron, or embedding-provider vars

@@ -79,7 +79,9 @@ In scope:
 - The shared plugin tree (`plugin/`) consumed by the Claude Code / Codex /
   Hermes marketplaces.
 - The MCP tool surface and the HTTP API exposed at `/mcp`, `/mcp/<slug>`,
-  `/api/<slug>/sessions*`, `/dashboard*`, `/healthz`.
+  `/api/<slug>/sessions*`, `/dashboard*`, `/healthz`, and the OAuth 2.1
+  endpoints (`/authorize`, `/token`, `/register`, `/revoke`,
+  `/.well-known/oauth-*`, `/dashboard/oauth/consent`).
 
 Out of scope (please do **not** spend time on these):
 

@@ -190,6 +190,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
     expect(result.applied).toEqual([
       '0011_summary_length_check.sql',
       '0012_drop_summary_length_check.sql',
+      '0013_oauth_tables.sql',
     ]);
 
     // FK integrity after the rebuild.

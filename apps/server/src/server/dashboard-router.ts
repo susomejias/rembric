@@ -22,6 +22,7 @@ import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
 import { createJudgmentsRouter } from '../dashboard/judgments.js';
 import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
+import { createOAuthConsentRouter } from '../dashboard/oauth-consent.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
 import { createPromptsRouter } from '../dashboard/prompts.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
@@ -43,6 +44,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
+import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
@@ -79,6 +81,9 @@ export interface DashboardDeps {
   /** Resolved judgment aging thresholds (from `config.judgments`). */
   orphanAfterMs: number;
   orphanDeadlineMs: number;
+  /** OAuth service + consent signing key; present only when OAuth is enabled. */
+  oauth?: OAuthService | null;
+  oauthAreqKey?: Buffer | null;
 }
 
 export interface DashboardStats {
@@ -102,19 +107,22 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
   app.get('/assets/:path{.+}', createAssetsMiddleware());
 
   // ── login / logout (anonymous) ───────────────────────────────────
-  app.get('/login', (c) => c.html(renderLogin(null)));
+  app.get('/login', (c) => c.html(renderLogin(null, safeNext(c.req.query('next')))));
 
   app.post('/login', async (c) => {
     const form = await c.req.formData();
     const r = form.get('token');
     const tokenPlain = typeof r === 'string' ? r : '';
+    const next = safeNext(
+      typeof form.get('next') === 'string' ? (form.get('next') as string) : null,
+    );
     if (tokenPlain.length === 0) {
-      return c.html(renderLogin('Token is required.'), 400);
+      return c.html(renderLogin('Token is required.', next), 400);
     }
     try {
       const resolved = deps.tokens.authenticate(tokenPlain);
       if (resolved.scope !== '*') {
-        return c.html(renderLogin('Only admin-scoped tokens can access the dashboard.'), 403);
+        return c.html(renderLogin('Only admin-scoped tokens can access the dashboard.', next), 403);
       }
       const { cookie } = deps.sessions.create(resolved.token.id);
       setCookie(c, COOKIE_NAME, cookie, {
@@ -123,10 +131,10 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         path: '/dashboard',
         maxAge: SESSION_TTL_SECONDS,
       });
-      return c.redirect('/dashboard');
+      return c.redirect(next ?? '/dashboard');
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(renderLogin('Invalid token.'), 401);
+        return c.html(renderLogin('Invalid token.', next), 401);
       }
       throw err;
     }
@@ -161,9 +169,9 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       return next();
     }
     const cookie = getCookie(c, COOKIE_NAME);
-    if (!cookie) return c.redirect('/dashboard/login');
+    if (!cookie) return c.redirect(loginWithNext(c));
     const ctx = deps.sessions.resolve(cookie);
-    if (!ctx) return c.redirect('/dashboard/login');
+    if (!ctx) return c.redirect(loginWithNext(c));
 
     const resolved: ResolvedSession = {
       session: ctx.session,
@@ -557,7 +565,40 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     }),
   );
 
+  if (deps.oauth && deps.oauthAreqKey) {
+    app.route(
+      '/oauth',
+      createOAuthConsentRouter({
+        oauth: deps.oauth,
+        areqKey: deps.oauthAreqKey,
+        sessions: deps.sessions,
+      }),
+    );
+  }
+
   return app;
+}
+
+/**
+ * Same-origin dashboard path to return to after login, or null. Restricted to
+ * the OAuth consent route — the only flow that needs return-to — so every
+ * other dashboard redirect stays the bare `/dashboard/login`.
+ */
+function safeNext(next: string | null | undefined): string | null {
+  if (!next) return null;
+  return next.startsWith('/dashboard/oauth/') ? next : null;
+}
+
+function loginWithNext(c: Context): string {
+  let target = '/dashboard/login';
+  try {
+    const u = new URL(c.req.url);
+    const next = safeNext(u.pathname + u.search);
+    if (next) target += `?next=${encodeURIComponent(next)}`;
+  } catch {
+    /* fall through to bare login */
+  }
+  return target;
 }
 
 /* ── helpers used by the Overview body ─────────────────────────── */
@@ -675,8 +716,11 @@ function systemRow(label: string, value: string, tone: 'fg' | 'lime'): SafeHtml 
   `;
 }
 
-function renderLogin(error: string | null): string {
+function renderLogin(error: string | null, next: string | null = null): string {
   const errorHtml = error ? flash({ tone: 'danger', label: 'ERROR', body: error }) : raw('');
+  const nextInput = next
+    ? raw(`<input type="hidden" name="next" value="${escape(next)}">`)
+    : raw('');
   const body = html`
     <div class="login-stage">
       <div class="left">
@@ -718,7 +762,7 @@ function renderLogin(error: string | null): string {
           class="stack"
           style="max-width:none;width:100%"
         >
-          ${errorHtml}
+          ${errorHtml}${nextInput}
           <div class="field">
             <label>Admin token</label>
             <input
