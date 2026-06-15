@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.16](https://github.com/susomejias/rembric/compare/server-v0.21.15...server-v0.21.16) (2026-06-15)
+
+
+### Features
+
+* **server:** OAuth 2.1 authorization server for remote MCP connectors ([#161](https://github.com/susomejias/rembric/issues/161)) ([d47d2d8](https://github.com/susomejias/rembric/commit/d47d2d8448023eaa9ef5b8669bcc6debce45506e))
+
 ## [0.21.15](https://github.com/susomejias/rembric/compare/server-v0.21.14...server-v0.21.15) (2026-06-14)
 
 
