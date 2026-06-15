@@ -688,3 +688,29 @@ describe('migration runner FK-safety invariant', () => {
     expect(finallyBlock, 'expected a finally block that re-enables foreign_keys').not.toBeNull();
   });
 });
+
+describe('oauth additive-migration invariant', () => {
+  // The OAuth change promises the static `tokens` table is untouched and the
+  // OAuth migration is purely additive (CREATE TABLE only — no rebuild dance).
+  const oauthMigration = readFileSync(join(srcRoot, 'db/migrations/0013_oauth_tables.sql'), 'utf8');
+
+  it('0013 never DROPs or ALTERs the static `tokens` table', () => {
+    expect(/\b(DROP|ALTER)\s+TABLE\s+tokens\b/i.test(oauthMigration)).toBe(false);
+  });
+
+  it('0013 is additive: only CREATE TABLE / CREATE INDEX statements', () => {
+    const statements = oauthMigration
+      .split(/-->\s*statement-breakpoint/)
+      .map((s) =>
+        s
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('--'))
+          .join('\n')
+          .trim(),
+      )
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      expect(/^CREATE\s+(TABLE|INDEX)\b/i.test(stmt), `non-additive statement: ${stmt}`).toBe(true);
+    }
+  });
+});

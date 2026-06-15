@@ -1,6 +1,8 @@
+import type { Token } from '../db/schema/tokens.js';
 import { DomainError } from '../services/errors.js';
+import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
-import type { TokensService } from '../services/tokens.js';
+import type { TokenScope, TokensService } from '../services/tokens.js';
 
 import type { RequestContext } from './request-context.js';
 
@@ -51,8 +53,10 @@ export function authenticate(input: {
   pathSlug: string | undefined;
   tokens: TokensService;
   projects: ProjectsService;
+  /** When set, OAuth-minted access tokens are accepted as a fallback. */
+  oauth?: OAuthService | null;
 }): RequestContext {
-  const { authorization, pathSlug, tokens, projects } = input;
+  const { authorization, pathSlug, tokens, projects, oauth } = input;
 
   if (!authorization) {
     throw new AuthError('missing_token', 'missing Authorization header', 401);
@@ -65,21 +69,7 @@ export function authenticate(input: {
     throw new AuthError('malformed_authorization', 'empty bearer token', 401);
   }
 
-  let resolved: ReturnType<TokensService['authenticate']>;
-  try {
-    resolved = tokens.authenticate(plaintext);
-  } catch (err) {
-    if (err instanceof DomainError) {
-      if (err.code === 'token_revoked') {
-        throw new AuthError('token_revoked', 'token has been revoked', 401);
-      }
-      if (err.code === 'token_expired') {
-        throw new AuthError('token_expired', 'token has expired', 401);
-      }
-      throw new AuthError('token_invalid', 'token not recognized', 401);
-    }
-    throw err;
-  }
+  const resolved = resolveToken(plaintext, tokens, oauth ?? null);
 
   const project = pathSlug && pathSlug.length > 0 ? (projects.findBySlug(pathSlug) ?? null) : null;
 
@@ -97,5 +87,56 @@ export function authenticate(input: {
     project,
     requestedSlug: pathSlug && pathSlug.length > 0 ? pathSlug : null,
     mcpSessionId: null,
+  };
+}
+
+/**
+ * Resolve a bearer secret to a token + scope. The static `tokens` table is
+ * consulted first (unchanged behavior); only a genuine no-match falls
+ * through to the OAuth access-token lookup. A static revoked/expired token
+ * is a definitive match and is NOT retried against OAuth.
+ */
+function resolveToken(
+  plaintext: string,
+  tokens: TokensService,
+  oauth: OAuthService | null,
+): { token: Token; scope: TokenScope } {
+  try {
+    return tokens.authenticate(plaintext);
+  } catch (err) {
+    if (!(err instanceof DomainError)) throw err;
+    if (err.code === 'token_revoked') {
+      throw new AuthError('token_revoked', 'token has been revoked', 401);
+    }
+    if (err.code === 'token_expired') {
+      throw new AuthError('token_expired', 'token has expired', 401);
+    }
+    // token_not_found / token_invalid → try OAuth before rejecting.
+    if (oauth) {
+      const oa = oauth.authenticateAccessToken(plaintext);
+      if (oa) {
+        return { token: syntheticOAuthToken(oa.clientId, oa.scope), scope: oa.scope };
+      }
+    }
+    throw new AuthError('token_invalid', 'token not recognized', 401);
+  }
+}
+
+/**
+ * A `Token`-shaped value for an OAuth-authenticated connection. Keyed on the
+ * client id (stable across refresh rotations and per-connector — DCR runs
+ * once per connector instance) so session ownership and rate-limit bucketing
+ * stay continuous. The `hash` is never read after authentication.
+ */
+function syntheticOAuthToken(clientId: string, scope: TokenScope): Token {
+  return {
+    id: `oauth:${clientId}`,
+    name: `oauth:${clientId}`,
+    hash: '',
+    scope,
+    projectId: null,
+    createdAt: new Date(0),
+    expiresAt: null,
+    revokedAt: null,
   };
 }

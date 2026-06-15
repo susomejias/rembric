@@ -1,0 +1,107 @@
+/* OAUTH CONSENT — centered brutalist authorization card */
+
+.consent-stage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-6);
+}
+
+.consent-card {
+  width: 100%;
+  max-width: 540px;
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.consent-card .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.consent-card .brand img {
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  user-select: none;
+  pointer-events: none;
+}
+
+.consent-card .brand .wordmark {
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--fg-dim);
+}
+
+.consent-card h1 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 2.4rem;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.consent-card .lead {
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.consent-card .lead b {
+  color: var(--fg);
+}
+
+.consent-grant {
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.consent-grant .lbl {
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--fg-dim);
+}
+
+.consent-grant .val {
+  font-family: var(--f-mono);
+  font-size: 0.95rem;
+}
+
+.consent-note {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.consent-actions {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .consent-stage {
+    padding: var(--s-4);
+    align-items: stretch;
+  }
+  .consent-card {
+    padding: var(--s-5);
+  }
+  .consent-card h1 {
+    font-size: 1.9rem;
+  }
+}

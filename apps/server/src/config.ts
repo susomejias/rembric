@@ -51,6 +51,27 @@ const envSchema = z.object({
   REMBRIC_ADMIN_TOKEN: z.string().min(16).optional(),
   REMBRIC_SESSION_SECRET: z.string().min(16).optional(),
 
+  // OAuth 2.1 authorization server. The feature is enabled iff
+  // REMBRIC_PUBLIC_URL is set; it is the OAuth `issuer` and the base for
+  // every absolute metadata URL, so it MUST be the externally-reachable
+  // origin (a proxy/tunnel front, not the internal HOST:PORT). HTTPS is
+  // required, with an http exception ONLY for loopback hosts (localhost /
+  // 127.0.0.1) — the RFC 8414 testing exemption the MCP SDK also applies.
+  REMBRIC_PUBLIC_URL: z
+    .string()
+    .url()
+    .refine(isAllowedIssuerUrl, {
+      message: 'REMBRIC_PUBLIC_URL must be https:// (http allowed only for localhost / 127.0.0.1)',
+    })
+    .optional(),
+  REMBRIC_OAUTH_ACCESS_TTL: z.coerce.number().int().min(60).max(86_400).default(3600),
+  REMBRIC_OAUTH_REFRESH_TTL: z.coerce
+    .number()
+    .int()
+    .min(3600)
+    .max(365 * 86_400)
+    .default(30 * 86_400),
+
   // Per-token MCP rate limiting. Disabled by default — single-user
   // localhost deployments do not need it. Set RATE_LIMIT_ENABLED=true
   // to turn on the token-bucket limiter.
@@ -106,6 +127,13 @@ export interface Config {
   logLevel: LogLevel;
   adminToken: string | null;
   sessionSecret: string | null;
+  oauth: {
+    enabled: boolean;
+    /** OAuth issuer / external base URL; null when the feature is off. */
+    issuer: string | null;
+    accessTtlMs: number;
+    refreshTtlMs: number;
+  };
   rateLimit: {
     enabled: boolean;
     ratePerSecond: number;
@@ -154,6 +182,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: parsed.LOG_LEVEL,
     adminToken: parsed.REMBRIC_ADMIN_TOKEN ?? null,
     sessionSecret: parsed.REMBRIC_SESSION_SECRET ?? null,
+    oauth: {
+      enabled: parsed.REMBRIC_PUBLIC_URL !== undefined,
+      issuer: parsed.REMBRIC_PUBLIC_URL ? stripTrailingSlash(parsed.REMBRIC_PUBLIC_URL) : null,
+      accessTtlMs: parsed.REMBRIC_OAUTH_ACCESS_TTL * 1000,
+      refreshTtlMs: parsed.REMBRIC_OAUTH_REFRESH_TTL * 1000,
+    },
     rateLimit: {
       enabled: parsed.RATE_LIMIT_ENABLED,
       ratePerSecond: parsed.RATE_LIMIT_RPS,
@@ -172,6 +206,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   };
 }
 
+function stripTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+function isAllowedIssuerUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname);
+}
+
 /** Redact secrets from a config for safe logging. */
 export function redactConfig(config: Config): Record<string, unknown> {
   return {
@@ -181,6 +232,12 @@ export function redactConfig(config: Config): Record<string, unknown> {
     logLevel: config.logLevel,
     adminToken: config.adminToken ? '[set]' : '[unset]',
     sessionSecret: config.sessionSecret ? '[set]' : '[derived from admin token]',
+    oauth: {
+      enabled: config.oauth.enabled,
+      issuer: config.oauth.issuer ?? '[unset]',
+      accessTtlMs: config.oauth.accessTtlMs,
+      refreshTtlMs: config.oauth.refreshTtlMs,
+    },
     rateLimit: config.rateLimit,
     sessions: config.sessions,
     candidates: config.candidates,

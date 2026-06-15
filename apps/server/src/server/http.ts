@@ -6,11 +6,18 @@ import {
 } from 'node:http';
 
 import { getRequestListener } from '@hono/node-server';
+import type { OAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/provider.js';
+import {
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthRouter,
+} from '@modelcontextprotocol/sdk/server/auth/router.js';
+import express from 'express';
 import { Hono, type Context } from 'hono';
 
 import type { DbDiagnostics } from '../db/diagnostics.js';
 import { type McpTransportManager } from '../mcp/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { TokensService } from '../services/tokens.js';
 import { REMBRIC_VERSION } from '../version.js';
@@ -57,6 +64,19 @@ export interface CreateHttpServerOptions {
   triggerConsolidation?: () => Promise<unknown>;
   /** Fire-and-forget lazy sweep, invoked after a session is created. */
   sweep?: (projectId: string | null) => void;
+  /**
+   * OAuth 2.1 authorization server. When present, the SDK `mcpAuthRouter`
+   * (a vetted Express router) is mounted for the OAuth endpoints and the
+   * `/mcp` `401` advertises the protected-resource metadata.
+   */
+  oauth?: {
+    provider: OAuthServerProvider;
+    /** OAuth service for the `/mcp` access-token fallback in `authenticate()`. */
+    service: OAuthService;
+    /** Issuer / external base URL (no trailing slash). */
+    issuer: string;
+    scopesSupported?: string[];
+  } | null;
 }
 
 export interface HttpServerHandle {
@@ -126,6 +146,25 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
 
   const honoListener = getRequestListener(honoApp.fetch);
 
+  // OAuth authorization server: the SDK's vetted Express router owns the
+  // protocol surface (PKCE validation, redirect/state/CSRF, metadata, DCR,
+  // rate limiting). Mounted only when OAuth is enabled. The router MUST be
+  // installed at the application root.
+  const oauthListener = opts.oauth
+    ? (() => {
+        const app = express();
+        app.use(
+          mcpAuthRouter({
+            provider: opts.oauth.provider,
+            issuerUrl: new URL(opts.oauth.issuer),
+            scopesSupported: opts.oauth.scopesSupported,
+            resourceName: 'Rembric',
+          }),
+        );
+        return app;
+      })()
+    : null;
+
   const server = createNodeServer((req, res) => {
     const rawUrl = req.url ?? '/';
     const pathname = parsePathname(rawUrl);
@@ -133,6 +172,10 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       void handleMcpRequest(req, res, opts, pathname).catch((err: unknown) => {
         respondInternal(res, err);
       });
+      return;
+    }
+    if (oauthListener && isOAuthPath(pathname)) {
+      oauthListener(req, res);
       return;
     }
     void honoListener(req, res);
@@ -213,9 +256,17 @@ async function handleMcpRequest(
       pathSlug: slug,
       tokens: opts.tokens,
       projects: opts.projects,
+      oauth: opts.oauth?.service ?? null,
     });
   } catch (err) {
     if (err instanceof AuthError) {
+      // RFC 9728: advertise the protected-resource metadata so OAuth clients
+      // can discover the authorization server. Additive — static-token
+      // clients ignore the header. Only emitted when OAuth is enabled.
+      if (opts.oauth && err.status === 401) {
+        const metadataUrl = getOAuthProtectedResourceMetadataUrl(new URL(opts.oauth.issuer));
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${metadataUrl}"`);
+      }
       respondJson(res, err.status, { ok: false, code: err.code, message: err.message });
       return;
     }
@@ -301,6 +352,13 @@ function extractProjectSlug(pathname: string): string | undefined {
 const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 function isValidSlug(slug: string): boolean {
   return slug.length > 0 && slug.length <= 128 && SLUG_RE.test(slug);
+}
+
+const OAUTH_EXACT_PATHS = new Set(['/authorize', '/token', '/register', '/revoke']);
+
+/** Reserved OAuth authorization-server paths handled by the SDK router. */
+function isOAuthPath(pathname: string): boolean {
+  return OAUTH_EXACT_PATHS.has(pathname) || pathname.startsWith('/.well-known/oauth-');
 }
 
 function respondJson(res: ServerResponse, status: number, body: unknown): void {
