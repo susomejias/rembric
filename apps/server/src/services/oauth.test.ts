@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
-import { OAuthError, OAuthService, resolveGrantedScope } from './oauth.js';
+import { grantedOAuthScope, OAuthError, OAuthService, resolveGrantedScope } from './oauth.js';
 
 const TTL = { accessTtlMs: 3_600_000, refreshTtlMs: 30 * 86_400_000 };
 
@@ -260,5 +260,29 @@ describe('resolveGrantedScope', () => {
 
   it('grants write when both read and write are requested', () => {
     expect(resolveGrantedScope('read mcp')).toBe('*');
+  });
+});
+
+describe('grantedOAuthScope', () => {
+  it('echoes requested scopes restricted to the advertised set', () => {
+    expect(grantedOAuthScope('mcp read')).toBe('mcp read');
+    expect(grantedOAuthScope('mcp')).toBe('mcp');
+    expect(grantedOAuthScope('read')).toBe('read');
+  });
+
+  it('drops unsupported scopes', () => {
+    expect(grantedOAuthScope('mcp openid profile')).toBe('mcp');
+    expect(grantedOAuthScope('write admin')).toBe('read');
+  });
+
+  it('fails closed to read when nothing supported is requested', () => {
+    expect(grantedOAuthScope(undefined)).toBe('read');
+    expect(grantedOAuthScope('')).toBe('read');
+    expect(grantedOAuthScope('garbage')).toBe('read');
+  });
+
+  it('round-trips through resolveGrantedScope to the right authz scope', () => {
+    expect(resolveGrantedScope(grantedOAuthScope('mcp read'))).toBe('*');
+    expect(resolveGrantedScope(grantedOAuthScope('read'))).toBe('read:*');
   });
 });

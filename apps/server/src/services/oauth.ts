@@ -50,7 +50,8 @@ export interface IssueCodeInput {
   clientId: string;
   redirectUri: string;
   codeChallenge: string;
-  scope: TokenScope;
+  /** OAuth scope string in the advertised vocabulary (e.g. "mcp read"). */
+  scope: string;
   subject: string;
 }
 
@@ -58,7 +59,8 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   expiresInSeconds: number;
-  scope: TokenScope;
+  /** Granted OAuth scope string, echoed back to the client in /token. */
+  scope: string;
 }
 
 export interface ResolvedAccessToken {
@@ -174,7 +176,7 @@ export class OAuthService {
     return this.issueTokenPair({
       clientId: code.clientId,
       familyId: `oauthf_${ulid(this.now().getTime())}`,
-      scope: code.scope as TokenScope,
+      scope: code.scope,
       subject: code.subject,
     });
   }
@@ -214,7 +216,7 @@ export class OAuthService {
     return this.issueTokenPair({
       clientId: refresh.clientId,
       familyId: refresh.familyId,
-      scope: refresh.scope as TokenScope,
+      scope: refresh.scope,
       subject: refresh.subject,
     });
   }
@@ -226,7 +228,10 @@ export class OAuthService {
     if (token.revokedAt) return null;
     if (token.expiresAt.getTime() <= this.now().getTime()) return null;
     return {
-      scope: token.scope as TokenScope,
+      // Stored scope is the granted OAuth string; derive the authz TokenScope
+      // at read time. Back-compatible with tokens that stored a TokenScope
+      // directly: resolveGrantedScope('*')='*', resolveGrantedScope('read:*')='read:*'.
+      scope: resolveGrantedScope(token.scope),
       subject: token.subject,
       clientId: token.clientId,
       expiresAtSeconds: Math.floor(token.expiresAt.getTime() / 1000),
@@ -245,7 +250,7 @@ export class OAuthService {
   private issueTokenPair(input: {
     clientId: string;
     familyId: string;
-    scope: TokenScope;
+    scope: string;
     subject: string;
   }): TokenPair {
     const accessSecret = generateSecret();
@@ -263,7 +268,7 @@ export class OAuthService {
   private insertToken(
     kind: 'access' | 'refresh',
     secret: string,
-    grant: { clientId: string; familyId: string; scope: TokenScope; subject: string },
+    grant: { clientId: string; familyId: string; scope: string; subject: string },
     ttlMs: number,
   ): OAuthToken {
     const ts = this.now();
@@ -299,6 +304,23 @@ export function resolveGrantedScope(requestedScope: string | undefined): TokenSc
     (t) => t === '*' || t === 'mcp' || t === 'mcp:write' || t.endsWith(':write'),
   );
   return wantsWrite ? '*' : 'read:*';
+}
+
+/** OAuth scopes advertised in the metadata and grantable at consent. */
+export const SUPPORTED_OAUTH_SCOPES = ['mcp', 'read'] as const;
+
+/**
+ * The OAuth scope string to grant: the requested scopes restricted to the
+ * advertised set, echoed verbatim in the token response so the client sees
+ * its requested scopes as granted. Falls closed to `read` when nothing
+ * supported was requested.
+ */
+export function grantedOAuthScope(requestedScope: string | undefined): string {
+  const supported = SUPPORTED_OAUTH_SCOPES as readonly string[];
+  const kept = (requestedScope ?? '')
+    .split(/\s+/)
+    .filter((t) => supported.includes(t.toLowerCase()));
+  return kept.length > 0 ? kept.join(' ') : 'read';
 }
 
 function generateSecret(): string {

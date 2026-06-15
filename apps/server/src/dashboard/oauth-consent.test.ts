@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { signAuthRequest, type AuthRequest } from '../services/oauth-areq.js';
-import { OAuthService } from '../services/oauth.js';
+import { OAuthService, resolveGrantedScope } from '../services/oauth.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
@@ -96,10 +96,12 @@ describe('OAuth consent route', () => {
     const url = new URL(loc);
     expect(url.searchParams.get('code')).toBeTruthy();
     expect(url.searchParams.get('state')).toBe('st-9');
-    // The issued code is redeemable for the granted (write) scope.
+    // The issued code redeems to the granted OAuth scope ("mcp"), which
+    // derives to the write-capable authz TokenScope.
     const code = url.searchParams.get('code')!;
     const pair = oauth.redeemCode({ code, clientId, redirectUri: REDIRECT });
-    expect(pair.scope).toBe('*');
+    expect(pair.scope).toBe('mcp');
+    expect(resolveGrantedScope(pair.scope)).toBe('*');
   });
 
   it('POST deny redirects with access_denied and issues no code', async () => {
