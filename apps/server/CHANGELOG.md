@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.21](https://github.com/susomejias/rembric/compare/server-v0.21.20...server-v0.21.21) (2026-06-16)
+
+
+### Documentation
+
+* **server:** clarify memory.search is hybrid + paginable in tool description ([#172](https://github.com/susomejias/rembric/issues/172)) ([68144d3](https://github.com/susomejias/rembric/commit/68144d363a69cafcf9f88efb4605896bc4b67882))
+
 ## [0.21.20](https://github.com/susomejias/rembric/compare/server-v0.21.19...server-v0.21.20) (2026-06-16)
 
 
