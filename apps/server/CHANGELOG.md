@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.20](https://github.com/susomejias/rembric/compare/server-v0.21.19...server-v0.21.20) (2026-06-16)
+
+
+### Features
+
+* **server:** lower memory.search default result count 20→8 ([#170](https://github.com/susomejias/rembric/issues/170)) ([e4989db](https://github.com/susomejias/rembric/commit/e4989db041e56aeac614b99cd43989cef6b84131))
+
 ## [0.21.19](https://github.com/susomejias/rembric/compare/server-v0.21.18...server-v0.21.19) (2026-06-16)
 
 
