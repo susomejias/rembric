@@ -155,6 +155,115 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
+    // Read tools never mutate. Every Rembric tool is non-destructive (rows are
+    // never deleted; supersede is a reversible status flip) and closed-world
+    // (single local store) — so destructiveHint/openWorldHint are false for ALL
+    // tools. The name sets below are exhaustive against the registered tools;
+    // a newly-registered tool with no entry fails the partition assertion.
+    const READ_TOOLS = new Set([
+      'memory.search',
+      'memory.get',
+      'memory.context',
+      'memory.session_get',
+      'memory.timeline',
+      'memory.search_prompts',
+      'memory.doctor',
+      'memory.about',
+      'memory.stats',
+      'memory.suggest_topic_key',
+      'project.list',
+      'project.current',
+    ]);
+    const WRITE_TOOLS = new Set([
+      'memory.save',
+      'memory.confirm',
+      'memory.capture_passive',
+      'memory.save_prompt',
+      'memory.session_start',
+      'memory.session_summary',
+      'memory.session_end',
+      'memory.judge',
+      'memory.compare',
+      'project.use',
+    ]);
+
+    const client = await connect();
+    const { tools } = await client.listTools();
+
+    // Every registered tool is partitioned into exactly one of the two sets —
+    // catches an un-annotated new tool.
+    const registered = tools.map((t) => t.name).sort();
+    expect(registered).toEqual([...READ_TOOLS, ...WRITE_TOOLS].sort());
+
+    for (const tool of tools) {
+      const ann = tool.annotations;
+      expect(ann, `${tool.name} must declare annotations`).toBeDefined();
+      expect(ann?.destructiveHint, `${tool.name} destructiveHint`).toBe(false);
+      expect(ann?.openWorldHint, `${tool.name} openWorldHint`).toBe(false);
+      expect(typeof ann?.title, `${tool.name} title`).toBe('string');
+      expect(ann?.readOnlyHint, `${tool.name} readOnlyHint`).toBe(READ_TOOLS.has(tool.name));
+    }
+
+    await client.close();
+  });
+
+  it('every tool advertises an outputSchema', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      expect(tool.outputSchema, `${tool.name} must declare an outputSchema`).toBeDefined();
+    }
+    await client.close();
+  });
+
+  it('returns conforming structuredContent for the tools not exercised elsewhere', async () => {
+    // The SDK validates structuredContent against the registered outputSchema
+    // on every call, so a non-throwing call with structuredContent present IS
+    // the schema conformance test. The save→search→get→confirm/context/session/
+    // timeline/judge/compare/doctor/suggest_topic_key paths are covered by other
+    // tests in this file; this fills the gap for the rest.
+    const client = await connect();
+
+    const about = await client.callTool({ name: 'memory.about', arguments: {} });
+    expect(about.structuredContent).toBeDefined();
+
+    const stats = await client.callTool({ name: 'memory.stats', arguments: {} });
+    expect(stats.structuredContent).toBeDefined();
+
+    const savePrompt = await client.callTool({
+      name: 'memory.save_prompt',
+      arguments: { content: 'a goal worth remembering', title: 'goal' },
+    });
+    expect(savePrompt.structuredContent).toBeDefined();
+
+    const searchPrompts = await client.callTool({
+      name: 'memory.search_prompts',
+      arguments: { query: 'goal' },
+    });
+    expect(searchPrompts.structuredContent).toBeDefined();
+
+    const capture = await client.callTool({
+      name: 'memory.capture_passive',
+      arguments: { text: '## Key Learnings:\n- first learning\n- second learning\n' },
+    });
+    expect(capture.structuredContent).toBeDefined();
+
+    const use = await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'outputschema-proj', autocreate: true },
+    });
+    expect(use.structuredContent).toBeDefined();
+
+    const list = await client.callTool({ name: 'project.list', arguments: {} });
+    expect(list.structuredContent).toBeDefined();
+
+    const current = await client.callTool({ name: 'project.current', arguments: {} });
+    expect(current.structuredContent).toBeDefined();
+
+    await client.close();
+  });
+
   it('round-trips save → search → get → confirm against /mcp (global scope)', async () => {
     const client = await connect();
 

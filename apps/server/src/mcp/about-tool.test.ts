@@ -54,6 +54,8 @@ describe('memory.about handler', () => {
     expect(res.content).toHaveLength(1);
     const [entry] = res.content;
     expect(entry?.type).toBe('text');
-    expect(JSON.parse(entry?.text ?? '')).toEqual(buildAboutReport());
+    const text = entry && 'text' in entry ? entry.text : '';
+    expect(JSON.parse(text)).toEqual(buildAboutReport());
+    expect(res.structuredContent).toEqual(buildAboutReport());
   });
 });

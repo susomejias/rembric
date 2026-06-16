@@ -1,5 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  RootsListChangedNotificationSchema,
+  type ToolAnnotations,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import type { Repositories } from '../db/repositories/index.js';
 import type { SessionRouter } from '../server/session-router.js';
@@ -10,38 +13,59 @@ import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
 import type { CandidateOptions } from '../services/save-time-candidates.js';
 
-import { handleAbout } from './about-tool.js';
+import { aboutOutput, handleAbout } from './about-tool.js';
 import { buildInstructions } from './instructions.js';
 import {
   buildProjectHandlers,
+  projectCurrentOutput,
   projectCurrentSchema,
+  projectListOutput,
   projectListSchema,
+  projectUseOutput,
   projectUseSchema,
 } from './project-tools.js';
 import {
   buildRelationsHandlers,
+  compareOutput,
   compareSchema,
+  judgeOutput,
   judgeSchema,
+  suggestTopicKeyOutput,
   suggestTopicKeySchema,
 } from './relations-tools.js';
 import {
   buildSessionsHandlers,
+  capturePassiveOutput,
   capturePassiveSchema,
+  contextOutput,
   contextSchema,
+  doctorOutput,
+  sessionGetOutput,
   sessionGetSchema,
   type DoctorReport,
+  savePromptOutput,
   savePromptSchema,
+  searchPromptsOutput,
   searchPromptsSchema,
+  sessionEndOutput,
   sessionEndSchema,
+  sessionStartOutput,
   sessionStartSchema,
+  sessionSummaryOutput,
   sessionSummarySchema,
+  statsOutput,
+  timelineOutput,
   timelineSchema,
 } from './sessions-tools.js';
 import {
   buildHandlers,
+  memoryConfirmOutput,
   memoryConfirmSchema,
+  memoryGetOutput,
   memoryGetSchema,
+  memorySaveOutput,
   memorySaveSchema,
+  memorySearchOutput,
   memorySearchSchema,
 } from './tools.js';
 
@@ -89,6 +113,33 @@ const GET_DESCRIPTION =
 const CONFIRM_DESCRIPTION =
   'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it.';
 
+// Rembric is append-only (rows are never deleted; supersede is a reversible,
+// journaled status flip) and a closed local store, so destructiveHint and
+// openWorldHint are false for EVERY tool — defined once here so no per-tool
+// factory can get them wrong.
+const NON_DESTRUCTIVE_CLOSED = { destructiveHint: false, openWorldHint: false } as const;
+
+const READ_ANNOTATIONS = (title: string): ToolAnnotations => ({
+  title,
+  ...NON_DESTRUCTIVE_CLOSED,
+  readOnlyHint: true,
+  idempotentHint: true,
+});
+
+const WRITE_ANNOTATIONS = (title: string): ToolAnnotations => ({
+  title,
+  ...NON_DESTRUCTIVE_CLOSED,
+  readOnlyHint: false,
+  idempotentHint: false,
+});
+
+const IDEMPOTENT_WRITE_ANNOTATIONS = (title: string): ToolAnnotations => ({
+  title,
+  ...NON_DESTRUCTIVE_CLOSED,
+  readOnlyHint: false,
+  idempotentHint: true,
+});
+
 export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   const server = new McpServer(
     {
@@ -114,22 +165,42 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   });
   server.registerTool(
     'memory.save',
-    { description: SAVE_DESCRIPTION, inputSchema: memorySaveSchema },
+    {
+      description: SAVE_DESCRIPTION,
+      inputSchema: memorySaveSchema,
+      outputSchema: memorySaveOutput,
+      annotations: WRITE_ANNOTATIONS('Save memory'),
+    },
     handlers.save,
   );
   server.registerTool(
     'memory.search',
-    { description: SEARCH_DESCRIPTION, inputSchema: memorySearchSchema },
+    {
+      description: SEARCH_DESCRIPTION,
+      inputSchema: memorySearchSchema,
+      outputSchema: memorySearchOutput,
+      annotations: READ_ANNOTATIONS('Search memories'),
+    },
     handlers.search,
   );
   server.registerTool(
     'memory.get',
-    { description: GET_DESCRIPTION, inputSchema: memoryGetSchema },
+    {
+      description: GET_DESCRIPTION,
+      inputSchema: memoryGetSchema,
+      outputSchema: memoryGetOutput,
+      annotations: READ_ANNOTATIONS('Get memory'),
+    },
     handlers.get,
   );
   server.registerTool(
     'memory.confirm',
-    { description: CONFIRM_DESCRIPTION, inputSchema: memoryConfirmSchema },
+    {
+      description: CONFIRM_DESCRIPTION,
+      inputSchema: memoryConfirmSchema,
+      outputSchema: memoryConfirmOutput,
+      annotations: WRITE_ANNOTATIONS('Confirm memory'),
+    },
     handlers.confirm,
   );
 
@@ -153,6 +224,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode providers POST to the sessions endpoint on startup). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt }.',
       inputSchema: sessionStartSchema,
+      outputSchema: sessionStartOutput,
+      annotations: WRITE_ANNOTATIONS('Start session'),
     },
     sessions.sessionStart,
   );
@@ -162,6 +235,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned.',
       inputSchema: sessionEndSchema,
+      outputSchema: sessionEndOutput,
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS('End session'),
     },
     sessions.sessionEnd,
   );
@@ -171,6 +246,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=2000 chars, server rejects longer with invalid_input — keep it tight), title? (<=100 chars, descriptive of work done, NOT the cwd) }. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.',
       inputSchema: sessionSummarySchema,
+      outputSchema: sessionSummaryOutput,
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),
     },
     sessions.sessionSummary,
   );
@@ -180,6 +257,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), pendingJudgments (aged unresolved relation pairs to close with memory.judge), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory). Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
       inputSchema: contextSchema,
+      outputSchema: contextOutput,
+      annotations: READ_ANNOTATIONS('Recent context'),
     },
     sessions.context,
   );
@@ -189,6 +268,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         "Fetch one session by id with its FULL, untruncated summary — memory.context only returns a short snippet. Scope-enforced: a cross-scope or soft-deleted id returns not_found. Use to resume work surfaced in memory.context when the snippet isn't enough (cross-client / multi-agent handoff).",
       inputSchema: sessionGetSchema,
+      outputSchema: sessionGetOutput,
+      annotations: READ_ANNOTATIONS('Get session'),
     },
     sessions.sessionGet,
   );
@@ -198,6 +279,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Drill into chronological neighbors of a specific memory. Returns memories before and after the target within the same session (or, when the target has no session, a ±2h time window with fallback:"time_window").',
       inputSchema: timelineSchema,
+      outputSchema: timelineOutput,
+      annotations: READ_ANNOTATIONS('Memory timeline'),
     },
     sessions.timeline,
   );
@@ -207,6 +290,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Bulk-save learnings: extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls.',
       inputSchema: capturePassiveSchema,
+      outputSchema: capturePassiveOutput,
+      annotations: WRITE_ANNOTATIONS('Capture learnings'),
     },
     sessions.capturePassive,
   );
@@ -216,6 +301,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         "Persist the user's most recent prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). Call this when the user states a goal or constraint worth remembering. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`.",
       inputSchema: savePromptSchema,
+      outputSchema: savePromptOutput,
+      annotations: WRITE_ANNOTATIONS('Save prompt'),
     },
     sessions.savePrompt,
   );
@@ -225,6 +312,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Search curated prompts in the active scope. With `query`, runs an FTS5 MATCH over `content + tags` (token-aware); without it, falls back to recency. Filters: `sessionId`, `agent`, `includeDeleted` (default false). Returns `{ scope, prompts[], total, clamped }`. Use when the user references a prior goal/directive and you need to retrieve the exact wording.',
       inputSchema: searchPromptsSchema,
+      outputSchema: searchPromptsOutput,
+      annotations: READ_ANNOTATIONS('Search prompts'),
     },
     sessions.searchPrompts,
   );
@@ -234,6 +323,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Read-only operational diagnostics. Returns DB/LLM/embeddings/consolidation health plus warnings. Use at session start when behavior seems off.',
       inputSchema: {},
+      outputSchema: doctorOutput,
+      annotations: READ_ANNOTATIONS('Diagnostics'),
     },
     sessions.doctor,
   );
@@ -243,6 +334,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Read-only guidance to update/upgrade Rembric: returns the running server version + the canonical installer commands to update client plugins. Call when the operator asks how to update or upgrade Rembric (server or plugins). Surfaces commands for the operator to run; never executes them.',
       inputSchema: {},
+      outputSchema: aboutOutput,
+      annotations: READ_ANNOTATIONS('About Rembric'),
     },
     handleAbout,
   );
@@ -252,6 +345,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Read-only counters: memoriesByStatus, memoriesByType, sessionsByStatus, scoped to the active project (or global).',
       inputSchema: {},
+      outputSchema: statsOutput,
+      annotations: READ_ANNOTATIONS('Stats'),
     },
     sessions.stats,
   );
@@ -273,6 +368,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Activate a project for this MCP session by slug. By default, never creates and never switches mid-session. Pass autocreate:true to mint a new project (slug must match strict regex). Pass confirmSwitch:true to replace the current project (only allowed when no session is active — close it first via memory.session_summary). ASK THE USER before passing either flag.',
       inputSchema: projectUseSchema,
+      outputSchema: projectUseOutput,
+      annotations: WRITE_ANNOTATIONS('Use project'),
     },
     projectHandlers.use,
   );
@@ -282,6 +379,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'List existing projects and their memory counts. Use when the user references a project that may not be active in this session.',
       inputSchema: projectListSchema,
+      outputSchema: projectListOutput,
+      annotations: READ_ANNOTATIONS('List projects'),
     },
     projectHandlers.list,
   );
@@ -291,6 +390,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Report the project active in this session (slug, projectId, source) plus any pending suggestedSlugs surfaced by roots-based discovery.',
       inputSchema: projectCurrentSchema,
+      outputSchema: projectCurrentOutput,
+      annotations: READ_ANNOTATIONS('Current project'),
     },
     projectHandlers.current,
   );
@@ -303,6 +404,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Suggest a stable topic_key for an evolving memory based on type + title/content. Deterministic — no LLM. Call before memory.save when updating a topic you have saved before, so the new row supersedes the previous one atomically instead of fragmenting the result set.',
       inputSchema: suggestTopicKeySchema,
+      outputSchema: suggestTopicKeyOutput,
+      annotations: READ_ANNOTATIONS('Suggest topic key'),
     },
     relationsHandlers.suggestTopicKey,
   );
@@ -312,6 +415,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Close a pending judgment surfaced by memory.save.candidates[]. Pass the judgmentId, a relation (supersedes/conflicts_with/related/compatible/scoped/not_conflict), optional reason and confidence. relation=supersedes atomically marks the candidate target memory as superseded.',
       inputSchema: judgeSchema,
+      outputSchema: judgeOutput,
+      annotations: WRITE_ANNOTATIONS('Judge memories'),
     },
     relationsHandlers.judge,
   );
@@ -321,6 +426,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       description:
         'Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge instead.',
       inputSchema: compareSchema,
+      outputSchema: compareOutput,
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Compare memories'),
     },
     relationsHandlers.compare,
   );

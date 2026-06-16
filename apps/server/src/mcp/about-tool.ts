@@ -1,4 +1,8 @@
+import { z } from 'zod';
+
 import { REMBRIC_VERSION } from '../version.js';
+
+import { ok } from './result.js';
 
 // Must track the canonical installer entrypoint owned by the tui-installer
 // capability (repo-root install.sh shim). Never fork the URL or flag set here.
@@ -39,9 +43,19 @@ export function buildAboutReport(): AboutReport {
   };
 }
 
+export const aboutOutput = {
+  server: z.object({ version: z.string(), where: z.string(), update: z.string() }),
+  plugins: z.object({
+    note: z.string(),
+    status: z.string(),
+    interactive: z.string(),
+    update_all: z.string(),
+    subset: z.string(),
+  }),
+  docs: z.string(),
+};
+
 export function handleAbout(_args: Record<string, never>) {
   void _args;
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(buildAboutReport(), null, 2) }],
-  };
+  return ok(buildAboutReport());
 }

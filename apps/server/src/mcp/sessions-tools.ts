@@ -14,6 +14,7 @@ import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
 import { mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
+import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
@@ -102,11 +103,164 @@ export interface DoctorReport {
   warnings: string[];
 }
 
-function ok(payload: unknown) {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
-  };
-}
+const counts = z.record(z.string(), z.number());
+
+const promptRow = z.object({
+  id: z.string(),
+  content: z.string(),
+  title: z.string(),
+  tags: z.array(z.string()).nullable(),
+  sessionId: z.string().nullable(),
+  projectId: z.string().nullable(),
+  agent: z.string().nullable(),
+  replaces: z.array(z.string()).nullable(),
+  deletedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+const memoryNeighbor = z.object({
+  id: z.string(),
+  type: z.string(),
+  content: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  sessionId: z.string().nullable(),
+});
+
+export const sessionStartOutput = {
+  sessionId: z.string(),
+  scope: z.string(),
+  projectId: z.string().nullable(),
+  startedAt: z.string(),
+  title: z.string().nullable(),
+  reused: z.boolean(),
+};
+
+export const sessionEndOutput = {
+  ok: z.literal(true),
+  sessionId: z.string(),
+  endedAt: z.string().nullable(),
+};
+
+export const sessionSummaryOutput = {
+  ok: z.literal(true),
+  sessionId: z.string(),
+  summary: z.string(),
+  title: z.string().nullable(),
+  summaryFinal: z.boolean(),
+  titleFinal: z.boolean(),
+};
+
+export const contextOutput = {
+  scope: z.string(),
+  recentSessions: z.array(
+    z.object({
+      id: z.string(),
+      agent: z.string(),
+      startedAt: z.string(),
+      endedAt: z.string().nullable(),
+      status: z.string(),
+      title: z.string().nullable(),
+      summary: z.string().nullable(),
+    }),
+  ),
+  recentPrompts: z.array(
+    z.object({
+      id: z.string(),
+      content: z.string(),
+      agent: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+  recentMemories: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      snippet: z.string(),
+      status: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+  pendingJudgments: z.array(
+    z.object({
+      judgmentId: z.string(),
+      sourceId: z.string(),
+      targetId: z.string(),
+      sourceSnippet: z.string(),
+      targetSnippet: z.string(),
+      ageMs: z.number(),
+    }),
+  ),
+  needsReview: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      snippet: z.string(),
+      reviewAfter: z.string(),
+      ageMs: z.number(),
+    }),
+  ),
+  clamped: z.boolean(),
+};
+
+export const sessionGetOutput = {
+  id: z.string(),
+  agent: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  title: z.string().nullable(),
+  summary: z.string().nullable(),
+};
+
+export const timelineOutput = {
+  target: z.object({ id: z.string(), createdAt: z.string() }),
+  before: z.array(memoryNeighbor),
+  after: z.array(memoryNeighbor),
+  fallback: z.string().nullable(),
+};
+
+export const capturePassiveOutput = {
+  saved: z.number(),
+  ids: z.array(z.string()),
+};
+
+export const savePromptOutput = {
+  ok: z.literal(true),
+  id: z.string(),
+  createdAt: z.string(),
+  replaces: z.array(z.string()).optional(),
+};
+
+export const searchPromptsOutput = {
+  scope: z.string(),
+  prompts: z.array(promptRow),
+  total: z.number(),
+  clamped: z.boolean(),
+};
+
+export const doctorOutput = {
+  db: z.object({
+    open: z.boolean(),
+    journalMode: z.string(),
+    integrity: z.string(),
+    sizeBytes: z.number(),
+  }),
+  embeddings: z.object({ model: z.string(), backlog: z.number() }),
+  consolidation: z.object({
+    lastRunAt: z.string().nullable(),
+    lastRunOps: counts,
+  }),
+  sessions: z.object({ active: z.number() }),
+  warnings: z.array(z.string()),
+};
+
+export const statsOutput = {
+  scope: z.string(),
+  memoriesByStatus: counts,
+  memoriesByType: counts,
+  sessionsByStatus: counts,
+};
 
 /**
  * Resolve the effective scope for a session-tool call.

@@ -883,3 +883,70 @@ A connection authenticated by an OAuth access token SHALL be subject to the iden
 - **GIVEN** OAuth is enabled
 - **WHEN** the server routes requests for `/authorize`, `/token`, `/register`, and `/.well-known/oauth-*`
 - **THEN** those SHALL resolve to the OAuth handlers and SHALL NOT be interpreted as `/mcp` project slugs, and `/mcp/<slug>` routing SHALL remain unchanged
+
+### Requirement: Every MCP tool MUST advertise behavioral annotations
+
+Every tool registered on the MCP server SHALL declare an `annotations` object consistent with Rembric's append-only and closed-store invariants. The annotation set SHALL satisfy:
+
+- Read-only tools (`memory.search`, `memory.get`, `memory.context`, `memory.session_get`, `memory.timeline`, `memory.search_prompts`, `memory.doctor`, `memory.about`, `memory.stats`, `memory.suggest_topic_key`, `project.list`, `project.current`) SHALL carry `readOnlyHint: true`.
+- Mutating tools SHALL carry `readOnlyHint: false`.
+- Because no tool performs an irreversible destructive update (supersede is a reversible, journaled `status` flip; rows are never deleted), **every** tool SHALL carry `destructiveHint: false`.
+- Because Rembric is a closed local store, **every** tool SHALL carry `openWorldHint: false`.
+- Tools whose repeated invocation is side-effect-free or last-call-wins (`memory.compare`, `memory.session_end`, `memory.session_summary`, `memory.suggest_topic_key`, and all read-only tools) SHALL carry `idempotentHint: true`.
+
+Annotations are advisory metadata only: they SHALL NOT change tool inputs, outputs, or the `text` result contract.
+
+#### Scenario: Read-only tools report readOnlyHint
+
+- **WHEN** a client calls `tools/list`
+- **THEN** each of `memory.search`, `memory.get`, `memory.context`, `memory.session_get`, `memory.timeline`, `memory.search_prompts`, `memory.doctor`, `memory.about`, `memory.stats`, `memory.suggest_topic_key`, `project.list`, and `project.current` SHALL report `annotations.readOnlyHint === true`
+
+#### Scenario: No tool is advertised as destructive
+
+- **WHEN** a client calls `tools/list`
+- **THEN** every registered tool SHALL report `annotations.destructiveHint === false`
+
+#### Scenario: No tool is advertised as open-world
+
+- **WHEN** a client calls `tools/list`
+- **THEN** every registered tool SHALL report `annotations.openWorldHint === false`
+
+#### Scenario: Mutating tools are not marked read-only
+
+- **WHEN** a client calls `tools/list`
+- **THEN** `memory.save`, `memory.confirm`, `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, `memory.session_summary`, `memory.session_end`, `memory.judge`, `memory.compare`, and `project.use` SHALL report `annotations.readOnlyHint === false`
+
+#### Scenario: Annotations do not alter the result contract
+
+- **WHEN** any annotated tool is invoked successfully
+- **THEN** the result SHALL still be returned as a `text` content block (no `structuredContent` is required), unchanged from the pre-annotation behavior
+
+### Requirement: Every MCP tool MUST advertise an output schema and return conforming structured content
+
+Every tool registered on the MCP server SHALL declare an `outputSchema` describing the shape of its **successful** result, and on success SHALL return a `structuredContent` object that conforms to that schema. The `structuredContent` SHALL be the JSON-normalized form of the response (timestamps as ISO strings), equal in meaning to the existing `text` content block.
+
+This requirement is additive and SHALL NOT change:
+
+- the `text` content block returned by any tool (clients that read only `text` are unaffected), or
+- error results — results returned via `mcpError` carry `isError: true`, for which output-schema validation is not performed.
+
+#### Scenario: A successful tool call returns structured content
+
+- **WHEN** any registered tool is invoked and succeeds
+- **THEN** the result SHALL include a `structuredContent` object conforming to the tool's declared `outputSchema`
+- **AND** the result SHALL still include the equivalent `text` content block
+
+#### Scenario: Every tool advertises an output schema
+
+- **WHEN** a client calls `tools/list`
+- **THEN** every tool entry SHALL include an `outputSchema`
+
+#### Scenario: Error results are exempt from output-schema validation
+
+- **WHEN** a tool returns an error via `mcpError` (e.g. `not_found`, `scope_locked`, `forbidden`, `invalid_input`)
+- **THEN** the result SHALL carry `isError: true` and SHALL NOT be required to include `structuredContent`
+
+#### Scenario: Structured content matches the text payload
+
+- **WHEN** a tool succeeds and returns both `text` and `structuredContent`
+- **THEN** parsing the `text` JSON SHALL yield the same object as `structuredContent`
