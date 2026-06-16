@@ -76,7 +76,9 @@ export const memorySearchSchema = {
     .int()
     .min(0)
     .optional()
-    .describe('Skip this many results for paging; combine with limit to fetch the next page.'),
+    .describe(
+      'Skip this many results for paging. Exact for the no-query listing; on a text query it is best-effort within a bounded relevance window, so a deep offset may return an empty page.',
+    ),
 };
 
 export const memoryGetSchema = {
