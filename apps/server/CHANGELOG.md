@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.18](https://github.com/susomejias/rembric/compare/server-v0.21.17...server-v0.21.18) (2026-06-16)
+
+
+### Features
+
+* **server:** MCP tool annotations + output schemas ([#165](https://github.com/susomejias/rembric/issues/165)) ([98dc493](https://github.com/susomejias/rembric/commit/98dc493029f74108bab22590601da47d8db29ab8))
+
 ## [0.21.17](https://github.com/susomejias/rembric/compare/server-v0.21.16...server-v0.21.17) (2026-06-15)
 
 
