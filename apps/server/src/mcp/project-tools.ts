@@ -9,6 +9,7 @@ import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
 
 import { mcpError } from './errors.js';
+import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
@@ -33,6 +34,33 @@ export const projectListSchema = {
 
 export const projectCurrentSchema = {} as const;
 
+export const projectUseOutput = {
+  slug: z.string(),
+  projectId: z.string(),
+  created: z.boolean(),
+  switched: z.boolean(),
+  source: z.string(),
+  previousSlug: z.string().nullable().optional(),
+};
+
+export const projectListOutput = {
+  projects: z.array(
+    z.object({
+      slug: z.string(),
+      displayName: z.string().nullable(),
+      archived: z.boolean(),
+      memoryCount: z.number(),
+    }),
+  ),
+};
+
+export const projectCurrentOutput = {
+  slug: z.string().nullable(),
+  projectId: z.string().nullable(),
+  source: z.string(),
+  suggestedSlugs: z.array(z.string()),
+};
+
 export interface ProjectToolDeps {
   repos: Pick<Repositories, 'memory'>;
   projects: ProjectsService;
@@ -40,12 +68,6 @@ export interface ProjectToolDeps {
   router: SessionRouter;
   /** Set by `createMcpServer` after construction to enable roots discovery. */
   getServer?: () => McpServer;
-}
-
-function ok(payload: unknown) {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
-  };
 }
 
 function routerKey(): { tokenId: string; mcpSessionId: string } | null {

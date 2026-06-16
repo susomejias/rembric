@@ -5,6 +5,7 @@ import { DomainError } from '../services/errors.js';
 import { type RelationsService, type RelationView } from '../services/relations.js';
 
 import { mcpError } from './errors.js';
+import { ok } from './result.js';
 import { suggestTopicKey } from './topic-key.js';
 
 /**
@@ -61,14 +62,27 @@ export const compareSchema = {
   evidence: z.unknown().optional(),
 };
 
+export const suggestTopicKeyOutput = {
+  topic_key: z.string(),
+};
+
+export const judgeOutput = {
+  ok: z.literal(true),
+  judgmentId: z.string(),
+  relation: z.string(),
+  status: z.string(),
+  judgedAt: z.string(),
+};
+
+export const compareOutput = {
+  ok: z.literal(true),
+  judgmentId: z.string(),
+  relation: z.string(),
+  status: z.string(),
+};
+
 export interface RelationsToolDeps {
   relations: RelationsService;
-}
-
-function ok(payload: unknown) {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
-  };
 }
 
 export function buildRelationsHandlers(deps: RelationsToolDeps) {

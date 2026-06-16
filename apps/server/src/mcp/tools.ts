@@ -15,6 +15,7 @@ import { isAuthorized } from '../services/tokens.js';
 
 import { mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
+import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
@@ -72,6 +73,82 @@ export const memoryConfirmSchema = {
   id: z.string().min(1),
 };
 
+const relationView = z.object({
+  kind: z.string(),
+  targetId: z.string(),
+  judgmentId: z.string().optional(),
+  status: z.string(),
+  reason: z.string().nullable().optional(),
+  confidence: z.number().nullable().optional(),
+});
+
+const candidate = z.object({
+  judgmentId: z.string(),
+  targetId: z.string(),
+  snippet: z.string(),
+  similarity: z.number(),
+  source: z.string(),
+});
+
+const memoryRow = z.object({
+  id: z.string(),
+  scope: z.string(),
+  projectId: z.string().nullable(),
+  type: z.string(),
+  content: z.string(),
+  tags: z.array(z.string()),
+  status: z.string(),
+  createdAt: z.string(),
+  lastSeenAt: z.string().nullable(),
+  relations: z.array(relationView),
+  reviewState: z.string().optional(),
+  reviewAfter: z.string().nullable().optional(),
+});
+
+export const memorySaveOutput = {
+  id: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  candidates: z.array(candidate),
+  judgmentRequired: z.boolean(),
+};
+
+export const memorySearchOutput = {
+  count: z.number(),
+  memories: z.array(memoryRow),
+};
+
+export const memoryGetOutput = {
+  memory: z.object({
+    id: z.string(),
+    scope: z.string(),
+    projectId: z.string().nullable(),
+    type: z.string(),
+    content: z.string(),
+    tags: z.array(z.string()),
+    status: z.string(),
+    replaces: z.array(z.string()),
+    createdAt: z.string(),
+  }),
+  head: z.object({ id: z.string(), content: z.string(), status: z.string() }),
+  predecessors: z.array(
+    z.object({
+      id: z.string(),
+      content: z.string(),
+      status: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+  confirmationCount: z.number(),
+  relations: z.array(relationView),
+  reviewState: z.string().optional(),
+  reviewAfter: z.string().nullable().optional(),
+};
+
+export const memoryConfirmOutput = {
+  ok: z.literal(true),
+};
+
 export interface ToolDeps {
   memory: MemoryService;
   /** Optional — when present, save surfaces candidates + writes pending relations. */
@@ -111,17 +188,6 @@ export function buildHandlers(deps: ToolDeps) {
     search: handleSearch.bind(null, deps),
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
-  };
-}
-
-function ok(payload: unknown) {
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: JSON.stringify(payload, null, 2),
-      },
-    ],
   };
 }
 
