@@ -440,8 +440,10 @@ export class MemoryService {
   }
 }
 
+const DEFAULT_SEARCH_LIMIT = 8;
+
 function clampLimit(limit: number | undefined): number {
-  if (limit === undefined) return 20;
+  if (limit === undefined) return DEFAULT_SEARCH_LIMIT;
   if (limit < 1) return 1;
   if (limit > 200) return 200;
   return Math.floor(limit);
