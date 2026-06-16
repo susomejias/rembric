@@ -83,7 +83,6 @@ export async function bootstrap(
 
   const tokens = new TokensService(repos);
   const projects = new ProjectsService(repos);
-  const memorySvc = new MemoryService(repos, dbHandle.db);
   const agentSessionsSvc = new AgentSessionsService(repos, dbHandle.db);
   const promptsSvc = new PromptsService(repos, dbHandle.db);
   const relationsSvc = new RelationsService(repos, dbHandle.db);
@@ -158,6 +157,12 @@ export async function bootstrap(
       `  ↻ embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
     );
   }
+
+  // Constructed after the embedder so the hybrid-search dense branch has a
+  // live `embedQuery`; the embedder is REQUIRED at boot so this is non-lazy.
+  const memorySvc = new MemoryService(repos, dbHandle.db, undefined, (text) =>
+    embedder.embed(text),
+  );
   const embeddingWorker = new EmbeddingWorker({
     repos,
     embedder,
@@ -218,7 +223,8 @@ export async function bootstrap(
       candidates: {
         perSaveMax: config.candidates.perSaveMax,
       },
-      embedNow: (memoryId, content) => embeddingWorker.embedNow(memoryId, content),
+      embedNow: (memoryId, content, scope, projectId, status, type) =>
+        embeddingWorker.embedNow(memoryId, content, scope, projectId, status, type),
       router: sessionRouter,
       repos,
       doctor: buildDoctorReport,

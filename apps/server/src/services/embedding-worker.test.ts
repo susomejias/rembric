@@ -80,7 +80,14 @@ describe('EmbeddingWorker', () => {
 
   it('embedNow inserts inline when the embedder is warm', async () => {
     const row = mem.save({ type: 'feedback', content: 'inline row' }, SCOPE_GLOBAL);
-    const ok = await worker.embedNow(row.id, row.content);
+    const ok = await worker.embedNow(
+      row.id,
+      row.content,
+      row.scope,
+      row.projectId,
+      row.status,
+      row.type,
+    );
     expect(ok).toBe(true);
     expect(vecCount()).toBe(1);
     // The drain has nothing left for this row.

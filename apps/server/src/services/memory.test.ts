@@ -49,38 +49,38 @@ describe('memory.save', () => {
 });
 
 describe('memory.search', () => {
-  it('FTS5 keyword match within scope', () => {
+  it('FTS5 keyword match within scope', async () => {
     memory.save({ type: 'user', content: 'prefers tabs over spaces' }, projectScope(projectId));
     memory.save({ type: 'user', content: 'uses pnpm not npm' }, projectScope(projectId));
 
-    const results = memory.search({ query: 'tabs' }, projectScope(projectId));
+    const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     expect(results.length).toBe(1);
     expect(results[0]!.content).toMatch(/tabs/);
   });
 
-  it('never leaks across projects', () => {
+  it('never leaks across projects', async () => {
     const otherId = projects.create({ slug: 'other-app' }).id;
     memory.save({ type: 'user', content: 'in project A' }, projectScope(projectId));
     memory.save({ type: 'user', content: 'in project B' }, projectScope(otherId));
 
-    const a = memory.search({}, projectScope(projectId));
+    const a = await memory.search({}, projectScope(projectId));
     expect(a.every((m) => m.projectId === projectId)).toBe(true);
     expect(a.some((m) => m.content.includes('B'))).toBe(false);
   });
 
-  it("global scope returns globals only — projects don't leak", () => {
+  it("global scope returns globals only — projects don't leak", async () => {
     memory.save({ type: 'user', content: 'global one' }, SCOPE_GLOBAL);
     memory.save({ type: 'user', content: 'project one' }, projectScope(projectId));
 
-    const globals = memory.search({}, SCOPE_GLOBAL);
+    const globals = await memory.search({}, SCOPE_GLOBAL);
     expect(globals.every((m) => m.scope === 'global')).toBe(true);
   });
 
-  it("project scope returns project only — globals don't leak", () => {
+  it("project scope returns project only — globals don't leak", async () => {
     memory.save({ type: 'user', content: 'global g' }, SCOPE_GLOBAL);
     memory.save({ type: 'user', content: 'project p' }, projectScope(projectId));
 
-    const proj = memory.search({}, projectScope(projectId));
+    const proj = await memory.search({}, projectScope(projectId));
     expect(proj.every((m) => m.scope === 'project' && m.projectId === projectId)).toBe(true);
   });
 });
@@ -190,8 +190,10 @@ describe('memory.purgeDisconnectedArchived', () => {
     // Insert a fake embedding row directly.
     const fakeEmbedding = Buffer.alloc(768 * 4);
     db.handle.raw
-      .prepare('INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)')
-      .run(m.id, fakeEmbedding);
+      .prepare(
+        'INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(m.id, m.projectId, 'archived', m.type, fakeEmbedding);
     const beforeCount = (
       db.handle.raw
         .prepare('SELECT COUNT(*) AS v FROM memory_vec WHERE memory_id = ?')
@@ -374,10 +376,10 @@ describe('derived review state', () => {
     expect(stale?.reviewState).toBe('needs_review');
   });
 
-  it('reviewStateForMemories maps each searched row', () => {
+  it('reviewStateForMemories maps each searched row', async () => {
     memory.save({ type: 'project', content: 'find me tabs' }, projectScope(projectId));
     clock.advance(100 * DAY);
-    const results = memory.search({ query: 'tabs' }, projectScope(projectId));
+    const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     const review = memory.reviewStateForMemories(results);
     expect(review.get(results[0]!.id)?.reviewState).toBe('needs_review');
   });

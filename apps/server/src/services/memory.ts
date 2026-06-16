@@ -5,6 +5,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
+import { hybridSearch } from './hybrid-search.js';
 import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 
@@ -94,9 +95,15 @@ export interface NeedsReviewItem {
 
 export class MemoryService {
   constructor(
-    private readonly repos: Pick<Repositories, 'memory' | 'consolidation'>,
+    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
+    /**
+     * Optional lazy embedder for the hybrid search dense branch. When unset,
+     * `search` degrades to FTS-only (keeps the many test/seed construction
+     * sites compiling unchanged and tolerates pre-embedder bootstrap order).
+     */
+    private readonly embedQuery?: (text: string) => Promise<Float32Array>,
   ) {}
 
   save(input: SaveMemoryInput, scope: Scope): Memory {
@@ -250,25 +257,41 @@ export class MemoryService {
   }
 
   /**
-   * FTS5-backed keyword search restricted to the given scope. The scope
-   * is enforced at the SQL level; the agent cannot opt out by passing
-   * a wider filter.
+   * Scope-restricted search. With a text query this is hybrid retrieval
+   * (dense vec ⊕ lexical FTS, RRF-fused — see `hybrid-search.ts`); without
+   * one it is the chronological listing with exact pagination. Scope is
+   * enforced at the SQL level; the agent cannot opt out by widening a filter.
    */
-  search(input: SearchMemoriesInput, scope: Scope): Memory[] {
+  async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
     const status = input.status ?? 'active';
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
+    const memScope = scope.kind === 'global' ? 'global' : 'project';
+    const projectId = scope.kind === 'project' ? scope.projectId : null;
 
-    const ids = this.repos.memory.searchMemoryIds({
-      query: input.query,
-      scope: scope.kind === 'global' ? 'global' : 'project',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
-      status,
-      type: input.type,
-      tag: input.tag,
-      limit,
-      offset,
-    });
+    const query = input.query?.trim();
+    const ids = query
+      ? await hybridSearch({
+          repos: this.repos,
+          embedQuery: this.embedQuery,
+          query,
+          scope: memScope,
+          projectId,
+          status,
+          type: input.type,
+          tag: input.tag,
+          limit,
+          offset,
+        })
+      : this.repos.memory.searchMemoryIds({
+          scope: memScope,
+          projectId,
+          status,
+          type: input.type,
+          tag: input.tag,
+          limit,
+          offset,
+        });
     if (ids.length === 0) return [];
 
     const raw = this.repos.memory.unsafeGetByIds(ids);
