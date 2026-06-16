@@ -46,6 +46,7 @@ ChatGPT connects as a **custom MCP connector** (no plugin, no static token) usin
    - URL: `https://memory.example.com/mcp/<slug>` (the `/<slug>` binds it to that project; omit for global).
    - Authentication: **OAuth**. Leave the advanced panel alone — the server advertises Dynamic Client Registration, so ChatGPT registers itself automatically (no client id/secret).
 3. **Consent**: the browser lands on the Rembric consent screen → sign in with your `REMBRIC_ADMIN_TOKEN` → **Authorize**. ChatGPT manages the token (refresh included) from then on.
+4. **Disable ChatGPT's native memory** _(optional but recommended)_: in Settings → Personalization → Memory, turn off **Reference saved memories** (and **Reference chat history**). This stops ChatGPT from falling back to its own store, so it leans on Rembric as the single source of truth — fewer stale or duplicated facts, and the custom instruction below has nothing to compete with. Leave it on if you deliberately want both stores.
 
 Per-project = one connector per `/mcp/<slug>`. Developer mode is a beta ChatGPT feature; on Business/Enterprise an admin can publish the connector workspace-wide.
 
