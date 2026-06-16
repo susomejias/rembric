@@ -23,6 +23,8 @@ import {
   type NewMemory,
 } from '../schema/memory.js';
 
+import { scopeWhere } from './scope-clause.js';
+
 export interface FindActiveByScopeOpts {
   scope: MemoryScope;
   projectId?: string | null;
@@ -32,7 +34,6 @@ export interface FindActiveByScopeOpts {
 }
 
 export interface SearchMemoryIdsOpts {
-  query?: string;
   scope: MemoryScope;
   projectId: string | null;
   status: MemoryStatus;
@@ -40,6 +41,18 @@ export interface SearchMemoryIdsOpts {
   tag?: string;
   limit: number;
   offset: number;
+}
+
+export interface SearchBm25IdsOpts {
+  /** Pre-sanitized FTS5 MATCH expression (see services/hybrid-search.ts). */
+  matchExpr: string;
+  scope: MemoryScope;
+  projectId: string | null;
+  status: MemoryStatus;
+  type?: MemoryType;
+  tag?: string;
+  /** Bounded rank window depth (no OFFSET — fusion paginates in memory). */
+  limit: number;
 }
 
 export interface AdminListMemoriesOpts {
@@ -85,14 +98,12 @@ export class MemoryRepository {
     projectId: string | null;
     topicKey: string;
   }): Memory | undefined {
-    const scopeClause =
-      opts.scope === 'project'
-        ? sql`scope = 'project' AND project_id = ${opts.projectId}`
-        : sql`scope = 'global' AND project_id IS NULL`;
     return this.db
       .select()
       .from(memory)
-      .where(sql`${scopeClause} AND topic_key = ${opts.topicKey} AND status = 'active'`)
+      .where(
+        sql`${scopeWhere(opts.scope, opts.projectId)} AND topic_key = ${opts.topicKey} AND status = 'active'`,
+      )
       .limit(1)
       .get();
   }
@@ -109,10 +120,6 @@ export class MemoryRepository {
     excludeIds: string[];
     limit: number;
   }): { id: string; rank: number; content: string }[] {
-    const scopeWhere =
-      opts.scope === 'project'
-        ? sql`scope = 'project' AND project_id = ${opts.projectId}`
-        : sql`scope = 'global' AND project_id IS NULL`;
     return this.db.all<{ id: string; rank: number; content: string }>(
       sql`
         SELECT m.id AS id, memory_fts.rank AS rank, m.content AS content
@@ -120,7 +127,7 @@ export class MemoryRepository {
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
           AND m.id != ${opts.excludeId}
-          AND ${scopeWhere}
+          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
           AND m.status = 'active'
           AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
         ORDER BY rank
@@ -244,45 +251,69 @@ export class MemoryRepository {
       .filter((r): r is { projectId: string; n: number } => r.projectId !== null);
   }
 
+  /**
+   * Chronological listing (no text query). The hybrid text-query path lives
+   * in `services/hybrid-search.ts` and reads the lexical branch via
+   * `searchBm25Ids`; this method owns only the no-query listing branch.
+   */
   searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
-    const scopeClause =
-      opts.scope === 'global'
-        ? sql`(m.scope = 'global' AND m.project_id IS NULL)`
-        : sql`(m.scope = 'project' AND m.project_id = ${opts.projectId})`;
     const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
     const tagClause = opts.tag
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
-    const statusClause = sql`AND m.status = ${opts.status}`;
-
-    const rows = opts.query
-      ? this.db.all<{ id: string }>(
-          sql`
-            SELECT m.id
-            FROM memory m
-            JOIN memory_fts f ON f.rowid = m.rowid
-            WHERE memory_fts MATCH ${opts.query}
-              AND ${scopeClause}
-              ${statusClause}
-              ${typeClause}
-              ${tagClause}
-            ORDER BY rank, m.created_at DESC
-            LIMIT ${opts.limit} OFFSET ${opts.offset}
-          `,
-        )
-      : this.db.all<{ id: string }>(
-          sql`
-            SELECT m.id
-            FROM memory m
-            WHERE ${scopeClause}
-              ${statusClause}
-              ${typeClause}
-              ${tagClause}
-            ORDER BY m.created_at DESC
-            LIMIT ${opts.limit} OFFSET ${opts.offset}
-          `,
-        );
+    const rows = this.db.all<{ id: string }>(
+      sql`
+        SELECT m.id
+        FROM memory m
+        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+          AND m.status = ${opts.status}
+          ${typeClause}
+          ${tagClause}
+        ORDER BY m.created_at DESC
+        LIMIT ${opts.limit} OFFSET ${opts.offset}
+      `,
+    );
     return rows.map((r) => r.id);
+  }
+
+  /**
+   * Lexical (FTS5/BM25) retriever for the hybrid search path: scoped ids
+   * ordered by BM25 rank for a PRE-SANITIZED MATCH expression, bounded to a
+   * rank window (no OFFSET — RRF fusion paginates in memory). Distinct from
+   * the unscoped `adminSearchFts` and the save-time `searchBm25Candidates`.
+   */
+  searchBm25Ids(opts: SearchBm25IdsOpts): string[] {
+    const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
+    const tagClause = opts.tag
+      ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
+      : sql``;
+    const rows = this.db.all<{ id: string }>(
+      sql`
+        SELECT m.id
+        FROM memory_fts
+          JOIN memory m ON m.rowid = memory_fts.rowid
+        WHERE memory_fts MATCH ${opts.matchExpr}
+          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
+          AND m.status = ${opts.status}
+          ${typeClause}
+          ${tagClause}
+        ORDER BY memory_fts.rank
+        LIMIT ${opts.limit}
+      `,
+    );
+    return rows.map((r) => r.id);
+  }
+
+  /** Subset of `ids` whose memory carries `tag` (dense-branch tag post-filter). */
+  idsWithTag(ids: readonly string[], tag: string): Set<string> {
+    if (ids.length === 0) return new Set();
+    const rows = this.db.all<{ id: string }>(sql`
+      SELECT m.id AS id
+      FROM memory m
+      WHERE m.id IN (SELECT value FROM json_each(${JSON.stringify([...ids])}))
+        AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${tag})
+    `);
+    return new Set(rows.map((r) => r.id));
   }
 
   /** @internal */

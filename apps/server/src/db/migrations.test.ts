@@ -101,6 +101,144 @@ describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () 
   });
 });
 
+// Prod-safety for 0014: the memory_vec rebuild must run over a POPULATED
+// 2-column vec0 table without losing embeddings or corrupting the vtable's
+// shadow tables (the failure mode of ALTER…RENAME), and must derive the new
+// partition_key/status/type metadata correctly from the joined memory rows.
+describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  const vec = (a: number, b: number): Buffer => {
+    const v = new Float32Array(768);
+    v[0] = a;
+    v[1] = b;
+    return Buffer.from(v.buffer);
+  };
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig14-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig14-slice-'));
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const f of all) {
+      if (f.startsWith('0014_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('synchronous = NORMAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  it('preserves every embedding byte-for-byte and derives metadata, without corrupting the vtable', () => {
+    // Pre-0014 state: a project + a global and a project memory (different
+    // statuses/types) each with a 2-column memory_vec row.
+    raw
+      .prepare(
+        "INSERT INTO projects (id, slug, display_name, created_at) VALUES ('proj1', 'proj1', 'proj1', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, content, status, created_at) VALUES ('g1', 'global', NULL, 'user', 'global one', 'active', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, content, status, created_at) VALUES ('p1', 'project', 'proj1', 'project', 'project one', 'superseded', 0)",
+      )
+      .run();
+    const embG = vec(1, 0);
+    const embP = vec(0, 1);
+    raw.prepare('INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)').run('g1', embG);
+    raw.prepare('INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)').run('p1', embP);
+
+    // Apply 0014 (and anything after) over the populated 2-column table.
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
+
+    // No FK damage and the rebuild scratch table is gone.
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    const leftover = raw
+      .prepare("SELECT name FROM sqlite_master WHERE name = '_memory_vec_rebuild'")
+      .all();
+    expect(leftover).toEqual([]);
+
+    // Both vectors survived, with metadata derived from the memory rows.
+    const rows = raw
+      .prepare<
+        [],
+        { memory_id: string; partition_key: string; status: string; type: string }
+      >('SELECT memory_id, partition_key, status, type FROM memory_vec ORDER BY memory_id')
+      .all();
+    expect(rows).toEqual([
+      { memory_id: 'g1', partition_key: '__global__', status: 'active', type: 'user' },
+      { memory_id: 'p1', partition_key: 'proj1', status: 'superseded', type: 'project' },
+    ]);
+
+    // Embeddings are byte-identical (no re-embedding, no precision loss).
+    const backG = raw
+      .prepare<
+        [string],
+        { embedding: Buffer }
+      >('SELECT embedding FROM memory_vec WHERE memory_id = ?')
+      .get('g1');
+    expect(Buffer.compare(backG!.embedding, embG)).toBe(0);
+
+    // The status-sync trigger mirrors memory.status into the vec row.
+    raw.prepare("UPDATE memory SET status = 'archived' WHERE id = 'g1'").run();
+    const synced = raw
+      .prepare<[string], { status: string }>('SELECT status FROM memory_vec WHERE memory_id = ?')
+      .get('g1');
+    expect(synced!.status).toBe('archived');
+
+    // The rebuilt vtable answers a partition+status-filtered kNN (proves the
+    // shadow tables are intact — ALTER…RENAME would have left them dangling).
+    const hits = raw
+      .prepare<[Buffer, string], { memory_id: string }>(
+        `SELECT memory_id FROM memory_vec
+         WHERE embedding MATCH ? AND k = 5 AND partition_key = ? AND status = 'superseded'`,
+      )
+      .all(vec(0, 1), 'proj1');
+    expect(hits.map((h) => h.memory_id)).toEqual(['p1']);
+  });
+
+  it('is a no-op-safe rebuild when memory_vec is empty', () => {
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    // Fresh inserts use the new 5-column shape.
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, content, status, created_at) VALUES ('g2', 'global', NULL, 'user', 'x', 'active', 0)",
+      )
+      .run();
+    expect(() =>
+      raw
+        .prepare(
+          'INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('g2', '__global__', 'active', 'user', vec(1, 1)),
+    ).not.toThrow();
+  });
+});
+
 // Regression for the production incident where 0011 failed with
 // `FOREIGN KEY constraint failed` because `sessions` is a FK parent
 // (prompts/memory/confirmations all reference it) and the table-rebuild
@@ -191,6 +329,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0011_summary_length_check.sql',
       '0012_drop_summary_length_check.sql',
       '0013_oauth_tables.sql',
+      '0014_hybrid_search_vec_rebuild.sql',
     ]);
 
     // FK integrity after the rebuild.

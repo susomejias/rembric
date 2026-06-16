@@ -1,4 +1,6 @@
 import type { Repositories } from '../db/repositories/index.js';
+import { partitionKeyFor } from '../db/repositories/scope-clause.js';
+import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 import type { Embedder } from '../embeddings/embedder.js';
 
 /**
@@ -36,10 +38,23 @@ export class EmbeddingWorker {
    * vector is in place; on failure the save proceeds with FTS-only
    * detection and the drain retries the row.
    */
-  async embedNow(memoryId: string, content: string): Promise<boolean> {
+  async embedNow(
+    memoryId: string,
+    content: string,
+    scope: MemoryScope,
+    projectId: string | null,
+    status: MemoryStatus,
+    type: MemoryType,
+  ): Promise<boolean> {
     try {
       const vector = await this.opts.embedder.embed(content);
-      this.opts.repos.vectors.insertEmbedding(memoryId, Buffer.from(vector.buffer));
+      this.opts.repos.vectors.insertEmbedding(
+        memoryId,
+        Buffer.from(vector.buffer),
+        partitionKeyFor(scope, projectId),
+        status,
+        type,
+      );
       return true;
     } catch (err) {
       // Benign race with the drain (row already embedded) or an inference
@@ -73,7 +88,13 @@ export class EmbeddingWorker {
     for (const row of pending) {
       try {
         const vector = await this.opts.embedder.embed(row.content);
-        this.opts.repos.vectors.insertEmbedding(row.id, Buffer.from(vector.buffer));
+        this.opts.repos.vectors.insertEmbedding(
+          row.id,
+          Buffer.from(vector.buffer),
+          partitionKeyFor(row.scope, row.projectId),
+          row.status,
+          row.type,
+        );
         processed++;
       } catch {
         // Skip this row for now; the worker retries it on the next call.
