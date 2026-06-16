@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.19](https://github.com/susomejias/rembric/compare/server-v0.21.18...server-v0.21.19) (2026-06-16)
+
+
+### Features
+
+* **server:** hybrid semantic search in memory.search (dense + FTS, RRF) ([#168](https://github.com/susomejias/rembric/issues/168)) ([c131619](https://github.com/susomejias/rembric/commit/c131619ff3cde4814eaf63f02ea621aeef0ef030))
+
 ## [0.21.18](https://github.com/susomejias/rembric/compare/server-v0.21.17...server-v0.21.18) (2026-06-16)
 
 
