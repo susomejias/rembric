@@ -155,6 +155,24 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.search description teaches recall, hybrid ranking, and the widen affordance', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const search = tools.find((t) => t.name === 'memory.search');
+    const desc = search?.description ?? '';
+
+    // Recall trigger (existing protocol-teaching contract).
+    expect(desc).toMatch(/recall|remember|recuerda/i);
+    // Hybrid semantic + keyword ranking is advertised (not the stale "FTS5 keyword search").
+    expect(desc).toMatch(/hybrid/i);
+    expect(desc).toMatch(/semantic/i);
+    // Widen affordance: small default page, raise limit or page with offset.
+    expect(desc).toMatch(/limit/i);
+    expect(desc).toMatch(/offset/i);
+
+    await client.close();
+  });
+
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
     // Read tools never mutate. Every Rembric tool is non-destructive (rows are
     // never deleted; supersede is a reversible status flip) and closed-world
