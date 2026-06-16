@@ -83,6 +83,28 @@ describe('memory.search', () => {
     const proj = await memory.search({}, projectScope(projectId));
     expect(proj.every((m) => m.scope === 'project' && m.projectId === projectId)).toBe(true);
   });
+
+  it('defaults to at most 8 results when no limit is given (both branches)', async () => {
+    for (let i = 0; i < 12; i++) {
+      memory.save({ type: 'user', content: `widget number ${i}` }, projectScope(projectId));
+    }
+    // Hybrid text-query branch (FTS-only here: no embedQuery wired).
+    const queried = await memory.search({ query: 'widget' }, projectScope(projectId));
+    expect(queried.length).toBe(8);
+    // No-query chronological listing branch.
+    const listed = await memory.search({}, projectScope(projectId));
+    expect(listed.length).toBe(8);
+  });
+
+  it('an explicit limit overrides the default in both directions', async () => {
+    for (let i = 0; i < 12; i++) {
+      memory.save({ type: 'user', content: `widget number ${i}` }, projectScope(projectId));
+    }
+    expect(
+      (await memory.search({ query: 'widget', limit: 3 }, projectScope(projectId))).length,
+    ).toBe(3);
+    expect((await memory.search({ limit: 12 }, projectScope(projectId))).length).toBe(12);
+  });
 });
 
 describe('memory.get', () => {
