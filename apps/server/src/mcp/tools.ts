@@ -62,8 +62,21 @@ export const memorySearchSchema = {
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
   status: z.enum(MEMORY_STATUSES).optional(),
-  limit: z.number().int().min(1).max(200).optional(),
-  offset: z.number().int().min(0).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Max results (default 8). Raise it (up to 200) when 8 are all relevant and you need more.',
+    ),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Skip this many results for paging; combine with limit to fetch the next page.'),
 };
 
 export const memoryGetSchema = {
