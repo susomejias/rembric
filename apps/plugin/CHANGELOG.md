@@ -4,6 +4,13 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.15.1](https://github.com/susomejias/rembric/compare/plugin-v0.15.0...plugin-v0.15.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **plugin:** use real codex plugin add/remove verbs in installer ([#174](https://github.com/susomejias/rembric/issues/174)) ([d934fe7](https://github.com/susomejias/rembric/commit/d934fe78cabfa3db7bc0208a8408da2d49f7b6f0))
+
 ## [0.15.0](https://github.com/susomejias/rembric/compare/plugin-v0.14.0...plugin-v0.15.0) (2026-06-14)
 
 
