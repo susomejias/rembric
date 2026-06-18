@@ -634,9 +634,9 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
       rem="claude plugin uninstall rembric@rembric" ;;
     codex)
       add="codex plugin marketplace add https://github.com/susomejias/rembric.git"
-      ins="codex plugin install rembric"
-      upd="codex plugin marketplace upgrade rembric"
-      rem="codex plugin uninstall rembric" ;;
+      ins="codex plugin add rembric@rembric"
+      upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
+      rem="codex plugin remove rembric@rembric" ;;
   esac
   case "$action" in
     install)   say "  Run:"; say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;

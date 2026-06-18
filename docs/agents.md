@@ -99,7 +99,7 @@ is sensitive.
 
 ```bash
 codex plugin marketplace add https://github.com/susomejias/rembric.git
-codex plugin install rembric
+codex plugin add rembric@rembric
 ```
 
 The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the repo subtree on install. Repo access (SSH key / PAT) gates discovery, exactly like the Claude Code plugin.
@@ -181,16 +181,13 @@ If you only use one client, set up just that one. If you use both, you need both
 Codex caches plugins by `version` under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`, so the cache invalidates when we bump `apps/plugin/.codex-plugin/plugin.json`. Official commands (`developers.openai.com/codex/plugins`):
 
 ```shell
-# refresh ALL configured marketplaces
-codex plugin marketplace upgrade
-
-# or refresh a specific one
+# refresh the marketplace snapshot, then re-install from it (the snapshot
+# refresh alone does NOT pull the new version into the local cache)
 codex plugin marketplace upgrade rembric
+codex plugin add rembric@rembric
 ```
 
-After the marketplace catalog refresh, Codex picks up the new version on the next plugin load. If Codex reports it's still on the cached version, fall back to a clean cycle from inside Codex's `/plugins` panel: select the plugin, **Uninstall plugin**, then **Install plugin** again (the docs do not yet expose a per-plugin `update` command — this is the supported alternative).
-
-Restart `codex` after the update so the bridge and hooks re-spawn from the new cache path.
+The Codex CLI has no dedicated per-plugin `update` verb, so re-running `codex plugin add` against the refreshed snapshot is the upgrade mechanism — this is exactly what the TUI installer's Update action runs for you. (`codex plugin marketplace upgrade` with no argument refreshes ALL configured marketplaces.) Restart `codex` after the update so the bridge and hooks re-spawn from the new cache path.
 
 ### Hermes Agent (memory provider plugin)
 
@@ -281,7 +278,7 @@ Credentials, slug source, and update flow are independent per client. The Rembri
 | Client          | Credentials from                                  | Slug from                                                          | Update                                                                                        |
 | --------------- | ------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | **Claude Code** | Wizard → keychain (`${user_config.*}`)             | `.rembric` file via the bridge                                     | `/plugin update rembric@rembric`                                                              |
-| **Codex CLI**   | Shell env (`export REMBRIC_*`)                     | `.rembric` file via the bridge                                     | `codex plugin marketplace upgrade rembric` + restart                                          |
+| **Codex CLI**   | Shell env (`export REMBRIC_*`)                     | `.rembric` file via the bridge                                     | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart       |
 | **Hermes Agent**| Shell env OR `~/.rembric/.env` preload             | Cascade (env / `rembric.json` / `.rembric` / URL parse)            | Re-run the curl-installer                                                                     |
 
 Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).

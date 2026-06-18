@@ -25,7 +25,7 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 | Client           | Manual command                                                                                                                                                                                |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Claude Code**  | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                            |
-| **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin install rembric`                                                                                      |
+| **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin add rembric@rembric`                                                                                  |
 | **Hermes Agent** | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                           |
 | **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` then paste the printed MCP block into `~/.config/opencode/opencode.json` |
 
