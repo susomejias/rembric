@@ -184,7 +184,7 @@ describe('agent routing', () => {
     const { code, out } = run(['--agent=codex', '--action=install'], { home });
     expect(code).toBe(0);
     expect(out).toContain('codex plugin marketplace add');
-    expect(out).toContain('codex plugin install rembric');
+    expect(out).toContain('codex plugin add rembric@rembric');
   });
 
   it('claude uninstall prints the marketplace command and the conservative note', () => {
@@ -203,13 +203,13 @@ describe('agent routing', () => {
     const codex = run(['--agent=codex', '--action=update'], { home });
     expect(codex.code).toBe(0);
     expect(codex.out).toContain('codex plugin marketplace upgrade rembric');
-    expect(codex.out).not.toContain('codex plugin install');
+    expect(codex.out).not.toContain('codex plugin install'); // no such subcommand in the Codex CLI
   });
 
   it('a comma-separated --agent list drives multiple agents in one run', () => {
     const { code, out } = run(['--agent=codex,claude', '--action=install'], { home });
     expect(code).toBe(0);
-    expect(out).toContain('codex plugin install rembric');
+    expect(out).toContain('codex plugin add rembric@rembric');
     expect(out).toContain('claude plugin install rembric@rembric');
   });
 
