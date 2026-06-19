@@ -53,11 +53,11 @@ importers:
         specifier: ^1.0.0
         version: 1.29.0(zod@3.25.76)
       better-sqlite3:
-        specifier: ^11.5.0
-        version: 11.10.0
+        specifier: ^12.11.1
+        version: 12.11.1
       drizzle-orm:
         specifier: ^0.36.0
-        version: 0.36.4(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
+        version: 0.36.4(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -1485,8 +1485,9 @@ packages:
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
-  better-sqlite3@11.10.0:
-    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
+  better-sqlite3@12.11.1:
+    resolution: {integrity: sha512-dq9AtApgg5PGFtBzPFSBl3HZQjHok5gaQCM6zh2Yk0aSmDCs1CbnVI8/HgASQkNKsWFpseIO9beg5xxpYhbIfA==}
+    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x || 26.x}
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -3076,6 +3077,11 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  semver@7.8.4:
+    resolution: {integrity: sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   send@1.2.1:
     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
     engines: {node: '>= 18'}
@@ -4650,7 +4656,7 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  better-sqlite3@11.10.0:
+  better-sqlite3@12.11.1:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3
@@ -4909,10 +4915,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.36.4(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0):
+  drizzle-orm@0.36.4(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1):
     optionalDependencies:
       '@types/better-sqlite3': 7.6.13
-      better-sqlite3: 11.10.0
+      better-sqlite3: 12.11.1
 
   dunder-proto@1.0.1:
     dependencies:
@@ -5972,7 +5978,7 @@ snapshots:
 
   node-abi@3.92.0:
     dependencies:
-      semver: 7.8.0
+      semver: 7.8.4
 
   node-exports-info@1.6.0:
     dependencies:
@@ -6347,6 +6353,8 @@ snapshots:
   semver@6.3.1: {}
 
   semver@7.8.0: {}
+
+  semver@7.8.4: {}
 
   send@1.2.1:
     dependencies:
