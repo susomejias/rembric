@@ -53,26 +53,24 @@ Per-project = one connector per `/mcp/<slug>`. Developer mode is a beta ChatGPT 
 ChatGPT has no session-lifecycle hooks (those are plugin-only), so drive the flow from the model with a custom instruction. Recommended (Settings → Personalization → Custom instructions), tuned to use Rembric as the long-term memory:
 
 ```text
-Use Rembric (connected via MCP) as my canonical long-term memory. It is the
-source of truth about who I am, my preferences, decisions, and work context —
-above your built-in memory.
+Use Rembric MCP as my canonical long-term memory, above built-in memory.
 
-- BEFORE your first substantive reply in a conversation, or whenever the request
-  depends on who I am / my preferences / prior work: call memory.context (or
-  memory.search by topic) and ground your answer in what it returns. Don't
-  assume; if Rembric doesn't have it, say so.
-- The MOMENT something durable comes up (a preference, decision, stable fact
-  about me, discovery, config): save it immediately with memory.save. If it
-  updates something already stored, pass topic_key to supersede it.
-- If memory.save returns candidates[] (possible conflicts), resolve them with
-  memory.judge.
-- If your built-in memory and Rembric disagree, Rembric wins; reconcile by
-  saving the correct version to Rembric.
-- Before closing a work topic: call memory.session_summary (title + goal /
-  findings / done / next steps).
+Non-negotiable first step before every answer: call memory.search with a query
+derived from the latest user request, regardless of topic. Do not answer from
+built-in memory, current chat context, inference, location/IP, web, or
+memory.context before checking memory.search.
 
-Do this as a natural part of the flow; don't ask permission unless the content
-is sensitive.
+Use relevant memory.search results to ground the answer; ignore irrelevant
+results. If no relevant memory exists, continue normally and say so only when
+the user asked for remembered/personal context.
+
+memory.context is only optional auxiliary background for high-level recap of past
+sessions/work; it is not a source of truth and must never replace memory.search.
+
+Save durable facts/preferences/decisions/configs with memory.save; use topic_key
+when updating. Resolve candidates with memory.judge. If built-in memory conflicts
+with Rembric, Rembric wins. Before closing work topics, call
+memory.session_summary.
 ```
 
 > ChatGPT calls MCP tools when it judges them relevant, not on every turn — occasionally you'll still nudge it ("save that to Rembric"). The tool descriptions already prompt proactive use; the instruction reinforces it.
