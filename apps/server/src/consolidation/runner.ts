@@ -144,7 +144,7 @@ export class ConsolidationRunner {
       const a = this.opts.repos.memory.findScopeTupleById(row.sourceId);
       const b = this.opts.repos.memory.findScopeTupleById(row.targetId);
 
-      let reason: string | null = null;
+      let reason: string | null;
       if (!a || !b) {
         reason = 'source or target memory missing';
       } else if (
