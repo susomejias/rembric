@@ -93,7 +93,7 @@ export interface CreateMcpServerOptions {
   prompts: PromptsService;
   relations: RelationsService;
   candidates: CandidateOptions;
-  /** Inline save-time embedding (see ToolDeps.embedNow). */
+  /** Inline save-time embedding (see MemoryToolDeps.embedNow). */
   embedNow?: (
     memoryId: string,
     content: string,
