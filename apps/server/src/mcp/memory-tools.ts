@@ -9,18 +9,21 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
+import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import { type Scope, SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
-import { mcpError } from './errors.js';
+import { clamp, scopeFromContext, serializeMemory, snippet } from './_shared.js';
+import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
- * Tool handlers backing the four MCP tools.
+ * Tool handlers backing the core memory tools: save / search / get / confirm
+ * plus the memory-reading research tools context / timeline.
  *
  * Scope resolution happens here once and is then threaded into every
  * service call. The service layer enforces the scope at the SQL level
@@ -89,6 +92,19 @@ export const memoryConfirmSchema = {
   id: z.string().min(1),
 };
 
+export const contextSchema = {
+  sessions: z.number().int().min(0).max(25).optional(),
+  prompts: z.number().int().min(0).max(50).optional(),
+  memories: z.number().int().min(0).max(100).optional(),
+  includeArchived: z.boolean().optional(),
+};
+
+export const timelineSchema = {
+  memoryId: z.string().min(1),
+  before: z.number().int().min(0).max(50).optional(),
+  after: z.number().int().min(0).max(50).optional(),
+};
+
 const relationView = z.object({
   kind: z.string(),
   targetId: z.string(),
@@ -119,6 +135,15 @@ const memoryRow = z.object({
   relations: z.array(relationView),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+});
+
+const memoryNeighbor = z.object({
+  id: z.string(),
+  type: z.string(),
+  content: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  sessionId: z.string().nullable(),
 });
 
 export const memorySaveOutput = {
@@ -165,14 +190,73 @@ export const memoryConfirmOutput = {
   ok: z.literal(true),
 };
 
-export interface ToolDeps {
+export const contextOutput = {
+  scope: z.string(),
+  recentSessions: z.array(
+    z.object({
+      id: z.string(),
+      agent: z.string(),
+      startedAt: z.string(),
+      endedAt: z.string().nullable(),
+      status: z.string(),
+      title: z.string().nullable(),
+      summary: z.string().nullable(),
+    }),
+  ),
+  recentPrompts: z.array(
+    z.object({
+      id: z.string(),
+      content: z.string(),
+      agent: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+  recentMemories: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      snippet: z.string(),
+      status: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+  pendingJudgments: z.array(
+    z.object({
+      judgmentId: z.string(),
+      sourceId: z.string(),
+      targetId: z.string(),
+      sourceSnippet: z.string(),
+      targetSnippet: z.string(),
+      ageMs: z.number(),
+    }),
+  ),
+  needsReview: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      snippet: z.string(),
+      reviewAfter: z.string(),
+      ageMs: z.number(),
+    }),
+  ),
+  clamped: z.boolean(),
+};
+
+export const timelineOutput = {
+  target: z.object({ id: z.string(), createdAt: z.string() }),
+  before: z.array(memoryNeighbor),
+  after: z.array(memoryNeighbor),
+  fallback: z.string().nullable(),
+};
+
+export interface MemoryToolDeps {
   memory: MemoryService;
   /** Optional — when present, save surfaces candidates + writes pending relations. */
   relations?: RelationsService;
   /** Optional — when present, controls candidate detection thresholds. */
   candidates?: CandidateOptions;
-  /** Optional — repositories needed for save-time candidate queries. */
-  repos?: Pick<Repositories, 'memory' | 'vectors'>;
+  /** Optional — repositories needed for save-time candidates + context/timeline reads. */
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors'>;
   /**
    * Optional — embeds the just-saved row inline so vec candidate
    * detection has a self-vector to kNN from.
@@ -185,7 +269,7 @@ export interface ToolDeps {
     status: MemoryStatus,
     type: MemoryType,
   ) => Promise<boolean>;
-  /** Optional — required to evaluate the project-suggestion gate on save. */
+  /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
   router?: SessionRouter;
   /** Optional — required to evaluate the project-suggestion gate on save. */
   projects?: ProjectsService;
@@ -194,9 +278,14 @@ export interface ToolDeps {
    * active session row for `(tokenId, projectId)` to the memory when the
    * SessionRouter has no entry. This is the bridge that makes
    * HTTP-driven sessions (the plugin's hooks POSTing `/api/<slug>/sessions`)
-   * show up as `memory.session_id` on subsequent MCP-side saves.
+   * show up as `memory.session_id` on subsequent MCP-side saves. Also used
+   * by `memory.context` to surface recent sessions.
    */
   agentSessions?: AgentSessionsService;
+  /** Optional — required by `memory.context` to surface recent prompts. */
+  prompts?: PromptsService;
+  /** Optional — pending relations older than this surface in `memory.context`. */
+  orphanAfterMs?: number;
   /**
    * Optional — provides access to the active `McpServer` so handlers can
    * await (or trigger) roots discovery when no project is resolved yet.
@@ -205,12 +294,14 @@ export interface ToolDeps {
   getServer?: () => McpServer;
 }
 
-export function buildHandlers(deps: ToolDeps) {
+export function buildMemoryHandlers(deps: MemoryToolDeps) {
   return {
     save: handleSave.bind(null, deps),
     search: handleSearch.bind(null, deps),
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
+    context: handleContext.bind(null, deps),
+    timeline: handleTimeline.bind(null, deps),
   };
 }
 
@@ -230,7 +321,7 @@ export function buildHandlers(deps: ToolDeps) {
  * connections short-circuit on `ctx.requestedSlug`.
  */
 async function resolveEffectiveProject(
-  deps: ToolDeps,
+  deps: MemoryToolDeps,
 ): Promise<{ id: string; slug: string } | null> {
   const ctx = getRequestContext();
   if (ctx.project) return ctx.project;
@@ -261,7 +352,7 @@ async function resolveEffectiveProject(
  * saved with `session_id = NULL`, the back-compat path for clients that
  * neither run the plugin nor call `memory.session_start`).
  */
-function resolveActiveSessionId(deps: ToolDeps, projectId: string | null): string | null {
+function resolveActiveSessionId(deps: MemoryToolDeps, projectId: string | null): string | null {
   const ctx = getRequestContext();
   if (ctx.mcpSessionId && deps.router) {
     const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
@@ -278,7 +369,7 @@ function resolveActiveSessionId(deps: ToolDeps, projectId: string | null): strin
 }
 
 async function handleSave(
-  deps: ToolDeps,
+  deps: MemoryToolDeps,
   args: {
     scope: 'global' | 'project';
     type: (typeof MEMORY_TYPES)[number];
@@ -443,7 +534,7 @@ async function handleSave(
 }
 
 async function handleSearch(
-  deps: ToolDeps,
+  deps: MemoryToolDeps,
   args: {
     query?: string;
     type?: (typeof MEMORY_TYPES)[number];
@@ -513,7 +604,7 @@ async function handleSearch(
   }
 }
 
-async function handleGet(deps: ToolDeps, args: { id: string }) {
+async function handleGet(deps: MemoryToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
   const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
@@ -564,7 +655,7 @@ async function handleGet(deps: ToolDeps, args: { id: string }) {
   }
 }
 
-async function handleConfirm(deps: ToolDeps, args: { id: string }) {
+async function handleConfirm(deps: MemoryToolDeps, args: { id: string }) {
   const ctx = getRequestContext();
   const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
@@ -587,10 +678,191 @@ async function handleConfirm(deps: ToolDeps, args: { id: string }) {
   }
 }
 
-function errToMcp(err: unknown) {
-  if (err instanceof DomainError) {
-    return mcpError(err.code, err.message);
+const CONTEXT_SNIPPET_CHARS = 350;
+// needsReview is recurring (every memory.context) and usually populated, so
+// it is kept frugal on COUNT (only the 3 oldest). Its snippet uses the same
+// CONTEXT_SNIPPET_CHARS cap as the other lists for a homogeneous payload.
+const NEEDS_REVIEW_MAX = 3;
+
+function handleContext(
+  deps: MemoryToolDeps,
+  args: {
+    sessions?: number;
+    prompts?: number;
+    memories?: number;
+    includeArchived?: boolean;
+  },
+) {
+  if (!deps.repos || !deps.agentSessions || !deps.prompts || !deps.router) {
+    return mcpError('internal_error', 'memory.context is not wired with its required dependencies');
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return mcpError('internal_error', message);
+  const scope = scopeFromContext({ router: deps.router });
+  const sessionsLimit = clamp(args.sessions ?? 3, 0, 25);
+  const memoriesLimit = clamp(args.memories ?? 10, 0, 100);
+  const clamped =
+    (args.sessions ?? 0) > 25 || (args.prompts ?? 0) > 50 || (args.memories ?? 0) > 100;
+  const includeArchived = args.includeArchived === true;
+
+  const recentSessions = deps.agentSessions
+    .recentForContext({
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      limit: sessionsLimit,
+    })
+    .map((s) => ({
+      id: s.id,
+      agent: s.agent,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      status: s.status,
+      title: s.title,
+      summary: s.summary ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
+    }));
+
+  const recentMemories = deps.repos.memory
+    .recentForContext({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      includeArchived,
+      limit: memoriesLimit,
+    })
+    .map((m) => ({
+      id: m.id,
+      type: m.type,
+      snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
+      status: m.status,
+      createdAt: m.createdAt.toISOString(),
+    }));
+
+  const promptsLimit = clamp(args.prompts ?? 5, 0, 50);
+  const recentPrompts = deps.prompts
+    .recentForContext({
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      limit: promptsLimit,
+    })
+    .map((p) => ({
+      id: p.id,
+      content: snippet(p.content, CONTEXT_SNIPPET_CHARS),
+      agent: p.agent,
+      createdAt: p.createdAt,
+    }));
+
+  // Aged pending relations (older than the orphan threshold) the agent
+  // should close with memory.judge while context is fresh. Unjudged rows
+  // are deterministically orphaned by the sweep after the deadline.
+  const now = Date.now();
+  const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
+  const pendingJudgments = deps.repos.relations
+    .listPendingOlderThanInScope({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      cutoffMs: pendingCutoff,
+      limit: 5,
+    })
+    .map((r) => ({
+      judgmentId: r.judgmentId,
+      sourceId: r.sourceId,
+      targetId: r.targetId,
+      sourceSnippet: snippet(r.sourceContent, CONTEXT_SNIPPET_CHARS),
+      targetSnippet: snippet(r.targetContent, CONTEXT_SNIPPET_CHARS),
+      ageMs: now - r.createdAt.getTime(),
+    }));
+
+  // Active memories past their review shelf life — re-affirm with
+  // memory.confirm, supersede with memory.save + topic_key, or judge if they
+  // contradict another memory. Unary (one memory, no counterpart), disjoint
+  // from pendingJudgments. Derived read-time state; nothing is mutated.
+  const needsReview = deps.memory.needsReviewForContext(scope, NEEDS_REVIEW_MAX).map((it) => ({
+    id: it.memory.id,
+    type: it.memory.type,
+    snippet: snippet(it.memory.content, CONTEXT_SNIPPET_CHARS),
+    reviewAfter: it.reviewAfter.toISOString(),
+    ageMs: now - it.reviewBaseline.getTime(),
+  }));
+
+  return ok({
+    scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
+    recentSessions,
+    recentPrompts,
+    recentMemories,
+    pendingJudgments,
+    needsReview,
+    clamped,
+  });
+}
+
+function handleTimeline(
+  deps: MemoryToolDeps,
+  args: { memoryId: string; before?: number; after?: number },
+) {
+  if (!deps.repos || !deps.router) {
+    return mcpError(
+      'internal_error',
+      'memory.timeline is not wired with its required dependencies',
+    );
+  }
+  const before = clamp(args.before ?? 5, 0, 50);
+  const after = clamp(args.after ?? 5, 0, 50);
+  if (before + after > 50) {
+    return mcpError(
+      'invalid_input',
+      'memory.timeline: before + after exceeds 50; for larger windows use memory.search',
+    );
+  }
+  const scope = scopeFromContext({ router: deps.router });
+  const target = deps.memory.get(args.memoryId, scope);
+  if (!target) {
+    return mcpError('not_found', `memory '${args.memoryId}' not found in this scope`);
+  }
+  const t = target.memory;
+
+  if (t.sessionId) {
+    const beforeRows = deps.repos.memory.sessionNeighbors({
+      sessionId: t.sessionId,
+      pivotCreatedAt: t.createdAt,
+      pivotId: t.id,
+      direction: 'before',
+      limit: before,
+    });
+    const afterRows = deps.repos.memory.sessionNeighbors({
+      sessionId: t.sessionId,
+      pivotCreatedAt: t.createdAt,
+      pivotId: t.id,
+      direction: 'after',
+      limit: after,
+    });
+    return ok({
+      target: { id: t.id, createdAt: t.createdAt },
+      before: beforeRows.map(serializeMemory),
+      after: afterRows.map(serializeMemory),
+      fallback: null,
+    });
+  }
+
+  // Fallback: ±2h window around created_at, scoped to (scope, project_id).
+  const windowMs = 2 * 3600 * 1000;
+  const targetMs = t.createdAt.getTime();
+  const window = {
+    scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+    pivotId: t.id,
+    loMs: targetMs - windowMs,
+    hiMs: targetMs + windowMs,
+    pivotMs: targetMs,
+  };
+  const beforeRows = deps.repos.memory.windowNeighbors({
+    ...window,
+    direction: 'before',
+    limit: before,
+  });
+  const afterRows = deps.repos.memory.windowNeighbors({
+    ...window,
+    direction: 'after',
+    limit: after,
+  });
+  return ok({
+    target: { id: t.id, createdAt: t.createdAt },
+    before: beforeRows.map(serializeMemory),
+    after: afterRows.map(serializeMemory),
+    fallback: 'time_window',
+  });
 }

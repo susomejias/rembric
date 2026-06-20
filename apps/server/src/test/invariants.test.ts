@@ -714,3 +714,35 @@ describe('oauth additive-migration invariant', () => {
     }
   });
 });
+
+describe('MCP tool-handler module layout invariant', () => {
+  const mcpDir = join(srcRoot, 'mcp');
+  const sourceFiles = readdirSync(mcpDir).filter(
+    (f) => f.endsWith('.ts') && !f.endsWith('.test.ts'),
+  );
+  const handlerModules = sourceFiles.filter((f) => f.endsWith('-tools.ts'));
+
+  it('has no generic tools.ts handler module', () => {
+    expect(readdirSync(mcpDir)).not.toContain('tools.ts');
+  });
+
+  it('every *-tools.ts module exports exactly one build*Handlers factory', () => {
+    for (const file of handlerModules) {
+      const src = readFileSync(join(mcpDir, file), 'utf8');
+      const matches = src.match(/export function build\w+Handlers\b/g) ?? [];
+      expect(matches.length, `${file} must export exactly one build*Handlers factory`).toBe(1);
+    }
+  });
+
+  it('errToMcp and routerKey are each defined in exactly one module', () => {
+    for (const sym of ['errToMcp', 'routerKey']) {
+      const definers = sourceFiles.filter((f) =>
+        new RegExp(`(?:export )?function ${sym}\\b`).test(readFileSync(join(mcpDir, f), 'utf8')),
+      );
+      expect(
+        definers,
+        `${sym} must be defined once; found in: ${definers.join(', ')}`,
+      ).toHaveLength(1);
+    }
+  });
+});

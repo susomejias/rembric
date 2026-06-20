@@ -8,6 +8,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
 
+import { routerKey } from './_shared.js';
 import { mcpError } from './errors.js';
 import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
@@ -68,12 +69,6 @@ export interface ProjectToolDeps {
   router: SessionRouter;
   /** Set by `createMcpServer` after construction to enable roots discovery. */
   getServer?: () => McpServer;
-}
-
-function routerKey(): { tokenId: string; mcpSessionId: string } | null {
-  const ctx = getRequestContext();
-  if (!ctx.mcpSessionId) return null;
-  return { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId };
 }
 
 export function buildProjectHandlers(deps: ProjectToolDeps) {

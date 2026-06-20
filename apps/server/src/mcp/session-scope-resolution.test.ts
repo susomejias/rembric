@@ -13,7 +13,9 @@ import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { buildSessionsHandlers } from './sessions-tools.js';
+import { buildMemoryHandlers } from './memory-tools.js';
+import { buildObservabilityHandlers } from './observability-tools.js';
+import { buildPromptHandlers } from './prompt-tools.js';
 
 /**
  * Regression coverage for the scope-resolution fix in
@@ -42,7 +44,9 @@ let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
 let otherToken: Token;
-let handlers: ReturnType<typeof buildSessionsHandlers>;
+let handlers: ReturnType<typeof buildMemoryHandlers> &
+  ReturnType<typeof buildPromptHandlers> &
+  ReturnType<typeof buildObservabilityHandlers>;
 
 function makeContext(token: Token, overrides: Partial<RequestContext> = {}): RequestContext {
   return {
@@ -82,7 +86,11 @@ beforeEach(() => {
     .get()!;
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
-  handlers = buildSessionsHandlers({
+  // One broad deps object passed (as a variable, to dodge excess-property
+  // checks) to each per-domain builder; the merged handlers expose the
+  // scope-resolving tools this suite exercises (context/timeline from memory,
+  // save_prompt/search_prompts from prompt, stats/capture_passive from observability).
+  const deps = {
     repos: createRepositories(db.handle.db),
     agentSessions,
     memory,
@@ -91,13 +99,17 @@ beforeEach(() => {
     router,
     doctor: () => ({
       db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
-      llm: { reachable: false, lastPingAt: null },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },
       warnings: [],
     }),
-  });
+  };
+  handlers = {
+    ...buildMemoryHandlers(deps),
+    ...buildPromptHandlers(deps),
+    ...buildObservabilityHandlers(deps),
+  };
 });
 
 afterEach(() => db.cleanup());
@@ -187,7 +199,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.stats({})),
+      Promise.resolve(handlers.stats()),
     );
     const { isError, payload } = decode(r);
 

@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { parseKeyLearnings } from './sessions-tools.js';
+import { parseKeyLearnings } from './observability-tools.js';
 
 describe('parseKeyLearnings — capture_passive parser', () => {
   it('returns [] when no Key Learnings section exists', () => {

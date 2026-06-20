@@ -12,7 +12,7 @@ import { PromptsService } from '../services/prompts.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { buildSessionsHandlers } from './sessions-tools.js';
+import { buildSessionHandlers } from './session-tools.js';
 
 /**
  * 4.3 — Session-lifecycle MCP tools reject soft-deleted target rows
@@ -32,7 +32,7 @@ let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
 let otherToken: Token;
-let handlers: ReturnType<typeof buildSessionsHandlers>;
+let handlers: ReturnType<typeof buildSessionHandlers>;
 
 function makeContext(token: Token, overrides: Partial<RequestContext> = {}): RequestContext {
   return {
@@ -72,7 +72,9 @@ beforeEach(() => {
     .get()!;
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
-  handlers = buildSessionsHandlers({
+  // Pass deps via a variable (not a fresh literal) so the broad object is
+  // accepted by the narrower SessionToolDeps without excess-property errors.
+  const deps = {
     repos: createRepositories(db.handle.db),
     agentSessions,
     memory,
@@ -81,13 +83,13 @@ beforeEach(() => {
     router,
     doctor: () => ({
       db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
-      llm: { reachable: false, lastPingAt: null },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },
       warnings: [],
     }),
-  });
+  };
+  handlers = buildSessionHandlers(deps);
 });
 
 afterEach(() => db.cleanup());
