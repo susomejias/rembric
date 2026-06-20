@@ -12,9 +12,12 @@ import { describe, expect, it } from 'vitest';
  * `findDriftCandidates`, `findContradictionCandidates`); the change
  * `remove-llm-consolidation` deleted the LLM orphan judge
  * (`judgeDecisionSchema`), the cron scheduler (`ConsolidationScheduler`,
- * `croner`), and the server-side `generate` chat path. A regression that
- * brings any of those names back into the consolidation module would
- * silently resurrect a dead code path.
+ * `croner`), and the server-side `generate` chat path; `tidy-consolidation-journal`
+ * deleted the dead op producers (`applyMerge`, `applySupersede`, `recordNoop`,
+ * `recordFailed`) — the deterministic sweep produces only `decay` and
+ * `orphan_promote`, and `undoOp` still unwinds historical merge/supersede rows.
+ * A regression that brings any of those names back into the consolidation
+ * module would silently resurrect a dead code path.
  *
  * This test scans every `.ts` file under `src/consolidation/` (excluding
  * tests) and fails if a forbidden symbol is defined, imported, or
@@ -28,6 +31,10 @@ const FORBIDDEN_SYMBOLS = [
   'judgeDecisionSchema',
   'ConsolidationScheduler',
   'croner',
+  'applyMerge',
+  'applySupersede',
+  'recordNoop',
+  'recordFailed',
 ] as const;
 
 /**

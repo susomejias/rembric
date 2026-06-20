@@ -239,6 +239,248 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   });
 });
 
+describe('migration 0015_tidy_consolidation_journal over populated data', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig15-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig15-slice-'));
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const f of all) {
+      if (f.startsWith('0015_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('synchronous = NORMAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  it('drops the llm_* columns, backfills NULL scope, renames consolidation_id → run_id, and preserves every row', () => {
+    // Pre-0015 state: the old shape still has llm_provider/llm_model and a
+    // nullable scope; consolidation_ops still has the consolidation_id column.
+    raw
+      .prepare(
+        "INSERT INTO consolidation_runs (id, started_at, llm_provider, llm_model, scope, summary) VALUES ('run-a', 0, 'openai', 'gpt-x', 'global', '{}')",
+      )
+      .run();
+    // A legacy run that predates scope population (scope IS NULL → backfilled).
+    raw
+      .prepare(
+        "INSERT INTO consolidation_runs (id, started_at, llm_provider, llm_model, scope, summary) VALUES ('run-legacy', 0, NULL, NULL, NULL, NULL)",
+      )
+      .run();
+    // A historical merge op and a decay op (must survive renderable/undoable).
+    raw
+      .prepare(
+        "INSERT INTO consolidation_ops (id, consolidation_id, op_type, affected_ids, created_id, applied_at) VALUES ('op-merge', 'run-a', 'merge', '[\"m1\",\"m2\"]', 'm3', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO consolidation_ops (id, consolidation_id, op_type, affected_ids, applied_at) VALUES ('op-decay', 'run-legacy', 'decay', '[\"m4\"]', 0)",
+      )
+      .run();
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+
+    // consolidation_runs lost the two llm columns and gained a NOT NULL scope.
+    const runCols = raw
+      .prepare<[], { name: string; notnull: number }>('PRAGMA table_info(consolidation_runs)')
+      .all();
+    const runColNames = runCols.map((c) => c.name);
+    expect(runColNames).not.toContain('llm_provider');
+    expect(runColNames).not.toContain('llm_model');
+    expect(runCols.find((c) => c.name === 'scope')!.notnull).toBe(1);
+
+    // consolidation_ops renamed the FK column and recreated its index.
+    const opCols = raw
+      .prepare<[], { name: string }>('PRAGMA table_info(consolidation_ops)')
+      .all()
+      .map((c) => c.name);
+    expect(opCols).toContain('run_id');
+    expect(opCols).not.toContain('consolidation_id');
+    const idx = raw
+      .prepare<[], { name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='consolidation_ops'",
+      )
+      .all()
+      .map((r) => r.name);
+    expect(idx).toContain('consolidation_ops_run_id_idx');
+    expect(idx).not.toContain('consolidation_ops_consolidation_id_idx');
+
+    // Every run row preserved; the NULL-scope legacy row backfilled to 'unknown'.
+    const runs = raw
+      .prepare<
+        [],
+        { id: string; scope: string }
+      >('SELECT id, scope FROM consolidation_runs ORDER BY id')
+      .all();
+    expect(runs).toEqual([
+      { id: 'run-a', scope: 'global' },
+      { id: 'run-legacy', scope: 'unknown' },
+    ]);
+
+    // Every op row preserved with its run_id intact (historical merge included).
+    const ops = raw
+      .prepare<
+        [],
+        { id: string; run_id: string; op_type: string }
+      >('SELECT id, run_id, op_type FROM consolidation_ops ORDER BY id')
+      .all();
+    expect(ops).toEqual([
+      { id: 'op-decay', run_id: 'run-legacy', op_type: 'decay' },
+      { id: 'op-merge', run_id: 'run-a', op_type: 'merge' },
+    ]);
+  });
+
+  it('migration simulation: a fully-populated prod-like DB upgrades with no data loss and no corruption', () => {
+    // Seed every table 0015 could plausibly interact with — the rebuilt
+    // parent (consolidation_runs), its child (consolidation_ops), plus a
+    // representative spread of unrelated tables — so PRAGMA integrity_check
+    // and foreign_key_check below cover the WHOLE file, not just the two
+    // touched tables.
+    raw
+      .prepare(
+        "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO projects (id, slug, display_name, created_at) VALUES ('proj1', 'proj1', 'proj1', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO sessions (id, token_id, project_id, agent, started_at, summary, status) VALUES ('sess1', 'tok1', 'proj1', 'claude', 0, ?, 'active')",
+      )
+      .run('s'.repeat(1500));
+    raw
+      .prepare(
+        "INSERT INTO prompts (id, session_id, project_id, title, content, tags, replaces, created_at) VALUES ('p1', 'sess1', 'proj1', 'untitled', 'body', '[]', '[]', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, content, created_at, session_id) VALUES ('m1', 'project', 'proj1', 'fact', 'project body', 0, 'sess1')",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, content, created_at) VALUES ('m2', 'global', NULL, 'user', 'global body', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO confirmations (id, memory_id, event_ts, session_id) VALUES ('c1', 'm1', 0, 'sess1')",
+      )
+      .run();
+    raw
+      .prepare(
+        'INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('m1', 'proj1', 'active', 'fact', Buffer.from(new Float32Array(768).buffer));
+    raw
+      .prepare(
+        "INSERT INTO consolidation_runs (id, started_at, llm_provider, llm_model, scope, summary) VALUES ('run-a', 0, 'openai', 'gpt-x', 'project:proj1', '{}')",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO consolidation_runs (id, started_at, llm_provider, llm_model, scope, summary) VALUES ('run-legacy', 0, NULL, NULL, NULL, NULL)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO consolidation_ops (id, consolidation_id, op_type, affected_ids, created_id, applied_at) VALUES ('op-merge', 'run-a', 'merge', '[\"m1\"]', 'm2', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO consolidation_ops (id, consolidation_id, op_type, affected_ids, created_id, applied_at) VALUES ('op-orphan', 'run-a', 'orphan_promote', '[\"m1\",\"m2\"]', 'judg-1', 0)",
+      )
+      .run();
+
+    const TABLES = [
+      'tokens',
+      'projects',
+      'sessions',
+      'prompts',
+      'memory',
+      'confirmations',
+      'memory_vec',
+      'consolidation_runs',
+      'consolidation_ops',
+    ];
+    const countAll = () =>
+      Object.fromEntries(
+        TABLES.map((t) => [
+          t,
+          raw.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${t}`).get()!.n,
+        ]),
+      );
+    const before = countAll();
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
+
+    // No corruption anywhere in the file, and no dangling foreign keys.
+    expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+
+    // No row vanished from any table.
+    expect(countAll()).toEqual(before);
+
+    // Unrelated tables are byte-identical (0015 must not touch them).
+    expect(
+      raw.prepare<[], { content: string }>("SELECT content FROM memory WHERE id = 'm1'").get()!
+        .content,
+    ).toBe('project body');
+    expect(
+      raw
+        .prepare<[], { summary: string | null }>("SELECT summary FROM sessions WHERE id = 'sess1'")
+        .get()!.summary?.length,
+    ).toBe(1500);
+
+    // The legacy NULL-scope run was backfilled; every op kept its run_id.
+    expect(
+      raw
+        .prepare<
+          [],
+          { scope: string }
+        >("SELECT scope FROM consolidation_runs WHERE id = 'run-legacy'")
+        .get()!.scope,
+    ).toBe('unknown');
+    expect(
+      raw
+        .prepare<
+          [],
+          { run_id: string }
+        >("SELECT run_id FROM consolidation_ops WHERE id = 'op-orphan'")
+        .get()!.run_id,
+    ).toBe('run-a');
+  });
+});
+
 // Regression for the production incident where 0011 failed with
 // `FOREIGN KEY constraint failed` because `sessions` is a FK parent
 // (prompts/memory/confirmations all reference it) and the table-rebuild
@@ -330,6 +572,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0012_drop_summary_length_check.sql',
       '0013_oauth_tables.sql',
       '0014_hybrid_search_vec_rebuild.sql',
+      '0015_tidy_consolidation_journal.sql',
     ]);
 
     // FK integrity after the rebuild.

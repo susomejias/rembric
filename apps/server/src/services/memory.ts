@@ -375,14 +375,12 @@ export class MemoryService {
         id: runId,
         startedAt: ts,
         finishedAt: ts,
-        llmProvider: null,
-        llmModel: null,
         scope: 'maintenance',
         summary: JSON.stringify({ kind: 'archived_memory_purge', deleted: deletedIds.length }),
       });
       this.repos.consolidation.insertOp({
         id: ulid(ts.getTime()),
-        consolidationId: runId,
+        runId,
         opType: 'archived_memory_purge',
         affectedIds: deletedIds,
         createdId: null,

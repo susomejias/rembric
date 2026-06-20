@@ -3,12 +3,13 @@ import { ulid } from 'ulid';
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 import { type ConsolidationOpType } from '../db/schema/consolidation.js';
-import { type Memory } from '../db/schema/memory.js';
 
 /**
  * Atomic consolidation operations. Each runs inside a SQLite transaction; on
- * error the whole transaction rolls back and the runner logs a `failed`
- * op (or a `noop` if the decision was already inert).
+ * error the whole transaction rolls back. The deterministic sweep produces
+ * only `decay` (via `applyDecay`) and `orphan_promote` (via
+ * `recordOrphanPromote`); `undoOp`/`undoRun` additionally unwind historical
+ * `merge`/`supersede` rows from the removed LLM consolidator.
  *
  * The contract (also enforced by tests):
  *   - never DELETE FROM memory
@@ -19,114 +20,8 @@ import { type Memory } from '../db/schema/memory.js';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
 
-export interface MergeOpInput {
-  consolidationId: string;
-  predecessors: Memory[];
-  /** The merged memory body produced by the LLM. */
-  mergedContent: string;
-  reasoning: string;
-}
-
-export function applyMerge(
-  repos: ConsolidationDeps,
-  tx: TransactionRunner,
-  input: MergeOpInput,
-): { mergedId: string; opId: string } {
-  if (input.predecessors.length < 2) {
-    throw new Error('applyMerge: requires at least two predecessors');
-  }
-
-  const first = input.predecessors[0]!;
-  for (const p of input.predecessors) {
-    if (p.scope !== first.scope || p.projectId !== first.projectId) {
-      throw new Error('applyMerge: predecessors span multiple scopes');
-    }
-    if (p.status !== 'active') {
-      throw new Error(`applyMerge: predecessor ${p.id} is not active (status=${p.status})`);
-    }
-  }
-
-  const now = new Date();
-  const mergedId = ulid(now.getTime());
-  const opId = ulid(now.getTime());
-  const predecessorIds = input.predecessors.map((p) => p.id);
-
-  tx.transaction(() => {
-    repos.memory.insert({
-      id: mergedId,
-      scope: first.scope,
-      projectId: first.projectId,
-      type: first.type,
-      content: input.mergedContent,
-      tags: dedupeTags(input.predecessors),
-      status: 'active',
-      replaces: predecessorIds,
-      createdAt: now,
-      lastSeenAt: now,
-      source: { tokenName: 'consolidation' },
-    });
-    repos.memory.markSupersededMany(predecessorIds);
-    repos.consolidation.insertOp({
-      id: opId,
-      consolidationId: input.consolidationId,
-      opType: 'merge',
-      affectedIds: predecessorIds,
-      createdId: mergedId,
-      reasoning: input.reasoning,
-      appliedAt: now,
-    });
-  });
-
-  return { mergedId, opId };
-}
-
-export interface SupersedeOpInput {
-  consolidationId: string;
-  winner: Memory;
-  losers: Memory[];
-  reasoning: string;
-}
-
-export function applySupersede(
-  repos: ConsolidationDeps,
-  tx: TransactionRunner,
-  input: SupersedeOpInput,
-): { opId: string } {
-  if (input.losers.length === 0) {
-    throw new Error('applySupersede: at least one loser required');
-  }
-  const all = [input.winner, ...input.losers];
-  const first = all[0]!;
-  for (const m of all) {
-    if (m.scope !== first.scope || m.projectId !== first.projectId) {
-      throw new Error('applySupersede: members span multiple scopes');
-    }
-  }
-
-  const now = new Date();
-  const loserIds = input.losers.map((l) => l.id);
-  const opId = ulid(now.getTime());
-
-  tx.transaction(() => {
-    repos.memory.markSupersededMany(loserIds);
-    const prev = repos.memory.findReplaces(input.winner.id) ?? [];
-    repos.memory.setReplaces(input.winner.id, Array.from(new Set([...prev, ...loserIds])));
-    repos.consolidation.insertOp({
-      id: opId,
-      consolidationId: input.consolidationId,
-      opType: 'supersede',
-      affectedIds: loserIds,
-      createdId: input.winner.id,
-      reasoning: input.reasoning,
-      appliedAt: now,
-    });
-  });
-
-  return { opId };
-}
-
 export interface DecayOpInput {
-  consolidationId: string;
+  runId: string;
   ids: string[];
   reasoning: string;
 }
@@ -146,7 +41,7 @@ export function applyDecay(
     repos.memory.archiveActive(input.ids);
     repos.consolidation.insertOp({
       id: opId,
-      consolidationId: input.consolidationId,
+      runId: input.runId,
       opType: 'decay',
       affectedIds: input.ids,
       reasoning: input.reasoning,
@@ -155,36 +50,6 @@ export function applyDecay(
   });
 
   return { opId };
-}
-
-export function recordNoop(
-  repos: ConsolidationDeps,
-  input: { consolidationId: string; affectedIds: string[]; reasoning: string },
-): void {
-  const now = new Date();
-  repos.consolidation.insertOp({
-    id: ulid(now.getTime()),
-    consolidationId: input.consolidationId,
-    opType: 'noop',
-    affectedIds: input.affectedIds,
-    reasoning: input.reasoning,
-    appliedAt: now,
-  });
-}
-
-export function recordFailed(
-  repos: ConsolidationDeps,
-  input: { consolidationId: string; affectedIds: string[]; reasoning: string },
-): void {
-  const now = new Date();
-  repos.consolidation.insertOp({
-    id: ulid(now.getTime()),
-    consolidationId: input.consolidationId,
-    opType: 'failed',
-    affectedIds: input.affectedIds,
-    reasoning: input.reasoning,
-    appliedAt: now,
-  });
 }
 
 /**
@@ -198,7 +63,7 @@ export function recordFailed(
 export function recordOrphanPromote(
   repos: ConsolidationDeps,
   input: {
-    consolidationId: string;
+    runId: string;
     judgmentId: string;
     sourceId: string;
     targetId: string;
@@ -210,7 +75,7 @@ export function recordOrphanPromote(
   const opId = ulid(now.getTime());
   repos.consolidation.insertOp({
     id: opId,
-    consolidationId: input.consolidationId,
+    runId: input.runId,
     opType: 'orphan_promote',
     affectedIds: [input.sourceId, input.targetId],
     createdId: input.judgmentId,
@@ -263,12 +128,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
   // `orphan_promote` operates on relation rows (append-only, unaffected by
   // the purge paths); the others operate on memory rows.
-  if (
-    op.opType === 'merge' ||
-    op.opType === 'supersede' ||
-    op.opType === 'decay' ||
-    op.opType === 'archive'
-  ) {
+  if (op.opType === 'merge' || op.opType === 'supersede' || op.opType === 'decay') {
     const expected = new Set<string>(op.affectedIds);
     if (op.opType === 'merge' && op.createdId) expected.add(op.createdId);
     const existing = repos.memory.existingIds([...expected]);
@@ -286,7 +146,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
       }
-    } else if (op.opType === 'decay' || op.opType === 'archive') {
+    } else if (op.opType === 'decay') {
       repos.memory.reactivate(op.affectedIds);
     } else if (op.opType === 'orphan_promote' && op.createdId) {
       // createdId carries the promoted relation's judgment_id. Undo a
@@ -325,14 +185,6 @@ export function undoRun(
     reverted.push(op.id);
   }
   return { reverted };
-}
-
-function dedupeTags(memories: Memory[]): string[] {
-  const set = new Set<string>();
-  for (const m of memories) {
-    for (const t of m.tags) set.add(t);
-  }
-  return [...set];
 }
 
 export type { ConsolidationOpType };

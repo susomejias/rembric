@@ -63,7 +63,7 @@ export class ConsolidationRepository {
     return this.db
       .select()
       .from(consolidationOps)
-      .where(and(eq(consolidationOps.consolidationId, runId), isNull(consolidationOps.revertedAt)))
+      .where(and(eq(consolidationOps.runId, runId), isNull(consolidationOps.revertedAt)))
       .all();
   }
 
@@ -89,7 +89,7 @@ export class ConsolidationRepository {
     return this.db
       .select()
       .from(consolidationOps)
-      .where(eq(consolidationOps.consolidationId, runId))
+      .where(eq(consolidationOps.runId, runId))
       .orderBy(consolidationOps.appliedAt)
       .all();
   }
@@ -103,7 +103,7 @@ export class ConsolidationRepository {
     const row = this.db
       .select({ total: count(), reverted: count(consolidationOps.revertedAt) })
       .from(consolidationOps)
-      .where(eq(consolidationOps.consolidationId, runId))
+      .where(eq(consolidationOps.runId, runId))
       .get();
     return { total: row?.total ?? 0, reverted: row?.reverted ?? 0 };
   }

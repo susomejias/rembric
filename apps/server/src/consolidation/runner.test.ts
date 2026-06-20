@@ -54,8 +54,7 @@ describe('ConsolidationRunner sweep', () => {
       .all();
     expect(rows.length).toBe(2);
     for (const row of rows) {
-      expect(row.llmProvider).toBeNull();
-      expect(row.llmModel).toBeNull();
+      expect(row.scope).not.toBeNull();
       expect(row.finishedAt).not.toBeNull();
     }
   });

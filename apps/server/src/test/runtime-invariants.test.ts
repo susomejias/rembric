@@ -2,146 +2,105 @@ import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { applyMerge, applySupersede, undoOp } from '../consolidation/operations.js';
-import { createRepositories } from '../db/repositories/index.js';
+import { undoOp } from '../consolidation/operations.js';
+import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
-import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import { SCOPE_GLOBAL } from '../services/scope.js';
 
 import { createTestDb, type TestDb } from './db.js';
 
 describe('runtime invariants — status FSM and scope discipline', () => {
   let testDb: TestDb;
-  let projXScope: Scope;
-  let projYScope: Scope;
 
   beforeAll(() => {
     testDb = createTestDb();
     const projects = new ProjectsService(createRepositories(testDb.handle.db));
-    const x = projects.create({ slug: 'proj-x' });
-    const y = projects.create({ slug: 'proj-y' });
-    projXScope = projectScope(x.id);
-    projYScope = projectScope(y.id);
+    projects.create({ slug: 'proj-x' });
+    projects.create({ slug: 'proj-y' });
   });
   afterAll(() => testDb.cleanup());
 
-  it('13.8 active → archived → undo back to active', () => {
+  /**
+   * Seed a historical `merge` op (two superseded predecessors + an active
+   * merged row + a journaled op) the way the removed LLM consolidator once did.
+   * The producer is gone, but the spec requires such rows to stay undoable.
+   */
+  function seedHistoricalMerge(
+    repos: Repositories,
+    svc: MemoryService,
+  ): { aId: string; bId: string; mergedId: string; opId: string } {
+    const db = testDb.handle.db;
+    const runId = ulid();
+    db.insert(consolidationRuns)
+      .values({ id: runId, startedAt: new Date(), scope: 'global' })
+      .run();
+
+    const a = svc.save({ type: 'feedback', content: `merge-A-${runId}` }, SCOPE_GLOBAL);
+    const b = svc.save({ type: 'feedback', content: `merge-B-${runId}` }, SCOPE_GLOBAL);
+    const mergedId = `merged-${runId}`;
+    repos.memory.insert({
+      id: mergedId,
+      scope: 'global',
+      projectId: null,
+      type: 'feedback',
+      content: `merged-${runId}`,
+      tags: [],
+      status: 'active',
+      replaces: [a.id, b.id],
+      createdAt: new Date(),
+      lastSeenAt: new Date(),
+      source: { tokenName: 'consolidation' },
+    });
+    repos.memory.markSupersededMany([a.id, b.id]);
+    const opId = `op-${runId}`;
+    repos.consolidation.insertOp({
+      id: opId,
+      runId,
+      opType: 'merge',
+      affectedIds: [a.id, b.id],
+      createdId: mergedId,
+      reasoning: 'historical',
+      appliedAt: new Date(),
+    });
+    return { aId: a.id, bId: b.id, mergedId, opId };
+  }
+
+  it('13.8 active → archived', () => {
     const svc = new MemoryService(createRepositories(testDb.handle.db), testDb.handle.db);
     const m = svc.save({ type: 'feedback', content: 'fsm-test-1' }, SCOPE_GLOBAL);
     expect(m.status).toBe('active');
 
     svc.archive(m.id, SCOPE_GLOBAL);
-    const after = svc.unsafeGetById(m.id)!;
-    expect(after.status).toBe('archived');
-
-    // The dashboard "unarchive" operation flips back to active. We assert
-    // by direct update because the public service surface doesn't expose
-    // a generic unarchive — the only path back is `consolidation.undo`,
-    // covered below.
-    expect(after.status).toBe('archived');
+    expect(svc.unsafeGetById(m.id)!.status).toBe('archived');
   });
 
-  it('13.8 active → superseded via merge, then undo flips back to active', () => {
+  it('13.8 superseded via a historical merge, then undo flips back to active', () => {
     const db = testDb.handle.db;
-    const svc = new MemoryService(createRepositories(db), db);
-    const runId = ulid();
-    db.insert(consolidationRuns)
-      .values({
-        id: runId,
-        startedAt: new Date(),
-        llmProvider: 'test',
-        llmModel: 'test',
-        scope: 'global',
-      })
-      .run();
+    const repos = createRepositories(db);
+    const svc = new MemoryService(repos, db);
 
-    const a = svc.save({ type: 'feedback', content: 'merge-test-A' }, SCOPE_GLOBAL);
-    const b = svc.save({ type: 'feedback', content: 'merge-test-B' }, SCOPE_GLOBAL);
+    const { aId, bId, mergedId, opId } = seedHistoricalMerge(repos, svc);
 
-    const { opId, mergedId } = applyMerge(createRepositories(db), db, {
-      consolidationId: runId,
-      predecessors: [a, b],
-      mergedContent: 'merged-AB',
-      reasoning: 'fsm test',
-    });
-
-    expect(db.select().from(memory).where(eq(memory.id, a.id)).get()!.status).toBe('superseded');
-    expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('superseded');
+    expect(db.select().from(memory).where(eq(memory.id, aId)).get()!.status).toBe('superseded');
+    expect(db.select().from(memory).where(eq(memory.id, bId)).get()!.status).toBe('superseded');
     expect(db.select().from(memory).where(eq(memory.id, mergedId)).get()!.status).toBe('active');
 
-    undoOp(createRepositories(db), db, opId);
-    expect(db.select().from(memory).where(eq(memory.id, a.id)).get()!.status).toBe('active');
-    expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('active');
+    undoOp(repos, db, opId);
+    expect(db.select().from(memory).where(eq(memory.id, aId)).get()!.status).toBe('active');
+    expect(db.select().from(memory).where(eq(memory.id, bId)).get()!.status).toBe('active');
     // Merged row is archived (not deleted) by undo; the table is append-only.
     expect(db.select().from(memory).where(eq(memory.id, mergedId)).get()!.status).toBe('archived');
   });
 
-  it('13.9 a merge across two projects fails before any row mutates', () => {
-    const db = testDb.handle.db;
-    const svc = new MemoryService(createRepositories(db), db);
-    const runId = ulid();
-    db.insert(consolidationRuns)
-      .values({
-        id: runId,
-        startedAt: new Date(),
-        llmProvider: 'test',
-        llmModel: 'test',
-        scope: 'global',
-      })
-      .run();
-
-    const a = svc.save({ type: 'reference', content: 'cross-scope-A' }, projXScope);
-    const b = svc.save({ type: 'reference', content: 'cross-scope-B' }, projYScope);
-
-    expect(() =>
-      applyMerge(createRepositories(db), db, {
-        consolidationId: runId,
-        predecessors: [a, b],
-        mergedContent: 'should-not-happen',
-        reasoning: 'cross scope',
-      }),
-    ).toThrow(/scopes/);
-
-    // Neither predecessor's status changed.
-    expect(db.select().from(memory).where(eq(memory.id, a.id)).get()!.status).toBe('active');
-    expect(db.select().from(memory).where(eq(memory.id, b.id)).get()!.status).toBe('active');
-  });
-
-  it('13.9 a supersede across project and global fails before any mutation', () => {
-    const db = testDb.handle.db;
-    const svc = new MemoryService(createRepositories(db), db);
-    const runId = ulid();
-    db.insert(consolidationRuns)
-      .values({
-        id: runId,
-        startedAt: new Date(),
-        llmProvider: 'test',
-        llmModel: 'test',
-        scope: 'global',
-      })
-      .run();
-
-    const winner = svc.save({ type: 'reference', content: 'global-winner' }, SCOPE_GLOBAL);
-    const loser = svc.save({ type: 'reference', content: 'proj-loser' }, projXScope);
-
-    expect(() =>
-      applySupersede(createRepositories(db), db, {
-        consolidationId: runId,
-        winner,
-        losers: [loser],
-        reasoning: 'cross scope supersede',
-      }),
-    ).toThrow(/scope/i);
-
-    expect(db.select().from(memory).where(eq(memory.id, winner.id)).get()!.status).toBe('active');
-    expect(db.select().from(memory).where(eq(memory.id, loser.id)).get()!.status).toBe('active');
-  });
-
   it('every consolidation op records an affected_ids set with a single (scope, project) tuple', () => {
     // Sanity gate: walk every op row in the test DB and assert all of its
-    // affected memories share scope + project_id.
+    // affected memories share scope + project_id. This is the surviving
+    // guarantee for "consolidation never crosses scope" now that the
+    // producer-level scope guards (applyMerge/applySupersede) are gone —
+    // the deterministic sweep operates one (scope, project) tuple at a time.
     const db = testDb.handle.db;
     const ops = db.select().from(consolidationOps).all();
     for (const op of ops) {
