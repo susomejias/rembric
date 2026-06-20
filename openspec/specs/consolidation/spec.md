@@ -14,7 +14,7 @@ The server SHALL run the deterministic consolidation sweep (decay + deadline orp
 
 - **GIVEN** the newest `consolidation_runs` row for the scope is older than the minimum interval (or absent)
 - **WHEN** a session is started in that scope
-- **THEN** the sweep SHALL run for that scope and a new `consolidation_runs` row SHALL be created with `started_at` set and `llm_provider`/`llm_model` NULL
+- **THEN** the sweep SHALL run for that scope and a new `consolidation_runs` row SHALL be created with `started_at` set
 
 #### Scenario: Session start within the throttle window skips the sweep
 
@@ -50,12 +50,18 @@ A `memory_relations` row with `status = 'pending'` and `created_at < (now - JUDG
 
 ### Requirement: Removed configuration MUST degrade gracefully on upgrade
 
-A server booting in an environment that still defines any removed variable (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_ENABLED`, `CONSOLIDATION_CRON`, `CONSOLIDATION_BATCH_SIZE`) SHALL start normally and SHALL log a single warning naming the ignored variables. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` and `EMBEDDING_*` remain valid (embedding client). Boot SHALL NOT fail on a missing `OPENAI_API_KEY` under any combination. Upgrading a running installation SHALL require zero manual steps: no DB migration, no config rewrite, no plugin update.
+A server booting in an environment that still defines any removed variable (`LLM_PROVIDER`, `OPENAI_MODEL`, `CONSOLIDATION_ENABLED`, `CONSOLIDATION_CRON`, `CONSOLIDATION_BATCH_SIZE`) SHALL start normally and SHALL log a single warning naming the ignored variables. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` and `EMBEDDING_*` remain valid (embedding client). Boot SHALL NOT fail on a missing `OPENAI_API_KEY` under any combination. Upgrading a running installation SHALL require zero manual operator steps: no config rewrite and no plugin update. The boot-time migration runner MAY apply schema migrations automatically (including dropping the obsolete `consolidation_runs.llm_provider` / `llm_model` columns); such migrations SHALL run unattended, SHALL preserve all existing `consolidation_runs` / `consolidation_ops` rows, and SHALL NOT require any operator action.
 
 #### Scenario: Boot with stale LLM env vars
 
 - **WHEN** the server boots with `OPENAI_MODEL` and `CONSOLIDATION_CRON` still set
 - **THEN** it SHALL reach the listening state and SHALL log one warning listing both names as ignored
+
+#### Scenario: Upgrade boot applies the column-drop migration unattended
+
+- **GIVEN** a database whose `consolidation_runs` table still has the `llm_provider` / `llm_model` columns and contains existing run and op rows
+- **WHEN** the server boots after the upgrade
+- **THEN** the migration runner SHALL rebuild `consolidation_runs` without those two columns, all pre-existing `consolidation_runs` and `consolidation_ops` rows (including historical `merge` / `supersede` ops) SHALL be preserved, and no operator action SHALL be required
 
 ### Requirement: The consolidation MUST target redundancy, drift, contradiction, and decay
 

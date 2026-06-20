@@ -255,12 +255,12 @@ describe('memory.purgeDisconnectedArchived', () => {
 
     // Manually insert a consolidation_ops row referencing m via affected_ids.
     db.handle.raw
-      .prepare(`INSERT INTO consolidation_runs (id, started_at) VALUES (?, ?)`)
+      .prepare(`INSERT INTO consolidation_runs (id, started_at, scope) VALUES (?, ?, 'global')`)
       .run('test-run-001', Date.now());
     db.handle.raw
       .prepare(
         `INSERT INTO consolidation_ops
-           (id, consolidation_id, op_type, affected_ids, applied_at)
+           (id, run_id, op_type, affected_ids, applied_at)
          VALUES (?, ?, 'decay', ?, ?)`,
       )
       .run('test-op-001', 'test-run-001', JSON.stringify([m.id]), Date.now());
@@ -274,12 +274,12 @@ describe('memory.purgeDisconnectedArchived', () => {
     memory.archive(m.id, projectScope(projectId));
 
     db.handle.raw
-      .prepare(`INSERT INTO consolidation_runs (id, started_at) VALUES (?, ?)`)
+      .prepare(`INSERT INTO consolidation_runs (id, started_at, scope) VALUES (?, ?, 'global')`)
       .run('test-run-002', Date.now());
     db.handle.raw
       .prepare(
         `INSERT INTO consolidation_ops
-           (id, consolidation_id, op_type, affected_ids, created_id, applied_at)
+           (id, run_id, op_type, affected_ids, created_id, applied_at)
          VALUES (?, ?, 'merge', ?, ?, ?)`,
       )
       .run('test-op-002', 'test-run-002', JSON.stringify(['other-id']), m.id, Date.now());

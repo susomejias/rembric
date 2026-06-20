@@ -224,14 +224,12 @@ export class PromptsService {
         id: runId,
         startedAt: ts,
         finishedAt: ts,
-        llmProvider: null,
-        llmModel: null,
         scope: 'maintenance',
         summary: JSON.stringify({ kind: 'prompt_purge', deleted: deletedIds.length }),
       });
       this.repos.consolidation.insertOp({
         id: ulid(ts.getTime()),
-        consolidationId: runId,
+        runId,
         opType: 'prompt_purge',
         affectedIds: deletedIds,
         createdId: null,

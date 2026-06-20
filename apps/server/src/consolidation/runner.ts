@@ -115,7 +115,7 @@ export class ConsolidationRunner {
     );
     if (decayIds.length > 0) {
       applyDecay(this.opts.repos, this.opts.tx, {
-        consolidationId: runId,
+        runId,
         ids: decayIds,
         reasoning: `last_seen_at older than ${(this.opts.decay ?? DEFAULT_DECAY).thresholdMs}ms with low confidence`,
       });
@@ -160,7 +160,7 @@ export class ConsolidationRunner {
       try {
         this.opts.relations.orphan(row.judgmentId, reason);
         recordOrphanPromote(this.opts.repos, {
-          consolidationId: runId,
+          runId,
           judgmentId: row.judgmentId,
           sourceId: row.sourceId,
           targetId: row.targetId,

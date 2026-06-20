@@ -263,12 +263,6 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
           <div class="label">Scope</div>
           <div class="value">${scopeLabel(deps.repos, run.scope)}</div>
         </div>
-        ${run.llmModel
-          ? html`<div class="stat-card">
-              <div class="label">Model</div>
-              <div class="value" style="font-size:.9rem">${run.llmModel}</div>
-            </div>`
-          : raw('')}
         <div class="stat-card">
           <div class="label">Ops</div>
           <div class="value">${ops.length}</div>
@@ -378,7 +372,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     } catch (err) {
       return renderUndoError(c, err);
     }
-    return c.redirect(`/dashboard/consolidation/${op?.consolidationId ?? ''}`);
+    return c.redirect(`/dashboard/consolidation/${op?.runId ?? ''}`);
   });
 
   return app;

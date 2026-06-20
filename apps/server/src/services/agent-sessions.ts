@@ -605,14 +605,12 @@ export class AgentSessionsService {
         id: runId,
         startedAt: ts,
         finishedAt: ts,
-        llmProvider: null,
-        llmModel: null,
         scope: 'maintenance',
         summary: JSON.stringify({ kind: 'session_purge', deleted: deletedIds.length }),
       });
       this.repos.consolidation.insertOp({
         id: ulid(ts.getTime()),
-        consolidationId: runId,
+        runId,
         opType: 'session_purge',
         affectedIds: deletedIds,
         createdId: null,
