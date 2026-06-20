@@ -281,7 +281,7 @@ The detail view at `/dashboard/sessions/:id` SHALL render whether the row is sof
 
 ### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
 
-Every MCP tool handler under `apps/server/src/mcp/sessions-tools.ts` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
+Every MCP tool handler under `apps/server/src/mcp/` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
 
 1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
 2. The `SessionRouter` entry for `(tokenId, mcpSessionId)`, populated by a prior `project.use` call or by roots-based discovery, when the connection is path-less (`ctx.requestedSlug === null`).
@@ -557,7 +557,7 @@ The method SHALL NOT accept any flag, option, or argument that bypasses the `ses
 
 The `AgentSessionsService` SHALL expose a single canonical constant `SUMMARY_MAX_CHARS` and SHALL reject any `summary` argument whose `String.prototype.length` exceeds it. The cap SHALL be enforced **solely in the server** — there SHALL be no SQLite `CHECK` constraint that pins `summary` length to the cap value. The `CHECK (length(summary) <= 2000)` previously introduced in migration `0011` SHALL be removed by a table-rebuild migration. A database `CHECK` MAY remain only as a generous pathological-size guard (a value far above any plausible `SUMMARY_MAX_CHARS`, e.g. 1 MB) that does NOT track or pin the operative cap; changing `SUMMARY_MAX_CHARS` SHALL NOT require a database migration.
 
-`SUMMARY_MAX_CHARS` SHALL be set high enough to carry a rich handoff summary (the design records the chosen value). The constant SHALL remain the single source of truth, exported and imported by the MCP zod schema (`apps/server/src/mcp/sessions-tools.ts`) and by the HTTP-layer truncation helper, so no layer can drift from the service-level cap.
+`SUMMARY_MAX_CHARS` SHALL be set high enough to carry a rich handoff summary (the design records the chosen value). The constant SHALL remain the single source of truth, exported and imported by the MCP zod schema (`apps/server/src/mcp/session-tools.ts`) and by the HTTP-layer truncation helper, so no layer can drift from the service-level cap.
 
 The cap precondition SHALL be enforced before the `summary_final` precedence rule is evaluated, by every write path that mutates `sessions.summary`:
 
@@ -610,7 +610,7 @@ The auto-curate path (`composeDerivedSummary` invoked for sessions with anchored
 
 ### Requirement: `memory.context` MUST display-truncate every text field to one shared bound
 
-The `memory.context` handler (`handleContext` in `apps/server/src/mcp/sessions-tools.ts`) SHALL NOT emit any stored long-form text verbatim. Every text field of its response SHALL be display-truncated through the same `snippet(content, max)` helper, using a single module-level bound `CONTEXT_SNIPPET_CHARS`, producing a value of at most `CONTEXT_SNIPPET_CHARS` characters with a trailing `…` ellipsis when truncation occurs. The fields covered are:
+The `memory.context` handler (`handleContext` in `apps/server/src/mcp/memory-tools.ts`) SHALL NOT emit any stored long-form text verbatim. Every text field of its response SHALL be display-truncated through the same `snippet(content, max)` helper, using a single module-level bound `CONTEXT_SNIPPET_CHARS`, producing a value of at most `CONTEXT_SNIPPET_CHARS` characters with a trailing `…` ellipsis when truncation occurs. The fields covered are:
 
 - `recentSessions[].summary`
 - `recentPrompts[].content`

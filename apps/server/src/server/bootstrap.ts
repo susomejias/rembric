@@ -8,7 +8,7 @@ import { createDb, createRepositories, type DbHandle, type Repositories } from '
 import { EMBEDDING_MODEL_ID, loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
-import type { DoctorReport } from '../mcp/sessions-tools.js';
+import type { DoctorReport } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { DomainError } from '../services/errors.js';

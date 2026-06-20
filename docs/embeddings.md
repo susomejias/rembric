@@ -71,7 +71,7 @@ worker.processBatch()                       ← services/embedding-worker.ts
 ## 4. Save path (the hot path)
 
 ```
-memory.save (MCP)                            ← mcp/tools.ts
+memory.save (MCP)                            ← mcp/memory-tools.ts
    │
    ├─ insert the memory row (append-only, unchanged)
    │

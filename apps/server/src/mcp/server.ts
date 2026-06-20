@@ -17,6 +17,29 @@ import type { CandidateOptions } from '../services/save-time-candidates.js';
 import { aboutOutput, handleAbout } from './about-tool.js';
 import { buildInstructions } from './instructions.js';
 import {
+  buildMemoryHandlers,
+  contextOutput,
+  contextSchema,
+  memoryConfirmOutput,
+  memoryConfirmSchema,
+  memoryGetOutput,
+  memoryGetSchema,
+  memorySaveOutput,
+  memorySaveSchema,
+  memorySearchOutput,
+  memorySearchSchema,
+  timelineOutput,
+  timelineSchema,
+} from './memory-tools.js';
+import {
+  buildObservabilityHandlers,
+  capturePassiveOutput,
+  capturePassiveSchema,
+  doctorOutput,
+  statsOutput,
+  type DoctorReport,
+} from './observability-tools.js';
+import {
   buildProjectHandlers,
   projectCurrentOutput,
   projectCurrentSchema,
@@ -25,6 +48,13 @@ import {
   projectUseOutput,
   projectUseSchema,
 } from './project-tools.js';
+import {
+  buildPromptHandlers,
+  savePromptOutput,
+  savePromptSchema,
+  searchPromptsOutput,
+  searchPromptsSchema,
+} from './prompt-tools.js';
 import {
   buildRelationsHandlers,
   compareOutput,
@@ -35,40 +65,16 @@ import {
   suggestTopicKeySchema,
 } from './relations-tools.js';
 import {
-  buildSessionsHandlers,
-  capturePassiveOutput,
-  capturePassiveSchema,
-  contextOutput,
-  contextSchema,
-  doctorOutput,
-  sessionGetOutput,
-  sessionGetSchema,
-  type DoctorReport,
-  savePromptOutput,
-  savePromptSchema,
-  searchPromptsOutput,
-  searchPromptsSchema,
+  buildSessionHandlers,
   sessionEndOutput,
   sessionEndSchema,
+  sessionGetOutput,
+  sessionGetSchema,
   sessionStartOutput,
   sessionStartSchema,
   sessionSummaryOutput,
   sessionSummarySchema,
-  statsOutput,
-  timelineOutput,
-  timelineSchema,
-} from './sessions-tools.js';
-import {
-  buildHandlers,
-  memoryConfirmOutput,
-  memoryConfirmSchema,
-  memoryGetOutput,
-  memoryGetSchema,
-  memorySaveOutput,
-  memorySaveSchema,
-  memorySearchOutput,
-  memorySearchSchema,
-} from './tools.js';
+} from './session-tools.js';
 
 /**
  * Construct the MCP server and register every tool.
@@ -87,7 +93,7 @@ export interface CreateMcpServerOptions {
   prompts: PromptsService;
   relations: RelationsService;
   candidates: CandidateOptions;
-  /** Inline save-time embedding (see ToolDeps.embedNow). */
+  /** Inline save-time embedding (see MemoryToolDeps.embedNow). */
   embedNow?: (
     memoryId: string,
     content: string,
@@ -159,8 +165,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
   );
 
-  // ── Original 4 memory tools ────────────────────────────────────────
-  const handlers = buildHandlers({
+  // ── Memory tools: save / search / get / confirm + context / timeline ─
+  const memoryHandlers = buildMemoryHandlers({
     memory: opts.memory,
     relations: opts.relations,
     candidates: opts.candidates,
@@ -169,6 +175,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     router: opts.router,
     projects: opts.projects,
     agentSessions: opts.agentSessions,
+    prompts: opts.prompts,
+    orphanAfterMs: opts.orphanAfterMs,
     getServer: () => server,
   });
   server.registerTool(
@@ -179,7 +187,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: memorySaveOutput,
       annotations: WRITE_ANNOTATIONS('Save memory'),
     },
-    handlers.save,
+    memoryHandlers.save,
   );
   server.registerTool(
     'memory.search',
@@ -189,7 +197,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: memorySearchOutput,
       annotations: READ_ANNOTATIONS('Search memories'),
     },
-    handlers.search,
+    memoryHandlers.search,
   );
   server.registerTool(
     'memory.get',
@@ -199,7 +207,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: memoryGetOutput,
       annotations: READ_ANNOTATIONS('Get memory'),
     },
-    handlers.get,
+    memoryHandlers.get,
   );
   server.registerTool(
     'memory.confirm',
@@ -209,21 +217,32 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: memoryConfirmOutput,
       annotations: WRITE_ANNOTATIONS('Confirm memory'),
     },
-    handlers.confirm,
+    memoryHandlers.confirm,
   );
 
-  // ── Session lifecycle + research + observability tools ────────────
-  const sessions = buildSessionsHandlers({
-    repos: opts.repos,
+  // ── Session lifecycle tools ───────────────────────────────────────
+  const sessionHandlers = buildSessionHandlers({
     agentSessions: opts.agentSessions,
-    memory: opts.memory,
     projects: opts.projects,
+    router: opts.router,
+    sweep: opts.sweep,
+    getServer: () => server,
+  });
+
+  // ── Curated-prompt tools ──────────────────────────────────────────
+  const promptHandlers = buildPromptHandlers({
     prompts: opts.prompts,
+    agentSessions: opts.agentSessions,
+    router: opts.router,
+  });
+
+  // ── Observability tools ───────────────────────────────────────────
+  const observabilityHandlers = buildObservabilityHandlers({
+    memory: opts.memory,
+    agentSessions: opts.agentSessions,
+    repos: opts.repos,
     router: opts.router,
     doctor: opts.doctor,
-    sweep: opts.sweep,
-    orphanAfterMs: opts.orphanAfterMs,
-    getServer: () => server,
   });
 
   server.registerTool(
@@ -235,7 +254,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: sessionStartOutput,
       annotations: WRITE_ANNOTATIONS('Start session'),
     },
-    sessions.sessionStart,
+    sessionHandlers.sessionStart,
   );
   server.registerTool(
     'memory.session_end',
@@ -246,7 +265,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: sessionEndOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('End session'),
     },
-    sessions.sessionEnd,
+    sessionHandlers.sessionEnd,
   );
   server.registerTool(
     'memory.session_summary',
@@ -257,7 +276,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: sessionSummaryOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),
     },
-    sessions.sessionSummary,
+    sessionHandlers.sessionSummary,
   );
   server.registerTool(
     'memory.context',
@@ -268,7 +287,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: contextOutput,
       annotations: READ_ANNOTATIONS('Recent context'),
     },
-    sessions.context,
+    memoryHandlers.context,
   );
   server.registerTool(
     'memory.session_get',
@@ -279,7 +298,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: sessionGetOutput,
       annotations: READ_ANNOTATIONS('Get session'),
     },
-    sessions.sessionGet,
+    sessionHandlers.sessionGet,
   );
   server.registerTool(
     'memory.timeline',
@@ -290,7 +309,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: timelineOutput,
       annotations: READ_ANNOTATIONS('Memory timeline'),
     },
-    sessions.timeline,
+    memoryHandlers.timeline,
   );
   server.registerTool(
     'memory.capture_passive',
@@ -301,7 +320,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: capturePassiveOutput,
       annotations: WRITE_ANNOTATIONS('Capture learnings'),
     },
-    sessions.capturePassive,
+    observabilityHandlers.capturePassive,
   );
   server.registerTool(
     'memory.save_prompt',
@@ -312,7 +331,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: savePromptOutput,
       annotations: WRITE_ANNOTATIONS('Save prompt'),
     },
-    sessions.savePrompt,
+    promptHandlers.savePrompt,
   );
   server.registerTool(
     'memory.search_prompts',
@@ -323,7 +342,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: searchPromptsOutput,
       annotations: READ_ANNOTATIONS('Search prompts'),
     },
-    sessions.searchPrompts,
+    promptHandlers.searchPrompts,
   );
   server.registerTool(
     'memory.doctor',
@@ -334,7 +353,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: doctorOutput,
       annotations: READ_ANNOTATIONS('Diagnostics'),
     },
-    sessions.doctor,
+    observabilityHandlers.doctor,
   );
   server.registerTool(
     'memory.about',
@@ -356,7 +375,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema: statsOutput,
       annotations: READ_ANNOTATIONS('Stats'),
     },
-    sessions.stats,
+    observabilityHandlers.stats,
   );
 
   // ── Project management tools ──────────────────────────────────────

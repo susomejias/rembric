@@ -8,12 +8,11 @@ import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { buildSessionsHandlers } from './sessions-tools.js';
-import { buildHandlers } from './tools.js';
+import { buildMemoryHandlers } from './memory-tools.js';
+import { buildSessionHandlers } from './session-tools.js';
 
 /**
  * 3.6 — End-to-end handler tests for the `project_suggestion_pending`
@@ -31,11 +30,10 @@ let projects: ProjectsService;
 let memory: MemoryService;
 let router: SessionRouter;
 let agentSessions: AgentSessionsService;
-let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
-let saveHandlers: ReturnType<typeof buildHandlers>;
-let sessionHandlers: ReturnType<typeof buildSessionsHandlers>;
+let saveHandlers: ReturnType<typeof buildMemoryHandlers>;
+let sessionHandlers: ReturnType<typeof buildSessionHandlers>;
 
 function makeContext(overrides: Partial<RequestContext> = {}): RequestContext {
   return {
@@ -65,7 +63,6 @@ beforeEach(() => {
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-  prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(createRepositories(db.handle.db));
   tokens.bootstrapAdmin('project-suggestion-pending-test-admin-zzz');
   adminToken = db.handle.db
@@ -73,27 +70,16 @@ beforeEach(() => {
     .from(tokensSchema)
     .where(eq(tokensSchema.name, 'admin'))
     .get()!;
-  saveHandlers = buildHandlers({
+  saveHandlers = buildMemoryHandlers({
     memory,
     repos: createRepositories(db.handle.db),
     router,
     projects,
   });
-  sessionHandlers = buildSessionsHandlers({
-    repos: createRepositories(db.handle.db),
+  sessionHandlers = buildSessionHandlers({
     agentSessions,
-    memory,
     projects,
-    prompts,
     router,
-    doctor: () => ({
-      db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
-      llm: { reachable: false, lastPingAt: null },
-      embeddings: { model: 'fake-test-embedder', backlog: 0 },
-      consolidation: { lastRunAt: null, lastRunOps: {} },
-      sessions: { active: 0 },
-      warnings: [],
-    }),
   });
 });
 

@@ -12,7 +12,7 @@ import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { buildHandlers } from './tools.js';
+import { buildMemoryHandlers } from './memory-tools.js';
 
 /**
  * Strict path-scoping contract — see src/services/memory.ts and
@@ -23,7 +23,7 @@ import { buildHandlers } from './tools.js';
 let db: TestDb;
 let projects: ProjectsService;
 let memory: MemoryService;
-let handlers: ReturnType<typeof buildHandlers>;
+let handlers: ReturnType<typeof buildMemoryHandlers>;
 let projectA: Project;
 let projectB: Project;
 
@@ -68,7 +68,7 @@ beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  handlers = buildHandlers({ memory });
+  handlers = buildMemoryHandlers({ memory });
   projectA = projects.create({ slug: 'test-rembric' });
   projectB = projects.create({ slug: 'other-project' });
 });
@@ -268,11 +268,11 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
   }
 
   let router: SessionRouter;
-  let routerHandlers: ReturnType<typeof buildHandlers>;
+  let routerHandlers: ReturnType<typeof buildMemoryHandlers>;
 
   beforeEach(() => {
     router = new SessionRouter();
-    routerHandlers = buildHandlers({ memory, router, projects });
+    routerHandlers = buildMemoryHandlers({ memory, router, projects });
   });
 
   it('memory.save({scope:project}) succeeds after project.use activates a project', async () => {
@@ -365,18 +365,18 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
   // factory returns. `resolveEffectiveProject` only forwards it to
   // `ensureRootsDiscoveryRun`, which short-circuits when there is an
   // in-flight promise on the router — so the stub is never dereferenced.
-  const fakeServer = {} as unknown as Parameters<typeof buildHandlers>[0]['getServer'] extends
-    | (() => infer S)
-    | undefined
+  const fakeServer = {} as unknown as Parameters<
+    typeof buildMemoryHandlers
+  >[0]['getServer'] extends (() => infer S) | undefined
     ? S
     : never;
 
   let router: SessionRouter;
-  let routerHandlers: ReturnType<typeof buildHandlers>;
+  let routerHandlers: ReturnType<typeof buildMemoryHandlers>;
 
   beforeEach(() => {
     router = new SessionRouter();
-    routerHandlers = buildHandlers({
+    routerHandlers = buildMemoryHandlers({
       memory,
       router,
       projects,
@@ -450,7 +450,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
   // `(tokenId, projectId)`.
 
   let agentSessions: AgentSessionsService;
-  let fallbackHandlers: ReturnType<typeof buildHandlers>;
+  let fallbackHandlers: ReturnType<typeof buildMemoryHandlers>;
   let realTokenId: string;
   let ctxWithRealToken: (project: Project | null) => RequestContext;
 
@@ -473,7 +473,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       ...fakeContext(project),
       token: { ...fakeContext(project).token, id: realTokenId },
     });
-    fallbackHandlers = buildHandlers({ memory, projects, agentSessions });
+    fallbackHandlers = buildMemoryHandlers({ memory, projects, agentSessions });
   });
 
   it('attaches a memory to the session created via agentSessions.ensure', async () => {
@@ -557,7 +557,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     });
     router.setActiveSession(realTokenId, MCP_SESSION, 'sess-router-explicit');
 
-    const handlersWithRouter = buildHandlers({ memory, projects, agentSessions, router });
+    const handlersWithRouter = buildMemoryHandlers({ memory, projects, agentSessions, router });
     const ctxWithSession: RequestContext = {
       ...ctxWithRealToken(projectA),
       mcpSessionId: MCP_SESSION,

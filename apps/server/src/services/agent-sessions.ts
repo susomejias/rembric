@@ -13,7 +13,7 @@ const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
  * Single source of truth for the maximum length (UTF-16 code units) of
  * `sessions.summary`. Enforced SERVER-SIDE ONLY at: (a) the service layer
  * below via `assertSummaryWithinCap`, (b) the MCP zod schema in
- * `sessions-tools.ts`, (c) the HTTP handler in `api-router.ts` via
+ * `session-tools.ts`, (c) the HTTP handler in `api-router.ts` via
  * `truncateSummary`. There is NO SQLite `CHECK` pinning this value — the
  * `0011` constraint was dropped in `0012_drop_summary_length_check.sql`, so
  * this constant is a tunable: change it here and no table rebuild is needed.
