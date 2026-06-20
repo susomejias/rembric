@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.22](https://github.com/susomejias/rembric/compare/server-v0.21.21...server-v0.21.22) (2026-06-20)
+
+
+### Bug Fixes
+
+* **ci:** prefetch + cache embedding model so the real-embedder test resolves offline ([#186](https://github.com/susomejias/rembric/issues/186)) ([f29f9c8](https://github.com/susomejias/rembric/commit/f29f9c8358d20eeac4ad6373346d3efe21c1f70a))
+
 ## [0.21.21](https://github.com/susomejias/rembric/compare/server-v0.21.20...server-v0.21.21) (2026-06-16)
 
 
