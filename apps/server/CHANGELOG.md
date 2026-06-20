@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.23](https://github.com/susomejias/rembric/compare/server-v0.21.22...server-v0.21.23) (2026-06-20)
+
+
+### Refactor
+
+* **consolidation:** remove LLM-era residue and tidy the journal schema ([#188](https://github.com/susomejias/rembric/issues/188)) ([7e7382f](https://github.com/susomejias/rembric/commit/7e7382fafdbbf5e4eb04ae393f302378fa607454))
+* **mcp:** organize tool handlers one domain per module ([#189](https://github.com/susomejias/rembric/issues/189)) ([7027a39](https://github.com/susomejias/rembric/commit/7027a39a688c7fcc7fa8012933181480fa443e04))
+
 ## [0.21.22](https://github.com/susomejias/rembric/compare/server-v0.21.21...server-v0.21.22) (2026-06-20)
 
 
