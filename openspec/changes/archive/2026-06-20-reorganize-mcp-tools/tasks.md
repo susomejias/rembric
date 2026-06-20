@@ -25,4 +25,4 @@
 - [x] 5.1 `openspec validate reorganize-mcp-tools --strict` passes.
 - [x] 5.2 `tsc --noEmit` and `eslint` pass (no import cycles).
 - [x] 5.3 Full server suite passes: 833 passed, 1 pre-existing skip, including the new layout invariant.
-- [ ] 5.4 Dev-stack boot smoke (`pnpm run dev:docker:up`) — confirm the MCP server registers the same tool surface end-to-end. _(Pending the joint dev-env check.)_
+- [x] 5.4 Dev-stack boot smoke (`pnpm run dev:docker:up`): server booted v0.21.22, `/healthz` → 200, MCP server registered tools with the new wiring (no boot errors).
