@@ -49,9 +49,12 @@ export async function loadEmbedder(): Promise<Embedder> {
   // Present → resolve locally, refuse network. Absent (dev machines) →
   // download at the pinned revision into the default cache; the first
   // bare-metal boot blocks on that download, once.
-  const baked = existsSync(IMAGE_MODEL_CACHE);
+  // REMBRIC_MODEL_CACHE overrides the dir (CI prefetches the same layout
+  // and points here so the suite resolves offline, never the HF CDN).
+  const localModelDir = process.env.REMBRIC_MODEL_CACHE ?? IMAGE_MODEL_CACHE;
+  const baked = existsSync(localModelDir);
   if (baked) {
-    env.localModelPath = IMAGE_MODEL_CACHE;
+    env.localModelPath = localModelDir;
     env.allowRemoteModels = false;
   }
   const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
