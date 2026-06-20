@@ -14,6 +14,8 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 
 Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --noEmit --incremental`. Pre-push = `pnpm test`. Never bypass git hooks with `--no-verify`.
 
+PR titles and descriptions are always written in English (regardless of the language used in chat).
+
 Operator surface = dashboard (`/dashboard/{tokens,projects,sessions,judgments,memories,consolidation,maintenance}`). No operator CLI; Docker image runs the server only.
 
 ## Architecture
