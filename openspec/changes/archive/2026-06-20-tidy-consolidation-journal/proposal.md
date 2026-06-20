@@ -24,6 +24,7 @@ This change removes only LLM-era residue and tightens journal schema hygiene. Al
 ### Modified Capabilities
 
 - `consolidation`: the requirement "Removed configuration MUST degrade gracefully on upgrade" currently states upgrades require **no DB migration** — this change introduces one automatic migration (column drop + `scope` tighten + FK column rename), so that guarantee is narrowed to "no manual steps" rather than "no migration." The scenario "First session start after the throttle window triggers a sweep" currently asserts the new `consolidation_runs` row has `llm_provider`/`llm_model` `NULL`; that assertion is removed because the columns cease to exist. (The `scope` nullability and the `consolidation_id`→`run_id` rename are not referenced by any spec requirement, so they need no further delta.)
+- `dashboard`: the requirement "Consolidation runs MUST be inspectable and reversible from the dashboard" mandated a `llm_model`-based model indicator on the run detail (plus the "Legacy LLM run keeps its provenance visible" / "Sweep run renders no model indicator" scenarios). Dropping the `llm_model` column removes that capability, so the model-indicator clause and both scenarios are deleted; all other dashboard consolidation behavior is unchanged.
 
 ## Impact
 

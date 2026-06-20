@@ -85,7 +85,7 @@ The `/dashboard/memories/:id` view SHALL display the memory's content, status, t
 
 ### Requirement: Consolidation runs MUST be inspectable and reversible from the dashboard
 
-The dashboard SHALL list consolidation runs at `/dashboard/consolidation` and SHALL show per-run details at `/dashboard/consolidation/:id` including each op with its recorded reasoning. Each op SHALL have an "Undo" action; each run SHALL have an "Undo entire run" action. The run detail SHALL render a model indicator only for runs whose `llm_model` is non-null (legacy LLM-era runs); the runs listing SHALL NOT include a model column. The run detail SHALL render sweep summaries (`{"archives":N,"orphaned":M}`) as legible text and SHALL fall back to the raw stored text for runs whose summary does not match that shape. Scope cells in the runs listing and the run detail SHALL render the project slug when the scope refers to an existing project, falling back to the raw scope string otherwise.
+The dashboard SHALL list consolidation runs at `/dashboard/consolidation` and SHALL show per-run details at `/dashboard/consolidation/:id` including each op with its recorded reasoning. Each op SHALL have an "Undo" action; each run SHALL have an "Undo entire run" action. The run detail SHALL render sweep summaries (`{"archives":N,"orphaned":M}`) as legible text and SHALL fall back to the raw stored text for runs whose summary does not match that shape. Scope cells in the runs listing and the run detail SHALL render the project slug when the scope refers to an existing project, falling back to the raw scope string otherwise.
 
 #### Scenario: Undoing an op from the dashboard
 
@@ -97,18 +97,6 @@ The dashboard SHALL list consolidation runs at `/dashboard/consolidation` and SH
 - **GIVEN** every op of a run has been undone
 - **WHEN** the operator visits `/dashboard/consolidation`
 - **THEN** the run SHALL be visually marked as reverted in the listing
-
-#### Scenario: Legacy LLM run keeps its provenance visible
-
-- **GIVEN** a historical run with `llm_model = 'qwen2.5:7b-instruct-q4_K_M'`
-- **WHEN** the operator opens its detail page
-- **THEN** the model indicator SHALL be rendered with that value
-
-#### Scenario: Sweep run renders no model indicator
-
-- **GIVEN** a post-LLM sweep run (`llm_model IS NULL`)
-- **WHEN** the operator opens its detail page
-- **THEN** no model indicator SHALL be rendered
 
 #### Scenario: Sweep summary renders legibly
 
