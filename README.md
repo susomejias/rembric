@@ -17,7 +17,8 @@
   <a href="#dashboard">Dashboard</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#project-status">Project status</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#contributing">Contributing</a> ·
+  <a href="#sponsor">Sponsor</a>
   <br/>
   <sub>More docs: <a href="./docs/agents.md">Agent integration</a> · <a href="./docs/updates.md">Updates</a> · <a href="./docs/troubleshooting.md">Troubleshooting</a> · <a href="./docs/docker.md">Docker</a> · <a href="./docs/backup.md">Backup</a> · <a href="./docs/embeddings.md">Embeddings</a> · <a href="./docs/relations.md">Relations</a></sub>
 </p>
@@ -460,6 +461,10 @@ Rembric is open-source under the MIT License — **as-is, no warranty**. The mai
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Commits follow Conventional Commits; pre-commit lints and typechecks; pre-push runs the full test suite.
+
+## Sponsor
+
+If Rembric saves you time, you can support its maintenance through [GitHub Sponsors](https://github.com/sponsors/susomejias), [Ko-fi](https://ko-fi.com/susomejias), or [Buy Me a Coffee](https://buymeacoffee.com/susomejias).
 
 ## License
 
