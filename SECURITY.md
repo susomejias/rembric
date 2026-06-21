@@ -29,7 +29,7 @@ click **Report a vulnerability**. This opens a private channel between you and
 the maintainer; do not file a public issue.
 
 **Email fallback:** if you cannot use Security Advisories for any reason
-(corporate firewall, anonymous report, …), email **jesusmejias.jm@gmail.com**
+(corporate firewall, anonymous report, …), email **rembric@susomejias.dev**
 with subject line `[rembric-security] <short description>`.
 
 When you report, please include:
