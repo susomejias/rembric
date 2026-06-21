@@ -20,7 +20,7 @@ the project) and to all participants.
 ## Enforcement contact
 
 Reports of conduct concerns may be sent to the maintainer at
-**jesusmejias.jm@gmail.com** with the subject line
+**rembric@susomejias.dev** with the subject line
 `[rembric-coc] <short description>`.
 
 - Reports are confidential.

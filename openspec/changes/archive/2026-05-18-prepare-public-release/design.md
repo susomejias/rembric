@@ -1,6 +1,6 @@
 ## Context
 
-The repo has been a single-owner private project on GitHub since 2026-05-13. Current state is `main @ 959c38a`, 188 commits, 28 tags (`v0.1.0` … `v0.14.2`), 24 GitHub Releases, 32 PRs (1 open: release-please pending 0.15.0; 29 merged; 2 closed). The committer set is `jesusmejias.jm@gmail.com` (personal Gmail) + `github-actions[bot]` — zero corporate-identity leak. LICENSE is MIT with copyright neutralized to "Rembric contributors". `.gitignore` excludes `.env`, `*.local.*`, `data/`, `data-dev/`, `AGENTS.md`, `.claude/`.
+The repo has been a single-owner private project on GitHub since 2026-05-13. Current state is `main @ 959c38a`, 188 commits, 28 tags (`v0.1.0` … `v0.14.2`), 24 GitHub Releases, 32 PRs (1 open: release-please pending 0.15.0; 29 merged; 2 closed). The committer set is the maintainer's previous personal Gmail + `github-actions[bot]` — zero corporate-identity leak. LICENSE is MIT with copyright neutralized to "Rembric contributors". `.gitignore` excludes `.env`, `*.local.*`, `data/`, `data-dev/`, `AGENTS.md`, `.claude/`.
 
 The OWNER has explicitly chosen Ruta B (orphan-swap in the same repo) over Ruta A (rename current to `rembric-private`, create new public from scratch). The motivation: the URL `github.com/susomejias/rembric` carries SEO / backlink value and the project's documentation already hard-codes that URL across README, `docs/`, and `openspec/`. A two-repo split would either redirect (transient) or force a documentation-wide URL update; Ruta B preserves the URL.
 
