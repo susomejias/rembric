@@ -284,15 +284,15 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 <p align="center"><i>Overview · counters, pending judgments queue, recent agent sessions.</i></p>
 
 <details>
-<summary><b>More surfaces</b> — overview health · memories · prompts · sessions · judgments · consolidation · projects · tokens · maintenance</summary>
+<summary><b>More surfaces</b> — consolidation health · memories · sessions · judgments · consolidation · projects · tokens · updates · maintenance</summary>
 
 <br>
 
 <p align="center">
-  <img src="./docs/screenshots/dashboard-consolidation.png" alt="Consolidation health" width="100%">
+  <img src="./docs/screenshots/dashboard-consolidation-health.png" alt="Consolidation health" width="100%">
 </p>
 
-<p align="center"><i>Overview · health — last run, ops applied, orphan pendings, 7-day activity, system info.</i></p>
+<p align="center"><i>Consolidation health · last run, ops applied, orphan pendings, 7-day activity, system info.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-memories.png" alt="Memories list" width="100%">
@@ -301,10 +301,22 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 <p align="center"><i>Memories · append-only; filter by scope, status, type, FTS5 search.</i></p>
 
 <p align="center">
+  <img src="./docs/screenshots/dashboard-sessions.png" alt="Sessions list" width="100%">
+</p>
+
+<p align="center"><i>Sessions · active, ended, and abandoned agent runs with memory and prompt counts.</i></p>
+
+<p align="center">
   <img src="./docs/screenshots/dashboard-memory-detail.png" alt="Memory detail" width="100%">
 </p>
 
 <p align="center"><i>Memory detail · status, scope, project, type, full content body.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-session-detail.png" alt="Session detail" width="100%">
+</p>
+
+<p align="center"><i>Session detail · run metadata, summary, and memories attached to the session.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-judgments.png" alt="Judgments" width="100%">
@@ -313,10 +325,16 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 <p align="center"><i>Judgments · audit trail of every relation verdict — compatible, supersedes, not_conflict.</i></p>
 
 <p align="center">
-  <img src="./docs/screenshots/dashboard-consolidation-run.png" alt="Consolidation run detail" width="100%">
+  <img src="./docs/screenshots/dashboard-judgment-detail.png" alt="Judgment detail" width="100%">
 </p>
 
-<p align="center"><i>Consolidation run · op-by-op view with per-op undo and full-run revert. Every action journaled.</i></p>
+<p align="center"><i>Judgment detail · source, target, verdict, confidence, reason, and evidence for one relation.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-consolidation.png" alt="Consolidation" width="100%">
+</p>
+
+<p align="center"><i>Consolidation · manually trigger sweeps and inspect recent run status.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-projects.png" alt="Projects" width="100%">
@@ -329,6 +347,12 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
 </p>
 
 <p align="center"><i>Tokens · scope-bound (<code>*</code> or <code>project:&lt;slug&gt;</code>), revocable, expirable.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-updates.png" alt="Updates" width="100%">
+</p>
+
+<p align="center"><i>Updates · current version, last check time, and manual release check.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-maintenance.png" alt="Maintenance" width="100%">
