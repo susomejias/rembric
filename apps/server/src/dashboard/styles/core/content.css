@@ -121,14 +121,22 @@
   background: var(--bg);
   border: 1px solid var(--fg-faint);
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0;
   transition:
     opacity 0.12s,
     color 0.12s,
     border-color 0.12s;
 }
-.main .md-block:hover .md-copy {
+/* Hidden at rest so it never obscures content; revealed on hover/focus of the
+   block. Touch devices have no hover, so keep it faintly visible there. */
+.main .md-block:hover .md-copy,
+.main .md-block:focus-within .md-copy {
   opacity: 1;
+}
+@media (hover: none) {
+  .main .md-block .md-copy {
+    opacity: 0.55;
+  }
 }
 .main .md-block .md-copy:hover {
   color: var(--lime);
