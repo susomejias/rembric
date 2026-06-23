@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.22.0](https://github.com/susomejias/rembric/compare/server-v0.21.24...server-v0.22.0) (2026-06-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* memory.save rejects calls without a title, and deployments re-embed the whole corpus once on first boot (search stays available via the lexical branch throughout the backfill).
+
+### Features
+
+* required, searchable memory titles ([#196](https://github.com/susomejias/rembric/issues/196)) ([90c57ce](https://github.com/susomejias/rembric/commit/90c57ce7875955f9fab499d4af3000438956f7e8))
+
 ## [0.21.24](https://github.com/susomejias/rembric/compare/server-v0.21.23...server-v0.21.24) (2026-06-23)
 
 
