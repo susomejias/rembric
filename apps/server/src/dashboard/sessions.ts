@@ -5,7 +5,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import { backLink, PAGE_SIZE, pager, renderMarkdown, urlWithPage, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
@@ -328,11 +328,13 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
       ${row.description
         ? html`<h2>Description (seed goal)</h2>
-            <pre>${row.description}</pre>`
+            <div class="md-body">${renderMarkdown(row.description)}</div>`
         : raw('')}
 
       <h2>Summary</h2>
-      <pre>${row.summary ?? '—'}</pre>
+      ${row.summary
+        ? html`<div class="md-body">${renderMarkdown(row.summary)}</div>`
+        : html`<p>—</p>`}
 
       <h2>Memories (${memories.length})</h2>
       ${memories.length === 0

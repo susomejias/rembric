@@ -8,7 +8,7 @@ import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import { backLink, PAGE_SIZE, pager, renderMarkdown, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import {
@@ -389,7 +389,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       </div>
 
       <h2>Content</h2>
-      <pre>${row.content}</pre>
+      <div class="md-body">${renderMarkdown(row.content)}</div>
 
       <h2>Tags</h2>
       <p>${tagsHtml}</p>

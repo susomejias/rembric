@@ -13,6 +13,7 @@ import {
   navEntry,
   pager,
   PAGE_SIZE,
+  renderMarkdown,
   renderMobileBar,
   renderSidebar,
   sectionBar,
@@ -336,5 +337,34 @@ describe('renderMobileBar', () => {
     const withBadge = renderMobileBar('home', raw('<a class="sb-update" href="/x">UPD</a>'));
     expect(withBadge.__html).toContain('sb-update');
     expect(renderMobileBar('home').__html).not.toContain('sb-update');
+  });
+});
+
+describe('renderMarkdown', () => {
+  it('renders bold, inline code, fenced code, and lists as HTML', () => {
+    const out = renderMarkdown('**bold** and `code`\n\n- one\n- two\n\n```\nfenced\n```').__html;
+    expect(out).toContain('<strong>bold</strong>');
+    expect(out).toContain('<code>code</code>');
+    expect(out).toContain('<ul>');
+    expect(out).toContain('<li>one</li>');
+    expect(out).toContain('<pre><code>fenced\n</code></pre>');
+    // raw Markdown markers must not survive as visible source
+    expect(out).not.toContain('**bold**');
+  });
+
+  it('escapes raw HTML in content (html:false) instead of injecting it', () => {
+    const out = renderMarkdown('hello <script>alert(1)</script> world').__html;
+    expect(out).not.toContain('<script>');
+    expect(out).toContain('&lt;script&gt;');
+  });
+
+  it('does not emit a clickable javascript: link', () => {
+    const out = renderMarkdown('[click](javascript:alert(1))').__html;
+    expect(out).not.toContain('href="javascript:');
+  });
+
+  it('renders an ordinary http link as an anchor', () => {
+    const out = renderMarkdown('[rembric](https://example.com)').__html;
+    expect(out).toContain('<a href="https://example.com">rembric</a>');
   });
 });

@@ -94,6 +94,56 @@
   color: inherit;
 }
 
+/* `.md-body` — server-rendered Markdown (memory/session/prompt content).
+   Headings, paragraphs, code, and pre inherit the element rules above; this
+   block adds the elements those rules don't cover (lists, content links,
+   blockquote, hr) and trims the container's leading/trailing margins. No new
+   token — locked brutalist palette only. */
+.main .md-body {
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-4) var(--s-5);
+  margin-bottom: var(--s-4);
+}
+.main .md-body > :first-child {
+  margin-top: 0;
+}
+.main .md-body > :last-child {
+  margin-bottom: 0;
+}
+.main .md-body ul,
+.main .md-body ol {
+  margin: 0 0 var(--s-4);
+  padding-left: var(--s-5);
+  color: var(--fg);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.main .md-body li {
+  margin-bottom: var(--s-2);
+}
+.main .md-body li::marker {
+  color: var(--fg-dim);
+}
+.main .md-body a {
+  color: var(--lime);
+  text-underline-offset: 3px;
+}
+.main .md-body a:hover {
+  text-decoration: underline;
+}
+.main .md-body blockquote {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  border-left: 2px solid var(--fg-faint);
+  color: var(--fg-dim);
+}
+.main .md-body hr {
+  border: 0;
+  border-top: 1px solid var(--fg-faint);
+  margin: var(--s-5) 0;
+}
+
 /* form labels (legacy form.stack uses `<label>One thing <input/></label>`) */
 .main label {
   display: grid;

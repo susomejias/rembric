@@ -12,9 +12,20 @@
  * demands it.
  */
 
+import MarkdownIt from 'markdown-it';
+
 import { REMBRIC_VERSION } from '../version.js';
 
 import { escape, html, raw, type SafeHtml } from './templates.js';
+
+// `html: false` renders any raw HTML in the source as escaped text (no separate
+// sanitizer needed); markdown-it's default validateLink drops javascript:/data:
+// schemes. This is the ONLY place dashboard text content reaches raw().
+const md = new MarkdownIt({ html: false, linkify: false });
+
+export function renderMarkdown(content: string): SafeHtml {
+  return raw(md.render(content));
+}
 
 /* ── icons (sidebar) ───────────────────────────────────────────────── */
 
