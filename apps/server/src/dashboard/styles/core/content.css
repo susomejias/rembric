@@ -94,6 +94,124 @@
   color: inherit;
 }
 
+/* `.md-body` — server-rendered Markdown (memory/session/prompt content).
+   Headings, paragraphs, code, and pre inherit the element rules above; this
+   block adds the elements those rules don't cover (lists, content links,
+   blockquote, hr) and trims the container's leading/trailing margins. No new
+   token — locked brutalist palette only. */
+.main .md-block {
+  position: relative;
+}
+.main .md-block .md-body {
+  margin-bottom: 0;
+}
+.main .md-block .md-copy {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-3);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--fg-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+/* Hidden at rest so it never obscures content; revealed on hover/focus of the
+   block. Touch devices have no hover, so keep it faintly visible there. */
+.main .md-block:hover .md-copy,
+.main .md-block:focus-within .md-copy {
+  opacity: 1;
+}
+@media (hover: none) {
+  .main .md-block .md-copy {
+    opacity: 0.55;
+  }
+}
+.main .md-block .md-copy:hover {
+  color: var(--lime);
+  border-color: var(--lime);
+}
+.main .md-copy .ic {
+  display: inline-flex;
+}
+.main .md-copy .ic-done {
+  display: none;
+}
+.main .md-copy.is-copied {
+  color: var(--lime);
+  border-color: var(--lime);
+  opacity: 1;
+}
+.main .md-copy.is-copied .ic-copy {
+  display: none;
+}
+.main .md-copy.is-copied .ic-done {
+  display: inline-flex;
+}
+.main .md-copy.is-failed {
+  color: var(--danger);
+  border-color: var(--danger);
+  opacity: 1;
+}
+.main .md-raw {
+  display: none;
+}
+.main .md-body {
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-4) var(--s-5);
+  margin-bottom: var(--s-4);
+}
+.main .md-body > :first-child {
+  margin-top: 0;
+}
+.main .md-body > :last-child {
+  margin-bottom: 0;
+}
+.main .md-body ul,
+.main .md-body ol {
+  margin: 0 0 var(--s-4);
+  padding-left: var(--s-5);
+  color: var(--fg);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.main .md-body li {
+  margin-bottom: var(--s-2);
+}
+.main .md-body li::marker {
+  color: var(--fg-dim);
+}
+.main .md-body a {
+  color: var(--lime);
+  text-underline-offset: 3px;
+}
+.main .md-body a:hover {
+  text-decoration: underline;
+}
+.main .md-body blockquote {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  border-left: 2px solid var(--fg-faint);
+  color: var(--fg-dim);
+}
+.main .md-body hr {
+  border: 0;
+  border-top: 1px solid var(--fg-faint);
+  margin: var(--s-5) 0;
+}
+
 /* form labels (legacy form.stack uses `<label>One thing <input/></label>`) */
 .main label {
   display: grid;

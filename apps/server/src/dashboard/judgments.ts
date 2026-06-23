@@ -5,7 +5,7 @@ import type { RelationKind, RelationStatus } from '../db/schema/memory-relations
 import type { RelationsService } from '../services/relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { escape, formatTs, html, raw, shortId, statusPill, verdictPill } from './templates.js';
@@ -276,13 +276,13 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
       <p class="mono small">
         <a href="/dashboard/memories/${row.sourceId}">${shortId(row.sourceId)}</a>
       </p>
-      <pre>${row.sourceContent}</pre>
+      ${mdBody(row.sourceContent)}
 
       <h2>Target</h2>
       <p class="mono small">
         <a href="/dashboard/memories/${row.targetId}">${shortId(row.targetId)}</a>
       </p>
-      <pre>${row.targetContent}</pre>
+      ${mdBody(row.targetContent)}
 
       <h2>Reason</h2>
       <p>${row.reason ?? raw('<span class="muted">—</span>')}</p>
