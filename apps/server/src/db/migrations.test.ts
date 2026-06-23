@@ -226,7 +226,7 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
     // Fresh inserts use the new 5-column shape.
     raw
       .prepare(
-        "INSERT INTO memory (id, scope, project_id, type, content, status, created_at) VALUES ('g2', 'global', NULL, 'user', 'x', 'active', 0)",
+        "INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at) VALUES ('g2', 'global', NULL, 'user', 'g2 title', 'x', 'active', 0)",
       )
       .run();
     expect(() =>
@@ -573,6 +573,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0013_oauth_tables.sql',
       '0014_hybrid_search_vec_rebuild.sql',
       '0015_tidy_consolidation_journal.sql',
+      '0016_add_memory_title.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -606,5 +607,79 @@ describe('migrations 0011 + 0012 with referencing children', () => {
     expect(() =>
       raw.prepare("UPDATE sessions SET summary = ? WHERE id = 'sess1'").run('a'.repeat(20_000)),
     ).not.toThrow();
+  });
+});
+
+// Prod-safety for 0016: the title backfill must produce a 1..100-char NON-EMPTY
+// title for EVERY pre-existing row — including adversarial content the DB never
+// forbade (empty/whitespace, markdown-only first line, CRLF, over-100) — or the
+// CHECK(length(title) BETWEEN 1 AND 100) aborts the irreversible migration.
+describe('migration 0016_add_memory_title backfill over adversarial content', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig16-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig16-slice-'));
+    for (const f of readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()) {
+      if (f.startsWith('0016_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('foreign_keys = ON');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  it('backfills a valid 1..100-char title for every adversarial pre-0016 row', () => {
+    // Pre-0016 schema has `content NOT NULL` but no non-empty CHECK, so each of
+    // these is a legal legacy row the backfill must survive.
+    const rows: Array<{ id: string; content: string }> = [
+      { id: 'normal', content: '**Bold lead** then body' },
+      { id: 'empty', content: '' },
+      { id: 'blank', content: '   ' },
+      { id: 'markdown-only', content: '### \nreal second line' },
+      { id: 'crlf', content: 'first line\r\nsecond' },
+      { id: 'long', content: 'x'.repeat(250) },
+    ];
+    const ins = raw.prepare(
+      "INSERT INTO memory (id, scope, project_id, type, content, status, created_at) VALUES (?, 'global', NULL, 'user', ?, 'active', 0)",
+    );
+    for (const r of rows) ins.run(r.id, r.content);
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0016_add_memory_title.sql');
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+
+    const titles = new Map(
+      raw
+        .prepare<[], { id: string; title: string }>('SELECT id, title FROM memory')
+        .all()
+        .map((r) => [r.id, r.title]),
+    );
+    expect(titles.size).toBe(rows.length);
+    for (const [, title] of titles) {
+      expect(title.length).toBeGreaterThanOrEqual(1);
+      expect(title.length).toBeLessThanOrEqual(100);
+    }
+    // Empty/whitespace fall through to the 'untitled' floor; no trailing CR.
+    expect(titles.get('empty')).toBe('untitled');
+    expect(titles.get('blank')).toBe('untitled');
+    expect(titles.get('crlf')).toBe('first line');
+    expect(titles.get('normal')).toBe('Bold lead** then body');
+    expect(titles.get('long')).toBe('x'.repeat(100));
   });
 });

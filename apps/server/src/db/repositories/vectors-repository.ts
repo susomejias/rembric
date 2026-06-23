@@ -8,6 +8,7 @@ import { scopeWhere } from './scope-clause.js';
 export interface VecNeighbor {
   id: string;
   distance: number;
+  title: string;
   content: string;
 }
 
@@ -22,6 +23,7 @@ export interface KnnOpts {
 /** A memory still missing an embedding, with the metadata the vec row needs. */
 export interface PendingEmbedding {
   id: string;
+  title: string;
   content: string;
   scope: MemoryScope;
   projectId: string | null;
@@ -52,6 +54,7 @@ export class VectorsRepository {
       sql`
         SELECT m.id AS id,
                vec_distance_cosine(v_self.embedding, v_other.embedding) AS distance,
+               m.title AS title,
                m.content AS content
         FROM memory_vec v_self
           JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
@@ -116,7 +119,7 @@ export class VectorsRepository {
   /** Non-archived memories still missing an embedding, oldest first. */
   findMissingEmbeddings(limit: number): PendingEmbedding[] {
     return this.db.all<PendingEmbedding>(sql`
-      SELECT m.id AS id, m.content AS content, m.scope AS scope,
+      SELECT m.id AS id, m.title AS title, m.content AS content, m.scope AS scope,
              m.project_id AS projectId, m.status AS status, m.type AS type
       FROM memory m
       LEFT JOIN memory_vec v ON v.memory_id = m.id

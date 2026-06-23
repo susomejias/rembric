@@ -1,7 +1,7 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
 import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
-import type { Embedder } from '../embeddings/embedder.js';
+import { type Embedder, embeddingInput } from '../embeddings/embedder.js';
 
 /**
  * Background worker that backfills `memory_vec` with embeddings for any
@@ -40,6 +40,7 @@ export class EmbeddingWorker {
    */
   async embedNow(
     memoryId: string,
+    title: string,
     content: string,
     scope: MemoryScope,
     projectId: string | null,
@@ -47,7 +48,7 @@ export class EmbeddingWorker {
     type: MemoryType,
   ): Promise<boolean> {
     try {
-      const vector = await this.opts.embedder.embed(content);
+      const vector = await this.opts.embedder.embed(embeddingInput(title, content));
       this.opts.repos.vectors.insertEmbedding(
         memoryId,
         Buffer.from(vector.buffer),
@@ -87,7 +88,7 @@ export class EmbeddingWorker {
 
     for (const row of pending) {
       try {
-        const vector = await this.opts.embedder.embed(row.content);
+        const vector = await this.opts.embedder.embed(embeddingInput(row.title, row.content));
         this.opts.repos.vectors.insertEmbedding(
           row.id,
           Buffer.from(vector.buffer),

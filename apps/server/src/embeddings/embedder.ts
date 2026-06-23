@@ -21,6 +21,40 @@ import { existsSync } from 'node:fs';
 export const EMBEDDING_MODEL_ID = 'onnx-community/gte-multilingual-base';
 export const EMBEDDING_DTYPE = 'q8';
 export const EMBEDDING_DIMS = 768;
+
+/**
+ * Version tag for the TEXT recipe fed to the embedder (independent of the
+ * model id). Stored in the embedding-state marker alongside the model id;
+ * bumping it invalidates every stored vector so the boot-time
+ * `ensureVectorModel` reset + background drain re-embed the corpus with the
+ * new recipe. Bump whenever `embeddingInput` changes.
+ *   v2-title-content: embed `title + "\n\n" + content` (was content-only).
+ *
+ * Governs BOTH halves of the recipe — the document side (`embeddingInput`) and
+ * the query side (`embeddingQueryInput`). Bump if EITHER changes so the corpus
+ * re-embeds against a matching query encoder.
+ */
+export const EMBEDDING_INPUT_VERSION = 'v2-title-content';
+
+/**
+ * The exact text embedded for a memory (document side): its curated title
+ * followed by the body, so the headline shapes the stored vector. Used
+ * identically at save time (`embedNow`) and by the background drain.
+ */
+export function embeddingInput(title: string, content: string): string {
+  return `${title}\n\n${content}`;
+}
+
+/**
+ * The exact text embedded for a search query (query side). A query has no
+ * curated title, so it is embedded verbatim — identity today. Kept as a named
+ * counterpart to `embeddingInput` so the document/query asymmetry is an
+ * explicit, co-located decision: a future change to the document recipe has an
+ * obvious place to weigh the matching query-side transform.
+ */
+export function embeddingQueryInput(query: string): string {
+  return query;
+}
 /** Pinned HF revision — build-time fetch and dev downloads MUST agree. */
 export const EMBEDDING_MODEL_REVISION = '2edbf5e672aab465f9ed4c154a8b61791c082c69';
 

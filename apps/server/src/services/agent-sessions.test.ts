@@ -452,8 +452,8 @@ describe('AgentSessionsService', () => {
       // Stamp a memory row referencing this session.
       db.handle.raw
         .prepare(
-          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
-           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+          `INSERT INTO memory (id, scope, project_id, type, title, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'mem title', 'x', 'active', '[]', ?, ?)`,
         )
         .run('mem-purge-test-001', projectId, Date.now(), s.id);
       endAndBackdate(s.id, 2 * 60 * 60 * 1000);
@@ -491,8 +491,8 @@ describe('AgentSessionsService', () => {
       const withMemory = sessions.start({ tokenId, projectId, agent: 'with-memory' });
       db.handle.raw
         .prepare(
-          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
-           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+          `INSERT INTO memory (id, scope, project_id, type, title, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'mem title', 'x', 'active', '[]', ?, ?)`,
         )
         .run('mem-parity-test-001', projectId, Date.now(), withMemory.id);
       endAndBackdate(withMemory.id, 2 * 60 * 60 * 1000);
@@ -544,8 +544,8 @@ describe('AgentSessionsService', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-memory' });
       db.handle.raw
         .prepare(
-          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
-           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, ?)`,
+          `INSERT INTO memory (id, scope, project_id, type, title, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'mem title', 'x', 'active', '[]', ?, ?)`,
         )
         .run(newSessionId('mem'), projectId, Date.now(), s.id);
       const recent = sessions.recentForContext({ projectId, limit: 25 });
@@ -569,8 +569,8 @@ describe('AgentSessionsService', () => {
       const memoryId = newSessionId('mem-for-conf');
       db.handle.raw
         .prepare(
-          `INSERT INTO memory (id, scope, project_id, type, content, status, replaces, created_at, session_id)
-           VALUES (?, 'project', ?, 'user', 'x', 'active', '[]', ?, NULL)`,
+          `INSERT INTO memory (id, scope, project_id, type, title, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'mem title', 'x', 'active', '[]', ?, NULL)`,
         )
         .run(memoryId, projectId, Date.now());
       db.handle.raw

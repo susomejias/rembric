@@ -17,7 +17,7 @@
 import { type DbHandle, createDb } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
-import { MemoryService } from '../services/memory.js';
+import { deriveTitle, MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
 import { projectScope } from '../services/scope.js';
@@ -204,6 +204,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
       memorySvc.save(
         {
           type: cluster.type,
+          title: deriveTitle(content),
           content,
           tags: [cluster.topicKey],
           topicKey: cluster.topicKey,
@@ -252,7 +253,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
       deps.handle.db,
       () => past,
     );
-    backdated.save({ type: s.type, content: s.content }, scope);
+    backdated.save({ type: s.type, title: deriveTitle(s.content), content: s.content }, scope);
     memoryCount += 1;
   }
 
@@ -319,6 +320,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   memorySvc.save(
     {
       type: 'feedback',
+      title: 'Log WAL state first when debugging flaky tests',
       content: 'When debugging a flaky test, always log the WAL state first.',
       tags: ['debug-tips'],
       topicKey: 'debug-tips',
@@ -328,6 +330,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const m2 = memorySvc.save(
     {
       type: 'feedback',
+      title: 'Read the SQLite WAL first when debugging flaky tests',
       content: 'Debugging flaky tests starts with reading the SQLite WAL — most ghosts hide there.',
       tags: ['debug-tips'],
       topicKey: 'debug-tips',
@@ -339,6 +342,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const m3 = memorySvc.save(
     {
       type: 'feedback',
+      title: 'Dump journal_mode + busy_timeout pragmas for flaky tests',
       content: 'For flaky tests, dump the journal_mode + busy_timeout pragmas first.',
       tags: ['debug-tips'],
       topicKey: 'debug-tips-variant',
@@ -392,6 +396,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     const src = memorySvc.save(
       {
         type: 'reference',
+        title: deriveTitle(pair.source),
         content: pair.source,
         tags: [pair.topicKey],
         topicKey: `${pair.topicKey}-src`,
@@ -401,6 +406,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     const tgt = memorySvc.save(
       {
         type: 'reference',
+        title: deriveTitle(pair.target),
         content: pair.target,
         tags: [pair.topicKey],
         topicKey: `${pair.topicKey}-tgt`,

@@ -120,6 +120,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     memory.save(
       {
         type: 'project',
+        title: 'a project-scoped memory of foo',
         content: 'a project-scoped memory of foo',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -152,6 +153,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     const target = memory.save(
       {
         type: 'project',
+        title: 'a timeline anchor in bar',
         content: 'a timeline anchor in bar',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -174,6 +176,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     memory.save(
       {
         type: 'project',
+        title: 'baz one',
         content: 'baz one',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -182,6 +185,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     memory.save(
       {
         type: 'reference',
+        title: 'baz two',
         content: 'baz two',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -191,6 +195,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
     memory.save(
       {
         type: 'reference',
+        title: 'global noise that must not leak',
         content: 'global noise that must not leak',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -259,6 +264,7 @@ describe('scopeFromContext — fallback to SCOPE_GLOBAL', () => {
     memory.save(
       {
         type: 'reference',
+        title: 'a global note',
         content: 'a global note',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -281,6 +287,7 @@ describe('scopeFromContext — fallback to SCOPE_GLOBAL', () => {
     memory.save(
       {
         type: 'project',
+        title: 'admin-only memory',
         content: 'admin-only memory',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -315,6 +322,7 @@ describe('scopeFromContext — path-scoped connections override router', () => {
     memory.save(
       {
         type: 'project',
+        title: 'leftover memory that must not leak',
         content: 'leftover memory that must not leak',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -342,6 +350,7 @@ describe('scopeFromContext — path-scoped connections override router', () => {
     memory.save(
       {
         type: 'project',
+        title: 'pathy memory',
         content: 'pathy memory',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
@@ -350,6 +359,7 @@ describe('scopeFromContext — path-scoped connections override router', () => {
     memory.save(
       {
         type: 'project',
+        title: 'router-pinned memory',
         content: 'router-pinned memory',
         source: { tokenName: adminToken.name, agent: 'test' },
       },

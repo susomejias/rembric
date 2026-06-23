@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { EMBEDDING_DIMS, loadEmbedder } from './embedder.js';
+import { EMBEDDING_DIMS, embeddingInput, loadEmbedder } from './embedder.js';
+
+describe('embeddingInput', () => {
+  it('prepends the title to the content so the headline shapes the vector', () => {
+    expect(embeddingInput('Dashboard timezone fix', 'use formatTs helper')).toBe(
+      'Dashboard timezone fix\n\nuse formatTs helper',
+    );
+  });
+});
 
 /**
  * Real-model smoke test, guarding the transformers.js `NewModel →

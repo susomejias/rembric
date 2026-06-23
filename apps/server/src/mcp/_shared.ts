@@ -83,6 +83,7 @@ export function serializeMemory(m: Memory) {
   return {
     id: m.id,
     type: m.type,
+    title: m.title,
     content: m.content,
     status: m.status,
     createdAt: m.createdAt,

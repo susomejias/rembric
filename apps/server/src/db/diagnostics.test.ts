@@ -46,8 +46,8 @@ describe('db/diagnostics', () => {
     expect(countTableRows(t.handle, 'memory')).toBe(0);
     t.handle.raw
       .prepare(
-        `INSERT INTO memory (id, scope, project_id, type, content, tags, status, replaces, created_at, last_seen_at)
-         VALUES ('01TEST', 'global', NULL, 'project', 'diag test', '[]', 'active', '[]', 1, 1)`,
+        `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at, last_seen_at)
+         VALUES ('01TEST', 'global', NULL, 'project', 'diag test', 'diag test', '[]', 'active', '[]', 1, 1)`,
       )
       .run();
     expect(countTableRows(t.handle, 'memory')).toBe(1);

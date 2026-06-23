@@ -25,6 +25,15 @@ import {
 
 import { scopeWhere } from './scope-clause.js';
 
+// BM25 column weights for the interactive search lexical branch, in
+// `memory_fts` declaration order (content, tags, title). A title hit is a
+// strong relevance signal, so title is weighted above content. Save-time
+// candidate detection deliberately keeps default (unweighted) ranking so its
+// calibrated FTS_THRESHOLD is undisturbed.
+const FTS_WEIGHT_CONTENT = 1.0;
+const FTS_WEIGHT_TAGS = 1.0;
+const FTS_WEIGHT_TITLE = 2.0;
+
 export interface FindActiveByScopeOpts {
   scope: MemoryScope;
   projectId?: string | null;
@@ -111,6 +120,14 @@ export class MemoryRepository {
   /**
    * BM25 FTS5 candidate search for save-time detection: active in-scope
    * rows matching `matchExpr`, excluding the saved row and its links.
+   *
+   * Deliberately ordered by the DEFAULT (unweighted) `rank`, unlike the
+   * interactive `searchBm25Ids` (which applies the FTS_WEIGHT_* title boost):
+   * the save-time `FTS_THRESHOLD` was calibrated on unweighted BM25, so
+   * reweighting here would silently de-calibrate candidate surfacing. (The
+   * MATCH does now span the `title` column too, so a saved row's content tokens
+   * can match an existing row's title — a small, intentional recall widening;
+   * the rank/threshold math is unchanged.)
    */
   searchBm25Candidates(opts: {
     matchExpr: string;
@@ -119,10 +136,10 @@ export class MemoryRepository {
     projectId: string | null;
     excludeIds: string[];
     limit: number;
-  }): { id: string; rank: number; content: string }[] {
-    return this.db.all<{ id: string; rank: number; content: string }>(
+  }): { id: string; rank: number; title: string; content: string }[] {
+    return this.db.all<{ id: string; rank: number; title: string; content: string }>(
       sql`
-        SELECT m.id AS id, memory_fts.rank AS rank, m.content AS content
+        SELECT m.id AS id, memory_fts.rank AS rank, m.title AS title, m.content AS content
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
@@ -297,7 +314,7 @@ export class MemoryRepository {
           AND m.status = ${opts.status}
           ${typeClause}
           ${tagClause}
-        ORDER BY memory_fts.rank
+        ORDER BY bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE})
         LIMIT ${opts.limit}
       `,
     );

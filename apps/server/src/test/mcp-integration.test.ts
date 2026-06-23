@@ -290,6 +290,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'feedback',
+        title: 'roundtrip marker indicator',
         content: 'roundtripmarkeraaa indicator',
         tags: ['integration'],
       },
@@ -332,6 +333,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'reference',
+        title: 'should be rejected',
         content: 'should-be-rejected',
       },
     })) as ToolResult;
@@ -365,6 +367,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'feedback',
+        title: 'lifecycle saved row',
         content: 'lifecycle-saved-row',
       },
     })) as ToolResult;
@@ -438,7 +441,12 @@ describe('MCP protocol conformance', () => {
     for (let i = 0; i < 12; i++) {
       await client.callTool({
         name: 'memory.save',
-        arguments: { scope: 'global', type: 'project', content: `ctx-default-cap-marker-${i}` },
+        arguments: {
+          scope: 'global',
+          type: 'project',
+          title: `ctx default cap marker ${i}`,
+          content: `ctx-default-cap-marker-${i}`,
+        },
       });
     }
     const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
@@ -462,6 +470,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'feedback',
+        title: 'backfill useful row',
         content: 'backfill-useful-row',
       },
     });
@@ -571,7 +580,12 @@ describe('MCP protocol conformance', () => {
     // memory.save auto-stamps the active session_id, so no summary is written.
     const saved = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'anchor row, no session summary' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'anchor row, no session summary',
+        content: 'anchor row, no session summary',
+      },
     })) as ToolResult;
     expect(saved.isError).toBeFalsy();
 
@@ -629,7 +643,12 @@ describe('MCP protocol conformance', () => {
     // Content-bearing via an anchored memory; never summarized with a title → placeholder stands.
     await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'anchor row, placeholder title' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'anchor row, placeholder title',
+        content: 'anchor row, placeholder title',
+      },
     });
 
     const ctx = (await client.callTool({
@@ -763,6 +782,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'project',
+        title: 'auth model: JWT',
         content: 'auth model: JWT',
         topic_key: 'decision/auth-model',
       },
@@ -775,6 +795,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'project',
+        title: 'auth model: opaque tokens',
         content: 'auth model: opaque tokens',
         topic_key: 'decision/auth-model',
       },
@@ -804,6 +825,7 @@ describe('MCP protocol conformance', () => {
         arguments: {
           scope: 'global',
           type: 'feedback',
+          title: 'fruitcake bicycle aluminum',
           content: 'fruitcake bicycle aluminum windowpane horizon',
         },
       });
@@ -814,6 +836,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'feedback',
+        title: 'fruitcake bicycle aluminum',
         content: 'fruitcake bicycle aluminum windowpane horizon',
       },
     })) as ToolResult;
@@ -853,11 +876,21 @@ describe('MCP protocol conformance', () => {
     const client = await connect();
     const a = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'compare-test-aaa' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'compare test aaa',
+        content: 'compare-test-aaa',
+      },
     })) as ToolResult;
     const b = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'compare-test-bbb' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'compare test bbb',
+        content: 'compare-test-bbb',
+      },
     })) as ToolResult;
     const aId = (readJson(a) as { id: string }).id;
     const bId = (readJson(b) as { id: string }).id;
@@ -926,6 +959,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         scope: 'global',
         type: 'feedback',
+        title: 'no session row marker',
         content: 'no-session-row-marker',
       },
     })) as ToolResult;
@@ -972,11 +1006,21 @@ describe('MCP protocol conformance', () => {
 
     const saveOne = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'pending-source-marker' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'pending source marker',
+        content: 'pending-source-marker',
+      },
     })) as ToolResult;
     const saveTwo = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'feedback', content: 'pending-target-marker' },
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'pending target marker',
+        content: 'pending-target-marker',
+      },
     })) as ToolResult;
     const sourceId = (readJson(saveOne) as { id: string }).id;
     const targetId = (readJson(saveTwo) as { id: string }).id;
@@ -1039,7 +1083,12 @@ describe('MCP protocol conformance', () => {
 
     const saved = (await client.callTool({
       name: 'memory.save',
-      arguments: { scope: 'global', type: 'project', content: 'needsreviewmarkeraaa goal' },
+      arguments: {
+        scope: 'global',
+        type: 'project',
+        title: 'needs review marker goal',
+        content: 'needsreviewmarkeraaa goal',
+      },
     })) as ToolResult;
     const id = (readJson(saved) as { id: string }).id;
 

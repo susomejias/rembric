@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { deriveTitle } from '../../services/memory.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memoryRelations, type NewMemoryRelation } from '../schema/memory-relations.js';
 import { memory, type NewMemory } from '../schema/memory.js';
@@ -9,6 +10,7 @@ import { RelationsRepository } from './relations-repository.js';
 function mem(id: string, content: string): NewMemory {
   return {
     id,
+    title: deriveTitle(content),
     content,
     scope: 'global',
     projectId: null,

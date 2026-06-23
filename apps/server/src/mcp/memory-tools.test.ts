@@ -81,7 +81,12 @@ describe('memory.save — strict path scoping', () => {
   it("rejects scope='global' on a path-scoped connection with code 'scope_locked'", async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
-        handlers.save({ scope: 'global', type: 'user', content: 'developer of full-stack' }),
+        handlers.save({
+          scope: 'global',
+          type: 'user',
+          title: 'developer of full-stack',
+          content: 'developer of full-stack',
+        }),
       ),
     );
     expect(isErrorResponse(r)).toBe(true);
@@ -92,7 +97,7 @@ describe('memory.save — strict path scoping', () => {
 
   it("rejects scope='project' on an unscoped connection with code 'project_required'", async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.save({ scope: 'project', type: 'user', content: 'x' })),
+      Promise.resolve(handlers.save({ scope: 'project', type: 'user', title: 'x', content: 'x' })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('project_required');
@@ -101,7 +106,13 @@ describe('memory.save — strict path scoping', () => {
   it('saves under the bound project regardless of the input scope', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
-        handlers.save({ scope: 'project', type: 'user', content: 'prefers pnpm', tags: [] }),
+        handlers.save({
+          scope: 'project',
+          type: 'user',
+          title: 'prefers pnpm',
+          content: 'prefers pnpm',
+          tags: [],
+        }),
       ),
     );
     expect(isErrorResponse(r)).toBeFalsy();
@@ -113,7 +124,9 @@ describe('memory.save — strict path scoping', () => {
 
   it('on unscoped connections still saves globals normally', async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.save({ scope: 'global', type: 'user', content: 'dark mode' })),
+      Promise.resolve(
+        handlers.save({ scope: 'global', type: 'user', title: 'dark mode', content: 'dark mode' }),
+      ),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     const { id } = parseText<{ id: string }>(r);
@@ -121,13 +134,61 @@ describe('memory.save — strict path scoping', () => {
     expect(persisted?.scope).toBe('global');
     expect(persisted?.projectId).toBeNull();
   });
+
+  it('rejects an empty title with code invalid_input', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        handlers.save({ scope: 'project', type: 'user', title: '', content: 'has content' }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('invalid_input');
+  });
+});
+
+describe('memory.title — read payloads expose the saved title', () => {
+  it('memory.search returns rows whose title equals what was saved', async () => {
+    memory.save(
+      { type: 'user', title: 'pnpm is the package manager', content: 'we use pnpm here' },
+      projectScope(projectA.id),
+    );
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.search({})),
+    );
+    const { memories } = parseText<{ memories: { title: string; content: string }[] }>(r);
+    const row = memories.find((m) => m.content === 'we use pnpm here');
+    expect(row?.title).toBe('pnpm is the package manager');
+  });
+
+  it('memory.get returns memory.title and head.title for a saved memory', async () => {
+    const saved = memory.save(
+      { type: 'user', title: 'prefers dark mode', content: 'always dark theme' },
+      projectScope(projectA.id),
+    );
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.get({ id: saved.id })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const payload = parseText<{ memory: { title: string }; head: { title: string } }>(r);
+    expect(payload.memory.title).toBe('prefers dark mode');
+    expect(payload.head.title).toBe('prefers dark mode');
+  });
 });
 
 describe('memory.search — strict path scoping', () => {
   beforeEach(() => {
-    memory.save({ type: 'user', content: 'global preference one' }, SCOPE_GLOBAL);
-    memory.save({ type: 'user', content: 'project-A specific' }, projectScope(projectA.id));
-    memory.save({ type: 'user', content: 'project-B specific' }, projectScope(projectB.id));
+    memory.save(
+      { type: 'user', title: 'global preference one', content: 'global preference one' },
+      SCOPE_GLOBAL,
+    );
+    memory.save(
+      { type: 'user', title: 'project-A specific', content: 'project-A specific' },
+      projectScope(projectA.id),
+    );
+    memory.save(
+      { type: 'user', title: 'project-B specific', content: 'project-B specific' },
+      projectScope(projectB.id),
+    );
   });
 
   it('path-scoped: returns only memories in the bound project — no globals leak', async () => {
@@ -161,9 +222,15 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
   let projectBId: string;
 
   beforeEach(() => {
-    globalId = memory.save({ type: 'user', content: 'global' }, SCOPE_GLOBAL).id;
-    projectAId = memory.save({ type: 'user', content: 'A' }, projectScope(projectA.id)).id;
-    projectBId = memory.save({ type: 'user', content: 'B' }, projectScope(projectB.id)).id;
+    globalId = memory.save({ type: 'user', title: 'global', content: 'global' }, SCOPE_GLOBAL).id;
+    projectAId = memory.save(
+      { type: 'user', title: 'A', content: 'A' },
+      projectScope(projectA.id),
+    ).id;
+    projectBId = memory.save(
+      { type: 'user', title: 'B', content: 'B' },
+      projectScope(projectB.id),
+    ).id;
   });
 
   it('path-scoped: get(global id) → not_found', async () => {
@@ -282,6 +349,7 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
         routerHandlers.save({
           scope: 'project',
           type: 'user',
+          title: 'router-activated save',
           content: 'router-activated save',
         }),
       ),
@@ -296,7 +364,12 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
   it('memory.save without router activation still returns project_required', async () => {
     const r = await runWithContext(unscopedContextWithSession(), () =>
       Promise.resolve(
-        routerHandlers.save({ scope: 'project', type: 'user', content: 'no project' }),
+        routerHandlers.save({
+          scope: 'project',
+          type: 'user',
+          title: 'no project',
+          content: 'no project',
+        }),
       ),
     );
     expect(isErrorResponse(r)).toBe(true);
@@ -304,8 +377,11 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
   });
 
   it('memory.search returns the router-activated project memories, not globals', async () => {
-    memory.save({ type: 'user', content: 'global only' }, SCOPE_GLOBAL);
-    const saved = memory.save({ type: 'user', content: 'in project A' }, projectScope(projectA.id));
+    memory.save({ type: 'user', title: 'global only', content: 'global only' }, SCOPE_GLOBAL);
+    const saved = memory.save(
+      { type: 'user', title: 'in project A', content: 'in project A' },
+      projectScope(projectA.id),
+    );
     router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
     const r = await runWithContext(unscopedContextWithSession(), () =>
       Promise.resolve(routerHandlers.search({})),
@@ -318,7 +394,10 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
   });
 
   it('memory.get on a project id resolves once the router has activated that project', async () => {
-    const saved = memory.save({ type: 'user', content: 'gettable' }, projectScope(projectA.id));
+    const saved = memory.save(
+      { type: 'user', title: 'gettable', content: 'gettable' },
+      projectScope(projectA.id),
+    );
     router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
     const r = await runWithContext(unscopedContextWithSession(), () =>
       Promise.resolve(routerHandlers.get({ id: saved.id })),
@@ -404,6 +483,7 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
       routerHandlers.save({
         scope: 'project',
         type: 'project',
+        title: 'eager-discovery save',
         content: 'eager-discovery save',
       }),
     );
@@ -419,7 +499,11 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
 
   it('memory.search awaits the same in-flight discovery promise', async () => {
     const saved = memory.save(
-      { type: 'user', content: 'visible only with project scope' },
+      {
+        type: 'user',
+        title: 'visible only with project scope',
+        content: 'visible only with project scope',
+      },
       projectScope(projectA.id),
     );
 
@@ -488,6 +572,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       fallbackHandlers.save({
         scope: 'project',
         type: 'project',
+        title: 'memory saved after HTTP session create',
         content: 'memory saved after HTTP session create',
       }),
     );
@@ -517,6 +602,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       fallbackHandlers.save({
         scope: 'project',
         type: 'project',
+        title: 'attaches to newer',
         content: 'attaches to newer',
       }),
     );
@@ -530,6 +616,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       fallbackHandlers.save({
         scope: 'project',
         type: 'project',
+        title: 'no session active',
         content: 'no session active',
       }),
     );
@@ -566,6 +653,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       handlersWithRouter.save({
         scope: 'project',
         type: 'project',
+        title: 'router precedence',
         content: 'router precedence',
       }),
     );

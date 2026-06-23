@@ -38,14 +38,21 @@ describe('runtime invariants — status FSM and scope discipline', () => {
       .values({ id: runId, startedAt: new Date(), scope: 'global' })
       .run();
 
-    const a = svc.save({ type: 'feedback', content: `merge-A-${runId}` }, SCOPE_GLOBAL);
-    const b = svc.save({ type: 'feedback', content: `merge-B-${runId}` }, SCOPE_GLOBAL);
+    const a = svc.save(
+      { type: 'feedback', title: `merge-A-${runId}`, content: `merge-A-${runId}` },
+      SCOPE_GLOBAL,
+    );
+    const b = svc.save(
+      { type: 'feedback', title: `merge-B-${runId}`, content: `merge-B-${runId}` },
+      SCOPE_GLOBAL,
+    );
     const mergedId = `merged-${runId}`;
     repos.memory.insert({
       id: mergedId,
       scope: 'global',
       projectId: null,
       type: 'feedback',
+      title: `merged-${runId}`,
       content: `merged-${runId}`,
       tags: [],
       status: 'active',
@@ -70,7 +77,10 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
   it('13.8 active → archived', () => {
     const svc = new MemoryService(createRepositories(testDb.handle.db), testDb.handle.db);
-    const m = svc.save({ type: 'feedback', content: 'fsm-test-1' }, SCOPE_GLOBAL);
+    const m = svc.save(
+      { type: 'feedback', title: 'fsm-test-1', content: 'fsm-test-1' },
+      SCOPE_GLOBAL,
+    );
     expect(m.status).toBe('active');
 
     svc.archive(m.id, SCOPE_GLOBAL);

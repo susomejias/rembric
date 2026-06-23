@@ -89,7 +89,9 @@ describe('memory.save — project_suggestion_pending gate', () => {
   it('fires when scope defaults to project, no project pinned, and a suggestion is unminted', async () => {
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
     const r = await runWithContext(makeContext(), () =>
-      Promise.resolve(saveHandlers.save({ scope: 'project', type: 'project', content: 'x' })),
+      Promise.resolve(
+        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
+      ),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
@@ -100,7 +102,14 @@ describe('memory.save — project_suggestion_pending gate', () => {
   it("does NOT fire when the agent passes scope:'global' explicitly", async () => {
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
     const r = await runWithContext(makeContext(), () =>
-      Promise.resolve(saveHandlers.save({ scope: 'global', type: 'project', content: 'global-x' })),
+      Promise.resolve(
+        saveHandlers.save({
+          scope: 'global',
+          type: 'project',
+          title: 'global-x',
+          content: 'global-x',
+        }),
+      ),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
@@ -111,7 +120,9 @@ describe('memory.save — project_suggestion_pending gate', () => {
     projects.create({ slug: 'acme-research' });
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
     const r = await runWithContext(makeContext(), () =>
-      Promise.resolve(saveHandlers.save({ scope: 'project', type: 'project', content: 'x' })),
+      Promise.resolve(
+        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
+      ),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
@@ -124,7 +135,9 @@ describe('memory.save — project_suggestion_pending gate', () => {
     const proj = projects.create({ slug: 'path-proj' });
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['unrelated-suggestion']);
     const r = await runWithContext(makeContext({ project: proj, requestedSlug: 'path-proj' }), () =>
-      Promise.resolve(saveHandlers.save({ scope: 'project', type: 'project', content: 'x' })),
+      Promise.resolve(
+        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
+      ),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();

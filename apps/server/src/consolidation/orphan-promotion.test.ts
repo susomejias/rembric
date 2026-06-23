@@ -55,8 +55,14 @@ function backdate(judgmentId: string, msAgo: number): void {
 
 describe('deadline orphaning', () => {
   it('orphans a pending row older than the deadline and journals it', () => {
-    const a = memory.save({ type: 'feedback', content: 'old fact' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', content: 'new fact' }, SCOPE_GLOBAL);
+    const a = memory.save(
+      { type: 'feedback', title: 'old fact', content: 'old fact' },
+      SCOPE_GLOBAL,
+    );
+    const b = memory.save(
+      { type: 'feedback', title: 'new fact', content: 'new fact' },
+      SCOPE_GLOBAL,
+    );
     const pending = relations.createPending({ sourceId: b.id, targetId: a.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 
@@ -83,8 +89,8 @@ describe('deadline orphaning', () => {
   });
 
   it('does not touch pending rows younger than the deadline', () => {
-    const a = memory.save({ type: 'feedback', content: 'a' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', content: 'b' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'a', content: 'a' }, SCOPE_GLOBAL);
+    const b = memory.save({ type: 'feedback', title: 'b', content: 'b' }, SCOPE_GLOBAL);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     // No backdate — well within the window.
 
@@ -99,8 +105,8 @@ describe('deadline orphaning', () => {
   });
 
   it('undoRun restores an orphaned row to pending', () => {
-    const a = memory.save({ type: 'feedback', content: 'x' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', content: 'y' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'x', content: 'x' }, SCOPE_GLOBAL);
+    const b = memory.save({ type: 'feedback', title: 'y', content: 'y' }, SCOPE_GLOBAL);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 
@@ -125,8 +131,8 @@ describe('deadline orphaning', () => {
   });
 
   it('is idempotent: a second forced run orphans nothing new', () => {
-    const a = memory.save({ type: 'feedback', content: 'p' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', content: 'q' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'p', content: 'p' }, SCOPE_GLOBAL);
+    const b = memory.save({ type: 'feedback', title: 'q', content: 'q' }, SCOPE_GLOBAL);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 

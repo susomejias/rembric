@@ -7,7 +7,7 @@ import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory } from '../db/schema/memory.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { MemoryService } from './memory.js';
+import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { RelationsService } from './relations.js';
 import { findSaveTimeCandidates } from './save-time-candidates.js';
@@ -30,7 +30,12 @@ afterEach(() => db.cleanup());
 describe('topic_key upsert path', () => {
   it('first save with a topic_key creates a fresh active row', () => {
     const { memory: m } = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'auth via JWT', topicKey: 'decision/auth-model' },
+      {
+        type: 'project',
+        title: 'Auth via JWT',
+        content: 'auth via JWT',
+        topicKey: 'decision/auth-model',
+      },
       SCOPE_GLOBAL,
     );
     expect(m.topicKey).toBe('decision/auth-model');
@@ -40,11 +45,21 @@ describe('topic_key upsert path', () => {
 
   it('second save with the same topic_key auto-supersedes the previous row', () => {
     const first = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'auth via JWT', topicKey: 'decision/auth-model' },
+      {
+        type: 'project',
+        title: 'Auth via JWT',
+        content: 'auth via JWT',
+        topicKey: 'decision/auth-model',
+      },
       SCOPE_GLOBAL,
     );
     const second = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'auth via opaque tokens', topicKey: 'decision/auth-model' },
+      {
+        type: 'project',
+        title: 'Auth via opaque tokens',
+        content: 'auth via opaque tokens',
+        topicKey: 'decision/auth-model',
+      },
       SCOPE_GLOBAL,
     );
 
@@ -66,11 +81,11 @@ describe('topic_key upsert path', () => {
     const scopeB: Scope = projectScope(projB.id);
 
     const a = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'A:auth', topicKey: 'decision/auth-model' },
+      { type: 'project', title: 'A:auth', content: 'A:auth', topicKey: 'decision/auth-model' },
       scopeA,
     );
     const b = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'B:auth', topicKey: 'decision/auth-model' },
+      { type: 'project', title: 'B:auth', content: 'B:auth', topicKey: 'decision/auth-model' },
       scopeB,
     );
 
@@ -84,13 +99,16 @@ describe('topic_key upsert path', () => {
   it('topic_key > 128 chars is rejected', () => {
     const long = 'x'.repeat(129);
     expect(() =>
-      memorySvc.saveWithTopicKey({ type: 'project', content: 'x', topicKey: long }, SCOPE_GLOBAL),
+      memorySvc.saveWithTopicKey(
+        { type: 'project', title: 'Long topic key', content: 'x', topicKey: long },
+        SCOPE_GLOBAL,
+      ),
     ).toThrow(/128/);
   });
 
   it('empty topic_key is normalized to null', () => {
     const { memory: m } = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'x', topicKey: '   ' },
+      { type: 'project', title: 'Empty topic key', content: 'x', topicKey: '   ' },
       SCOPE_GLOBAL,
     );
     expect(m.topicKey).toBeNull();
@@ -100,7 +118,12 @@ describe('topic_key upsert path', () => {
     const N = 25;
     for (let i = 0; i < N; i++) {
       memorySvc.saveWithTopicKey(
-        { type: 'project', content: `v${i}`, topicKey: 'decision/auth-model' },
+        {
+          type: 'project',
+          title: `Version ${i}`,
+          content: `v${i}`,
+          topicKey: 'decision/auth-model',
+        },
         SCOPE_GLOBAL,
       );
     }
@@ -123,11 +146,19 @@ describe('topic_key upsert path', () => {
 describe('findSaveTimeCandidates', () => {
   it('returns FTS candidates above the threshold scoped to the same (scope, project)', () => {
     const a = memorySvc.save(
-      { type: 'feedback', content: 'use two-space indentation always' },
+      {
+        type: 'feedback',
+        title: 'Use two-space indentation always',
+        content: 'use two-space indentation always',
+      },
       SCOPE_GLOBAL,
     );
     const b = memorySvc.save(
-      { type: 'feedback', content: 'use two-space indentation always with single quotes' },
+      {
+        type: 'feedback',
+        title: 'Use two-space indentation with single quotes',
+        content: 'use two-space indentation always with single quotes',
+      },
       SCOPE_GLOBAL,
     );
 
@@ -139,10 +170,21 @@ describe('findSaveTimeCandidates', () => {
 
   it('respects perSaveMax', () => {
     for (let i = 0; i < 10; i++) {
-      memorySvc.save({ type: 'feedback', content: `similar marker keyword ${i}` }, SCOPE_GLOBAL);
+      memorySvc.save(
+        {
+          type: 'feedback',
+          title: `Similar marker keyword ${i}`,
+          content: `similar marker keyword ${i}`,
+        },
+        SCOPE_GLOBAL,
+      );
     }
     const recent = memorySvc.save(
-      { type: 'feedback', content: 'similar marker keyword extra' },
+      {
+        type: 'feedback',
+        title: 'Similar marker keyword extra',
+        content: 'similar marker keyword extra',
+      },
       SCOPE_GLOBAL,
     );
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), recent, {
@@ -156,12 +198,16 @@ describe('findSaveTimeCandidates', () => {
     const scopeA: Scope = projectScope(projA.id);
 
     const _global = memorySvc.save(
-      { type: 'feedback', content: 'cross-scope marker' },
+      { type: 'feedback', title: 'Cross-scope marker', content: 'cross-scope marker' },
       SCOPE_GLOBAL,
     );
     void _global;
     const saved = memorySvc.save(
-      { type: 'feedback', content: 'cross-scope marker in project a' },
+      {
+        type: 'feedback',
+        title: 'Cross-scope marker in project a',
+        content: 'cross-scope marker in project a',
+      },
       scopeA,
     );
 
@@ -174,11 +220,21 @@ describe('findSaveTimeCandidates', () => {
 
   it('skips rows already linked via the just-saved row replaces[]', () => {
     const first = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'auth model JWT', topicKey: 'decision/auth' },
+      {
+        type: 'project',
+        title: 'Auth model JWT',
+        content: 'auth model JWT',
+        topicKey: 'decision/auth',
+      },
       SCOPE_GLOBAL,
     );
     const second = memorySvc.saveWithTopicKey(
-      { type: 'project', content: 'auth model opaque tokens', topicKey: 'decision/auth' },
+      {
+        type: 'project',
+        title: 'Auth model opaque tokens',
+        content: 'auth model opaque tokens',
+        topicKey: 'decision/auth',
+      },
       SCOPE_GLOBAL,
     );
     // second.memory.replaces contains first.memory.id; candidate
@@ -206,10 +262,12 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
           try {
             const svc = new MemoryService(createRepositories(fresh.handle.db), fresh.handle.db);
             for (const op of ops) {
+              const content = op.content.trim() || 'x';
               svc.saveWithTopicKey(
                 {
                   type: 'project',
-                  content: op.content.trim() || 'x',
+                  title: deriveTitle(content),
+                  content,
                   topicKey: `decision/${op.key}`,
                 },
                 SCOPE_GLOBAL,
@@ -234,8 +292,8 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
 
 describe('RelationsService.compare — idempotency + cross-scope rejection', () => {
   it('compare twice on the same pair updates the existing row in place', () => {
-    const a = memorySvc.save({ type: 'feedback', content: 'a' }, SCOPE_GLOBAL);
-    const b = memorySvc.save({ type: 'feedback', content: 'b' }, SCOPE_GLOBAL);
+    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
+    const b = memorySvc.save({ type: 'feedback', title: 'Memory b', content: 'b' }, SCOPE_GLOBAL);
 
     const first = relations.compare({
       sourceId: a.id,
@@ -265,8 +323,11 @@ describe('RelationsService.compare — idempotency + cross-scope rejection', () 
 
   it('compare across scopes is rejected with cross_scope_relation', () => {
     const projA = projects.create({ slug: 'proj-a' });
-    const a = memorySvc.save({ type: 'feedback', content: 'a' }, SCOPE_GLOBAL);
-    const b = memorySvc.save({ type: 'feedback', content: 'b' }, projectScope(projA.id));
+    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
+    const b = memorySvc.save(
+      { type: 'feedback', title: 'Memory b', content: 'b' },
+      projectScope(projA.id),
+    );
 
     expect(() =>
       relations.compare({
@@ -280,8 +341,8 @@ describe('RelationsService.compare — idempotency + cross-scope rejection', () 
   });
 
   it('double-judge of the same pending row throws conflict', () => {
-    const a = memorySvc.save({ type: 'feedback', content: 'a' }, SCOPE_GLOBAL);
-    const b = memorySvc.save({ type: 'feedback', content: 'b' }, SCOPE_GLOBAL);
+    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
+    const b = memorySvc.save({ type: 'feedback', title: 'Memory b', content: 'b' }, SCOPE_GLOBAL);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
 
     relations.judge(pending.judgmentId, {

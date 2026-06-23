@@ -4,7 +4,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
-import type { MemoryService } from '../services/memory.js';
+import { deriveTitle, type MemoryService } from '../services/memory.js';
 
 import { resolveSessionId, scopeFromContext } from './_shared.js';
 import { errToMcp } from './errors.js';
@@ -109,6 +109,7 @@ function handleCapturePassive(
     const m = deps.memory.save(
       {
         type: 'reference',
+        title: deriveTitle(content),
         content,
         source: { tokenName: ctx.token.name, agent: 'passive' },
         sessionId: explicitSession,

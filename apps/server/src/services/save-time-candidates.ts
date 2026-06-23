@@ -44,6 +44,7 @@ export interface SaveCandidate {
   similarity: number;
   /** Which detector surfaced this match. */
   source: 'vec' | 'fts';
+  title: string;
   snippet: string;
 }
 
@@ -69,6 +70,7 @@ export function findSaveTimeCandidates(
       targetId: r.id,
       similarity: 1 - Math.max(0, Math.min(1, r.distance)),
       source: 'vec' as const,
+      title: r.title,
       snippet: snippet(r.content, 200),
     }))
     .filter((c) => c.similarity >= VEC_THRESHOLD);
@@ -93,6 +95,7 @@ export function findSaveTimeCandidates(
           targetId: r.id,
           similarity: sim,
           source: 'fts',
+          title: r.title,
           snippet: snippet(r.content, 200),
         });
       }
