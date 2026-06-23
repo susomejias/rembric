@@ -128,7 +128,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           <td>${scopePill(m.scope)}</td>
           <td>${projectLabel}</td>
           <td>${m.type}</td>
-          <td><a href="/dashboard/memories/${m.id}">${truncate(m.content, 100)}</a></td>
+          <td><a href="/dashboard/memories/${m.id}">${truncate(m.title, 100)}</a></td>
           <td>${statusPill(m.status)}</td>
           <td>
             ${reviewById.get(m.id) === 'needs_review'
@@ -229,7 +229,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               <th>scope</th>
               <th>project</th>
               <th>type</th>
-              <th>content</th>
+              <th>title</th>
               <th>status</th>
               <th>review</th>
               <th>created</th>
@@ -323,7 +323,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                 <thead>
                   <tr>
                     <th>status</th>
-                    <th>content</th>
+                    <th>title</th>
                     <th>created</th>
                   </tr>
                 </thead>
@@ -333,7 +333,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                       <tr data-href="/dashboard/memories/${p.id}">
                         <td>${statusPill(p.status)}</td>
                         <td>
-                          <a href="/dashboard/memories/${p.id}">${truncate(p.content, 120)}</a>
+                          <a href="/dashboard/memories/${p.id}">${truncate(p.title, 120)}</a>
                         </td>
                         <td class="muted">${formatTs(p.createdAt)}</td>
                       </tr>
@@ -352,9 +352,9 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const body = html`
       ${viewHead({
         num: '02',
-        title: `Rembric Memory ${shortId(row.id)}.`,
-        hl: 'Rembric',
+        title: row.title,
         meta: [
+          { k: 'ID', v: shortId(row.id) },
           { k: 'STATUS', v: row.status.toUpperCase() },
           { k: 'SCOPE', v: row.scope.toUpperCase() },
         ],

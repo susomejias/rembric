@@ -94,7 +94,7 @@ Every MCP tool SHALL declare its input schema with zod, and the SDK shall reject
 
 ### Requirement: memory.save MUST accept a `topic_key` and surface candidates
 
-The `memory.save` tool's input schema SHALL gain an optional `topic_key?: string` argument (max length 128, NUL-byte rejected). The response shape SHALL be extended with two additional fields: `candidates: Array<Candidate>` (always present, empty when none found) and `judgmentRequired: boolean`. Existing fields (`id`, `status`, `createdAt`) are unchanged.
+The `memory.save` tool's input schema SHALL require a `title: string` argument (1–100 chars; empty or over-long rejected with `invalid_input`) and SHALL gain an optional `topic_key?: string` argument (max length 128, NUL-byte rejected). The response shape SHALL be extended with two additional fields: `candidates: Array<Candidate>` (always present, empty when none found) and `judgmentRequired: boolean`. Existing fields (`id`, `status`, `createdAt`) are unchanged.
 
 The `Candidate` type:
 
@@ -102,6 +102,7 @@ The `Candidate` type:
 {
   judgmentId: string;
   targetId: string;
+  title: string; // the candidate's title
   snippet: string; // first ~200 chars of the candidate's content
   similarity: number; // 0..1, max(vec, fts) normalized
   source: 'vec' | 'fts'; // which detector surfaced it
@@ -110,19 +111,24 @@ The `Candidate` type:
 
 #### Scenario: memory.save with no `topic_key` and zero candidates
 
-- **WHEN** `memory.save({type, content})` is called and no existing memory matches the candidate-detection thresholds
+- **WHEN** `memory.save({type, title, content})` is called and no existing memory matches the candidate-detection thresholds
 - **THEN** the response SHALL be `{ id, status: 'active', createdAt, candidates: [], judgmentRequired: false }`
+
+#### Scenario: memory.save without a title
+
+- **WHEN** `memory.save` is called without a `title`, or with a `title` that is empty or longer than 100 characters
+- **THEN** the call SHALL be rejected with code `invalid_input` and SHALL NOT insert any row
 
 #### Scenario: memory.save with `topic_key` upserting an existing row
 
-- **WHEN** `memory.save({type, content, topic_key: 'arch/auth'})` is called and an active memory with that key exists in scope
+- **WHEN** `memory.save({type, title, content, topic_key: 'arch/auth'})` is called and an active memory with that key exists in scope
 - **THEN** the response SHALL include the newly created `id`; the previous row SHALL be in `status = 'superseded'`; `candidates` MAY additionally include unrelated rows surfaced by FTS/vec; `judgmentRequired` reflects only the candidates surfaced via that path, not the topic-key upsert (which is already judged)
 
 #### Scenario: memory.save before the just-saved row has an embedding
 
 - **GIVEN** the just-saved row's embedding has not been computed yet (lazy model load or worker lag)
 - **WHEN** `memory.save` finds three FTS5 matches above threshold
-- **THEN** the response SHALL include three candidates each with `source: 'fts'`; no vec-sourced candidates SHALL appear
+- **THEN** the response SHALL include three candidates each with `source: 'fts'` and each carrying the candidate's `title`; no vec-sourced candidates SHALL appear
 
 #### Scenario: memory.save with `topic_key` longer than 128 chars
 
@@ -169,6 +175,25 @@ For an `active` memory, the response SHALL additionally include the derived revi
 - **GIVEN** an `active` memory M whose derived `reviewState` is `'fresh'`
 - **WHEN** an authenticated client calls `memory.get('M')`
 - **THEN** the response SHALL include `reviewState: 'fresh'` and `reviewAfter` (the non-null derived timestamp for M's type)
+
+### Requirement: Memory-returning MCP reads MUST expose the title
+
+Every MCP tool that returns a memory SHALL include that memory's `title` field in the returned shape: `memory.search` result rows, `memory.get` (the memory object, its `head`, and each `predecessors[]` entry), `memory.timeline` neighbors (`before[]`/`after[]`), and `memory.context` (`recentMemories[]`, plus a source/target title on `pendingJudgments[]`, and `needsReview[]`). The title SHALL be returned in full (titles are capped at 100 chars, so no snippet truncation applies).
+
+#### Scenario: memory.search rows carry a title
+
+- **WHEN** `memory.search` returns one or more memory rows
+- **THEN** each returned row SHALL include its `title`
+
+#### Scenario: memory.context surfaces titles
+
+- **WHEN** `memory.context` returns `recentMemories`, `pendingJudgments`, or `needsReview` entries
+- **THEN** each `recentMemories`/`needsReview` entry SHALL include its memory's `title`, and each `pendingJudgments` entry SHALL include the source and target memories' titles
+
+#### Scenario: memory.timeline neighbors carry a title
+
+- **WHEN** `memory.timeline` returns `before` or `after` neighbors
+- **THEN** each neighbor SHALL include its `title`
 
 ### Requirement: The `memory.confirm` tool MUST follow the supersedes chain
 
@@ -454,7 +479,7 @@ When the MCP server is constructed, its `instructions` field SHALL be populated 
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
-1. **A proactive save flow** — directing the agent to call `memory.save` the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Mechanical detail (error codes, scope semantics) MAY be deferred to the tool's own `description`.
+1. **A proactive save flow** — directing the agent to call `memory.save` (with the required short `title` headline plus the `content`) the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Mechanical detail (error codes, scope semantics) MAY be deferred to the tool's own `description`.
 2. **A recall flow** — directing the agent that when starting or resuming work, after a `/compact` event, or when asked "what did we do", it SHALL call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
 3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (≤2000 chars). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1000-character ceiling.
 4. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins).

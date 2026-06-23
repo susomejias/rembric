@@ -96,6 +96,7 @@ export interface CreateMcpServerOptions {
   /** Inline save-time embedding (see MemoryToolDeps.embedNow). */
   embedNow?: (
     memoryId: string,
+    title: string,
     content: string,
     scope: MemoryScope,
     projectId: string | null,
@@ -116,7 +117,7 @@ export interface CreateMcpServerOptions {
 }
 
 const SAVE_DESCRIPTION =
-  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, content. Optional: tags[], topic_key. If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
+  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key. If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 
 const SEARCH_DESCRIPTION =
   'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters. Returns a small default page (8); if every result looks relevant and you need more, prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (results are ranked by relevance over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory).';

@@ -626,8 +626,14 @@ describe('dashboard E2E', () => {
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
     const memSvc = new MemoryService(createRepositories(handle.db), handle.db);
-    const a = memSvc.save({ type: 'feedback', content: 'judged-row-source-content' }, SCOPE_GLOBAL);
-    const b = memSvc.save({ type: 'feedback', content: 'judged-row-target-content' }, SCOPE_GLOBAL);
+    const a = memSvc.save(
+      { type: 'feedback', title: 'judged-row-source-title', content: 'judged-row-source-content' },
+      SCOPE_GLOBAL,
+    );
+    const b = memSvc.save(
+      { type: 'feedback', title: 'judged-row-target-title', content: 'judged-row-target-content' },
+      SCOPE_GLOBAL,
+    );
     const rel = new RelationsService(createRepositories(handle.db), handle.db).compare({
       sourceId: a.id,
       targetId: b.id,
@@ -640,7 +646,7 @@ describe('dashboard E2E', () => {
     handle.close();
 
     // Populated state on home: row renders with the supersedes pill class
-    // and the source/target content wrapped in memory-detail links (no bare
+    // and the source/target title wrapped in memory-detail links (no bare
     // short ids).
     const after = await get(baseUrl, '/dashboard', jar);
     expect(after.status).toBe(200);
@@ -648,8 +654,8 @@ describe('dashboard E2E', () => {
     expect(afterBody).toContain('RECENT JUDGMENTS');
     expect(afterBody).not.toContain('NO JUDGMENTS YET');
     expect(afterBody).toContain('pill k-supersedes');
-    expect(afterBody).toContain('judged-row-source-content');
-    expect(afterBody).toContain('judged-row-target-content');
+    expect(afterBody).toContain('judged-row-source-title');
+    expect(afterBody).toContain('judged-row-target-title');
     expect(afterBody).toContain(`href="/dashboard/memories/${a.id}"`);
     expect(afterBody).toContain(`href="/dashboard/memories/${b.id}"`);
     expect(afterBody).toContain('agent');
@@ -666,15 +672,15 @@ describe('dashboard E2E', () => {
     expect(afterBody).not.toContain('PENDING JUDGMENTS');
 
     // Same seed appears on /dashboard/judgments: source → target column
-    // shows truncated content as memory-detail links, not bare short ids;
+    // shows truncated title as memory-detail links, not bare short ids;
     // the verdict cell uses the shared verdictPill helper (k-supersedes);
     // rows are whole-row clickable (data-href) with the real detail anchor
     // on the created cell — no id column.
     const list = await get(baseUrl, '/dashboard/judgments', jar);
     expect(list.status).toBe(200);
     const listBody = await list.text();
-    expect(listBody).toContain('judged-row-source-content');
-    expect(listBody).toContain('judged-row-target-content');
+    expect(listBody).toContain('judged-row-source-title');
+    expect(listBody).toContain('judged-row-target-title');
     expect(listBody).toContain(`href="/dashboard/memories/${a.id}"`);
     expect(listBody).toContain(`href="/dashboard/memories/${b.id}"`);
     expect(listBody).toContain('pill k-supersedes');
@@ -719,16 +725,20 @@ describe('dashboard E2E', () => {
     );
     const freshSvc = new MemoryService(createRepositories(handle.db), handle.db);
     const stale = staleSvc.save(
-      { type: 'project', content: 'reviewbadge-stale-marker' },
+      { type: 'project', title: 'reviewbadge-stale-marker', content: 'reviewbadge-stale-marker' },
       SCOPE_GLOBAL,
     );
     const fresh = freshSvc.save(
-      { type: 'project', content: 'reviewbadge-fresh-marker' },
+      { type: 'project', title: 'reviewbadge-fresh-marker', content: 'reviewbadge-fresh-marker' },
       SCOPE_GLOBAL,
     );
     // `reference` has no TTL → never needs review even when ancient.
     const ref = staleSvc.save(
-      { type: 'reference', content: 'reviewbadge-reference-marker' },
+      {
+        type: 'reference',
+        title: 'reviewbadge-reference-marker',
+        content: 'reviewbadge-reference-marker',
+      },
       SCOPE_GLOBAL,
     );
     handle.close();

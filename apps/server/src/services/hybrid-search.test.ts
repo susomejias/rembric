@@ -69,8 +69,14 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
   afterEach(() => db.cleanup());
 
   it('dense branch surfaces an exact semantic match (identical text → identical vector)', async () => {
-    mem.save({ type: 'user', content: 'alpha beta gamma' }, projectScope(projectId));
-    mem.save({ type: 'user', content: 'unrelated text here' }, projectScope(projectId));
+    mem.save(
+      { type: 'user', title: 'Alpha beta gamma', content: 'alpha beta gamma' },
+      projectScope(projectId),
+    );
+    mem.save(
+      { type: 'user', title: 'Unrelated text here', content: 'unrelated text here' },
+      projectScope(projectId),
+    );
     await embedAll();
     const results = await mem.search({ query: 'alpha beta gamma' }, projectScope(projectId));
     expect(results[0]!.content).toBe('alpha beta gamma');
@@ -78,13 +84,22 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
 
   it('isolates scope, status, and type on the hybrid path', async () => {
     const otherId = new ProjectsService(repos).create({ slug: 'other' }).id;
-    mem.save({ type: 'user', content: 'shared token here' }, projectScope(projectId));
-    mem.save({ type: 'user', content: 'shared token here' }, projectScope(otherId));
-    const supersededRow = mem.save(
-      { type: 'user', content: 'shared token superseded' },
+    mem.save(
+      { type: 'user', title: 'Shared token here', content: 'shared token here' },
       projectScope(projectId),
     );
-    mem.save({ type: 'project', content: 'shared token typed' }, projectScope(projectId));
+    mem.save(
+      { type: 'user', title: 'Shared token here', content: 'shared token here' },
+      projectScope(otherId),
+    );
+    const supersededRow = mem.save(
+      { type: 'user', title: 'Shared token superseded', content: 'shared token superseded' },
+      projectScope(projectId),
+    );
+    mem.save(
+      { type: 'project', title: 'Shared token typed', content: 'shared token typed' },
+      projectScope(projectId),
+    );
     await embedAll();
     // Flip one to superseded via the memory table → the vec status trigger mirrors it.
     db.handle.raw
@@ -100,9 +115,12 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
   });
 
   it('finds a memory with no embedding via the lexical branch (coverage gap)', async () => {
-    mem.save({ type: 'user', content: 'embedded one widget' }, projectScope(projectId));
+    mem.save(
+      { type: 'user', title: 'Embedded one widget', content: 'embedded one widget' },
+      projectScope(projectId),
+    );
     const unembedded = mem.save(
-      { type: 'user', content: 'unembedded widget row' },
+      { type: 'user', title: 'Unembedded widget row', content: 'unembedded widget row' },
       projectScope(projectId),
     );
     // Deliberately do NOT embed — dense is blind to it; FTS must still find it.
@@ -110,8 +128,26 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(res.map((m) => m.id)).toContain(unembedded.id);
   });
 
+  it('finds a memory by a term present only in its title (FTS indexes title)', async () => {
+    const row = mem.save(
+      // 'Kubernetes' appears in the title but NOT in the content body.
+      {
+        type: 'project',
+        title: 'Kubernetes deploy notes',
+        content: 'rollout steps for the cluster',
+      },
+      projectScope(projectId),
+    );
+    // No embedding → the hit can only come from the lexical branch matching title.
+    const res = await mem.search({ query: 'Kubernetes' }, projectScope(projectId));
+    expect(res.map((m) => m.id)).toContain(row.id);
+  });
+
   it('a malformed lexical query never throws (fault isolation + sanitizer)', async () => {
-    mem.save({ type: 'user', content: 'C++ pointers and refs' }, projectScope(projectId));
+    mem.save(
+      { type: 'user', title: 'C++ pointers and refs', content: 'C++ pointers and refs' },
+      projectScope(projectId),
+    );
     await embedAll();
     await expect(
       mem.search({ query: 'C++ "unbalanced AND' }, projectScope(projectId)),
@@ -120,10 +156,18 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
 
   it('tag filters the dense branch (no wrong-tag rows)', async () => {
     const tagged = mem.save(
-      { type: 'user', content: 'taggable subject matter', tags: ['keep'] },
+      {
+        type: 'user',
+        title: 'Taggable subject matter',
+        content: 'taggable subject matter',
+        tags: ['keep'],
+      },
       projectScope(projectId),
     );
-    mem.save({ type: 'user', content: 'taggable subject matter' }, projectScope(projectId));
+    mem.save(
+      { type: 'user', title: 'Taggable subject matter', content: 'taggable subject matter' },
+      projectScope(projectId),
+    );
     await embedAll();
     const res = await mem.search(
       { query: 'taggable subject matter', tag: 'keep' },
@@ -134,7 +178,10 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
 
   it('degrades to FTS-only when no embedQuery is wired', async () => {
     const ftsOnly = new MemoryService(repos, db.handle.db); // no embedQuery
-    ftsOnly.save({ type: 'user', content: 'lexical only lookup' }, projectScope(projectId));
+    ftsOnly.save(
+      { type: 'user', title: 'Lexical only lookup', content: 'lexical only lookup' },
+      projectScope(projectId),
+    );
     await embedAll();
     const res = await ftsOnly.search({ query: 'lexical only' }, projectScope(projectId));
     expect(res.map((m) => m.content)).toContain('lexical only lookup');
@@ -163,8 +210,22 @@ describe('hybrid search cross-lingual recall (real embedder)', () => {
   });
 
   it('a Spanish query surfaces an English-stored memory (the motivating bug)', async () => {
-    mem.save({ type: 'user', content: 'user prefers black coffee, no sugar' }, SCOPE_GLOBAL);
-    mem.save({ type: 'user', content: 'deploys on Fridays after standup' }, SCOPE_GLOBAL);
+    mem.save(
+      {
+        type: 'user',
+        title: 'User prefers black coffee, no sugar',
+        content: 'user prefers black coffee, no sugar',
+      },
+      SCOPE_GLOBAL,
+    );
+    mem.save(
+      {
+        type: 'user',
+        title: 'Deploys on Fridays after standup',
+        content: 'deploys on Fridays after standup',
+      },
+      SCOPE_GLOBAL,
+    );
     const worker = new EmbeddingWorker({ repos, embedder });
     await worker.processBatch();
 

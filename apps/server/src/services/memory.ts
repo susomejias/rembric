@@ -27,11 +27,33 @@ const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived
  *   - `confirm` only inserts into the `confirmations` event table; it never
  *     mutates a `memory` row.
  *   - `archive` is the only path that flips active→archived.
- *   - Nothing here ever issues DELETE FROM memory or UPDATE memory.content.
+ *   - Nothing here ever issues DELETE FROM memory or UPDATE memory.{content,title}.
  */
+
+// Bound is measured in JS string length (UTF-16 code units) at the zod/service
+// layers; the DB CHECK counts Unicode code points. The JS layers are the
+// stricter, binding bound for astral text — they reject before the DB sees it.
+export const TITLE_MAX_CHARS = 100;
+
+/**
+ * Derive a non-empty, ≤100-char title from a memory's content. Used by
+ * non-curated write paths (passive capture, dev seed) and mirrors the SQL
+ * backfill in migration 0016. Deterministic, no LLM: first non-empty line,
+ * leading Markdown markers stripped, truncated; falls back to the first 100
+ * chars of `content` (which is validated non-empty, so the result is 1..100).
+ */
+export function deriveTitle(content: string): string {
+  const firstLine = content.split('\n', 1)[0] ?? '';
+  const stripped = firstLine.replace(/^[\s*#`]+/, '').trim();
+  // Collapse all whitespace (incl. the newlines kept by the full-content
+  // fallback) so a derived title is always a single scannable line.
+  return (stripped || content.trim()).replace(/\s+/g, ' ').slice(0, TITLE_MAX_CHARS);
+}
 
 export interface SaveMemoryInput {
   type: MemoryType;
+  /** Short human-readable label, 1..100 chars. Required. */
+  title: string;
   content: string;
   tags?: string[];
   source?: MemorySource;
@@ -123,6 +145,13 @@ export class MemoryService {
     if (input.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
     }
+    const { title } = input;
+    if (title.trim().length === 0 || title.length > TITLE_MAX_CHARS) {
+      throw new DomainError(
+        'invalid_input',
+        `memory.save: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
+      );
+    }
     const topicKey = normalizeTopicKey(input.topicKey);
 
     const ts = this.now();
@@ -149,6 +178,7 @@ export class MemoryService {
         scope: scope.kind === 'global' ? 'global' : 'project',
         projectId: scope.kind === 'project' ? scope.projectId : null,
         type: input.type,
+        title,
         content: input.content,
         tags: input.tags ?? [],
         status: 'active',

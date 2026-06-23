@@ -343,7 +343,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                 <thead>
                   <tr>
                     <th>type</th>
-                    <th>content</th>
+                    <th>title</th>
                     <th>status</th>
                     <th>created</th>
                   </tr>
@@ -354,7 +354,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                       <tr data-href="/dashboard/memories/${m.id}">
                         <td>${m.type}</td>
                         <td>
-                          <a href="/dashboard/memories/${m.id}">${truncate(m.content, 120)}</a>
+                          <a href="/dashboard/memories/${m.id}">${truncate(m.title, 120)}</a>
                         </td>
                         <td>${statusPill(m.status)}</td>
                         <td class="muted">${formatTs(m.createdAt)}</td>

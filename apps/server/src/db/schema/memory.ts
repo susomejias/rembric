@@ -8,7 +8,7 @@ import { projects } from './projects.js';
  *
  * Invariants enforced at the application layer (and asserted by CI tests):
  *   - No row is ever DELETEd.
- *   - The `content` column is never UPDATEd.
+ *   - The `content` and `title` columns are never UPDATEd.
  *   - Status transitions are constrained to active → superseded | archived,
  *     plus undo flips back to active.
  *
@@ -37,6 +37,13 @@ export const memory = sqliteTable(
     scope: text('scope', { enum: ['global', 'project'] }).notNull(),
     projectId: text('project_id').references(() => projects.id),
     type: text('type', { enum: ['user', 'feedback', 'project', 'reference'] }).notNull(),
+    /**
+     * Short human-readable label (1..100 chars). Required at save; the DB
+     * enforces `NOT NULL` + `CHECK(length(title) BETWEEN 1 AND 100)` (the
+     * CHECK is declared in the migration — Drizzle can't express it). Set
+     * once at INSERT; never UPDATEd, like `content`.
+     */
+    title: text('title').notNull(),
     content: text('content').notNull(),
     tags: text('tags', { mode: 'json' })
       .$type<string[]>()

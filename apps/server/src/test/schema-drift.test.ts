@@ -58,6 +58,7 @@ const EXPECTED_COLUMNS: Record<
     { name: 'scope', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'project_id', type: 'TEXT', notnull: 0, pk: 0 },
     { name: 'type', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'title', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'content', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'tags', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'status', type: 'TEXT', notnull: 1, pk: 0 },
@@ -178,8 +179,8 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
     const raw = testDb.handle.raw;
     raw
       .prepare(
-        `INSERT INTO memory (id, scope, project_id, type, content, tags, status, replaces, created_at)
-         VALUES ('drift-row-1', 'global', NULL, 'feedback', 'searchable phrase apple', '[]', 'active', '[]', ?)`,
+        `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at)
+         VALUES ('drift-row-1', 'global', NULL, 'feedback', 'searchable phrase', 'searchable phrase apple', '[]', 'active', '[]', ?)`,
       )
       .run(Date.now());
 

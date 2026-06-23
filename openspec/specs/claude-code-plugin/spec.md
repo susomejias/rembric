@@ -47,7 +47,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 ## Command catalog
 
 - The plugin SHALL ship exactly four commands under `/rembric:*`:
-  - `remember <text>` → `memory.save({type: 'project', content: '$ARGUMENTS'})`
+  - `remember <text>` → `memory.save({type: 'project', title: <concise ≤100-char headline>, content: '$ARGUMENTS'})` (the `title` is required by `memory.save`, so the command directs the agent to supply a short headline derived from the text)
   - `recall <topic>` → `memory.search({q: '$ARGUMENTS', limit: 5})`, rendered compactly
   - `context` → `memory.context({limit: 10})`, rendered compactly
   - `summary` → `memory.session_summary({auto: true})`

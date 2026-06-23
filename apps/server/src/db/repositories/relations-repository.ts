@@ -55,6 +55,8 @@ export type AdminRelationWithContent = Pick<
   | 'judgedAt'
   | 'createdAt'
 > & {
+  sourceTitle: Memory['title'];
+  targetTitle: Memory['title'];
   sourceContent: Memory['content'];
   targetContent: Memory['content'];
 };
@@ -76,6 +78,8 @@ const withContentSelection = {
   markedByActor: memoryRelations.markedByActor,
   judgedAt: memoryRelations.judgedAt,
   createdAt: memoryRelations.createdAt,
+  sourceTitle: sourceMemory.title,
+  targetTitle: targetMemory.title,
   sourceContent: sourceMemory.content,
   targetContent: targetMemory.content,
 };

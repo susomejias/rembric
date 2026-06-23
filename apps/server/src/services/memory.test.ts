@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
-import { MemoryService } from './memory.js';
+import { DomainError } from './errors.js';
+import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { SCOPE_GLOBAL, projectScope } from './scope.js';
 
@@ -28,7 +29,7 @@ afterEach(() => {
 describe('memory.save', () => {
   it('persists with the scope passed in (project)', () => {
     const m = memory.save(
-      { type: 'user', content: 'prefers tabs', tags: ['editor'] },
+      { type: 'user', title: 'Prefers tabs', content: 'prefers tabs', tags: ['editor'] },
       projectScope(projectId),
     );
     expect(m.scope).toBe('project');
@@ -38,20 +39,58 @@ describe('memory.save', () => {
   });
 
   it('persists with the scope passed in (global)', () => {
-    const m = memory.save({ type: 'user', content: 'dark mode' }, SCOPE_GLOBAL);
+    const m = memory.save({ type: 'user', title: 'Dark mode', content: 'dark mode' }, SCOPE_GLOBAL);
     expect(m.scope).toBe('global');
     expect(m.projectId).toBeNull();
   });
 
   it('rejects empty content', () => {
-    expect(() => memory.save({ type: 'user', content: '   ' }, SCOPE_GLOBAL)).toThrow(/non-empty/);
+    expect(() =>
+      memory.save({ type: 'user', title: 'Blank content', content: '   ' }, SCOPE_GLOBAL),
+    ).toThrow(/non-empty/);
+  });
+
+  it('rejects an empty title with invalid_input', () => {
+    try {
+      memory.save({ type: 'user', title: '', content: 'has content' }, SCOPE_GLOBAL);
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
+
+  it('rejects a title longer than 100 chars with invalid_input', () => {
+    try {
+      memory.save({ type: 'user', title: 'a'.repeat(101), content: 'has content' }, SCOPE_GLOBAL);
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
+
+  it('persists the title it was given', () => {
+    const m = memory.save(
+      { type: 'user', title: 'Use pnpm workspaces', content: 'the monorepo uses pnpm workspaces' },
+      projectScope(projectId),
+    );
+    expect(m.title).toBe('Use pnpm workspaces');
+    const refetched = memory.unsafeGetById(m.id);
+    expect(refetched?.title).toBe('Use pnpm workspaces');
   });
 });
 
 describe('memory.search', () => {
   it('FTS5 keyword match within scope', async () => {
-    memory.save({ type: 'user', content: 'prefers tabs over spaces' }, projectScope(projectId));
-    memory.save({ type: 'user', content: 'uses pnpm not npm' }, projectScope(projectId));
+    memory.save(
+      { type: 'user', title: 'Prefers tabs over spaces', content: 'prefers tabs over spaces' },
+      projectScope(projectId),
+    );
+    memory.save(
+      { type: 'user', title: 'Uses pnpm not npm', content: 'uses pnpm not npm' },
+      projectScope(projectId),
+    );
 
     const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     expect(results.length).toBe(1);
@@ -60,8 +99,14 @@ describe('memory.search', () => {
 
   it('never leaks across projects', async () => {
     const otherId = projects.create({ slug: 'other-app' }).id;
-    memory.save({ type: 'user', content: 'in project A' }, projectScope(projectId));
-    memory.save({ type: 'user', content: 'in project B' }, projectScope(otherId));
+    memory.save(
+      { type: 'user', title: 'In project A', content: 'in project A' },
+      projectScope(projectId),
+    );
+    memory.save(
+      { type: 'user', title: 'In project B', content: 'in project B' },
+      projectScope(otherId),
+    );
 
     const a = await memory.search({}, projectScope(projectId));
     expect(a.every((m) => m.projectId === projectId)).toBe(true);
@@ -69,16 +114,22 @@ describe('memory.search', () => {
   });
 
   it("global scope returns globals only — projects don't leak", async () => {
-    memory.save({ type: 'user', content: 'global one' }, SCOPE_GLOBAL);
-    memory.save({ type: 'user', content: 'project one' }, projectScope(projectId));
+    memory.save({ type: 'user', title: 'Global one', content: 'global one' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'user', title: 'Project one', content: 'project one' },
+      projectScope(projectId),
+    );
 
     const globals = await memory.search({}, SCOPE_GLOBAL);
     expect(globals.every((m) => m.scope === 'global')).toBe(true);
   });
 
   it("project scope returns project only — globals don't leak", async () => {
-    memory.save({ type: 'user', content: 'global g' }, SCOPE_GLOBAL);
-    memory.save({ type: 'user', content: 'project p' }, projectScope(projectId));
+    memory.save({ type: 'user', title: 'Global g', content: 'global g' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'user', title: 'Project p', content: 'project p' },
+      projectScope(projectId),
+    );
 
     const proj = await memory.search({}, projectScope(projectId));
     expect(proj.every((m) => m.scope === 'project' && m.projectId === projectId)).toBe(true);
@@ -86,7 +137,10 @@ describe('memory.search', () => {
 
   it('defaults to at most 8 results when no limit is given (both branches)', async () => {
     for (let i = 0; i < 12; i++) {
-      memory.save({ type: 'user', content: `widget number ${i}` }, projectScope(projectId));
+      memory.save(
+        { type: 'user', title: deriveTitle(`widget number ${i}`), content: `widget number ${i}` },
+        projectScope(projectId),
+      );
     }
     // Hybrid text-query branch (FTS-only here: no embedQuery wired).
     const queried = await memory.search({ query: 'widget' }, projectScope(projectId));
@@ -98,7 +152,10 @@ describe('memory.search', () => {
 
   it('an explicit limit overrides the default in both directions', async () => {
     for (let i = 0; i < 12; i++) {
-      memory.save({ type: 'user', content: `widget number ${i}` }, projectScope(projectId));
+      memory.save(
+        { type: 'user', title: deriveTitle(`widget number ${i}`), content: `widget number ${i}` },
+        projectScope(projectId),
+      );
     }
     expect(
       (await memory.search({ query: 'widget', limit: 3 }, projectScope(projectId))).length,
@@ -109,7 +166,10 @@ describe('memory.search', () => {
 
 describe('memory.get', () => {
   it('returns memory + history when in scope', () => {
-    const saved = memory.save({ type: 'user', content: 'fresh' }, projectScope(projectId));
+    const saved = memory.save(
+      { type: 'user', title: 'Fresh', content: 'fresh' },
+      projectScope(projectId),
+    );
     const result = memory.get(saved.id, projectScope(projectId));
     expect(result?.memory.id).toBe(saved.id);
     expect(result?.predecessors).toEqual([]);
@@ -117,20 +177,26 @@ describe('memory.get', () => {
   });
 
   it('returns null for a global id when scope is project', () => {
-    const g = memory.save({ type: 'user', content: 'g' }, SCOPE_GLOBAL);
+    const g = memory.save({ type: 'user', title: 'Global g', content: 'g' }, SCOPE_GLOBAL);
     const result = memory.get(g.id, projectScope(projectId));
     expect(result).toBeNull();
   });
 
   it('returns null for a project id when scope is global', () => {
-    const p = memory.save({ type: 'user', content: 'p' }, projectScope(projectId));
+    const p = memory.save(
+      { type: 'user', title: 'Project p', content: 'p' },
+      projectScope(projectId),
+    );
     const result = memory.get(p.id, SCOPE_GLOBAL);
     expect(result).toBeNull();
   });
 
   it('returns null for a memory in a different project', () => {
     const otherId = projects.create({ slug: 'other' }).id;
-    const m = memory.save({ type: 'user', content: 'in other' }, projectScope(otherId));
+    const m = memory.save(
+      { type: 'user', title: 'In other', content: 'in other' },
+      projectScope(otherId),
+    );
     const result = memory.get(m.id, projectScope(projectId));
     expect(result).toBeNull();
   });
@@ -142,7 +208,10 @@ describe('memory.get', () => {
 
 describe('memory.confirm', () => {
   it('records confirmations against the head', () => {
-    const m = memory.save({ type: 'user', content: 'count me' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Count me', content: 'count me' },
+      projectScope(projectId),
+    );
     memory.confirm(m.id, projectScope(projectId));
     memory.confirm(m.id, projectScope(projectId));
     const result = memory.get(m.id, projectScope(projectId));
@@ -150,7 +219,10 @@ describe('memory.confirm', () => {
   });
 
   it('throws not_found for cross-scope ids', () => {
-    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Sample x', content: 'x' },
+      projectScope(projectId),
+    );
     expect(() => memory.confirm(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
   });
 
@@ -161,19 +233,28 @@ describe('memory.confirm', () => {
 
 describe('memory.archive', () => {
   it('flips active → archived when in scope', () => {
-    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Sample x', content: 'x' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
     const refetched = memory.unsafeGetById(m.id);
     expect(refetched?.status).toBe('archived');
   });
 
   it('refuses to archive an out-of-scope memory', () => {
-    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Sample x', content: 'x' },
+      projectScope(projectId),
+    );
     expect(() => memory.archive(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
   });
 
   it('refuses to archive a non-active memory', () => {
-    const m = memory.save({ type: 'user', content: 'x' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Sample x', content: 'x' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
     expect(() => memory.archive(m.id, projectScope(projectId))).toThrow(/not in 'active'/);
   });
@@ -181,7 +262,10 @@ describe('memory.archive', () => {
 
 describe('memory.purgeDisconnectedArchived', () => {
   it('purges archived memories that are not referenced anywhere', () => {
-    const m = memory.save({ type: 'user', content: 'disconnected' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Disconnected', content: 'disconnected' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
 
     const result = memory.purgeDisconnectedArchived({ adminBypass: true });
@@ -190,7 +274,10 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('writes an archived_memory_purge op to consolidation_ops with the ids', () => {
-    const m = memory.save({ type: 'user', content: 'journaled' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Journaled', content: 'journaled' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
 
     memory.purgeDisconnectedArchived({ adminBypass: true });
@@ -206,7 +293,10 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('drops the embedding row from memory_vec in the same transaction', () => {
-    const m = memory.save({ type: 'user', content: 'with-vec' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'With vec', content: 'with-vec' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
 
     // Insert a fake embedding row directly.
@@ -235,13 +325,16 @@ describe('memory.purgeDisconnectedArchived', () => {
 
   it('skips an archived memory that is referenced via replaces[] from another row', () => {
     const oldRow = memory.save(
-      { type: 'user', content: 'old', topicKey: 'demo-topic' },
+      { type: 'user', title: 'Old', content: 'old', topicKey: 'demo-topic' },
       projectScope(projectId),
     );
     // Auto-supersede via topic_key: the new save points its `replaces`
     // at oldRow.id, and oldRow transitions to 'superseded'. Manually
     // flip it to archived to satisfy the (a) condition of the predicate.
-    memory.save({ type: 'user', content: 'new', topicKey: 'demo-topic' }, projectScope(projectId));
+    memory.save(
+      { type: 'user', title: 'New', content: 'new', topicKey: 'demo-topic' },
+      projectScope(projectId),
+    );
     db.handle.raw.prepare(`UPDATE memory SET status = 'archived' WHERE id = ?`).run(oldRow.id);
 
     const result = memory.purgeDisconnectedArchived({ adminBypass: true });
@@ -250,7 +343,10 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('skips an archived memory referenced by a consolidation_ops.affected_ids row', () => {
-    const m = memory.save({ type: 'user', content: 'referenced-by-op' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Referenced by op', content: 'referenced-by-op' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
 
     // Manually insert a consolidation_ops row referencing m via affected_ids.
@@ -270,7 +366,10 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('skips an archived memory referenced by consolidation_ops.created_id', () => {
-    const m = memory.save({ type: 'user', content: 'created-by-merge' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Created by merge', content: 'created-by-merge' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
 
     db.handle.raw
@@ -289,10 +388,16 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('skips an archived memory referenced by memory_relations', () => {
-    const m = memory.save({ type: 'user', content: 'referenced-by-rel' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Referenced by rel', content: 'referenced-by-rel' },
+      projectScope(projectId),
+    );
     memory.archive(m.id, projectScope(projectId));
     // Insert a memory_relations row using m as source.
-    const other = memory.save({ type: 'user', content: 'other' }, projectScope(projectId));
+    const other = memory.save(
+      { type: 'user', title: 'Other', content: 'other' },
+      projectScope(projectId),
+    );
     db.handle.raw
       .prepare(
         `INSERT INTO memory_relations
@@ -306,7 +411,10 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('skips an archived memory with a surviving confirmation', () => {
-    const m = memory.save({ type: 'user', content: 'confirmed' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Confirmed', content: 'confirmed' },
+      projectScope(projectId),
+    );
     memory.confirm(m.id, projectScope(projectId));
     memory.archive(m.id, projectScope(projectId));
 
@@ -315,13 +423,19 @@ describe('memory.purgeDisconnectedArchived', () => {
   });
 
   it('skips active memories even when disconnected', () => {
-    const m = memory.save({ type: 'user', content: 'still-active' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Still active', content: 'still-active' },
+      projectScope(projectId),
+    );
     const result = memory.purgeDisconnectedArchived({ adminBypass: true });
     expect(result.deletedIds).not.toContain(m.id);
   });
 
   it('skips superseded memories even when disconnected from the graph', () => {
-    const m = memory.save({ type: 'user', content: 'superseded' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'user', title: 'Superseded', content: 'superseded' },
+      projectScope(projectId),
+    );
     db.handle.raw.prepare(`UPDATE memory SET status = 'superseded' WHERE id = ?`).run(m.id);
 
     const result = memory.purgeDisconnectedArchived({ adminBypass: true });
@@ -347,7 +461,10 @@ describe('derived review state', () => {
   const DAY = 24 * 60 * 60 * 1000;
 
   it('needsReviewForContext surfaces a stale memory and memory.confirm clears it', () => {
-    const m = memory.save({ type: 'project', content: 'ship v1 by Q2' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'project', title: 'Ship v1 by Q2', content: 'ship v1 by Q2' },
+      projectScope(projectId),
+    );
 
     expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
 
@@ -362,14 +479,17 @@ describe('derived review state', () => {
   });
 
   it('a reference (no TTL) never needs review', () => {
-    memory.save({ type: 'reference', content: 'dashboard: https://x' }, projectScope(projectId));
+    memory.save(
+      { type: 'reference', title: 'Dashboard link', content: 'dashboard: https://x' },
+      projectScope(projectId),
+    );
     clock.advance(400 * DAY);
     expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
   });
 
   it('needsReview respects scope isolation', () => {
     const otherId = projects.create({ slug: 'other-app' }).id;
-    memory.save({ type: 'project', content: 'A goal' }, projectScope(projectId));
+    memory.save({ type: 'project', title: 'A goal', content: 'A goal' }, projectScope(projectId));
     clock.advance(100 * DAY);
 
     expect(memory.needsReviewForContext(projectScope(otherId), 5)).toHaveLength(0);
@@ -378,7 +498,10 @@ describe('derived review state', () => {
   });
 
   it('excludes archived memories from needsReview', () => {
-    const m = memory.save({ type: 'project', content: 'old plan' }, projectScope(projectId));
+    const m = memory.save(
+      { type: 'project', title: 'Old plan', content: 'old plan' },
+      projectScope(projectId),
+    );
     clock.advance(100 * DAY);
     memory.archive(m.id, projectScope(projectId));
     expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(0);
@@ -386,7 +509,7 @@ describe('derived review state', () => {
 
   it('memory.get exposes reviewState/reviewAfter for an active head', () => {
     const m = memory.save(
-      { type: 'feedback', content: 'prefers terse PRs' },
+      { type: 'feedback', title: 'Prefers terse PRs', content: 'prefers terse PRs' },
       projectScope(projectId),
     );
     const fresh = memory.get(m.id, projectScope(projectId));
@@ -399,10 +522,39 @@ describe('derived review state', () => {
   });
 
   it('reviewStateForMemories maps each searched row', async () => {
-    memory.save({ type: 'project', content: 'find me tabs' }, projectScope(projectId));
+    memory.save(
+      { type: 'project', title: 'Find me tabs', content: 'find me tabs' },
+      projectScope(projectId),
+    );
     clock.advance(100 * DAY);
     const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     const review = memory.reviewStateForMemories(results);
     expect(review.get(results[0]!.id)?.reviewState).toBe('needs_review');
+  });
+});
+
+describe('deriveTitle', () => {
+  it('strips a leading markdown marker and keeps the first line', () => {
+    expect(deriveTitle('**Bold lead** then body')).toBe('Bold lead** then body');
+    expect(deriveTitle('### Heading here\nbody')).toBe('Heading here');
+  });
+
+  it('uses only the first line of multi-line content', () => {
+    expect(deriveTitle('First line\nsecond\nthird')).toBe('First line');
+  });
+
+  it('strips a trailing carriage return (CRLF content)', () => {
+    expect(deriveTitle('Windows note\r\nsecond')).toBe('Windows note');
+  });
+
+  it('truncates to 100 chars', () => {
+    expect(deriveTitle('x'.repeat(250))).toBe('x'.repeat(100));
+  });
+
+  it('falls back to a single-line collapse when the first line is marker-only', () => {
+    // First line strips to empty → fallback to content, whitespace collapsed so
+    // the title never contains an embedded newline.
+    expect(deriveTitle('### \nreal second line')).toBe('### real second line');
+    expect(deriveTitle('   \nReal title')).toBe('Real title');
   });
 });

@@ -50,14 +50,15 @@ afterEach(() => {
  * to stay renderable and undoable.
  */
 function seedHistoricalMerge(): { aId: string; bId: string; mergedId: string; opId: string } {
-  const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
-  const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
+  const a = memoryService.save({ type: 'user', title: 'a', content: 'a' }, projectScope(projectId));
+  const b = memoryService.save({ type: 'user', title: 'b', content: 'b' }, projectScope(projectId));
   const mergedId = `merged-${a.id}`;
   repos.memory.insert({
     id: mergedId,
     scope: 'project',
     projectId,
     type: 'user',
+    title: 'merged',
     content: 'merged',
     tags: [],
     status: 'active',
@@ -82,8 +83,14 @@ function seedHistoricalMerge(): { aId: string; bId: string; mergedId: string; op
 
 describe('applyDecay', () => {
   it('archives only currently-active memories', () => {
-    const a = memoryService.save({ type: 'user', content: 'a' }, projectScope(projectId));
-    const b = memoryService.save({ type: 'user', content: 'b' }, projectScope(projectId));
+    const a = memoryService.save(
+      { type: 'user', title: 'a', content: 'a' },
+      projectScope(projectId),
+    );
+    const b = memoryService.save(
+      { type: 'user', title: 'b', content: 'b' },
+      projectScope(projectId),
+    );
     memoryService.archive(b.id, projectScope(projectId));
 
     applyDecay(repos, db.handle.db, {
@@ -123,7 +130,10 @@ describe('undoOp / undoRun', () => {
 
   it('undoRun reverses every op in reverse order', () => {
     seedHistoricalMerge();
-    const c = memoryService.save({ type: 'user', content: 'c' }, projectScope(projectId));
+    const c = memoryService.save(
+      { type: 'user', title: 'c', content: 'c' },
+      projectScope(projectId),
+    );
     applyDecay(repos, db.handle.db, {
       runId,
       ids: [c.id],
@@ -139,7 +149,7 @@ describe('undoOp / undoRun', () => {
 describe('undoOp with purged rows', () => {
   it('blocks undo with PurgedRowMissingError listing the missing ids', () => {
     const c = memoryService.save(
-      { type: 'user', content: 'will-be-purged' },
+      { type: 'user', title: 'will-be-purged', content: 'will-be-purged' },
       projectScope(projectId),
     );
     applyDecay(repos, db.handle.db, {

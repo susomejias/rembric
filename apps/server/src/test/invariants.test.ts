@@ -60,6 +60,14 @@ const FORBIDDEN: ForbiddenRule[] = [
     description: 'raw `UPDATE memory SET content = …` is forbidden — content is immutable',
   },
   {
+    pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*title\s*:/i,
+    description: '`db.update(memory).set({ title: … })` is forbidden — title is immutable',
+  },
+  {
+    pattern: /UPDATE\s+memory\b[^;]*\bSET\s+title\s*=/i,
+    description: 'raw `UPDATE memory SET title = …` is forbidden — title is immutable',
+  },
+  {
     pattern: /delete\s*\(\s*agentSessions\s*\)/i,
     description: 'Drizzle `db.delete(agentSessions)` is forbidden — agent sessions are append-only',
   },

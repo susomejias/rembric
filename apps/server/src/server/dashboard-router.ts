@@ -355,13 +355,13 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                           </div>
                           <div class="mem">
                             <a href="/dashboard/memories/${r.sourceId}" class="txt"
-                              >${truncate(r.sourceContent, 70)}</a
+                              >${truncate(r.sourceTitle, 70)}</a
                             >
                           </div>
                           <div class="mem">
                             <span class="arrow">↳</span>
                             <a href="/dashboard/memories/${r.targetId}" class="txt"
-                              >${truncate(r.targetContent, 70)}</a
+                              >${truncate(r.targetTitle, 70)}</a
                             >
                           </div>
                         </div>

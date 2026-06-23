@@ -55,6 +55,7 @@ const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 export const memorySaveSchema = {
   scope: z.enum(MEMORY_SCOPES).default('project'),
   type: z.enum(MEMORY_TYPES),
+  title: z.string().min(1).max(100),
   content: z.string().min(1),
   tags: z.array(z.string()).max(64).optional(),
   topic_key: z.string().min(1).max(128).optional(),
@@ -117,6 +118,7 @@ const relationView = z.object({
 const candidate = z.object({
   judgmentId: z.string(),
   targetId: z.string(),
+  title: z.string(),
   snippet: z.string(),
   similarity: z.number(),
   source: z.string(),
@@ -127,6 +129,7 @@ const memoryRow = z.object({
   scope: z.string(),
   projectId: z.string().nullable(),
   type: z.string(),
+  title: z.string(),
   content: z.string(),
   tags: z.array(z.string()),
   status: z.string(),
@@ -140,6 +143,7 @@ const memoryRow = z.object({
 const memoryNeighbor = z.object({
   id: z.string(),
   type: z.string(),
+  title: z.string(),
   content: z.string(),
   status: z.string(),
   createdAt: z.string(),
@@ -165,16 +169,18 @@ export const memoryGetOutput = {
     scope: z.string(),
     projectId: z.string().nullable(),
     type: z.string(),
+    title: z.string(),
     content: z.string(),
     tags: z.array(z.string()),
     status: z.string(),
     replaces: z.array(z.string()),
     createdAt: z.string(),
   }),
-  head: z.object({ id: z.string(), content: z.string(), status: z.string() }),
+  head: z.object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() }),
   predecessors: z.array(
     z.object({
       id: z.string(),
+      title: z.string(),
       content: z.string(),
       status: z.string(),
       createdAt: z.string(),
@@ -215,6 +221,7 @@ export const contextOutput = {
     z.object({
       id: z.string(),
       type: z.string(),
+      title: z.string(),
       snippet: z.string(),
       status: z.string(),
       createdAt: z.string(),
@@ -225,6 +232,8 @@ export const contextOutput = {
       judgmentId: z.string(),
       sourceId: z.string(),
       targetId: z.string(),
+      sourceTitle: z.string(),
+      targetTitle: z.string(),
       sourceSnippet: z.string(),
       targetSnippet: z.string(),
       ageMs: z.number(),
@@ -234,6 +243,7 @@ export const contextOutput = {
     z.object({
       id: z.string(),
       type: z.string(),
+      title: z.string(),
       snippet: z.string(),
       reviewAfter: z.string(),
       ageMs: z.number(),
@@ -263,6 +273,7 @@ export interface MemoryToolDeps {
    */
   embedNow?: (
     memoryId: string,
+    title: string,
     content: string,
     scope: MemoryScope,
     projectId: string | null,
@@ -373,6 +384,7 @@ async function handleSave(
   args: {
     scope: 'global' | 'project';
     type: (typeof MEMORY_TYPES)[number];
+    title: string;
     content: string;
     tags?: string[];
     topic_key?: string;
@@ -446,6 +458,7 @@ async function handleSave(
   );
   const input: SaveMemoryInput = {
     type: args.type,
+    title: args.title,
     content: args.content,
     tags: args.tags,
     source: {
@@ -486,6 +499,7 @@ async function handleSave(
     let candidates: {
       judgmentId: string;
       targetId: string;
+      title: string;
       snippet: string;
       similarity: number;
       source: 'vec' | 'fts';
@@ -496,7 +510,7 @@ async function handleSave(
         // pass has a self-vector to kNN from (model is warm by boot
         // contract; on failure detection degrades to FTS5 for this save).
         if (deps.embedNow)
-          await deps.embedNow(m.id, m.content, m.scope, m.projectId, m.status, m.type);
+          await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId, m.status, m.type);
         const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
         for (const c of detected) {
           // Skip the topic_key supersede target — we already wrote that relation.
@@ -508,6 +522,7 @@ async function handleSave(
           candidates.push({
             judgmentId: row.judgmentId,
             targetId: c.targetId,
+            title: c.title,
             snippet: c.snippet,
             similarity: c.similarity,
             source: c.source,
@@ -587,6 +602,7 @@ async function handleSearch(
           scope: m.scope,
           projectId: m.projectId,
           type: m.type,
+          title: m.title,
           content: m.content,
           tags: m.tags,
           status: m.status,
@@ -627,6 +643,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id: string }) {
         scope: result.memory.scope,
         projectId: result.memory.projectId,
         type: result.memory.type,
+        title: result.memory.title,
         content: result.memory.content,
         tags: result.memory.tags,
         status: result.memory.status,
@@ -635,11 +652,13 @@ async function handleGet(deps: MemoryToolDeps, args: { id: string }) {
       },
       head: {
         id: result.head.id,
+        title: result.head.title,
         content: result.head.content,
         status: result.head.status,
       },
       predecessors: result.predecessors.map((p) => ({
         id: p.id,
+        title: p.title,
         content: p.content,
         status: p.status,
         createdAt: p.createdAt,
@@ -728,6 +747,7 @@ function handleContext(
     .map((m) => ({
       id: m.id,
       type: m.type,
+      title: m.title,
       snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
       status: m.status,
       createdAt: m.createdAt.toISOString(),
@@ -762,6 +782,8 @@ function handleContext(
       judgmentId: r.judgmentId,
       sourceId: r.sourceId,
       targetId: r.targetId,
+      sourceTitle: r.sourceTitle,
+      targetTitle: r.targetTitle,
       sourceSnippet: snippet(r.sourceContent, CONTEXT_SNIPPET_CHARS),
       targetSnippet: snippet(r.targetContent, CONTEXT_SNIPPET_CHARS),
       ageMs: now - r.createdAt.getTime(),
@@ -774,6 +796,7 @@ function handleContext(
   const needsReview = deps.memory.needsReviewForContext(scope, NEEDS_REVIEW_MAX).map((it) => ({
     id: it.memory.id,
     type: it.memory.type,
+    title: it.memory.title,
     snippet: snippet(it.memory.content, CONTEXT_SNIPPET_CHARS),
     reviewAfter: it.reviewAfter.toISOString(),
     ageMs: now - it.reviewBaseline.getTime(),

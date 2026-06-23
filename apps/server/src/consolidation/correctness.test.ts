@@ -31,7 +31,9 @@ describe('13.18 concurrency — 100 concurrent memory.save calls leave DB consis
       const operations = [] as Promise<unknown>[];
       for (let i = 0; i < N; i++) {
         operations.push(
-          Promise.resolve(svc.save({ type: 'feedback', content: `c-${i}` }, SCOPE_GLOBAL)),
+          Promise.resolve(
+            svc.save({ type: 'feedback', title: `c-${i}`, content: `c-${i}` }, SCOPE_GLOBAL),
+          ),
         );
       }
       await Promise.all(operations);

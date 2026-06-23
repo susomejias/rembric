@@ -5,7 +5,12 @@ import { ConsolidationRunner } from '../consolidation/index.js';
 import { undoOp, undoRun } from '../consolidation/operations.js';
 import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
 import { createDb, createRepositories, type DbHandle, type Repositories } from '../db/index.js';
-import { EMBEDDING_MODEL_ID, loadEmbedder, type Embedder } from '../embeddings/embedder.js';
+import {
+  EMBEDDING_MODEL_ID,
+  embeddingQueryInput,
+  loadEmbedder,
+  type Embedder,
+} from '../embeddings/embedder.js';
 import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/observability-tools.js';
@@ -161,7 +166,7 @@ export async function bootstrap(
   // Constructed after the embedder so the hybrid-search dense branch has a
   // live `embedQuery`; the embedder is REQUIRED at boot so this is non-lazy.
   const memorySvc = new MemoryService(repos, dbHandle.db, undefined, (text) =>
-    embedder.embed(text),
+    embedder.embed(embeddingQueryInput(text)),
   );
   const embeddingWorker = new EmbeddingWorker({
     repos,
@@ -223,8 +228,8 @@ export async function bootstrap(
       candidates: {
         perSaveMax: config.candidates.perSaveMax,
       },
-      embedNow: (memoryId, content, scope, projectId, status, type) =>
-        embeddingWorker.embedNow(memoryId, content, scope, projectId, status, type),
+      embedNow: (memoryId, title, content, scope, projectId, status, type) =>
+        embeddingWorker.embedNow(memoryId, title, content, scope, projectId, status, type),
       router: sessionRouter,
       repos,
       doctor: buildDoctorReport,

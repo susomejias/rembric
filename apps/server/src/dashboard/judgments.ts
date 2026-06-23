@@ -129,9 +129,9 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
                 <td>${statusPill(r.status)}</td>
                 <td>${verdictPill(r.relation)}</td>
                 <td class="small">
-                  <a href="/dashboard/memories/${r.sourceId}">${truncate(r.sourceContent, 60)}</a>
+                  <a href="/dashboard/memories/${r.sourceId}">${truncate(r.sourceTitle, 60)}</a>
                   →
-                  <a href="/dashboard/memories/${r.targetId}">${truncate(r.targetContent, 60)}</a>
+                  <a href="/dashboard/memories/${r.targetId}">${truncate(r.targetTitle, 60)}</a>
                 </td>
                 <td class="small">${r.markedByActor ?? raw('<span class="muted">—</span>')}</td>
                 <td class="muted">
@@ -273,14 +273,16 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
       </div>
 
       <h2>Source</h2>
-      <p class="mono small">
-        <a href="/dashboard/memories/${row.sourceId}">${shortId(row.sourceId)}</a>
+      <p class="small">
+        <a href="/dashboard/memories/${row.sourceId}">${row.sourceTitle}</a>
+        <span class="mono muted">${shortId(row.sourceId)}</span>
       </p>
       ${mdBody(row.sourceContent)}
 
       <h2>Target</h2>
-      <p class="mono small">
-        <a href="/dashboard/memories/${row.targetId}">${shortId(row.targetId)}</a>
+      <p class="small">
+        <a href="/dashboard/memories/${row.targetId}">${row.targetTitle}</a>
+        <span class="mono muted">${shortId(row.targetId)}</span>
       </p>
       ${mdBody(row.targetContent)}
 

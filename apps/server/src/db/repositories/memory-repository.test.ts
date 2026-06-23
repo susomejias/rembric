@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { deriveTitle } from '../../services/memory.js';
 import { REVIEW_TTL_MS } from '../../services/review.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { confirmations } from '../schema/confirmations.js';
@@ -10,6 +11,7 @@ import { MemoryRepository } from './memory-repository.js';
 
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {
   return {
+    title: deriveTitle(overrides.content),
     scope: 'global',
     projectId: null,
     type: 'project',
