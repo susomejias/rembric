@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.24](https://github.com/susomejias/rembric/compare/server-v0.21.23...server-v0.21.24) (2026-06-23)
+
+
+### Features
+
+* **dashboard:** render memory/session/prompt/judgment content as markdown ([#194](https://github.com/susomejias/rembric/issues/194)) ([2f71269](https://github.com/susomejias/rembric/commit/2f71269e33823a56b5e58a67154304ed22d6dded))
+
 ## [0.21.23](https://github.com/susomejias/rembric/compare/server-v0.21.22...server-v0.21.23) (2026-06-20)
 
 
