@@ -59,6 +59,12 @@ describe('shell()', () => {
     expect(out.includes('<style ')).toBe(false);
   });
 
+  it('injects the copy-raw handler into <head>', () => {
+    const out = shell(html`<p>hi</p>`, { title: 't' });
+    const head = out.slice(out.indexOf('<head>'), out.indexOf('</head>'));
+    expect(head).toContain('[data-md-copy]');
+  });
+
   it('injects favicon links in <head>', () => {
     const out = shell(html`<p>hi</p>`, { title: 't' });
     const head = out.slice(out.indexOf('<head>'), out.indexOf('</head>'));

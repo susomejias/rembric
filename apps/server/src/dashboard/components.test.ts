@@ -11,6 +11,7 @@ import {
   kvGrid,
   NAV,
   navEntry,
+  mdBody,
   pager,
   PAGE_SIZE,
   renderMarkdown,
@@ -366,5 +367,31 @@ describe('renderMarkdown', () => {
   it('renders an ordinary http link as an anchor', () => {
     const out = renderMarkdown('[rembric](https://example.com)').__html;
     expect(out).toContain('<a href="https://example.com">rembric</a>');
+  });
+});
+
+describe('mdBody', () => {
+  it('wraps rendered Markdown with a copy-raw button and a hidden raw source', () => {
+    const out = mdBody('**bold** and `code`').__html;
+    expect(out).toContain('class="md-block"');
+    expect(out).toContain('data-md-copy');
+    expect(out).toContain('class="md-body"');
+    expect(out).toContain('<strong>bold</strong>');
+    expect(out).toContain('class="md-raw" hidden');
+    // icon-only button: carries the copy + done SVG icons, no "COPY" text label
+    expect(out).toContain('class="ic ic-copy"');
+    expect(out).toContain('class="ic ic-done"');
+    expect(out).toContain('<svg');
+    expect(out).not.toContain('>COPY<');
+  });
+
+  it('stores the raw source escaped (round-trips via textContent), never as live markup', () => {
+    const out = mdBody('line one\n<script>alert(1)</script>').__html;
+    const raw = out.slice(out.indexOf('<pre class="md-raw"'), out.indexOf('</pre>'));
+    // raw source is HTML-escaped inside the hidden <pre>; no live script tag
+    expect(raw).toContain('&lt;script&gt;');
+    expect(raw).not.toContain('<script>');
+    // newline from the source is preserved verbatim in the <pre>
+    expect(raw).toContain('line one\n');
   });
 });

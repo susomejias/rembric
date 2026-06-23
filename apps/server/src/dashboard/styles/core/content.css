@@ -99,6 +99,66 @@
    block adds the elements those rules don't cover (lists, content links,
    blockquote, hr) and trims the container's leading/trailing margins. No new
    token — locked brutalist palette only. */
+.main .md-block {
+  position: relative;
+}
+.main .md-block .md-body {
+  margin-bottom: 0;
+}
+.main .md-block .md-copy {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-3);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--fg-faint);
+  cursor: pointer;
+  opacity: 0.5;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.main .md-block:hover .md-copy {
+  opacity: 1;
+}
+.main .md-block .md-copy:hover {
+  color: var(--lime);
+  border-color: var(--lime);
+}
+.main .md-copy .ic {
+  display: inline-flex;
+}
+.main .md-copy .ic-done {
+  display: none;
+}
+.main .md-copy.is-copied {
+  color: var(--lime);
+  border-color: var(--lime);
+  opacity: 1;
+}
+.main .md-copy.is-copied .ic-copy {
+  display: none;
+}
+.main .md-copy.is-copied .ic-done {
+  display: inline-flex;
+}
+.main .md-copy.is-failed {
+  color: var(--danger);
+  border-color: var(--danger);
+  opacity: 1;
+}
+.main .md-raw {
+  display: none;
+}
 .main .md-body {
   background: var(--bg-elev);
   border: 1px solid var(--fg-faint);

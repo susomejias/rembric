@@ -6,7 +6,7 @@ import { DomainError } from '../services/errors.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, renderMarkdown, urlWithPage, viewHead } from './components.js';
+import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { escape, formatTs, html, raw, shortId } from './templates.js';
@@ -126,7 +126,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       const contentCell = html`
         <details class="rbr-prompt-content">
           <summary>${truncate(p.content, 120)}</summary>
-          <div class="md-body">${renderMarkdown(p.content)}</div>
+          ${mdBody(p.content)}
         </details>
       `;
       const sessionCell = p.sessionId

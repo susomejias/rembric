@@ -16,6 +16,7 @@
 - [x] 3.3 `prompts.ts` (~line 129): replace the `<pre>${p.content}</pre>` inside the `<details>` cell with `.md-body` + `renderMarkdown`
 - [x] 3.4 `judgments.ts` (~lines 279/285): render Source + Target memory content via `.md-body` + `renderMarkdown`; leave Reason as `<p>` and Evidence as `<pre>` (JSON)
 - [x] 3.5 Leave all list/table `truncate(content, N)` cells unchanged (plain escaped text)
+- [x] 3.6 Wrap the render in a shared `mdBody(content)` component (`components.ts`): rendered `.md-body` + icon-only copy-raw button + hidden `<pre class="md-raw">` source; add a `MD_COPY` handler in `shell()` (Clipboard API + `execCommand` fallback). All call sites use `mdBody` (no duplicated logic)
 
 ## 4. Styles
 
@@ -26,7 +27,8 @@
 
 - [x] 5.1 `components.test.ts`: `renderMarkdown` renders bold/inline-code/fenced-code/list; `<script>`/raw HTML stays escaped; `javascript:` link is not clickable
 - [x] 5.2 No per-view dashboard unit tests exist (view render is covered by the shared `renderMarkdown` helper + the MCP/integration suite). List snippets are unchanged (`truncate` path untouched), so no new assertion needed
-- [x] 5.3 `templates.test.ts` already asserts `minifyHtml` preserves `<pre>` blocks — covers rendered fenced-code output
+- [x] 5.3 `templates.test.ts` already asserts `minifyHtml` preserves `<pre>` blocks — covers rendered fenced-code output (and the hidden `.md-raw` source)
+- [x] 5.4 `components.test.ts`: `mdBody` emits the icon-only copy button + hidden `.md-raw` with the source escaped and newlines preserved; `templates.test.ts`: `shell()` injects the `[data-md-copy]` handler
 
 ## 6. Verify
 

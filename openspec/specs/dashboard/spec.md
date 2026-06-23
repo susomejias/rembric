@@ -1047,6 +1047,8 @@ The Markdown parser SHALL be configured to **disable raw HTML passthrough** (`ht
 
 The rendering SHALL be performed entirely server-side and in-process; no CDN, network call, or client-side JavaScript SHALL be required to display formatted content. Rendering SHALL reuse the locked brutalist design tokens and self-hosted fonts; it SHALL NOT introduce a new design token, and fenced/inline code SHALL remain monospace.
 
+Each rendered Markdown block SHALL provide an icon-only control that copies the verbatim Markdown source to the clipboard, so the raw source remains recoverable behind the render. The source SHALL be carried in the page (not re-fetched) such that copying yields the original source — including the literal `**`, backticks, and fences — rather than the rendered HTML. The control SHALL function in non-secure (plain-HTTP) deployments via a clipboard fallback. This control is a progressive enhancement; the formatted content itself SHALL still render with JavaScript disabled.
+
 List and table views SHALL NOT render Markdown: truncated `content` snippets in list cells SHALL remain plain escaped text.
 
 #### Scenario: Memory detail renders Markdown formatting
@@ -1064,6 +1066,11 @@ List and table views SHALL NOT render Markdown: truncated `content` snippets in 
 
 - **WHEN** a memory's content contains a Markdown link whose URL uses a `javascript:` (or other dangerous) scheme
 - **THEN** the rendered output SHALL NOT produce a clickable link that navigates to that scheme
+
+#### Scenario: Copy-raw control returns the verbatim source
+
+- **WHEN** an operator activates the copy control on a rendered Markdown block
+- **THEN** the verbatim Markdown source (including the original `**`, backticks, and fences) SHALL be copied to the clipboard, not the rendered HTML
 
 #### Scenario: Session description and summary render Markdown
 

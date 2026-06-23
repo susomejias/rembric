@@ -317,6 +317,71 @@ const ROW_LINK = `
 })();
 `;
 
+// Copy-raw for rendered Markdown blocks. Each <div class="md-block"> pairs a
+// rendered <div class="md-body"> with a hidden <pre class="md-raw"> holding the
+// verbatim source; the [data-md-copy] button copies that source so the raw
+// Markdown isn't lost behind the render. Uses the async Clipboard API when in a
+// secure context (https/localhost) and falls back to execCommand for plain-http
+// deployments behind a VPN.
+const MD_COPY = `
+(function(){
+  function copyText(text){
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function(resolve, reject){
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'absolute';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok ? resolve() : reject(new Error('execCommand failed'));
+      } catch (e) { reject(e); }
+    });
+  }
+  function bind(root){
+    var scope = root && root.querySelectorAll ? root : document;
+    var btns = scope.querySelectorAll('[data-md-copy]');
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      if (b.__rbrMdCopyBound) continue;
+      b.__rbrMdCopyBound = true;
+      b.addEventListener('click', function(){
+        var block = this.closest ? this.closest('.md-block') : this.parentNode;
+        var src = block ? block.querySelector('.md-raw') : null;
+        if (!src) return;
+        var btn = this;
+        copyText(src.textContent || '').then(function(){
+          btn.classList.add('is-copied');
+          setTimeout(function(){ btn.classList.remove('is-copied'); }, 1500);
+        }).catch(function(){
+          btn.classList.add('is-failed');
+          setTimeout(function(){ btn.classList.remove('is-failed'); }, 1500);
+        });
+      });
+    }
+  }
+  function start(){
+    bind(document);
+    if (document.body) {
+      document.body.addEventListener('htmx:afterSwap', function(e){
+        bind(e && e.target ? e.target : document);
+      });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+`;
+
 /* ─── shell ─────────────────────────────────────────────────────────── */
 
 export interface ShellOptions {
@@ -384,6 +449,7 @@ ${links.join('\n')}
 <script>${SB_COLLAPSE}</script>
 <script>${ROW_LINK}</script>
 <script>${CONFIRM}</script>
+<script>${MD_COPY}</script>
 </head>
 <body>
 ${shellBody}

@@ -27,6 +27,32 @@ export function renderMarkdown(content: string): SafeHtml {
   return raw(md.render(content));
 }
 
+const COPY_ICON =
+  '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="8.5" height="8.5" rx="1.2"/><path d="M3.5 10.5H2.2A0.7 0.7 0 0 1 1.5 9.8V2.2A0.7 0.7 0 0 1 2.2 1.5H9.8A0.7 0.7 0 0 1 10.5 2.2V3.5"/></svg>';
+const CHECK_ICON =
+  '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5L6.5 12L13 4.5"/></svg>';
+
+// Rendered Markdown block with an icon-only copy-raw button tucked into the
+// panel's top-right corner (GitHub code-block style). The verbatim source lives
+// in a hidden `<pre class="md-raw">` (a `<pre>` so the HTML minifier preserves
+// its whitespace) that the [data-md-copy] handler in shell() reads.
+export function mdBody(content: string): SafeHtml {
+  return html`<div class="md-block">
+    <button
+      class="md-copy"
+      type="button"
+      data-md-copy
+      title="Copy raw Markdown"
+      aria-label="Copy raw Markdown"
+    >
+      <span class="ic ic-copy">${raw(COPY_ICON)}</span
+      ><span class="ic ic-done">${raw(CHECK_ICON)}</span>
+    </button>
+    <div class="md-body">${renderMarkdown(content)}</div>
+    <pre class="md-raw" hidden>${content}</pre>
+  </div>`;
+}
+
 /* ── icons (sidebar) ───────────────────────────────────────────────── */
 
 const SVG_OPEN =
