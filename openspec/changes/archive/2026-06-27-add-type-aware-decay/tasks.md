@@ -27,3 +27,4 @@
 - [x] 5.1 Run `pnpm run typecheck` and `pnpm run lint` — both clean (no `any`, no floating promises).
 - [x] 5.2 Run `pnpm test` (or at minimum the three touched test files) — all green; invariant tests under `apps/server/src/test/invariants.test.ts` (data-access confinement, append-only) still pass.
 - [x] 5.3 Run `openspec validate --strict add-type-aware-decay` — exits clean.
+- [x] 5.4 (operator smoke) Validated against `pnpm run dev:docker:up`: backdated three zero-confirmation active rows (project/user/reference) to `last_seen_at` 200 days ago, forced the sweep via `POST /admin/consolidation/run`, and confirmed only the `project` row was archived (`user`/`reference` exempt under their longer per-type thresholds). The decay op journaled `op_type=decay` with reasoning `last_seen_at older than per-type decay threshold with low confidence`; a second sweep archived 0 (idempotent).
