@@ -147,7 +147,10 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         num: '04',
         title: 'Rembric Judgments.',
         hl: 'Rembric',
-        meta: [{ k: 'SHOWING', v: `${rows.length} ROWS` }],
+        meta: [
+          { k: 'TOTAL', v: String(deps.repos.relations.adminCountWithFilters(filters)) },
+          { k: 'SHOWING', v: `${rows.length} ROWS` },
+        ],
       })}
       ${filtersBar}
       <div class="tbl-host">

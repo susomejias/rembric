@@ -230,6 +230,24 @@ export class RelationsRepository {
     return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
   }
 
+  adminCountWithFilters(filters: AdminRelationFilters): number {
+    const conditions: SQL[] = [];
+    if (filters.status) conditions.push(eq(memoryRelations.status, filters.status));
+    if (filters.kind === 'pending') {
+      conditions.push(isNull(memoryRelations.relation));
+    } else if (filters.kind) {
+      conditions.push(eq(memoryRelations.relation, filters.kind));
+    }
+    const query = this.db
+      .select({ value: count() })
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .$dynamic();
+    const row = conditions.length > 0 ? query.where(and(...conditions)).get() : query.get();
+    return row?.value ?? 0;
+  }
+
   adminGetWithContent(id: string): AdminRelationWithContent | undefined {
     return this.db
       .select(withContentSelection)

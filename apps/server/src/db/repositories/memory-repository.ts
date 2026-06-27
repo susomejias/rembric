@@ -560,6 +560,19 @@ export class MemoryRepository {
     return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, opts.offset);
   }
 
+  private needsReviewExprs(ttlByType: ReadonlyArray<readonly [MemoryType, number]>): {
+    ttlExpr: SQL;
+    baselineExpr: SQL;
+  } {
+    const ttlCase = sql.join(
+      ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
+      sql` `,
+    );
+    const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
+    const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}), ${memory.createdAt}))`;
+    return { ttlExpr, baselineExpr };
+  }
+
   private runNeedsReview(
     scopeFilter: SQL | undefined,
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>,
@@ -567,12 +580,7 @@ export class MemoryRepository {
     limit: number,
     offset: number,
   ): Memory[] {
-    const ttlCase = sql.join(
-      ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
-      sql` `,
-    );
-    const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
-    const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}), ${memory.createdAt}))`;
+    const { ttlExpr, baselineExpr } = this.needsReviewExprs(ttlByType);
 
     return this.db
       .select()
@@ -695,6 +703,71 @@ export class MemoryRepository {
       .limit(opts.limit)
       .offset(opts.offset)
       .all();
+  }
+
+  adminCount(opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
+    const conditions: SQL[] = [eq(memory.status, opts.status)];
+    if (opts.type) conditions.push(eq(memory.type, opts.type));
+    if (opts.project?.kind === 'global') {
+      conditions.push(eq(memory.scope, 'global'), isNull(memory.projectId));
+    } else if (opts.project?.kind === 'project') {
+      conditions.push(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
+    }
+    const row = this.db
+      .select({ value: count() })
+      .from(memory)
+      .where(and(...conditions))
+      .get();
+    return row?.value ?? 0;
+  }
+
+  adminCountFts(query: string, opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
+    // Mirror the status/type/scope filters the dashboard applies client-side to
+    // the FTS page (see `clientSideFilter` in dashboard/memories.ts). Without
+    // them the TOTAL counts superseded/out-of-scope matches the list drops,
+    // diverging from what the user can actually page through.
+    const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
+    if (opts.type) conds.push(sql`m.type = ${opts.type}`);
+    if (opts.project?.kind === 'global') {
+      conds.push(sql`m.scope = 'global' AND m.project_id IS NULL`);
+    } else if (opts.project?.kind === 'project') {
+      conds.push(sql`m.scope = 'project' AND m.project_id = ${opts.project.projectId}`);
+    }
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v
+      FROM memory m
+      JOIN memory_fts f ON f.rowid = m.rowid
+      WHERE ${sql.join(conds, sql` AND `)}
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
+  adminCountNeedsReview(opts: {
+    project?: AdminListMemoriesOpts['project'];
+    nowMs: number;
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+  }): number {
+    if (opts.ttlByType.length === 0) return 0;
+    let scopeFilter: SQL | undefined;
+    if (opts.project?.kind === 'global') {
+      scopeFilter = and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    } else if (opts.project?.kind === 'project') {
+      scopeFilter = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
+    }
+    const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.ttlByType);
+    const row = this.db
+      .select({ value: count() })
+      .from(memory)
+      .where(
+        and(
+          eq(memory.status, 'active'),
+          scopeFilter,
+          sql`${ttlExpr} IS NOT NULL`,
+          sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
+        ),
+      )
+      .get();
+    return row?.value ?? 0;
   }
 
   adminGetByIds(ids: readonly string[]): Memory[] {

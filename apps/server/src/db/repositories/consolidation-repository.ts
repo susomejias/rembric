@@ -81,6 +81,11 @@ export class ConsolidationRepository {
       .all();
   }
 
+  adminCountRuns(): number {
+    const row = this.db.select({ value: count() }).from(consolidationRuns).get();
+    return row?.value ?? 0;
+  }
+
   adminGetRun(id: string): ConsolidationRun | undefined {
     return this.db.select().from(consolidationRuns).where(eq(consolidationRuns.id, id)).get();
   }

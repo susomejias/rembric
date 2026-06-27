@@ -229,6 +229,15 @@ export class AgentSessionsRepository {
       .all();
   }
 
+  adminCount(opts: { deleted: boolean }): number {
+    const row = this.db
+      .select({ value: count() })
+      .from(agentSessions)
+      .where(opts.deleted ? isNotNull(agentSessions.deletedAt) : isNull(agentSessions.deletedAt))
+      .get();
+    return row?.value ?? 0;
+  }
+
   adminGetDetail(id: string): AdminSessionDetail | undefined {
     return this.db
       .select({ ...listSelection, summary: agentSessions.summary })

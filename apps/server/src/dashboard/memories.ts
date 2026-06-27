@@ -119,6 +119,32 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
 
+    // True total for the current filter set (not the page slice). The
+    // needs_review+query path is TS-derived row-by-row, so it can only
+    // report a lower bound.
+    let total: string;
+    if (query && wantNeedsReview) {
+      total = `${visible.length}+`;
+    } else if (query) {
+      total = String(
+        deps.repos.memory.adminCountFts(query, {
+          status: statusFilter as Memory['status'],
+          type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+          project,
+        }),
+      );
+    } else if (wantNeedsReview) {
+      total = String(deps.repos.memory.adminCountNeedsReview({ project, nowMs, ttlByType }));
+    } else {
+      total = String(
+        deps.repos.memory.adminCount({
+          status: statusFilter as Memory['status'],
+          type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+          project,
+        }),
+      );
+    }
+
     const rowsHtml = visible.map((m) => {
       const projectLabel = m.projectId
         ? (projectById.get(m.projectId)?.slug ?? shortId(m.projectId))
@@ -174,7 +200,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         title: 'Rembric Memories.',
         hl: 'Rembric',
         meta: [
-          { k: 'TOTAL', v: String(rows.length) },
+          { k: 'TOTAL', v: total },
           { k: 'SHOWING', v: `${visible.length} ROWS` },
         ],
       })}
