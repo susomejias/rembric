@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.1](https://github.com/susomejias/rembric/compare/server-v0.22.0...server-v0.22.1) (2026-06-27)
+
+
+### Features
+
+* **consolidation:** type-aware decay thresholds ([#203](https://github.com/susomejias/rembric/issues/203)) ([0acb6c2](https://github.com/susomejias/rembric/commit/0acb6c2fb7668a44f64b316c4c8f93a94fa69917))
+* **dashboard:** true filtered totals on list pages ([#204](https://github.com/susomejias/rembric/issues/204)) ([6615fc0](https://github.com/susomejias/rembric/commit/6615fc0dc2d4a9f7567c7f8efdf6ef5e65dad4cb))
+* **mcp:** batch judgment + dismissed-candidate suppression ([#201](https://github.com/susomejias/rembric/issues/201)) ([09bae6d](https://github.com/susomejias/rembric/commit/09bae6d23a5198dcac3b9a54c34489792a24a9f1))
+* **mcp:** memory.search projection + batch get + FTS unification ([#202](https://github.com/susomejias/rembric/issues/202)) ([0a347ac](https://github.com/susomejias/rembric/commit/0a347ac7324af71daec0db96656d37aca04ca684))
+
+
+### Bug Fixes
+
+* **server:** dashboard, mcp, and consolidation correctness quick wins ([#200](https://github.com/susomejias/rembric/issues/200)) ([e28e015](https://github.com/susomejias/rembric/commit/e28e0151dd444049921b3760d1e793851b0ef9c6))
+
 ## [0.22.0](https://github.com/susomejias/rembric/compare/server-v0.21.24...server-v0.22.0) (2026-06-23)
 
 
