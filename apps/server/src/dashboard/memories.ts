@@ -70,7 +70,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     let rows: Memory[];
     if (query) {
       rows = deps.repos.memory
-        .adminSearchFts(query, PAGE_SIZE, offset)
+        .adminSearchFts(query, PAGE_SIZE + 1, offset)
         .filter((m) => clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter));
     } else if (wantNeedsReview) {
       // needs_review implies active; the SQL path filters + paginates correctly.
