@@ -126,7 +126,13 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     if (query && wantNeedsReview) {
       total = `${visible.length}+`;
     } else if (query) {
-      total = String(deps.repos.memory.adminCountFts(query));
+      total = String(
+        deps.repos.memory.adminCountFts(query, {
+          status: statusFilter as Memory['status'],
+          type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+          project,
+        }),
+      );
     } else if (wantNeedsReview) {
       total = String(deps.repos.memory.adminCountNeedsReview({ project, nowMs, ttlByType }));
     } else {

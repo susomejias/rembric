@@ -721,12 +721,23 @@ export class MemoryRepository {
     return row?.value ?? 0;
   }
 
-  adminCountFts(query: string): number {
+  adminCountFts(query: string, opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
+    // Mirror the status/type/scope filters the dashboard applies client-side to
+    // the FTS page (see `clientSideFilter` in dashboard/memories.ts). Without
+    // them the TOTAL counts superseded/out-of-scope matches the list drops,
+    // diverging from what the user can actually page through.
+    const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
+    if (opts.type) conds.push(sql`m.type = ${opts.type}`);
+    if (opts.project?.kind === 'global') {
+      conds.push(sql`m.scope = 'global' AND m.project_id IS NULL`);
+    } else if (opts.project?.kind === 'project') {
+      conds.push(sql`m.scope = 'project' AND m.project_id = ${opts.project.projectId}`);
+    }
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v
       FROM memory m
       JOIN memory_fts f ON f.rowid = m.rowid
-      WHERE memory_fts MATCH ${query}
+      WHERE ${sql.join(conds, sql` AND `)}
     `) as { v: number } | undefined;
     return row?.v ?? 0;
   }

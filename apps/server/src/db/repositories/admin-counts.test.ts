@@ -56,12 +56,15 @@ describe('admin list-page count methods', () => {
       .run();
 
     // 12 active global memories matching FTS 'widget', + 1 active project row,
-    // + 2 archived rows used as relation endpoints.
+    // + 2 archived rows used as relation endpoints. Plus a superseded and an
+    // archived 'widget' match so the FTS count must honour the status filter.
     const rows: NewMemory[] = [];
     for (let i = 0; i < 12; i++) rows.push(mem({ id: `G${i}`, content: `widget number ${i}` }));
     rows.push(mem({ id: 'PROJ', content: 'gadget one', scope: 'project', projectId: 'p1' }));
     rows.push(mem({ id: 'RS', content: 'relation source', status: 'archived' }));
     rows.push(mem({ id: 'RT', content: 'relation target', status: 'archived' }));
+    rows.push(mem({ id: 'WSUP', content: 'widget superseded', status: 'superseded' }));
+    rows.push(mem({ id: 'WARC', content: 'widget archived', status: 'archived' }));
     t.handle.db.insert(memory).values(rows).run();
 
     // 12 visible sessions + 2 soft-deleted.
@@ -108,12 +111,29 @@ describe('admin list-page count methods', () => {
       repos.memory.adminCount({ status: 'active', project: { kind: 'project', projectId: 'p1' } }),
     ).toBe(1);
     expect(repos.memory.adminCount({ status: 'active', type: 'user' })).toBe(0);
-    expect(repos.memory.adminCount({ status: 'archived' })).toBe(2);
+    expect(repos.memory.adminCount({ status: 'archived' })).toBe(3);
   });
 
-  it('memory.adminCountFts counts all matches, not just the first page', () => {
-    expect(repos.memory.adminCountFts('widget')).toBe(12);
-    expect(repos.memory.adminCountFts('zzznomatchzzz')).toBe(0);
+  it('memory.adminCountFts counts all matches in the filter set, not just the first page', () => {
+    // 12 active 'widget' rows; the superseded/archived 'widget' matches are
+    // excluded by the (default) active status filter, matching the list.
+    expect(repos.memory.adminCountFts('widget', { status: 'active' })).toBe(12);
+    expect(repos.memory.adminCountFts('zzznomatchzzz', { status: 'active' })).toBe(0);
+  });
+
+  it('memory.adminCountFts honours the status/scope filters the list applies', () => {
+    expect(repos.memory.adminCountFts('widget', { status: 'superseded' })).toBe(1);
+    expect(repos.memory.adminCountFts('widget', { status: 'archived' })).toBe(1);
+    // 'gadget' is project-scoped only: global filter → 0, project filter → 1.
+    expect(
+      repos.memory.adminCountFts('gadget', { status: 'active', project: { kind: 'global' } }),
+    ).toBe(0);
+    expect(
+      repos.memory.adminCountFts('gadget', {
+        status: 'active',
+        project: { kind: 'project', projectId: 'p1' },
+      }),
+    ).toBe(1);
   });
 
   it('memory.adminCountNeedsReview counts aged active rows; empty TTL map → 0', () => {

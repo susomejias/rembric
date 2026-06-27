@@ -6,7 +6,7 @@ The `/dashboard/memories` view SHALL support filtering by project, type, status,
 
 The view SHALL render review state in a dedicated `review` column (separate from `status`, because review is an orthogonal axis — a freshness signal, not a lifecycle value): each `active` row whose derived `reviewState = 'needs_review'` (derivation per the `memory` capability) SHALL show a `needs_review` badge in that column; all other rows SHALL show a neutral placeholder. The badge SHALL use the existing `.pill` atom and the locked palette — no new design token is introduced. The filter form SHALL include a `review` control with values `(any)` (default) and `needs_review`; when `review = needs_review` the list SHALL show only `active` memories deriving `needs_review`, computed server-side with the per-type TTL pushed into SQL so pagination is correct, respecting the current project filter and preserving all active filters across HTMX swaps.
 
-The view header SHALL render a `TOTAL` meta chip whose value is the true count of rows matching the **current filter set** (the combined scope/status/type/review/search filters), independent of pagination — NOT the count of rows on the current page. The header SHALL also render a `SHOWING N ROWS` indicator carrying the page-slice count. The true count SHALL be computed by a dashboard-only, `admin*`-prefixed repository read so that no counting SQL leaves the `src/db/` layer. For the FTS-search branch the count SHALL be the number of rows matching the search expression (not the page slice); for the `needs_review`-only branch it SHALL be the number of active rows deriving `needs_review` for the active project filter.
+The view header SHALL render a `TOTAL` meta chip whose value is the true count of rows matching the **current filter set** (the combined scope/status/type/review/search filters), independent of pagination — NOT the count of rows on the current page. The header SHALL also render a `SHOWING N ROWS` indicator carrying the page-slice count. The true count SHALL be computed by a dashboard-only, `admin*`-prefixed repository read so that no counting SQL leaves the `src/db/` layer. For the FTS-search branch the count SHALL be the number of rows matching the search expression **within the current scope/status/type filter** — mirroring the client-side filter the list applies to the FTS page — not the raw match count (which would over-report by including superseded/out-of-scope rows the list drops) and not the page slice; for the `needs_review`-only branch it SHALL be the number of active rows deriving `needs_review` for the active project filter.
 
 For the single combination of `review = needs_review` AND a non-empty free-text query — where review state is derived after the page slice rather than in SQL — the `TOTAL` chip SHALL render the page-slice count suffixed with `+` (a "at least N" lower bound) rather than an inexact exact-looking number.
 
@@ -45,11 +45,11 @@ For the single combination of `review = needs_review` AND a non-empty free-text 
 - **THEN** the header `TOTAL` chip SHALL read `248`
 - **AND** the `SHOWING` indicator SHALL read `10 ROWS`
 
-#### Scenario: TOTAL counts all FTS matches, not just the page
+#### Scenario: TOTAL counts FTS matches within the active filter set, not just the page
 
-- **GIVEN** 53 memories match the free-text query `q` with the page size at 10
-- **WHEN** the operator submits that query on `/dashboard/memories`
-- **THEN** the header `TOTAL` chip SHALL read `53`
+- **GIVEN** 53 `active` memories match the free-text query `q` with the page size at 10, plus additional superseded/archived (or out-of-scope) rows that also match `q`
+- **WHEN** the operator submits that query on `/dashboard/memories` under the default `status = active` filter
+- **THEN** the header `TOTAL` chip SHALL read `53` — the FTS matches within the current scope/status/type filter, mirroring the rows the list shows — and SHALL NOT read the raw match count that includes the superseded/out-of-scope rows
 - **AND** the `SHOWING` indicator SHALL read `10 ROWS`
 
 #### Scenario: needs_review combined with search renders a lower-bound total

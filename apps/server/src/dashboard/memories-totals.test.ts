@@ -74,4 +74,19 @@ describe('memories dashboard TOTAL meta', () => {
     const html = await (await app.request('/?review=needs_review&q=widget')).text();
     expect(html).toContain('<b>TOTAL</b> 10+');
   });
+
+  it('FTS search total honours the (default active) status filter, not the raw match count', async () => {
+    // Two more 'widget' matches that are NOT active. The list filters them out
+    // client-side; the count must mirror that, so TOTAL stays 12 (not 14).
+    t.handle.db
+      .insert(memory)
+      .values([
+        { ...widget('WSUP'), status: 'superseded' },
+        { ...widget('WARC'), status: 'archived' },
+      ])
+      .run();
+    const html = await (await app.request('/?q=widget')).text();
+    expect(html).toContain('<b>TOTAL</b> 12');
+    expect(html).not.toContain('<b>TOTAL</b> 14');
+  });
 });
