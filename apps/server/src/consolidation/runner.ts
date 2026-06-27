@@ -107,17 +107,13 @@ export class ConsolidationRunner {
     });
 
     // 1. Decay.
-    const decayIds = findDecayCandidates(
-      this.opts.repos,
-      scope,
-      this.opts.decay ?? DEFAULT_DECAY,
-      now,
-    );
+    const decay = this.opts.decay ?? DEFAULT_DECAY;
+    const decayIds = findDecayCandidates(this.opts.repos, scope, decay, now);
     if (decayIds.length > 0) {
       applyDecay(this.opts.repos, this.opts.tx, {
         runId,
         ids: decayIds,
-        reasoning: `last_seen_at older than ${(this.opts.decay ?? DEFAULT_DECAY).thresholdMs}ms with low confidence`,
+        reasoning: `last_seen_at older than ${formatDurationMs(decay.thresholdMs)} with confidence ≤ ${decay.confidenceFloor}`,
       });
       ops.archives = decayIds.length;
     }
@@ -179,4 +175,11 @@ export class ConsolidationRunner {
 
 function scopeString(scope: ScopeKey): string {
   return scope.scope === 'global' ? 'global' : `project:${scope.projectId ?? ''}`;
+}
+
+function formatDurationMs(ms: number): string {
+  const days = Math.round(ms / 86_400_000);
+  if (days >= 365 && days % 365 === 0) return `${days / 365}y`;
+  if (days >= 30 && days % 30 === 0) return `${days / 30}mo`;
+  return `${days}d`;
 }
