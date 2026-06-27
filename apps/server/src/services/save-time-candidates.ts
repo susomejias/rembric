@@ -49,11 +49,19 @@ export interface SaveCandidate {
 }
 
 export function findSaveTimeCandidates(
-  repos: Pick<Repositories, 'memory' | 'vectors'>,
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations'>,
   saved: Memory,
   opts: CandidateOptions,
 ): SaveCandidate[] {
   const poolSize = opts.poolSize ?? 20;
+
+  // Suppress targets the new memory's ancestry (`replaces`) already judged
+  // `not_conflict`, so a re-save never re-surfaces an already-dismissed pair.
+  const dismissedIds =
+    saved.replaces.length > 0
+      ? repos.relations.listNotConflictTargetsForSources(saved.replaces)
+      : [];
+  const excludeIds = [...saved.replaces, ...dismissedIds];
 
   // Vec kNN is only useful once the just-saved row has an embedding (the
   // worker may not have processed it yet); otherwise the FTS pass below
@@ -62,7 +70,7 @@ export function findSaveTimeCandidates(
     memoryId: saved.id,
     scope: saved.scope,
     projectId: saved.projectId,
-    excludeIds: saved.replaces,
+    excludeIds,
     limit: poolSize,
   });
   const vecPool: SaveCandidate[] = vecRows
@@ -85,7 +93,7 @@ export function findSaveTimeCandidates(
       excludeId: saved.id,
       scope: saved.scope,
       projectId: saved.projectId,
-      excludeIds: saved.replaces,
+      excludeIds,
       limit: poolSize,
     });
     for (const r of ftsRows) {

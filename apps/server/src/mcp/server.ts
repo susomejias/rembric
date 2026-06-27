@@ -126,7 +126,7 @@ const GET_DESCRIPTION =
   'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
 
 const CONFIRM_DESCRIPTION =
-  'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it.';
+  'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it. Pass `ids: string[]` to re-affirm several memories in one call — e.g. close out all of memory.context.needsReview when they are all still true.';
 
 // Rembric is append-only (rows are never deleted; supersede is a reversible,
 // journaled status flip) and a closed local store, so destructiveHint and
@@ -441,7 +441,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.judge',
     {
       description:
-        'Close a pending judgment surfaced by memory.save.candidates[]. Pass the judgmentId, a relation (supersedes/conflicts_with/related/compatible/scoped/not_conflict), optional reason and confidence. relation=supersedes atomically marks the candidate target memory as superseded.',
+        'Close a pending judgment surfaced by memory.save.candidates[]. Pass the judgmentId, a relation (supersedes/conflicts_with/related/compatible/scoped/not_conflict), optional reason and confidence. relation=supersedes atomically marks the candidate target memory as superseded. Pass `judgments: [...]` to close all of memory.save.candidates[] in one call — each item is judged independently, so a bad id reports an error without rolling back the others.',
       inputSchema: judgeSchema,
       outputSchema: judgeOutput,
       annotations: WRITE_ANNOTATIONS('Judge memories'),

@@ -305,6 +305,34 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
   });
 });
 
+describe('memory.confirm — batch (ids)', () => {
+  it('confirms each id once; duplicates collapse to one; reports the count', async () => {
+    const m1 = memory.save({ type: 'user', title: 'c1', content: 'c1' }, projectScope(projectA.id));
+    const m2 = memory.save({ type: 'user', title: 'c2', content: 'c2' }, projectScope(projectA.id));
+    const m3 = memory.save({ type: 'user', title: 'c3', content: 'c3' }, projectScope(projectA.id));
+
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.confirm({ ids: [m1.id, m2.id, m3.id, m2.id] })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(parseText<{ confirmed: number }>(r).confirmed).toBe(3);
+
+    const scope = projectScope(projectA.id);
+    expect(memory.get(m1.id, scope)?.confirmationCount).toBe(1);
+    expect(memory.get(m2.id, scope)?.confirmationCount).toBe(1); // duplicate recorded once
+    expect(memory.get(m3.id, scope)?.confirmationCount).toBe(1);
+  });
+
+  it('single-id confirm still returns { ok: true }', async () => {
+    const m = memory.save({ type: 'user', title: 's', content: 's' }, projectScope(projectA.id));
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.confirm({ id: m.id })),
+    );
+    expect(parseText<{ ok: boolean }>(r).ok).toBe(true);
+    expect(memory.get(m.id, projectScope(projectA.id))?.confirmationCount).toBe(1);
+  });
+});
+
 describe('memory.* — router-activated project on an unscoped /mcp connection', () => {
   // Reproduces the bug where calling `project.use({slug})` on a path-less
   // /mcp connection correctly updates the SessionRouter and is reported by

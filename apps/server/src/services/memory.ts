@@ -356,6 +356,19 @@ export class MemoryService {
     this.repos.memory.touchLastSeen(head.id, ts);
   }
 
+  /**
+   * Batch confirm: de-duplicates `ids` and records one confirmation per
+   * distinct id inside ONE transaction. Atomic — a missing/out-of-scope id
+   * aborts the whole batch via `confirm`'s `memory_not_found`.
+   */
+  confirmMany(ids: readonly string[], scope: Scope, source?: MemorySource): { confirmed: number } {
+    const unique = [...new Set(ids)];
+    return this.tx.transaction(() => {
+      for (const id of unique) this.confirm(id, scope, source);
+      return { confirmed: unique.length };
+    });
+  }
+
   archive(id: string, scope: Scope): void {
     const existing = this.unsafeGetById(id);
     if (!existing || !memoryMatchesScope(existing, scope)) {

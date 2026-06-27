@@ -162,4 +162,82 @@ describe('RelationsRepository', () => {
       expect(repo.adminGetWithContent('nope')).toBeUndefined();
     });
   });
+
+  describe('listNotConflictTargetsForSources', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          mem('S1', 's1'),
+          mem('S2', 's2'),
+          mem('T1', 't1'),
+          mem('T2', 't2'),
+          mem('T3', 't3'),
+        ])
+        .run();
+      t.handle.db
+        .insert(memoryRelations)
+        .values([
+          rel({
+            id: 'N1',
+            judgmentId: 'JN1',
+            sourceId: 'S1',
+            targetId: 'T1',
+            relation: 'not_conflict',
+            status: 'judged',
+          }),
+          rel({
+            id: 'N2',
+            judgmentId: 'JN2',
+            sourceId: 'S1',
+            targetId: 'T2',
+            relation: 'not_conflict',
+            status: 'judged',
+          }),
+          rel({
+            id: 'N3',
+            judgmentId: 'JN3',
+            sourceId: 'S1',
+            targetId: 'T1',
+            relation: 'not_conflict',
+            status: 'judged',
+          }), // dup target
+          rel({
+            id: 'N4',
+            judgmentId: 'JN4',
+            sourceId: 'S1',
+            targetId: 'T3',
+            relation: 'conflicts_with',
+            status: 'judged',
+          }), // wrong relation
+          rel({
+            id: 'N5',
+            judgmentId: 'JN5',
+            sourceId: 'S1',
+            targetId: 'T2',
+            relation: null,
+            status: 'pending',
+          }), // not judged
+          rel({
+            id: 'N6',
+            judgmentId: 'JN6',
+            sourceId: 'S2',
+            targetId: 'T1',
+            relation: 'not_conflict',
+            status: 'judged',
+          }), // other source
+        ])
+        .run();
+    });
+
+    it('returns distinct not_conflict judged targets, scoped to the given sources', () => {
+      expect(repo.listNotConflictTargetsForSources(['S1']).sort()).toEqual(['T1', 'T2']);
+      expect(repo.listNotConflictTargetsForSources(['S2'])).toEqual(['T1']);
+      expect(repo.listNotConflictTargetsForSources(['S1', 'S2']).sort()).toEqual(['T1', 'T2']);
+    });
+
+    it('returns [] for empty input', () => {
+      expect(repo.listNotConflictTargetsForSources([])).toEqual([]);
+    });
+  });
 });

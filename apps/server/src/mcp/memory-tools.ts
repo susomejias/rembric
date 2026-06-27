@@ -90,7 +90,19 @@ export const memoryGetSchema = {
 };
 
 export const memoryConfirmSchema = {
-  id: z.string().min(1),
+  id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('A single memory id. Provide exactly one of `id` or `ids`.'),
+  ids: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'Batch re-affirm several memories in one call (e.g. all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
+    ),
 };
 
 export const contextSchema = {
@@ -194,6 +206,7 @@ export const memoryGetOutput = {
 
 export const memoryConfirmOutput = {
   ok: z.literal(true),
+  confirmed: z.number().optional(),
 };
 
 export const contextOutput = {
@@ -674,10 +687,17 @@ async function handleGet(deps: MemoryToolDeps, args: { id: string }) {
   }
 }
 
-async function handleConfirm(deps: MemoryToolDeps, args: { id: string }) {
+async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
   const ctx = getRequestContext();
   const activeProject = await resolveEffectiveProject(deps);
   const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
+
+  const hasId = typeof args.id === 'string' && args.id.length > 0;
+  const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
+  if (hasId === hasIds) {
+    return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+  }
+
   try {
     const authzTarget = {
       scope: scope.kind,
@@ -687,11 +707,18 @@ async function handleConfirm(deps: MemoryToolDeps, args: { id: string }) {
     if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm in this scope`);
     }
+    if (args.ids !== undefined) {
+      const { confirmed } = deps.memory.confirmMany(args.ids, scope, { tokenName: ctx.token.name });
+      return ok({ ok: true, confirmed });
+    }
+    if (args.id === undefined) {
+      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+    }
     deps.memory.confirm(args.id, scope, { tokenName: ctx.token.name });
     return ok({ ok: true });
   } catch (err) {
     if (err instanceof DomainError && err.code === 'memory_not_found') {
-      return mcpError('not_found', `memory '${args.id}' not found`);
+      return mcpError('not_found', 'memory not found');
     }
     return errToMcp(err);
   }
