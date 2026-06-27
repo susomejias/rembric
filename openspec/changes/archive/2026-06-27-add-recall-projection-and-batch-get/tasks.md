@@ -28,3 +28,4 @@
 - [x] 5.1 `npx openspec validate --strict add-recall-projection-and-batch-get` exits clean.
 - [x] 5.2 `pnpm run typecheck` and `pnpm run lint` pass with no `any`/`as unknown as` in the new code.
 - [x] 5.3 `pnpm test` passes (pre-push gate), including the data-access and append-only invariant tests in `apps/server/src/test/invariants.test.ts`.
+- [x] 5.4 (operator smoke) Validated against `pnpm run dev:docker:up` via an MCP client at `/mcp/demo`: `memory.search` default returns full content; `snippet:20` truncates with ellipsis; `fields:['id','title']` keeps identity and omits `content` without changing the result set/order; `memory.get` single returns the legacy `{memory,head,…}` shape, batch `ids` returns ordered rows with unknown ids in `notFound` (no content leak), and both/neither `id`/`ids` → `invalid_input`; a CJK-only save surfaced candidates via the unified FTS builder (empty MATCH before #202).
