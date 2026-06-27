@@ -28,5 +28,5 @@
 
 - [x] 4.1 Run `pnpm run typecheck` and `pnpm run lint` clean (no new `any` without a justifying comment).
 - [x] 4.2 Run the invariants suite `pnpm vitest run apps/server/src/test/invariants.test.ts` to confirm append-only + data-access confinement still hold (the new SQL lives in `relations-repository.ts`).
-- [ ] 4.3 (operator-only) Smoke against `pnpm run dev:docker:up`: save → batch-judge all candidates in one call; re-save the same topic and confirm the dismissed pair does NOT re-surface; `memory.context` → batch-confirm the `needsReview` ids in one call.
+- [x] 4.3 (operator-only) Smoked against `pnpm run dev:docker:up` via an MCP client at `/mcp/demo`: save X → save Y (X surfaced among candidates) → batch-judge all 4 candidates `not_conflict` in one `memory.judge({judgments:[…]})` call (all ok) → re-save Y' on the same `topic_key` (X NOT re-surfaced — suppression fired) → `memory.confirm({ids:[…]})` batch-confirmed in one call with duplicate-id dedup (dup→confirmed=1).
 - [x] 4.4 Run `openspec validate --strict add-batch-judgment-and-candidate-suppression` and confirm it exits 0.
