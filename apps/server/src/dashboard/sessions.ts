@@ -144,7 +144,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         num: '03',
         title: 'Rembric Sessions.',
         hl: 'Rembric',
-        meta: [{ k: 'TOTAL', v: String(visibleRows.length) }],
+        meta: [{ k: 'TOTAL', v: String(deps.repos.agentSessions.adminCount({ deleted: false })) }],
       })}
       ${flash}
       ${includeDeleted

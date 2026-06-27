@@ -117,7 +117,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         num: '05',
         title: 'Rembric Consolidation.',
         hl: 'Rembric',
-        meta: [{ k: 'RUNS', v: String(runs.length) }],
+        meta: [{ k: 'TOTAL', v: String(deps.repos.consolidation.adminCountRuns()) }],
       })}
       <p>${sweepForm}</p>
       ${runs.length === 0
