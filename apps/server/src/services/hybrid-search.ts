@@ -112,14 +112,16 @@ export function fuseRRF(rankedLists: string[][], rankConstant = RANK_CONSTANT): 
 /**
  * Build a crash-proof FTS5 MATCH expression from arbitrary natural-language
  * text. Keeps whole Unicode word tokens (does NOT split at non-ASCII chars or
- * drop accented/CJK tokens — unlike the ASCII-only save-time `escapeFts`),
- * drops pure-punctuation tokens, and quotes each surviving token as a phrase —
+ * drop accented/CJK tokens, unlike a naive ASCII-only tokenizer), drops
+ * pure-punctuation tokens, and quotes each surviving token as a phrase —
+ * optionally capped at `maxTerms` OR-phrases (save-time candidate detection
+ * passes a cap; interactive search does not).
  * which neutralizes FTS5 metacharacters AND bareword operators (AND/OR/NOT/
  * NEAR) in one move. The OR between quoted phrases is the intended fusion-
  * friendly recall semantics; a user's literal "OR" becomes the phrase `"or"`.
  * Returns '' when nothing usable remains (caller skips the lexical branch).
  */
-export function sanitizeFtsQuery(query: string): string {
+export function sanitizeFtsQuery(query: string, opts?: { maxTerms?: number }): string {
   const tokens: string[] = [];
   for (const raw of query.split(/\s+/)) {
     const t = raw.replace(/"/g, '').trim();
@@ -129,6 +131,7 @@ export function sanitizeFtsQuery(query: string): string {
     // empty-phrase parse edge).
     if (!/[\p{L}\p{N}]/u.test(t)) continue;
     tokens.push(`"${t}"`);
+    if (opts?.maxTerms !== undefined && tokens.length >= opts.maxTerms) break;
   }
   return tokens.join(' OR ');
 }

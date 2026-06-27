@@ -40,6 +40,15 @@ describe('sanitizeFtsQuery', () => {
     expect(sanitizeFtsQuery('   ')).toBe('');
     expect(sanitizeFtsQuery('!!! ??? ...')).toBe('');
   });
+
+  it('caps the number of OR-phrases at maxTerms; the no-cap call is unchanged', () => {
+    expect(sanitizeFtsQuery('alpha beta gamma delta epsilon', { maxTerms: 3 })).toBe(
+      '"alpha" OR "beta" OR "gamma"',
+    );
+    expect(sanitizeFtsQuery('alpha beta gamma delta epsilon')).toBe(
+      '"alpha" OR "beta" OR "gamma" OR "delta" OR "epsilon"',
+    );
+  });
 });
 
 describe('hybrid search plumbing (FakeEmbedder)', () => {

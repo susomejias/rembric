@@ -168,6 +168,25 @@ describe('findSaveTimeCandidates', () => {
     expect(cands.every((c) => c.source === 'fts' || c.source === 'vec')).toBe(true);
   });
 
+  it('surfaces FTS candidates for non-ASCII content (Unicode-aware MATCH builder)', () => {
+    // No embedder is wired here, so any candidate MUST come from FTS — which the
+    // old ASCII-only builder could never produce for CJK content (it returned '').
+    const a = memorySvc.save(
+      { type: 'feedback', title: '認証 トークン 設計', content: '認証 トークン 設計 の メモ' },
+      SCOPE_GLOBAL,
+    );
+    const b = memorySvc.save(
+      {
+        type: 'feedback',
+        title: '認証 トークン 設計 改訂',
+        content: '認証 トークン 設計 の 改訂 メモ',
+      },
+      SCOPE_GLOBAL,
+    );
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, { perSaveMax: 5 });
+    expect(cands.some((c) => c.targetId === a.id && c.source === 'fts')).toBe(true);
+  });
+
   it('respects perSaveMax', () => {
     for (let i = 0; i < 10; i++) {
       memorySvc.save(

@@ -83,10 +83,36 @@ export const memorySearchSchema = {
     .describe(
       'Skip this many results for paging. Exact for the no-query listing; on a text query it is best-effort within a bounded relevance window, so a deep offset may return an empty page.',
     ),
+  snippet: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Truncate each result's `content` to this many characters (ellipsis appended) so a broad triage scan stays cheap; omit for full content, then drill in with memory.get.",
+    ),
+  fields: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Restrict each result to these fields; identity fields (id, type, title) are always included. Omit for the full row.',
+    ),
 };
 
 export const memoryGetSchema = {
-  id: z.string().min(1),
+  id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('A single memory id. Provide exactly one of `id` or `ids`.'),
+  ids: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'Batch: fetch several memories by id in one scoped call. Out-of-scope/unknown ids come back in `notFound`. Provide exactly one of `id` or `ids`.',
+    ),
 };
 
 export const memoryConfirmSchema = {
@@ -137,17 +163,19 @@ const candidate = z.object({
 });
 
 const memoryRow = z.object({
+  // Identity fields are always present; the rest MAY be omitted by the
+  // `fields` projection, and `content` MAY be truncated by `snippet`.
   id: z.string(),
-  scope: z.string(),
-  projectId: z.string().nullable(),
   type: z.string(),
   title: z.string(),
-  content: z.string(),
-  tags: z.array(z.string()),
-  status: z.string(),
-  createdAt: z.string(),
-  lastSeenAt: z.string().nullable(),
-  relations: z.array(relationView),
+  scope: z.string().optional(),
+  projectId: z.string().nullable().optional(),
+  content: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  status: z.string().optional(),
+  createdAt: z.string().optional(),
+  lastSeenAt: z.string().nullable().optional(),
+  relations: z.array(relationView).optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
 });
@@ -176,32 +204,43 @@ export const memorySearchOutput = {
 };
 
 export const memoryGetOutput = {
-  memory: z.object({
-    id: z.string(),
-    scope: z.string(),
-    projectId: z.string().nullable(),
-    type: z.string(),
-    title: z.string(),
-    content: z.string(),
-    tags: z.array(z.string()),
-    status: z.string(),
-    replaces: z.array(z.string()),
-    createdAt: z.string(),
-  }),
-  head: z.object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() }),
-  predecessors: z.array(
-    z.object({
+  // Single-id response (when `id` is provided). Optional so the same tool can
+  // also return the batch shape below (when `ids` is provided).
+  memory: z
+    .object({
       id: z.string(),
+      scope: z.string(),
+      projectId: z.string().nullable(),
+      type: z.string(),
       title: z.string(),
       content: z.string(),
+      tags: z.array(z.string()),
       status: z.string(),
+      replaces: z.array(z.string()),
       createdAt: z.string(),
-    }),
-  ),
-  confirmationCount: z.number(),
-  relations: z.array(relationView),
+    })
+    .optional(),
+  head: z
+    .object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() })
+    .optional(),
+  predecessors: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        content: z.string(),
+        status: z.string(),
+        createdAt: z.string(),
+      }),
+    )
+    .optional(),
+  confirmationCount: z.number().optional(),
+  relations: z.array(relationView).optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+  // Batch response (when `ids` is provided).
+  memories: z.array(memoryRow).optional(),
+  notFound: z.array(z.string()).optional(),
 };
 
 export const memoryConfirmOutput = {
@@ -575,6 +614,8 @@ async function handleSearch(
     status?: (typeof MEMORY_STATUSES)[number];
     limit?: number;
     offset?: number;
+    snippet?: number;
+    fields?: string[];
   },
 ) {
   const ctx = getRequestContext();
@@ -611,11 +652,70 @@ async function handleSearch(
     // Derived review metadata (batched confirmation lookup) — informational
     // only; never affects ordering or which rows are returned.
     const review = deps.memory.reviewStateForMemories(memories);
+    // Optional projection (selection/ordering/scope are already final and are
+    // never affected): truncate content to `snippet` chars, then keep only the
+    // requested `fields` plus the always-present identity fields.
+    const fieldSet =
+      args.fields && args.fields.length > 0
+        ? new Set<string>(['id', 'type', 'title', ...args.fields])
+        : null;
     return ok({
       count: memories.length,
       memories: memories.map((m) => {
         const r = review.get(m.id);
-        return {
+        const full: Record<string, unknown> = {
+          id: m.id,
+          scope: m.scope,
+          projectId: m.projectId,
+          type: m.type,
+          title: m.title,
+          content: typeof args.snippet === 'number' ? snippet(m.content, args.snippet) : m.content,
+          tags: m.tags,
+          status: m.status,
+          createdAt: m.createdAt,
+          lastSeenAt: m.lastSeenAt,
+          relations: relations?.get(m.id) ?? [],
+          ...(r && r.reviewState !== null
+            ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
+            : {}),
+        };
+        if (!fieldSet) return full;
+        return Object.fromEntries(Object.entries(full).filter(([k]) => fieldSet.has(k)));
+      }),
+    });
+  } catch (err) {
+    return errToMcp(err);
+  }
+}
+
+async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
+  const ctx = getRequestContext();
+  const activeProject = await resolveEffectiveProject(deps);
+  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
+
+  const hasId = typeof args.id === 'string' && args.id.length > 0;
+  const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
+  if (hasId === hasIds) {
+    return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+  }
+
+  const canRead = (m: { scope: MemoryScope; projectId: string | null }): boolean =>
+    isAuthorized(ctx.scope, 'read', { scope: m.scope, projectId: m.projectId });
+
+  try {
+    if (args.ids !== undefined) {
+      // Batch: scoped + ordered; out-of-scope / unknown / unauthorized ids land
+      // in `notFound` and never leak content.
+      const rows = deps.memory.getMany(args.ids, scope).filter((m) => canRead(m));
+      const relations = deps.relations
+        ? deps.relations.listForMemories(
+            rows.map((m) => m.id),
+            10,
+          )
+        : null;
+      const found = new Set(rows.map((m) => m.id));
+      return ok({
+        memories: rows.map((m) => ({
           id: m.id,
           scope: m.scope,
           projectId: m.projectId,
@@ -627,32 +727,19 @@ async function handleSearch(
           createdAt: m.createdAt,
           lastSeenAt: m.lastSeenAt,
           relations: relations?.get(m.id) ?? [],
-          ...(r && r.reviewState !== null
-            ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
-            : {}),
-        };
-      }),
-    });
-  } catch (err) {
-    return errToMcp(err);
-  }
-}
+        })),
+        notFound: args.ids.filter((id) => !found.has(id)),
+      });
+    }
 
-async function handleGet(deps: MemoryToolDeps, args: { id: string }) {
-  const ctx = getRequestContext();
-  const activeProject = await resolveEffectiveProject(deps);
-  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
-  try {
+    if (args.id === undefined) {
+      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+    }
     const result = deps.memory.get(args.id, scope);
     if (!result) {
       return mcpError('not_found', `memory '${args.id}' not found`);
     }
-    const authzTarget = {
-      scope: result.memory.scope,
-      projectId: result.memory.projectId,
-      projectSlug: activeProject?.slug ?? null,
-    } as const;
-    if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
+    if (!canRead(result.memory)) {
       return mcpError('forbidden', `token scope '${ctx.scope}' cannot read this memory`);
     }
     return ok({

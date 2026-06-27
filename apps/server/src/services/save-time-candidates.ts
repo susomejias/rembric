@@ -1,6 +1,8 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
+import { sanitizeFtsQuery } from './hybrid-search.js';
+
 /**
  * Save-time candidate detector for `memory.save`.
  *
@@ -85,7 +87,7 @@ export function findSaveTimeCandidates(
 
   // BM25 returns lower-is-better; normalize via 1/(1+|rank|) to a [0,1]
   // proxy, then keep matches above the configured threshold.
-  const matchExpr = escapeFts(saved.content);
+  const matchExpr = sanitizeFtsQuery(saved.content, { maxTerms: 16 });
   const ftsPool: SaveCandidate[] = [];
   if (matchExpr.length > 0) {
     const ftsRows = repos.memory.searchBm25Candidates({
@@ -125,30 +127,4 @@ export function findSaveTimeCandidates(
 function snippet(content: string, max: number): string {
   if (content.length <= max) return content;
   return content.slice(0, max - 1) + '…';
-}
-
-/**
- * Build an FTS5 MATCH expression from user-supplied content.
- *
- * Strategy: extract alphanumeric tokens, drop very short / noise tokens,
- * uniquify, cap at 16 terms, then OR them together. We avoid a phrase
- * match because it requires the exact ngram to appear verbatim in the
- * indexed document; for candidate detection we want "any overlap" with
- * BM25 ranking those that overlap more.
- *
- * Returns an empty string when no usable tokens are found; the caller
- * skips the query in that case (no candidates is the right answer).
- */
-function escapeFts(text: string): string {
-  const seen = new Set<string>();
-  const tokens: string[] = [];
-  for (const raw of text.toLowerCase().split(/[^a-z0-9]+/)) {
-    if (raw.length < 3) continue;
-    if (seen.has(raw)) continue;
-    seen.add(raw);
-    tokens.push(`"${raw}"`);
-    if (tokens.length >= 16) break;
-  }
-  if (tokens.length === 0) return '';
-  return tokens.join(' OR ');
 }
