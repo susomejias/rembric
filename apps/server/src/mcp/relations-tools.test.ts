@@ -122,4 +122,33 @@ describe('memory.judge — batch form', () => {
     expect(out.judgmentId).toBe(p.judgmentId);
     expect(out.status).toBe('judged');
   });
+
+  it('rejects supplying BOTH single fields and judgments (spec: exactly one)', async () => {
+    db.handle.db
+      .insert(memory)
+      .values([mem('A', 'a'), mem('B', 'b')])
+      .run();
+    const p = relations.createPending({ sourceId: 'A', targetId: 'B' });
+    const r = await runWithContext(fakeContext(), () =>
+      Promise.resolve(
+        handlers.judge({
+          judgmentId: p.judgmentId,
+          relation: 'related',
+          judgments: [{ judgmentId: p.judgmentId, relation: 'related' }],
+        }),
+      ),
+    );
+    const out = parse<{ ok: boolean; code: string }>(r);
+    expect(out.ok).toBe(false);
+    expect(out.code).toBe('invalid_input');
+    // The pending row must remain untouched (no silent partial judge).
+    expect(repos.relations.findByJudgmentId(p.judgmentId)?.status).toBe('pending');
+  });
+
+  it('rejects supplying NEITHER single fields nor judgments', async () => {
+    const r = await runWithContext(fakeContext(), () => Promise.resolve(handlers.judge({})));
+    const out = parse<{ ok: boolean; code: string }>(r);
+    expect(out.ok).toBe(false);
+    expect(out.code).toBe('invalid_input');
+  });
 });

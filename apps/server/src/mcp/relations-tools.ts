@@ -149,6 +149,16 @@ function handleJudge(
 ) {
   const ctx = getRequestContext();
 
+  // Exactly one of the single fields or `judgments` (spec: both/neither → invalid_input).
+  const hasSingle = args.judgmentId !== undefined || args.relation !== undefined;
+  const hasBatch = args.judgments !== undefined;
+  if (hasSingle === hasBatch) {
+    return mcpError(
+      'invalid_input',
+      'provide exactly one of {judgmentId, relation} or {judgments: [...]}',
+    );
+  }
+
   if (args.judgments !== undefined) {
     // Each item runs in its OWN RelationsService.judge transaction (no outer
     // tx), so a bad id reports an error without rolling back the good ones.
