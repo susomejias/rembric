@@ -45,7 +45,6 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
-.claude/
 .claude/settings.local.json
 
 # Codex CLI auto-generated companion (equivalent to CLAUDE.md, per-user)
