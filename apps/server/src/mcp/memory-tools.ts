@@ -470,6 +470,11 @@ async function handleSave(
   };
 
   try {
+    // Archived projects reject new writes (projects spec, "Archiving a
+    // project"). Enforced here rather than in resolveEffectiveProject so the
+    // read paths (search/get) keep returning an archived project's memories.
+    if (activeProject) deps.projects?.assertWritable(activeProject.id);
+
     const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
 
     // If the topic_key upsert path fired, record the auto-judged
