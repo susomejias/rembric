@@ -476,20 +476,31 @@ export class MemoryRepository {
   findDecayCandidateIds(
     scope: MemoryScope,
     projectId: string | null,
-    cutoff: Date,
+    nowMs: number,
+    thresholdByType: ReadonlyArray<readonly [MemoryType, number]>,
+    defaultThresholdMs: number,
     confidenceFloor: number,
   ): string[] {
     const scopeFilter =
       scope === 'global'
         ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
         : and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? ''));
+    // Per-type inactivity window: a row decays once last_seen_at predates
+    // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
+    const thresholdExpr =
+      thresholdByType.length > 0
+        ? sql`CASE ${sql.join(
+            thresholdByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
+            sql` `,
+          )} ELSE ${defaultThresholdMs} END`
+        : sql`${defaultThresholdMs}`;
     return this.db
       .select({ id: memory.id })
       .from(memory)
       .where(
         and(
           eq(memory.status, 'active'),
-          sql`${memory.lastSeenAt} < ${cutoff.getTime()}`,
+          sql`${memory.lastSeenAt} < (${nowMs} - ${thresholdExpr})`,
           scopeFilter,
           sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}) < ${confidenceFloor}`,
         ),

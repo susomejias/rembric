@@ -213,6 +213,66 @@ describe('MemoryRepository', () => {
     expect(repo.adminCountConfirmations('missing')).toBe(0);
   });
 
+  describe('findDecayCandidateIds (per-type thresholds)', () => {
+    const NOW = 1_000_000;
+
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({
+            id: 'P_OLD',
+            content: 'project old',
+            type: 'project',
+            lastSeenAt: new Date(NOW - 200),
+          }),
+          row({
+            id: 'P_NEW',
+            content: 'project new',
+            type: 'project',
+            lastSeenAt: new Date(NOW - 50),
+          }),
+          row({
+            id: 'U_SAME',
+            content: 'user same age',
+            type: 'user',
+            lastSeenAt: new Date(NOW - 200),
+          }),
+          row({
+            id: 'F_OLD',
+            content: 'feedback old',
+            type: 'feedback',
+            lastSeenAt: new Date(NOW - 2_000),
+          }),
+          row({
+            id: 'F_NEW',
+            content: 'feedback new',
+            type: 'feedback',
+            lastSeenAt: new Date(NOW - 500),
+          }),
+        ])
+        .run();
+    });
+
+    it('selects rows past their per-type threshold; longer-lived & fresh rows exempt; missing type uses default', () => {
+      const ids = repo.findDecayCandidateIds(
+        'global',
+        null,
+        NOW,
+        [
+          ['project', 100],
+          ['user', 10_000],
+        ],
+        1_000, // defaultThresholdMs — covers 'feedback' (no explicit entry)
+        1, // confidenceFloor
+      );
+      // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
+      // U_SAME: user age 200 < 10_000 → out (longer threshold than project).
+      // F_OLD: feedback age 2_000 > default 1_000 → in.  F_NEW: 500 < 1_000 → out.
+      expect([...ids].sort()).toEqual(['F_OLD', 'P_OLD']);
+    });
+  });
+
   describe('review reads', () => {
     const PROJECT_TTL = REVIEW_TTL_MS.project!;
     const ttlByType = Object.entries(REVIEW_TTL_MS).filter(

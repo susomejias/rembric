@@ -1,12 +1,15 @@
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { consolidationRuns } from '../db/schema/consolidation.js';
+import { memory, type MemoryType, type NewMemory } from '../db/schema/memory.js';
+import { deriveTitle } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
+import { type DecayThresholds } from './decay.js';
 import { ConsolidationRunner } from './runner.js';
 
 /**
@@ -87,5 +90,72 @@ describe('ConsolidationRunner sweep', () => {
       .run('01MAINTENANCE0000000000000', Date.now(), 'maintenance');
     const summary = runner.runAll();
     expect(summary.runs.length).toBeGreaterThan(0);
+  });
+});
+
+function decayRow(id: string, type: MemoryType, lastSeenAt: Date): NewMemory {
+  return {
+    id,
+    title: deriveTitle(`${type} ${id}`),
+    content: `${type} ${id}`,
+    scope: 'global',
+    projectId: null,
+    type,
+    tags: [],
+    status: 'active',
+    replaces: [],
+    createdAt: new Date(1_000),
+    lastSeenAt,
+  };
+}
+
+describe('ConsolidationRunner per-type decay', () => {
+  // project/default decay after 1s; reference effectively never (1 day) on a
+  // 60s-old clock.
+  const SHORT_DECAY: DecayThresholds = {
+    thresholdByType: { project: 1_000, reference: 86_400_000 },
+    defaultThresholdMs: 1_000,
+    confidenceFloor: 1,
+  };
+
+  function buildRunner(decay?: DecayThresholds): ConsolidationRunner {
+    return new ConsolidationRunner({
+      repos: createRepositories(db.handle.db),
+      tx: db.handle.db,
+      relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
+      decay,
+    });
+  }
+
+  it('archives only rows past their per-type threshold; reference is exempt', () => {
+    const old = new Date(Date.now() - 60_000);
+    db.handle.db
+      .insert(memory)
+      .values([
+        decayRow('PROJ', 'project', old),
+        decayRow('REF', 'reference', old),
+        decayRow('USERD', 'user', old), // no explicit entry → defaultThresholdMs
+      ])
+      .run();
+
+    const summary = buildRunner(SHORT_DECAY).runAll({ force: true });
+    const archives = summary.runs.reduce((n, r) => n + r.ops.archives, 0);
+    expect(archives).toBe(2);
+
+    const statusOf = (id: string) =>
+      db.handle.db.select().from(memory).where(eq(memory.id, id)).get()?.status;
+    expect(statusOf('PROJ')).toBe('archived');
+    expect(statusOf('USERD')).toBe('archived');
+    expect(statusOf('REF')).toBe('active');
+  });
+
+  it('is idempotent: a second forced sweep archives nothing new', () => {
+    db.handle.db
+      .insert(memory)
+      .values([decayRow('A', 'project', new Date(Date.now() - 60_000))])
+      .run();
+    const r = buildRunner(SHORT_DECAY);
+    expect(r.runAll({ force: true }).runs.reduce((n, x) => n + x.ops.archives, 0)).toBe(1);
+    expect(r.runAll({ force: true }).runs.reduce((n, x) => n + x.ops.archives, 0)).toBe(0);
   });
 });

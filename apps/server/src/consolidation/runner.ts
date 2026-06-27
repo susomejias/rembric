@@ -113,7 +113,7 @@ export class ConsolidationRunner {
       applyDecay(this.opts.repos, this.opts.tx, {
         runId,
         ids: decayIds,
-        reasoning: `last_seen_at older than ${formatDurationMs(decay.thresholdMs)} with confidence ≤ ${decay.confidenceFloor}`,
+        reasoning: 'last_seen_at older than per-type decay threshold with low confidence',
       });
       ops.archives = decayIds.length;
     }
@@ -175,11 +175,4 @@ export class ConsolidationRunner {
 
 function scopeString(scope: ScopeKey): string {
   return scope.scope === 'global' ? 'global' : `project:${scope.projectId ?? ''}`;
-}
-
-function formatDurationMs(ms: number): string {
-  const days = Math.round(ms / 86_400_000);
-  if (days >= 365 && days % 365 === 0) return `${days / 365}y`;
-  if (days >= 30 && days % 30 === 0) return `${days / 30}mo`;
-  return `${days}d`;
 }
