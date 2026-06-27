@@ -225,6 +225,24 @@ export class MemoryService {
   }
 
   /**
+   * Scoped batch retrieve. Returns the in-scope memory rows in request id
+   * order; missing or out-of-scope ids are simply absent, so callers diff the
+   * returned ids against the request to report not-found (no leak — an
+   * out-of-scope id is indistinguishable from a missing one). Unlike `get`,
+   * this is a pure read: it does NOT touch `last_seen_at`, so a bulk pull does
+   * not reshuffle decay/context recency ordering.
+   */
+  getMany(ids: readonly string[], scope: Scope): Memory[] {
+    const byId = new Map(this.unsafeGetByIds(ids).map((m) => [m.id, m]));
+    const out: Memory[] = [];
+    for (const id of ids) {
+      const m = byId.get(id);
+      if (m && memoryMatchesScope(m, scope)) out.push(m);
+    }
+    return out;
+  }
+
+  /**
    * Derive the read-time review state for a batch of memories (used by
    * `memory.search`). Confirmation timestamps are fetched in one grouped
    * query; non-active rows map to a null state. Read-only.

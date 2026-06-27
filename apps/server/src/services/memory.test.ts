@@ -26,6 +26,23 @@ afterEach(() => {
   db.cleanup();
 });
 
+describe('memory.getMany (scoped batch retrieve)', () => {
+  it('returns in-scope rows in request order and omits cross-scope/missing ids', () => {
+    const otherId = projects.create({ slug: 'other-app' }).id;
+    const a = memory.save({ type: 'user', title: 'A', content: 'a' }, projectScope(projectId));
+    const b = memory.save({ type: 'user', title: 'B', content: 'b' }, projectScope(projectId));
+    const cross = memory.save({ type: 'user', title: 'X', content: 'x' }, projectScope(otherId));
+
+    const rows = memory.getMany([b.id, 'missing', cross.id, a.id], projectScope(projectId));
+    // Order preserved; the cross-scope and missing ids are simply absent (no leak).
+    expect(rows.map((m) => m.id)).toEqual([b.id, a.id]);
+  });
+
+  it('returns an empty array for an empty id list', () => {
+    expect(memory.getMany([], projectScope(projectId))).toEqual([]);
+  });
+});
+
 describe('memory.save', () => {
   it('persists with the scope passed in (project)', () => {
     const m = memory.save(

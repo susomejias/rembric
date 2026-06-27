@@ -350,6 +350,94 @@ describe('memory.confirm — batch (ids)', () => {
   });
 });
 
+describe('memory.search — projection (snippet / fields)', () => {
+  beforeEach(() => {
+    memory.save(
+      { type: 'user', title: 'projection target', content: 'X'.repeat(500) },
+      projectScope(projectA.id),
+    );
+  });
+
+  it('default request returns full content and the full row shape', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.search({})),
+    );
+    const { memories } = parseText<{
+      memories: { content: string; scope?: string; tags?: string[] }[];
+    }>(r);
+    expect(memories[0]?.content.length).toBe(500);
+    expect(memories[0]?.scope).toBe('project');
+    expect(Array.isArray(memories[0]?.tags)).toBe(true);
+  });
+
+  it('snippet truncates content to N chars (same helper as memory.context)', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.search({ snippet: 50 })),
+    );
+    const { memories } = parseText<{ memories: { content: string }[] }>(r);
+    expect(memories[0]?.content.length).toBe(50);
+    expect(memories[0]?.content.endsWith('…')).toBe(true);
+  });
+
+  it('fields restricts the row but always keeps identity fields, and does not change rows', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.search({ fields: ['status'] })),
+    );
+    const { count, memories } = parseText<{ count: number; memories: Record<string, unknown>[] }>(
+      r,
+    );
+    expect(count).toBe(1);
+    const row: Record<string, unknown> = memories[0] ?? {};
+    expect(Object.keys(row).sort()).toEqual(['id', 'status', 'title', 'type']);
+    expect(row.content).toBeUndefined();
+  });
+});
+
+describe('memory.get — batch (ids)', () => {
+  let aId1: string;
+  let aId2: string;
+  let bId: string;
+  beforeEach(() => {
+    aId1 = memory.save({ type: 'user', title: 'a1', content: 'a1' }, projectScope(projectA.id)).id;
+    aId2 = memory.save({ type: 'user', title: 'a2', content: 'a2' }, projectScope(projectA.id)).id;
+    bId = memory.save({ type: 'user', title: 'b', content: 'b' }, projectScope(projectB.id)).id;
+  });
+
+  it('returns an ordered in-scope batch; unknown and cross-scope ids go to notFound (no leak)', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.get({ ids: [aId2, 'nope', bId, aId1] })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const { memories, notFound } = parseText<{
+      memories: { id: string }[];
+      notFound: string[];
+    }>(r);
+    expect(memories.map((m) => m.id)).toEqual([aId2, aId1]);
+    expect(notFound).toEqual(['nope', bId]);
+  });
+
+  it('legacy single-id request is unchanged', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.get({ id: aId1 })),
+    );
+    const payload = parseText<{ memory: { id: string }; head: { id: string } }>(r);
+    expect(payload.memory.id).toBe(aId1);
+    expect(payload.head.id).toBe(aId1);
+  });
+
+  it('supplying both id and ids is invalid_input', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.get({ id: aId1, ids: [aId2] })),
+    );
+    expect(parseText<{ code: string }>(r).code).toBe('invalid_input');
+  });
+
+  it('supplying neither id nor ids is invalid_input', async () => {
+    const r = await runWithContext(fakeContext(projectA), () => Promise.resolve(handlers.get({})));
+    expect(parseText<{ code: string }>(r).code).toBe('invalid_input');
+  });
+});
+
 describe('memory.* — router-activated project on an unscoped /mcp connection', () => {
   // Reproduces the bug where calling `project.use({slug})` on a path-less
   // /mcp connection correctly updates the SessionRouter and is reported by
