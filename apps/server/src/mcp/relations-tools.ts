@@ -38,11 +38,27 @@ const JUDGE_RELATIONS = [
 ] as const;
 
 export const judgeSchema = {
-  judgmentId: z.string().min(1),
-  relation: z.enum(JUDGE_RELATIONS),
+  judgmentId: z.string().min(1).optional(),
+  relation: z.enum(JUDGE_RELATIONS).optional(),
   reason: z.string().max(2000).optional(),
   confidence: z.number().min(0).max(1).optional(),
   evidence: z.unknown().optional(),
+  judgments: z
+    .array(
+      z.object({
+        judgmentId: z.string().min(1),
+        relation: z.enum(JUDGE_RELATIONS),
+        reason: z.string().max(2000).optional(),
+        confidence: z.number().min(0).max(1).optional(),
+        evidence: z.unknown().optional(),
+      }),
+    )
+    .min(1)
+    .max(25)
+    .optional()
+    .describe(
+      'Batch: close several judgmentIds (e.g. all of memory.save.candidates[]) in one call.',
+    ),
 };
 
 const COMPARE_RELATIONS = [
@@ -68,10 +84,23 @@ export const suggestTopicKeyOutput = {
 
 export const judgeOutput = {
   ok: z.literal(true),
-  judgmentId: z.string(),
-  relation: z.string(),
-  status: z.string(),
-  judgedAt: z.string(),
+  judgmentId: z.string().optional(),
+  relation: z.string().optional(),
+  status: z.string().optional(),
+  judgedAt: z.string().optional(),
+  results: z
+    .array(
+      z.object({
+        ok: z.boolean(),
+        judgmentId: z.string(),
+        relation: z.string().optional(),
+        status: z.string().optional(),
+        judgedAt: z.string().optional(),
+        code: z.string().optional(),
+        message: z.string().optional(),
+      }),
+    )
+    .optional(),
 };
 
 export const compareOutput = {
@@ -104,14 +133,70 @@ function handleSuggestTopicKey(args: {
 function handleJudge(
   deps: RelationsToolDeps,
   args: {
-    judgmentId: string;
-    relation: (typeof JUDGE_RELATIONS)[number];
+    judgmentId?: string;
+    relation?: (typeof JUDGE_RELATIONS)[number];
     reason?: string;
     confidence?: number;
     evidence?: unknown;
+    judgments?: Array<{
+      judgmentId: string;
+      relation: (typeof JUDGE_RELATIONS)[number];
+      reason?: string;
+      confidence?: number;
+      evidence?: unknown;
+    }>;
   },
 ) {
   const ctx = getRequestContext();
+
+  // Exactly one of the single fields or `judgments` (spec: both/neither → invalid_input).
+  const hasSingle = args.judgmentId !== undefined || args.relation !== undefined;
+  const hasBatch = args.judgments !== undefined;
+  if (hasSingle === hasBatch) {
+    return mcpError(
+      'invalid_input',
+      'provide exactly one of {judgmentId, relation} or {judgments: [...]}',
+    );
+  }
+
+  if (args.judgments !== undefined) {
+    // Each item runs in its OWN RelationsService.judge transaction (no outer
+    // tx), so a bad id reports an error without rolling back the good ones.
+    const results = args.judgments.map((j) => {
+      try {
+        const row = deps.relations.judge(j.judgmentId, {
+          relation: j.relation,
+          reason: j.reason,
+          confidence: j.confidence,
+          evidence: j.evidence,
+          actor: ctx.token.name,
+          kind: 'agent',
+        });
+        return {
+          ok: true as const,
+          judgmentId: row.judgmentId,
+          relation: row.relation,
+          status: row.status,
+          judgedAt: row.judgedAt,
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            ok: false as const,
+            judgmentId: j.judgmentId,
+            code: err.code,
+            message: err.message,
+          };
+        }
+        throw err;
+      }
+    });
+    return ok({ ok: true, results });
+  }
+
+  if (args.judgmentId === undefined || args.relation === undefined) {
+    return mcpError('invalid_input', 'provide either {judgmentId, relation} or {judgments: [...]}');
+  }
   try {
     const row = deps.relations.judge(args.judgmentId, {
       relation: args.relation,

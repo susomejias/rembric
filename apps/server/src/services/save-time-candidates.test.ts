@@ -218,6 +218,55 @@ describe('findSaveTimeCandidates', () => {
     expect(cands.some((c) => c.targetId === _global.id)).toBe(false);
   });
 
+  it('does not re-surface a target the new memory ancestry already judged not_conflict', () => {
+    const x = memorySvc.save(
+      { type: 'feedback', title: 'shared dedup marker', content: 'shared dedup marker token' },
+      SCOPE_GLOBAL,
+    );
+    const y = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'shared dedup marker two',
+        content: 'shared dedup marker token two',
+      },
+      SCOPE_GLOBAL,
+    );
+    const base = memorySvc.saveWithTopicKey(
+      {
+        type: 'feedback',
+        title: 'shared dedup marker base',
+        content: 'shared dedup marker token base',
+        topicKey: 'dedup/k',
+      },
+      SCOPE_GLOBAL,
+    ).memory;
+
+    // `base` previously dismissed X (not_conflict) but flagged Y (conflicts_with).
+    const px = relations.createPending({ sourceId: base.id, targetId: x.id });
+    relations.judge(px.judgmentId, { relation: 'not_conflict', actor: 'tester', kind: 'agent' });
+    const py = relations.createPending({ sourceId: base.id, targetId: y.id });
+    relations.judge(py.judgmentId, { relation: 'conflicts_with', actor: 'tester', kind: 'agent' });
+
+    // Re-save the same topic → replaces = [base.id].
+    const revised = memorySvc.saveWithTopicKey(
+      {
+        type: 'feedback',
+        title: 'shared dedup marker revised',
+        content: 'shared dedup marker token revised',
+        topicKey: 'dedup/k',
+      },
+      SCOPE_GLOBAL,
+    ).memory;
+    expect(revised.replaces).toEqual([base.id]);
+
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), revised, {
+      perSaveMax: 10,
+    });
+    const ids = cands.map((c) => c.targetId);
+    expect(ids).not.toContain(x.id); // dismissed not_conflict → suppressed
+    expect(ids).toContain(y.id); // conflicts_with → still surfaces
+  });
+
   it('skips rows already linked via the just-saved row replaces[]', () => {
     const first = memorySvc.saveWithTopicKey(
       {

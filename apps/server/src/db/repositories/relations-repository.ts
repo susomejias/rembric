@@ -187,6 +187,28 @@ export class RelationsRepository {
       .all();
   }
 
+  /**
+   * Distinct target ids that any of `sourceIds` has already judged
+   * `not_conflict`. Save-time candidate detection uses this (keyed on the new
+   * memory's `replaces` ancestry) to stop re-surfacing pairs the agent already
+   * dismissed. Empty input → [].
+   */
+  listNotConflictTargetsForSources(sourceIds: readonly string[]): string[] {
+    if (sourceIds.length === 0) return [];
+    return this.db
+      .selectDistinct({ targetId: memoryRelations.targetId })
+      .from(memoryRelations)
+      .where(
+        and(
+          eq(memoryRelations.status, 'judged'),
+          eq(memoryRelations.relation, 'not_conflict'),
+          inArray(memoryRelations.sourceId, [...sourceIds]),
+        ),
+      )
+      .all()
+      .map((r) => r.targetId);
+  }
+
   findPendingOlderThan(cutoff: Date, limit: number): MemoryRelation[] {
     return this.db
       .select()
