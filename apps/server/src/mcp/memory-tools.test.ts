@@ -122,6 +122,23 @@ describe('memory.save — strict path scoping', () => {
     expect(persisted?.projectId).toBe(projectA.id);
   });
 
+  it("rejects a save into an archived project with code 'project_archived'", async () => {
+    const guarded = buildMemoryHandlers({ memory, projects });
+    projects.archive(projectA.id);
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        guarded.save({
+          scope: 'project',
+          type: 'user',
+          title: 'should be rejected',
+          content: 'write into an archived project',
+        }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('project_archived');
+  });
+
   it('on unscoped connections still saves globals normally', async () => {
     const r = await runWithContext(fakeContext(null), () =>
       Promise.resolve(
