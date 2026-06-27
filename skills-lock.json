@@ -72,6 +72,12 @@
       "skillPath": "skills/skill-creator/SKILL.md",
       "computedHash": "5ea13a6d9f0d4bb694405d79acd00cadec0d21bb138c4dd10fcf3c500cb835c2"
     },
+    "systems-thinker": {
+      "source": "susomejias/skills",
+      "sourceType": "github",
+      "skillPath": "systems-thinker/SKILL.md",
+      "computedHash": "43b93b8987bc42cdae0f2f4ed66664fcd64c0b049013c43fd930f586a7050e37"
+    },
     "testing": {
       "source": "susomejias/skills",
       "sourceType": "github",
