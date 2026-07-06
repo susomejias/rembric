@@ -2,9 +2,10 @@
 # Stop hook — Codex CLI only.
 #
 # Codex's Stop hook fires once per agent turn (verified against
-# developers.openai.com/codex/hooks). Codex has no SessionEnd, no
-# PreCompact/PostCompact, and no SessionStart matcher:"compact". Stop is
-# the ONLY signal we have for any kind of session-progress update.
+# developers.openai.com/codex/hooks). Codex has no SessionEnd and no
+# SessionStart matcher:"compact" (PreCompact/PostCompact ARE wired in
+# hooks.codex.json). Stop is the ONLY end-of-session-shaped signal we
+# have for session-progress updates.
 #
 # Strategy: every turn, read the transcript_path JSONL (which contains
 # the full conversation so far), format it, derive a title from the first

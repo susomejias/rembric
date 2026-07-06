@@ -138,7 +138,7 @@ describe('server install', () => {
     expect(token).toBeDefined();
     expect(token).toHaveLength(64);
     // Headless without --up must not bring the stack up.
-    expect(out).not.toContain('Up. Dashboard');
+    expect(out).not.toContain('Up.');
   });
 
   it('interrupted run (empty token in existing .env) gets filled on re-run', () => {
@@ -261,6 +261,64 @@ describe('agent routing', () => {
     expect(un.code).toBe(0);
     expect(existsSync(installed)).toBe(false);
     expect(un.out).toContain('Left in place');
+  });
+});
+
+describe('opencode installer verifications', () => {
+  const OPENCODE_INSTALL = join(REPO_ROOT, 'apps', 'plugin', '.opencode-plugin', 'install.sh');
+
+  it('is idempotent: a second install produces byte-identical files', () => {
+    const files = [
+      join(home, '.config', 'opencode', 'plugins', 'rembric.ts'),
+      join(home, '.config', 'opencode', 'opencode.json'),
+      join(home, '.config', 'rembric', 'bin', 'rembric-bridge.mjs'),
+      join(home, '.config', 'rembric', 'bin', 'rembric-dotenv.mjs'),
+    ];
+    const first = run(['--agent=opencode', '--action=install'], { home });
+    expect(first.code).toBe(0);
+    const snapshot = files.map((f) => readFileSync(f, 'utf8'));
+    const second = run(['--agent=opencode', '--action=install'], { home });
+    expect(second.code).toBe(0);
+    expect(second.out).toContain('already has mcp.rembric'); // config detected, not re-written
+    expect(files.map((f) => readFileSync(f, 'utf8'))).toEqual(snapshot);
+  });
+
+  it('an unrelated "rembric" string elsewhere in opencode.json is NOT treated as configured', () => {
+    const cfgDir = join(home, '.config', 'opencode');
+    mkdirSync(cfgDir, { recursive: true });
+    const cfg = JSON.stringify({ mcp: { 'rembric-foo': { type: 'local' } }, theme: 'rembric' });
+    writeFileSync(join(cfgDir, 'opencode.json'), cfg);
+    const { code, out } = run(['--agent=opencode', '--action=install'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('manual merge required');
+    expect(readFileSync(join(cfgDir, 'opencode.json'), 'utf8')).toBe(cfg); // untouched
+  });
+
+  it('a real mcp.rembric entry is detected as already configured', () => {
+    const cfgDir = join(home, '.config', 'opencode');
+    mkdirSync(cfgDir, { recursive: true });
+    const cfg = JSON.stringify({ mcp: { rembric: { type: 'local', enabled: true } } });
+    writeFileSync(join(cfgDir, 'opencode.json'), cfg);
+    const { out } = run(['--agent=opencode', '--action=install'], { home });
+    expect(out).toContain('already has mcp.rembric');
+    expect(readFileSync(join(cfgDir, 'opencode.json'), 'utf8')).toBe(cfg);
+  });
+
+  it('aborts loudly and removes the partial plugin when the import rewrite no-ops', () => {
+    const drift = mkdtempSync(join(tmpdir(), 'rembric-drift-'));
+    writeFileSync(
+      join(drift, 'plugin.ts'),
+      `// @rembric-plugin-version 0.0.0\nimport { readRembricSlug } from './lib/rembric-dotenv.mjs';\nexport const RembricPlugin = () => ({});\n`,
+    );
+    const { code, out } = run([], {
+      home,
+      script: OPENCODE_INSTALL,
+      env: { PLUGIN_SRC: drift, BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin') },
+    });
+    rmSync(drift, { recursive: true, force: true });
+    expect(code).toBe(1);
+    expect(out).toContain('rewrite failed');
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
   });
 });
 
@@ -428,13 +486,33 @@ describe('agent CLI flags', () => {
     expect(code).toBe(0);
     expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(/^REMBRIC_PORT=9001$/m);
   });
+
+  it('--port=abc is rejected at parse time, before any .env write', () => {
+    const { code, out } = run(['--server', '--action=install', '--port=abc'], { cwd: dir });
+    expect(code).toBe(2);
+    expect(out).toContain('invalid --port=abc');
+    expect(existsSync(join(dir, '.env'))).toBe(false);
+  });
+
+  it('--port out of range (70000) is rejected', () => {
+    const { code, out } = run(['--server', '--action=install', '--port=70000'], { cwd: dir });
+    expect(code).toBe(2);
+    expect(out).toContain('invalid --port=70000');
+    expect(existsSync(join(dir, '.env'))).toBe(false);
+  });
 });
 
 describe('server bring-up (--up) with a stubbed docker', () => {
   // A fake `docker` on PATH lets us exercise the `up` path (and its failure
   // modes) headlessly — no daemon. It answers the three subcommands bring_up
   // uses: `compose version` (deps check), `compose pull`, `compose up`.
-  function fakeDockerDir(composeUp: 'ok' | 'conflict'): string {
+  // A fake `curl` answers the post-up /healthz poll ('healthy' → {ok:true},
+  // 'down' → connection refused rc 7), and a no-op `sleep` collapses the
+  // ~30s poll ceiling so the down case stays fast.
+  function fakeDockerDir(
+    composeUp: 'ok' | 'conflict',
+    healthz: 'healthy' | 'down' = 'healthy',
+  ): string {
     const d = mkdtempSync(join(tmpdir(), 'rembric-fakebin-'));
     const up =
       composeUp === 'conflict'
@@ -452,6 +530,14 @@ esac
 `,
     );
     chmodSync(join(d, 'docker'), 0o755);
+    const curl =
+      healthz === 'healthy'
+        ? `#!/bin/sh\nprintf '{"ok":true,"version":"9.9.9"}'\nexit 0\n`
+        : `#!/bin/sh\nexit 7\n`;
+    writeFileSync(join(d, 'curl'), curl);
+    chmodSync(join(d, 'curl'), 0o755);
+    writeFileSync(join(d, 'sleep'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(d, 'sleep'), 0o755);
     return d;
   }
 
@@ -463,8 +549,36 @@ esac
     });
     rmSync(bin, { recursive: true, force: true });
     expect(code).toBe(0);
-    expect(out).toContain('Up. Dashboard');
+    expect(out).toContain('Up.');
+    expect(out).toContain('127.0.0.1:8787/dashboard');
     expect(out).toMatch(/Log in with admin token: [0-9a-f]{64}/);
+  });
+
+  it('healthy /healthz: success banner reports the server version from the response', () => {
+    const bin = fakeDockerDir('ok', 'healthy');
+    const { code, out } = run(['--server', '--action=install', '--up'], {
+      cwd: dir,
+      path: `${bin}:${process.env.PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out).toContain('Up.');
+    expect(out).toContain('9.9.9'); // version parsed from the stubbed healthz JSON
+    expect(out).toContain('127.0.0.1:8787/dashboard');
+  });
+
+  it('unreachable /healthz: withholds the success banner and hints at docker compose logs', () => {
+    const bin = fakeDockerDir('ok', 'down');
+    const { code, out } = run(['--server', '--action=install', '--up'], {
+      cwd: dir,
+      path: `${bin}:${process.env.PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0); // bounded failure, never a set -e abort
+    expect(out).not.toContain('Up.');
+    expect(out).not.toContain('/dashboard');
+    expect(out).not.toContain('Log in with admin token');
+    expect(out).toContain('docker compose logs');
   });
 
   it('--up honours --port (dashboard URL) and --token (login line)', () => {
@@ -490,7 +604,7 @@ esac
     expect(code).toBe(0);
     expect(out).toContain('REMBRIC_NO_PULL'); // the "pull skipped" notice
     expect(out).not.toContain('FAKEPULL'); // pull was NOT invoked
-    expect(out).toContain('Up. Dashboard');
+    expect(out).toContain('Up.');
   });
 
   it('container-name conflict: friendly message, never clobbers, no raw daemon dump', () => {

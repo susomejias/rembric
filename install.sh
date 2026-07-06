@@ -30,7 +30,7 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 _tmp=$(mktemp)
-if ! curl -fsSL "$RAW" -o "$_tmp"; then
+if ! curl -fsSL --max-time 30 --retry 2 --retry-connrefused "$RAW" -o "$_tmp"; then
   rm -f "$_tmp"
   printf '[rembric] error: failed to fetch %s\n' "$RAW" >&2
   exit 1
