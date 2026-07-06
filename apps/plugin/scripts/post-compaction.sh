@@ -16,6 +16,8 @@ trap 'exit 0' ERR
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh
 source "${SCRIPT_DIR}/_api.sh"
+# shellcheck source=./_transcript.sh
+source "${SCRIPT_DIR}/_transcript.sh"
 
 INPUT=""
 if [ ! -t 0 ]; then
@@ -23,7 +25,9 @@ if [ ! -t 0 ]; then
 fi
 SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
-COMPACTION_SUMMARY="$(rembric_compaction_summary_from_stdin_json "$INPUT")"
+# The compactor quotes conversation content verbatim, so this payload is
+# transcript-derived: it must pass through the same redaction choke point.
+COMPACTION_SUMMARY="$(rembric_redact_private "$(rembric_compaction_summary_from_stdin_json "$INPUT")")"
 [ -z "$CWD" ] && CWD="$PWD"
 SLUG="$(rembric_read_project_slug "$CWD")"
 

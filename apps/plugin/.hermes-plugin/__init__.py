@@ -442,6 +442,21 @@ class RembricMemoryProvider(MemoryProvider):
         return None
 
 
+# Mirrors stripPrivateTags in .opencode-plugin/plugin.ts and
+# rembric_redact_private in scripts/_transcript.sh; the shared fixtures in
+# ../test/redaction-fixtures.json keep the three implementations in lock-step.
+_PRIVATE_SPAN_RE = re.compile(r"<private>.*?</private>", re.IGNORECASE | re.DOTALL)
+_PRIVATE_UNCLOSED_RE = re.compile(r"<private>.*", re.IGNORECASE | re.DOTALL)
+
+
+def _redact_private(text: str) -> str:
+    if not text:
+        return ""
+    redacted = _PRIVATE_SPAN_RE.sub("[REDACTED]", text)
+    # Unclosed tag redacts through end-of-text: fail closed for a privacy marker.
+    return _PRIVATE_UNCLOSED_RE.sub("[REDACTED]", redacted)
+
+
 def _format_transcript(messages: list) -> str:
     """Serialize messages oldest-first; truncate from the head at 20k chars.
 
@@ -460,7 +475,9 @@ def _format_transcript(messages: list) -> str:
             except (TypeError, ValueError):
                 content = repr(content)
         lines.append(f"{role}: {content}")
-    transcript = "\n".join(lines)
+    # Redact before tail-truncation: truncating first could cut off the
+    # opening <private> tag and leak the span content.
+    transcript = _redact_private("\n".join(lines))
     if len(transcript) > _SUMMARY_MAX_CHARS:
         transcript = transcript[-_SUMMARY_MAX_CHARS:]
     return transcript
@@ -487,7 +504,7 @@ def _derive_title_from_messages(messages: list) -> str:
                 content = json.dumps(content, ensure_ascii=False)
             except (TypeError, ValueError):
                 content = repr(content)
-        text = content.strip()
+        text = _redact_private(content.strip())
         if not text:
             continue
         # Collapse newlines / tabs to spaces — titles are single-line.

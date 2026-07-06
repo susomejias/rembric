@@ -1,0 +1,67 @@
+[
+  {
+    "name": "plain span",
+    "input": "Connect to <private>postgresql://u:p@host/db</private> now",
+    "expected": "Connect to [REDACTED] now"
+  },
+  {
+    "name": "multiline span with case-variant tags",
+    "input": "<PRIVATE>line one\nline two</Private>",
+    "expected": "[REDACTED]"
+  },
+  {
+    "name": "case variants inline",
+    "input": "keep <Private>secret</PRIVATE> tail",
+    "expected": "keep [REDACTED] tail"
+  },
+  {
+    "name": "multiple spans",
+    "input": "a <private>one</private> b <private>two</private> c",
+    "expected": "a [REDACTED] b [REDACTED] c"
+  },
+  {
+    "name": "unclosed tag redacts to end of text",
+    "input": "before <private>secret with no closing tag",
+    "expected": "before [REDACTED]"
+  },
+  {
+    "name": "unclosed tag spanning newlines",
+    "input": "before <private>secret\nmore secret",
+    "expected": "before [REDACTED]"
+  },
+  {
+    "name": "paired span then unclosed tail",
+    "input": "a <private>x</private> b <private>tail",
+    "expected": "a [REDACTED] b [REDACTED]"
+  },
+  {
+    "name": "empty span",
+    "input": "<private></private>",
+    "expected": "[REDACTED]"
+  },
+  {
+    "name": "nested-looking tags close at first closer",
+    "input": "<private>a<private>b</private>c</private>",
+    "expected": "[REDACTED]c</private>"
+  },
+  {
+    "name": "stray closing tag is left verbatim",
+    "input": "text </private> more",
+    "expected": "text </private> more"
+  },
+  {
+    "name": "multiline text around a multiline span",
+    "input": "keep1\n<private>x\ny</private>\nkeep2",
+    "expected": "keep1\n[REDACTED]\nkeep2"
+  },
+  {
+    "name": "text without tags",
+    "input": "line a\nline b",
+    "expected": "line a\nline b"
+  },
+  {
+    "name": "empty input",
+    "input": "",
+    "expected": ""
+  }
+]
