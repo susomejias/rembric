@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/susomejias/rembric/compare/server-v0.22.1...server-v0.22.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **mcp:** align session summary cap description ([#212](https://github.com/susomejias/rembric/issues/212)) ([0a7b591](https://github.com/susomejias/rembric/commit/0a7b5914cfd14b829948f73ae264d1c9411a0af7))
+
 ## [0.22.1](https://github.com/susomejias/rembric/compare/server-v0.22.0...server-v0.22.1) (2026-06-27)
 
 
