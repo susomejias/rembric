@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
+import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ProjectsService } from '../services/projects.js';
 
 import { createTestDb } from './db.js';
@@ -169,6 +170,22 @@ describe('MCP protocol conformance', () => {
     // Widen affordance: small default page, raise limit or page with offset.
     expect(desc).toMatch(/limit/i);
     expect(desc).toMatch(/offset/i);
+
+    await client.close();
+  });
+
+  it('memory.session_summary description matches the schema hard limit', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const sessionSummary = tools.find((t) => t.name === 'memory.session_summary');
+    const desc = sessionSummary?.description ?? '';
+    const schema = sessionSummary?.inputSchema as
+      | { properties?: { summary?: { maxLength?: number } } }
+      | undefined;
+
+    expect(schema?.properties?.summary?.maxLength).toBe(SUMMARY_MAX_CHARS);
+    expect(desc).toContain(String(SUMMARY_MAX_CHARS));
+    expect(desc).not.toContain('2000');
 
     await client.close();
   });
@@ -510,7 +527,7 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    const fullSummary = `Goal: ${'x'.repeat(600)}`; // 606 chars, under the 2000 write cap, over the 350 display bound
+    const fullSummary = `Goal: ${'x'.repeat(600)}`; // 606 chars, under the write cap, over the 350 display bound
     const summarised = (await client.callTool({
       name: 'memory.session_summary',
       arguments: { summary: fullSummary, title: 'Long' },

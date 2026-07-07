@@ -18,12 +18,12 @@ Every closed session in the dashboard SHALL display a non-null `summary` wheneve
 
 A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty, opencode hard-crashed before `server.instance.disposed` could fire) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
 
-Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`, opencode dispose-time flush) MAY post bodies up to the HTTP wire upper bound (`summary` ≤20,000 chars at the zod boundary). The server SHALL truncate any body whose `summary.length` exceeds `SUMMARY_MAX_CHARS` (2000) at the HTTP handler before calling the service, by replacing it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'`. Convergence is therefore on a row whose stored `summary` is bounded by `SUMMARY_MAX_CHARS` regardless of what the fallback writer sent. The literal number `19500` that appeared in scenarios in the prior version of this spec was a derived wire-side budget; the spec now references the server cap (`SUMMARY_MAX_CHARS`) abstractly so it does not drift when the cap is changed in a future OpenSpec change.
+Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`, opencode dispose-time flush) MAY post bodies up to the HTTP wire upper bound (`summary` ≤20,000 chars at the zod boundary). The server SHALL truncate any body whose `summary.length` exceeds `SUMMARY_MAX_CHARS` at the HTTP handler before calling the service, by replacing it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'`. Convergence is therefore on a row whose stored `summary` is bounded by `SUMMARY_MAX_CHARS` regardless of what the fallback writer sent. Historical specs used literal numbers (`19500`, then `2000`) for derived or previous caps; this spec now references the server cap (`SUMMARY_MAX_CHARS`) abstractly so it does not drift when the cap is changed in a future OpenSpec change.
 
 #### Scenario: Claude Code short session with cooperating agent
 
 - **GIVEN** a Claude Code session of N user prompts (N ≥ 1, no compact)
-- **AND** the agent called `memory.session_summary({summary, title})` at any point before stop with `summary.length <= 2000`
+- **AND** the agent called `memory.session_summary({summary, title})` at any point before stop with `summary.length <= SUMMARY_MAX_CHARS`
 - **WHEN** the user closes the session and `SessionEnd` fires
 - **THEN** `sessions.summary` SHALL be the model-authored content (preserved because `final:true` blocks the bash overwrite)
 - **AND** `sessions.title` SHALL be the model-authored title
@@ -34,7 +34,7 @@ Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`,
 - **GIVEN** a Claude Code session of N user prompts (N ≥ 1, no compact)
 - **AND** the agent never called `memory.session_summary`
 - **WHEN** the user closes the session and `SessionEnd` fires with a non-empty `transcript_path` JSONL
-- **THEN** `sessions.summary` SHALL be the bash fallback's formatted transcript (oldest-first, role: content) truncated server-side to at most `SUMMARY_MAX_CHARS` (2000) chars, with the suffix `…[truncated]` when truncation fired
+- **THEN** `sessions.summary` SHALL be the bash fallback's formatted transcript (oldest-first, role: content) truncated server-side to at most `SUMMARY_MAX_CHARS` chars, with the suffix `…[truncated]` when truncation fired
 - **AND** `sessions.title` SHALL be derived from the first non-empty assistant message in the transcript, truncated to 100 chars
 - **AND** `sessions.status` SHALL be `'ended'`
 
@@ -52,7 +52,7 @@ Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`,
 - **GIVEN** a Hermes session of N turns (N ≥ 1, no compress)
 - **WHEN** the user exits and `on_session_end(messages)` fires
 - **THEN** the provider SHALL POST `/end {summary: _format_transcript(messages), title, final:false}` whose `summary` is bounded client-side by `_SUMMARY_MAX_CHARS` (a wire upper bound, not the effective cap)
-- **AND** the server SHALL truncate any body exceeding `SUMMARY_MAX_CHARS` (2000) before storing
+- **AND** the server SHALL truncate any body exceeding `SUMMARY_MAX_CHARS` before storing
 - **AND** `sessions.summary` SHALL be non-null and of length ≤ `SUMMARY_MAX_CHARS`
 - **AND** `sessions.status` SHALL be `'ended'`
 
@@ -73,7 +73,7 @@ Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`,
 - **AND** the agent never called `memory.session_summary`
 - **WHEN** the user closes opencode (firing `server.instance.disposed`)
 - **THEN** the plugin's dispose handler POSTs `/sessions/<id>/summary` for every known session with body `{summary: <role-prefixed transcript bounded by the plugin's client-side wire upper bound>, title?: <first user text truncated to 100 chars>, final: false}`
-- **AND** the server SHALL truncate `summary` to `SUMMARY_MAX_CHARS` (2000) chars with the suffix `…[truncated]` when the wire body exceeded the cap
+- **AND** the server SHALL truncate `summary` to `SUMMARY_MAX_CHARS` chars with the suffix `…[truncated]` when the wire body exceeded the cap
 - **AND** `sessions.summary` SHALL be the accumulated (possibly server-truncated) transcript (NOT `NULL` — this is the key behaviour change vs the pre-0.8.0 plugin)
 - **AND** `sessions.title` SHALL be the derived title when the accumulator had at least one user entry; OMITTED from the body otherwise (server leaves the placeholder `basename(cwd) · HH:MM UTC` in place)
 - **AND** `sessions.status` SHALL be `'active'` until `abandonStale` flips it to `'abandoned'`
@@ -92,7 +92,7 @@ Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`,
 - **GIVEN** an opencode session approaching the context window limit
 - **WHEN** `experimental.session.compacting` fires
 - **THEN** the plugin appends the recall-context block AND the "FIRST ACTION REQUIRED: call memory.session_summary" reminder to `output.context`
-- **AND** the next agent (post-compaction) reads that reminder and calls `memory.session_summary({summary: <compacted summary content>, title})` with `summary.length <= 2000`
+- **AND** the next agent (post-compaction) reads that reminder and calls `memory.session_summary({summary: <compacted summary content>, title})` with `summary.length <= SUMMARY_MAX_CHARS`
 - **AND** the resulting row in `sessions` has the compacted summary as `summary` and a non-null `title`
 
 ### Requirement: Write precedence for summary and title MUST be expressed via a `final:boolean` flag
@@ -214,20 +214,20 @@ The agent-facing protocol nudges injected by the per-client plugins SHALL state 
 - `apps/plugin/.hermes-plugin/__init__.py` — Hermes provider's system-message injection (around line 313). The session-close protocol sentence SHALL include the cap.
 - `apps/plugin/commands/summary.md` — the slash command description SHALL mention the cap so users invoking `/rembric:summary` see the budget too.
 
-Each plugin SHALL emit the literal substring `2000` (the cap value) in the injected text so a test can grep for it and a contributor changing the cap is forced to update every site.
+Each plugin SHALL emit the literal substring `10000` (the current cap value) in the injected text so a test can grep for it and a contributor changing the cap is forced to update every site.
 
 #### Scenario: Claude Code post-compact injection mentions the cap
 
 - **WHEN** `apps/plugin/scripts/post-compact.sh` runs and emits its stdout protocol block
-- **THEN** the emitted text SHALL contain the substring `2000`
+- **THEN** the emitted text SHALL contain the substring `10000`
 - **AND** the text SHALL describe the cap as a limit on the `summary` field passed to `memory.session_summary`
 
 #### Scenario: Hermes provider injection mentions the cap
 
 - **WHEN** Hermes loads the rembric plugin and its system-message injection runs
-- **THEN** the injected protocol text SHALL contain the substring `2000`
+- **THEN** the injected protocol text SHALL contain the substring `10000`
 
 #### Scenario: Slash command description mentions the cap
 
 - **WHEN** a user opens the `/rembric:summary` slash command's description text
-- **THEN** the description SHALL contain the substring `2000`
+- **THEN** the description SHALL contain the substring `10000`

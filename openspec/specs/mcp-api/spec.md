@@ -321,7 +321,7 @@ The descriptions of `memory.save`, `memory.search`, `memory.get`, and `memory.co
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, and `memory.session_summary` with the following contracts. The tools are split by responsibility: `memory.session_start` opens a session, `memory.session_summary` writes summary/title without transitioning, `memory.session_end` is the sole state transition. This is a behaviour change from the prior contract where `memory.session_summary` ended the session as a side effect.
 
-`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS = 2000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the literal `'2000'` so it can retry with a tighter body on the first attempt.
+`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
 
 #### Scenario: `memory.session_start` opens a new session
 
@@ -340,7 +340,7 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 
 #### Scenario: `memory.session_summary` writes summary and title without ending the session
 
-- **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= 2000`
+- **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= SUMMARY_MAX_CHARS`
 - **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false> }`
 
 #### Scenario: `memory.session_summary` may be called multiple times; the latest call wins
@@ -361,15 +361,15 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 
 #### Scenario: `memory.session_summary` rejects summary over `SUMMARY_MAX_CHARS`
 
-- **WHEN** the agent submits `summary: "A".repeat(2001)` (one char over the cap)
+- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS + 1)` (one char over the cap)
 - **THEN** the call SHALL be rejected at the zod boundary with code `invalid_input`
-- **AND** the error message SHALL contain the substring `'2000'` so the agent can deduce the cap and retry with a tighter body on the first attempt
+- **AND** the error message SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so the agent can deduce the cap and retry with a tighter body on the first attempt
 - **AND** the session row SHALL NOT be mutated (no partial write, `summary_final` unchanged)
 
 #### Scenario: `memory.session_summary` accepts summary of exactly `SUMMARY_MAX_CHARS`
 
-- **WHEN** the agent submits `summary: "A".repeat(2000)`
-- **THEN** the call SHALL succeed and the row SHALL have `summary` of length 2000 with `summary_final = true`
+- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS)`
+- **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` with `summary_final = true`
 
 #### Scenario: A session-lifecycle tool targets a session owned by a different token
 
@@ -554,7 +554,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 1. **A proactive save flow** — directing the agent to call `memory.save` (with the required short `title` headline plus the `content`) the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Mechanical detail (error codes, scope semantics) MAY be deferred to the tool's own `description`.
 2. **A recall flow** — directing the agent that when starting or resuming work, after a `/compact` event, or when asked "what did we do", it SHALL call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
-3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (≤2000 chars). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1000-character ceiling.
+3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (currently ≤10000 chars, derived from `SUMMARY_MAX_CHARS`). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1000-character ceiling.
 4. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins).
 
 #### Scenario: An MCP client connects on `/mcp/<slug>`
@@ -562,7 +562,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **WHEN** the `initialize` handshake completes against `/mcp/my-project`
 - **THEN** the `InitializeResult.instructions` SHALL contain references to `memory.save`, `memory.search`, `memory.session_summary`, AND `memory.context` plus a note indicating the connection is project-scoped to `'my-project'` and that `scope='global'` will be rejected
 - **AND** the instructions SHALL contain the substring `memory.session_summary` and the substring `title` and a reference to "before" (referring to before ending a working turn)
-- **AND** the instructions SHALL contain the substring `2000` (the summary length cap)
+- **AND** the instructions SHALL contain the substring `10000` (the summary length cap)
 - **AND** the instructions SHALL contain the substring `memory.context` (the recall flow)
 - **AND** the instructions SHALL contain the substring `memory.about` (the update-guidance pointer)
 
@@ -581,13 +581,13 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp` without a project
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
-- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `2000`-char cap, AND the `memory.about` update-guidance pointer) and a note indicating the connection is global-scope and that project memories require opening `/mcp/<slug>` or sending `X-Rembric-Project`
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note indicating the connection is global-scope and that project memories require opening `/mcp/<slug>` or sending `X-Rembric-Project`
 
 #### Scenario: Instructions length is checked at build time
 
 - **WHEN** the test suite runs against both `/mcp` and `/mcp/<slug>` variants of `buildInstructions(ctx)`
-- **THEN** both outputs SHALL be 1000 characters or fewer (the raised cap — the 2000-char summary cap mention, the recall flow, AND the memory.about pointer MUST all fit within the 1000-char budget)
-- **AND** both outputs SHALL contain the substring `2000`
+- **THEN** both outputs SHALL be 1000 characters or fewer (the raised cap — the 10000-char summary cap mention, the recall flow, AND the memory.about pointer MUST all fit within the 1000-char budget)
+- **AND** both outputs SHALL contain the substring `10000`
 - **AND** both outputs SHALL contain the substring `memory.context`
 - **AND** both outputs SHALL contain the substring `memory.about`
 
@@ -602,7 +602,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **WHEN** `apps/server/src/mcp/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
 - **THEN** both outputs SHALL contain the substrings `memory.save`, `memory.context`, `memory.session_summary`, AND `memory.about`
 - **AND** both outputs SHALL be ≤1000 chars
-- **AND** existing assertions for `memory.search`, scope notes, the `2000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass
+- **AND** existing assertions for `memory.search`, scope notes, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass
 
 ### Requirement: The MCP server MUST expose `memory.suggest_topic_key`
 

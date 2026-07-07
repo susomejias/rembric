@@ -82,7 +82,7 @@ The server SHALL respond `200 OK` on both insert and upsert paths with body `{ o
 
 The endpoint SHALL accept a JSON body `{ summary: string, title?: string, final?: boolean }`. The `summary` field SHALL be a string of length ≥1 and ≤20,000 chars at the zod transport boundary (kept as a wire DoS guard, distinct from the effective service-layer cap). The `title` field SHALL be a string of length ≤100 chars (when present, length ≥1). The `final` field SHALL default to `false`.
 
-Before the service-layer call, the handler SHALL apply server-side truncation: if `summary.length > SUMMARY_MAX_CHARS` (2000), the handler SHALL replace `summary` with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` (where `SUFFIX = '…[truncated]'`, length 13 in JavaScript code units) before calling `agentSessions.writeSummary`. The resulting written length SHALL be exactly `SUMMARY_MAX_CHARS` when truncation fired. This truncation is silent at the HTTP boundary (response status remains `200 OK` and the truncated value is echoed back in the response body) because the HTTP clients are hook scripts (bash / Python / opencode plugin) that cannot react to an error — the suffix is the operator-visible signal.
+Before the service-layer call, the handler SHALL apply server-side truncation: if `summary.length > SUMMARY_MAX_CHARS`, the handler SHALL replace `summary` with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` (where `SUFFIX = '…[truncated]'`, length 13 in JavaScript code units) before calling `agentSessions.writeSummary`. The resulting written length SHALL be exactly `SUMMARY_MAX_CHARS` when truncation fired. This truncation is silent at the HTTP boundary (response status remains `200 OK` and the truncated value is echoed back in the response body) because the HTTP clients are hook scripts (bash / Python / opencode plugin) that cannot react to an error — the suffix is the operator-visible signal.
 
 The server SHALL resolve the session by `(token_id, id)` — token-mismatch SHALL surface as `session_not_found`. When the resolved row's `deleted_at IS NOT NULL`, the call SHALL be rejected with `session_deleted`.
 
@@ -98,7 +98,7 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 
 #### Scenario: Non-final summary write on an active session with no prior summary
 
-- **WHEN** a client POSTs `{ summary: 'raw transcript', title: 'Fix bug' }` to `/api/foo/sessions/<S>/summary` on an active row whose `summary` is null and `summary_final` is `false` and `summary.length <= 2000`
+- **WHEN** a client POSTs `{ summary: 'raw transcript', title: 'Fix bug' }` to `/api/foo/sessions/<S>/summary` on an active row whose `summary` is null and `summary_final` is `false` and `summary.length <= SUMMARY_MAX_CHARS`
 - **THEN** the row SHALL have `summary = 'raw transcript'`, `title = 'Fix bug'`, `summary_final = false`, `title_final = false`
 - **AND** `status` SHALL remain `'active'`
 - **AND** the response SHALL be `{ ok: true, sessionId, summary, title, summaryFinal: false, titleFinal: false }`
@@ -106,9 +106,9 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 #### Scenario: Oversized summary is truncated server-side
 
 - **GIVEN** an active session row with `summary_final = false`
-- **WHEN** a client POSTs `{ summary: 'A'.repeat(5000) }` to `/api/foo/sessions/<S>/summary`
+- **WHEN** a client POSTs `{ summary: 'A'.repeat(SUMMARY_MAX_CHARS + 2000) }` to `/api/foo/sessions/<S>/summary`
 - **THEN** the response SHALL be `200 OK` (NOT an error)
-- **AND** the row's `summary` SHALL be of length exactly 2000
+- **AND** the row's `summary` SHALL be of length exactly `SUMMARY_MAX_CHARS`
 - **AND** the row's `summary` SHALL end with the literal suffix `…[truncated]`
 - **AND** the response body's `summary` field SHALL echo the truncated value
 
@@ -153,7 +153,7 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 
 The endpoint SHALL accept a JSON body `{ summary?: string, title?: string, final?: boolean }`. All fields are optional; an empty body `{}` is valid. The same wire-DoS bound (`summary` length ≤20,000 chars at the zod boundary) and the same `final` precedence rules as `/summary` apply when those fields are provided.
 
-Before the service-layer call, the handler SHALL apply server-side truncation to the `summary` field, identical to `/summary`: when `summary` is present and `summary.length > SUMMARY_MAX_CHARS` (2000), the handler SHALL replace it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` before calling `agentSessions.end`. The response remains `200 OK` with the truncated value echoed back.
+Before the service-layer call, the handler SHALL apply server-side truncation to the `summary` field, identical to `/summary`: when `summary` is present and `summary.length > SUMMARY_MAX_CHARS`, the handler SHALL replace it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` before calling `agentSessions.end`. The response remains `200 OK` with the truncated value echoed back.
 
 The server SHALL resolve the session by `(token_id, id)` and, when active, atomically:
 
@@ -169,16 +169,16 @@ Soft-deleted rows SHALL be rejected with `session_deleted`. Already-ended rows S
 
 #### Scenario: Active session closed atomically with summary and title
 
-- **WHEN** a client POSTs `{ summary: 'raw transcript', title: 'Refactor auth', final: false }` to `/end` on an active row with no prior summary, with `summary.length <= 2000`
+- **WHEN** a client POSTs `{ summary: 'raw transcript', title: 'Refactor auth', final: false }` to `/end` on an active row with no prior summary, with `summary.length <= SUMMARY_MAX_CHARS`
 - **THEN** the server SHALL write summary and title (both `_final = false`), set `status='ended'`, set `ended_at=now` — in a single transaction
 - **AND** the response SHALL include the written values
 
 #### Scenario: Active session closed with an oversized summary is truncated server-side
 
 - **GIVEN** an active session row with `summary_final = false`
-- **WHEN** a client POSTs `{ summary: 'A'.repeat(5000), final: false }` to `/end`
+- **WHEN** a client POSTs `{ summary: 'A'.repeat(SUMMARY_MAX_CHARS + 2000), final: false }` to `/end`
 - **THEN** the response SHALL be `200 OK`
-- **AND** the row's `summary` SHALL be of length exactly 2000 with the literal suffix `…[truncated]`
+- **AND** the row's `summary` SHALL be of length exactly `SUMMARY_MAX_CHARS` with the literal suffix `…[truncated]`
 - **AND** `status` SHALL be `'ended'` and `ended_at` SHALL be set
 
 #### Scenario: End on already-ended session with new summary (write-once protected)
