@@ -7,7 +7,7 @@ import {
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 import type { SessionRouter } from '../server/session-router.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
@@ -271,8 +271,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   server.registerTool(
     'memory.session_summary',
     {
-      description:
-        'Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=2000 chars, server rejects longer with invalid_input — keep it tight), title? (<=100 chars, descriptive of work done, NOT the cwd) }. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.',
+      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd) }. Keep it concise but include useful handoff detail. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.`,
       inputSchema: sessionSummarySchema,
       outputSchema: sessionSummaryOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),
