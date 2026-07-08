@@ -312,3 +312,54 @@ describe('project.list is filtered by token scope', () => {
     expect(slugs).toEqual([projectB.slug]);
   });
 });
+
+describe('project.use({autocreate: true}) requires write authorization', () => {
+  it('a `read:*` token cannot autocreate a new project', async () => {
+    const r = await runWithContext(ctxFor('read:*'), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'brand-new-slug', autocreate: true })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('forbidden');
+    expect(projects.findBySlug('brand-new-slug')).toBeUndefined();
+  });
+
+  it('a `read:project:<id>` token cannot autocreate a new project', async () => {
+    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'another-new-slug', autocreate: true })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('forbidden');
+    expect(projects.findBySlug('another-new-slug')).toBeUndefined();
+  });
+
+  it('a `project:<id>` token cannot autocreate a new project', async () => {
+    const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'yet-another-slug', autocreate: true })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('forbidden');
+    expect(projects.findBySlug('yet-another-slug')).toBeUndefined();
+  });
+
+  it('a `*` token can still autocreate a new project', async () => {
+    const r = await runWithContext(ctxFor('*'), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'admin-created-slug', autocreate: true })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    expect(payload.created).toBe(true);
+    expect(projects.findBySlug('admin-created-slug')).toBeDefined();
+  });
+
+  it('autocreate against an already-existing slug is unaffected by the write check', async () => {
+    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
+      Promise.resolve(projectHandlers.use({ slug: projectA.slug, autocreate: true })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    expect(payload.created).toBe(false);
+  });
+});

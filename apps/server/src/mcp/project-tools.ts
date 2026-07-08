@@ -100,12 +100,14 @@ function handleUse(
   let created = false;
   if (!project) {
     if (args.autocreate === true) {
-      // A project minted here can never match a project-pinned token id, so
-      // gate on an anonymous project target BEFORE creating the row.
-      if (!isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: null })) {
+      // Minting a project row is a write, even though project.use is
+      // otherwise a read action. A project minted here can never match a
+      // project-pinned token id, so gate on an anonymous project target
+      // BEFORE creating the row.
+      if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: null })) {
         return mcpError(
           'forbidden',
-          `token scope '${ctx.scope}' does not authorize read on project '${args.slug}'`,
+          `token scope '${ctx.scope}' does not authorize creating project '${args.slug}'`,
         );
       }
       try {
