@@ -82,13 +82,25 @@ process.stderr.write(
   `[rembric-bridge] projectDir=${projectDir} (from ${projectDirSource}) url=${url}\n`,
 );
 
+// Exact pin, never `@latest`: a floating tag re-resolves on every session
+// start (network dependency, non-reproducible) and a broken upstream release
+// would instantly hit all users. Bump deliberately with plugin releases.
+const MCP_REMOTE_VERSION = '0.1.38';
+
 // `mcp-remote` requires HTTPS by default and rejects plain HTTP (except
 // for localhost). Rembric is commonly deployed on a LAN VPS reached over
 // HTTP (e.g. http://192.168.x.y:8787), so we pass `--allow-http`
 // unconditionally. For HTTPS deployments the flag is a no-op.
 const child = spawn(
   'npx',
-  ['-y', 'mcp-remote@latest', url, '--allow-http', '--header', `Authorization:Bearer ${token}`],
+  [
+    '-y',
+    `mcp-remote@${MCP_REMOTE_VERSION}`,
+    url,
+    '--allow-http',
+    '--header',
+    `Authorization:Bearer ${token}`,
+  ],
   { stdio: 'inherit' },
 );
 

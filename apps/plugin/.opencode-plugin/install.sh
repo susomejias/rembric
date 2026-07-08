@@ -76,6 +76,14 @@ TMP_PLUGIN="$(mktemp)"
 trap 'rm -f "$TMP_PLUGIN"' EXIT
 fetch_file "${PLUGIN_SRC}/plugin.ts" "$TMP_PLUGIN" || exit 1
 sed "s|'\\.\\./bin/rembric-dotenv\\.mjs'|'${DOTENV_DEST}'|g" "$TMP_PLUGIN" > "$PLUGIN_DEST"
+# If the dev-time import in plugin.ts ever drifts from the sed pattern above,
+# the rewrite silently no-ops and the installed plugin crashes at load. Fail
+# the install loudly instead, leaving no broken file behind.
+if ! grep -qF "$DOTENV_DEST" "$PLUGIN_DEST"; then
+  rm -f "$PLUGIN_DEST"
+  printf '[rembric] error: dotenv import rewrite failed — plugin.ts does not reference %s after sed; removed the broken plugin file\n' "$DOTENV_DEST" >&2
+  exit 1
+fi
 chmod 644 "$PLUGIN_DEST"
 
 # Render the MCP snippet (used for auto-write OR for manual paste).
@@ -98,6 +106,42 @@ mcp_block() {
 MCP
 }
 
+# has_mcp_rembric: detect an existing `mcp.rembric` entry without a jq
+# dependency. A minimal character scanner (string/escape aware) tracks brace
+# depth, finds the top-level "mcp" key, and looks for a "rembric" key directly
+# inside that object — a "rembric" substring anywhere else (another server's
+# name, an unrelated value) must NOT count as configured.
+has_mcp_rembric() {
+  [ -f "$OPENCODE_JSON" ] || return 1
+  awk '
+    BEGIN { depth = 0; instr = 0; esc = 0; buf = ""; pendmcp = 0; mcpd = -1; found = 0 }
+    {
+      line = $0
+      n = length(line)
+      for (i = 1; i <= n; i++) {
+        c = substr(line, i, 1)
+        if (instr) {
+          if (esc) esc = 0
+          else if (c == "\\") esc = 1
+          else if (c == "\"") instr = 0
+          else buf = buf c
+          continue
+        }
+        if (c == "\"") { instr = 1; buf = ""; continue }
+        if (c == ":") {
+          if (buf == "mcp" && depth == 1 && mcpd == -1) pendmcp = 1
+          else if (buf == "rembric" && mcpd != -1 && depth == mcpd) found = 1
+          buf = ""
+          continue
+        }
+        if (c == "{") { depth++; if (pendmcp) { mcpd = depth; pendmcp = 0 }; continue }
+        if (c == "}") { if (depth == mcpd) mcpd = -1; depth--; continue }
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$OPENCODE_JSON" 2>/dev/null
+}
+
 # Auto-configure ~/.config/opencode/opencode.json.
 #
 # Three branches:
@@ -114,7 +158,7 @@ configure_opencode_json() {
     AUTO_WROTE_JSON=1
     return 0
   fi
-  if grep -q '"rembric"' "$OPENCODE_JSON" 2>/dev/null; then
+  if has_mcp_rembric; then
     AUTO_WROTE_JSON=2  # already configured
     return 0
   fi

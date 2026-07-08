@@ -176,7 +176,7 @@ The proactive-save protocol travels via the MCP `initialize.instructions` (~500 
 ## Bridge runtime
 
 - **Requires Node 18+** on PATH. Claude Code already needs Node, so this is normally satisfied.
-- The bridge uses `npx -y mcp-remote@latest` for the actual stdio↔HTTP MCP transport. First launch downloads `mcp-remote` (~5–15 s, needs network); subsequent launches are instant from the npx cache.
+- The bridge uses `npx -y mcp-remote@<pinned version>` for the actual stdio↔HTTP MCP transport (the exact version is pinned in `rembric-bridge.mjs` and bumped deliberately with plugin releases). First launch downloads `mcp-remote` (~5–15 s, needs network); subsequent launches are instant from the npx cache.
 - One bridge process per MCP session (~30 MB residence). Lives only for the session lifetime.
 - The bridge does NOT parse or modify MCP frames. Bytes flow through `mcp-remote` unchanged.
 

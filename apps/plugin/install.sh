@@ -57,7 +57,14 @@ for arg in "$@"; do
     --status) ARG_STATUS=1 ;;
     --json) ARG_JSON=1 ;;
     --token=*) ARG_TOKEN="${arg#--token=}"; ARG_TOKEN_SET=1 ;;
-    --port=*) ARG_PORT="${arg#--port=}" ;;
+    --port=*)
+      ARG_PORT="${arg#--port=}"
+      case "$ARG_PORT" in
+        ''|*[!0-9]*) printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2; exit 2 ;;
+      esac
+      if [ "${#ARG_PORT}" -gt 5 ] || [ "$ARG_PORT" -lt 1 ] || [ "$ARG_PORT" -gt 65535 ]; then
+        printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2; exit 2
+      fi ;;
     --noninteractive) NONINTERACTIVE=1 ;;
     -h|--help) ARG_HELP=1 ;;
     *) printf '[rembric] error: unknown argument %s\n' "$arg" >&2; exit 2 ;;
@@ -259,7 +266,7 @@ fetch() { # $1 repo-relative path, $2 dest
     if [ -f "$REMBRIC_SRC/$_rel" ]; then cp "$REMBRIC_SRC/$_rel" "$_dest"; return 0; fi
     printf '[rembric] error: missing local file %s\n' "$REMBRIC_SRC/$_rel" >&2; return 1
   fi
-  if ! curl -fsSL "$RAW_BASE/$REF/$_rel" -o "$_dest"; then
+  if ! curl -fsSL --max-time 30 --retry 2 --retry-connrefused "$RAW_BASE/$REF/$_rel" -o "$_dest"; then
     printf '[rembric] error: failed to fetch %s\n' "$RAW_BASE/$REF/$_rel" >&2; return 1
   fi
 }
@@ -464,6 +471,27 @@ gen_token() {
   return 1
 }
 
+# health_wait <port> <token>: poll the authenticated /healthz until the app
+# reports {ok:true} (sets HEALTH_VERSION from the response) or ~15 bounded
+# attempts expire (≈30s ceiling — first boot loads the embedding model, so the
+# app can lag `up -d` noticeably). `docker compose up -d` exiting 0 only means
+# the container started; this is what distinguishes "up" from "crashed on boot".
+HEALTH_VERSION=''
+health_wait() {
+  HEALTH_VERSION=''
+  _hi=0
+  while [ "$_hi" -lt 15 ]; do
+    _hb=$(curl -fsS --max-time 2 -H "Authorization: Bearer $2" "http://127.0.0.1:$1/healthz" 2>/dev/null) || _hb=''
+    if printf '%s' "$_hb" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
+      HEALTH_VERSION=$(printf '%s' "$_hb" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+      return 0
+    fi
+    _hi=$((_hi + 1))
+    sleep 2 2>/dev/null || :
+  done
+  return 1
+}
+
 # bring_up: offer to `docker compose pull && up -d`, gated on docker compose
 # being available AND user confirmation (interactive [y/N] or --up). Shared by
 # install and update so both behave the same. Reads $tok for the login line.
@@ -496,8 +524,23 @@ bring_up() {
   # `if x=$(…); then` keeps the capture set -e-safe (a bare `x=$(failing)` aborts).
   if _up=$(docker compose up -d 2>&1); then _rc=0; else _rc=$?; fi
   if [ "$_rc" = "0" ]; then
-    say "  ${LIME}Up.${RESET} Dashboard: ${BOLD}http://127.0.0.1:${ARG_PORT:-8787}/dashboard${RESET}  (adjust host to your setup)"
-    [ -n "${tok:-}" ] && say "  Log in with admin token: ${BOLD}${tok}${RESET}"
+    _hport="${ARG_PORT:-}"
+    if [ -z "$_hport" ] && [ -f ./.env ]; then
+      _hport=$(sed -n 's/^REMBRIC_PORT=//p' ./.env | head -1)
+    fi
+    [ -z "$_hport" ] && _hport=8787
+    if ! has curl; then
+      say "  Started. ${WARN}Could not verify health (curl not found)${RESET} — check ${BOLD}docker compose logs${RESET}, then open ${BOLD}http://127.0.0.1:${_hport}/dashboard${RESET}"
+    else
+      say "  ${DIM}Waiting for the server to report healthy (up to ~30s; first boot loads the embedding model)…${RESET}"
+      if health_wait "$_hport" "${tok:-}"; then
+        say "  ${LIME}Up.${RESET} Server ${HEALTH_VERSION:-unknown} healthy. Dashboard: ${BOLD}http://127.0.0.1:${_hport}/dashboard${RESET}  (adjust host to your setup)"
+        if [ -n "${tok:-}" ]; then say "  Log in with admin token: ${BOLD}${tok}${RESET}"; fi
+      else
+        say "  ${DANGER}The container started but /healthz did not report ok within ~30s${RESET} — it may still be booting, or it crashed."
+        say "  Inspect with: ${BOLD}docker compose logs${RESET} — then retry: ${BOLD}docker compose up -d${RESET}"
+      fi
+    fi
   else
     case "$_up" in
       *"already in use"*|*Conflict*)

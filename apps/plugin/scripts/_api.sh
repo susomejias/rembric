@@ -7,8 +7,8 @@
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
 #                                       with Authorization: Bearer ${REMBRIC_API_TOKEN}
 #
-# Every function exits 0 on failure (silent stderr diagnostic only) so a
-# plugin-side problem NEVER aborts the host agent.
+# Every function exits 0 on failure (at most a one-line stderr diagnostic) so
+# a plugin-side problem NEVER aborts the host agent.
 
 set -u
 trap 'exit 0' ERR
@@ -66,12 +66,18 @@ rembric_post() {
   # of the expansion, leaving a stray `}` in the final string.
   [ -z "$body" ] && body='{}'
   local url="${REMBRIC_SERVER_URL%/}${path}"
+  local rc=0
   curl -sf -X POST \
     -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
     -H "Content-Type: application/json" \
     --max-time 3 \
     -d "$body" \
-    "$url" > /dev/null 2>&1
+    "$url" > /dev/null 2>&1 || rc=$?
+  # Diagnostic only — no body, no token (keeps payloads/credentials out of
+  # host logs); the unconditional return 0 keeps the host agent unbreakable.
+  if [ "$rc" -ne 0 ]; then
+    printf '[rembric] POST %s failed (curl rc=%s)\n' "$path" "$rc" >&2
+  fi
   return 0
 }
 
