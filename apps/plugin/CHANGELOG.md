@@ -4,6 +4,14 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.16.2](https://github.com/susomejias/rembric/compare/plugin-v0.16.1...plugin-v0.16.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* **plugin:** harden installer bring-up, hook transport, and bridge pinning ([#217](https://github.com/susomejias/rembric/issues/217)) ([77cbc2f](https://github.com/susomejias/rembric/commit/77cbc2fe6a775bfe5988f60a30950c4ea70a378e))
+* **plugin:** redact &lt;private&gt; spans in bash and python clients ([#216](https://github.com/susomejias/rembric/issues/216)) ([c83bdcb](https://github.com/susomejias/rembric/commit/c83bdcb168bb3969c2471bf26b1aba1b309aa76b))
+
 ## [0.16.1](https://github.com/susomejias/rembric/compare/plugin-v0.16.0...plugin-v0.16.1) (2026-07-07)
 
 ### Bug Fixes
