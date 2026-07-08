@@ -18,15 +18,13 @@ import { buildObservabilityHandlers } from './observability-tools.js';
 import { buildPromptHandlers } from './prompt-tools.js';
 
 /**
- * Regression coverage for the scope-resolution fix in
- * `scopeFromContext`. Before the fix, every session-tool handler that
- * called `scopeFromContext()` ignored the `SessionRouter`, so a
+ * Regression coverage for scope resolution in the session-tool surface.
+ * Before the fix, these handlers ignored the `SessionRouter`, so a
  * path-less `/mcp` agent that pinned a project via `project.use`
  * silently saw global scope from `memory.context`, `memory.timeline`,
  * `memory.stats`, `memory.save_prompt`, and `memory.capture_passive`.
  *
- * The fix mirrors the precedence in `resolveEffectiveProject`
- * (tools.ts) and the inline resolution in `handleSessionStart`:
+ * All handlers now share `resolveEffectiveScope` (`_shared.ts`):
  *   1. ctx.project          → path-scoped connection
  *   2. SessionRouter entry  → path-less connection with prior project.use
  *   3. SCOPE_GLOBAL         → no resolution
@@ -114,7 +112,7 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
-describe('scopeFromContext — path-less /mcp with router pin', () => {
+describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
   it('memory.context returns the router-pinned project scope, not global', async () => {
     const project = projects.create({ slug: 'foo', displayName: null });
     memory.save(
@@ -145,7 +143,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
 
   it('memory.timeline succeeds when called with the router-pinned scope', async () => {
     // The scope resolution is shared by every session-tool handler via
-    // scopeFromContext. The router-fallback branch is exhaustively
+    // resolveEffectiveScope. The router-fallback branch is exhaustively
     // covered by the other tests in this suite (context, stats,
     // save_prompt, capture_passive). For timeline we just confirm that
     // calling it with a project-scoped target does not error out.
@@ -259,7 +257,7 @@ describe('scopeFromContext — path-less /mcp with router pin', () => {
   });
 });
 
-describe('scopeFromContext — fallback to SCOPE_GLOBAL', () => {
+describe('resolveEffectiveScope — fallback to SCOPE_GLOBAL', () => {
   it('path-less /mcp with empty router → memory.context returns global', async () => {
     memory.save(
       {
@@ -310,7 +308,7 @@ describe('scopeFromContext — fallback to SCOPE_GLOBAL', () => {
   });
 });
 
-describe('scopeFromContext — path-scoped connections override router', () => {
+describe('resolveEffectiveScope — path-scoped connections override router', () => {
   it('ctx.requestedSlug set + ctx.project null → returns global, ignores router pin', async () => {
     // Simulate a path-scoped request to a slug whose project does NOT
     // exist (e.g., archived or deleted). Auth would not populate

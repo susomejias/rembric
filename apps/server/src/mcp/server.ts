@@ -235,6 +235,8 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     prompts: opts.prompts,
     agentSessions: opts.agentSessions,
     router: opts.router,
+    projects: opts.projects,
+    getServer: () => server,
   });
 
   // ── Observability tools ───────────────────────────────────────────
@@ -243,7 +245,9 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     agentSessions: opts.agentSessions,
     repos: opts.repos,
     router: opts.router,
+    projects: opts.projects,
     doctor: opts.doctor,
+    getServer: () => server,
   });
 
   server.registerTool(
@@ -425,7 +429,12 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   );
 
   // ── Relations tools (judgment graph) ──────────────────────────────
-  const relationsHandlers = buildRelationsHandlers({ relations: opts.relations });
+  const relationsHandlers = buildRelationsHandlers({
+    relations: opts.relations,
+    router: opts.router,
+    projects: opts.projects,
+    getServer: () => server,
+  });
   server.registerTool(
     'memory.suggest_topic_key',
     {

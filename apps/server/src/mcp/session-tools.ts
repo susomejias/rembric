@@ -5,8 +5,9 @@ import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import { type ProjectsService } from '../services/projects.js';
+import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
-import { resolveSessionId, routerKey, scopeFromContext } from './_shared.js';
+import { assertAuthorized, requireScope, resolveSessionId, routerKey } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
@@ -150,6 +151,12 @@ async function handleSessionStart(
     projectId = found.id;
   }
 
+  try {
+    assertAuthorized('write', projectId ? projectScope(projectId) : SCOPE_GLOBAL);
+  } catch (err) {
+    return errToMcp(err);
+  }
+
   // Idempotency on (token, project): if a session is already active for
   // this scope (typically because the plugin's SessionStart hook created
   // one via the HTTP /api/.../sessions path), return that one instead of
@@ -203,9 +210,19 @@ async function handleSessionStart(
   });
 }
 
-function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: string }) {
+async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: string }) {
   const ctx = getRequestContext();
-  const sessionId = resolveSessionId(deps, args.sessionId);
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'write');
+  } catch (err) {
+    return errToMcp(err);
+  }
+  const sessionId = resolveSessionId(
+    deps,
+    args.sessionId,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   if (!sessionId) {
     return mcpError(
       'session_not_found',
@@ -224,12 +241,22 @@ function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: string }) {
   }
 }
 
-function handleSessionSummary(
+async function handleSessionSummary(
   deps: SessionToolDeps,
   args: { sessionId?: string; summary: string; title?: string },
 ) {
   const ctx = getRequestContext();
-  const sessionId = resolveSessionId(deps, args.sessionId);
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'write');
+  } catch (err) {
+    return errToMcp(err);
+  }
+  const sessionId = resolveSessionId(
+    deps,
+    args.sessionId,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   if (!sessionId) {
     return mcpError(
       'session_not_found',
@@ -285,8 +312,13 @@ function rejectIfDeleted(
   return null;
 }
 
-function handleSessionGet(deps: SessionToolDeps, args: { sessionId: string }) {
-  const scope = scopeFromContext(deps);
+async function handleSessionGet(deps: SessionToolDeps, args: { sessionId: string }) {
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   const row = deps.agentSessions.getById(args.sessionId);
   if (
     !row ||

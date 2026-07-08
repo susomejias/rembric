@@ -1,38 +1,98 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { DomainError } from '../services/errors.js';
+import type { ProjectsService } from '../services/projects.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import { isAuthorized } from '../services/tokens.js';
+
+import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Cross-cutting helpers shared by the MCP tool-handler modules. Defined once
  * here so the per-domain modules (`memory-tools`, `session-tools`,
- * `prompt-tools`, `observability-tools`) import rather than copy them.
+ * `prompt-tools`, `observability-tools`, `relations-tools`, `project-tools`)
+ * import rather than copy them.
  */
 
+export interface ScopeResolutionDeps {
+  router?: SessionRouter;
+  projects?: ProjectsService;
+  getServer?: () => McpServer;
+}
+
+export interface EffectiveScope {
+  scope: Scope;
+  project: { id: string; slug: string } | null;
+}
+
 /**
- * Resolve the effective scope for a tool call from the request context.
+ * Resolve the effective scope (and project) subsequent operations target.
  *
- * Precedence:
- *   1. `ctx.project` — set when the connection is path-scoped (`/mcp/<slug>`).
- *   2. For path-less `/mcp` connections (`ctx.requestedSlug === null`), the
- *      `SessionRouter` entry populated by a prior `project.use` or roots-based
- *      discovery.
+ * Sources, in order of precedence:
+ *   1. `ctx.project` — set by the HTTP layer when the URL was `/mcp/<slug>`
+ *      and the slug resolved to an existing project.
+ *   2. `SessionRouter` entry — set by an explicit `project.use({slug})` or
+ *      by roots-based discovery on a path-less `/mcp` connection.
  *   3. Global scope when neither source resolves a project.
  *
- * This is the synchronous resolver used by read/observability tools. The
- * memory write/CRUD path uses the async `resolveEffectiveProject`
- * (`memory-tools`), which additionally awaits roots discovery.
+ * Before consulting source #2 on an unscoped connection, this helper
+ * awaits any in-flight roots discovery (or triggers it lazily as a
+ * fallback for clients that never emit `notifications/initialized`) so
+ * the router is populated by the time we read it. Path-scoped
+ * connections short-circuit on `ctx.requestedSlug`.
  */
-export function scopeFromContext(deps: { router: SessionRouter }): Scope {
+export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
   const ctx = getRequestContext();
-  if (ctx.project) return projectScope(ctx.project.id);
-  if (ctx.requestedSlug !== null) return SCOPE_GLOBAL;
-  if (ctx.mcpSessionId) {
-    const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
-    if (entry?.projectId) return projectScope(entry.projectId);
+  if (ctx.project) return { scope: projectScope(ctx.project.id), project: ctx.project };
+  if (ctx.requestedSlug !== null) return { scope: SCOPE_GLOBAL, project: null };
+  if (!ctx.mcpSessionId || !deps.router || !deps.projects) {
+    return { scope: SCOPE_GLOBAL, project: null };
   }
-  return SCOPE_GLOBAL;
+  if (deps.getServer) {
+    await ensureRootsDiscoveryRun(
+      { server: deps.getServer(), router: deps.router, projects: deps.projects },
+      { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId, pathSlug: ctx.requestedSlug },
+    );
+  }
+  const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
+  const project = entry?.projectId ? (deps.projects.getById(entry.projectId) ?? null) : null;
+  if (!project) return { scope: SCOPE_GLOBAL, project: null };
+  return { scope: projectScope(project.id), project };
+}
+
+/**
+ * Authorization gate every tool handler (except the data-free `memory.about`)
+ * passes through: checks the request token's scope against the tool's
+ * read/write classification and the target scope, throwing
+ * `DomainError('forbidden')` on failure.
+ */
+export function assertAuthorized(action: 'read' | 'write', scope: Scope): void {
+  const ctx = getRequestContext();
+  const authorized = isAuthorized(ctx.scope, action, {
+    scope: scope.kind,
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+  });
+  if (!authorized) {
+    const target = scope.kind === 'project' ? `project '${scope.projectId}'` : 'global scope';
+    throw new DomainError(
+      'forbidden',
+      `token scope '${ctx.scope}' does not authorize ${action} on ${target}`,
+    );
+  }
+}
+
+/** Resolve the effective scope and assert the token may `action` on it. */
+export async function requireScope(
+  deps: ScopeResolutionDeps,
+  action: 'read' | 'write',
+): Promise<Scope> {
+  const { scope } = await resolveEffectiveScope(deps);
+  assertAuthorized(action, scope);
+  return scope;
 }
 
 export function routerKey(): { tokenId: string; mcpSessionId: string } | null {
@@ -48,11 +108,12 @@ export function routerKey(): { tokenId: string; mcpSessionId: string } | null {
  *   3. the most recently-active session for `(tokenId, projectId)` — captures
  *      sessions created out-of-band by the plugin's HTTP hooks.
  * Returns null when none resolve. Shared by session_end/summary, save_prompt,
- * and capture_passive.
+ * and capture_passive; `projectId` is the caller's already-resolved scope.
  */
 export function resolveSessionId(
   deps: { router: SessionRouter; agentSessions: AgentSessionsService },
   explicit: string | undefined,
+  projectId: string | null,
 ): string | null {
   if (explicit) return explicit;
   const ctx = getRequestContext();
@@ -61,8 +122,6 @@ export function resolveSessionId(
     const routerHit = deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId;
     if (routerHit) return routerHit;
   }
-  const scope = scopeFromContext(deps);
-  const projectId = scope.kind === 'project' ? scope.projectId : null;
   const active = deps.agentSessions.findActiveForTransport({
     tokenId: ctx.token.id,
     projectId,

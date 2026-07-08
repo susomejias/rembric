@@ -9,6 +9,7 @@ import {
 } from '../db/schema/memory-relations.js';
 
 import { DomainError } from './errors.js';
+import { memoryMatchesScope, type Scope } from './scope.js';
 
 /**
  * Service for the judgment graph between memories.
@@ -16,11 +17,13 @@ import { DomainError } from './errors.js';
  * Three entry points:
  *   - `createPending` — called by `memory.save` when a candidate detector
  *     surfaces a similar memory; inserts with status='pending'
- *   - `judge` — called by `memory.judge` (agent) or the consolidator's
- *     orphan-promotion pass; transitions pending → judged and, for
- *     `relation='supersedes'`, mutates the target memory row
- *   - `compare` — called by `memory.compare` (agent-driven proactive
- *     analysis); upserts a judged row directly without a preceding save
+ *   - `judge` / `judgeInScope` — called by `memory.judge` (agent, via the
+ *     scoped variant) or the consolidator's orphan-promotion pass;
+ *     transitions pending → judged and, for `relation='supersedes'`,
+ *     mutates the target memory row
+ *   - `compare` / `compareInScope` — called by `memory.compare`
+ *     (agent-driven proactive analysis, via the scoped variant); upserts a
+ *     judged row directly without a preceding save
  *
  * Cross-scope safety: insert and upsert paths assert that source and
  * target memories share `(scope, project_id)` — a CI test in
@@ -111,6 +114,33 @@ export class RelationsService {
         `relations.judge: judgmentId ${judgmentId} not found`,
       );
     }
+    return this.applyJudgment(existing, judgmentId, input);
+  }
+
+  /**
+   * Scoped variant of `judge` for agent-facing callers: the judgment's
+   * source and target must both lie in `scope`. A missing or out-of-scope
+   * judgmentId raises the same error, so cross-scope existence never leaks.
+   */
+  judgeInScope(judgmentId: string, scope: Scope, input: JudgeInput): MemoryRelation {
+    const existing = this.repos.relations.findByJudgmentIdInScope(judgmentId, {
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+    });
+    if (!existing) {
+      throw new DomainError(
+        'memory_not_found',
+        `relations.judge: judgmentId ${judgmentId} not found in this scope`,
+      );
+    }
+    return this.applyJudgment(existing, judgmentId, input);
+  }
+
+  private applyJudgment(
+    existing: MemoryRelation,
+    judgmentId: string,
+    input: JudgeInput,
+  ): MemoryRelation {
     if (existing.status !== 'pending') {
       throw new DomainError(
         'conflict',
@@ -148,6 +178,24 @@ export class RelationsService {
       return next;
     });
     return updated;
+  }
+
+  /**
+   * Scoped variant of `compare`: both memories must lie in `scope`. A
+   * missing or out-of-scope id raises the same error, so cross-scope
+   * existence never leaks.
+   */
+  compareInScope(input: CompareInput, scope: Scope): MemoryRelation {
+    for (const id of [input.sourceId, input.targetId]) {
+      const tuple = this.repos.memory.findScopeTupleById(id);
+      if (!tuple || !memoryMatchesScope(tuple, scope)) {
+        throw new DomainError(
+          'memory_not_found',
+          `relations.compare: memory ${id} not found in this scope`,
+        );
+      }
+    }
+    return this.compare(input);
   }
 
   /**

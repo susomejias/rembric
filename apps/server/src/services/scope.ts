@@ -10,8 +10,8 @@
  * the dashboard admin views.
  *
  * Mapping from MCP request context to a Scope happens in one place
- * (the MCP handlers, via `scopeFromContext`). Mapping from CLI / cron
- * to a scope happens at the call site of the consolidation engine.
+ * (the MCP handlers, via `resolveEffectiveScope`). Mapping from CLI /
+ * cron to a scope happens at the call site of the consolidation engine.
  */
 
 export type Scope = { kind: 'global' } | { kind: 'project'; projectId: string };
