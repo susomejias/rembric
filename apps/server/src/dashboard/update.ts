@@ -11,7 +11,7 @@ import type { SessionsService } from '../services/sessions.js';
 import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
-import { btn, viewHead } from './components.js';
+import { btn, getSession, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { formatTs, html, raw, type SafeHtml } from './templates.js';
@@ -23,10 +23,6 @@ export interface UpdateDeps {
   updates: UpdateCheckService;
   selfUpdate: SelfUpdateOrchestrator;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 function getUpdateState(c: Context): UpdateViewState | null {

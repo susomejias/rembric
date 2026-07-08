@@ -8,7 +8,7 @@ import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
 
-import { btn, flash, viewHead } from './components.js';
+import { btn, domainErrorPage, flash, flashErrorPage, getSession, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { html, raw } from './templates.js';
@@ -21,10 +21,6 @@ export interface MaintenanceDeps {
   memory: MemoryService;
   prompts: PromptsService;
   tokens: TokensService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 /**
@@ -45,16 +41,12 @@ function requireAdmin(
   if (!token || token.scope !== '*') {
     return {
       session: null,
-      forbidden: c.html(
-        renderPage(
-          c,
-          deps.sessions,
-          html`<p class="flash error">
-            Maintenance requires an admin-scoped (<code>*</code>) token. Your session token is
-            scoped to <code>${token?.scope ?? '(unknown)'}</code>.
-          </p>`,
-          { title: 'Maintenance', activeNav: 'maintenance' },
-        ),
+      forbidden: flashErrorPage(
+        c,
+        deps.sessions,
+        html`Maintenance requires an admin-scoped (<code>*</code>) token. Your session token is
+          scoped to <code>${token?.scope ?? '(unknown)'}</code>.`,
+        { title: 'Maintenance', activeNav: 'maintenance' },
         403,
       ),
     };
@@ -352,12 +344,12 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
       return c.redirect(`/dashboard/maintenance?purged-sessions=${deletedIds.length}`);
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Maintenance',
-            activeNav: 'maintenance',
-          }),
-          err.code === 'forbidden' ? 403 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Maintenance', activeNav: 'maintenance' },
+          (code) => (code === 'forbidden' ? 403 : 400),
         );
       }
       throw err;
@@ -381,12 +373,12 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
       return c.redirect(`/dashboard/maintenance?purged-memories=${deletedIds.length}`);
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Maintenance',
-            activeNav: 'maintenance',
-          }),
-          err.code === 'forbidden' ? 403 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Maintenance', activeNav: 'maintenance' },
+          (code) => (code === 'forbidden' ? 403 : 400),
         );
       }
       throw err;
@@ -410,12 +402,12 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
       return c.redirect(`/dashboard/maintenance?purged-prompts=${deletedIds.length}`);
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Maintenance',
-            activeNav: 'maintenance',
-          }),
-          err.code === 'forbidden' ? 403 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Maintenance', activeNav: 'maintenance' },
+          (code) => (code === 'forbidden' ? 403 : 400),
         );
       }
       throw err;

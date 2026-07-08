@@ -1,22 +1,17 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import { DomainError } from '../services/errors.js';
 import { SLUG_REGEX, type ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { viewHead } from './components.js';
+import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { formatTs, html, raw } from './templates.js';
-import type { ResolvedSession } from './types.js';
 
 export interface ProjectsDeps {
   projects: ProjectsService;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 export function createProjectsRouter(deps: ProjectsDeps): Hono {
@@ -120,7 +115,7 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
 
       <h2>Active (${active.length})</h2>
       ${active.length === 0
-        ? html`<p class="muted">No active projects.</p>`
+        ? tblEmpty('No active projects.')
         : html`
             <div class="tbl-host">
               <table>
@@ -195,7 +190,10 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
       deps.projects.archive(c.req.param('id'));
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, deps.sessions, err.message);
+        return flashErrorPage(c, deps.sessions, err.message, {
+          title: 'Projects',
+          activeNav: 'projects',
+        });
       }
       throw err;
     }
@@ -216,7 +214,10 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
       deps.projects.unarchive(c.req.param('id'));
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, deps.sessions, err.message);
+        return flashErrorPage(c, deps.sessions, err.message, {
+          title: 'Projects',
+          activeNav: 'projects',
+        });
       }
       throw err;
     }
@@ -231,13 +232,19 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
     const raw = form.get('displayName');
     const displayName = (typeof raw === 'string' ? raw : '').trim();
     if (!displayName) {
-      return errorResponse(c, deps.sessions, 'Display name is required.');
+      return flashErrorPage(c, deps.sessions, 'Display name is required.', {
+        title: 'Projects',
+        activeNav: 'projects',
+      });
     }
     try {
       deps.projects.rename(c.req.param('id'), displayName);
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, deps.sessions, err.message);
+        return flashErrorPage(c, deps.sessions, err.message, {
+          title: 'Projects',
+          activeNav: 'projects',
+        });
       }
       throw err;
     }
@@ -245,14 +252,4 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
   });
 
   return app;
-}
-
-function errorResponse(c: Context, sessions: SessionsService, message: string): Response {
-  return c.html(
-    renderPage(c, sessions, html`<p class="flash error">${message}</p>`, {
-      title: 'Projects',
-      activeNav: 'projects',
-    }),
-    400,
-  );
 }

@@ -5,11 +5,21 @@ import { NotUndoableError, PurgedRowMissingError } from '../consolidation/operat
 import type { Repositories } from '../db/repositories/index.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
+import {
+  backLink,
+  flashErrorPage,
+  getSession,
+  kv,
+  kvGrid,
+  PAGE_SIZE,
+  pager,
+  tblEmpty,
+  urlWithPage,
+  viewHead,
+} from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { formatTs, html, raw, shortId } from './templates.js';
-import type { ResolvedSession } from './types.js';
 
 export interface ConsolidationDeps {
   repos: Repositories;
@@ -19,10 +29,6 @@ export interface ConsolidationDeps {
   /** Bound consolidation undo lambdas (wired in bootstrap). */
   undoRun: (runId: string) => void;
   undoOp: (opId: string) => void;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 /** `project:<id>` → project slug when the project still exists; raw value otherwise. */
@@ -121,10 +127,9 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
       })}
       <p>${sweepForm}</p>
       ${runs.length === 0
-        ? html`<p class="muted">
-            No runs yet. The deterministic sweep runs on session start (throttled per scope); force
-            one with “Run sweep now”.
-          </p>`
+        ? tblEmpty(
+            'No runs yet. The deterministic sweep runs on session start (throttled per scope); force one with “Run sweep now”.',
+          )
         : html`
             <div class="tbl-host">
               <table>
@@ -250,31 +255,19 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         meta: [{ k: 'OPS', v: String(ops.length) }],
       })}
       ${backLink({ href: '/dashboard/consolidation', label: 'BACK TO CONSOLIDATION' })}
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="label">Started</div>
-          <div class="value" style="font-size:.9rem">${formatTs(run.startedAt)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Finished</div>
-          <div class="value" style="font-size:.9rem">${formatTs(run.finishedAt)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Scope</div>
-          <div class="value">${scopeLabel(deps.repos, run.scope)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Ops</div>
-          <div class="value">${ops.length}</div>
-        </div>
-      </div>
+      ${kvGrid([
+        kv({ k: 'Started', v: formatTs(run.startedAt) }),
+        kv({ k: 'Finished', v: formatTs(run.finishedAt) }),
+        kv({ k: 'Scope', v: scopeLabel(deps.repos, run.scope) }),
+        kv({ k: 'Ops', v: ops.length }),
+      ])}
 
       <h2>Summary</h2>
       <pre>${formatRunSummary(run.summary)}</pre>
 
       <h2>Ops</h2>
       ${ops.length === 0
-        ? html`<p class="muted">No operations were recorded for this run.</p>`
+        ? tblEmpty('No operations were recorded for this run.')
         : html`
             <div class="tbl-host">
               <table>
@@ -307,22 +300,20 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
   });
 
   function renderUndoError(c: Context, err: unknown): Response {
+    const view = { title: 'Consolidation', activeNav: 'consolidation' } as const;
     if (err instanceof PurgedRowMissingError) {
-      return c.html(
-        renderPage(
-          c,
-          deps.sessions,
-          html`<p class="flash error">
-            <b>Undo blocked.</b> ${err.missing.length} memory row(s) referenced by this op have been
-            purged after the op ran; their state cannot be reconstructed. Missing ids:
-            <code>${err.missing.join(', ')}</code>.
-          </p>`,
-          { title: 'Consolidation', activeNav: 'consolidation' },
-        ),
+      return flashErrorPage(
+        c,
+        deps.sessions,
+        html`<b>Undo blocked.</b> ${err.missing.length} memory row(s) referenced by this op have
+          been purged after the op ran; their state cannot be reconstructed. Missing ids:
+          <code>${err.missing.join(', ')}</code>.`,
+        view,
         409,
       );
     }
     if (err instanceof NotUndoableError) {
+      // Not a "flash error" tone — purge is terminal-by-design, not a failure.
       return c.html(
         renderPage(
           c,
@@ -331,19 +322,13 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
             <b>Not undoable.</b> Purge operations are terminal — the rows they removed cannot be
             reconstructed.
           </p>`,
-          { title: 'Consolidation', activeNav: 'consolidation' },
+          view,
         ),
         409,
       );
     }
     const message = err instanceof Error ? err.message : String(err);
-    return c.html(
-      renderPage(c, deps.sessions, html`<p class="flash error">${message}</p>`, {
-        title: 'Consolidation',
-        activeNav: 'consolidation',
-      }),
-      400,
-    );
+    return flashErrorPage(c, deps.sessions, message, view, 400);
   }
 
   app.post('/:id/undo', async (c) => {

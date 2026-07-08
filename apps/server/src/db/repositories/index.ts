@@ -15,6 +15,7 @@ export {
   AgentSessionsRepository,
   type AdminRecentSession,
   type AdminSessionDetail,
+  type AdminSessionFilters,
   type AdminSessionRow,
   type ListSessionsOpts,
 } from './agent-sessions-repository.js';
@@ -30,7 +31,11 @@ export {
 } from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
 export { ProjectsRepository } from './projects-repository.js';
-export { PromptsRepository, type AdminListPromptsOpts } from './prompts-repository.js';
+export {
+  PromptsRepository,
+  type AdminListPromptsOpts,
+  type AdminPromptFilters,
+} from './prompts-repository.js';
 export {
   RelationsRepository,
   type AdminRelationFilters,

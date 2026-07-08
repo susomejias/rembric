@@ -3,11 +3,14 @@ import { and, count, desc, eq, inArray, isNotNull, isNull, like, sql, type SQL }
 import type { Db } from '../client.js';
 import { prompts, type NewPrompt, type Prompt } from '../schema/prompts.js';
 
-export interface AdminListPromptsOpts {
+export interface AdminPromptFilters {
   includeDeleted: boolean;
   project?: { kind: 'global' } | { kind: 'project'; projectId: string };
   agent?: string;
   sessionIdPrefix?: string;
+}
+
+export interface AdminListPromptsOpts extends AdminPromptFilters {
   limit: number;
   offset: number;
 }
@@ -165,7 +168,7 @@ export class PromptsRepository {
     return this.db.select().from(prompts).where(inArray(prompts.id, ids)).all();
   }
 
-  adminList(opts: AdminListPromptsOpts): Prompt[] {
+  private adminFilterConditions(opts: AdminPromptFilters): SQL[] {
     const conditions: SQL[] = [];
     if (!opts.includeDeleted) conditions.push(isNull(prompts.deletedAt));
     if (opts.project?.kind === 'global') {
@@ -177,7 +180,11 @@ export class PromptsRepository {
     if (opts.sessionIdPrefix) {
       conditions.push(like(prompts.sessionId, opts.sessionIdPrefix + '%'));
     }
+    return conditions;
+  }
 
+  adminList(opts: AdminListPromptsOpts): Prompt[] {
+    const conditions = this.adminFilterConditions(opts);
     const query = this.db
       .select()
       .from(prompts)
@@ -186,6 +193,14 @@ export class PromptsRepository {
       .offset(opts.offset)
       .$dynamic();
     return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
+  }
+
+  /** True count for the same filter set `adminList` applies, no LIMIT/OFFSET/ORDER BY. */
+  adminCount(opts: AdminPromptFilters): number {
+    const conditions = this.adminFilterConditions(opts);
+    const query = this.db.select({ value: count() }).from(prompts).$dynamic();
+    const row = conditions.length > 0 ? query.where(and(...conditions)).get() : query.get();
+    return row?.value ?? 0;
   }
 
   /** Non-deleted prompt count per agent session, keyed by session id. */

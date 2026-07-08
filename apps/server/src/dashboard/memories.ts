@@ -1,4 +1,4 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
 import type { Memory, MemoryType } from '../db/schema/memory.js';
@@ -8,7 +8,26 @@ import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
+import {
+  domainErrorPage,
+  filterGroup,
+  filtersBar,
+  flash,
+  getSession,
+  inp,
+  kv,
+  kvGrid,
+  PAGE_SIZE,
+  pager,
+  mdBody,
+  backLink,
+  projectOptions,
+  sel,
+  tblEmpty,
+  truncate,
+  urlWithPage,
+  viewHead,
+} from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import {
@@ -20,17 +39,13 @@ import {
   scopePill,
   shortId,
   statusPill,
+  verdictPill,
 } from './templates.js';
-import type { ResolvedSession } from './types.js';
 
 export interface MemoriesDeps {
   repos: Repositories;
   memory: MemoryService;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 export function createMemoriesRouter(deps: MemoriesDeps): Hono {
@@ -166,33 +181,44 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       `;
     });
 
-    const projectOptions = [
-      raw('<option value="">all scopes</option>'),
-      raw(
-        `<option value="__global__"${projectFilter === '__global__' ? ' selected' : ''}>global only</option>`,
-      ),
-      ...projectRows.map((p) =>
-        raw(
-          `<option value="${escape(p.slug)}"${projectFilter === p.slug ? ' selected' : ''}>${escape(p.slug)}</option>`,
-        ),
-      ),
-    ];
-
-    const statusOptions = (['active', 'superseded', 'archived'] as const).map((s) =>
-      raw(`<option value="${s}"${statusFilter === s ? ' selected' : ''}>${s}</option>`),
-    );
+    const statusOptions = (['active', 'superseded', 'archived'] as const).map((s) => ({
+      value: s,
+      label: s,
+      selected: statusFilter === s,
+    }));
     const typeOptions = [
-      raw(`<option value="">all types</option>`),
-      ...(['user', 'feedback', 'project', 'reference'] as const).map((t) =>
-        raw(`<option value="${t}"${typeFilter === t ? ' selected' : ''}>${t}</option>`),
-      ),
+      { value: '', label: 'all types', selected: typeFilter === '' },
+      ...(['user', 'feedback', 'project', 'reference'] as const).map((t) => ({
+        value: t,
+        label: t,
+        selected: typeFilter === t,
+      })),
     ];
     const reviewOptions = [
-      raw(`<option value="">any review</option>`),
-      raw(
-        `<option value="needs_review"${wantNeedsReview ? ' selected' : ''}>needs_review</option>`,
-      ),
+      { value: '', label: 'any review', selected: !wantNeedsReview },
+      { value: 'needs_review', label: 'needs_review', selected: wantNeedsReview },
     ];
+
+    const filterBar = filtersBar([
+      filterGroup(
+        'SCOPE',
+        'f-project',
+        sel('project', projectOptions(projectRows, projectFilter), { id: 'f-project' }),
+      ),
+      filterGroup('STATUS', 'f-status', sel('status', statusOptions, { id: 'f-status' })),
+      filterGroup('TYPE', 'f-type', sel('type', typeOptions, { id: 'f-type' })),
+      filterGroup('REVIEW', 'f-review', sel('review', reviewOptions, { id: 'f-review' })),
+      filterGroup(
+        'SEARCH',
+        'f-q',
+        inp('q', query, 'FTS5 keyword, tag, topic', { type: 'search', id: 'f-q' }),
+        { className: 'search' },
+      ),
+      html`<span class="acts">
+        <button class="btn primary" type="submit">FILTER</button>
+        <a class="clear" href="/dashboard/memories">CLEAR</a>
+      </span>`,
+    ]);
 
     const body = html`
       ${viewHead({
@@ -213,64 +239,29 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         </span>
       </div>
 
-      <form class="filters" method="get">
-        <span class="group">
-          <span class="k">SCOPE</span>
-          <select name="project">
-            ${projectOptions}
-          </select>
-        </span>
-        <span class="group">
-          <span class="k">STATUS</span>
-          <select name="status">
-            ${statusOptions}
-          </select>
-        </span>
-        <span class="group">
-          <span class="k">TYPE</span>
-          <select name="type">
-            ${typeOptions}
-          </select>
-        </span>
-        <span class="group">
-          <span class="k">REVIEW</span>
-          <select name="review">
-            ${reviewOptions}
-          </select>
-        </span>
-        <span class="group search">
-          <span class="k">SEARCH</span>
-          <input type="search" name="q" value="${query}" placeholder="FTS5 keyword, tag, topic" />
-        </span>
-        <span class="acts">
-          <button class="btn primary" type="submit">FILTER</button>
-          <a class="clear" href="/dashboard/memories">CLEAR</a>
-        </span>
-      </form>
-
-      <div class="tbl-host">
-        <table>
-          <thead>
-            <tr>
-              <th>scope</th>
-              <th>project</th>
-              <th>type</th>
-              <th>title</th>
-              <th>status</th>
-              <th>review</th>
-              <th>created</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${visible.length === 0
-              ? html`<tr>
-                  <td colspan="7" class="muted">No memories match this filter.</td>
-                </tr>`
-              : rowsHtml}
-          </tbody>
-        </table>
-      </div>
-
+      ${filterBar}
+      ${visible.length === 0
+        ? tblEmpty('No memories match this filter.')
+        : html`
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>scope</th>
+                    <th>project</th>
+                    <th>type</th>
+                    <th>title</th>
+                    <th>status</th>
+                    <th>review</th>
+                    <th>created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHtml}
+                </tbody>
+              </table>
+            </div>
+          `}
       ${pager({
         page,
         hasMore,
@@ -307,19 +298,40 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       { type: row.type, createdAt: row.createdAt, status: row.status, lastConfirmedAt },
       new Date(),
     );
+
+    const confirmForm = html`
+      <form action="/dashboard/memories/${row.id}/confirm" method="post" class="inline">
+        ${csrfInput(session.session, deps.sessions, 'memory.confirm')}
+        <button class="primary" type="submit">Confirm</button>
+      </form>
+    `;
     // Shown only for an active row whose type has a TTL (reviewAfter set).
-    const reviewCard =
+    // Labels stay Title Case (matching the pre-existing stat-card copy the
+    // spec's e2e assertions target) — the `.kv .k` CSS uppercases display.
+    const reviewKv =
       reviewState !== null && reviewAfter !== null
-        ? html`
-            <div class="stat-card">
-              <div class="label">Review</div>
-              <div class="value">
-                ${reviewState === 'needs_review' ? reviewPill() : raw('fresh')}
-              </div>
-              <div class="label" style="margin-top:.4rem">Review after</div>
-              <div class="value" style="font-size:.9rem">${formatTs(reviewAfter)}</div>
-            </div>
-          `
+        ? [
+            kv({ k: 'Review', v: reviewState === 'needs_review' ? reviewPill() : raw('fresh') }),
+            kv({ k: 'Review after', v: formatTs(reviewAfter), mono: true }),
+          ]
+        : [];
+
+    const justConfirmed = c.req.query('confirmed') !== undefined;
+    const confirmedFlash = justConfirmed
+      ? flash({ tone: 'success', label: 'CONFIRMED', body: 'Review affirmed just now.' })
+      : raw('');
+
+    // The Confirm action is non-destructive — no data-confirm modal. When
+    // the memory needs review, the notice and the action are grouped in
+    // one banner; otherwise Confirm lives with the other Actions.
+    const reviewNotice =
+      reviewState === 'needs_review'
+        ? flash({
+            tone: 'warn',
+            label: 'NEEDS REVIEW',
+            body: html`This memory hasn't been re-affirmed since ${formatTs(reviewAfter)}.
+            ${confirmForm}`,
+          })
         : raw('');
 
     const archiveButton =
@@ -375,6 +387,56 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         ? raw('<span class="muted">—</span>')
         : row.tags.map((t) => raw(`<span class="pill">${escape(t)}</span> `));
 
+    const sourceLabel = sourceLine(row.source);
+
+    const touchingRelations = deps.repos.relations.adminListTouching(row.id);
+    const judgmentsHtml =
+      touchingRelations.length === 0
+        ? tblEmpty('No judgments touch this memory.')
+        : html`
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>kind</th>
+                    <th>status</th>
+                    <th>counterpart</th>
+                    <th>timestamp</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${touchingRelations.map((r) => {
+                    const isSource = r.sourceId === row.id;
+                    const counterpartId = isSource ? r.targetId : r.sourceId;
+                    const counterpartTitle = isSource ? r.targetTitle : r.sourceTitle;
+                    const ts = r.judgedAt ?? r.createdAt;
+                    return html`
+                      <tr data-href="/dashboard/judgments/${r.id}">
+                        <td>${verdictPill(r.relation)}</td>
+                        <td>${statusPill(r.status)}</td>
+                        <td class="small">
+                          <a href="/dashboard/memories/${counterpartId}"
+                            >${truncate(counterpartTitle, 80)}</a
+                          >
+                        </td>
+                        <td class="muted">
+                          <a href="/dashboard/judgments/${r.id}">${formatTs(ts)}</a>
+                        </td>
+                      </tr>
+                    `;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          `;
+
+    const replacesHtml =
+      row.replaces.length === 0
+        ? raw('—')
+        : row.replaces.map(
+            (rid) => html`<a href="/dashboard/memories/${rid}" class="mono small">${rid}</a> `,
+          );
+
     const body = html`
       ${viewHead({
         num: '02',
@@ -385,34 +447,24 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           { k: 'SCOPE', v: row.scope.toUpperCase() },
         ],
       })}
-      ${backLink({ href: '/dashboard/memories', label: 'BACK TO MEMORIES' })}
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="label">Status</div>
-          <div class="value">${statusPill(row.status)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Scope</div>
-          <div class="value">${scopePill(row.scope)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Project</div>
-          <div class="value">${project?.slug ?? '—'}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Type</div>
-          <div class="value">${row.type}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Confirms</div>
-          <div class="value">${confirmCount}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Created</div>
-          <div class="value" style="font-size:.9rem">${formatTs(row.createdAt)}</div>
-        </div>
-        ${reviewCard}
-      </div>
+      ${backLink({ href: '/dashboard/memories', label: 'BACK TO MEMORIES' })} ${confirmedFlash}
+      ${reviewNotice}
+      ${kvGrid([
+        kv({ k: 'Status', v: statusPill(row.status) }),
+        kv({ k: 'Scope', v: scopePill(row.scope) }),
+        kv({ k: 'Project', v: project?.slug ?? '—' }),
+        kv({ k: 'Type', v: row.type }),
+        kv({ k: 'Confirms', v: confirmCount }),
+        kv({ k: 'Created', v: formatTs(row.createdAt) }),
+        kv({ k: 'Source', v: sourceLabel }),
+        kv({
+          k: 'Session',
+          v: row.sessionId
+            ? html`<a href="/dashboard/sessions/${row.sessionId}">${shortId(row.sessionId)}</a>`
+            : '—',
+        }),
+        ...reviewKv,
+      ])}
 
       <h2>Content</h2>
       ${mdBody(row.content)}
@@ -421,12 +473,15 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       <p>${tagsHtml}</p>
 
       <h2>Replaces</h2>
-      <p class="mono small">${row.replaces.length === 0 ? '—' : row.replaces.join(', ')}</p>
+      <p class="mono small">${replacesHtml}</p>
 
       ${predHtml}
 
+      <h2>Judgments</h2>
+      ${judgmentsHtml}
+
       <h2>Actions</h2>
-      <p>${archiveButton}</p>
+      <p>${archiveButton} ${reviewState !== 'needs_review' ? confirmForm : raw('')}</p>
     `;
     return c.html(
       renderPage(c, deps.sessions, body, {
@@ -453,25 +508,38 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       deps.memory.archive(id, scope);
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Memory',
-            activeNav: 'memories',
-          }),
-          400,
-        );
+        return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });
       }
       throw err;
     }
     return c.redirect(`/dashboard/memories/${id}`);
   });
 
-  return app;
-}
+  app.post('/:id/confirm', async (c) => {
+    const session = getSession(c);
+    if (!session) return c.redirect('/dashboard/login');
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
+    const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'memory.confirm');
+    if (form instanceof Response) return form;
+
+    const id = c.req.param('id');
+    const row = deps.memory.unsafeGetById(id);
+    if (!row) return c.redirect('/dashboard/memories');
+
+    const scope =
+      row.scope === 'project' && row.projectId ? projectScope(row.projectId) : SCOPE_GLOBAL;
+    try {
+      deps.memory.confirm(id, scope, { agent: 'dashboard-operator' });
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });
+      }
+      throw err;
+    }
+    return c.redirect(`/dashboard/memories/${id}?confirmed=1`);
+  });
+
+  return app;
 }
 
 function clientSideFilter(
@@ -489,4 +557,14 @@ function clientSideFilter(
     return m.scope === 'project' && m.projectId === p?.id;
   }
   return true;
+}
+
+function sourceLine(source: Memory['source']): string {
+  if (!source) return '—';
+  const parts = [
+    source.agent ? `agent: ${source.agent}` : null,
+    source.tokenName ? `token: ${source.tokenName}` : null,
+    source.model ? `model: ${source.model}` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.length > 0 ? parts.join(' · ') : '—';
 }
