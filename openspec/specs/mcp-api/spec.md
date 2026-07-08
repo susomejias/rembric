@@ -1101,11 +1101,25 @@ Every registered MCP tool except `memory.about` SHALL be classified as `read` or
 
 Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `memory.compare`, `project.use` (against the requested project), `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project.
 
+`project.use({autocreate: true})` on a slug that does not yet exist is a WRITE (it mints a new project row), even though `project.use` is otherwise read-classified: the server SHALL check `isAuthorized(tokenScope, 'write', {scope: 'project', projectId: null})` before creating the row. `autocreate: true` against an ALREADY-existing slug is unaffected (no row is created, so the normal read check against the resolved project applies).
+
 #### Scenario: Read-restricted token attempts a formerly-ungated write
 
 - **GIVEN** a token with scope `read:*` or `read:project:<id>`
 - **WHEN** the token invokes `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, or `memory.judge`
 - **THEN** the call SHALL be rejected with code `forbidden` and no row SHALL be written
+
+#### Scenario: A read-only token cannot autocreate a project
+
+- **GIVEN** a token with scope `read:*` or `read:project:<id>`
+- **WHEN** the token calls `project.use({slug: 'brand-new-slug', autocreate: true})` for a slug that does not yet exist
+- **THEN** the call SHALL be rejected with code `forbidden` and no project row SHALL be created
+
+#### Scenario: A full-access token can still autocreate a project
+
+- **GIVEN** a token with scope `*`
+- **WHEN** the token calls `project.use({slug: 'brand-new-slug', autocreate: true})` for a slug that does not yet exist
+- **THEN** the project SHALL be created and the call SHALL succeed
 
 #### Scenario: Project-restricted token reads another project's context
 
