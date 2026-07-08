@@ -23,11 +23,7 @@ export {
   DashboardSessionsRepository,
   type ResolvedDashboardSession,
 } from './dashboard-sessions-repository.js';
-export {
-  MemoryRepository,
-  type AdminListMemoriesOpts,
-  type FindActiveByScopeOpts,
-} from './memory-repository.js';
+export { MemoryRepository, type AdminListMemoriesOpts } from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
 export { ProjectsRepository } from './projects-repository.js';
 export { PromptsRepository, type AdminListPromptsOpts } from './prompts-repository.js';

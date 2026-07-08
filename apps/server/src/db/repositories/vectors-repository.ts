@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { Db } from '../client.js';
 import type { MemoryScope, MemoryStatus, MemoryType } from '../schema/memory.js';
 
-import { scopeWhere } from './scope-clause.js';
+import { partitionKeyFor } from './scope-clause.js';
 
 export interface VecNeighbor {
   id: string;
@@ -45,27 +45,60 @@ export class VectorsRepository {
   constructor(private readonly db: Db) {}
 
   /**
-   * Cosine-distance kNN over `memory_vec` for active in-scope rows,
+   * Cosine-distance kNN over active rows in the query row's scope shard,
    * excluding the query row and any ids already linked to it. Empty when
    * the query row has no embedding yet. Save-time candidate detection only.
+   *
+   * Two-step: fetch the row's embedding, then reuse the partition-pruned
+   * `knnByQueryVector` with `k = limit + |excludeIds| + 1` (the over-fetch
+   * keeps result cardinality after dropping self + excluded ids). The L2
+   * kNN order equals cosine order because embeddings are unit-normalized
+   * (embedder `normalize: true`); the hydration recomputes exact cosine
+   * distances so returned values match the pre-pruning implementation.
    */
-  knnByCosine(opts: KnnOpts): VecNeighbor[] {
+  knnCandidates(opts: KnnOpts): VecNeighbor[] {
+    const queryVector = this.findEmbedding(opts.memoryId);
+    if (!queryVector) return [];
+    const neighbors = this.knnByQueryVector({
+      queryVector,
+      partitionKey: partitionKeyFor(opts.scope, opts.projectId),
+      status: 'active',
+      rankWindowSize: opts.limit + opts.excludeIds.length + 1,
+    });
+    const excluded = new Set([opts.memoryId, ...opts.excludeIds]);
+    const ids = neighbors
+      .filter((n) => !excluded.has(n.id))
+      .slice(0, opts.limit)
+      .map((n) => n.id);
+    if (ids.length === 0) return [];
+    const embedding = Buffer.from(
+      queryVector.buffer,
+      queryVector.byteOffset,
+      queryVector.byteLength,
+    );
     return this.db.all<VecNeighbor>(
       sql`
         SELECT m.id AS id,
-               vec_distance_cosine(v_self.embedding, v_other.embedding) AS distance,
+               vec_distance_cosine(${embedding}, v.embedding) AS distance,
                m.title AS title,
                m.content AS content
-        FROM memory_vec v_self
-          JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
-          JOIN memory m ON m.id = v_other.memory_id
-        WHERE v_self.memory_id = ${opts.memoryId}
-          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
-          AND m.status = 'active'
-          AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
+        FROM json_each(${JSON.stringify(ids)}) je
+          JOIN memory_vec v ON v.memory_id = je.value
+          JOIN memory m ON m.id = je.value
         ORDER BY distance ASC
-        LIMIT ${opts.limit}
       `,
+    );
+  }
+
+  private findEmbedding(memoryId: string): Float32Array | undefined {
+    const row = this.db.get<{ embedding: Buffer }>(
+      sql`SELECT embedding FROM memory_vec WHERE memory_id = ${memoryId}`,
+    ) as { embedding: Buffer } | undefined;
+    if (!row) return undefined;
+    return new Float32Array(
+      row.embedding.buffer,
+      row.embedding.byteOffset,
+      row.embedding.byteLength / Float32Array.BYTES_PER_ELEMENT,
     );
   }
 
@@ -147,6 +180,8 @@ export class VectorsRepository {
    * Nearest-neighbor cosine similarity sample for calibration telemetry.
    * Scoped to `active` memories so the VEC_THRESHOLD reference is not skewed
    * by retained superseded/archived (or post-model-change stale-space) vectors.
+   * The anchor side is bounded to the newest `sample` active vectors up front
+   * (LIMIT alone bounds output rows, not the pairwise join work).
    */
   similaritySample(sample: number): { memoryId: string; sim: number }[] {
     return this.db.all<{ memoryId: string; sim: number }>(sql`
@@ -156,6 +191,10 @@ export class VectorsRepository {
         JOIN memory m_self ON m_self.id = v_self.memory_id AND m_self.status = 'active'
         JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
         JOIN memory m_other ON m_other.id = v_other.memory_id AND m_other.status = 'active'
+      WHERE v_self.memory_id IN (
+        SELECT memory_id FROM memory_vec WHERE status = 'active'
+        ORDER BY memory_id DESC LIMIT ${sample}
+      )
       GROUP BY v_self.memory_id
       ORDER BY v_self.memory_id DESC
       LIMIT ${sample}

@@ -455,11 +455,12 @@ function collectStats(
   const consolidationRow = repos.consolidation.latestRun();
   const sessionsByStatus = agentSessionsSvc.countByStatus();
   const relationsByStatus = relationsSvc.countByStatus();
+  const memoriesByStatus = repos.memory.countRowsByStatus();
 
   return {
-    totalMemories: repos.memory.countAll(),
-    activeMemories: repos.memory.countByStatus('active'),
-    archivedMemories: repos.memory.countByStatus('archived'),
+    totalMemories: memoriesByStatus.reduce((acc, r) => acc + r.count, 0),
+    activeMemories: memoriesByStatus.find((r) => r.status === 'active')?.count ?? 0,
+    archivedMemories: memoriesByStatus.find((r) => r.status === 'archived')?.count ?? 0,
     projects: repos.projects.count(),
     lastConsolidationAt: consolidationRow?.startedAt ?? null,
     activeSessions: sessionsByStatus.active,
