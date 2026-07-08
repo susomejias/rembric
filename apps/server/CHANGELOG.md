@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.23.0](https://github.com/susomejias/rembric/compare/server-v0.22.2...server-v0.23.0) (2026-07-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** tool calls with insufficient token scope now fail with forbidden.
+
+### Features
+
+* **dashboard:** cross-navigation, sessions filters, shared helpers, SHOWING fix ([#219](https://github.com/susomejias/rembric/issues/219)) ([dc65213](https://github.com/susomejias/rembric/commit/dc65213e625b9636d91d93cb4e85265ac20620e3))
+* **mcp:** enforce token authorization across the MCP tool surface ([#215](https://github.com/susomejias/rembric/issues/215)) ([4425d51](https://github.com/susomejias/rembric/commit/4425d51797eac6e057fbe9c9a4c9140571f8280b))
+
+
+### Bug Fixes
+
+* **mcp:** require write authorization for project.use autocreate ([#223](https://github.com/susomejias/rembric/issues/223)) ([f320036](https://github.com/susomejias/rembric/commit/f320036c91a0b17dae0b568c490224ec141976f7))
+* **plugin:** redact &lt;private&gt; spans in bash and python clients ([#216](https://github.com/susomejias/rembric/issues/216)) ([c83bdcb](https://github.com/susomejias/rembric/commit/c83bdcb168bb3969c2471bf26b1aba1b309aa76b))
+
+
+### Performance
+
+* **server:** partition-pruned save-time knn, bounded sampling, fair scoped orphaning ([#218](https://github.com/susomejias/rembric/issues/218)) ([e89fb79](https://github.com/susomejias/rembric/commit/e89fb79e35284ed9a41f6b5e2e507dddab8dc608))
+
 ## [0.22.2](https://github.com/susomejias/rembric/compare/server-v0.22.1...server-v0.22.2) (2026-07-07)
 
 ### Bug Fixes
