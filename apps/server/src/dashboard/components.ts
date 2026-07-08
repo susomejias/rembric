@@ -12,11 +12,17 @@
  * demands it.
  */
 
+import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import MarkdownIt from 'markdown-it';
 
+import type { DomainError, DomainErrorCode } from '../services/errors.js';
+import type { SessionsService } from '../services/sessions.js';
 import { REMBRIC_VERSION } from '../version.js';
 
+import { renderPage, type PageOpts } from './page-shell.js';
 import { escape, html, raw, type SafeHtml } from './templates.js';
+import type { ResolvedSession } from './types.js';
 
 // `html: false` renders any raw HTML in the source as escaped text (no separate
 // sanitizer needed); markdown-it's default validateLink drops javascript:/data:
@@ -25,6 +31,50 @@ const md = new MarkdownIt({ html: false, linkify: false });
 
 export function renderMarkdown(content: string): SafeHtml {
   return raw(md.render(content));
+}
+
+/* ── request-scoped helpers ────────────────────────────────────────── */
+
+export function getSession(c: Context): ResolvedSession | null {
+  return (c.get('session') as ResolvedSession | undefined) ?? null;
+}
+
+export function truncate(s: string | null | undefined, max: number): string {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
+}
+
+/**
+ * Render the shared flash-error page shape (`<p class="flash error">`
+ * inside the normal authenticated shell) at the given status. The one
+ * rendering used by every `catch (err) { … }` site across the dashboard
+ * routers — behavior-preserving extraction, not a new response shape.
+ */
+export function flashErrorPage(
+  c: Context,
+  sessions: SessionsService,
+  message: SafeHtml | string,
+  view: Pick<PageOpts, 'title' | 'activeNav'>,
+  status: ContentfulStatusCode = 400,
+): Response {
+  return c.html(renderPage(c, sessions, html`<p class="flash error">${message}</p>`, view), status);
+}
+
+/**
+ * `domainErrorPage` variant for a caught `DomainError`. `statusFor` lets
+ * each call site keep its own code→status mapping (e.g. `*_not_found` →
+ * 404) exactly as before the extraction; omit it for call sites that
+ * always answered 400 regardless of code.
+ */
+export function domainErrorPage(
+  c: Context,
+  sessions: SessionsService,
+  err: DomainError,
+  view: Pick<PageOpts, 'title' | 'activeNav'>,
+  statusFor?: (code: DomainErrorCode) => ContentfulStatusCode,
+): Response {
+  return flashErrorPage(c, sessions, err.message, view, statusFor ? statusFor(err.code) : 400);
 }
 
 const COPY_ICON =
@@ -443,13 +493,18 @@ export interface SelOption {
   selected?: boolean;
 }
 
-export function sel(name: string, options: SelOption[], opts?: { grow?: boolean }): SafeHtml {
+export function sel(
+  name: string,
+  options: SelOption[],
+  opts?: { grow?: boolean; id?: string },
+): SafeHtml {
   const inner = options.map((o) =>
     raw(
       `<option value="${escape(o.value)}"${o.selected ? ' selected' : ''}>${escape(o.label)}</option>`,
     ),
   );
-  return html`<select name="${name}" class="sel${opts?.grow ? ' grow' : ''}">
+  const idAttr = opts?.id ? ` id="${escape(opts.id)}"` : '';
+  return html`<select name="${name}" ${raw(idAttr)} class="sel${opts?.grow ? ' grow' : ''}">
     ${inner}
   </select>`;
 }
@@ -458,16 +513,51 @@ export function inp(
   name: string,
   value: string,
   placeholder: string,
-  opts?: { type?: string; grow?: boolean; autofocus?: boolean; size?: 'lg' },
+  opts?: { type?: string; grow?: boolean; autofocus?: boolean; size?: 'lg'; id?: string },
 ): SafeHtml {
   const cls = `inp${opts?.size === 'lg' ? ' lg' : ''}${opts?.grow ? ' grow' : ''}`;
+  const idAttr = opts?.id ? ` id="${escape(opts.id)}"` : '';
   return raw(
-    `<input class="${cls}" type="${escape(opts?.type ?? 'text')}" name="${escape(name)}" value="${escape(value)}" placeholder="${escape(placeholder)}"${opts?.autofocus ? ' autofocus' : ''}>`,
+    `<input class="${cls}" type="${escape(opts?.type ?? 'text')}" name="${escape(name)}" value="${escape(value)}" placeholder="${escape(placeholder)}"${idAttr}${opts?.autofocus ? ' autofocus' : ''}>`,
   );
 }
 
 export function filtersBar(children: SafeHtml[]): SafeHtml {
   return html`<form class="filters" method="get">${children}</form>`;
+}
+
+/**
+ * Wraps a filter control with an accessible `<label>` styled identically
+ * to the pre-existing `span.k` chip (same `.k` class — no CSS change).
+ * `id` binds the label's `for` to the control; callers pass the matching
+ * `id` into `sel()`/`inp()`.
+ */
+export function filterGroup(
+  label: string,
+  id: string,
+  control: SafeHtml,
+  opts?: { className?: string },
+): SafeHtml {
+  return html`<span class="group${opts?.className ? ' ' + opts.className : ''}">
+    <label class="k" for="${id}">${label}</label>
+    ${control}
+  </span>`;
+}
+
+/**
+ * Shared `<select>` option set for the project/scope filter used by the
+ * memories and prompts list views: "all scopes" · "global only" · one
+ * entry per project slug.
+ */
+export function projectOptions(
+  projectRows: readonly { slug: string }[],
+  selected: string,
+): SelOption[] {
+  return [
+    { value: '', label: 'all scopes', selected: selected === '' },
+    { value: '__global__', label: 'global only', selected: selected === '__global__' },
+    ...projectRows.map((p) => ({ value: p.slug, label: p.slug, selected: selected === p.slug })),
+  ];
 }
 
 /* ── pager ─────────────────────────────────────────────────────────── */

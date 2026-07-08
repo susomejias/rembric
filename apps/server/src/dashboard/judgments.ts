@@ -1,30 +1,34 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import type { AdminRelationFilters, Repositories } from '../db/repositories/index.js';
 import type { RelationKind, RelationStatus } from '../db/schema/memory-relations.js';
 import type { RelationsService } from '../services/relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
+import {
+  backLink,
+  filterGroup,
+  filtersBar,
+  getSession,
+  kv,
+  kvGrid,
+  PAGE_SIZE,
+  pager,
+  mdBody,
+  sel,
+  tblEmpty,
+  truncate,
+  urlWithPage,
+  viewHead,
+} from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { escape, formatTs, html, raw, shortId, statusPill, verdictPill } from './templates.js';
-import type { ResolvedSession } from './types.js';
-
-function truncate(s: string | null, max: number): string {
-  if (!s) return '';
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
-}
 
 export interface JudgmentsDeps {
   repos: Repositories;
   relations: RelationsService;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 const VALID_STATUSES = new Set(['pending', 'judged', 'orphaned']);
@@ -65,82 +69,70 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
 
-    const filtersBar = html`
-      <form class="filters" method="get">
-        <span class="group">
-          <span class="k">STATUS</span>
-          <select name="status">
-            <option value="" ${statusFilter === '' ? 'selected' : ''}>all statuses</option>
-            <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>pending</option>
-            <option value="judged" ${statusFilter === 'judged' ? 'selected' : ''}>judged</option>
-            <option value="orphaned" ${statusFilter === 'orphaned' ? 'selected' : ''}>
-              orphaned
-            </option>
-          </select>
-        </span>
-        <span class="group">
-          <span class="k">KIND</span>
-          <select name="kind">
-            <option value="" ${kindFilter === '' ? 'selected' : ''}>all kinds</option>
-            ${[
-              'supersedes',
-              'conflicts_with',
-              'related',
-              'compatible',
-              'scoped',
-              'not_conflict',
-              'pending',
-            ].map((k) =>
-              raw(`<option value="${k}"${kindFilter === k ? ' selected' : ''}>${k}</option>`),
-            )}
-          </select>
-        </span>
-        <span class="acts">
-          <button class="btn primary" type="submit">FILTER</button>
-          <a class="clear" href="/dashboard/judgments">CLEAR</a>
-        </span>
-      </form>
-    `;
+    const statusOptions = [
+      { value: '', label: 'all statuses', selected: statusFilter === '' },
+      { value: 'pending', label: 'pending', selected: statusFilter === 'pending' },
+      { value: 'judged', label: 'judged', selected: statusFilter === 'judged' },
+      { value: 'orphaned', label: 'orphaned', selected: statusFilter === 'orphaned' },
+    ];
+    const kindOptions = [
+      { value: '', label: 'all kinds', selected: kindFilter === '' },
+      ...(
+        [
+          'supersedes',
+          'conflicts_with',
+          'related',
+          'compatible',
+          'scoped',
+          'not_conflict',
+          'pending',
+        ] as const
+      ).map((k) => ({ value: k, label: k, selected: kindFilter === k })),
+    ];
 
-    const tableBody =
-      visible.length === 0
-        ? html`<tr>
-            <td colspan="6" class="muted">No judgments match this filter.</td>
-          </tr>`
-        : visible.map((r) => {
-            const orphanForm =
-              r.status === 'pending'
-                ? html`
-                    <form
-                      action="/dashboard/judgments/${r.judgmentId}/orphan"
-                      method="post"
-                      class="inline"
-                      data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
-                      data-confirm-label="MARK ORPHANED"
-                      data-confirm-tone="danger"
-                    >
-                      ${csrfInput(session.session, deps.sessions, 'judgment.orphan')}
-                      <button class="warn" type="submit">Mark orphaned</button>
-                    </form>
-                  `
-                : raw('<span class="muted small">—</span>');
-            return html`
-              <tr data-href="/dashboard/judgments/${r.id}">
-                <td>${statusPill(r.status)}</td>
-                <td>${verdictPill(r.relation)}</td>
-                <td class="small">
-                  <a href="/dashboard/memories/${r.sourceId}">${truncate(r.sourceTitle, 60)}</a>
-                  →
-                  <a href="/dashboard/memories/${r.targetId}">${truncate(r.targetTitle, 60)}</a>
-                </td>
-                <td class="small">${r.markedByActor ?? raw('<span class="muted">—</span>')}</td>
-                <td class="muted">
-                  <a href="/dashboard/judgments/${r.id}">${formatTs(r.createdAt)}</a>
-                </td>
-                <td>${orphanForm}</td>
-              </tr>
-            `;
-          });
+    const filterBar = filtersBar([
+      filterGroup('STATUS', 'f-status', sel('status', statusOptions, { id: 'f-status' })),
+      filterGroup('KIND', 'f-kind', sel('kind', kindOptions, { id: 'f-kind' })),
+      html`<span class="acts">
+        <button class="btn primary" type="submit">FILTER</button>
+        <a class="clear" href="/dashboard/judgments">CLEAR</a>
+      </span>`,
+    ]);
+
+    const rowsHtml = visible.map((r) => {
+      const orphanForm =
+        r.status === 'pending'
+          ? html`
+              <form
+                action="/dashboard/judgments/${r.judgmentId}/orphan"
+                method="post"
+                class="inline"
+                data-confirm="Mark this judgment as orphaned? It will be removed from the pending queue and won't be re-judged automatically."
+                data-confirm-label="MARK ORPHANED"
+                data-confirm-tone="danger"
+              >
+                ${csrfInput(session.session, deps.sessions, 'judgment.orphan')}
+                <button class="warn" type="submit">Mark orphaned</button>
+              </form>
+            `
+          : raw('<span class="muted small">—</span>');
+      return html`
+        <tr data-href="/dashboard/judgments/${r.id}">
+          <td>${statusPill(r.status)}</td>
+          <td>${verdictPill(r.relation)}</td>
+          <td class="small">
+            <a href="/dashboard/memories/${r.sourceId}">${truncate(r.sourceTitle, 60)}</a>
+            →
+            <a href="/dashboard/memories/${r.targetId}">${truncate(r.targetTitle, 60)}</a>
+          </td>
+          <td class="small">${r.markedByActor ?? raw('<span class="muted">—</span>')}</td>
+          <td class="muted">
+            <a href="/dashboard/judgments/${r.id}">${formatTs(r.createdAt)}</a>
+          </td>
+          <td>${orphanForm}</td>
+        </tr>
+      `;
+    });
 
     const body = html`
       ${viewHead({
@@ -149,27 +141,31 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         hl: 'Rembric',
         meta: [
           { k: 'TOTAL', v: String(deps.repos.relations.adminCountWithFilters(filters)) },
-          { k: 'SHOWING', v: `${rows.length} ROWS` },
+          { k: 'SHOWING', v: `${visible.length} ROWS` },
         ],
       })}
-      ${filtersBar}
-      <div class="tbl-host">
-        <table>
-          <thead>
-            <tr>
-              <th>status</th>
-              <th>verdict</th>
-              <th>source → target</th>
-              <th>actor</th>
-              <th>created</th>
-              <th>actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableBody}
-          </tbody>
-        </table>
-      </div>
+      ${filterBar}
+      ${visible.length === 0
+        ? tblEmpty('No judgments match this filter.')
+        : html`
+            <div class="tbl-host">
+              <table>
+                <thead>
+                  <tr>
+                    <th>status</th>
+                    <th>verdict</th>
+                    <th>source → target</th>
+                    <th>actor</th>
+                    <th>created</th>
+                    <th>actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHtml}
+                </tbody>
+              </table>
+            </div>
+          `}
       ${pager({
         page,
         hasMore,
@@ -241,39 +237,19 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         ],
       })}
       ${backLink({ href: '/dashboard/judgments', label: 'BACK TO JUDGMENTS' })}
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="label">Status</div>
-          <div class="value">${statusPill(row.status)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Verdict</div>
-          <div class="value">${verdictPill(row.relation)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Confidence</div>
-          <div class="value">${row.confidence !== null ? row.confidence.toFixed(2) : '—'}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Marked by</div>
-          <div class="value">
-            ${row.markedByKind ?? '—'}
-            ${row.markedByActor
-              ? html`<span class="muted small"> · ${row.markedByActor}</span>`
-              : raw('')}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Created</div>
-          <div class="value" style="font-size:.9rem">${formatTs(row.createdAt)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Judged</div>
-          <div class="value" style="font-size:.9rem">
-            ${row.judgedAt !== null ? formatTs(row.judgedAt) : '—'}
-          </div>
-        </div>
-      </div>
+      ${kvGrid([
+        kv({ k: 'Status', v: statusPill(row.status) }),
+        kv({ k: 'Verdict', v: verdictPill(row.relation) }),
+        kv({ k: 'Confidence', v: row.confidence !== null ? row.confidence.toFixed(2) : '—' }),
+        kv({
+          k: 'Marked by',
+          v: html`${row.markedByKind ?? '—'}${row.markedByActor
+            ? html`<span class="muted small"> · ${row.markedByActor}</span>`
+            : raw('')}`,
+        }),
+        kv({ k: 'Created', v: formatTs(row.createdAt) }),
+        kv({ k: 'Judged', v: row.judgedAt !== null ? formatTs(row.judgedAt) : '—' }),
+      ])}
 
       <h2>Source</h2>
       <p class="small">

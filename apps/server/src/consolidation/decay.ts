@@ -1,6 +1,8 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryType } from '../db/schema/memory.js';
 
+import type { ScopeKey } from './candidates.js';
+
 /**
  * Identify memories eligible for deterministic decay (archive).
  *
@@ -41,11 +43,6 @@ export const DEFAULT_DECAY: DecayThresholds = {
   defaultThresholdMs: 90 * DAY_MS,
   confidenceFloor: 1,
 };
-
-export interface ScopeKey {
-  scope: 'global' | 'project';
-  projectId: string | null;
-}
 
 export function findDecayCandidates(
   repos: Pick<Repositories, 'memory'>,

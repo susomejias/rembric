@@ -24,17 +24,20 @@
 #   - Exit 0 — plugin-side failure NEVER aborts the host agent.
 #   - Prefer `jq` when available; fall back to a defensive awk parser
 #     otherwise. awk is POSIX, ships with macOS BSD and Linux gawk/mawk.
+#   - Redact <private>…</private> spans to [REDACTED] (case-insensitive,
+#     spans newlines; an unclosed tag redacts through end-of-text) before
+#     any payload-bound text leaves this file — see rembric_redact_private.
 
 set -u
 trap 'exit 0' ERR
 
 # Conservative tail size — kept as a wire upper bound, NOT the effective cap.
-# The server's effective summary cap is SUMMARY_MAX_CHARS=2000 (enforced by
-# CHECK constraint + zod + service-layer guard). For HTTP writers (this
-# script, opencode plugin, Hermes provider) the server truncates anything
-# longer with a '…[truncated]' suffix. We keep 19500 here so a generous
-# transcript window reaches the server even if a future change raises the
-# cap; the server is the only authoritative trimmer.
+# The server's effective summary cap is SUMMARY_MAX_CHARS=10000 (enforced by
+# zod + service-layer guard). For HTTP writers (this script, opencode plugin,
+# Hermes provider) the server truncates anything longer with a '…[truncated]'
+# suffix. We keep 19500 here so a generous transcript window reaches the
+# server even if a future change raises the cap; the server is the only
+# authoritative trimmer.
 RBR_TRANSCRIPT_MAX_CHARS=19500
 RBR_TITLE_MAX_CHARS=100
 
@@ -42,11 +45,47 @@ RBR_TITLE_MAX_CHARS=100
 # Common post-processing applied to both agents.
 # ---------------------------------------------------------------------------
 
+# Mirrors stripPrivateTags in .opencode-plugin/plugin.ts and _redact_private
+# in .hermes-plugin/__init__.py; the shared fixtures in ../test/ keep the
+# three implementations in lock-step. POSIX awk only (BSD awk must pass).
+rembric_redact_private() {
+  printf '%s' "${1:-}" | awk '
+    NR > 1 && !inpriv { printf "\n" }
+    {
+      line = $0
+      while (length(line) > 0) {
+        if (inpriv) {
+          p = index(tolower(line), "</private>")
+          if (p == 0) {
+            line = ""
+          } else {
+            line = substr(line, p + 10)
+            inpriv = 0
+          }
+        } else {
+          p = index(tolower(line), "<private>")
+          if (p == 0) {
+            printf "%s", line
+            line = ""
+          } else {
+            printf "%s[REDACTED]", substr(line, 1, p - 1)
+            line = substr(line, p + 9)
+            inpriv = 1
+          }
+        }
+      }
+    }
+  '
+}
+
 _rembric_truncate_transcript() {
   local out="${1:-}"
   if [ -z "$out" ]; then
     return 0
   fi
+  # Redact before tail-truncation: truncating first could cut off the opening
+  # <private> tag and leak the span content.
+  out="$(rembric_redact_private "$out")"
   if [ "${#out}" -gt "$RBR_TRANSCRIPT_MAX_CHARS" ]; then
     out="${out: -$RBR_TRANSCRIPT_MAX_CHARS}"
   fi
@@ -55,6 +94,7 @@ _rembric_truncate_transcript() {
 
 _rembric_finalize_title() {
   local title="${1:-}"
+  title="$(rembric_redact_private "$title")"
   if [ "${#title}" -gt "$RBR_TITLE_MAX_CHARS" ]; then
     title="${title:0:$RBR_TITLE_MAX_CHARS}"
   fi

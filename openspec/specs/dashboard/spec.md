@@ -97,6 +97,13 @@ For the single combination of `review = needs_review` AND a non-empty free-text 
 
 The `/dashboard/memories/:id` view SHALL display the memory's title, content, status, tags, scope, project, source, current confirmation count, and a visualization of the `replaces` chain showing all predecessors with their titles, content snapshots, and timestamps. The page heading SHALL be the memory's `title` (not its id); the id SHALL remain available as a secondary metadata chip. For an `active` head whose type has a review TTL, the view SHALL additionally display the derived `reviewState` and `reviewAfter` (the latter rendered via the shared timestamp helper); these fields SHALL be omitted when the head is not `active` or its type has no TTL.
 
+The view SHALL additionally provide cross-entity navigation and a re-affirmation action:
+
+- A "Judgments" section listing every relation touching the memory (as source or target): kind, status, the counterpart memory labelled by its title and linked to its detail, and the relevant timestamp via the shared timestamp helper; each row SHALL link to `/dashboard/judgments/:id`. The section SHALL render the unified empty state when no relations touch the memory.
+- When the memory has a `session_id`, the metadata block SHALL link it to `/dashboard/sessions/:id`.
+- The raw `replaces` ids SHALL render as links to the corresponding memory detail pages (matching the predecessor entries, which already link).
+- A Confirm action (CSRF-protected POST) that records a confirmation event via the service layer with source `dashboard-operator`, refreshing the review TTL. The action is non-destructive and SHALL NOT use the destructive-confirmation modal. When `reviewState = 'needs_review'`, the action SHALL be visually associated with the review notice.
+
 #### Scenario: Viewing a merged memory
 
 - **WHEN** the operator opens the detail view for a merged memory M
@@ -112,6 +119,24 @@ The `/dashboard/memories/:id` view SHALL display the memory's title, content, st
 
 - **WHEN** the operator opens any memory's detail view
 - **THEN** the page heading SHALL render the memory's `title`, and the memory id SHALL appear only as a secondary metadata chip
+
+#### Scenario: The detail view shows the memory's source
+
+- **GIVEN** a memory saved with a non-null `source`
+- **WHEN** the operator opens its detail view
+- **THEN** the metadata block SHALL display the `source` value
+
+#### Scenario: Navigating from a memory to a judgment that touches it
+
+- **GIVEN** a memory that is the source or target of at least one relation
+- **WHEN** the operator opens the memory's detail view
+- **THEN** the Judgments section SHALL list each such relation with its kind, status, and title-linked counterpart, and each entry SHALL link to the judgment detail view
+
+#### Scenario: Operator confirms a needs-review memory from the dashboard
+
+- **GIVEN** an `active` memory with `reviewState = 'needs_review'`
+- **WHEN** the operator submits the Confirm action
+- **THEN** a confirmation event with source `dashboard-operator` SHALL be recorded via the service layer, the review TTL SHALL refresh, and the reloaded page SHALL show `reviewState = 'fresh'` with an incremented confirmation count
 
 ### Requirement: Memory and judgment views MUST display the title
 
@@ -241,6 +266,8 @@ A logged-in dashboard user SHALL see a list of recent sessions for the active pr
 
 The list SHALL be ordered with `status = 'active'` rows first, then all remaining rows; within each group rows SHALL be ordered by `started_at DESC`. The ordering SHALL be applied in the SQL query (before `LIMIT`/`OFFSET`) so pagination respects it. The soft-deleted table shown under `?include_deleted=1` keeps plain `started_at DESC`.
 
+The view SHALL provide a filter bar (matching the memories-list pattern) with controls for project, agent, and status. Filters SHALL be applied server-side in the repository query (affecting rows, pagination, and the header total alike) and SHALL apply to the non-deleted table only; the `include_deleted` toggle is unchanged. Each filter control SHALL have an associated `<label>`.
+
 The `title` column SHALL render using the cascade `row.title ?? row.description ?? shortId(row.id)`. The cascade SHALL NOT short-circuit on placeholder titles (e.g. `'rembric · 22:14 UTC'`) — those count as real titles for the purpose of display, because they are still more informative than `shortId` alone. The cascade ensures legacy rows (where `title` is NULL because they predate the column migration) still get a sensible value.
 
 The title column SHALL be the first visible content column and SHALL truncate with `text-overflow: ellipsis` past ~40 chars to keep the table compact. The full title SHALL be available as the cell's `title` attribute (HTML tooltip) so operators can hover to see the full string.
@@ -254,6 +281,12 @@ The memory count and the prompt count SHALL be rendered as two separate right-al
 - **AND** each row SHALL include a `title` column rendered via the documented cascade
 - **AND** each row SHALL include both a `memories` count column and a `prompts` count column
 - **AND** the table header SHALL NOT contain a `<th>` labelled `id`
+
+#### Scenario: Filtering sessions by agent and status
+
+- **GIVEN** sessions from agents `claude-code` and `opencode` in statuses `active` and `ended`
+- **WHEN** the operator applies `?agent=claude-code&status=ended`
+- **THEN** the table SHALL contain only `claude-code`/`ended` rows, the pager SHALL paginate the filtered set, and the header total SHALL equal the filtered count
 
 #### Scenario: Active sessions sort above ended ones regardless of age
 
@@ -1134,7 +1167,7 @@ List and table views SHALL NOT render Markdown: truncated `content` snippets in 
 
 ### Requirement: Dashboard list headers MUST report the true filtered total
 
-Every paginated dashboard list view SHALL render a header total chip whose value equals the true number of rows matching the view's current filter set, computed independently of pagination — NOT the count of rows present on the current page. The page-slice count SHALL remain available as a distinct `SHOWING N ROWS` indicator (in the header meta and/or the pager footer). This requirement applies to the memories (`/dashboard/memories`), sessions (`/dashboard/sessions`), judgments (`/dashboard/judgments`), and consolidation-runs (`/dashboard/consolidation`) list views.
+Every paginated dashboard list view SHALL render a header total chip whose value equals the true number of rows matching the view's current filter set, computed independently of pagination — NOT the count of rows present on the current page. The page-slice count SHALL remain available as a distinct `SHOWING N ROWS` indicator (in the header meta and/or the pager footer), and the `SHOWING` value SHALL equal the number of rows actually rendered on the page (never including any pagination lookahead row). This requirement applies to the memories (`/dashboard/memories`), sessions (`/dashboard/sessions`), judgments (`/dashboard/judgments`), consolidation-runs (`/dashboard/consolidation`), and prompts (`/dashboard/prompts`) list views.
 
 The true count SHALL be produced by an `admin*`-prefixed repository read that applies the SAME filter conditions as the view's corresponding `admin*List*` query and omits `LIMIT`/`OFFSET`/`ORDER BY`. All such counting SQL SHALL live under `apps/server/src/db/repositories/` and SHALL be invoked only from `apps/server/src/dashboard/`, satisfying the data-access and admin-method confinement invariants. No new MCP tool, HTTP route, DB migration, or design token SHALL be introduced.
 
@@ -1158,6 +1191,18 @@ The tokens list (`/dashboard/tokens`) already reports the true count because its
 - **GIVEN** 25 `consolidation_runs` rows with the page size at 10
 - **WHEN** the operator opens `/dashboard/consolidation`
 - **THEN** the header total chip SHALL read `25`, not the page-slice count
+
+#### Scenario: Prompts list total counts all rows for the active filter
+
+- **GIVEN** 23 non-deleted `prompts` rows matching the active filter with the page size at 10
+- **WHEN** the operator opens `/dashboard/prompts`
+- **THEN** the header SHALL render a total chip reading `23` alongside the existing `SHOWING` indicator
+
+#### Scenario: SHOWING never counts the pagination lookahead
+
+- **GIVEN** a list view whose query fetches `PAGE_SIZE + 1` rows to detect a next page
+- **WHEN** a full page renders
+- **THEN** the `SHOWING` indicator SHALL read `PAGE_SIZE`, not `PAGE_SIZE + 1`
 
 #### Scenario: Counting SQL stays in the repository layer
 

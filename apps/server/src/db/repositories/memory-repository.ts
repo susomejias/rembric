@@ -1,16 +1,4 @@
-import {
-  and,
-  count,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  or,
-  sql,
-  type SQL,
-} from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
@@ -23,7 +11,7 @@ import {
   type NewMemory,
 } from '../schema/memory.js';
 
-import { scopeWhere } from './scope-clause.js';
+import { scopeCondition, scopeWhere } from './scope-clause.js';
 
 // BM25 column weights for the interactive search lexical branch, in
 // `memory_fts` declaration order (content, tags, title). A title hit is a
@@ -33,14 +21,6 @@ import { scopeWhere } from './scope-clause.js';
 const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
-
-export interface FindActiveByScopeOpts {
-  scope: MemoryScope;
-  projectId?: string | null;
-  includeGlobal?: boolean;
-  limit?: number;
-  offset?: number;
-}
 
 export interface SearchMemoryIdsOpts {
   scope: MemoryScope;
@@ -74,33 +54,6 @@ export interface AdminListMemoriesOpts {
 
 export class MemoryRepository {
   constructor(private readonly db: Db) {}
-
-  findActiveByScope(opts: FindActiveByScopeOpts): Memory[] {
-    const projectFilter =
-      opts.scope === 'project' && opts.projectId
-        ? eq(memory.projectId, opts.projectId)
-        : isNull(memory.projectId);
-
-    const scopeFilter =
-      opts.scope === 'project' && opts.includeGlobal
-        ? or(
-            and(eq(memory.scope, 'project'), projectFilter),
-            and(eq(memory.scope, 'global'), isNull(memory.projectId)),
-          )
-        : and(eq(memory.scope, opts.scope), projectFilter);
-
-    let query = this.db
-      .select()
-      .from(memory)
-      .where(and(scopeFilter, eq(memory.status, 'active')))
-      .orderBy(desc(memory.createdAt))
-      .$dynamic();
-
-    if (opts.limit !== undefined) query = query.limit(opts.limit);
-    if (opts.offset !== undefined) query = query.offset(opts.offset);
-
-    return query.all();
-  }
 
   findActiveByTopicKey(opts: {
     scope: MemoryScope;
@@ -160,11 +113,7 @@ export class MemoryRepository {
     includeArchived: boolean;
     limit: number;
   }): Memory[] {
-    const conditions: SQL[] = [
-      opts.scope === 'project'
-        ? (and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? '')) as SQL)
-        : (and(eq(memory.scope, 'global'), isNull(memory.projectId)) as SQL),
-    ];
+    const conditions: SQL[] = [scopeCondition(opts.scope, opts.projectId)];
     if (!opts.includeArchived) conditions.push(sql`${memory.status} != 'archived'`);
     return this.db
       .select()
@@ -208,10 +157,7 @@ export class MemoryRepository {
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
-    const scopeFilter =
-      opts.scope === 'project'
-        ? and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? ''))
-        : and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
     const windowCmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} >= ${opts.loMs} AND ${memory.createdAt} < ${opts.pivotMs}`
@@ -234,10 +180,7 @@ export class MemoryRepository {
     byStatus: Record<string, number>;
     byType: Record<string, number>;
   } {
-    const scopeFilter =
-      scope === 'project'
-        ? and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? ''))
-        : and(eq(memory.scope, 'global'), isNull(memory.projectId));
+    const scopeFilter = scopeCondition(scope, projectId);
     const statusRows = this.db
       .select({ status: memory.status, n: count() })
       .from(memory)
@@ -378,18 +321,13 @@ export class MemoryRepository {
       .at(0)?.id;
   }
 
-  countByStatus(status: MemoryStatus): number {
-    const row = this.db
-      .select({ value: count() })
+  /** All-scope memory counts grouped by status (dashboard stats, one query). */
+  countRowsByStatus(): { status: MemoryStatus; count: number }[] {
+    return this.db
+      .select({ status: memory.status, count: count() })
       .from(memory)
-      .where(eq(memory.status, status))
-      .get();
-    return row?.value ?? 0;
-  }
-
-  countAll(): number {
-    const row = this.db.select({ value: count() }).from(memory).get();
-    return row?.value ?? 0;
+      .groupBy(memory.status)
+      .all();
   }
 
   countConfirmations(memoryId: string): number {
@@ -481,10 +419,7 @@ export class MemoryRepository {
     defaultThresholdMs: number,
     confidenceFloor: number,
   ): string[] {
-    const scopeFilter =
-      scope === 'global'
-        ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
-        : and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? ''));
+    const scopeFilter = scopeCondition(scope, projectId);
     // Per-type inactivity window: a row decays once last_seen_at predates
     // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
     const thresholdExpr =
@@ -542,11 +477,13 @@ export class MemoryRepository {
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
-    const scopeFilter =
-      opts.scope === 'global'
-        ? and(eq(memory.scope, 'global'), isNull(memory.projectId))
-        : and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId ?? ''));
-    return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, 0);
+    return this.runNeedsReview(
+      scopeCondition(opts.scope, opts.projectId),
+      opts.ttlByType,
+      opts.nowMs,
+      opts.limit,
+      0,
+    );
   }
 
   /**
@@ -564,9 +501,9 @@ export class MemoryRepository {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
     let scopeFilter: SQL | undefined;
     if (opts.project?.kind === 'global') {
-      scopeFilter = and(eq(memory.scope, 'global'), isNull(memory.projectId));
+      scopeFilter = scopeCondition('global', null);
     } else if (opts.project?.kind === 'project') {
-      scopeFilter = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
+      scopeFilter = scopeCondition('project', opts.project.projectId);
     }
     return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, opts.offset);
   }
@@ -761,9 +698,9 @@ export class MemoryRepository {
     if (opts.ttlByType.length === 0) return 0;
     let scopeFilter: SQL | undefined;
     if (opts.project?.kind === 'global') {
-      scopeFilter = and(eq(memory.scope, 'global'), isNull(memory.projectId));
+      scopeFilter = scopeCondition('global', null);
     } else if (opts.project?.kind === 'project') {
-      scopeFilter = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
+      scopeFilter = scopeCondition('project', opts.project.projectId);
     }
     const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.ttlByType);
     const row = this.db

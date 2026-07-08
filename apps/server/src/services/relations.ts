@@ -7,6 +7,7 @@ import {
   type MarkedByKind,
   type RelationKind,
 } from '../db/schema/memory-relations.js';
+import type { MemoryScope } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
 
@@ -359,12 +360,22 @@ export class RelationsService {
   }
 
   /**
-   * Find pending relations older than `cutoffMs`, in ascending creation
-   * order. Used by the consolidator's orphan-promotion pass.
+   * Find pending relations older than `cutoffMs` whose endpoints both lie
+   * in `scope`, in ascending creation order. Used by the consolidator's
+   * per-scope orphan-promotion pass.
    */
-  findPendingOlderThan(cutoffMs: number, limit: number): MemoryRelation[] {
-    const cutoff = new Date(this.now().getTime() - cutoffMs);
-    return this.repos.relations.findPendingOlderThan(cutoff, limit);
+  findPendingOlderThanInScope(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    cutoffMs: number;
+    limit: number;
+  }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
+    return this.repos.relations.findPendingOlderThanInScope({
+      scope: opts.scope,
+      projectId: opts.projectId,
+      cutoffMs: this.now().getTime() - opts.cutoffMs,
+      limit: opts.limit,
+    });
   }
 
   /** Count rows by status. Used by `memory.stats` and the dashboard. */

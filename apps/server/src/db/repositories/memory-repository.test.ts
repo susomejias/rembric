@@ -178,22 +178,10 @@ describe('MemoryRepository', () => {
       ).toEqual(['03A', '03B']);
     });
 
-    it('findActiveByScope scopes correctly', () => {
-      expect(repo.findActiveByScope({ scope: 'global' }).map((m) => m.id)).toEqual(['03A']);
-      expect(
-        repo.findActiveByScope({ scope: 'project', projectId: 'p1' }).map((m) => m.id),
-      ).toEqual(['03B']);
-      expect(
-        repo
-          .findActiveByScope({ scope: 'project', projectId: 'p1', includeGlobal: true })
-          .map((m) => m.id),
-      ).toEqual(['03B', '03A']);
-    });
-
-    it('countByStatus', () => {
-      expect(repo.countByStatus('active')).toBe(2);
-      expect(repo.countByStatus('superseded')).toBe(1);
-      expect(repo.countByStatus('archived')).toBe(0);
+    it('countRowsByStatus groups all scopes by status in one query', () => {
+      const rows = repo.countRowsByStatus();
+      const byStatus = Object.fromEntries(rows.map((r) => [r.status, r.count]));
+      expect(byStatus).toEqual({ active: 2, superseded: 1 });
     });
   });
 

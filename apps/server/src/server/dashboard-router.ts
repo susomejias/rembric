@@ -15,6 +15,8 @@ import {
   sectionBar,
   sparkline,
   statCard,
+  tblEmpty,
+  truncate,
   viewHead,
 } from '../dashboard/components.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
@@ -339,7 +341,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
             more: raw('<a href="/dashboard/judgments" style="color:var(--lime)">OPEN ALL ›</a>'),
           })}
           ${recentJudgedRows.length === 0
-            ? html`<div class="tbl-empty">NO JUDGMENTS YET</div>`
+            ? tblEmpty('NO JUDGMENTS YET')
             : html`
                 <div class="jq">
                   ${recentJudgedRows.map(
@@ -387,7 +389,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
             more: raw('<a href="/dashboard/sessions" style="color:var(--lime)">OPEN ALL ›</a>'),
           })}
           ${recentSessions.length === 0
-            ? html`<div class="tbl-empty">NO SESSIONS YET</div>`
+            ? tblEmpty('NO SESSIONS YET')
             : html`
                 <div class="tl" style="border:1px solid var(--fg-faint)">
                   ${recentSessions.map(
@@ -668,12 +670,6 @@ function fmtWindow(ms: number): string {
 function shortDisplayId(id: string): string {
   if (!id) return '—';
   return id.length > 12 ? id.slice(0, 8) + '…' + id.slice(-3) : id;
-}
-
-function truncate(s: string, max: number): string {
-  if (!s) return '';
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
 }
 
 function pctOfTotal(n: number, total: number): SafeHtml {

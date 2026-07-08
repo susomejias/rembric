@@ -1,12 +1,13 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps } from '../db/schema/consolidation.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import { MemoryService } from '../services/memory.js';
+import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
+import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { undoRun } from './operations.js';
@@ -128,6 +129,55 @@ describe('deadline orphaning', () => {
       .where(and(eq(consolidationOps.opType, 'orphan_promote'), sql`reverted_at IS NOT NULL`))
       .all();
     expect(opsAfter.length).toBe(1);
+  });
+
+  it("orphans scope B's overdue pending even when scope A has more than a full batch overdue", () => {
+    const projects = new ProjectsService(createRepositories(db.handle.db));
+    const projA = projects.create({ slug: 'proj-a' });
+    const projB = projects.create({ slug: 'proj-b' });
+
+    const aIds: string[] = [];
+    for (let i = 0; i < 52; i++) {
+      aIds.push(
+        memory.save({ type: 'feedback', title: `a${i}`, content: `a${i}` }, projectScope(projA.id))
+          .id,
+      );
+    }
+    const aJudgmentIds: string[] = [];
+    for (let i = 0; i < 51; i++) {
+      const p = relations.createPending({ sourceId: aIds[i]!, targetId: aIds[i + 1]! });
+      backdate(p.judgmentId, orphanDeadlineMs + 10_000);
+      aJudgmentIds.push(p.judgmentId);
+    }
+
+    const b1 = memory.save(
+      { type: 'feedback', title: 'b1', content: 'b1' },
+      projectScope(projB.id),
+    );
+    const b2 = memory.save(
+      { type: 'feedback', title: 'b2', content: 'b2' },
+      projectScope(projB.id),
+    );
+    const bPending = relations.createPending({ sourceId: b1.id, targetId: b2.id });
+    backdate(bPending.judgmentId, orphanDeadlineMs + 10_000);
+
+    const result = runner.runScope({ scope: 'project', projectId: projB.id });
+    expect(result.ops.orphaned).toBe(1);
+
+    const bRow = db.handle.db
+      .select()
+      .from(memoryRelations)
+      .where(eq(memoryRelations.judgmentId, bPending.judgmentId))
+      .get();
+    expect(bRow?.status).toBe('orphaned');
+
+    const aRows = db.handle.db
+      .select({ status: memoryRelations.status })
+      .from(memoryRelations)
+      .where(inArray(memoryRelations.judgmentId, aJudgmentIds))
+      .all();
+    expect(aRows).toHaveLength(51);
+    expect(aRows.every((r) => r.status === 'pending')).toBe(true);
   });
 
   it('is idempotent: a second forced run orphans nothing new', () => {

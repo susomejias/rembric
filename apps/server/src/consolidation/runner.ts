@@ -128,31 +128,24 @@ export class ConsolidationRunner {
 
   /**
    * Orphan pending relations older than the deadline whose source +
-   * target both lie in `scope`. Rows whose memories disappeared are
-   * orphaned regardless of scope match (nothing left to judge).
+   * target both lie in `scope`. Candidate selection is scoped in SQL and
+   * batch-bounded per scope, so one scope's backlog cannot starve
+   * another's. Endpoints cannot be missing: `PURGE_PREDICATE`
+   * (memory-repository.ts) never purges a memory referenced by
+   * `memory_relations`.
    */
   private orphanExpired(runId: string, scope: ScopeKey): number {
     const deadlineMs = this.opts.orphanDeadlineMs ?? DEFAULT_ORPHAN_DEADLINE_MS;
-    const pending = this.opts.relations.findPendingOlderThan(deadlineMs, ORPHAN_BATCH);
+    const pending = this.opts.relations.findPendingOlderThanInScope({
+      scope: scope.scope,
+      projectId: scope.projectId,
+      cutoffMs: deadlineMs,
+      limit: ORPHAN_BATCH,
+    });
 
+    const reason = `unjudged after ${deadlineMs}ms deadline`;
     let orphaned = 0;
     for (const row of pending) {
-      const a = this.opts.repos.memory.findScopeTupleById(row.sourceId);
-      const b = this.opts.repos.memory.findScopeTupleById(row.targetId);
-
-      let reason: string | null;
-      if (!a || !b) {
-        reason = 'source or target memory missing';
-      } else if (
-        a.scope === scope.scope &&
-        (scope.scope === 'project' ? a.projectId === scope.projectId : a.projectId === null)
-      ) {
-        reason = `unjudged after ${deadlineMs}ms deadline`;
-      } else {
-        // Out of scope for this iteration — left for the matching pass.
-        continue;
-      }
-
       try {
         this.opts.relations.orphan(row.judgmentId, reason);
         recordOrphanPromote(this.opts.repos, {

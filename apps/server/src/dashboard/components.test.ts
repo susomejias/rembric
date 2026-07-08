@@ -1,11 +1,18 @@
+import { Hono, type Context } from 'hono';
 import { describe, expect, it } from 'vitest';
 
+import { DomainError } from '../services/errors.js';
+import type { SessionsService } from '../services/sessions.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import {
   backLink,
   btn,
+  domainErrorPage,
+  filterGroup,
   flash,
+  flashErrorPage,
+  getSession,
   inp,
   kv,
   kvGrid,
@@ -14,6 +21,7 @@ import {
   mdBody,
   pager,
   PAGE_SIZE,
+  projectOptions,
   renderMarkdown,
   renderMobileBar,
   renderSidebar,
@@ -22,10 +30,12 @@ import {
   sparkline,
   statCard,
   tblEmpty,
+  truncate,
   urlWithPage,
   viewHead,
 } from './components.js';
 import { raw } from './templates.js';
+import type { ResolvedSession } from './types.js';
 
 describe('PAGE_SIZE', () => {
   it('is the standard 10 across all paginated listings', () => {
@@ -220,6 +230,169 @@ describe('sparkline', () => {
 describe('tblEmpty', () => {
   it('renders the empty-state message', () => {
     expect(tblEmpty('NO ROWS').__html).toContain('class="tbl-empty">NO ROWS<');
+  });
+});
+
+describe('truncate', () => {
+  it('leaves short strings untouched', () => {
+    expect(truncate('short', 10)).toBe('short');
+  });
+
+  it('truncates with an ellipsis past max', () => {
+    expect(truncate('a very long string indeed', 10)).toBe('a very lo…');
+  });
+
+  it('returns empty string for null/undefined', () => {
+    expect(truncate(null, 10)).toBe('');
+    expect(truncate(undefined, 10)).toBe('');
+  });
+});
+
+describe('projectOptions', () => {
+  it('always leads with "all scopes" then "global only"', () => {
+    const opts = projectOptions([{ slug: 'proj-a' }], '');
+    expect(opts[0]).toEqual({ value: '', label: 'all scopes', selected: true });
+    expect(opts[1]).toEqual({ value: '__global__', label: 'global only', selected: false });
+    expect(opts[2]).toEqual({ value: 'proj-a', label: 'proj-a', selected: false });
+  });
+
+  it('marks the selected project slug', () => {
+    const opts = projectOptions([{ slug: 'proj-a' }, { slug: 'proj-b' }], 'proj-b');
+    expect(opts.find((o) => o.value === 'proj-b')?.selected).toBe(true);
+    expect(opts.find((o) => o.value === 'proj-a')?.selected).toBe(false);
+  });
+});
+
+describe('sel + id', () => {
+  it('emits the id attribute when provided', () => {
+    const out = sel('status', [{ value: 'active', label: 'active' }], { id: 'f-status' });
+    expect(out.__html).toContain('id="f-status"');
+  });
+
+  it('omits the id attribute by default', () => {
+    const out = sel('status', [{ value: 'active', label: 'active' }]);
+    expect(out.__html).not.toContain(' id=');
+  });
+});
+
+describe('inp + id', () => {
+  it('emits the id attribute when provided', () => {
+    const out = inp('q', '', 'search', { id: 'f-q' });
+    expect(out.__html).toContain('id="f-q"');
+  });
+});
+
+describe('filterGroup', () => {
+  it('wraps the control in a labelled .group span with a for-bound label', () => {
+    const out = filterGroup(
+      'STATUS',
+      'f-status',
+      sel('status', [{ value: 'active', label: 'active' }], {
+        id: 'f-status',
+      }),
+    );
+    expect(out.__html).toContain('<span class="group">');
+    expect(out.__html).toContain('<label class="k" for="f-status">STATUS</label>');
+    expect(out.__html).toContain('id="f-status"');
+  });
+
+  it('appends an extra class when opts.className is given', () => {
+    const out = filterGroup('SEARCH', 'f-q', inp('q', '', 'x', { id: 'f-q' }), {
+      className: 'search',
+    });
+    expect(out.__html).toContain('<span class="group search">');
+  });
+});
+
+describe('getSession', () => {
+  it('returns the session set on the context', async () => {
+    const app = new Hono();
+    const fake = { tokenId: 'tk1' } as unknown as ResolvedSession;
+    app.get('/', (c: Context) => {
+      c.set('session' as never, fake as never);
+      return c.json({ same: getSession(c) === fake });
+    });
+    const res = await app.request('/');
+    expect(await res.json()).toEqual({ same: true });
+  });
+
+  it('returns null when no session is set', async () => {
+    const app = new Hono();
+    app.get('/', (c: Context) => c.json({ session: getSession(c) }));
+    const res = await app.request('/');
+    expect(await res.json()).toEqual({ session: null });
+  });
+});
+
+describe('flashErrorPage + domainErrorPage', () => {
+  async function withSessionApp(handler: (c: Context, sessions: SessionsService) => Response) {
+    const { randomBytes } = await import('node:crypto');
+    const { createRepositories } = await import('../db/repositories/index.js');
+    const { SessionsService } = await import('../services/sessions.js');
+    const { TokensService } = await import('../services/tokens.js');
+    const { createTestDb } = await import('../test/db.js');
+
+    const t = createTestDb();
+    const repos = createRepositories(t.handle.db);
+    const sessions = new SessionsService(repos, randomBytes(32));
+    const tokens = new TokensService(repos);
+    const admin = tokens.create({ name: 'admin', scope: '*', projectId: null });
+    const created = sessions.create(admin.token.id);
+    const resolved: ResolvedSession = {
+      session: created.session,
+      sessions,
+      tokenId: admin.token.id,
+    };
+
+    const app = new Hono();
+    app.use('*', (c: Context, next) => {
+      c.set('session' as never, resolved as never);
+      return next();
+    });
+    app.get('/', (c: Context) => handler(c, sessions));
+    const res = await app.request('/');
+    t.cleanup();
+    return res;
+  }
+
+  it('flashErrorPage renders the flash-error markup at the given status (default 400)', async () => {
+    const res = await withSessionApp((c, sessions) =>
+      flashErrorPage(c, sessions, 'boom', { title: 'Widgets', activeNav: 'memories' }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).toContain('<p class="flash error">boom</p>');
+  });
+
+  it('flashErrorPage honors an explicit status override', async () => {
+    const res = await withSessionApp((c, sessions) =>
+      flashErrorPage(c, sessions, 'not here', { title: 'Widgets', activeNav: 'memories' }, 404),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('domainErrorPage defaults to 400 with no statusFor', async () => {
+    const res = await withSessionApp((c, sessions) =>
+      domainErrorPage(c, sessions, new DomainError('conflict', 'already active'), {
+        title: 'Memory',
+        activeNav: 'memories',
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('already active');
+  });
+
+  it('domainErrorPage applies statusFor to resolve a code-specific status', async () => {
+    const res = await withSessionApp((c, sessions) =>
+      domainErrorPage(
+        c,
+        sessions,
+        new DomainError('session_not_found', 'no such session'),
+        { title: 'Sessions', activeNav: 'sessions' },
+        (code) => (code === 'session_not_found' ? 404 : 400),
+      ),
+    );
+    expect(res.status).toBe(404);
   });
 });
 

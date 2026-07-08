@@ -22,8 +22,8 @@
 // All MCP wire-protocol handling is delegated to `npx -y mcp-remote`.
 // This bridge is a thin URL-building entrypoint.
 
-import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { SLUG_RE, parseDotenv } from './rembric-dotenv.mjs';

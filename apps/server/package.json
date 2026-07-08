@@ -1,6 +1,6 @@
 {
   "name": "@rembric/server",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "description": "Self-hosted memory, sessions, and dashboard for AI coding agents",
   "type": "module",
   "license": "MIT",
@@ -13,9 +13,9 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "start": "node dist/server-entrypoint.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude '../../install.test.ts'",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --exclude '../../install.test.ts'",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check"
   },

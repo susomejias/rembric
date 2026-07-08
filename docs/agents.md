@@ -393,6 +393,10 @@ Long-running agents compact their context. To survive that, two tools fire at sp
 
 The proactive-save protocol embedded in `initialize.instructions` already tells agents to do this. If your client ignores the field, paste the equivalent into the client's rules file (`AGENTS.md`, `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, `~/.gemini/system.md`, etc.).
 
+## Private content redaction (`<private>` tags)
+
+All four bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode) redact `<private>…</private>` spans to `[REDACTED]` in every transcript-derived upload — session summaries, pre/post-compact snapshots, and derived titles — **before the payload leaves the client**. Matching is case-insensitive and spans newlines; each span closes at the first `</private>`, and an unclosed `<private>` redacts through end-of-text (fail closed). The server never sees the marked content and does not strip the tags itself, so clients connecting without a bundled plugin do not get this redaction.
+
 ## Verifying
 
 After registering, ask the agent to list its tools — you should see the `memory.*` and `project.*` families. Save a test memory, then check `/dashboard/memories` for the row.

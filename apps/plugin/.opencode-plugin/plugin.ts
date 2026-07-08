@@ -1,5 +1,5 @@
 // x-release-please-start-version
-// @rembric-plugin-version 0.16.0
+// @rembric-plugin-version 0.16.1
 // x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
@@ -94,9 +94,17 @@ function diag(line: string): void {
   process.stderr.write(`[rembric] ${line}\n`);
 }
 
+// Mirrors rembric_redact_private in scripts/_transcript.sh and
+// _redact_private in .hermes-plugin/__init__.py; the shared fixtures in
+// ../test/redaction-fixtures.json keep the three implementations in
+// lock-step. An unclosed <private> redacts through end-of-text: fail
+// closed for a privacy marker (also covers a closing tag cut off by the
+// per-entry truncation applied before this at the call sites).
 function stripPrivateTags(text: string): string {
   if (!text) return '';
-  return text.replace(/<private>[\s\S]*?<\/private>/gi, '[REDACTED]');
+  return text
+    .replace(/<private>[\s\S]*?<\/private>/gi, '[REDACTED]')
+    .replace(/<private>[\s\S]*$/i, '[REDACTED]');
 }
 
 function truncate(text: string, max: number): string {

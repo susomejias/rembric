@@ -74,18 +74,27 @@ and try again — never bypass with `--no-verify` for normal development.
 
 ## Tests
 
-Every PR must keep coverage above the thresholds enforced by Vitest:
+Every PR must keep coverage at or above the thresholds enforced by Vitest
+(`apps/server/vitest.config.ts`). CI runs `pnpm --filter @rembric/server run
+test:coverage`, so the gate below fails the build on any PR that drops below
+it:
 
-- statements ≥ 90%
-- branches ≥ 85%
-- functions ≥ 85%
+- statements ≥ 85%
+- branches ≥ 78%
+- functions ≥ 91%
 - lines ≥ 85%
+
+These are an enforced floor set at (rounded down from) current real coverage,
+not an aspirational target. The ratchet is **up-only**: raise them as coverage
+grows; never lower them to make a PR pass. Keep these numbers identical to the
+`thresholds` block in `apps/server/vitest.config.ts`.
 
 Critical invariants of the product (append-only, status state machine, scope
 isolation, replaces-graph acyclicity, confirm-chain semantics) have
-dedicated tests under `apps/server/src/**/__tests__/invariants/`. **Do not** weaken or
-delete these. If a feature genuinely requires changing an invariant, change
-the spec first via an OpenSpec change.
+dedicated tests in
+`apps/server/src/test/{invariants,runtime-invariants}.test.ts`. **Do not**
+weaken or delete these. If a feature genuinely requires changing an invariant,
+change the spec first via an OpenSpec change.
 
 For new code, add unit tests in `apps/server/src/**/*.test.ts` next to the module, and
 integration / E2E tests where the boundary lives. Run with:
