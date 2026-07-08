@@ -12,14 +12,19 @@ import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import { type Scope, SCOPE_GLOBAL, projectScope } from '../services/scope.js';
-import { isAuthorized } from '../services/tokens.js';
+import type { Scope } from '../services/scope.js';
 
-import { clamp, scopeFromContext, serializeMemory, snippet } from './_shared.js';
+import {
+  assertAuthorized,
+  clamp,
+  requireScope,
+  resolveEffectiveScope,
+  serializeMemory,
+  snippet,
+} from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
-import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Tool handlers backing the core memory tools: save / search / get / confirm
@@ -41,7 +46,7 @@ import { ensureRootsDiscoveryRun } from './roots-discovery.js';
  *     - memory.save scope='project' →  mcpError 'project_required'
  *                                     (unless `project.use` activated one
  *                                      for this transport — see
- *                                      `resolveEffectiveProject`)
+ *                                      `resolveEffectiveScope` in `_shared`)
  *     - memory.save scope='global'  →  saved as user-wide
  *     - memory.search                →  globals only (or the active project
  *                                       set via `project.use`)
@@ -369,39 +374,6 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
 }
 
 /**
- * Resolve the project that subsequent operations should target.
- *
- * Sources, in order of precedence:
- *   1. `ctx.project` — set by the HTTP layer when the URL was `/mcp/<slug>`
- *      and the slug resolved to an existing project.
- *   2. `SessionRouter` entry — set by an explicit `project.use({slug})` or
- *      by roots-based discovery on a path-less `/mcp` connection.
- *
- * Before consulting source #2 on an unscoped connection, this helper
- * awaits any in-flight roots discovery (or triggers it lazily as a
- * fallback for clients that never emit `notifications/initialized`) so
- * the router is populated by the time we read it. Path-scoped
- * connections short-circuit on `ctx.requestedSlug`.
- */
-async function resolveEffectiveProject(
-  deps: MemoryToolDeps,
-): Promise<{ id: string; slug: string } | null> {
-  const ctx = getRequestContext();
-  if (ctx.project) return ctx.project;
-  if (ctx.requestedSlug !== null) return null;
-  if (!ctx.mcpSessionId || !deps.router || !deps.projects) return null;
-  if (deps.getServer) {
-    await ensureRootsDiscoveryRun(
-      { server: deps.getServer(), router: deps.router, projects: deps.projects },
-      { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId, pathSlug: ctx.requestedSlug },
-    );
-  }
-  const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
-  if (!entry?.projectId) return null;
-  return deps.projects.getById(entry.projectId) ?? null;
-}
-
-/**
  * Resolve the active Rembric session id for a memory write.
  *
  * Sources, in order of precedence:
@@ -469,7 +441,7 @@ async function handleSave(
   // this transport (or that roots discovery activated), in addition to the
   // URL-derived `ctx.project`. Mirrors the precedence used by
   // `handleSessionStart` and `project.current`.
-  const activeProject = await resolveEffectiveProject(deps);
+  const { scope, project: activeProject } = await resolveEffectiveScope(deps);
 
   // When roots-based discovery surfaced suggestions the agent has not yet
   // acted on, refuse the silent fallback to global. The agent must either
@@ -494,14 +466,10 @@ async function handleSave(
     );
   }
 
-  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
-  const authzTarget = {
-    scope: scope.kind,
-    projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: activeProject?.slug ?? null,
-  } as const;
-  if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
-    return mcpError('forbidden', `token scope '${ctx.scope}' cannot write ${scope.kind} memories`);
+  try {
+    assertAuthorized('write', scope);
+  } catch (err) {
+    return errToMcp(err);
   }
 
   const resolvedSessionId = resolveActiveSessionId(
@@ -523,7 +491,7 @@ async function handleSave(
 
   try {
     // Archived projects reject new writes (projects spec, "Archiving a
-    // project"). Enforced here rather than in resolveEffectiveProject so the
+    // project"). Enforced here rather than in resolveEffectiveScope so the
     // read paths (search/get) keep returning an archived project's memories.
     if (activeProject) deps.projects?.assertWritable(activeProject.id);
 
@@ -618,17 +586,11 @@ async function handleSearch(
     fields?: string[];
   },
 ) {
-  const ctx = getRequestContext();
-  const activeProject = await resolveEffectiveProject(deps);
-  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
-
-  const authzTarget = {
-    scope: scope.kind,
-    projectId: scope.kind === 'project' ? scope.projectId : null,
-    projectSlug: activeProject?.slug ?? null,
-  } as const;
-  if (!isAuthorized(ctx.scope, 'read', authzTarget)) {
-    return mcpError('forbidden', `token scope '${ctx.scope}' cannot read ${scope.kind} memories`);
+  const { scope } = await resolveEffectiveScope(deps);
+  try {
+    assertAuthorized('read', scope);
+  } catch (err) {
+    return errToMcp(err);
   }
 
   const input: SearchMemoriesInput = {
@@ -689,9 +651,7 @@ async function handleSearch(
 }
 
 async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
-  const ctx = getRequestContext();
-  const activeProject = await resolveEffectiveProject(deps);
-  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
+  const { scope } = await resolveEffectiveScope(deps);
 
   const hasId = typeof args.id === 'string' && args.id.length > 0;
   const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
@@ -699,14 +659,12 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
     return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
   }
 
-  const canRead = (m: { scope: MemoryScope; projectId: string | null }): boolean =>
-    isAuthorized(ctx.scope, 'read', { scope: m.scope, projectId: m.projectId });
-
   try {
+    assertAuthorized('read', scope);
     if (args.ids !== undefined) {
-      // Batch: scoped + ordered; out-of-scope / unknown / unauthorized ids land
-      // in `notFound` and never leak content.
-      const rows = deps.memory.getMany(args.ids, scope).filter((m) => canRead(m));
+      // Batch: scoped + ordered; out-of-scope / unknown ids land in
+      // `notFound` and never leak content.
+      const rows = deps.memory.getMany(args.ids, scope);
       const relations = deps.relations
         ? deps.relations.listForMemories(
             rows.map((m) => m.id),
@@ -738,9 +696,6 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
     const result = deps.memory.get(args.id, scope);
     if (!result) {
       return mcpError('not_found', `memory '${args.id}' not found`);
-    }
-    if (!canRead(result.memory)) {
-      return mcpError('forbidden', `token scope '${ctx.scope}' cannot read this memory`);
     }
     return ok({
       memory: {
@@ -781,8 +736,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
 
 async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
   const ctx = getRequestContext();
-  const activeProject = await resolveEffectiveProject(deps);
-  const scope: Scope = activeProject ? projectScope(activeProject.id) : SCOPE_GLOBAL;
+  const { scope } = await resolveEffectiveScope(deps);
 
   const hasId = typeof args.id === 'string' && args.id.length > 0;
   const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
@@ -791,14 +745,7 @@ async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: st
   }
 
   try {
-    const authzTarget = {
-      scope: scope.kind,
-      projectId: scope.kind === 'project' ? scope.projectId : null,
-      projectSlug: activeProject?.slug ?? null,
-    } as const;
-    if (!isAuthorized(ctx.scope, 'write', authzTarget)) {
-      return mcpError('forbidden', `token scope '${ctx.scope}' cannot confirm in this scope`);
-    }
+    assertAuthorized('write', scope);
     if (args.ids !== undefined) {
       const { confirmed } = deps.memory.confirmMany(args.ids, scope, { tokenName: ctx.token.name });
       return ok({ ok: true, confirmed });
@@ -822,7 +769,7 @@ const CONTEXT_SNIPPET_CHARS = 350;
 // CONTEXT_SNIPPET_CHARS cap as the other lists for a homogeneous payload.
 const NEEDS_REVIEW_MAX = 3;
 
-function handleContext(
+async function handleContext(
   deps: MemoryToolDeps,
   args: {
     sessions?: number;
@@ -834,7 +781,12 @@ function handleContext(
   if (!deps.repos || !deps.agentSessions || !deps.prompts || !deps.router) {
     return mcpError('internal_error', 'memory.context is not wired with its required dependencies');
   }
-  const scope = scopeFromContext({ router: deps.router });
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   const sessionsLimit = clamp(args.sessions ?? 3, 0, 25);
   const memoriesLimit = clamp(args.memories ?? 10, 0, 100);
   const clamped =
@@ -932,7 +884,7 @@ function handleContext(
   });
 }
 
-function handleTimeline(
+async function handleTimeline(
   deps: MemoryToolDeps,
   args: { memoryId: string; before?: number; after?: number },
 ) {
@@ -950,7 +902,12 @@ function handleTimeline(
       'memory.timeline: before + after exceeds 50; for larger windows use memory.search',
     );
   }
-  const scope = scopeFromContext({ router: deps.router });
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   const target = deps.memory.get(args.memoryId, scope);
   if (!target) {
     return mcpError('not_found', `memory '${args.memoryId}' not found in this scope`);

@@ -1,12 +1,21 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import type { ProjectsService } from '../services/projects.js';
 import { type PromptsService } from '../services/prompts.js';
+import type { Scope } from '../services/scope.js';
 
-import { resolveSessionId, scopeFromContext } from './_shared.js';
-import { errToMcp } from './errors.js';
+import {
+  assertAuthorized,
+  requireScope,
+  resolveEffectiveScope,
+  resolveSessionId,
+} from './_shared.js';
+import { errToMcp, mcpError } from './errors.js';
+import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
 
 /**
@@ -60,6 +69,9 @@ export interface PromptToolDeps {
   prompts: PromptsService;
   agentSessions: AgentSessionsService;
   router: SessionRouter;
+  projects: ProjectsService;
+  /** Set by `createMcpServer` after construction to enable roots discovery. */
+  getServer?: () => McpServer;
 }
 
 export function buildPromptHandlers(deps: PromptToolDeps) {
@@ -69,7 +81,7 @@ export function buildPromptHandlers(deps: PromptToolDeps) {
   };
 }
 
-function handleSavePrompt(
+async function handleSavePrompt(
   deps: PromptToolDeps,
   args: {
     content: string;
@@ -79,8 +91,27 @@ function handleSavePrompt(
   },
 ) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext(deps);
-  const sessionId = resolveSessionId(deps, undefined);
+  const { scope, project } = await resolveEffectiveScope(deps);
+  // Same gate as memory.save: an unscoped connection with pending
+  // roots-derived suggestions must not silently write to global.
+  if (!project) {
+    const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
+    if (pending) {
+      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+        suggestedSlugs: pending,
+      });
+    }
+  }
+  try {
+    assertAuthorized('write', scope);
+  } catch (err) {
+    return errToMcp(err);
+  }
+  const sessionId = resolveSessionId(
+    deps,
+    undefined,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   try {
     const row = deps.prompts.save({
       content: args.content,
@@ -106,7 +137,7 @@ function handleSavePrompt(
   }
 }
 
-function handleSearchPrompts(
+async function handleSearchPrompts(
   deps: PromptToolDeps,
   args: {
     query?: string;
@@ -117,7 +148,12 @@ function handleSearchPrompts(
     offset?: number;
   },
 ) {
-  const scope = scopeFromContext(deps);
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   try {
     const result = deps.prompts.searchByScope({
       scope,

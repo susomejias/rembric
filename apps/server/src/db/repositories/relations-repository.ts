@@ -4,6 +4,7 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   inArray,
   isNull,
   lt,
@@ -113,6 +114,34 @@ export class RelationsRepository {
       .select()
       .from(memoryRelations)
       .where(eq(memoryRelations.judgmentId, judgmentId))
+      .get();
+  }
+
+  /** Relation row by `judgmentId` whose source AND target both lie in the scope. */
+  findByJudgmentIdInScope(
+    judgmentId: string,
+    scope: { scope: MemoryScope; projectId: string | null },
+  ): MemoryRelation | undefined {
+    const scopeFilter =
+      scope.scope === 'project'
+        ? and(
+            eq(sourceMemory.scope, 'project'),
+            eq(sourceMemory.projectId, scope.projectId ?? ''),
+            eq(targetMemory.scope, 'project'),
+            eq(targetMemory.projectId, scope.projectId ?? ''),
+          )
+        : and(
+            eq(sourceMemory.scope, 'global'),
+            isNull(sourceMemory.projectId),
+            eq(targetMemory.scope, 'global'),
+            isNull(targetMemory.projectId),
+          );
+    return this.db
+      .select(getTableColumns(memoryRelations))
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(and(eq(memoryRelations.judgmentId, judgmentId), scopeFilter))
       .get();
   }
 
