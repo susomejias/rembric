@@ -7,9 +7,11 @@ import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
+import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
+import { isAuthorized } from '../services/tokens.js';
 
-import { routerKey } from './_shared.js';
-import { mcpError } from './errors.js';
+import { assertAuthorized, routerKey } from './_shared.js';
+import { errToMcp, mcpError } from './errors.js';
 import { ok } from './result.js';
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
@@ -98,6 +100,16 @@ function handleUse(
   let created = false;
   if (!project) {
     if (args.autocreate === true) {
+      // Minting a project row is a write, even though project.use is
+      // otherwise a read action. A project minted here can never match a
+      // project-pinned token id, so gate on an anonymous project target
+      // BEFORE creating the row.
+      if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: null })) {
+        return mcpError(
+          'forbidden',
+          `token scope '${ctx.scope}' does not authorize creating project '${args.slug}'`,
+        );
+      }
       try {
         project = deps.projects.create({ slug: args.slug });
         created = true;
@@ -110,6 +122,12 @@ function handleUse(
         suggestedSlugs: deps.projects.findSimilarSlugs(args.slug),
       });
     }
+  }
+
+  try {
+    assertAuthorized('read', projectScope(project.id));
+  } catch (err) {
+    return errToMcp(err);
   }
 
   if (project.archivedAt) {
@@ -173,8 +191,13 @@ function handleUse(
 }
 
 function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) {
+  const ctx = getRequestContext();
   const includeArchived = args.includeArchived === true;
-  const rows = deps.projects.list(includeArchived);
+  // Filtered to what the token may read: `*`/`read:*` see all projects,
+  // `project:<id>`/`read:project:<id>` see only that project.
+  const rows = deps.projects
+    .list(includeArchived)
+    .filter((p) => isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: p.id }));
   // Memory counts per project — one extra query, batched.
   const counts = deps.repos.memory.countByProject().reduce<Record<string, number>>((acc, r) => {
     acc[r.projectId] = r.n;
@@ -210,6 +233,11 @@ async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>
   const entry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
 
   const activeProjectId = entry?.projectId ?? ctx.project?.id ?? null;
+  try {
+    assertAuthorized('read', activeProjectId ? projectScope(activeProjectId) : SCOPE_GLOBAL);
+  } catch (err) {
+    return errToMcp(err);
+  }
   const activeSlug = activeProjectId
     ? (deps.projects.getById(activeProjectId)?.slug ?? null)
     : null;

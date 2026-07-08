@@ -1,10 +1,15 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { getRequestContext } from '../server/request-context.js';
+import type { SessionRouter } from '../server/session-router.js';
 import { DomainError } from '../services/errors.js';
+import type { ProjectsService } from '../services/projects.js';
 import { type RelationsService, type RelationView } from '../services/relations.js';
+import type { Scope } from '../services/scope.js';
 
-import { mcpError } from './errors.js';
+import { requireScope } from './_shared.js';
+import { errToMcp, mcpError } from './errors.js';
 import { ok } from './result.js';
 import { suggestTopicKey } from './topic-key.js';
 
@@ -112,25 +117,43 @@ export const compareOutput = {
 
 export interface RelationsToolDeps {
   relations: RelationsService;
+  router: SessionRouter;
+  projects: ProjectsService;
+  /** Set by `createMcpServer` after construction to enable roots discovery. */
+  getServer?: () => McpServer;
 }
 
 export function buildRelationsHandlers(deps: RelationsToolDeps) {
   return {
-    suggestTopicKey: handleSuggestTopicKey,
+    suggestTopicKey: handleSuggestTopicKey.bind(null, deps),
     judge: handleJudge.bind(null, deps),
     compare: handleCompare.bind(null, deps),
   };
 }
 
-function handleSuggestTopicKey(args: {
-  type: (typeof MEMORY_TYPES)[number];
-  title?: string;
-  content?: string;
-}) {
+async function handleSuggestTopicKey(
+  deps: RelationsToolDeps,
+  args: {
+    type: (typeof MEMORY_TYPES)[number];
+    title?: string;
+    content?: string;
+  },
+) {
+  try {
+    await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   return ok({ topic_key: suggestTopicKey(args) });
 }
 
-function handleJudge(
+// A missing judgment/memory and an out-of-scope one must be indistinguishable
+// (`not_found`) so cross-scope existence never leaks — mirrors memory.get.
+function maskNotFound(code: DomainError['code']): string {
+  return code === 'memory_not_found' ? 'not_found' : code;
+}
+
+async function handleJudge(
   deps: RelationsToolDeps,
   args: {
     judgmentId?: string;
@@ -159,12 +182,19 @@ function handleJudge(
     );
   }
 
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'write');
+  } catch (err) {
+    return errToMcp(err);
+  }
+
   if (args.judgments !== undefined) {
     // Each item runs in its OWN RelationsService.judge transaction (no outer
     // tx), so a bad id reports an error without rolling back the good ones.
     const results = args.judgments.map((j) => {
       try {
-        const row = deps.relations.judge(j.judgmentId, {
+        const row = deps.relations.judgeInScope(j.judgmentId, scope, {
           relation: j.relation,
           reason: j.reason,
           confidence: j.confidence,
@@ -184,7 +214,7 @@ function handleJudge(
           return {
             ok: false as const,
             judgmentId: j.judgmentId,
-            code: err.code,
+            code: maskNotFound(err.code),
             message: err.message,
           };
         }
@@ -198,7 +228,7 @@ function handleJudge(
     return mcpError('invalid_input', 'provide either {judgmentId, relation} or {judgments: [...]}');
   }
   try {
-    const row = deps.relations.judge(args.judgmentId, {
+    const row = deps.relations.judgeInScope(args.judgmentId, scope, {
       relation: args.relation,
       reason: args.reason,
       confidence: args.confidence,
@@ -214,12 +244,12 @@ function handleJudge(
       judgedAt: row.judgedAt,
     });
   } catch (err) {
-    if (err instanceof DomainError) return mcpError(err.code, err.message);
+    if (err instanceof DomainError) return mcpError(maskNotFound(err.code), err.message);
     throw err;
   }
 }
 
-function handleCompare(
+async function handleCompare(
   deps: RelationsToolDeps,
   args: {
     memoryIdA: string;
@@ -234,17 +264,26 @@ function handleCompare(
   if (args.memoryIdA === args.memoryIdB) {
     return mcpError('invalid_input', 'memory.compare: memoryIdA and memoryIdB must differ');
   }
+  let scope: Scope;
   try {
-    const row = deps.relations.compare({
-      sourceId: args.memoryIdA,
-      targetId: args.memoryIdB,
-      relation: args.relation,
-      reason: args.reason,
-      confidence: args.confidence,
-      evidence: args.evidence,
-      actor: ctx.token.name,
-      kind: 'agent',
-    });
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
+  try {
+    const row = deps.relations.compareInScope(
+      {
+        sourceId: args.memoryIdA,
+        targetId: args.memoryIdB,
+        relation: args.relation,
+        reason: args.reason,
+        confidence: args.confidence,
+        evidence: args.evidence,
+        actor: ctx.token.name,
+        kind: 'agent',
+      },
+      scope,
+    );
     return ok({
       ok: true,
       judgmentId: row.judgmentId,
@@ -253,11 +292,7 @@ function handleCompare(
     });
   } catch (err) {
     if (err instanceof DomainError) {
-      const code =
-        err.code === 'forbidden' && err.message.includes('cross_scope')
-          ? 'cross_scope_relation'
-          : err.code;
-      return mcpError(code, err.message);
+      return mcpError(maskNotFound(err.code), err.message);
     }
     throw err;
   }

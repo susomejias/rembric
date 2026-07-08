@@ -2,6 +2,7 @@ import { createServer as createNetServer } from 'node:net';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -91,7 +92,9 @@ describe('MCP protocol conformance', () => {
     await server.shutdown();
   });
 
-  async function connect(opts: { token?: string; projectSlug?: string } = {}): Promise<Client> {
+  async function connect(
+    opts: { token?: string; projectSlug?: string; rootUri?: string } = {},
+  ): Promise<Client> {
     const token = opts.token ?? ADMIN_TOKEN;
     const url = new URL(`${baseUrl}/mcp${opts.projectSlug ? `/${opts.projectSlug}` : ''}`);
     const transport = new StreamableHTTPClientTransport(url, {
@@ -99,8 +102,14 @@ describe('MCP protocol conformance', () => {
     });
     const client = new Client(
       { name: 'rembric-test-client', version: '0.0.0' },
-      { capabilities: {} },
+      { capabilities: opts.rootUri ? { roots: {} } : {} },
     );
+    if (opts.rootUri) {
+      const rootUri = opts.rootUri;
+      client.setRequestHandler(ListRootsRequestSchema, () => ({
+        roots: [{ uri: rootUri, name: rootUri }],
+      }));
+    }
     await client.connect(transport);
     return client;
   }
@@ -1154,6 +1163,53 @@ describe('MCP protocol conformance', () => {
       arguments: {},
     })) as ToolResult;
     expect((readJson(ctxAfter) as { needsReview: unknown[] }).needsReview).toHaveLength(0);
+
+    await client.close();
+  });
+
+  // Regression coverage for enforce-mcp-authorization: every scope-sensitive
+  // tool (not just save/search/get/confirm) now shares the async,
+  // roots-discovery-aware resolver, so the FIRST call on a fresh transport
+  // sees the same project scope a later call would.
+  it('memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project = projects.create({ slug: 'integration-roots-ctx-proj' });
+    createRepositories(server.dbHandle.db).memory.insert({
+      id: '01TESTROOTSCTXMARKER00000A',
+      scope: 'project',
+      projectId: project.id,
+      type: 'project',
+      title: 'roots-discovered context marker',
+      content: 'roots-discovered context marker',
+      tags: [],
+      status: 'active',
+      replaces: [],
+      createdAt: new Date(),
+      lastSeenAt: new Date(),
+    });
+
+    const client = await connect({ rootUri: `file:///tmp/${project.slug}` });
+    const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
+    expect(ctx.isError).toBeFalsy();
+    const payload = readJson(ctx) as { scope: string; recentMemories: { snippet: string }[] };
+    expect(payload.scope).toBe(`project:${project.id}`);
+    expect(
+      payload.recentMemories.some((m) => m.snippet.includes('roots-discovered context marker')),
+    ).toBe(true);
+
+    await client.close();
+  });
+
+  it('memory.capture_passive rejects with project_suggestion_pending when roots surface an unminted slug', async () => {
+    const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
+    const result = (await client.callTool({
+      name: 'memory.capture_passive',
+      arguments: { text: '## Key Learnings:\n- must not be saved silently to global\n' },
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+    const payload = readJson(result) as { code?: string; suggestedSlugs?: string[] };
+    expect(payload.code).toBe('project_suggestion_pending');
+    expect(payload.suggestedSlugs).toEqual(['integration-unminted-slug']);
 
     await client.close();
   });

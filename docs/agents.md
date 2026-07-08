@@ -20,6 +20,17 @@ Header: Authorization: Bearer <agent-token>
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
+Every tool call is authorized against the token's scope and the connection's effective (resolved) scope — not just at connection time. A call with insufficient scope fails with `forbidden`; a `memory.judge`/`memory.compare` target outside the effective scope fails with `not_found` (existence never leaks across scopes).
+
+| Token scope          | Can call                                               | Cannot call                                                                          |
+| --------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `*`                   | Every tool, any scope                                  | —                                                                                     |
+| `read:*`              | Every read-classified tool, any scope                  | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) |
+| `project:<id>`        | Every tool, scoped to project `<id>` only              | Any tool whose effective scope resolves to another project or to global             |
+| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only   | Writes, and reads whose effective scope resolves to another project or to global    |
+
+Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write.
+
 **OAuth 2.1 — no static token.** OAuth-capable clients (Claude Code as a remote MCP server, ChatGPT custom connectors) can connect without minting a token: set `REMBRIC_PUBLIC_URL` (the https issuer; `http://localhost` allowed for local testing) and the server runs the authorization-code + PKCE flow itself. The client points at the same `…/mcp[/<slug>]` URL with **no `Authorization` header**; the first connect opens a consent screen where you sign in with the admin token and approve, after which the client manages the token (refresh included). It is off unless `REMBRIC_PUBLIC_URL` is set, and the static-token path above is unchanged — both kinds of token authenticate `/mcp` identically.
 
 The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` (Claude Code, Codex CLI) inject it into the system prompt. Other clients still get the same protocol via each tool's description.

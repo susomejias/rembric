@@ -55,6 +55,8 @@ export const aboutOutput = {
   docs: z.string(),
 };
 
+// Exempt from the per-tool authorization gate: it accesses no stored data
+// (mcp-api spec — every other tool is classified read/write and gated).
 export function handleAbout(_args: Record<string, never>) {
   void _args;
   return ok(buildAboutReport());

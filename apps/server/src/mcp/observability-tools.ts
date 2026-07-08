@@ -1,3 +1,4 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
@@ -5,9 +6,17 @@ import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { deriveTitle, type MemoryService } from '../services/memory.js';
+import type { ProjectsService } from '../services/projects.js';
+import type { Scope } from '../services/scope.js';
 
-import { resolveSessionId, scopeFromContext } from './_shared.js';
-import { errToMcp } from './errors.js';
+import {
+  assertAuthorized,
+  requireScope,
+  resolveEffectiveScope,
+  resolveSessionId,
+} from './_shared.js';
+import { errToMcp, mcpError } from './errors.js';
+import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
 
 /**
@@ -62,7 +71,10 @@ export interface ObservabilityToolDeps {
   agentSessions: AgentSessionsService;
   repos: Pick<Repositories, 'memory'>;
   router: SessionRouter;
+  projects: ProjectsService;
   doctor: () => DoctorReport;
+  /** Set by `createMcpServer` after construction to enable roots discovery. */
+  getServer?: () => McpServer;
 }
 
 export function buildObservabilityHandlers(deps: ObservabilityToolDeps) {
@@ -93,17 +105,36 @@ export function parseKeyLearnings(text: string): string[] {
   return items;
 }
 
-function handleCapturePassive(
+async function handleCapturePassive(
   deps: ObservabilityToolDeps,
   args: { text: string; sessionId?: string },
 ) {
   const ctx = getRequestContext();
-  const scope = scopeFromContext(deps);
+  const { scope, project } = await resolveEffectiveScope(deps);
+  // Same gate as memory.save: an unscoped connection with pending
+  // roots-derived suggestions must not silently write to global.
+  if (!project) {
+    const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
+    if (pending) {
+      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+        suggestedSlugs: pending,
+      });
+    }
+  }
+  try {
+    assertAuthorized('write', scope);
+  } catch (err) {
+    return errToMcp(err);
+  }
   const items = parseKeyLearnings(args.text);
   if (items.length === 0) {
     return ok({ saved: 0, ids: [] as string[] });
   }
-  const explicitSession = args.sessionId ?? resolveSessionId(deps, undefined);
+  const explicitSession = resolveSessionId(
+    deps,
+    args.sessionId,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   const ids: string[] = [];
   for (const content of items) {
     const m = deps.memory.save(
@@ -121,16 +152,22 @@ function handleCapturePassive(
   return ok({ saved: ids.length, ids });
 }
 
-function handleDoctor(deps: ObservabilityToolDeps) {
+async function handleDoctor(deps: ObservabilityToolDeps) {
   try {
+    await requireScope(deps, 'read');
     return ok(deps.doctor());
   } catch (err) {
     return errToMcp(err);
   }
 }
 
-function handleStats(deps: ObservabilityToolDeps) {
-  const scope = scopeFromContext(deps);
+async function handleStats(deps: ObservabilityToolDeps) {
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'read');
+  } catch (err) {
+    return errToMcp(err);
+  }
   const { byStatus, byType } = deps.repos.memory.countByStatusAndTypeInScope(
     scope.kind === 'project' ? 'project' : 'global',
     scope.kind === 'project' ? scope.projectId : null,
