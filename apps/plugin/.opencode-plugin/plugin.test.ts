@@ -1,6 +1,7 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -270,4 +271,65 @@ describe('RembricPlugin handlers', () => {
 
     expect(fetchMock.mock.calls.length).toBe(before);
   });
+});
+
+describe('stripPrivateTags against the shared cross-client fixture set', () => {
+  // Lock-step contract with scripts/_transcript.sh (bash) and
+  // .hermes-plugin/__init__.py (python); exercised through the real
+  // upload path because plugin.ts exports ONLY RembricPlugin.
+  type Fixture = { name: string; input: string; expected: string };
+  const fixtures = (
+    JSON.parse(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'redaction-fixtures.json'),
+        'utf8',
+      ),
+    ) as Fixture[]
+  ).filter((f) => f.input !== '');
+
+  let dir: string;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-redaction-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+    fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+    vi.restoreAllMocks();
+  });
+
+  for (const fixture of fixtures) {
+    it(fixture.name, async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      const sessionId = 'redact-1';
+      await handlers.event!({
+        event: {
+          type: 'session.created',
+          properties: { info: { id: sessionId, parentID: '', title: 'work' } },
+        },
+      } as never);
+      await handlers['chat.message']!(
+        { sessionID: sessionId } as never,
+        { parts: [{ type: 'text', text: fixture.input }], message: {} } as never,
+      );
+      await handlers.event!({
+        event: { type: 'session.compacted', properties: { sessionID: sessionId } },
+      } as never);
+
+      const summaryCall = fetchMock.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes(`/sessions/${sessionId}/summary`),
+      );
+      expect(summaryCall).toBeDefined();
+      const body = JSON.parse((summaryCall![1] as { body: string }).body) as { summary: string };
+      expect(body.summary).toBe(`user: ${fixture.expected}`);
+    });
+  }
 });

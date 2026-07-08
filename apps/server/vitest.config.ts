@@ -7,7 +7,12 @@ export default defineConfig({
     // an already-included file, not add one. The default `test`/
     // `test:coverage` scripts pass `--exclude '../../install.test.ts'` so it
     // runs exactly once per CI run, via e2e:installer only.
-    include: ['src/**/*.test.ts', '../plugin/.opencode-plugin/*.test.ts', '../../install.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      '../plugin/.opencode-plugin/*.test.ts',
+      '../plugin/test/*.test.ts',
+      '../../install.test.ts',
+    ],
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,
     coverage: {

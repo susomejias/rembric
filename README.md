@@ -29,7 +29,7 @@
 
 ## Supported agents
 
-Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically; everything else gets the same memory tools via a plain MCP URL. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
+Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
 
 <table>
   <tr>

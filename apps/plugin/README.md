@@ -145,6 +145,20 @@ If `.rembric` is missing, unparseable, or `PROJECT_SLUG` is invalid, the bridge 
 
 Pick something stable, lowercase, hyphen-separated (`acme-foo`, `my-app-api`). For monorepos, one slug per subproject (`acme-foo-frontend`, `acme-foo-api`). Slugs must match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`.
 
+## Keeping content out of memory: `<private>` tags
+
+Wrap anything in `<private>…</private>` and every client — Claude Code, Codex CLI, Hermes Agent, opencode — replaces the whole span with `[REDACTED]` **before** any transcript-derived text (session summaries, pre/post-compact snapshots, derived titles) leaves your machine:
+
+```
+Connect with <private>postgresql://user:s3cret@db.internal/prod</private> and check the row count.
+```
+
+is uploaded as `Connect with [REDACTED] and check the row count.`
+
+- Matching is case-insensitive and spans newlines; each span closes at the first `</private>`.
+- An **unclosed** `<private>` redacts through end-of-text — the redaction fails closed, never open.
+- Redaction is client-side; the marked content never reaches the wire. The server does not strip these tags for you.
+
 ## Token budget
 
 | What                         | Cost      | When                               |

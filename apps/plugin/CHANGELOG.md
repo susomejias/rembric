@@ -6,76 +6,66 @@ The plugin is versioned independently from the Rembric server. Versions stay in 
 
 ## [0.16.1](https://github.com/susomejias/rembric/compare/plugin-v0.16.0...plugin-v0.16.1) (2026-07-07)
 
-
 ### Bug Fixes
 
-* **mcp:** align session summary cap description ([#212](https://github.com/susomejias/rembric/issues/212)) ([0a7b591](https://github.com/susomejias/rembric/commit/0a7b5914cfd14b829948f73ae264d1c9411a0af7))
+- **mcp:** align session summary cap description ([#212](https://github.com/susomejias/rembric/issues/212)) ([0a7b591](https://github.com/susomejias/rembric/commit/0a7b5914cfd14b829948f73ae264d1c9411a0af7))
 
 ## [0.16.0](https://github.com/susomejias/rembric/compare/plugin-v0.15.1...plugin-v0.16.0) (2026-06-23)
 
-
 ### ⚠ BREAKING CHANGES
 
-* memory.save rejects calls without a title, and deployments re-embed the whole corpus once on first boot (search stays available via the lexical branch throughout the backfill).
+- memory.save rejects calls without a title, and deployments re-embed the whole corpus once on first boot (search stays available via the lexical branch throughout the backfill).
 
 ### Features
 
-* required, searchable memory titles ([#196](https://github.com/susomejias/rembric/issues/196)) ([90c57ce](https://github.com/susomejias/rembric/commit/90c57ce7875955f9fab499d4af3000438956f7e8))
+- required, searchable memory titles ([#196](https://github.com/susomejias/rembric/issues/196)) ([90c57ce](https://github.com/susomejias/rembric/commit/90c57ce7875955f9fab499d4af3000438956f7e8))
 
 ## [0.15.1](https://github.com/susomejias/rembric/compare/plugin-v0.15.0...plugin-v0.15.1) (2026-06-18)
 
-
 ### Bug Fixes
 
-* **plugin:** use real codex plugin add/remove verbs in installer ([#174](https://github.com/susomejias/rembric/issues/174)) ([d934fe7](https://github.com/susomejias/rembric/commit/d934fe78cabfa3db7bc0208a8408da2d49f7b6f0))
+- **plugin:** use real codex plugin add/remove verbs in installer ([#174](https://github.com/susomejias/rembric/issues/174)) ([d934fe7](https://github.com/susomejias/rembric/commit/d934fe78cabfa3db7bc0208a8408da2d49f7b6f0))
 
 ## [0.15.0](https://github.com/susomejias/rembric/compare/plugin-v0.14.0...plugin-v0.15.0) (2026-06-14)
 
-
 ### Features
 
-* strengthen the memory protocol nudge (proactive save/recall/summarize) across all four clients ([#153](https://github.com/susomejias/rembric/issues/153)) ([c18d4b5](https://github.com/susomejias/rembric/commit/c18d4b58526d9d672e2083809c001750e1c2a52f))
+- strengthen the memory protocol nudge (proactive save/recall/summarize) across all four clients ([#153](https://github.com/susomejias/rembric/issues/153)) ([c18d4b5](https://github.com/susomejias/rembric/commit/c18d4b58526d9d672e2083809c001750e1c2a52f))
 
 ## [0.13.0](https://github.com/susomejias/rembric/compare/plugin-shared-v0.12.1...plugin-shared-v0.13.0) (2026-06-14)
 
-
 ### Features
 
-* **memory:** derived review state (needs_review) axis ([#141](https://github.com/susomejias/rembric/issues/141)) ([f0f4347](https://github.com/susomejias/rembric/commit/f0f4347dc408366f8798ab08be5e24fa3de42df3))
+- **memory:** derived review state (needs_review) axis ([#141](https://github.com/susomejias/rembric/issues/141)) ([f0f4347](https://github.com/susomejias/rembric/commit/f0f4347dc408366f8798ab08be5e24fa3de42df3))
 
 ## [0.12.1](https://github.com/susomejias/rembric/compare/plugin-shared-v0.12.0...plugin-shared-v0.12.1) (2026-06-14)
 
-
 ### Bug Fixes
 
-* **ci:** migrate plugin releases to node-workspace (independent claude/codex components) ([#136](https://github.com/susomejias/rembric/issues/136)) ([b53e2af](https://github.com/susomejias/rembric/commit/b53e2af325cb1e241fed70ec77d6daf4bb60ee55))
+- **ci:** migrate plugin releases to node-workspace (independent claude/codex components) ([#136](https://github.com/susomejias/rembric/issues/136)) ([b53e2af](https://github.com/susomejias/rembric/commit/b53e2af325cb1e241fed70ec77d6daf4bb60ee55))
 
 ## [0.12.0](https://github.com/susomejias/rembric/compare/plugin-shared-v0.11.1...plugin-shared-v0.12.0) (2026-06-14)
 
-
 ### Features
 
-* **plugin:** add --yes/-y flag to run Claude/Codex marketplace commands headlessly ([#132](https://github.com/susomejias/rembric/issues/132)) ([1428a16](https://github.com/susomejias/rembric/commit/1428a16b60021a28dbec962ca6699e8ee1be19e1))
-
+- **plugin:** add --yes/-y flag to run Claude/Codex marketplace commands headlessly ([#132](https://github.com/susomejias/rembric/issues/132)) ([1428a16](https://github.com/susomejias/rembric/commit/1428a16b60021a28dbec962ca6699e8ee1be19e1))
 
 ### Bug Fixes
 
-* **ci:** collapse plugin release components, drop linked-versions group ([#134](https://github.com/susomejias/rembric/issues/134)) ([0ae9303](https://github.com/susomejias/rembric/commit/0ae93034702fb9eb00981d1912db0d0d2d6f1cbb))
+- **ci:** collapse plugin release components, drop linked-versions group ([#134](https://github.com/susomejias/rembric/issues/134)) ([0ae9303](https://github.com/susomejias/rembric/commit/0ae93034702fb9eb00981d1912db0d0d2d6f1cbb))
 
 ## [0.11.1](https://github.com/susomejias/rembric/compare/plugin-shared-v0.11.0...plugin-shared-v0.11.1) (2026-06-13)
 
-
 ### Bug Fixes
 
-* **plugin:** correct the installer's per-agent update flow ([#127](https://github.com/susomejias/rembric/issues/127)) ([91d7465](https://github.com/susomejias/rembric/commit/91d74653e4416ee139d00ae118ccf898bb0ced16))
-* **plugin:** opencode/claude update notes drop install-only wiring ([#128](https://github.com/susomejias/rembric/issues/128)) ([6d45255](https://github.com/susomejias/rembric/commit/6d452551002daa1d4397ac9c5cf885d1f8ca2290))
+- **plugin:** correct the installer's per-agent update flow ([#127](https://github.com/susomejias/rembric/issues/127)) ([91d7465](https://github.com/susomejias/rembric/commit/91d74653e4416ee139d00ae118ccf898bb0ced16))
+- **plugin:** opencode/claude update notes drop install-only wiring ([#128](https://github.com/susomejias/rembric/issues/128)) ([6d45255](https://github.com/susomejias/rembric/commit/6d452551002daa1d4397ac9c5cf885d1f8ca2290))
 
 ## [0.11.0](https://github.com/susomejias/rembric/compare/plugin-shared-v0.10.0...plugin-shared-v0.11.0) (2026-06-13)
 
-
 ### Features
 
-* **plugin:** unified TUI installer for server + all clients ([#122](https://github.com/susomejias/rembric/issues/122)) ([3be359a](https://github.com/susomejias/rembric/commit/3be359aec1cc97a1d1623b30db76212a82fb2d59))
+- **plugin:** unified TUI installer for server + all clients ([#122](https://github.com/susomejias/rembric/issues/122)) ([3be359a](https://github.com/susomejias/rembric/commit/3be359aec1cc97a1d1623b30db76212a82fb2d59))
 
 ## [0.10.0](https://github.com/susomejias/rembric/compare/plugin-shared-v0.9.0...plugin-shared-v0.10.0) (2026-05-22)
 

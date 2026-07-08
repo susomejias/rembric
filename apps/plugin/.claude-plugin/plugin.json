@@ -9,12 +9,7 @@
   },
   "repository": "https://github.com/susomejias/rembric",
   "license": "MIT",
-  "keywords": [
-    "memory",
-    "mcp",
-    "rembric",
-    "agent-memory"
-  ],
+  "keywords": ["memory", "mcp", "rembric", "agent-memory"],
   "userConfig": {
     "server_url": {
       "type": "string",
