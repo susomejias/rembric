@@ -12,7 +12,10 @@ export default tseslint.config(
       'examples/**',
       'example-design/**',
       'apps/server/scripts/**',
-      'apps/plugin/**',
+      'apps/plugin/*',
+      '!apps/plugin/bin',
+      'apps/plugin/*/**',
+      '!apps/plugin/bin/**',
       'plugin/**',
       'apps/server/src/dashboard/public/**',
       '**/*.d.ts',
@@ -68,6 +71,16 @@ export default tseslint.config(
     // type-checked rules for these files.
     files: ['eslint.config.js', 'commitlint.config.js', 'install.test.ts'],
     extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    // Shipped runtime bridges. They live outside the TS projectService, so
+    // lint them with recommended (non-type-checked) rules only.
+    files: ['apps/plugin/bin/**/*.mjs'],
+    extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: { process: 'readonly' },
+      parserOptions: { projectService: false },
+    },
   },
   prettier,
 );

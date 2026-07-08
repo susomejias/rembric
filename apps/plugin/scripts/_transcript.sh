@@ -32,12 +32,12 @@ set -u
 trap 'exit 0' ERR
 
 # Conservative tail size — kept as a wire upper bound, NOT the effective cap.
-# The server's effective summary cap is SUMMARY_MAX_CHARS=2000 (enforced by
-# CHECK constraint + zod + service-layer guard). For HTTP writers (this
-# script, opencode plugin, Hermes provider) the server truncates anything
-# longer with a '…[truncated]' suffix. We keep 19500 here so a generous
-# transcript window reaches the server even if a future change raises the
-# cap; the server is the only authoritative trimmer.
+# The server's effective summary cap is SUMMARY_MAX_CHARS=10000 (enforced by
+# zod + service-layer guard). For HTTP writers (this script, opencode plugin,
+# Hermes provider) the server truncates anything longer with a '…[truncated]'
+# suffix. We keep 19500 here so a generous transcript window reaches the
+# server even if a future change raises the cap; the server is the only
+# authoritative trimmer.
 RBR_TRANSCRIPT_MAX_CHARS=19500
 RBR_TITLE_MAX_CHARS=100
 

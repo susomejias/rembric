@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -41,6 +41,14 @@ export interface ListSessionsOpts {
   limit: number;
   status?: AgentSessionStatus;
   includeDeleted?: boolean;
+}
+
+export interface AdminSessionFilters {
+  deleted: boolean;
+  /** Unset = no filter; `null` = global-only; a string = that project. */
+  projectId?: string | null;
+  agent?: string;
+  status?: AgentSessionStatus;
 }
 
 const listSelection = {
@@ -206,18 +214,38 @@ export class AgentSessionsRepository {
     this.db.run(sql`DELETE FROM sessions WHERE id IN (${placeholders})`);
   }
 
-  adminList(opts: {
-    deleted: boolean;
-    activeFirst: boolean;
-    limit: number;
-    offset: number;
-  }): AdminSessionRow[] {
+  /**
+   * Optional filters shared by `adminList`/`adminCount`. `projectId`
+   * follows the memories-list scope convention: unset = no filter,
+   * `null` = global-only (`project_id IS NULL`), a string = that project.
+   */
+  private adminFilterConditions(opts: AdminSessionFilters): SQL[] {
+    const conditions: SQL[] = [
+      opts.deleted ? isNotNull(agentSessions.deletedAt) : isNull(agentSessions.deletedAt),
+    ];
+    if (opts.projectId === null) {
+      conditions.push(isNull(agentSessions.projectId));
+    } else if (opts.projectId !== undefined) {
+      conditions.push(eq(agentSessions.projectId, opts.projectId));
+    }
+    if (opts.agent) conditions.push(eq(agentSessions.agent, opts.agent));
+    if (opts.status) conditions.push(eq(agentSessions.status, opts.status));
+    return conditions;
+  }
+
+  adminList(
+    opts: AdminSessionFilters & {
+      activeFirst: boolean;
+      limit: number;
+      offset: number;
+    },
+  ): AdminSessionRow[] {
     return this.db
       .select(listSelection)
       .from(agentSessions)
       .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
       .leftJoin(projects, eq(projects.id, agentSessions.projectId))
-      .where(opts.deleted ? isNotNull(agentSessions.deletedAt) : isNull(agentSessions.deletedAt))
+      .where(and(...this.adminFilterConditions(opts)))
       .orderBy(
         ...(opts.activeFirst
           ? [sql`CASE WHEN ${agentSessions.status} = 'active' THEN 0 ELSE 1 END`]
@@ -229,11 +257,12 @@ export class AgentSessionsRepository {
       .all();
   }
 
-  adminCount(opts: { deleted: boolean }): number {
+  /** True count for the same filter set `adminList` applies, no LIMIT/OFFSET/ORDER BY. */
+  adminCount(opts: AdminSessionFilters): number {
     const row = this.db
       .select({ value: count() })
       .from(agentSessions)
-      .where(opts.deleted ? isNotNull(agentSessions.deletedAt) : isNull(agentSessions.deletedAt))
+      .where(and(...this.adminFilterConditions(opts)))
       .get();
     return row?.value ?? 0;
   }

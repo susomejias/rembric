@@ -68,7 +68,7 @@ export function findSaveTimeCandidates(
   // Vec kNN is only useful once the just-saved row has an embedding (the
   // worker may not have processed it yet); otherwise the FTS pass below
   // picks up the slack.
-  const vecRows = repos.vectors.knnByCosine({
+  const vecRows = repos.vectors.knnCandidates({
     memoryId: saved.id,
     scope: saved.scope,
     projectId: saved.projectId,

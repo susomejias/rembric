@@ -1,6 +1,6 @@
 {
   "name": "rembric",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Memory for Codex CLI, backed by your self-hosted Rembric server.",
   "author": {
     "name": "rembric contributors",
@@ -9,12 +9,7 @@
   "repository": "https://github.com/susomejias/rembric",
   "homepage": "https://github.com/susomejias/rembric",
   "license": "MIT",
-  "keywords": [
-    "memory",
-    "mcp",
-    "rembric",
-    "agent-memory"
-  ],
+  "keywords": ["memory", "mcp", "rembric", "agent-memory"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "hooks": "./hooks/hooks.codex.json"
 }

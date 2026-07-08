@@ -64,6 +64,23 @@ export type AdminRelationWithContent = Pick<
 const sourceMemory = aliasedTable(memory, 'ms');
 const targetMemory = aliasedTable(memory, 'mt');
 
+/** Source AND target both lie in `(scope, projectId)` (aliased-join filter). */
+function endpointsInScope(scope: MemoryScope, projectId: string | null): SQL {
+  return scope === 'project'
+    ? (and(
+        eq(sourceMemory.scope, 'project'),
+        eq(sourceMemory.projectId, projectId ?? ''),
+        eq(targetMemory.scope, 'project'),
+        eq(targetMemory.projectId, projectId ?? ''),
+      ) as SQL)
+    : (and(
+        eq(sourceMemory.scope, 'global'),
+        isNull(sourceMemory.projectId),
+        eq(targetMemory.scope, 'global'),
+        isNull(targetMemory.projectId),
+      ) as SQL);
+}
+
 const withContentSelection = {
   id: memoryRelations.id,
   judgmentId: memoryRelations.judgmentId,
@@ -209,13 +226,35 @@ export class RelationsRepository {
       .map((r) => r.targetId);
   }
 
-  findPendingOlderThan(cutoff: Date, limit: number): MemoryRelation[] {
+  /**
+   * Aged pending relations in `scope`, ids only — feeds the consolidator's
+   * per-scope orphan-promotion pass (scope filter in SQL, oldest first,
+   * batch-bounded, so one scope's backlog never starves another's).
+   */
+  findPendingOlderThanInScope(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    cutoffMs: number;
+    limit: number;
+  }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
     return this.db
-      .select()
+      .select({
+        judgmentId: memoryRelations.judgmentId,
+        sourceId: memoryRelations.sourceId,
+        targetId: memoryRelations.targetId,
+      })
       .from(memoryRelations)
-      .where(and(eq(memoryRelations.status, 'pending'), lt(memoryRelations.createdAt, cutoff)))
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          eq(memoryRelations.status, 'pending'),
+          lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
+          endpointsInScope(opts.scope, opts.projectId),
+        ),
+      )
       .orderBy(memoryRelations.createdAt)
-      .limit(limit)
+      .limit(opts.limit)
       .all();
   }
 
@@ -270,6 +309,27 @@ export class RelationsRepository {
     return row?.value ?? 0;
   }
 
+  /**
+   * `listTouching` with joined counterpart titles, for the memory detail
+   * hub's Judgments section. Same touching/not_conflict predicate as
+   * `listTouching` — no new SQL shape, just the admin content join.
+   */
+  adminListTouching(memoryId: string): AdminRelationWithContent[] {
+    return this.db
+      .select(withContentSelection)
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
+          or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
+        ),
+      )
+      .orderBy(desc(memoryRelations.createdAt))
+      .all();
+  }
+
   adminGetWithContent(id: string): AdminRelationWithContent | undefined {
     return this.db
       .select(withContentSelection)
@@ -290,20 +350,6 @@ export class RelationsRepository {
     cutoffMs: number;
     limit: number;
   }): AdminRelationWithContent[] {
-    const scopeFilter =
-      opts.scope === 'project'
-        ? and(
-            eq(sourceMemory.scope, 'project'),
-            eq(sourceMemory.projectId, opts.projectId ?? ''),
-            eq(targetMemory.scope, 'project'),
-            eq(targetMemory.projectId, opts.projectId ?? ''),
-          )
-        : and(
-            eq(sourceMemory.scope, 'global'),
-            isNull(sourceMemory.projectId),
-            eq(targetMemory.scope, 'global'),
-            isNull(targetMemory.projectId),
-          );
     return this.db
       .select(withContentSelection)
       .from(memoryRelations)
@@ -313,7 +359,7 @@ export class RelationsRepository {
         and(
           eq(memoryRelations.status, 'pending'),
           lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
-          scopeFilter,
+          endpointsInScope(opts.scope, opts.projectId),
         ),
       )
       .orderBy(memoryRelations.createdAt)

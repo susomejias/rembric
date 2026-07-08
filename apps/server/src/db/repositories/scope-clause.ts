@@ -1,6 +1,6 @@
-import { sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 
-import type { MemoryScope } from '../schema/memory.js';
+import { memory, type MemoryScope } from '../schema/memory.js';
 
 /** Partition-key sentinel for the global scope (project_id IS NULL). */
 export const GLOBAL_PARTITION_KEY = '__global__';
@@ -15,6 +15,17 @@ export function scopeWhere(scope: MemoryScope, projectId: string | null, alias?:
   return scope === 'project'
     ? sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`
     : sql`${p}scope = 'global' AND ${p}project_id IS NULL`;
+}
+
+/**
+ * Drizzle-builder sibling of `scopeWhere`, for query-builder call sites over
+ * the unaliased `memory` table. Kept beside the raw idiom so the two evolve
+ * in lock-step.
+ */
+export function scopeCondition(scope: MemoryScope, projectId: string | null): SQL {
+  return scope === 'project'
+    ? (and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? '')) as SQL)
+    : (and(eq(memory.scope, 'global'), isNull(memory.projectId)) as SQL);
 }
 
 /**
