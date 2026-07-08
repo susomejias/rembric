@@ -141,4 +141,33 @@ describe('PromptsRepository', () => {
       expect(rows.map((p) => p.id)).toEqual(['P2']);
     });
   });
+
+  describe('adminCount', () => {
+    it('mirrors the default (non-deleted) adminList filter', () => {
+      expect(repo.adminCount({ includeDeleted: false })).toBe(2);
+      expect(repo.adminCount({ includeDeleted: true })).toBe(3);
+    });
+
+    it('mirrors the project/global filter', () => {
+      expect(repo.adminCount({ includeDeleted: false, project: { kind: 'global' } })).toBe(1);
+      expect(
+        repo.adminCount({
+          includeDeleted: false,
+          project: { kind: 'project', projectId: 'p1' },
+        }),
+      ).toBe(1);
+    });
+
+    it('mirrors the agent and session-prefix filter', () => {
+      expect(repo.adminCount({ includeDeleted: false, agent: 'claude-code' })).toBe(1);
+      expect(repo.adminCount({ includeDeleted: false, sessionIdPrefix: 'SESS' })).toBe(1);
+      expect(repo.adminCount({ includeDeleted: false, sessionIdPrefix: 'ZZZ' })).toBe(0);
+    });
+
+    it('is independent of limit/offset — the true count, not a page slice', () => {
+      const rows = repo.adminList({ includeDeleted: true, limit: 1, offset: 0 });
+      expect(rows).toHaveLength(1);
+      expect(repo.adminCount({ includeDeleted: true })).toBe(3);
+    });
+  });
 });

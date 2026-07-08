@@ -1,4 +1,4 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import type { AdminListPromptsOpts, Repositories } from '../db/repositories/index.js';
 import type { Prompt } from '../db/schema/prompts.js';
@@ -6,20 +6,30 @@ import { DomainError } from '../services/errors.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
+import {
+  domainErrorPage,
+  filterGroup,
+  filtersBar,
+  getSession,
+  inp,
+  mdBody,
+  PAGE_SIZE,
+  pager,
+  projectOptions,
+  sel,
+  tblEmpty,
+  truncate,
+  urlWithPage,
+  viewHead,
+} from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { escape, formatTs, html, raw, shortId } from './templates.js';
-import type { ResolvedSession } from './types.js';
+import { formatTs, html, raw, shortId } from './templates.js';
 
 export interface PromptsDeps {
   repos: Repositories;
   prompts: PromptsService;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 export function createPromptsRouter(deps: PromptsDeps): Hono {
@@ -81,6 +91,20 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
 
+    // The FTS branch filters client-side after `adminSearchFts` has already
+    // paginated, so (as with memories' needs_review+query combo) a true
+    // filtered count isn't cheaply derivable here — report a lower bound.
+    const total = query
+      ? `${visible.length}+`
+      : String(
+          deps.repos.prompts.adminCount({
+            includeDeleted,
+            project,
+            agent: agentFilter || undefined,
+            sessionIdPrefix: sessionFilter || undefined,
+          }),
+        );
+
     const flash = justDeleted
       ? html`<p class="flash success">
           Prompt <code>${justDeleted}</code> soft-deleted.
@@ -90,18 +114,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       : justUndeleted
         ? html`<p class="flash success">Prompt <code>${justUndeleted}</code> restored.</p>`
         : raw('');
-
-    const projectOptions = [
-      raw('<option value="">all scopes</option>'),
-      raw(
-        `<option value="__global__"${projectFilter === '__global__' ? ' selected' : ''}>global only</option>`,
-      ),
-      ...projectRows.map((p) =>
-        raw(
-          `<option value="${escape(p.slug)}"${projectFilter === p.slug ? ' selected' : ''}>${escape(p.slug)}</option>`,
-        ),
-      ),
-    ];
 
     const renderRow = (p: Prompt) => {
       const projectLabel = p.projectId
@@ -171,12 +183,46 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       `;
     };
 
+    const filterBar = filtersBar([
+      filterGroup(
+        'SCOPE',
+        'f-project',
+        sel('project', projectOptions(projectRows, projectFilter), { id: 'f-project' }),
+      ),
+      filterGroup(
+        'SESSION',
+        'f-session',
+        inp('session', sessionFilter, 'shortId prefix', { id: 'f-session' }),
+      ),
+      filterGroup(
+        'AGENT',
+        'f-agent',
+        inp('agent', agentFilter, 'e.g. claude-code', { id: 'f-agent' }),
+      ),
+      filterGroup(
+        'SEARCH',
+        'f-q',
+        inp('q', query, 'FTS5 over content + tags', { type: 'search', id: 'f-q' }),
+        { className: 'search' },
+      ),
+      includeDeleted ? raw('<input type="hidden" name="include_deleted" value="1" />') : raw(''),
+      html`<span class="acts">
+        <button class="btn primary" type="submit">FILTER</button>
+        <a class="clear" href="/dashboard/prompts${includeDeleted ? '?include_deleted=1' : ''}"
+          >CLEAR</a
+        >
+      </span>`,
+    ]);
+
     const body = html`
       ${viewHead({
         num: '03b',
         title: 'Rembric Prompts.',
         hl: 'Rembric',
-        meta: [{ k: 'SHOWING', v: `${visible.length} ROWS` }],
+        meta: [
+          { k: 'TOTAL', v: total },
+          { k: 'SHOWING', v: `${visible.length} ROWS` },
+        ],
       })}
       ${flash}
       ${includeDeleted
@@ -186,39 +232,9 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
         : raw(
             '<p class="small muted"><a href="/dashboard/prompts?include_deleted=1">Show deleted</a></p>',
           )}
-
-      <form class="filters" method="get">
-        <span class="group">
-          <span class="k">SCOPE</span>
-          <select name="project">
-            ${projectOptions}
-          </select>
-        </span>
-        <span class="group">
-          <span class="k">SESSION</span>
-          <input type="text" name="session" value="${sessionFilter}" placeholder="shortId prefix" />
-        </span>
-        <span class="group">
-          <span class="k">AGENT</span>
-          <input type="text" name="agent" value="${agentFilter}" placeholder="e.g. claude-code" />
-        </span>
-        <span class="group search">
-          <span class="k">SEARCH</span>
-          <input type="search" name="q" value="${query}" placeholder="FTS5 over content + tags" />
-        </span>
-        ${includeDeleted
-          ? raw('<input type="hidden" name="include_deleted" value="1" />')
-          : raw('')}
-        <span class="acts">
-          <button class="btn primary" type="submit">FILTER</button>
-          <a class="clear" href="/dashboard/prompts${includeDeleted ? '?include_deleted=1' : ''}"
-            >CLEAR</a
-          >
-        </span>
-      </form>
-
+      ${filterBar}
       ${visible.length === 0
-        ? html`<p class="muted">No prompts match this filter.</p>`
+        ? tblEmpty('No prompts match this filter.')
         : html`
             <div class="tbl-host">
               <table>
@@ -270,12 +286,12 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       deps.prompts.softDelete(id, { adminBypass: true });
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Prompts',
-            activeNav: 'prompts',
-          }),
-          err.code === 'prompt_not_found' ? 404 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Prompts', activeNav: 'prompts' },
+          (code) => (code === 'prompt_not_found' ? 404 : 400),
         );
       }
       throw err;
@@ -293,12 +309,12 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       deps.prompts.undelete(id, { adminBypass: true });
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Prompts',
-            activeNav: 'prompts',
-          }),
-          err.code === 'prompt_not_found' ? 404 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Prompts', activeNav: 'prompts' },
+          (code) => (code === 'prompt_not_found' ? 404 : 400),
         );
       }
       throw err;
@@ -307,11 +323,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
   });
 
   return app;
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
 }
 
 function matchesFilters(
@@ -332,6 +343,3 @@ function matchesFilters(
   if (sessionFilter && (!p.sessionId || !p.sessionId.startsWith(sessionFilter))) return false;
   return true;
 }
-
-// Maintained imports for downstream consumers.
-void backLink;

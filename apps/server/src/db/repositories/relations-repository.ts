@@ -309,6 +309,27 @@ export class RelationsRepository {
     return row?.value ?? 0;
   }
 
+  /**
+   * `listTouching` with joined counterpart titles, for the memory detail
+   * hub's Judgments section. Same touching/not_conflict predicate as
+   * `listTouching` — no new SQL shape, just the admin content join.
+   */
+  adminListTouching(memoryId: string): AdminRelationWithContent[] {
+    return this.db
+      .select(withContentSelection)
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
+          or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
+        ),
+      )
+      .orderBy(desc(memoryRelations.createdAt))
+      .all();
+  }
+
   adminGetWithContent(id: string): AdminRelationWithContent | undefined {
     return this.db
       .select(withContentSelection)

@@ -1,24 +1,19 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 import { type TokensService, type TokenScope } from '../services/tokens.js';
 
-import { viewHead } from './components.js';
+import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { escape, formatTs, html, raw, type SafeHtml } from './templates.js';
-import type { ResolvedSession } from './types.js';
 
 export interface TokensDeps {
   tokens: TokensService;
   projects: ProjectsService;
   sessions: SessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 export function createTokensRouter(deps: TokensDeps): Hono {
@@ -95,7 +90,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
 
       <h2>Existing</h2>
       ${tokens.length === 0
-        ? html`<p class="muted">No tokens yet.</p>`
+        ? tblEmpty('No tokens yet.')
         : html`
             <div class="tbl-host">
               <table>
@@ -161,7 +156,9 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const scopeOverride = readStringField(form, 'scope').trim();
     const expiresInput = readStringField(form, 'expires').trim();
 
-    if (!name) return errorResponse(c, deps.sessions, 'Name is required.');
+    const view = { title: 'Tokens', activeNav: 'tokens' } as const;
+
+    if (!name) return flashErrorPage(c, deps.sessions, 'Name is required.', view);
 
     let projectSlug: string | null = null;
     if (projectInput) {
@@ -174,7 +171,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
         projectSlug = p.slug;
       } catch (err) {
         if (err instanceof DomainError) {
-          return errorResponse(c, deps.sessions, err.message);
+          return flashErrorPage(c, deps.sessions, err.message, view);
         }
         throw err;
       }
@@ -183,7 +180,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     let scope: TokenScope;
     if (scopeOverride) {
       if (scopeOverride !== '*' && scopeOverride !== 'read:*') {
-        return errorResponse(c, deps.sessions, "Override scope must be '*' or 'read:*'.");
+        return flashErrorPage(c, deps.sessions, "Override scope must be '*' or 'read:*'.", view);
       }
       scope = scopeOverride;
     } else {
@@ -194,7 +191,12 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     if (expiresInput) {
       const parsed = new Date(expiresInput);
       if (Number.isNaN(parsed.getTime())) {
-        return errorResponse(c, deps.sessions, `Invalid expires timestamp '${expiresInput}'.`);
+        return flashErrorPage(
+          c,
+          deps.sessions,
+          `Invalid expires timestamp '${expiresInput}'.`,
+          view,
+        );
       }
       expiresAt = parsed;
     }
@@ -211,7 +213,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       return c.redirect(url.pathname + url.search);
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, deps.sessions, err.message);
+        return flashErrorPage(c, deps.sessions, err.message, view);
       }
       throw err;
     }
@@ -226,7 +228,10 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       deps.tokens.revoke(c.req.param('name'));
     } catch (err) {
       if (err instanceof DomainError) {
-        return errorResponse(c, deps.sessions, err.message);
+        return flashErrorPage(c, deps.sessions, err.message, {
+          title: 'Tokens',
+          activeNav: 'tokens',
+        });
       }
       throw err;
     }
@@ -245,14 +250,4 @@ function scopeBadge(scope: TokenScope): SafeHtml {
   if (scope === '*') return raw('<span class="pill scope-star">*</span>');
   if (scope === 'read:*') return raw('<span class="pill">read:*</span>');
   return raw(`<code>${escape(scope)}</code>`);
-}
-
-function errorResponse(c: Context, sessions: SessionsService, message: string): Response {
-  return c.html(
-    renderPage(c, sessions, html`<p class="flash error">${message}</p>`, {
-      title: 'Tokens',
-      activeNav: 'tokens',
-    }),
-    400,
-  );
 }

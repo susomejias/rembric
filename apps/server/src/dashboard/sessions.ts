@@ -1,24 +1,37 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 
 import type { Repositories } from '../db/repositories/index.js';
+import { AGENT_SESSION_STATUSES, type AgentSessionStatus } from '../db/schema/agent-sessions.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';
 
-import { backLink, PAGE_SIZE, pager, mdBody, urlWithPage, viewHead } from './components.js';
+import {
+  backLink,
+  domainErrorPage,
+  filterGroup,
+  filtersBar,
+  getSession,
+  inp,
+  kv,
+  kvGrid,
+  PAGE_SIZE,
+  pager,
+  mdBody,
+  sel,
+  tblEmpty,
+  truncate,
+  urlWithPage,
+  viewHead,
+} from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
 import { formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
-import type { ResolvedSession } from './types.js';
 
 export interface SessionsDeps {
   repos: Repositories;
   sessions: SessionsService;
   agentSessions: AgentSessionsService;
-}
-
-function getSession(c: Context): ResolvedSession | null {
-  return (c.get('session') as ResolvedSession | undefined) ?? null;
 }
 
 export function createSessionsRouter(deps: SessionsDeps): Hono {
@@ -33,17 +46,38 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const justRestored = url.searchParams.get('restored');
     const justAbandoned = url.searchParams.get('abandoned');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
+    const projectFilter = url.searchParams.get('project') ?? '';
+    const agentFilter = url.searchParams.get('agent') ?? '';
+    const statusFilterRaw = url.searchParams.get('status') ?? '';
+    const statusFilter = (AGENT_SESSION_STATUSES as readonly string[]).includes(statusFilterRaw)
+      ? (statusFilterRaw as AgentSessionStatus)
+      : undefined;
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
+
+    const projectRows = deps.repos.projects.adminListAll();
+    const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
+
+    let projectId: string | null | undefined;
+    if (projectFilter === '__global__') {
+      projectId = null;
+    } else if (projectFilter) {
+      const p = projectBySlug.get(projectFilter);
+      if (p) projectId = p.id;
+    }
 
     const visibleRowsRaw = deps.repos.agentSessions.adminList({
       deleted: false,
       activeFirst: true,
+      projectId,
+      agent: agentFilter || undefined,
+      status: statusFilter,
       limit: PAGE_SIZE + 1,
       offset,
     });
     const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
     const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
+    // Filters apply to the non-deleted table only; include_deleted is unchanged.
     const deletedRowsRaw = includeDeleted
       ? deps.repos.agentSessions.adminList({
           deleted: true,
@@ -139,12 +173,53 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             </p>`
           : raw('');
 
+    const projectOptionsList = [
+      { value: '', label: 'all scopes', selected: projectFilter === '' },
+      { value: '__global__', label: 'global only', selected: projectFilter === '__global__' },
+      ...projectRows.map((p) => ({
+        value: p.slug,
+        label: p.slug,
+        selected: projectFilter === p.slug,
+      })),
+    ];
+    const statusOptionsList = [
+      { value: '', label: 'all statuses', selected: statusFilterRaw === '' },
+      ...AGENT_SESSION_STATUSES.map((s) => ({
+        value: s,
+        label: s,
+        selected: statusFilterRaw === s,
+      })),
+    ];
+    const filterBar = filtersBar([
+      filterGroup('SCOPE', 'f-project', sel('project', projectOptionsList, { id: 'f-project' })),
+      filterGroup(
+        'AGENT',
+        'f-agent',
+        inp('agent', agentFilter, 'e.g. claude-code', { id: 'f-agent' }),
+      ),
+      filterGroup('STATUS', 'f-status', sel('status', statusOptionsList, { id: 'f-status' })),
+      includeDeleted ? raw('<input type="hidden" name="include_deleted" value="1" />') : raw(''),
+      html`<span class="acts">
+        <button class="btn primary" type="submit">FILTER</button>
+        <a class="clear" href="/dashboard/sessions${includeDeleted ? '?include_deleted=1' : ''}"
+          >CLEAR</a
+        >
+      </span>`,
+    ]);
+
+    const total = deps.repos.agentSessions.adminCount({
+      deleted: false,
+      projectId,
+      agent: agentFilter || undefined,
+      status: statusFilter,
+    });
+
     const body = html`
       ${viewHead({
         num: '03',
         title: 'Rembric Sessions.',
         hl: 'Rembric',
-        meta: [{ k: 'TOTAL', v: String(deps.repos.agentSessions.adminCount({ deleted: false })) }],
+        meta: [{ k: 'TOTAL', v: String(total) }],
       })}
       ${flash}
       ${includeDeleted
@@ -154,9 +229,10 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
         : raw(
             '<p class="small muted"><a href="/dashboard/sessions?include_deleted=1">Show deleted</a></p>',
           )}
+      ${filterBar}
       <h2>Sessions (${visibleRows.length})</h2>
       ${visibleRows.length === 0
-        ? html`<p class="muted">No agent sessions yet.</p>`
+        ? tblEmpty('No agent sessions match this filter.')
         : html`
             <div class="tbl-host">
               <table>
@@ -294,35 +370,19 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             keep their <code>session_id</code> pointer intact.
           </p>`
         : raw('')}
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="label">Status</div>
-          <div class="value">${statusPill(row.status)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Agent</div>
-          <div class="value">${row.agent}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Project</div>
-          <div class="value">${row.projectSlug ?? '— (global)'}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Token</div>
-          <div class="value">
-            ${row.tokenName ?? '—'}
-            ${row.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Started</div>
-          <div class="value" style="font-size:.9rem">${formatTs(row.startedAt)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Ended</div>
-          <div class="value" style="font-size:.9rem">${formatTs(row.endedAt)}</div>
-        </div>
-      </div>
+      ${kvGrid([
+        kv({ k: 'Status', v: statusPill(row.status) }),
+        kv({ k: 'Agent', v: row.agent }),
+        kv({ k: 'Project', v: row.projectSlug ?? '— (global)' }),
+        kv({
+          k: 'Token',
+          v: html`${row.tokenName ?? '—'}${row.tokenRevokedAt
+            ? raw('<span class="muted small">(revoked)</span>')
+            : raw('')}`,
+        }),
+        kv({ k: 'Started', v: formatTs(row.startedAt) }),
+        kv({ k: 'Ended', v: formatTs(row.endedAt) }),
+      ])}
 
       <p>${actionForm}</p>
 
@@ -336,7 +396,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
       <h2>Memories (${memories.length})</h2>
       ${memories.length === 0
-        ? html`<p class="muted">No memories anchored to this session.</p>`
+        ? tblEmpty('No memories anchored to this session.')
         : html`
             <div class="tbl-host">
               <table>
@@ -368,7 +428,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
       <h2>Prompts (${sessionPrompts.length})</h2>
       ${sessionPrompts.length === 0
-        ? html`<p class="muted">No prompts anchored to this session.</p>`
+        ? tblEmpty('No prompts anchored to this session.')
         : html`
             <div class="tbl-host">
               <table>
@@ -418,12 +478,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       deps.agentSessions.softDelete(id, { adminBypass: true });
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Sessions',
-            activeNav: 'sessions',
-          }),
-          err.code === 'session_not_found' ? 404 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Sessions', activeNav: 'sessions' },
+          (code) => (code === 'session_not_found' ? 404 : 400),
         );
       }
       throw err;
@@ -441,12 +501,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       deps.agentSessions.undelete(id, { adminBypass: true });
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Sessions',
-            activeNav: 'sessions',
-          }),
-          err.code === 'session_not_found' ? 404 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Sessions', activeNav: 'sessions' },
+          (code) => (code === 'session_not_found' ? 404 : 400),
         );
       }
       throw err;
@@ -464,12 +524,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       deps.agentSessions.markAbandoned(id, { adminBypass: true });
     } catch (err) {
       if (err instanceof DomainError) {
-        return c.html(
-          renderPage(c, deps.sessions, html`<p class="flash error">${err.message}</p>`, {
-            title: 'Sessions',
-            activeNav: 'sessions',
-          }),
-          err.code === 'session_not_found' ? 404 : 400,
+        return domainErrorPage(
+          c,
+          deps.sessions,
+          err,
+          { title: 'Sessions', activeNav: 'sessions' },
+          (code) => (code === 'session_not_found' ? 404 : 400),
         );
       }
       throw err;
@@ -478,11 +538,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
   });
 
   return app;
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
 }
 
 /**
