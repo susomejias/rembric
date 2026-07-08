@@ -13,7 +13,11 @@
   "scripts": {
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
+    "dev": "pnpm --filter @rembric/server run dev",
+    "start": "pnpm --filter @rembric/server run start",
     "test": "pnpm -r run test && pnpm run test:hermes-plugin",
+    "test:watch": "pnpm --filter @rembric/server run test:watch",
+    "test:coverage": "pnpm --filter @rembric/server run test:coverage",
     "test:hermes-plugin": "command -v python3 >/dev/null && python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -v || echo '[skip] python3 not available; Hermes plugin tests skipped'",
     "e2e:installer": "for f in install.sh apps/plugin/install.sh apps/plugin/.hermes-plugin/install.sh apps/plugin/.hermes-plugin/uninstall.sh apps/plugin/.opencode-plugin/install.sh apps/plugin/.opencode-plugin/uninstall.sh; do sh -n \"$f\" || exit 1; done && pnpm --filter @rembric/server exec vitest run ../../install.test.ts",
     "lint": "eslint .",

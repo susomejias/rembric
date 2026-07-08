@@ -2,6 +2,11 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // install.test.ts stays here so `vitest run ../../install.test.ts` (the
+    // e2e:installer step) can find it — a positional filter can only narrow
+    // an already-included file, not add one. The default `test`/
+    // `test:coverage` scripts pass `--exclude '../../install.test.ts'` so it
+    // runs exactly once per CI run, via e2e:installer only.
     include: ['src/**/*.test.ts', '../plugin/.opencode-plugin/*.test.ts', '../../install.test.ts'],
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,
@@ -22,14 +27,13 @@ export default defineConfig({
         'src/services/index.ts',
         'src/db/index.ts',
       ],
-      // Targets per design.md (≥ 85% / ≥ 90% statements). For v0 we
-      // start lower and raise these as the suite grows so the gate moves
-      // with us rather than blocking the first PRs.
+      // Enforced floor, rounded down from measured coverage. Up-only
+      // ratchet: raise as the suite grows, never lower to pass a PR.
       thresholds: {
-        lines: 50,
-        functions: 50,
-        branches: 50,
-        statements: 50,
+        lines: 85,
+        functions: 91,
+        branches: 78,
+        statements: 85,
       },
     },
   },

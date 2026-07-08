@@ -72,8 +72,13 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # Server suite runs WITH coverage so the vitest thresholds actually gate
+      # PRs; the Hermes plugin's Python tests run separately (they have no
+      # coverage gate). Together these cover what `pnpm test` runs.
       - name: Test
-        run: pnpm test
+        run: |
+          pnpm --filter @rembric/server run test:coverage
+          pnpm run test:hermes-plugin
 
       - name: Installer e2e (headless)
         run: pnpm run e2e:installer
