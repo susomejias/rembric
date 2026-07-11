@@ -1,3 +1,4 @@
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
@@ -9,6 +10,7 @@ import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
 
 import { AuthError, authenticate } from './auth.js';
+import type { AuthLockout } from './rate-limit.js';
 import type { RequestContext } from './request-context.js';
 
 type ApiEnv = { Variables: { rembricCtx: RequestContext } };
@@ -33,6 +35,8 @@ export interface ApiRouterDeps {
   projects: ProjectsService;
   /** OAuth access-token fallback, so /api auth matches /mcp. Null when OAuth is off. */
   oauth?: OAuthService | null;
+  /** Pre-auth failed-attempt lockout, keyed on network identity. */
+  authLockout?: AuthLockout | null;
   /**
    * Fire-and-forget consolidation sweep (decay + deadline orphaning),
    * invoked after a session is created. Throttled and error-isolated by
@@ -191,23 +195,39 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
 function authMiddleware(deps: ApiRouterDeps) {
   return async (c: ApiContext, next: () => Promise<void>) => {
     const slug = c.req.param('slug');
+    const identity = connIdentity(c);
+    const locked = deps.authLockout?.check(identity);
+    if (locked?.locked) {
+      c.header('Retry-After', String(locked.retryAfterSeconds));
+      return c.json({ ok: false, code: 'rate_limited', message: 'too many failed attempts' }, 429);
+    }
     try {
-      const ctx = authenticate({
+      const ctx = await authenticate({
         authorization: c.req.header('authorization'),
         pathSlug: slug,
         tokens: deps.tokens,
         projects: deps.projects,
         oauth: deps.oauth ?? null,
       });
+      deps.authLockout?.recordSuccess(identity);
       c.set('rembricCtx', ctx);
     } catch (err) {
       if (err instanceof AuthError) {
+        deps.authLockout?.recordFailure(identity);
         return c.json({ ok: false, code: err.code, message: err.message }, err.status);
       }
       throw err;
     }
     await next();
   };
+}
+
+function connIdentity(c: Context): string {
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 function rejectIfDeleted(

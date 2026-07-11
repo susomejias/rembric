@@ -3,8 +3,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRepositories } from '../db/repositories/index.js';
 import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { OAuthService } from '../services/oauth.js';
+import { ProjectsService } from '../services/projects.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
 import { createOAuthProvider } from './oauth-provider.js';
@@ -47,6 +49,7 @@ describe('createOAuthProvider', () => {
     oauth = new OAuthService({ oauth: new OAuthRepository(t.handle.db) }, TTL);
     provider = createOAuthProvider({
       oauth,
+      projects: new ProjectsService(createRepositories(t.handle.db)),
       issuer: 'https://rembric.example.com',
       areqKey: randomBytes(32),
     });

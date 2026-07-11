@@ -37,6 +37,8 @@ export const oauthAuthorizationCodes = sqliteTable(
     codeChallenge: text('code_challenge').notNull(),
     scope: text('scope').notNull(),
     subject: text('subject').notNull(),
+    /** Consented project (from the RFC 8707 resource path); null = global grant. */
+    projectId: text('project_id'),
     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
     consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
@@ -59,6 +61,8 @@ export const oauthTokens = sqliteTable(
     familyId: text('family_id').notNull(),
     scope: text('scope').notNull(),
     subject: text('subject').notNull(),
+    /** Consented project (inherited from the grant); null = global grant. */
+    projectId: text('project_id'),
     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
     /** Set when a refresh token is consumed by rotation. */
     rotatedAt: integer('rotated_at', { mode: 'timestamp_ms' }),

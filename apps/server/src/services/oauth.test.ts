@@ -286,3 +286,89 @@ describe('grantedOAuthScope', () => {
     expect(resolveGrantedScope(grantedOAuthScope('read'))).toBe('read:*');
   });
 });
+
+describe('OAuthService — project binding & hardening', () => {
+  let t: TestDb;
+  let svc: OAuthService;
+  let clock: { now: Date };
+
+  beforeEach(() => {
+    t = createTestDb();
+    clock = { now: new Date(1_000_000) };
+    svc = new OAuthService({ oauth: new OAuthRepository(t.handle.db) }, TTL, () => clock.now);
+  });
+
+  afterEach(() => t.cleanup());
+
+  function mint(opts: { scope: '*' | 'read:*'; projectId?: string | null }): string {
+    const client = svc.registerClient({ redirectUris: ['https://c/cb'] });
+    const code = svc.issueCode({
+      clientId: client.clientId,
+      redirectUri: 'https://c/cb',
+      codeChallenge: 'challenge',
+      scope: opts.scope,
+      subject: 'operator',
+      projectId: opts.projectId ?? null,
+    });
+    return svc.redeemCode({ code, clientId: client.clientId, redirectUri: 'https://c/cb' })
+      .accessToken;
+  }
+
+  it('binds a write grant to project:<id>', () => {
+    const access = mint({ scope: '*', projectId: 'proj-a' });
+    const resolved = svc.authenticateAccessToken(access);
+    expect(resolved?.scope).toBe('project:proj-a');
+    expect(resolved?.projectId).toBe('proj-a');
+  });
+
+  it('binds a read grant to read:project:<id>', () => {
+    const access = mint({ scope: 'read:*', projectId: 'proj-a' });
+    const resolved = svc.authenticateAccessToken(access);
+    expect(resolved?.scope).toBe('read:project:proj-a');
+  });
+
+  it('leaves a path-less grant global', () => {
+    const write = svc.authenticateAccessToken(mint({ scope: '*', projectId: null }));
+    expect(write?.scope).toBe('*');
+    expect(write?.projectId).toBeNull();
+    const read = svc.authenticateAccessToken(mint({ scope: 'read:*', projectId: null }));
+    expect(read?.scope).toBe('read:*');
+  });
+
+  it('carries the binding across a refresh rotation', () => {
+    const client = svc.registerClient({ redirectUris: ['https://c/cb'] });
+    const code = svc.issueCode({
+      clientId: client.clientId,
+      redirectUri: 'https://c/cb',
+      codeChallenge: 'challenge',
+      scope: '*',
+      subject: 'operator',
+      projectId: 'proj-a',
+    });
+    const pair = svc.redeemCode({ code, clientId: client.clientId, redirectUri: 'https://c/cb' });
+    const rotated = svc.refresh({ refreshToken: pair.refreshToken, clientId: client.clientId });
+    expect(svc.authenticateAccessToken(rotated.accessToken)?.scope).toBe('project:proj-a');
+  });
+
+  it('rejects a code exchange that omits redirect_uri (no optional bypass)', () => {
+    const client = svc.registerClient({ redirectUris: ['https://c/cb'] });
+    const code = svc.issueCode({
+      clientId: client.clientId,
+      redirectUri: 'https://c/cb',
+      codeChallenge: 'challenge',
+      scope: '*',
+      subject: 'operator',
+    });
+    expect(() => svc.redeemCode({ code, clientId: client.clientId })).toThrow(/redirect_uri/);
+  });
+
+  it('revoke is a no-op for another client (ownership check)', () => {
+    const access = mint({ scope: '*', projectId: null });
+    svc.revokeByToken(access, 'some-other-client');
+    expect(svc.authenticateAccessToken(access)).not.toBeNull();
+    // The owning client's revoke takes effect.
+    const owner = svc.authenticateAccessToken(access)?.clientId;
+    svc.revokeByToken(access, owner);
+    expect(svc.authenticateAccessToken(access)).toBeNull();
+  });
+});

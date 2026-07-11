@@ -6,6 +6,7 @@ import {
 } from 'node:http';
 
 import { getRequestListener } from '@hono/node-server';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import type { OAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import {
   getOAuthProtectedResourceMetadataUrl,
@@ -25,7 +26,7 @@ import { REMBRIC_VERSION } from '../version.js';
 import { createApiRouter } from './api-router.js';
 import { AuthError, authenticate } from './auth.js';
 import { createDashboardRouter, type DashboardDeps } from './dashboard-router.js';
-import type { RateLimiter } from './rate-limit.js';
+import type { AuthLockout, RateLimiter } from './rate-limit.js';
 import { runWithContext } from './request-context.js';
 
 /**
@@ -54,6 +55,10 @@ export interface CreateHttpServerOptions {
   diagnostics: DbDiagnostics;
   /** Optional per-token rate limiter applied before MCP transport handoff. */
   rateLimiter?: RateLimiter | null;
+  /** Pre-auth failed-attempt lockout, keyed on network identity. */
+  authLockout?: AuthLockout | null;
+  /** Maximum raw request body size (bytes) for body-bearing methods. */
+  maxBodyBytes?: number;
   /**
    * Triggers a consolidation sweep on demand (force — bypasses the
    * per-scope throttle). Wired by the bootstrapper to the in-process
@@ -97,6 +102,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       projects: opts.projects,
       diagnostics: opts.diagnostics,
       oauth: opts.oauth?.service ?? null,
+      authLockout: opts.authLockout ?? null,
     }),
   );
   honoApp.get('/', (c) => c.redirect('/dashboard'));
@@ -116,6 +122,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       projects: opts.projects,
       sweep: opts.sweep,
       oauth: opts.oauth?.service ?? null,
+      authLockout: opts.authLockout ?? null,
     }),
   );
 
@@ -126,14 +133,26 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
   if (opts.triggerConsolidation) {
     const trigger = opts.triggerConsolidation;
     honoApp.post('/admin/consolidation/run', async (c) => {
+      const identity = connIdentity(c);
+      const lockout = opts.authLockout ?? null;
+      const locked = lockout?.check(identity);
+      if (locked?.locked) {
+        c.header('Retry-After', String(locked.retryAfterSeconds));
+        return c.json(
+          { ok: false, code: 'rate_limited', message: 'too many failed attempts' },
+          429,
+        );
+      }
       const authz = c.req.header('authorization');
-      const adminCheck = adminAuth(authz, opts.tokens);
+      const adminCheck = await adminAuth(authz, opts.tokens);
       if (adminCheck !== null) {
+        lockout?.recordFailure(identity);
         return c.json(
           { ok: false, code: adminCheck.code, message: adminCheck.message },
           adminCheck.status,
         );
       }
+      lockout?.recordSuccess(identity);
       try {
         const result = await trigger();
         return c.json({ ok: true, result });
@@ -204,10 +223,21 @@ export interface HealthzDeps {
   diagnostics: DbDiagnostics;
   /** OAuth access-token fallback, so /healthz auth matches /mcp. Null when OAuth is off. */
   oauth?: OAuthService | null;
+  /** Pre-auth failed-attempt lockout, keyed on network identity. */
+  authLockout?: AuthLockout | null;
 }
 
 export function createHealthzHandler(deps: HealthzDeps) {
-  return (c: Context) => {
+  return async (c: Context) => {
+    const identity = connIdentity(c);
+    const locked = deps.authLockout?.check(identity);
+    if (locked?.locked) {
+      c.header('Retry-After', String(locked.retryAfterSeconds));
+      return c.json(
+        { ok: false, code: 'rate_limited' as const, message: 'too many failed attempts' },
+        429,
+      );
+    }
     const authz = c.req.header('authorization');
     if (authz === undefined) {
       return c.json(
@@ -216,22 +246,33 @@ export function createHealthzHandler(deps: HealthzDeps) {
       );
     }
     try {
-      authenticate({
+      await authenticate({
         authorization: authz,
         pathSlug: undefined,
         tokens: deps.tokens,
         projects: deps.projects,
         oauth: deps.oauth ?? null,
       });
+      deps.authLockout?.recordSuccess(identity);
       deps.diagnostics.ping();
       return c.json({ ok: true, version: REMBRIC_VERSION });
     } catch (err) {
       if (err instanceof AuthError) {
+        deps.authLockout?.recordFailure(identity);
         return c.json({ ok: false, code: err.code, message: err.message }, err.status);
       }
       return c.json({ ok: false, code: 'db_unavailable' as const }, 503);
     }
   };
+}
+
+/** Best-effort client network identity for pre-auth lockout keying. */
+export function connIdentity(c: Context): string {
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 async function handleMcpRequest(
@@ -253,18 +294,36 @@ async function handleMcpRequest(
     return;
   }
 
-  // 1. Auth.
+  // 1. Pre-auth lockout, keyed on network identity, BEFORE the token-hash
+  // scan so bogus bearers cannot exhaust CPU on the single Node thread.
+  const identity = req.socket.remoteAddress ?? 'unknown';
+  const lockout = opts.authLockout ?? null;
+  const locked = lockout?.check(identity);
+  if (locked?.locked) {
+    res.setHeader('Retry-After', String(locked.retryAfterSeconds));
+    respondJson(res, 429, {
+      ok: false,
+      code: 'rate_limited',
+      message: 'too many failed authentication attempts',
+      retryAfterSeconds: locked.retryAfterSeconds,
+    });
+    return;
+  }
+
+  // 1a. Auth.
   let ctx;
   try {
-    ctx = authenticate({
+    ctx = await authenticate({
       authorization: headerString(req.headers.authorization),
       pathSlug: slug,
       tokens: opts.tokens,
       projects: opts.projects,
       oauth: opts.oauth?.service ?? null,
     });
+    lockout?.recordSuccess(identity);
   } catch (err) {
     if (err instanceof AuthError) {
+      lockout?.recordFailure(identity);
       // RFC 9728: advertise the protected-resource metadata so OAuth clients
       // can discover the authorization server. Additive — static-token
       // clients ignore the header. Only emitted when OAuth is enabled.
@@ -296,7 +355,19 @@ async function handleMcpRequest(
   // 2. Parse body (POST/DELETE may carry JSON; GET/HEAD don't).
   let body: unknown;
   if (req.method === 'POST' || req.method === 'DELETE') {
-    body = await readJsonBody(req);
+    try {
+      body = await readJsonBody(req, opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+    } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        // Flush the 413 first, then tear down the connection so we neither
+        // buffer nor keep draining an abusive over-limit upload.
+        res.setHeader('Connection', 'close');
+        respondJson(res, 413, { ok: false, code: 'payload_too_large', message: err.message });
+        req.destroy();
+        return;
+      }
+      throw err;
+    }
   }
 
   // 3. Look up or create the transport keyed by mcp-session-id. The
@@ -313,10 +384,23 @@ async function handleMcpRequest(
   });
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+class BodyTooLargeError extends Error {}
+
+async function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    const buf = chunk as Buffer;
+    total += buf.length;
+    if (total > maxBytes) {
+      // Stop buffering but keep draining so the 413 response still flushes
+      // to the client (destroying the socket here would surface as a
+      // connection reset instead of a clean 413).
+      throw new BodyTooLargeError(`request body exceeds the ${maxBytes}-byte limit`);
+    }
+    chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
   if (raw.length === 0) return undefined;
@@ -389,7 +473,10 @@ interface AdminAuthFailure {
  * endpoints. Returns `null` on success, or a failure descriptor that
  * the caller renders as JSON.
  */
-function adminAuth(authz: string | undefined, tokens: TokensService): AdminAuthFailure | null {
+async function adminAuth(
+  authz: string | undefined,
+  tokens: TokensService,
+): Promise<AdminAuthFailure | null> {
   if (!authz) {
     return { status: 401, code: 'missing_token', message: 'missing Authorization header' };
   }
@@ -398,7 +485,7 @@ function adminAuth(authz: string | undefined, tokens: TokensService): AdminAuthF
   }
   const plaintext = authz.slice(7).trim();
   try {
-    const resolved = tokens.authenticate(plaintext);
+    const resolved = await tokens.authenticate(plaintext);
     if (resolved.scope !== '*') {
       return {
         status: 403,

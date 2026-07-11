@@ -82,6 +82,36 @@ const envSchema = z.object({
   RATE_LIMIT_RPS: z.coerce.number().positive().max(10_000).default(10),
   RATE_LIMIT_BURST: z.coerce.number().int().min(1).max(10_000).default(30),
 
+  // Pre-auth failed-attempt lockout. Always on — it only ever penalises
+  // repeated authentication FAILURES from one network identity, and is
+  // consulted before the token-hash scan so bogus bearers cannot exhaust
+  // CPU. A successful auth clears the identity's record.
+  AUTH_LOCKOUT_MAX_FAILURES: z.coerce.number().int().min(1).max(10_000).default(10),
+  AUTH_LOCKOUT_WINDOW_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
+  AUTH_LOCKOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(24 * 3_600_000)
+    .default(60_000),
+  // Maximum raw request body (bytes) accepted on the authenticated HTTP
+  // surface (`/mcp`, `/api`). Over-large bodies are rejected with 413.
+  MAX_BODY_BYTES: z.coerce
+    .number()
+    .int()
+    .min(64 * 1024)
+    .max(256 * 1024 * 1024)
+    .default(4 * 1024 * 1024),
+
+  // DNS-rebinding defense-in-depth for the MCP transport (opt-in). Comma-
+  // separated allow-lists; when EITHER is set the SDK transport enables
+  // protection. Left unset by default because the strict Host check can
+  // reject legitimate reverse-proxy setups, and the mandatory bearer token
+  // is the primary control. Host values include the port (e.g.
+  // "rembric.example.com:443"); origins are full origins (scheme+host[:port]).
+  REMBRIC_MCP_ALLOWED_HOSTS: z.string().optional(),
+  REMBRIC_MCP_ALLOWED_ORIGINS: z.string().optional(),
+
   // Sessions sweep: status='active' rows whose started_at is older than
   // this threshold are flipped to 'abandoned' at server startup. Default
   // 24h. Operators that run very long-lived agents can extend the window.
@@ -139,6 +169,16 @@ export interface Config {
     ratePerSecond: number;
     burst: number;
   };
+  authLockout: {
+    maxFailures: number;
+    windowMs: number;
+    lockoutMs: number;
+  };
+  maxBodyBytes: number;
+  mcpTransport: {
+    allowedHosts: string[];
+    allowedOrigins: string[];
+  };
   sessions: {
     abandonAfterMs: number;
   };
@@ -193,6 +233,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ratePerSecond: parsed.RATE_LIMIT_RPS,
       burst: parsed.RATE_LIMIT_BURST,
     },
+    authLockout: {
+      maxFailures: parsed.AUTH_LOCKOUT_MAX_FAILURES,
+      windowMs: parsed.AUTH_LOCKOUT_WINDOW_MS,
+      lockoutMs: parsed.AUTH_LOCKOUT_MS,
+    },
+    maxBodyBytes: parsed.MAX_BODY_BYTES,
+    mcpTransport: {
+      allowedHosts: splitCsv(parsed.REMBRIC_MCP_ALLOWED_HOSTS),
+      allowedOrigins: splitCsv(parsed.REMBRIC_MCP_ALLOWED_ORIGINS),
+    },
     sessions: {
       abandonAfterMs: parsed.SESSION_ABANDON_AFTER_MS,
     },
@@ -208,6 +258,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
 function stripTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/** Split a comma-separated env value into a trimmed, non-empty list. */
+function splitCsv(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 function isAllowedIssuerUrl(value: string): boolean {
@@ -242,6 +301,9 @@ export function redactConfig(config: Config): Record<string, unknown> {
       refreshTtlMs: config.oauth.refreshTtlMs,
     },
     rateLimit: config.rateLimit,
+    authLockout: config.authLockout,
+    maxBodyBytes: config.maxBodyBytes,
+    mcpTransport: config.mcpTransport,
     sessions: config.sessions,
     candidates: config.candidates,
     judgments: config.judgments,

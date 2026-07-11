@@ -9,6 +9,7 @@ import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createHealthzHandler } from './http.js';
+import { AuthLockout } from './rate-limit.js';
 
 let db: TestDb;
 let tokens: TokensService;
@@ -101,5 +102,25 @@ describe('GET /healthz', () => {
     const r = await call(tok.plaintext);
     expect(r.status).toBe(401);
     expect(r.body.code).toBe('token_revoked');
+  });
+
+  it('locks out (429) after repeated auth failures, before the hash scan', async () => {
+    const lockout = new AuthLockout({ maxFailures: 2, windowMs: 60_000, lockoutMs: 30_000 });
+    const guarded = new Hono();
+    guarded.get(
+      '/healthz',
+      createHealthzHandler({
+        tokens,
+        projects,
+        diagnostics: createDiagnostics(db.handle),
+        authLockout: lockout,
+      }),
+    );
+    const bad = { method: 'GET', headers: { authorization: 'Bearer nope' } };
+    expect((await guarded.request('/healthz', bad)).status).toBe(401);
+    expect((await guarded.request('/healthz', bad)).status).toBe(401); // trips the lockout
+    const locked = await guarded.request('/healthz', bad);
+    expect(locked.status).toBe(429);
+    expect(((await locked.json()) as Record<string, unknown>).code).toBe('rate_limited');
   });
 });

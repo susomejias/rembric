@@ -574,6 +574,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0014_hybrid_search_vec_rebuild.sql',
       '0015_tidy_consolidation_journal.sql',
       '0016_add_memory_title.sql',
+      '0017_oauth_project_binding.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -681,5 +682,70 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
     expect(titles.get('crlf')).toBe('first line');
     expect(titles.get('normal')).toBe('Bold lead** then body');
     expect(titles.get('long')).toBe('x'.repeat(100));
+  });
+});
+
+describe('migration 0017_oauth_project_binding', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig17-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig17-slice-'));
+
+    // Everything strictly before 0017 → oauth tables exist, binding does not.
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const f of all) {
+      if (f.startsWith('0017_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  it('adds project_id and revokes every pre-existing token (force re-consent)', () => {
+    raw
+      .prepare(
+        "INSERT INTO oauth_tokens (id, kind, hash, client_id, family_id, scope, subject, expires_at, created_at) VALUES ('t-legacy', 'access', 'h', 'c1', 'f1', 'mcp', 'op', 9999999999999, 0)",
+      )
+      .run();
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0017_oauth_project_binding.sql');
+
+    // The additive column exists...
+    const cols = raw
+      .prepare<[], { name: string }>('PRAGMA table_info(oauth_tokens)')
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain('project_id');
+
+    // ...and the legacy token is now revoked (NULL project_id + revoked).
+    const row = raw
+      .prepare<
+        [],
+        { revoked_at: number | null; project_id: string | null }
+      >("SELECT revoked_at, project_id FROM oauth_tokens WHERE id = 't-legacy'")
+      .get();
+    expect(row?.project_id).toBeNull();
+    expect(row?.revoked_at).not.toBeNull();
   });
 });
