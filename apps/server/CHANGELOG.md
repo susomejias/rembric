@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.0](https://github.com/susomejias/rembric/compare/server-v0.23.0...server-v0.24.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** migration 0017 revokes all existing OAuth access/refresh tokens, so OAuth clients must re-authorize once. Static bearer tokens are unaffected.
+
+### Features
+
+* **server:** harden API/MCP/OAuth auth surface ([#224](https://github.com/susomejias/rembric/issues/224)) ([589b245](https://github.com/susomejias/rembric/commit/589b24580ae62b222c82a931b4596134bb79cd35))
+
 ## [0.23.0](https://github.com/susomejias/rembric/compare/server-v0.22.2...server-v0.23.0) (2026-07-08)
 
 
