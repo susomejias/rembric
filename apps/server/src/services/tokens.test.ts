@@ -36,26 +36,26 @@ describe('TokensService.create', () => {
 });
 
 describe('TokensService.authenticate', () => {
-  it('matches the token via constant-time hash compare', () => {
+  it('matches the token via constant-time hash compare', async () => {
     const { plaintext, token } = tokens.create({ name: 't', scope: '*' });
-    const resolved = tokens.authenticate(plaintext);
+    const resolved = await tokens.authenticate(plaintext);
     expect(resolved.token.id).toBe(token.id);
   });
 
-  it('rejects an unknown token', () => {
-    expect(() => tokens.authenticate('not-a-real-token')).toThrow(/not recognized/);
+  it('rejects an unknown token', async () => {
+    await expect(tokens.authenticate('not-a-real-token')).rejects.toThrow(/not recognized/);
   });
 
-  it('rejects a revoked token', () => {
+  it('rejects a revoked token', async () => {
     const { plaintext } = tokens.create({ name: 't', scope: '*' });
     tokens.revoke('t');
-    expect(() => tokens.authenticate(plaintext)).toThrow(/revoked/);
+    await expect(tokens.authenticate(plaintext)).rejects.toThrow(/revoked/);
   });
 
-  it('rejects an expired token', () => {
+  it('rejects an expired token', async () => {
     const past = new Date(Date.now() - 1000);
     const { plaintext } = tokens.create({ name: 't', scope: '*', expiresAt: past });
-    expect(() => tokens.authenticate(plaintext)).toThrow(/expired/);
+    await expect(tokens.authenticate(plaintext)).rejects.toThrow(/expired/);
   });
 });
 

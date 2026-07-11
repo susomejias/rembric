@@ -70,6 +70,7 @@ export function createOAuthConsentRouter(deps: OAuthConsentDeps): Hono {
       codeChallenge: areq.codeChallenge,
       scope: grantedOAuthScope(areq.scope),
       subject: session.tokenId,
+      projectId: areq.projectId ?? null,
     });
     return c.redirect(buildRedirect(areq.redirectUri, { code, state: areq.state }));
   });

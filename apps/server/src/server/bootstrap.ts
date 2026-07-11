@@ -43,7 +43,7 @@ import {
 } from './data-loss-guard.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
 import { createOAuthProvider } from './oauth-provider.js';
-import { RateLimiter } from './rate-limit.js';
+import { AuthLockout, RateLimiter } from './rate-limit.js';
 import { SessionRouter } from './session-router.js';
 
 /**
@@ -140,7 +140,12 @@ export async function bootstrap(
     : null;
   const oauthProvider =
     oauthService && oauthIssuer
-      ? createOAuthProvider({ oauth: oauthService, issuer: oauthIssuer, areqKey: oauthAreqKey })
+      ? createOAuthProvider({
+          oauth: oauthService,
+          projects,
+          issuer: oauthIssuer,
+          areqKey: oauthAreqKey,
+        })
       : null;
 
   // In-process embedder + drain worker — fills memory_vec so save-time
@@ -218,25 +223,30 @@ export async function bootstrap(
   // One McpServer per session (the SDK requires a fresh server per
   // connected transport). The factory receives the URL path slug so the
   // emitted instructions block matches the connection scope.
-  const mcpManager = new McpTransportManager((factoryCtx) =>
-    createMcpServer({
-      memory: memorySvc,
-      projects,
-      agentSessions: agentSessionsSvc,
-      prompts: promptsSvc,
-      relations: relationsSvc,
-      candidates: {
-        perSaveMax: config.candidates.perSaveMax,
-      },
-      embedNow: (memoryId, title, content, scope, projectId, status, type) =>
-        embeddingWorker.embedNow(memoryId, title, content, scope, projectId, status, type),
-      router: sessionRouter,
-      repos,
-      doctor: buildDoctorReport,
-      sweep: sweepOnSessionStart,
-      orphanAfterMs: config.judgments.orphanAfterMs,
-      requestedSlug: factoryCtx.requestedSlug,
-    }),
+  const mcpManager = new McpTransportManager(
+    (factoryCtx) =>
+      createMcpServer({
+        memory: memorySvc,
+        projects,
+        agentSessions: agentSessionsSvc,
+        prompts: promptsSvc,
+        relations: relationsSvc,
+        candidates: {
+          perSaveMax: config.candidates.perSaveMax,
+        },
+        embedNow: (memoryId, title, content, scope, projectId, status, type) =>
+          embeddingWorker.embedNow(memoryId, title, content, scope, projectId, status, type),
+        router: sessionRouter,
+        repos,
+        doctor: buildDoctorReport,
+        sweep: sweepOnSessionStart,
+        orphanAfterMs: config.judgments.orphanAfterMs,
+        requestedSlug: factoryCtx.requestedSlug,
+      }),
+    {
+      allowedHosts: config.mcpTransport.allowedHosts,
+      allowedOrigins: config.mcpTransport.allowedOrigins,
+    },
   );
 
   const updates =
@@ -263,6 +273,10 @@ export async function bootstrap(
         burst: config.rateLimit.burst,
       })
     : null;
+
+  // Always on: only ever penalises repeated authentication FAILURES from one
+  // network identity, throttling them before the token-hash scan.
+  const authLockout = new AuthLockout(config.authLockout);
 
   try {
     assertDataLossGuard({ dataDir: config.dataDir, diagnostics: dbDiagnostics, env });
@@ -297,6 +311,8 @@ export async function bootstrap(
     agentSessions: agentSessionsSvc,
     diagnostics: dbDiagnostics,
     rateLimiter,
+    authLockout,
+    maxBodyBytes: config.maxBodyBytes,
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
     oauth:
@@ -329,6 +345,8 @@ export async function bootstrap(
       orphanDeadlineMs: config.judgments.orphanDeadlineMs,
       oauth: oauthService,
       oauthAreqKey: oauthService ? oauthAreqKey : null,
+      secureCookies: (oauthIssuer ?? '').startsWith('https:'),
+      authLockout,
     },
   });
 

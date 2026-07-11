@@ -47,7 +47,7 @@ const BEARER_PREFIX = 'bearer ';
  * tool calls that require a real project SHALL respond with
  * `project_not_found`. The `initialize` handshake itself succeeds.
  */
-export function authenticate(input: {
+export async function authenticate(input: {
   authorization: string | undefined;
   /** Slug from the URL path `/mcp/<slug>`, or undefined for `/mcp`. */
   pathSlug: string | undefined;
@@ -55,7 +55,7 @@ export function authenticate(input: {
   projects: ProjectsService;
   /** When set, OAuth-minted access tokens are accepted as a fallback. */
   oauth?: OAuthService | null;
-}): RequestContext {
+}): Promise<RequestContext> {
   const { authorization, pathSlug, tokens, projects, oauth } = input;
 
   if (!authorization) {
@@ -69,7 +69,7 @@ export function authenticate(input: {
     throw new AuthError('malformed_authorization', 'empty bearer token', 401);
   }
 
-  const resolved = resolveToken(plaintext, tokens, oauth ?? null);
+  const resolved = await resolveToken(plaintext, tokens, oauth ?? null);
 
   const project = pathSlug && pathSlug.length > 0 ? (projects.findBySlug(pathSlug) ?? null) : null;
 
@@ -96,13 +96,13 @@ export function authenticate(input: {
  * through to the OAuth access-token lookup. A static revoked/expired token
  * is a definitive match and is NOT retried against OAuth.
  */
-function resolveToken(
+async function resolveToken(
   plaintext: string,
   tokens: TokensService,
   oauth: OAuthService | null,
-): { token: Token; scope: TokenScope } {
+): Promise<{ token: Token; scope: TokenScope }> {
   try {
-    return tokens.authenticate(plaintext);
+    return await tokens.authenticate(plaintext);
   } catch (err) {
     if (!(err instanceof DomainError)) throw err;
     if (err.code === 'token_revoked') {
@@ -115,7 +115,10 @@ function resolveToken(
     if (oauth) {
       const oa = oauth.authenticateAccessToken(plaintext);
       if (oa) {
-        return { token: syntheticOAuthToken(oa.clientId, oa.scope), scope: oa.scope };
+        return {
+          token: syntheticOAuthToken(oa.clientId, oa.scope, oa.projectId),
+          scope: oa.scope,
+        };
       }
     }
     throw new AuthError('token_invalid', 'token not recognized', 401);
@@ -128,13 +131,13 @@ function resolveToken(
  * once per connector instance) so session ownership and rate-limit bucketing
  * stay continuous. The `hash` is never read after authentication.
  */
-function syntheticOAuthToken(clientId: string, scope: TokenScope): Token {
+function syntheticOAuthToken(clientId: string, scope: TokenScope, projectId: string | null): Token {
   return {
     id: `oauth:${clientId}`,
     name: `oauth:${clientId}`,
     hash: '',
     scope,
-    projectId: null,
+    projectId,
     createdAt: new Date(0),
     expiresAt: null,
     revokedAt: null,

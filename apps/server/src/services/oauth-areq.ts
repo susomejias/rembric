@@ -17,6 +17,8 @@ export interface AuthRequest {
   codeChallenge: string;
   scope: string;
   state?: string;
+  /** Consented project id (from the RFC 8707 resource path); null/absent = global grant. */
+  projectId?: string | null;
   /** Expiry, seconds since epoch. */
   exp: number;
 }

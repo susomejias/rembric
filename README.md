@@ -249,6 +249,21 @@ Per-token token-bucket limiter on `/mcp` requests. Disabled by default — singl
 | `RATE_LIMIT_RPS`     | `10`    | Refill rate per token, in requests per second.                                                             |
 | `RATE_LIMIT_BURST`   | `30`    | Burst capacity per token. The first N requests after a quiet period are free; beyond that, RPS applies.    |
 
+### Security hardening
+
+Applied to every bearer-authenticated surface (`/mcp`, `/api`, `/healthz`, `/admin`, `/dashboard/login`). The failed-attempt lockout is always on (it only ever penalises repeated authentication _failures_ from one network identity, and runs before the token-hash check so bogus bearers can't exhaust CPU).
+
+| Variable                      | Default   | Description                                                                                                                                                                     |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_LOCKOUT_MAX_FAILURES`   | `10`      | Failed auth attempts from one IP within the window before it is locked out (`429`).                                                                                             |
+| `AUTH_LOCKOUT_WINDOW_MS`      | `60000`   | Window (ms) over which failures accumulate.                                                                                                                                     |
+| `AUTH_LOCKOUT_MS`             | `60000`   | Lockout duration (ms) once tripped. A successful auth clears the identity's counter.                                                                                            |
+| `MAX_BODY_BYTES`              | `4194304` | Max raw request body on `/mcp` and `/api`; larger is rejected with `413`.                                                                                                       |
+| `REMBRIC_MCP_ALLOWED_HOSTS`   | _unset_   | Comma-separated `Host` allow-list (incl. port) for opt-in DNS-rebinding protection on the MCP transport. When set, requests with an unlisted `Host` are rejected.               |
+| `REMBRIC_MCP_ALLOWED_ORIGINS` | _unset_   | Comma-separated `Origin` allow-list. When set, a request whose `Origin` is present and unlisted is rejected. Setting either allow-list enables the transport's rebinding check. |
+
+**OAuth token confinement.** An OAuth grant is bound to the project it was consented for (the connector's `/mcp/<slug>` path, carried as the RFC 8707 resource indicator): the minted token authorizes only that project (`project:<id>` / `read:project:<id>`), or global scope for a path-less `/mcp` grant. Deploying this version **revokes all previously-issued OAuth tokens**, so existing OAuth clients re-authorize once (static tokens are unaffected). The dashboard session cookie is marked `Secure` when `REMBRIC_PUBLIC_URL` is `https`.
+
 ### Sessions
 
 | Variable                   | Default    | Description                                                                                                                                                    |

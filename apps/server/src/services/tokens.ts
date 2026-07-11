@@ -1,4 +1,11 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  scrypt,
+  scryptSync,
+  timingSafeEqual,
+  type ScryptOptions,
+} from 'node:crypto';
 
 import { ulid } from 'ulid';
 
@@ -107,11 +114,15 @@ export class TokensService {
    * Look up a token by its plaintext bearer secret. Returns the matching
    * row if (a) the hash verifies, (b) it is not revoked, and (c) it has
    * not expired.
+   *
+   * Async so the scrypt work runs on the libuv threadpool rather than
+   * blocking the single Node event loop — repeated failed attempts are
+   * additionally throttled by the pre-auth lockout (see `AuthLockout`).
    */
-  authenticate(plaintext: string): ResolvedToken {
+  async authenticate(plaintext: string): Promise<ResolvedToken> {
     const all = this.repos.tokens.listAll();
     for (const row of all) {
-      if (verifyToken(plaintext, row.hash)) {
+      if (await verifyToken(plaintext, row.hash)) {
         if (row.revokedAt) {
           throw new DomainError('token_revoked', 'token has been revoked');
         }
@@ -162,7 +173,7 @@ function hashToken(plaintext: string): string {
   return `${HASH_VERSION}$${salt.toString('hex')}$${derived.toString('hex')}`;
 }
 
-function verifyToken(plaintext: string, stored: string): boolean {
+async function verifyToken(plaintext: string, stored: string): Promise<boolean> {
   const [version, saltHex, hashHex] = stored.split('$');
   if (version !== HASH_VERSION || !saltHex || !hashHex) return false;
   let salt: Buffer;
@@ -174,8 +185,23 @@ function verifyToken(plaintext: string, stored: string): boolean {
     return false;
   }
   if (expected.length !== SCRYPT_PARAMS.keylen) return false;
-  const computed = scryptSync(plaintext, salt, SCRYPT_PARAMS.keylen, SCRYPT_PARAMS);
+  const computed = await scryptAsync(plaintext, salt, SCRYPT_PARAMS.keylen, SCRYPT_PARAMS);
   return timingSafeEqual(computed, expected);
+}
+
+/** Promise wrapper over the async (threadpool) scrypt so auth never blocks the event loop. */
+function scryptAsync(
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options: ScryptOptions,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keylen, options, (err, derived) => {
+      if (err) reject(err);
+      else resolve(derived);
+    });
+  });
 }
 
 /**

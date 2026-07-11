@@ -40,9 +40,9 @@ describe('authenticate — static + OAuth coexistence', () => {
       .accessToken;
   }
 
-  it('authenticates a static token (unchanged behavior)', () => {
+  it('authenticates a static token (unchanged behavior)', async () => {
     const created = tokens.create({ name: 'static', scope: '*', projectId: null });
-    const ctx = authenticate({
+    const ctx = await authenticate({
       authorization: `Bearer ${created.plaintext}`,
       pathSlug: undefined,
       tokens,
@@ -53,9 +53,9 @@ describe('authenticate — static + OAuth coexistence', () => {
     expect(ctx.token.id).toBe(created.token.id);
   });
 
-  it('falls back to an OAuth access token when static lookup misses', () => {
+  it('falls back to an OAuth access token when static lookup misses', async () => {
     const access = mintOAuthAccessToken('*');
-    const ctx = authenticate({
+    const ctx = await authenticate({
       authorization: `Bearer ${access}`,
       pathSlug: undefined,
       tokens,
@@ -66,9 +66,9 @@ describe('authenticate — static + OAuth coexistence', () => {
     expect(ctx.token.name).toMatch(/^oauth:/);
   });
 
-  it('preserves OAuth scope (read:*) through resolution', () => {
+  it('preserves OAuth scope (read:*) through resolution', async () => {
     const access = mintOAuthAccessToken('read:*');
-    const ctx = authenticate({
+    const ctx = await authenticate({
       authorization: `Bearer ${access}`,
       pathSlug: undefined,
       tokens,
@@ -78,8 +78,8 @@ describe('authenticate — static + OAuth coexistence', () => {
     expect(ctx.scope).toBe('read:*');
   });
 
-  it('rejects an unknown token with token_invalid', () => {
-    expect(() =>
+  it('rejects an unknown token with token_invalid', async () => {
+    await expect(
       authenticate({
         authorization: 'Bearer totally-unknown',
         pathSlug: undefined,
@@ -87,12 +87,12 @@ describe('authenticate — static + OAuth coexistence', () => {
         projects,
         oauth,
       }),
-    ).toThrow(AuthError);
+    ).rejects.toBeInstanceOf(AuthError);
   });
 
-  it('does not accept OAuth tokens when oauth is disabled', () => {
+  it('does not accept OAuth tokens when oauth is disabled', async () => {
     const access = mintOAuthAccessToken('*');
-    expect(() =>
+    await expect(
       authenticate({
         authorization: `Bearer ${access}`,
         pathSlug: undefined,
@@ -100,10 +100,10 @@ describe('authenticate — static + OAuth coexistence', () => {
         projects,
         oauth: null,
       }),
-    ).toThrow(AuthError);
+    ).rejects.toBeInstanceOf(AuthError);
   });
 
-  it('never authenticates a token row with an empty hash (synthetic-token safety)', () => {
+  it('never authenticates a token row with an empty hash (synthetic-token safety)', async () => {
     // The OAuth synthetic Token carries hash:'' and is never persisted; this
     // guards the invariant that an empty stored hash can never match.
     repos.tokens.insert({
@@ -116,15 +116,15 @@ describe('authenticate — static + OAuth coexistence', () => {
       expiresAt: null,
       revokedAt: null,
     });
-    expect(() => tokens.authenticate('')).toThrow(/not recognized/);
-    expect(() => tokens.authenticate('anything')).toThrow(/not recognized/);
+    await expect(tokens.authenticate('')).rejects.toThrow(/not recognized/);
+    await expect(tokens.authenticate('anything')).rejects.toThrow(/not recognized/);
   });
 
-  it('does not retry a revoked static token against OAuth', () => {
+  it('does not retry a revoked static token against OAuth', async () => {
     const created = tokens.create({ name: 'revokeme', scope: '*', projectId: null });
     tokens.revoke('revokeme');
     try {
-      authenticate({
+      await authenticate({
         authorization: `Bearer ${created.plaintext}`,
         pathSlug: undefined,
         tokens,

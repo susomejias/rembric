@@ -23,6 +23,7 @@ import type { Response } from 'express';
 
 import { signAuthRequest, type AuthRequest } from '../services/oauth-areq.js';
 import { OAuthError, type OAuthService, type TokenPair } from '../services/oauth.js';
+import type { ProjectsService } from '../services/projects.js';
 
 /**
  * Implements the MCP SDK's `OAuthServerProvider` so the vetted SDK
@@ -38,6 +39,8 @@ import { OAuthError, type OAuthService, type TokenPair } from '../services/oauth
 
 export interface OAuthProviderOptions {
   oauth: OAuthService;
+  /** Resolves the consented project from the RFC 8707 resource path. */
+  projects: ProjectsService;
   /** OAuth issuer / external base URL (no trailing slash). */
   issuer: string;
   /** HMAC key for signing the consent hand-off (derived from session secret). */
@@ -48,9 +51,27 @@ export interface OAuthProviderOptions {
 }
 
 const CONSENT_PATH = '/dashboard/oauth/consent';
+const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
+
+/**
+ * Extract the consented project id from an RFC 8707 `resource` indicator whose
+ * path is `/mcp/<slug>`. Returns null when there is no resource, the path is
+ * not project-scoped, or the slug does not resolve — a global grant.
+ */
+function projectIdFromResource(
+  resource: URL | undefined,
+  projects: ProjectsService,
+): string | null {
+  if (!resource) return null;
+  const path = resource.pathname.replace(/\/+$/, '');
+  if (!path.startsWith('/mcp/')) return null;
+  const slug = path.slice('/mcp/'.length).split('/')[0];
+  if (!slug || slug.length > 128 || !SLUG_RE.test(slug)) return null;
+  return projects.findBySlug(slug)?.id ?? null;
+}
 
 export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProvider {
-  const { oauth, issuer, areqKey } = opts;
+  const { oauth, projects, issuer, areqKey } = opts;
   const now = opts.now ?? (() => new Date());
   const consentTtl = opts.consentTtlSeconds ?? 600;
 
@@ -87,6 +108,7 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
         codeChallenge: params.codeChallenge,
         scope: (params.scopes ?? []).join(' '),
         state: params.state,
+        projectId: projectIdFromResource(params.resource, projects),
         exp: Math.floor(now().getTime() / 1000) + consentTtl,
       };
       const blob = signAuthRequest(req, areqKey);
@@ -137,10 +159,12 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
     },
 
     revokeToken(
-      _client: OAuthClientInformationFull,
+      client: OAuthClientInformationFull,
       request: OAuthTokenRevocationRequest,
     ): Promise<void> {
-      oauth.revokeByToken(request.token);
+      // RFC 7009: only the client that owns the token may revoke it. A request
+      // for another client's token is a no-op success (handled in the service).
+      oauth.revokeByToken(request.token, client.client_id);
       return Promise.resolve();
     },
   };

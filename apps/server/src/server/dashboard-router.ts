@@ -2,6 +2,7 @@ import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
@@ -56,6 +57,8 @@ import type { TokensService } from '../services/tokens.js';
 import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
+import type { AuthLockout } from './rate-limit.js';
+
 const COOKIE_NAME = 'rembric_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SIDEBAR_COOKIE = 'rbr-sb-collapsed';
@@ -86,6 +89,10 @@ export interface DashboardDeps {
   /** OAuth service + consent signing key; present only when OAuth is enabled. */
   oauth?: OAuthService | null;
   oauthAreqKey?: Buffer | null;
+  /** Set the `Secure` cookie attribute (true on HTTPS deployments). */
+  secureCookies?: boolean;
+  /** Pre-auth failed-attempt lockout for the login form, keyed on network identity. */
+  authLockout?: AuthLockout | null;
 }
 
 export interface DashboardStats {
@@ -112,6 +119,12 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
   app.get('/login', (c) => c.html(renderLogin(null, safeNext(c.req.query('next')))));
 
   app.post('/login', async (c) => {
+    const identity = loginIdentity(c);
+    const locked = deps.authLockout?.check(identity);
+    if (locked?.locked) {
+      c.header('Retry-After', String(locked.retryAfterSeconds));
+      return c.html(renderLogin('Too many attempts. Try again shortly.', null), 429);
+    }
     const form = await c.req.formData();
     const r = form.get('token');
     const tokenPlain = typeof r === 'string' ? r : '';
@@ -122,13 +135,18 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       return c.html(renderLogin('Token is required.', next), 400);
     }
     try {
-      const resolved = deps.tokens.authenticate(tokenPlain);
+      const resolved = await deps.tokens.authenticate(tokenPlain);
+      // A valid-but-non-admin token gets the SAME response as an invalid one,
+      // so the endpoint is not a token-validity oracle.
       if (resolved.scope !== '*') {
-        return c.html(renderLogin('Only admin-scoped tokens can access the dashboard.', next), 403);
+        deps.authLockout?.recordFailure(identity);
+        return c.html(renderLogin('Invalid token.', next), 401);
       }
+      deps.authLockout?.recordSuccess(identity);
       const { cookie } = deps.sessions.create(resolved.token.id);
       setCookie(c, COOKIE_NAME, cookie, {
         httpOnly: true,
+        secure: deps.secureCookies ?? false,
         sameSite: 'Lax',
         path: '/dashboard',
         maxAge: SESSION_TTL_SECONDS,
@@ -136,6 +154,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       return c.redirect(next ?? '/dashboard');
     } catch (err) {
       if (err instanceof DomainError) {
+        deps.authLockout?.recordFailure(identity);
         return c.html(renderLogin('Invalid token.', next), 401);
       }
       throw err;
@@ -150,6 +169,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     }
     setCookie(c, COOKIE_NAME, '', {
       httpOnly: true,
+      secure: deps.secureCookies ?? false,
       sameSite: 'Lax',
       path: '/dashboard',
       maxAge: 0,
@@ -589,6 +609,15 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
 function safeNext(next: string | null | undefined): string | null {
   if (!next) return null;
   return next.startsWith('/dashboard/oauth/') ? next : null;
+}
+
+/** Best-effort client network identity for the login failed-attempt lockout. */
+function loginIdentity(c: Context): string {
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 function loginWithNext(c: Context): string {

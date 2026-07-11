@@ -53,6 +53,8 @@ export interface IssueCodeInput {
   /** OAuth scope string in the advertised vocabulary (e.g. "mcp read"). */
   scope: string;
   subject: string;
+  /** Consented project id (from the RFC 8707 resource path); null = global grant. */
+  projectId?: string | null;
 }
 
 export interface TokenPair {
@@ -67,6 +69,8 @@ export interface ResolvedAccessToken {
   scope: TokenScope;
   subject: string;
   clientId: string;
+  /** Consented project id, or null for a global grant. */
+  projectId: string | null;
   /** Expiry as seconds since epoch (for AuthInfo). */
   expiresAtSeconds: number;
 }
@@ -139,6 +143,7 @@ export class OAuthService {
       codeChallenge: input.codeChallenge,
       scope: input.scope,
       subject: input.subject,
+      projectId: input.projectId ?? null,
       expiresAt: new Date(ts.getTime() + CODE_TTL_MS),
       consumedAt: null,
       createdAt: ts,
@@ -166,7 +171,10 @@ export class OAuthService {
     if (code.clientId !== input.clientId) {
       throw new OAuthError('invalid_grant', 'client_id does not match the authorization code');
     }
-    if (input.redirectUri !== undefined && code.redirectUri !== input.redirectUri) {
+    // OAuth 2.1: the code is always bound to a redirect_uri at /authorize, so
+    // the exchange MUST carry that same value — an omitted parameter is a
+    // mismatch, not a skip (closes the optional-redirect_uri bypass).
+    if (input.redirectUri === undefined || code.redirectUri !== input.redirectUri) {
       throw new OAuthError('invalid_grant', 'redirect_uri does not match the authorization code');
     }
     // Atomic single-use: only the first redemption flips consumed_at.
@@ -178,6 +186,7 @@ export class OAuthService {
       familyId: `oauthf_${ulid(this.now().getTime())}`,
       scope: code.scope,
       subject: code.subject,
+      projectId: code.projectId,
     });
   }
 
@@ -218,6 +227,7 @@ export class OAuthService {
       familyId: refresh.familyId,
       scope: refresh.scope,
       subject: refresh.subject,
+      projectId: refresh.projectId,
     });
   }
 
@@ -229,22 +239,31 @@ export class OAuthService {
     if (token.expiresAt.getTime() <= this.now().getTime()) return null;
     return {
       // Stored scope is the granted OAuth string; derive the authz TokenScope
-      // at read time. Back-compatible with tokens that stored a TokenScope
-      // directly: resolveGrantedScope('*')='*', resolveGrantedScope('read:*')='read:*'.
-      scope: resolveGrantedScope(token.scope),
+      // at read time, restricted to the consented project when the grant is
+      // project-bound (project:<id> / read:project:<id>), else global
+      // (* / read:*). resolveGrantedScope stays back-compatible.
+      scope: projectScopedGrant(resolveGrantedScope(token.scope), token.projectId),
       subject: token.subject,
       clientId: token.clientId,
+      projectId: token.projectId,
       expiresAtSeconds: Math.floor(token.expiresAt.getTime() / 1000),
     };
   }
 
-  /** Revoke the token family that a given access or refresh token belongs to. */
-  revokeByToken(plaintext: string): void {
+  /**
+   * Revoke the token family that a given access or refresh token belongs to.
+   * When `clientId` is provided (RFC 7009 client-ownership check), a token
+   * owned by a different client is a no-op — the caller still reports success,
+   * but another client's family is never revoked.
+   */
+  revokeByToken(plaintext: string, clientId?: string): void {
     const hash = hashSecret(plaintext);
     const token =
       this.repos.oauth.findTokenByHash(hash, 'access') ??
       this.repos.oauth.findTokenByHash(hash, 'refresh');
-    if (token) this.repos.oauth.revokeFamily(token.familyId, this.now());
+    if (!token) return;
+    if (clientId !== undefined && token.clientId !== clientId) return;
+    this.repos.oauth.revokeFamily(token.familyId, this.now());
   }
 
   private issueTokenPair(input: {
@@ -252,6 +271,7 @@ export class OAuthService {
     familyId: string;
     scope: string;
     subject: string;
+    projectId: string | null;
   }): TokenPair {
     const accessSecret = generateSecret();
     const refreshSecret = generateSecret();
@@ -268,7 +288,13 @@ export class OAuthService {
   private insertToken(
     kind: 'access' | 'refresh',
     secret: string,
-    grant: { clientId: string; familyId: string; scope: string; subject: string },
+    grant: {
+      clientId: string;
+      familyId: string;
+      scope: string;
+      subject: string;
+      projectId: string | null;
+    },
     ttlMs: number,
   ): OAuthToken {
     const ts = this.now();
@@ -280,6 +306,7 @@ export class OAuthService {
       familyId: grant.familyId,
       scope: grant.scope,
       subject: grant.subject,
+      projectId: grant.projectId,
       expiresAt: new Date(ts.getTime() + ttlMs),
       rotatedAt: null,
       revokedAt: null,
@@ -304,6 +331,16 @@ export function resolveGrantedScope(requestedScope: string | undefined): TokenSc
     (t) => t === '*' || t === 'mcp' || t === 'mcp:write' || t.endsWith(':write'),
   );
   return wantsWrite ? '*' : 'read:*';
+}
+
+/**
+ * Narrow a global grant scope to a single project when the grant was consented
+ * for one (finding #3): `*` → `project:<id>`, `read:*` → `read:project:<id>`.
+ * A null project leaves the global scope unchanged.
+ */
+export function projectScopedGrant(base: TokenScope, projectId: string | null): TokenScope {
+  if (!projectId) return base;
+  return base === '*' ? `project:${projectId}` : `read:project:${projectId}`;
 }
 
 /** OAuth scopes advertised in the metadata and grantable at consent. */
