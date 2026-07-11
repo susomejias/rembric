@@ -1,6 +1,6 @@
 {
   "name": "@rembric/server",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Self-hosted memory, sessions, and dashboard for AI coding agents",
   "type": "module",
   "license": "MIT",
