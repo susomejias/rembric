@@ -32,11 +32,15 @@ import type { ProjectsService } from '../services/projects.js';
  * either of those happen.
  */
 
-// 1s is enough for any compliant client whose SSE channel is open by
-// the time the lazy path fires (first tool call from the agent).
-// Lower values cap the worst-case latency hit when a non-compliant
-// client advertises `roots` but never responds.
-const ROOTS_LIST_TIMEOUT_MS = 1000;
+// Budget for the `listRoots` SSE round trip on the first tool call. A
+// compliant client whose channel is open answers in well under this; the
+// budget only bites a client that advertises `roots` but never responds
+// (its first call waits this long before falling back to global). Bumped
+// from 1s: bearer auth now runs async (scrypt on the libuv threadpool) on
+// every message, including the client's `roots/list` RESPONSE, so the round
+// trip carries more latency under load — 1s occasionally lost the race on
+// slow/instrumented runners. 2.5s keeps the worst-case bound reasonable.
+const ROOTS_LIST_TIMEOUT_MS = 2500;
 
 /**
  * One slot per `(tokenId, mcpSessionId)` records whether discovery has
