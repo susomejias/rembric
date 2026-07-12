@@ -186,6 +186,12 @@ The proactive-save protocol travels via the MCP `initialize.instructions` (~500 
 - The plugin is **client-side only** — it does not modify Rembric's server code.
 - Hook scripts are designed to **never block a session**: any error exits 0 with empty stdout.
 
+## Releases
+
+This package is released independently via [release-please](https://github.com/googleapis/release-please) (tag prefix `plugin-v*`), driven by Conventional Commit messages on `main`.
+
+**Always merge PRs with "Create a merge commit"**, never "Squash and merge" — a squashed commit's message defaults to the PR title, which release-please cannot parse as a Conventional Commit. A squash merge silently yields zero release commits until a new, real Conventional Commit lands on top of it.
+
 ## License
 
 MIT, same as the server.
