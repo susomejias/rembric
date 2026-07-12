@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.3](https://github.com/susomejias/rembric/compare/server-v0.24.2...server-v0.24.3) (2026-07-12)
+
+
+### Features
+
+* **server:** resolve MCP session auto-attachment via bridge instance id ([ea71092](https://github.com/susomejias/rembric/commit/ea71092cec61c9c1b27ce637bc8d7036021f1fcb))
+
+
+### Bug Fixes
+
+* **server:** stop guessing which concurrent session an MCP write belongs to ([75534f7](https://github.com/susomejias/rembric/commit/75534f77dcc6283642de435ddcb1d1b8d58a376a))
+* **server:** stop purging sessions with a genuine but uncurated summary ([28bc9e3](https://github.com/susomejias/rembric/commit/28bc9e3a86c393076620151e1f8f270093e97ea3))
+
 ## [0.24.2](https://github.com/susomejias/rembric/compare/server-v0.24.1...server-v0.24.2) (2026-07-12)
 
 
