@@ -215,7 +215,7 @@ describe('agent routing', () => {
 
   it('install surfaces the required post-install steps per agent', () => {
     const codex = run(['--agent=codex', '--action=install'], { home });
-    expect(codex.out).toContain('codex features enable plugin_hooks');
+    expect(codex.out).not.toContain('plugin_hooks'); // flag removed upstream in codex-cli 0.142.3+
     expect(codex.out).toContain('/hooks');
     const hermes = run(['--agent=hermes', '--action=install'], { home });
     expect(hermes.out).toContain('hermes plugins install rembric'); // triggers requires_env prompts

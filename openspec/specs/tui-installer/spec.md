@@ -299,12 +299,13 @@ In colour mode the header SHALL show, under the lime block wordmark, a two-line 
 
 ### Requirement: Per-agent post-install steps are surfaced
 
-After a successful install or update (NOT uninstall), the installer SHALL print the required platform post-install steps for that agent, so the user is not left with a half-wired plugin. The steps SHALL reflect the action: install-only wiring (credential prompts, enabling the plugin) SHALL NOT be repeated on update, where the plugin is already installed and enabled. At minimum: Codex SHALL show enabling `plugin_hooks` and trusting the 5 hooks via `/hooks`, plus exporting `REMBRIC_*`; Hermes install SHALL show `hermes plugins install rembric` (which triggers the `requires_env` credential prompts), then `hermes plugins enable rembric`, then a reminder to run `hermes gateway restart` so it loads the (new) plugin, while Hermes **update** SHALL show only `hermes gateway restart`; opencode install SHALL point at pasting the printed MCP block and exporting `REMBRIC_*` while opencode **update** SHALL only point at restarting opencode; Claude install SHALL note credentials are prompted (keychain) while Claude **update** SHALL only point at restarting Claude Code. The full walkthrough remains in `docs/agents.md`.
+After a successful install or update (NOT uninstall), the installer SHALL print the required platform post-install steps for that agent, so the user is not left with a half-wired plugin. The steps SHALL reflect the action: install-only wiring (credential prompts, enabling the plugin) SHALL NOT be repeated on update, where the plugin is already installed and enabled. At minimum: Codex SHALL show trusting the 5 hooks via `/hooks` (hooks are stable and on by default as of `codex-cli 0.142.3+`; the removed `plugin_hooks` flag SHALL NOT be shown), plus exporting `REMBRIC_*`; Hermes install SHALL show `hermes plugins install rembric` (which triggers the `requires_env` credential prompts), then `hermes plugins enable rembric`, then a reminder to run `hermes gateway restart` so it loads the (new) plugin, while Hermes **update** SHALL show only `hermes gateway restart`; opencode install SHALL point at pasting the printed MCP block and exporting `REMBRIC_*` while opencode **update** SHALL only point at restarting opencode; Claude install SHALL note credentials are prompted (keychain) while Claude **update** SHALL only point at restarting Claude Code. The full walkthrough remains in `docs/agents.md`.
 
-#### Scenario: Codex install prints the hook-enablement steps
+#### Scenario: Codex install prints the hook-trust step
 
 - **WHEN** `--agent=codex --action=install` runs
-- **THEN** the output SHALL include enabling `plugin_hooks` and trusting the hooks via `/hooks`
+- **THEN** the output SHALL include trusting the hooks via `/hooks`
+- **AND** the output SHALL NOT instruct enabling the removed `plugin_hooks` flag
 
 #### Scenario: Hermes install prints the requires_env + enable + gateway-restart steps
 

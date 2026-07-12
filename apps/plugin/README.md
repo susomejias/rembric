@@ -33,7 +33,7 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
 
-> **Using Codex CLI?** However you install, two one-time Codex-side steps are needed for hooks to fire: run `codex features enable plugin_hooks`, then approve the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#enable-plugin_hooks-and-trust-hooks-required).
+> **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
 
 ## What you get
 

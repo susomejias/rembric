@@ -171,7 +171,7 @@ JSON
 Cases:
 
 - Client requires a TUI with a live LLM call you'd burn user's tokens for.
-- Codex CLI's `plugin_hooks` feature is `under development` and trust requires interactive `/hooks` approval.
+- Codex CLI hooks are stable and on by default (`codex-cli 0.142.3+`), but trust requires interactive `/hooks` approval.
 - Claude Code's `${user_config.*}` substitution requires the install wizard → keychain flow which can't be scripted.
 - The tool isn't installed on the dev machine.
 

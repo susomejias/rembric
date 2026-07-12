@@ -80,7 +80,7 @@ Minimum required steps:
 - **Direct handler invocation via `pnpm exec tsx`** covers ~95% of the handler logic. Pattern from `add-opencode-plugin`: import the installed plugin module, set env vars, call handlers with mock inputs that mirror the platform's event shape.
 - **Tell the user explicitly** what you DID verify vs what you DID NOT. Don't say "verified e2e" when you only ran unit tests. List the manual smoke steps the user should run.
 
-**If local e2e is genuinely impossible** (Codex `plugin_hooks` feature gate, Claude Code keychain integration, tool you don't have installed): say so out loud. Tell the user:
+**If local e2e is genuinely impossible** (Codex `/hooks` interactive trust gate, Claude Code keychain integration, tool you don't have installed): say so out loud. Tell the user:
 
 > "I can't drive `<specific path>` from this environment. Unit tests cover `<list>`. Manual verification needed for `<list>`. Want the steps?"
 

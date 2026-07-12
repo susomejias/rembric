@@ -719,9 +719,8 @@ post_install_notes() { # $1 client, $2 action (install|update)
       fi ;;
     codex)
       say "  ${BOLD}Next${RESET} (one-time — required or hooks won't fire):"
-      say "    1) ${BOLD}codex features enable plugin_hooks${RESET}"
-      say "    2) open ${BOLD}/hooks${RESET} in Codex and trust the 5 rembric hooks"
-      say "    3) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
+      say "    1) open ${BOLD}/hooks${RESET} in Codex and trust the 5 rembric hooks"
+      say "    2) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
       say "    ${DIM}details: docs/agents.md${RESET}" ;;
     hermes)
       # On update the plugin is already installed + enabled — only the gateway
