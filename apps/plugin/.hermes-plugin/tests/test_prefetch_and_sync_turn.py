@@ -147,6 +147,7 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertEqual(body["final"], False)
         self.assertIn("hi", body["summary"])
         self.assertIn("hello", body["summary"])
+        self.assertEqual(body["title"], "hello")
 
         for _ in range(3):
             provider.sync_turn("hi again", "hello again")
@@ -235,6 +236,27 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         _, body = _captured_post(mock_urlopen)
         self.assertIn("turn one", body["summary"])
         self.assertIn("turn one reply", body["summary"])
+        self.assertEqual(body["title"], "turn one reply")
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_sync_turn_omits_title_before_any_assistant_message(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        provider.sync_turn(
+            "first user message",
+            "",
+            messages=[{"role": "user", "content": "first user message"}],
+        )
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
+        _, body = _captured_post(mock_urlopen)
+        self.assertNotIn("title", body)
+        self.assertEqual(body["final"], False)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_on_session_end_drains_a_pending_sync_turn_before_posting_end(

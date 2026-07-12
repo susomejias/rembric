@@ -11,13 +11,14 @@ import { describe, expect, it } from 'vitest';
  * bash (scripts/prompt-nudge.sh), TS (.opencode-plugin/plugin.ts), and Python
  * (.hermes-plugin/__init__.py) implementations. Bash and TS embed the SAME
  * `rembric:`-prefixed strings verbatim (asserted directly here); Python
- * wraps its summary hint in `<memory-hint>...</memory-hint>` tags following
- * its established convention (matching `_SAVE_HINT`'s existing wrapper), so
- * its lock-step check unwraps the tag and compares the shared core text.
+ * wraps both hints in `<memory-hint>...</memory-hint>` tags, so its
+ * lock-step check unwraps the tag and compares the shared core text
+ * (`saveCore`/`summaryCore`).
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
+  saveCore: string;
   save: string;
   summaryCore: string;
   summary: string;
@@ -107,12 +108,21 @@ describe('nudge text lock-step across bash and TS', () => {
   it('the fixture summary text is the rembric:-prefixed shared core', () => {
     expect(fixtures.summary).toBe(`rembric: ${fixtures.summaryCore}`);
   });
+
+  it('the fixture save text is the rembric:-prefixed shared core', () => {
+    expect(fixtures.save).toBe(`rembric: ${fixtures.saveCore}`);
+  });
 });
 
 describe.runIf(hasPython3)('nudge text lock-step with Python', () => {
   it("Python's _SUMMARY_HINT wraps the exact shared core text in <memory-hint> tags", () => {
     const hint = pythonHintConstant('_SUMMARY_HINT');
     expect(hint).toBe(`<memory-hint>${fixtures.summaryCore}</memory-hint>`);
+  });
+
+  it("Python's _SAVE_HINT wraps the exact shared core text in <memory-hint> tags", () => {
+    const hint = pythonHintConstant('_SAVE_HINT');
+    expect(hint).toBe(`<memory-hint>${fixtures.saveCore}</memory-hint>`);
   });
 });
 

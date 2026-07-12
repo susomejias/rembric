@@ -43,7 +43,7 @@ class SystemPromptBlockTest(unittest.TestCase):
     def test_session_summary_trigger_is_not_bound_to_the_word_done(self) -> None:
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertIn("before ending any working turn", block)
+        self.assertIn("Before ending", block)
         self.assertNotIn('before declaring work done', block)
 
     def test_block_is_within_1000_char_cap(self) -> None:

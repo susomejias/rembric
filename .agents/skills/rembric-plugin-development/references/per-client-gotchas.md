@@ -18,7 +18,7 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 
 ## Hermes Agent
 
-- `plugin.yaml::hooks: [...]` array **gates lifecycle override invocation**. Override a method on the provider without listing its hook name → Hermes does NOT call your override. Caught the hard way during `add-hermes-agent-plugin`.
+- `plugin.yaml::hooks: [...]` array is **purely descriptive metadata** — it does NOT gate lifecycle method invocation for memory providers. Verified against `NousResearch/hermes-agent@main`: `MemoryManager` calls every `MemoryProvider` ABC method (`system_prompt_block`, `prefetch`, `on_turn_start`, etc.) unconditionally by direct iteration; nothing in the dispatch path reads `plugin.yaml`. Bundled providers (honcho/hindsight) list only a subset in `hooks:` yet still get every method called. (A prior version of this note claimed the array gates invocation — that was disproven while diagnosing why `system_prompt_block` reliably fires despite not being listed.)
 - Credentials live in `${HERMES_HOME:-~/.hermes}/.env` populated by `requires_env: [...]` at install time. Don't preload any plugin-specific dotenv.
 - The provider class MUST guard `from agent.memory_provider import MemoryProvider` with a `try/except ImportError` fallback ABC so the file is importable in tests without Hermes installed.
 - `is_available` MUST send `Authorization: Bearer ${REMBRIC_API_TOKEN}` (Rembric `/healthz` requires auth since `0.13.0`). 401 → degrades to `is_available() = False`, silently disabling the provider.

@@ -57,7 +57,7 @@ describe('MCP initialize instructions', () => {
     for (const text of variants) {
       expect(text).toContain('memory.session_summary');
       expect(text).toContain('title');
-      expect(text).toContain('before');
+      expect(text.toLowerCase()).toContain('before');
     }
   });
 
@@ -87,7 +87,7 @@ describe('MCP initialize instructions', () => {
       buildInstructions({ requestedSlug: 'rembric' }),
     ];
     for (const text of variants) {
-      expect(text).toContain('before ending any working turn');
+      expect(text).toContain('Before ending');
       expect(text).not.toContain('before saying "done"');
     }
   });

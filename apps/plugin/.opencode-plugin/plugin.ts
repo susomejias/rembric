@@ -63,10 +63,10 @@ const RECALL_NUDGE =
   'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
 const SAVE_NUDGE_EVERY = 5;
 const SAVE_NUDGE =
-  'rembric: if recent work produced a decision, fix, or discovery, call memory.save now (title ≤100 + content).';
+  'rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).';
 const SUMMARY_NUDGE_EVERY = 10;
 const SUMMARY_NUDGE =
-  'rembric: call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.';
+  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.';
 
 type EventInput = {
   event: {

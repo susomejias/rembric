@@ -1,5 +1,6 @@
 {
-  "save": "rembric: if recent work produced a decision, fix, or discovery, call memory.save now (title ≤100 + content).",
-  "summaryCore": "call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.",
-  "summary": "rembric: call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files."
+  "saveCore": "if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
+  "save": "rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
+  "summaryCore": "did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.",
+  "summary": "rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip."
 }

@@ -23,7 +23,7 @@ const BASE = `Rembric — persistent memory across sessions. Use these tools pro
 
 SAVE: the moment it happens — bug fix · decision · discovery · config · pattern · preference — call memory.save with a title≤100 headline + content (don't batch). Evolving a prior topic? pass topic_key; resolve candidates[] with memory.judge.
 RECALL: starting/resuming work, after /compact, or asked "what did we do"? Call memory.context (memory.search for keyword lookup) if you lack prior detail.
-SUMMARIZE: before ending any working turn, call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — never end silent: Goal · Discoveries · Accomplished · Next Steps · Files.
+SUMMARIZE: did real work happen? Before ending, you MUST call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — Goal · Discoveries · Accomplished · Next Steps · Files. Trivial? Skip.
 Update Rembric itself: memory.about.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>

@@ -114,17 +114,18 @@ _SUMMARY_HINT_EVERY = 10
 _COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
 _SAVE_HINT = (
-    "<memory-hint>If this turn produced a decision, fix, or discovery, "
-    "call memory.save now (title ≤100 + content).</memory-hint>"
+    "<memory-hint>if recent work produced a decision, fix, or discovery, "
+    "you MUST call memory.save now (title ≤100 + content).</memory-hint>"
 )
 _SAVE_HINT_URGENT = (
     "<memory-hint>Context is about to compact — save anything important "
     "with memory.save NOW before it is lost.</memory-hint>"
 )
 _SUMMARY_HINT = (
-    "<memory-hint>call memory.session_summary({title, summary}) now — "
-    "title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · "
-    "Accomplished · Next Steps · Files.</memory-hint>"
+    "<memory-hint>did real work happen this turn? You MUST call "
+    "memory.session_summary({title, summary}) now — title ≤100 chars (the "
+    "work, not cwd); summary: Goal · Discoveries · Accomplished · Next "
+    "Steps · Files. Nothing memorable? Skip.</memory-hint>"
 )
 
 
@@ -371,10 +372,10 @@ class RembricMemoryProvider(MemoryProvider):
             "RECALL: starting/resuming work, after /compact, or asked \"what "
             "did we do\"? Call memory.context (memory.search for keyword "
             "lookup) if you lack prior detail.\n"
-            "SUMMARIZE: before ending any working turn, call "
+            "SUMMARIZE: did real work happen? Before ending, you MUST call "
             "memory.session_summary({title≤100 (the work, not cwd), "
-            "summary≤10000}) — never end silent: Goal · Discoveries · "
-            "Accomplished · Next Steps · Files.\n"
+            "summary≤10000}) — Goal · Discoveries · Accomplished · Next "
+            "Steps · Files. Trivial? Skip.\n"
             "Update Rembric itself: memory.about."
         )
 
@@ -460,11 +461,15 @@ class RembricMemoryProvider(MemoryProvider):
                 transcript = _format_transcript(messages)
                 if not transcript:
                     return
+                body: dict[str, Any] = {"summary": transcript, "final": False}
+                title = _derive_title_from_messages(messages)
+                if title:
+                    body["title"] = title
                 _api_post(
                     base,
                     slug,
                     f"/sessions/{session_id}/summary",
-                    {"summary": transcript, "final": False},
+                    body,
                 )
             finally:
                 if acquired:
@@ -639,8 +644,8 @@ _TITLE_MAX_CHARS = 100
 def _derive_title_from_messages(messages: list) -> str:
     """Return the first non-empty assistant message (≤100 chars) as a title.
 
-    Used by on_session_end to seed a non-final title write. Returns empty
-    string when no assistant message is found.
+    Used by sync_turn (every turn) and on_session_end to seed non-final
+    title writes. Returns empty string when no assistant message is found.
     """
     for msg in messages or []:
         if not isinstance(msg, dict):
