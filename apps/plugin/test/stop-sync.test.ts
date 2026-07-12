@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +19,7 @@ let server: Server;
 let serverUrl: string;
 let requests: CapturedRequest[];
 let dir: string;
+let responseDelayMs: number;
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -30,13 +31,16 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 beforeEach(async () => {
   requests = [];
+  responseDelayMs = 0;
   dir = mkdtempSync(join(tmpdir(), 'rembric-stopsync-'));
   server = createServer((req, res) => {
     readBody(req)
       .then((body) => {
         requests.push({ method: req.method ?? '', path: req.url ?? '', body });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
+        setTimeout(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
+        }, responseDelayMs);
       })
       .catch(() => {
         res.writeHead(500);
@@ -71,19 +75,47 @@ function writeTranscript(cwd: string, name: string): string {
   return path;
 }
 
-async function runStopSync(stdin: string): Promise<string> {
+function writeCodexTranscript(cwd: string, name: string): string {
+  const path = join(cwd, name);
+  const lines = [
+    JSON.stringify({
+      type: 'event_msg',
+      payload: { type: 'user_message', message: 'please fix the bug' },
+    }),
+    JSON.stringify({
+      type: 'event_msg',
+      payload: { type: 'agent_message', message: 'Fixed it, running tests now.' },
+    }),
+  ];
+  writeFileSync(path, lines.join('\n') + '\n');
+  return path;
+}
+
+async function runStopSync(stdin: string, agent?: string): Promise<string> {
   // Async execFile — NOT execFileSync — is required here: the script's
   // curl call and this test's in-process HTTP server share one Node event
   // loop. A synchronous spawn blocks that loop while curl waits on it,
   // deadlocking until curl's own timeout (verified: reproduces even with a
   // bare node+curl script outside vitest).
-  const child = execFileAsync('bash', [stopSyncSh], {
+  const child = execFileAsync('bash', agent ? [stopSyncSh, agent] : [stopSyncSh], {
     encoding: 'utf8',
     env: { ...process.env, REMBRIC_SERVER_URL: serverUrl, REMBRIC_API_TOKEN: 'test-token' },
   });
   child.child.stdin?.end(stdin);
   const { stdout } = await child;
   return stdout;
+}
+
+// Claude Code's sync runs in a detached background subshell (see
+// stop-sync.sh's header), so the script's own exit no longer implies the
+// request has landed — poll for it instead of asserting synchronously.
+function waitForRequest(): Promise<void> {
+  return vi.waitFor(
+    () => {
+      if (requests.length === 0) throw new Error('no request received yet');
+    },
+    { timeout: 3000, interval: 20 },
+  );
 }
 
 describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
@@ -94,8 +126,9 @@ describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
     const out = await runStopSync(
       JSON.stringify({ session_id: 'sess-abc', cwd: dir, transcript_path: transcriptPath }),
     );
-
     expect(out).toBe('');
+
+    await waitForRequest();
     expect(requests).toHaveLength(1);
     expect(requests[0]!.method).toBe('POST');
     expect(requests[0]!.path).toBe('/api/demo/sessions/sess-abc/summary');
@@ -104,6 +137,24 @@ describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
     expect(body.summary).toContain('Fixed it, running tests now.');
     expect(body.title).toContain('Fixed it, running tests now.');
     expect('final' in body).toBe(false);
+  });
+
+  it('returns almost immediately even when the server is slow to respond', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = writeTranscript(dir, 'transcript.jsonl');
+    responseDelayMs = 2000;
+
+    const startedAt = Date.now();
+    const out = await runStopSync(
+      JSON.stringify({ session_id: 'sess-slow', cwd: dir, transcript_path: transcriptPath }),
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(out).toBe('');
+    expect(elapsedMs).toBeLessThan(1000);
+
+    await waitForRequest();
+    expect(requests).toHaveLength(1);
   });
 
   it('makes no POST and emits no stdout when transcript_path is missing', async () => {
@@ -146,6 +197,37 @@ describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
   it('exits 0 and emits no stdout on empty/unparseable stdin', async () => {
     expect(await runStopSync('')).toBe('');
     expect(await runStopSync('not json')).toBe('');
+    expect(requests).toHaveLength(0);
+  });
+});
+
+describe('stop-sync.sh codex-cli (Codex Stop hook)', () => {
+  it('POSTs summary+title+final:false to /summary, and emits {} on stdout', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = writeCodexTranscript(dir, 'transcript.jsonl');
+
+    const out = await runStopSync(
+      JSON.stringify({ session_id: 'sess-abc', cwd: dir, transcript_path: transcriptPath }),
+      'codex-cli',
+    );
+
+    expect(out).toBe('{}');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.path).toBe('/api/demo/sessions/sess-abc/summary');
+    const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
+    expect(body.summary).toContain('please fix the bug');
+    expect(body.summary).toContain('Fixed it, running tests now.');
+    expect(body.title).toContain('Fixed it, running tests now.');
+    expect(body.final).toBe(false);
+  });
+
+  it('makes no POST but still emits {} on stdout when transcript_path is missing', async () => {
+    writeRembricFile(dir, 'demo');
+    const out = await runStopSync(
+      JSON.stringify({ session_id: 'sess-abc', cwd: dir }),
+      'codex-cli',
+    );
+    expect(out).toBe('{}');
     expect(requests).toHaveLength(0);
   });
 });

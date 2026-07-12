@@ -1,49 +1,95 @@
 #!/usr/bin/env bash
-# Stop hook — Claude Code only. Fires once per assistant turn (NOT once per
-# session — see the claude-code-plugin spec's note on why a prior Stop hook
-# was removed and why this one is safe: it never posts to /end and never
-# transitions session status, so it cannot trigger that historical bug).
+# Stop hook — Claude Code + Codex CLI. Fires once per assistant turn on both
+# clients (NOT once per session — see the claude-code-plugin spec's note on
+# why a prior Stop hook was removed and why this one is safe: it never posts
+# to /end and never transitions session status).
 #
-# Pure side effect: raw per-turn transcript sync to /summary. The `final`
-# field is omitted entirely (never sent as true), so a curated
-# memory.session_summary always wins via the server's last-final-wins
-# precedence. Emits NO stdout under any circumstance — this hook must never
-# touch the model's context.
-set -u
-trap 'exit 0' ERR
+# Pure side effect: raw per-turn transcript sync to /summary. Claude Code
+# omits `final` entirely (never sent as true); Codex sends `final:false`
+# explicitly (Codex has no SessionEnd — see session-end.sh's comment on why
+# its session row stays `active`). Either way, a curated
+# memory.session_summary (final:true) always wins via the server's
+# last-final-wins precedence.
+#
+# Claude Code's transcript-format-and-POST work runs in a detached
+# background subshell, stdout/stderr redirected to /dev/null so the host
+# sees EOF on this process's output as soon as the parent exits (the
+# classic shell daemonizing pattern — without the redirect, an inherited
+# pipe FD in the child would keep the host waiting on it regardless of
+# how fast the parent returns). hooks.json wires "async": true, but
+# whether that flag itself decouples the Stop event from turn latency is
+# unconfirmed, so this makes the script non-blocking on its own terms.
+#
+# Codex CLI stays synchronous — no documented async escape hatch, and
+# MUST emit `{}` JSON on stdout before exit.
+#
+# Usage: stop-sync.sh [agent-name]
+#   agent-name defaults to $REMBRIC_AGENT or "claude-code".
+#   hooks.json       → "claude-code"  — MUST emit NOTHING on stdout
+#   hooks.codex.json → "codex-cli"    — MUST emit `{}` JSON on stdout
+#     (Codex docs: "Stop expects JSON on stdout when it exits 0.")
+set -Eu
+
+AGENT="${1:-${REMBRIC_AGENT:-claude-code}}"
+PARSER="${AGENT//-/_}"
+if [ "$AGENT" = "codex-cli" ]; then
+  FINAL_JSON=',"final":false'
+else
+  FINAL_JSON=''
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./_api.sh
-source "${SCRIPT_DIR}/_api.sh"
-# shellcheck source=./_transcript.sh
-source "${SCRIPT_DIR}/_transcript.sh"
 
 INPUT=""
 if [ ! -t 0 ]; then
   INPUT="$(cat)"
 fi
-SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
-CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
-TRANSCRIPT_PATH="$(rembric_transcript_path_from_stdin_json "$INPUT")"
-[ -z "$CWD" ] && CWD="$PWD"
-SLUG="$(rembric_read_project_slug "$CWD")"
 
-if [ -z "$SESSION_ID" ] || [ -z "$SLUG" ] || [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
-  exit 0
-fi
+_sync() {
+  trap 'exit 0' ERR
+  # shellcheck source=./_api.sh
+  source "${SCRIPT_DIR}/_api.sh"
+  # shellcheck source=./_transcript.sh
+  source "${SCRIPT_DIR}/_transcript.sh"
 
-SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-[ -z "$SUMMARY" ] && exit 0
-TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  local session_id cwd transcript_path slug summary title summary_esc title_esc
+  session_id="$(rembric_session_id_from_stdin_json "$INPUT")"
+  cwd="$(rembric_cwd_from_stdin_json "$INPUT")"
+  transcript_path="$(rembric_transcript_path_from_stdin_json "$INPUT")"
+  [ -z "$cwd" ] && cwd="$PWD"
+  slug="$(rembric_read_project_slug "$cwd")"
 
-SUMMARY_ESC="$(rembric_json_escape "$SUMMARY")"
-if [ -n "$TITLE" ]; then
-  TITLE_ESC="$(rembric_json_escape "$TITLE")"
-  rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/summary" \
-    "{\"summary\":\"${SUMMARY_ESC}\",\"title\":\"${TITLE_ESC}\"}"
+  [ -z "$session_id" ] && return 0
+  [ -z "$slug" ] && return 0
+  [ -z "$transcript_path" ] && return 0
+  [ -f "$transcript_path" ] || return 0
+
+  summary="$("rembric_format_transcript_${PARSER}" "$transcript_path" 2>/dev/null || true)"
+  [ -z "$summary" ] && return 0
+  title="$("rembric_extract_first_assistant_${PARSER}" "$transcript_path" 2>/dev/null || true)"
+  summary_esc="$(rembric_json_escape "$summary")"
+  if [ -n "$title" ]; then
+    title_esc="$(rembric_json_escape "$title")"
+    rembric_post "/api/${slug}/sessions/${session_id}/summary" \
+      "{\"summary\":\"${summary_esc}\",\"title\":\"${title_esc}\"${FINAL_JSON}}"
+  else
+    rembric_post "/api/${slug}/sessions/${session_id}/summary" \
+      "{\"summary\":\"${summary_esc}\"${FINAL_JSON}}"
+  fi
+}
+
+if [ "$AGENT" = "codex-cli" ]; then
+  trap '_emit_json' ERR
+  _emit_json() {
+    printf '{}'
+    exit 0
+  }
+  _sync
+  printf '{}'
 else
-  rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/summary" \
-    "{\"summary\":\"${SUMMARY_ESC}\"}"
+  trap 'exit 0' ERR
+  _sync >/dev/null 2>&1 &
+  disown 2>/dev/null || true
 fi
 
 exit 0

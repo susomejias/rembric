@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helper for the Rembric plugin hook scripts.
 #
-# Sourced by session-start.sh, pre-compact.sh, and session-stop.sh. Exposes:
+# Sourced by session-start.sh, pre-compact.sh, and stop-sync.sh. Exposes:
 #   - rembric_parse_dotenv <path>     → echoes "KEY=VALUE\n..." pairs
 #   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
@@ -112,8 +112,8 @@ rembric_prompt_from_stdin_json() {
 }
 
 # Extract `transcript_path` from a hook stdin JSON blob. Returns empty
-# when missing or null. Used by session-end.sh (Claude Code) and
-# session-stop.sh (Codex) to find the JSONL conversation log on disk.
+# when missing or null. Used by session-end.sh, stop-sync.sh, and
+# pre-compact.sh to find the JSONL conversation log on disk.
 rembric_transcript_path_from_stdin_json() {
   local input="${1:-}"
   [ -z "$input" ] && return 0

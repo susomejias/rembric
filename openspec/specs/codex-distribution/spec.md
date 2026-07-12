@@ -73,7 +73,7 @@ Codex's mapping of lifecycle events to HTTP endpoints still diverges from Claude
 #### Scenario: Codex Stop wires to a per-turn summary writer
 
 - **WHEN** the `Stop` hook fires (which it does once per agent turn under Codex semantics)
-- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-stop.sh codex-cli` (Codex-only — Claude Code does NOT wire `Stop` in this version)
+- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-sync.sh codex-cli` (the same script Claude Code's `Stop` hook invokes with `claude-code`, differing only in the transcript parser and stdout contract selected by the agent-name argument)
 - **AND** the script SHALL read `session_id`, `cwd`, and `transcript_path` from stdin
 - **AND** SHALL read `${cwd}/.rembric` for the slug
 - **AND** SHALL read `transcript_path` if readable, format it via `_transcript.sh`, derive a title from the first non-empty assistant message (≤100 chars)
@@ -110,7 +110,7 @@ Codex's mapping of lifecycle events to HTTP endpoints still diverges from Claude
 
 ### Requirement: Codex hooks MUST receive `session_id` from stdin in the same JSON shape as Claude Code
 
-The shared scripts `session-start.sh`, `pre-compact.sh`, and `session-stop.sh` SHALL read the hook stdin as a JSON object containing a `session_id` field (and `cwd` when relevant). Claude Code and Codex CLI both pass the host-session id in stdin JSON for `command`-type hooks.
+The shared scripts `session-start.sh`, `pre-compact.sh`, and `stop-sync.sh` SHALL read the hook stdin as a JSON object containing a `session_id` field (and `cwd` when relevant). Claude Code and Codex CLI both pass the host-session id in stdin JSON for `command`-type hooks.
 
 If Codex passes the id under a different key (e.g. `sessionId`), the scripts SHALL prefer `session_id` and SHALL fall back to `sessionId` so the same script supports both clients without per-client forks. When neither field is present the scripts SHALL skip the HTTP call and exit `0`.
 

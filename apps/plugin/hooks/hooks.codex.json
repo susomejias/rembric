@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-stop.sh codex-cli"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-sync.sh codex-cli"
           }
         ]
       }
