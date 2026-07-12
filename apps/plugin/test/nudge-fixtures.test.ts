@@ -24,6 +24,7 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
 };
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
+const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
 
 function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): string[] {
   let out = '';
@@ -37,6 +38,15 @@ function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): 
   return out.split('\n').filter((l) => l.length > 0);
 }
 
+const hasPython3 = (() => {
+  try {
+    execFileSync('python3', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 function pythonHintConstant(name: '_SAVE_HINT' | '_SAVE_HINT_URGENT' | '_SUMMARY_HINT'): string {
   const program = [
     'import importlib.util, sys',
@@ -48,7 +58,30 @@ function pythonHintConstant(name: '_SAVE_HINT' | '_SAVE_HINT_URGENT' | '_SUMMARY
   return execFileSync('python3', ['-c', program, hermesInit, name], { encoding: 'utf8' });
 }
 
-describe('nudge text lock-step across bash, TS, and Python', () => {
+function pythonNumberConstant(name: '_SAVE_HINT_EVERY' | '_SUMMARY_HINT_EVERY'): number {
+  const program = [
+    'import importlib.util, sys',
+    "spec = importlib.util.spec_from_file_location('rembric_hermes_plugin', sys.argv[1])",
+    'mod = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(mod)',
+    'sys.stdout.write(str(getattr(mod, sys.argv[2])))',
+  ].join('\n');
+  return Number(execFileSync('python3', ['-c', program, hermesInit, name], { encoding: 'utf8' }));
+}
+
+function bashCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
+  const match = readFileSync(promptNudgeSh, 'utf8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
+  if (!match) throw new Error(`${name} not found in prompt-nudge.sh`);
+  return Number(match[1]);
+}
+
+function tsCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
+  const match = readFileSync(opencodePluginTs, 'utf8').match(new RegExp(`const ${name} = (\\d+);`));
+  if (!match) throw new Error(`${name} not found in plugin.ts`);
+  return Number(match[1]);
+}
+
+describe('nudge text lock-step across bash and TS', () => {
   let counterDir: string;
 
   it('bash prompt-nudge.sh emits the exact fixture save text on turn 5', () => {
@@ -71,12 +104,34 @@ describe('nudge text lock-step across bash, TS, and Python', () => {
     }
   });
 
+  it('the fixture summary text is the rembric:-prefixed shared core', () => {
+    expect(fixtures.summary).toBe(`rembric: ${fixtures.summaryCore}`);
+  });
+});
+
+describe.runIf(hasPython3)('nudge text lock-step with Python', () => {
   it("Python's _SUMMARY_HINT wraps the exact shared core text in <memory-hint> tags", () => {
     const hint = pythonHintConstant('_SUMMARY_HINT');
     expect(hint).toBe(`<memory-hint>${fixtures.summaryCore}</memory-hint>`);
   });
+});
 
-  it('the fixture summary text is the rembric:-prefixed shared core', () => {
-    expect(fixtures.summary).toBe(`rembric: ${fixtures.summaryCore}`);
+describe('nudge cadence numbers lock-step across bash and TS', () => {
+  it('SAVE_NUDGE_EVERY matches', () => {
+    expect(tsCadence('SAVE_NUDGE_EVERY')).toBe(bashCadence('SAVE_NUDGE_EVERY'));
+  });
+
+  it('SUMMARY_NUDGE_EVERY matches', () => {
+    expect(tsCadence('SUMMARY_NUDGE_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
+  });
+});
+
+describe.runIf(hasPython3)('nudge cadence numbers lock-step with Python', () => {
+  it('SAVE_NUDGE_EVERY matches', () => {
+    expect(pythonNumberConstant('_SAVE_HINT_EVERY')).toBe(bashCadence('SAVE_NUDGE_EVERY'));
+  });
+
+  it('SUMMARY_NUDGE_EVERY matches', () => {
+    expect(pythonNumberConstant('_SUMMARY_HINT_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
   });
 });
