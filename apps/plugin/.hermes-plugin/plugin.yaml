@@ -7,6 +7,7 @@ hooks:
   - on_session_end
   - on_pre_compress
   - on_session_switch
+  - on_turn_start
   - prefetch
   - queue_prefetch
   - sync_turn

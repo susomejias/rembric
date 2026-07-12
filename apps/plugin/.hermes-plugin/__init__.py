@@ -82,6 +82,9 @@ except ImportError:  # pragma: no cover - exercised only outside Hermes
         def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
             pass
 
+        def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:
+            pass
+
         def on_session_end(self, messages: list, **kwargs: Any) -> None:
             pass
 
@@ -106,7 +109,17 @@ _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
 _SYNC_TURN_HEARTBEAT_EVERY = 5
+_SAVE_HINT_EVERY = 3
+_COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
+_SAVE_HINT = (
+    "<memory-hint>If this turn produced a decision, fix, or discovery, "
+    "call memory.save now (title ≤100 + content).</memory-hint>"
+)
+_SAVE_HINT_URGENT = (
+    "<memory-hint>Context is about to compact — save anything important "
+    "with memory.save NOW before it is lost.</memory-hint>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +284,9 @@ class RembricMemoryProvider(MemoryProvider):
         # queue_prefetch warms this per-session; prefetch reads it back inline.
         self._prefetch_cache: dict[str, str] = {}
         self._sync_turn_count: int = 0
+        self._turn_number: int = 0
+        self._compaction_imminent: bool = False
+        self._compaction_warned: bool = False
 
     @property
     def name(self) -> str:
@@ -356,11 +372,34 @@ class RembricMemoryProvider(MemoryProvider):
             "Update Rembric itself: memory.about."
         )
 
+    def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:
+        del message
+        self._turn_number = turn_number
+        remaining = kwargs.get("remaining_tokens")
+        if (
+            isinstance(remaining, int)
+            and remaining < _COMPACTION_TOKEN_FLOOR
+            and not self._compaction_warned
+        ):
+            self._compaction_imminent = True
+        return None
+
     def prefetch(self, query: str, **kwargs: Any) -> str:
         # Inline on the turn path — read the cache only, never a network call.
         del query
         session_id = kwargs.get("session_id") or self._session_id
-        return self._prefetch_cache.get(session_id or "", "")
+        recalled = self._prefetch_cache.get(session_id or "", "")
+        if self._compaction_imminent:
+            self._compaction_imminent = False
+            self._compaction_warned = True
+            hint = _SAVE_HINT_URGENT
+        elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
+            hint = _SAVE_HINT
+        else:
+            hint = ""
+        if not hint:
+            return recalled
+        return f"{recalled}\n{hint}" if recalled else hint
 
     def queue_prefetch(self, query: str, **kwargs: Any) -> None:
         session_id = kwargs.get("session_id") or self._session_id
@@ -444,6 +483,12 @@ class RembricMemoryProvider(MemoryProvider):
             body,
         )
         self._prefetch_cache.pop(self._session_id, None)
+        self._reset_turn_state()
+
+    def _reset_turn_state(self) -> None:
+        self._turn_number = 0
+        self._compaction_imminent = False
+        self._compaction_warned = False
 
     def on_session_switch(
         self,
@@ -484,6 +529,7 @@ class RembricMemoryProvider(MemoryProvider):
             )
         if old_id and old_id != new_session_id:
             self._prefetch_cache.pop(old_id, None)
+            self._reset_turn_state()
         self._session_id = new_session_id
         if self._slug and self._base and new_session_id:
             _api_post(
