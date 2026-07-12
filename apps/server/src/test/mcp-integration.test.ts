@@ -1210,21 +1210,27 @@ describe('MCP protocol conformance', () => {
     'memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope',
     { retry: 3 },
     async () => {
-      const projects = new ProjectsService(createRepositories(server.dbHandle.db));
-      const project = projects.create({ slug: 'integration-roots-ctx-proj' });
-      createRepositories(server.dbHandle.db).memory.insert({
-        id: '01TESTROOTSCTXMARKER00000A',
-        scope: 'project',
-        projectId: project.id,
-        type: 'project',
-        title: 'roots-discovered context marker',
-        content: 'roots-discovered context marker',
-        tags: [],
-        status: 'active',
-        replaces: [],
-        createdAt: new Date(),
-        lastSeenAt: new Date(),
-      });
+      // Fixtures created once: `retry` re-runs this body, so a re-`create`
+      // would hit UNIQUE(slug)/PK and mask the real (timing) retry.
+      const repos = createRepositories(server.dbHandle.db);
+      const projectsSvc = new ProjectsService(repos);
+      let project = projectsSvc.findBySlug('integration-roots-ctx-proj');
+      if (!project) {
+        project = projectsSvc.create({ slug: 'integration-roots-ctx-proj' });
+        repos.memory.insert({
+          id: '01TESTROOTSCTXMARKER00000A',
+          scope: 'project',
+          projectId: project.id,
+          type: 'project',
+          title: 'roots-discovered context marker',
+          content: 'roots-discovered context marker',
+          tags: [],
+          status: 'active',
+          replaces: [],
+          createdAt: new Date(),
+          lastSeenAt: new Date(),
+        });
+      }
 
       const client = await connect({ rootUri: `file:///tmp/${project.slug}` });
       const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
