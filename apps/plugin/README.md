@@ -71,7 +71,7 @@ You will be prompted for two values at install time, both required:
   - No trailing slash.
 - **Rembric API token** — issued from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Stored in your system keychain (not in `settings.json`).
 
-That's it — the `userConfig` values flow to both the MCP bridge AND the lifecycle hooks via Claude Code's `${user_config.*}` substitution in the hook manifest. No shell exports required.
+That's it — the `userConfig` values reach the MCP bridge via `${user_config.*}` substitution in `mcp.json::env`, and reach the lifecycle hooks via the `CLAUDE_PLUGIN_OPTION_SERVER_URL`/`CLAUDE_PLUGIN_OPTION_API_TOKEN` environment variables Claude Code injects into every hook subprocess (referencing `${user_config.*}` directly in a hook's shell-form `command` string is rejected — the substituted value would be re-parsed by the shell). No shell exports required.
 
 ### Verifying the hooks reach the server
 
@@ -85,7 +85,7 @@ export REMBRIC_SERVER_URL="https://memory.example.com"
 export REMBRIC_API_TOKEN="$(security find-generic-password -s rembric -w 2>/dev/null || echo MISSING)"
 ```
 
-Restart Claude Code and try again. If sessions now appear with the shell exports but not without, the plugin's `${user_config.*}` substitution is misbehaving — open an issue with the Claude Code version. Either way the hook scripts emit a one-line stderr diagnostic (`[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST ...`) when credentials are missing; `claude --debug` shows them.
+Restart Claude Code and try again. If sessions now appear with the shell exports but not without, the plugin's `CLAUDE_PLUGIN_OPTION_*` env injection is misbehaving — open an issue with the Claude Code version. Either way the hook scripts emit a one-line stderr diagnostic (`[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST ...`) when credentials are missing; `claude --debug` shows them.
 
 ### Updating to a new version
 

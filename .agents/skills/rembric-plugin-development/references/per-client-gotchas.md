@@ -4,8 +4,8 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 
 ## Claude Code
 
-- `${user_config.*}` substitution works in BOTH `mcp.json::env` AND hook `command` strings. Install wizard's keychain is the single source of credentials.
-- Hooks inherit nothing from MCP env. Hook commands MUST inline-prefix env vars: `REMBRIC_SERVER_URL='${user_config.server_url}' REMBRIC_API_TOKEN='${user_config.api_token}' "${CLAUDE_PLUGIN_ROOT}"/scripts/x.sh`.
+- `${user_config.*}` substitution works in `mcp.json::env` (a real key/value object, not a shell string). It is REJECTED at hook-fire time inside a shell-form hook `command` string (`"VAR='${user_config.x}' ...script.sh"`) — Claude Code (≥2.1.20x) now throws "references \${user_config.\*} in a shell-form command" because the substituted value would be re-parsed by the shell. Install wizard's keychain is the single source of credentials.
+- Hooks inherit nothing from MCP env, but Claude Code always injects every `userConfig` key into the hook subprocess's env as `CLAUDE_PLUGIN_OPTION_<KEY>` (key upper-cased, non-alnum → `_`) — unconditionally, whether or not the command references it. Hook commands MUST inline-prefix from THAT var, not from `${user_config.*}`: `REMBRIC_SERVER_URL="${CLAUDE_PLUGIN_OPTION_SERVER_URL}" REMBRIC_API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN}" "${CLAUDE_PLUGIN_ROOT}"/scripts/x.sh`. This keeps `_api.sh` and every hook script unchanged (they still just read `$REMBRIC_SERVER_URL`/`$REMBRIC_API_TOKEN`) — the platform delta stays in the manifest, per the shared-script discipline below.
 - `${CLAUDE_PLUGIN_ROOT}` substitution works everywhere in Claude's manifests.
 - Claude Code caches plugins by `version`. A change with no version bump is invisible to `/plugin update`. Docs-only changes intentionally skip the bump.
 

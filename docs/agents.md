@@ -171,7 +171,7 @@ The two clients pick up credentials from different places — keep both configur
 
 | Client          | Where to put credentials                                                                                                                                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Claude Code** | Install wizard (`/plugin install rembric@rembric`) → keychain. Hooks pick them up automatically via `${user_config.*}` substitution. **No shell exports required.** |
+| **Claude Code** | Install wizard (`/plugin install rembric@rembric`) → keychain. Hooks pick them up automatically via the `CLAUDE_PLUGIN_OPTION_*` env vars Claude Code injects into every hook subprocess. **No shell exports required.** |
 | **Codex CLI**   | `export REMBRIC_SERVER_URL=…` and `export REMBRIC_API_TOKEN=…` in your shell rc. Bridge and hooks both read process env. **No wizard exists.**                      |
 
 If you only use one client, set up just that one. If you use both, you need both — the wizard input does NOT propagate to Codex's process, and the shell exports are NOT consumed by Claude Code's hooks (Claude Code substitutes from the keychain, not from `process.env`). Same Rembric server, same token, two configuration surfaces.
