@@ -587,14 +587,13 @@ export interface PagerOpts {
 export function pager(opts: PagerOpts): SafeHtml {
   const pageCount =
     opts.total !== undefined ? Math.max(1, Math.ceil(opts.total / PAGE_SIZE)) : undefined;
+  const label =
+    `PAGE ${opts.page + 1}` +
+    (pageCount !== undefined ? ` OF ${pageCount}` : '') +
+    (opts.totalLabel ? ` · ${opts.totalLabel}` : '');
   return html`
     <div class="pager">
-      <span
-        >PAGE
-        ${opts.page + 1}${pageCount !== undefined ? ` OF ${pageCount}` : ''}${opts.totalLabel
-          ? ` · ${opts.totalLabel}`
-          : ''}</span
-      >
+      <span>${label}</span>
       <span class="pages">
         ${opts.page > 0
           ? html`<a href="${opts.pageHrefBuilder(opts.page - 1)}">‹ PREV</a>`
