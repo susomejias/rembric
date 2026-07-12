@@ -68,9 +68,20 @@ const listSelection = {
 
 // "Session has something worth surfacing" — adding a new table that anchors
 // to a session id (e.g. a future `tool_calls`) MUST update only this helper.
-function sessionHasContentSql(alias: 's' | 'sessions') {
+// requireCuratedSummary distinguishes the two consumers' bars on clause 1
+// only: context-surfacing (true, default) trusts only a curated summary;
+// purge-eligibility (false) treats any summary text as "not empty", since
+// deleting genuine-but-uncurated content is irreversible while merely not
+// surfacing it in memory.context is not.
+function sessionHasContentSql(
+  alias: 's' | 'sessions',
+  opts: { requireCuratedSummary: boolean } = { requireCuratedSummary: true },
+) {
+  const summaryClause = opts.requireCuratedSummary
+    ? `${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1`
+    : `${alias}.summary IS NOT NULL`;
   return sql.raw(
-    `((${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1)` +
+    `((${summaryClause})` +
       ` OR ${alias}.title_final = 1` +
       ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
       ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
@@ -133,7 +144,13 @@ export class AgentSessionsRepository {
     return this.db
       .select()
       .from(agentSessions)
-      .where(and(scopeCondition, isNull(agentSessions.deletedAt), sessionHasContentSql('sessions')))
+      .where(
+        and(
+          scopeCondition,
+          isNull(agentSessions.deletedAt),
+          sessionHasContentSql('sessions', { requireCuratedSummary: true }),
+        ),
+      )
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit)
       .all();
@@ -185,7 +202,7 @@ export class AgentSessionsRepository {
          AND s.deleted_at IS NULL
          AND s.ended_at IS NOT NULL
          AND s.ended_at < ${cutoffMs}
-         AND NOT ${sessionHasContentSql('s')}
+         AND NOT ${sessionHasContentSql('s', { requireCuratedSummary: false })}
     `) as { v: number } | undefined;
     return row?.v ?? 0;
   }
@@ -199,7 +216,7 @@ export class AgentSessionsRepository {
            AND s.deleted_at IS NULL
            AND s.ended_at IS NOT NULL
            AND s.ended_at < ${cutoffMs}
-           AND NOT ${sessionHasContentSql('s')}
+           AND NOT ${sessionHasContentSql('s', { requireCuratedSummary: false })}
       `,
       )
       .map((r) => r.id);

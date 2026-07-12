@@ -447,14 +447,14 @@ describe('AgentSessionsService', () => {
       expect(result.deletedIds).not.toContain(s.id);
     });
 
-    it('purges a session whose only content is a raw, uncurated summary (summary_final=0)', () => {
+    it('does not purge a session with a genuine but uncurated summary (summary_final=0)', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'raw-summary-purge' });
       sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
       endAndBackdate(s.id, 2 * 60 * 60 * 1000);
 
       const result = sessions.purgeEmpty({ adminBypass: true });
-      expect(result.deletedIds).toContain(s.id);
-      expect(sessions.getById(s.id)).toBeUndefined();
+      expect(result.deletedIds).not.toContain(s.id);
+      expect(sessions.getById(s.id)).toBeDefined();
     });
 
     it('skips sessions referenced by a memory row', () => {
