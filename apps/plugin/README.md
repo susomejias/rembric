@@ -40,12 +40,14 @@ The rest of this file is the Claude Code plugin reference. For Codex see [`docs/
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
 - **A tiny stdio bridge** (`bin/rembric-bridge.mjs`, ~80 LOC) that reads `PROJECT_SLUG` from a `.rembric` file at the project root and path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the correct project on connect. No agent-side `project.use` call, no router-fallback codepath.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
-- **Six lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
+- **Eight lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
   - `SessionStart` (matcher `startup|resume|clear`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent). Also nudges the agent to load recent context.
   - `SessionStart` (matcher `compact`) injects a multi-line nudge into the post-compact model context directing it to call `memory.session_summary` and `memory.context` if detail is missing.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
+  - `UserPromptSubmit` (matcher-less, every prompt) carries a unified per-turn nudge: a save reminder every 5th turn plus a session-summary reminder on turn 1 and every 10th turn after, on plain stdout.
   - `PreCompact` POSTs the live transcript to `/api/<slug>/sessions/<id>/summary` BEFORE compaction wipes context, so the snapshot survives independent of model cooperation.
   - `PostCompact` POSTs the model-authored `compaction_summary` (delivered on stdin) directly to `/api/<slug>/sessions/<id>/summary` — the highest-quality summary we can capture.
+  - `Stop` (async, side-effect only) syncs the raw transcript to `/api/<slug>/sessions/<id>/summary` every turn, never as the final curated summary and never emitting stdout, so a `memory.session_summary` call always wins.
   - `SessionEnd` POSTs `/api/<slug>/sessions/<id>/end` when the session terminates, closing the row cleanly.
 
 Proactive memory protocol ("save after decisions, fixes, conventions, preferences, discoveries") is delivered server-side via the Rembric MCP `initialize.instructions` handshake — it applies to every MCP client (Claude Code plugin, Codex CLI, Cursor, …) automatically, with no per-client skill needed.
