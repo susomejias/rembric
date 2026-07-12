@@ -48,6 +48,9 @@ const MAX_TITLE_CHARS = 100;
 const RECALL_REGEX = /remember|recall|acuérdate|qué hicimos|what did we do/i;
 const RECALL_NUDGE =
   'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
+const SAVE_NUDGE_EVERY = 5;
+const SAVE_NUDGE =
+  'rembric: if recent work produced a decision, fix, or discovery, call memory.save now (title ≤100 + content).';
 
 type EventInput = {
   event: {
@@ -127,6 +130,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
   const subAgentSessions = new Set<string>();
   const sessionMessages = new Map<string, TranscriptEntry[]>();
   const pendingFlush = new Map<string, ReturnType<typeof setTimeout>>();
+  const userTurnCounts = new Map<string, number>();
 
   const baseUrl = serverUrl ? serverUrl.replace(/\/$/, '') : '';
 
@@ -296,6 +300,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
         knownSessions.delete(sessionId);
         subAgentSessions.delete(sessionId);
         sessionMessages.delete(sessionId);
+        userTurnCounts.delete(sessionId);
         const pending = pendingFlush.get(sessionId);
         if (pending) {
           clearTimeout(pending);
@@ -369,6 +374,12 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       if (RECALL_REGEX.test(content)) {
         output.parts.push({ type: 'text', text: RECALL_NUDGE });
+      }
+
+      const turn = (userTurnCounts.get(input.sessionID) ?? 0) + 1;
+      userTurnCounts.set(input.sessionID, turn);
+      if (turn % SAVE_NUDGE_EVERY === 0) {
+        output.parts.push({ type: 'text', text: SAVE_NUDGE });
       }
     },
 

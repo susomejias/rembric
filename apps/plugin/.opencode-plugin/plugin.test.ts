@@ -174,12 +174,12 @@ describe('RembricPlugin handlers', () => {
       'What did we do with the JWT?',
       '¿qué hicimos con el login?',
     ];
-    for (const text of cases) {
+    for (const [i, text] of cases.entries()) {
       const output = {
         parts: [{ type: 'text', text }],
         message: {},
       };
-      await handlers['chat.message']!({ sessionID: 's-recall' } as never, output as never);
+      await handlers['chat.message']!({ sessionID: `s-recall-${i}` } as never, output as never);
       const lastPart = output.parts[output.parts.length - 1];
       expect(lastPart.text).toContain('rembric: User intent: recall');
       expect(lastPart.text).toContain('memory.search');
@@ -202,6 +202,47 @@ describe('RembricPlugin handlers', () => {
       // Only the original part remains; nudge was not appended.
       expect(output.parts).toHaveLength(1);
       expect(output.parts[0].text).toBe(text);
+    }
+  });
+
+  it('chat.message appends the save nudge every 5th user turn, not before', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const pushed: number[] = [];
+    for (let turn = 1; turn <= 10; turn++) {
+      const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
+      await handlers['chat.message']!({ sessionID: 's-save' } as never, output as never);
+      if (output.parts.some((p) => p.text?.includes('memory.save'))) pushed.push(turn);
+    }
+    expect(pushed).toEqual([5, 10]);
+  });
+
+  it('chat.message never nudges a sub-agent session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'sub-save', parentID: 'parent', title: 'sub work' } },
+      },
+    } as never);
+    for (let turn = 1; turn <= 6; turn++) {
+      const output = { parts: [{ type: 'text', text: `edit ${turn}` }], message: {} };
+      await handlers['chat.message']!({ sessionID: 'sub-save' } as never, output as never);
+      expect(output.parts).toHaveLength(1);
+    }
+  });
+
+  it('recall and save nudges can both fire on the same turn', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    for (let turn = 1; turn <= 5; turn++) {
+      const output = {
+        parts: [{ type: 'text', text: 'recall the auth fix' }],
+        message: {},
+      };
+      await handlers['chat.message']!({ sessionID: 's-both' } as never, output as never);
+      if (turn === 5) {
+        expect(output.parts.some((p) => p.text?.includes('memory.search'))).toBe(true);
+        expect(output.parts.some((p) => p.text?.includes('memory.save'))).toBe(true);
+      }
     }
   });
 
