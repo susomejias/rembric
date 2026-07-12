@@ -388,6 +388,9 @@ class RembricMemoryProvider(MemoryProvider):
             and not self._compaction_warned
         ):
             self._compaction_imminent = True
+        # Only diagnostic evidence that Hermes calls this hook at all — see
+        # prefetch()'s matching line for whether its return value is ever seen.
+        _stderr(f"[rembric] on_turn_start: turn={turn_number} session={self._session_id!r}")
         return None
 
     def prefetch(self, query: str, **kwargs: Any) -> str:
@@ -396,16 +399,27 @@ class RembricMemoryProvider(MemoryProvider):
         session_id = kwargs.get("session_id") or self._session_id
         recalled = self._prefetch_cache.get(session_id or "", "")
         hints: list[str] = []
+        hint_tags: list[str] = []
         if self._compaction_imminent:
             self._compaction_imminent = False
             self._compaction_warned = True
             hints.append(_SAVE_HINT_URGENT)
+            hint_tags.append("save_urgent")
         elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
             hints.append(_SAVE_HINT)
+            hint_tags.append("save")
         if self._turn_number > 0 and (
             self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
         ):
             hints.append(_SUMMARY_HINT)
+            hint_tags.append("summary")
+        # Whether Hermes actually surfaces this return value to the model is
+        # otherwise unobservable from the host side; this line is the only way
+        # to confirm a hint was even offered.
+        _stderr(
+            f"[rembric] prefetch: turn={self._turn_number} session={session_id!r} "
+            f"hints={'+'.join(hint_tags) if hint_tags else 'none'}"
+        )
         if not hints:
             return recalled
         hint = "\n".join(hints)
