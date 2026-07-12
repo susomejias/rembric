@@ -182,7 +182,7 @@ The plugin SHALL NOT fall back to git-remote-derived slugs, `package.json::name`
 
 The plugin module's returned object SHALL declare exactly the following event handler properties, no more and no fewer:
 
-1. `event: async ({ event }) => ...` — a dispatcher that switches on `event.type` for `"session.created"`, `"session.deleted"`, `"server.instance.disposed"`, `"message.updated"`, and `"session.idle"`. Any other `event.type` values SHALL be silently ignored. `"message.updated"` and `"session.idle"` are dispatched here — NOT as separate top-level `Hooks` object keys — because neither name is a valid top-level `Hooks` key in the opencode plugin API; both are members of the `Event` union delivered exclusively through this dispatcher.
+1. `event: async ({ event }) => ...` — a dispatcher that switches on `event.type` for `"session.created"`, `"session.deleted"`, `"server.instance.disposed"`, `"message.updated"`, `"message.part.updated"`, and `"session.idle"`. Any other `event.type` values SHALL be silently ignored. None of these five are top-level `Hooks` object keys in the opencode plugin API; all are members of the `Event` union delivered exclusively through this dispatcher.
 2. `"chat.message": async (input, output) => ...` — appends a `{role:'user', text}` entry to the per-session transcript accumulator (`sessionMessages` Map). The handler SHALL NOT POST any HTTP request.
 3. `"experimental.session.compacting": async (input, output) => ...` — post-compaction reminder injection.
 
@@ -192,18 +192,18 @@ The plugin SHALL NOT register `experimental.chat.system.transform` (no system-pr
 
 If Plan B of the cwd spike applies (see "cwd spike" requirement), the plugin SHALL additionally register `"shell.env": async (input, output) => { output.env.REMBRIC_PROJECT_DIR = ctx.directory }`. The hook SHALL be omitted otherwise.
 
-The `chat.message` handler and the `event` dispatcher's `message.updated`/`session.idle` branches MUST treat the `sessionMessages` Map (and, for `session.idle`, the debounce-timer map) as their only side effects beyond the deliberate HTTP POST each performs. An invariant test (`apps/server/src/test/invariants.test.ts`) SHALL fail the build if the `chat.message` handler invokes `rembricPost`, `fetch`, or any other HTTP work (the `event` dispatcher's `message.updated` and `session.idle` branches are exempted from this specific invariant since `session.idle`'s HTTP POST is the intended primary flush mechanism — see "Session.idle handler (periodic flush)").
+The `chat.message` handler and the `event` dispatcher's `message.updated`/`message.part.updated`/`session.idle` branches MUST treat the `sessionMessages` Map (plus the `messageRoles`/`assistantParts` accumulators for the message branches, and the debounce-timer map for `session.idle`) as their only side effects beyond the deliberate HTTP POST each performs. An invariant test (`apps/server/src/test/invariants.test.ts`) SHALL fail the build if the `chat.message` handler invokes `rembricPost`, `fetch`, or any other HTTP work (the `event` dispatcher's `message.updated`, `message.part.updated`, and `session.idle` branches are exempted from this specific invariant since `session.idle`'s HTTP POST is the intended primary flush mechanism — see "Session.idle handler (periodic flush)").
 
 #### Scenario: Handler set is exactly the documented set
 
 - **WHEN** the resolved value of `RembricPlugin(ctx)` is inspected
 - **THEN** its own enumerable keys are exactly `["event", "chat.message", "experimental.session.compacting"]` plus `"shell.env"` if Plan B is active
-- **AND** no other keys exist — in particular, `"message.updated"` and `"session.idle"` SHALL NOT appear as top-level keys
+- **AND** no other keys exist — in particular, `"message.updated"`, `"message.part.updated"`, and `"session.idle"` SHALL NOT appear as top-level keys
 
-#### Scenario: message.updated and session.idle events reach the event dispatcher
+#### Scenario: message.updated, message.part.updated, and session.idle events reach the event dispatcher
 
-- **WHEN** opencode emits an event of type `"message.updated"` or `"session.idle"`
-- **THEN** the plugin's `event` hook SHALL receive it (since neither has its own top-level `Hooks` key) and route it to the corresponding branch described in "Message.updated handler accumulates assistant transcript" and "Session.idle handler (periodic flush)"
+- **WHEN** opencode emits an event of type `"message.updated"`, `"message.part.updated"`, or `"session.idle"`
+- **THEN** the plugin's `event` hook SHALL receive it (none has its own top-level `Hooks` key) and route it to the corresponding branch described in "Message.updated handler tracks role" / "Message.part.updated handler accumulates assistant transcript" and "Session.idle handler (periodic flush)"
 
 ### Requirement: Session.created handler with sub-agent filtering
 
@@ -583,33 +583,52 @@ The handler SHALL NOT POST any HTTP request. The accumulated data flows out only
 - **THEN** the oldest entry is removed (the array length stays at 200)
 - **AND** the newest entry is at the tail
 
-### Requirement: Message.updated handler accumulates assistant transcript
+### Requirement: Message.updated handler tracks role
+
+`@opencode-ai/sdk`'s `Message` type (`UserMessage | AssistantMessage`, the shape of `message.updated`'s `properties.info`) carries NO `parts` field — only metadata (id, role, cost, tokens, timing). Assistant text is delivered exclusively via separate `message.part.updated` events (see the next requirement); `message.updated` exists solely to learn which message ids are assistant-authored.
 
 The `event` dispatcher's `"message.updated"` branch SHALL:
 
-1. Return immediately if `input.sessionID` is in `subAgentSessions`.
-2. Return immediately if `output.message.role !== 'assistant'`. The branch is a no-op for user messages (which are captured by `chat.message`) and any other roles.
-3. Extract text from `output.message.parts` filtering text parts. Apply the same `stripPrivateTags` and truncate-to-2000 transforms as `chat.message`.
-4. If the resulting text is empty, return.
-5. Search `sessionMessages.get(input.sessionID)` for an existing entry whose `id` field equals `output.message.id`. If found, REPLACE its `text` (preserving the entry's position in the array). If not found, APPEND `{role:'assistant', text, id:<output.message.id>}` to the array.
+1. Return immediately if `properties.info.sessionID` is empty or in `subAgentSessions`.
+2. Return immediately if `properties.info.id` or `properties.info.role` is missing.
+3. Record `messageRoles.set(info.id, info.role)` in a closure-scoped `Map<string, string>`. This is the ONLY side effect — the branch SHALL NOT touch `sessionMessages` and SHALL NOT read or extract any `parts`-shaped field from `info`.
 
-The branch MUST be idempotent under streaming token updates: opencode may fire `message.updated` many times per assistant turn (token-by-token streaming). The id-keyed replacement ensures only one final-state entry per assistant message in the accumulator.
+#### Scenario: Role is recorded for later part-accumulation lookup
 
-The 200-entry cap from `chat.message` applies here too — when appending a new assistant entry causes the array to exceed 200, the oldest entry is FIFO-evicted.
+- **WHEN** the `event` dispatcher receives `message.updated` with `info.id="m1"`, `info.role="assistant"`, `info.sessionID="s1"`
+- **THEN** `messageRoles.get("m1")` is `"assistant"`
+- **AND** `sessionMessages` is unmodified
+
+### Requirement: Message.part.updated handler accumulates assistant transcript
+
+The `event` dispatcher's `"message.part.updated"` branch SHALL:
+
+1. Return immediately if `properties.part.type !== "text"`.
+2. Return immediately if `properties.part.sessionID`, `properties.part.messageID`, or `properties.part.id` is empty.
+3. Return immediately if `properties.part.sessionID` is in `subAgentSessions`, or is not in `knownSessions`.
+4. Return immediately if `messageRoles.get(properties.part.messageID) !== "assistant"`. This is a no-op for user-authored parts (captured instead by `chat.message`) and for parts seen before their owning message's `message.updated` event — an accepted at-most-one-part-dropped race, matching the "opt out until known" pattern used elsewhere in this plugin.
+5. Record `properties.part.text` in a closure-scoped `Map<string, Map<string, string>>` (`assistantParts`), keyed first by `messageID` then by `part.id` (a message can carry multiple text parts).
+6. Join all part texts for that `messageID` (insertion order) with `\n`, apply the same `stripPrivateTags` and truncate-to-2000 transforms as `chat.message`, and upsert `{role:'assistant', text, id:<messageID>}` into `sessionMessages` the same way the prior `message.updated`-based implementation did (replace if an entry with that id exists, else append; FIFO-evict past the 200-entry cap).
+
+The branch MUST be idempotent under streaming updates: opencode fires `message.part.updated` many times per assistant turn (token-by-token, and potentially once per distinct part). The id-keyed replacement in step 6 ensures only one final-state entry per assistant message in the accumulator.
+
+`messageRoles` and `assistantParts` entries for a session's message ids MUST be cleared when that session's `session.deleted` event fires (alongside the existing `sessionMessages`/`userTurnCounts`/`pendingFlush` cleanup), to avoid unbounded growth across a long-running opencode server process.
 
 #### Scenario: Assistant text is appended on first sight, replaced on subsequent updates
 
-- **GIVEN** `sessionMessages.get("s1")` is `[]`
-- **WHEN** the `event` dispatcher receives `message.updated` with `output.message.id="m1"`, `role="assistant"`, accumulating parts that resolve to text `"Hello,"`
+- **GIVEN** `sessionMessages.get("s1")` is `[]` and `messageRoles.get("m1") === "assistant"`
+- **WHEN** the `event` dispatcher receives `message.part.updated` with `part.messageID="m1"`, `part.id="p1"`, `part.sessionID="s1"`, text `"Hello,"`
 - **THEN** `sessionMessages.get("s1")` is `[{role:'assistant', text:'Hello,', id:'m1'}]`
-- **WHEN** the dispatcher receives `message.updated` again with the SAME `output.message.id="m1"` and longer text `"Hello, working on it."`
+- **WHEN** the dispatcher receives `message.part.updated` again with the SAME `part.id="p1"` and longer text `"Hello, working on it."`
 - **THEN** the entry's text is replaced; the array length stays at 1; the entry's position is unchanged
-- **WHEN** the dispatcher receives `message.updated` with a different `output.message.id="m2"`, text `"Done."`
+- **WHEN** the dispatcher receives `message.part.updated` with `part.messageID="m2"`, `part.id="p2"`, text `"Done."` (and `messageRoles.get("m2") === "assistant"`)
 - **THEN** `sessionMessages.get("s1")` is `[{role:'assistant', text:'Hello, working on it.', id:'m1'}, {role:'assistant', text:'Done.', id:'m2'}]`
 
-#### Scenario: Non-assistant roles are ignored
+#### Scenario: Non-assistant roles and unregistered sessions are ignored
 
-- **WHEN** the `event` dispatcher receives `message.updated` with `output.message.role="user"` or `"system"` or `"tool"`
+- **WHEN** the `event` dispatcher receives `message.part.updated` for a `part.messageID` whose `messageRoles` entry is `"user"`, `"system"`, `"tool"`, or absent
+- **THEN** the branch returns without mutating `sessionMessages`
+- **WHEN** the `event` dispatcher receives `message.part.updated` for a `part.sessionID` not in `knownSessions`
 - **THEN** the branch returns without mutating `sessionMessages`
 
 ### Requirement: Dispose spike result MUST be recorded

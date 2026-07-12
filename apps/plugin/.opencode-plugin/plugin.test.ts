@@ -436,7 +436,7 @@ describe('RembricPlugin handlers', () => {
     expect(fetchMock.mock.calls.length).toBe(before);
   });
 
-  it('event(message.updated) accumulates the assistant turn, flushed alongside the user turn', async () => {
+  it('event(message.part.updated) accumulates the assistant turn, flushed alongside the user turn', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
 
     await handlers.event!({
@@ -449,16 +449,19 @@ describe('RembricPlugin handlers', () => {
       { sessionID: 'mu1' } as never,
       { parts: [{ type: 'text', text: 'please fix the bug' }], message: {} } as never,
     );
+    // message.updated carries no `parts` on the real Message type (Assistant |
+    // User) — only metadata. It exists solely to record id → role.
     await handlers.event!({
       event: {
         type: 'message.updated',
+        properties: { info: { id: 'm1', role: 'assistant', sessionID: 'mu1' } },
+      },
+    } as never);
+    await handlers.event!({
+      event: {
+        type: 'message.part.updated',
         properties: {
-          info: {
-            id: 'm1',
-            role: 'assistant',
-            sessionID: 'mu1',
-            parts: [{ type: 'text', text: 'Fixed it.' }],
-          },
+          part: { id: 'p1', sessionID: 'mu1', messageID: 'm1', type: 'text', text: 'Fixed it.' },
         },
       },
     } as never);
@@ -480,7 +483,7 @@ describe('RembricPlugin handlers', () => {
     expect(body.summary).toContain('Fixed it.');
   });
 
-  it('event(message.updated) replaces text in place under streaming updates (same message id)', async () => {
+  it('event(message.part.updated) replaces text in place under streaming updates (same part id)', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
 
     await handlers.event!({
@@ -489,16 +492,23 @@ describe('RembricPlugin handlers', () => {
         properties: { info: { id: 'mu2', parentID: '', title: 'work' } },
       },
     } as never);
+    await handlers.event!({
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: 'm-stream', role: 'assistant', sessionID: 'mu2' } },
+      },
+    } as never);
     for (const partial of ['Hel', 'Hello,', 'Hello, working on it.']) {
       await handlers.event!({
         event: {
-          type: 'message.updated',
+          type: 'message.part.updated',
           properties: {
-            info: {
-              id: 'm-stream',
-              role: 'assistant',
+            part: {
+              id: 'p-stream',
               sessionID: 'mu2',
-              parts: [{ type: 'text', text: partial }],
+              messageID: 'm-stream',
+              type: 'text',
+              text: partial,
             },
           },
         },
@@ -517,19 +527,26 @@ describe('RembricPlugin handlers', () => {
     expect(body.summary).not.toContain('Hel\n');
   });
 
-  it('event(message.updated) ignores non-assistant roles and unknown session ids', async () => {
+  it('event(message.part.updated) ignores non-assistant roles and unknown session ids', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     const before = fetchMock.mock.calls.length;
 
     await handlers.event!({
       event: {
         type: 'message.updated',
+        properties: { info: { id: 'm-user', role: 'user', sessionID: 'never-registered' } },
+      },
+    } as never);
+    await handlers.event!({
+      event: {
+        type: 'message.part.updated',
         properties: {
-          info: {
-            id: 'm-user',
-            role: 'user',
+          part: {
+            id: 'p-user',
             sessionID: 'never-registered',
-            parts: [{ type: 'text', text: 'x' }],
+            messageID: 'm-user',
+            type: 'text',
+            text: 'x',
           },
         },
       },

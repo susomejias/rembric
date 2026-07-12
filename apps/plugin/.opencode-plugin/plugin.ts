@@ -12,16 +12,28 @@
 // shared dotenv lib to ~/.config/rembric/bin/rembric-dotenv.mjs.
 //
 // Session lifecycle:
-//   - session.created → POST /api/<slug>/sessions  (idempotent register)
-//   - chat.message    → accumulate user turn; also arms the debounced flush
-//                       session.idle uses (below)
-//   - message.updated → accumulate/upsert assistant turn (by message.id)
-//   - session.idle    → debounced (500ms) flush via POST /summary  ← PRIMARY
+//   - session.created      → POST /api/<slug>/sessions  (idempotent register)
+//   - chat.message         → accumulate user turn; also arms the debounced
+//                            flush session.idle uses (below)
+//   - message.updated      → track message id → role only
+//   - message.part.updated → accumulate/upsert assistant turn text, keyed by
+//                            part.messageID (see note below)
+//   - session.idle         → debounced (500ms) flush via POST /summary  ← PRIMARY
 //   - server.instance.disposed → fire-and-forget POST /summary  ← BEST-EFFORT
-//   - session.deleted → clean in-memory state
+//   - session.deleted      → clean in-memory state
 //
-// message.updated and session.idle are Event union members, dispatched via
-// the `event` hook — NOT top-level Hooks keys (opencode never invokes those).
+// message.updated, message.part.updated, and session.idle are Event union
+// members, dispatched via the `event` hook — NOT top-level Hooks keys
+// (opencode never invokes those).
+//
+// message.updated's `properties.info` (a Message = UserMessage |
+// AssistantMessage in @opencode-ai/sdk) carries NO `parts` field — only
+// metadata (id, role, cost, tokens...). Assistant TEXT only ever arrives via
+// message.part.updated's `properties.part`, keyed by `part.messageID`. An
+// earlier version read `info.parts` (never existed) and silently captured
+// zero assistant text forever; confirmed against the real installed
+// @opencode-ai/sdk@1.17.18 types after a live session showed user-only
+// transcripts.
 //
 // Why two flush paths? opencode kills the subprocess on
 // server.instance.disposed BEFORE async handlers complete (spike verified
@@ -63,10 +75,16 @@ type EventInput = {
   };
 };
 
-type ChatMessageInput = { sessionID: string };
+type ChatMessageInput = { sessionID: string; messageID?: string };
 type ChatMessageOutput = {
-  parts: Array<{ type: string; text?: string }>;
-  message: { summary?: { title?: string; body?: string } };
+  parts: Array<{
+    id?: string;
+    sessionID?: string;
+    messageID?: string;
+    type: string;
+    text?: string;
+  }>;
+  message: { id?: string; summary?: { title?: string; body?: string } };
 };
 
 type MessageUpdatedEventProps = {
@@ -74,7 +92,16 @@ type MessageUpdatedEventProps = {
     id?: string;
     role?: string;
     sessionID?: string;
-    parts?: Array<{ type: string; text?: string }>;
+  };
+};
+
+type MessagePartUpdatedEventProps = {
+  part?: {
+    id?: string;
+    sessionID?: string;
+    messageID?: string;
+    type?: string;
+    text?: string;
   };
 };
 
@@ -120,6 +147,30 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '...' : text;
 }
 
+// opencode validates every pushed part against the real TextPart schema
+// (id/sessionID/messageID all required) before persisting the outgoing user
+// message. A bare `{ type: 'text', text }` fails that validation and takes
+// down the whole turn with a hard server error — confirmed live: `opencode
+// run` crashed on turn 1 (the unconditional SUMMARY_NUDGE) with
+// `EventV2.InvalidDurableEvent: Expected string aggregate field sessionID`,
+// and a `--pure` (no plugins) run of the same message succeeded cleanly.
+function nudgePart(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): { id: string; sessionID: string; messageID: string; type: 'text'; text: string } {
+  // opencode's own id scheme prefixes every entity type (ses_, msg_, prt_...)
+  // and validates the prefix on write — confirmed live: a bare crypto.randomUUID()
+  // (no prefix) was rejected with `SchemaError: Expected a string starting with "prt"`.
+  return {
+    id: `prt_${crypto.randomUUID().replace(/-/g, '')}`,
+    sessionID: sessionId,
+    messageID: messageId,
+    type: 'text',
+    text,
+  };
+}
+
 export const RembricPlugin: Plugin = async (ctx) => {
   const serverUrl = process.env.REMBRIC_SERVER_URL;
   const apiToken = process.env.REMBRIC_API_TOKEN;
@@ -135,6 +186,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
   const sessionMessages = new Map<string, TranscriptEntry[]>();
   const pendingFlush = new Map<string, ReturnType<typeof setTimeout>>();
   const userTurnCounts = new Map<string, number>();
+  const messageRoles = new Map<string, string>();
+  const assistantParts = new Map<string, Map<string, string>>();
 
   const baseUrl = serverUrl ? serverUrl.replace(/\/$/, '') : '';
 
@@ -303,6 +356,12 @@ export const RembricPlugin: Plugin = async (ctx) => {
         if (!sessionId) return;
         knownSessions.delete(sessionId);
         subAgentSessions.delete(sessionId);
+        for (const entry of sessionMessages.get(sessionId) ?? []) {
+          if (entry.id) {
+            messageRoles.delete(entry.id);
+            assistantParts.delete(entry.id);
+          }
+        }
         sessionMessages.delete(sessionId);
         userTurnCounts.delete(sessionId);
         const pending = pendingFlush.get(sessionId);
@@ -333,17 +392,30 @@ export const RembricPlugin: Plugin = async (ctx) => {
         const info = (event.properties as MessageUpdatedEventProps | undefined)?.info ?? {};
         const sessionId = info.sessionID ?? '';
         if (!sessionId || subAgentSessions.has(sessionId)) return;
-        if (info.role !== 'assistant') return;
-        if (!info.id) return;
+        if (!info.id || !info.role) return;
+        messageRoles.set(info.id, info.role);
+      }
 
-        const text = (info.parts ?? [])
-          .filter((p) => p.type === 'text')
-          .map((p) => p.text ?? '')
-          .join('\n')
-          .trim();
+      if (event.type === 'message.part.updated') {
+        const part = (event.properties as MessagePartUpdatedEventProps | undefined)?.part ?? {};
+        if (part.type !== 'text') return;
+        const sessionId = part.sessionID ?? '';
+        const messageId = part.messageID ?? '';
+        if (!sessionId || !messageId || !part.id) return;
+        if (subAgentSessions.has(sessionId)) return;
+        if (!knownSessions.has(sessionId)) return;
+        if (messageRoles.get(messageId) !== 'assistant') return;
 
-        if (!text) return;
-        upsertAssistantMessage(sessionId, info.id, text);
+        let parts = assistantParts.get(messageId);
+        if (!parts) {
+          parts = new Map<string, string>();
+          assistantParts.set(messageId, parts);
+        }
+        parts.set(part.id, part.text ?? '');
+
+        const joined = Array.from(parts.values()).join('\n').trim();
+        if (!joined) return;
+        upsertAssistantMessage(sessionId, messageId, joined);
       }
 
       if (event.type === 'session.idle') {
@@ -376,17 +448,18 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (!content) return;
       appendUserMessage(input.sessionID, content);
 
+      const messageId = input.messageID ?? output.message.id ?? '';
       if (RECALL_REGEX.test(content)) {
-        output.parts.push({ type: 'text', text: RECALL_NUDGE });
+        output.parts.push(nudgePart(input.sessionID, messageId, RECALL_NUDGE));
       }
 
       const turn = (userTurnCounts.get(input.sessionID) ?? 0) + 1;
       userTurnCounts.set(input.sessionID, turn);
       if (turn % SAVE_NUDGE_EVERY === 0) {
-        output.parts.push({ type: 'text', text: SAVE_NUDGE });
+        output.parts.push(nudgePart(input.sessionID, messageId, SAVE_NUDGE));
       }
       if (turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0) {
-        output.parts.push({ type: 'text', text: SUMMARY_NUDGE });
+        output.parts.push(nudgePart(input.sessionID, messageId, SUMMARY_NUDGE));
       }
 
       // Same debounce as session.idle — avoids a second uncoordinated POST.
