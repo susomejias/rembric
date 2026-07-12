@@ -71,4 +71,20 @@ describe('post-tool.sh (throttled save nudge, self-filtering)', () => {
     expect(runPostTool(JSON.stringify({ session_id: 's3' })).trim()).toBe('');
     expect(runPostTool('').trim()).toBe('');
   });
+
+  it('never nudges after a memory/MCP tool call (no save→nudge→save loop)', () => {
+    const memoryTools = [
+      'memory.save',
+      'memory.search',
+      'mcp__plugin_rembric_rembric__memory_save',
+      'mcp__plugin_rembric_rembric__memory_search',
+    ];
+    for (const tool of memoryTools) {
+      for (let i = 1; i <= 10; i++) {
+        expect(
+          runPostTool(JSON.stringify({ tool_name: tool, session_id: `loop-${tool}` })).trim(),
+        ).toBe('');
+      }
+    }
+  });
 });
