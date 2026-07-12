@@ -118,6 +118,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
     '/api',
     createApiRouter({
       agentSessions: opts.agentSessions,
+      memory: opts.dashboard.memory,
       tokens: opts.tokens,
       projects: opts.projects,
       sweep: opts.sweep,

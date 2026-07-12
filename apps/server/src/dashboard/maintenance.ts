@@ -1,3 +1,7 @@
+import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+
 import { Hono, type Context } from 'hono';
 
 import type { DbDiagnostics } from '../db/diagnostics.js';
@@ -11,7 +15,7 @@ import type { TokensService } from '../services/tokens.js';
 import { btn, domainErrorPage, flash, flashErrorPage, getSession, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { html, raw } from './templates.js';
+import { formatTs, html, raw } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 export interface MaintenanceDeps {
@@ -21,6 +25,65 @@ export interface MaintenanceDeps {
   memory: MemoryService;
   prompts: PromptsService;
   tokens: TokensService;
+  /** Resolved data directory — on-demand backups land in `<dataDir>/backups`. */
+  dataDir: string;
+}
+
+const ON_DEMAND_BACKUP_PREFIX = 'on-demand-';
+const ON_DEMAND_BACKUP_KEEP = 3;
+
+function backupsDir(dataDir: string): string {
+  return join(dataDir, 'backups');
+}
+
+interface OnDemandBackup {
+  file: string;
+  path: string;
+  createdAt: Date;
+  sizeBytes: number;
+}
+
+/** Backup filenames newest-first (the `on-demand-<ms>` name sorts chronologically). */
+function listOnDemandBackupsDesc(dir: string): string[] {
+  let files: string[];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return files
+    .filter((f) => f.startsWith(ON_DEMAND_BACKUP_PREFIX) && f.endsWith('.sqlite'))
+    .sort()
+    .reverse();
+}
+
+function latestOnDemandBackup(dataDir: string): OnDemandBackup | null {
+  const dir = backupsDir(dataDir);
+  const file = listOnDemandBackupsDesc(dir).at(0);
+  if (!file) return null;
+  const path = join(dir, file);
+  const stat = statSync(path);
+  return { file, path, createdAt: stat.mtime, sizeBytes: stat.size };
+}
+
+/** Snapshot the live DB via `VACUUM INTO` and prune older on-demand backups. */
+function createOnDemandBackup(deps: MaintenanceDeps): OnDemandBackup {
+  const dir = backupsDir(deps.dataDir);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = `${ON_DEMAND_BACKUP_PREFIX}${Date.now()}.sqlite`;
+  const path = join(dir, file);
+  deps.diagnostics.vacuumInto(path);
+
+  for (const f of listOnDemandBackupsDesc(dir).slice(ON_DEMAND_BACKUP_KEEP)) {
+    try {
+      unlinkSync(join(dir, f));
+    } catch {
+      /* retention is best-effort; never fail the backup over it */
+    }
+  }
+
+  const stat = statSync(path);
+  return { file, path, createdAt: stat.mtime, sizeBytes: stat.size };
 }
 
 /**
@@ -124,11 +187,13 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     const purgedSessions = url.searchParams.get('purged-sessions');
     const purgedMemories = url.searchParams.get('purged-memories');
     const purgedPrompts = url.searchParams.get('purged-prompts');
+    const backedUp = url.searchParams.get('backed-up');
 
     const emptyCount = deps.agentSessions.countPurgeableEmpty();
     const archivedCount = deps.memory.countPurgeableDisconnectedArchived();
     const deletedPromptsCount = deps.prompts.countPurgeableDeleted();
     const breakdown = readBreakdown(deps.diagnostics);
+    const latestBackup = latestOnDemandBackup(deps.dataDir);
 
     const flashBanner =
       purgedSessions !== null
@@ -149,7 +214,13 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
                 label: 'PURGED',
                 body: html`Removed ${purgedPrompts} deleted prompt row(s).`,
               })
-            : raw('');
+            : backedUp !== null
+              ? flash({
+                  tone: 'success',
+                  label: 'BACKED UP',
+                  body: html`Snapshot written (${backedUp} bytes).`,
+                })
+              : raw('');
 
     const breakdownRows = breakdown.perTable.map(
       (r) => html`
@@ -315,6 +386,38 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
           </div>
           <div class="actions">${promptBtn}</div>
         </div>
+
+        <div class="maint-card">
+          <div class="head">
+            <h3>Backup Database</h3>
+          </div>
+          <div class="body">
+            <p>
+              Writes a consistent, WAL-safe snapshot of the live database via
+              <code>VACUUM INTO</code> (the same mechanism the self-update flow uses before every
+              upgrade), keeping the ${ON_DEMAND_BACKUP_KEEP} most recent on-demand snapshots.
+            </p>
+            ${latestBackup
+              ? html`<p class="small muted">
+                  Last backup: ${formatTs(latestBackup.createdAt)} ·
+                  ${formatBytes(latestBackup.sizeBytes)} ·
+                  <a href="/dashboard/maintenance/backup/download">Download</a>
+                </p>`
+              : html`<p class="small muted">No on-demand backup yet.</p>`}
+          </div>
+          <div class="actions">
+            <form
+              action="/dashboard/maintenance/backup"
+              method="post"
+              data-confirm="Write a fresh database snapshot now? This is reversible — it only reads the live database and writes a new file; nothing existing is modified."
+              data-confirm-label="BACKUP NOW"
+              data-confirm-tone="warn"
+            >
+              ${csrfInput(session.session, deps.sessions, 'maintenance.backup')}
+              <button class="btn" type="submit">BACKUP NOW</button>
+            </form>
+          </div>
+        </div>
       </section>
     `;
 
@@ -412,6 +515,43 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
       }
       throw err;
     }
+  });
+
+  app.post('/backup', async (c) => {
+    const guard = requireAdmin(c, deps);
+    if (guard.forbidden) return guard.forbidden;
+    const session = guard.session;
+    const form = await readFormAndVerifyCsrf(
+      c,
+      session.session,
+      deps.sessions,
+      'maintenance.backup',
+    );
+    if (form instanceof Response) return form;
+
+    const backup = createOnDemandBackup(deps);
+    return c.redirect(`/dashboard/maintenance?backed-up=${backup.sizeBytes}`);
+  });
+
+  app.get('/backup/download', (c) => {
+    const guard = requireAdmin(c, deps);
+    if (guard.forbidden) return guard.forbidden;
+
+    const backup = latestOnDemandBackup(deps.dataDir);
+    if (!backup) {
+      return flashErrorPage(c, deps.sessions, 'No on-demand backup exists yet.', {
+        title: 'Maintenance',
+        activeNav: 'maintenance',
+      });
+    }
+    // Stream rather than readFileSync — the snapshot scales with the whole
+    // memory corpus, so a full read would spike memory on large installs.
+    const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream;
+    return c.body(body, 200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(backup.sizeBytes),
+      'Content-Disposition': `attachment; filename="${backup.file}"`,
+    });
   });
 
   return app;

@@ -73,6 +73,12 @@ describe('shell()', () => {
     expect(head).toContain('favicon-16.png');
   });
 
+  it('loads the vendored htmx.min.js as a real <script src> in <head>', () => {
+    const out = shell(html`<p>hi</p>`, { title: 't' });
+    const head = out.slice(out.indexOf('<head>'), out.indexOf('</head>'));
+    expect(head).toContain('<script src="/dashboard/assets/htmx.min.js"></script>');
+  });
+
   it('renders the global confirmation <dialog> at the bottom of <body>', () => {
     const out = shell(html`<p>hi</p>`, { title: 't' });
     expect(out).toContain('id="rbr-confirm"');

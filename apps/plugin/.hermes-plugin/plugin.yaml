@@ -7,6 +7,9 @@ hooks:
   - on_session_end
   - on_pre_compress
   - on_session_switch
+  - prefetch
+  - queue_prefetch
+  - sync_turn
 requires_env:
   - name: REMBRIC_SERVER_URL
     description: >-

@@ -26,7 +26,7 @@ export interface PageOpts {
   title: string;
   activeNav: NavKey;
   view?: string;
-  counters?: { pendingJudgments?: number };
+  counters?: { pendingJudgments?: number; needsReview?: number };
   flash?: { kind: 'error' | 'success'; text: string };
 }
 

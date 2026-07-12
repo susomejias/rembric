@@ -141,7 +141,7 @@ export interface NavEntry {
   label: string;
   href: string;
   group: 'MAIN' | 'ADMIN';
-  badgeKey?: 'pendingJudgments';
+  badgeKey?: 'pendingJudgments' | 'needsReview';
 }
 
 export const NAV: readonly NavEntry[] = Object.freeze([
@@ -160,6 +160,7 @@ export const NAV: readonly NavEntry[] = Object.freeze([
     label: 'MEMORIES',
     href: '/dashboard/memories',
     group: 'MAIN',
+    badgeKey: 'needsReview',
   },
   {
     key: 'sessions',
@@ -230,7 +231,7 @@ export function navEntry(key: NavKey): NavEntry {
 
 export interface SidebarOpts {
   active: NavKey | null;
-  counters: { pendingJudgments?: number };
+  counters: { pendingJudgments?: number; needsReview?: number };
   collapsed: boolean;
   csrf: SafeHtml;
   /** Pre-rendered update badge (see `update-modal.ts::updateBadge`). */
@@ -320,6 +321,8 @@ export interface ViewHeadOpts {
   title: string;
   hl?: string;
   meta?: Array<{ k: string; v: string }>;
+  /** Tags the meta block with this `id` + `hx-swap-oob` so a filter swap can refresh the chips out-of-band. */
+  metaId?: string;
 }
 
 export function viewHead(opts: ViewHeadOpts): SafeHtml {
@@ -330,7 +333,9 @@ export function viewHead(opts: ViewHeadOpts): SafeHtml {
         )
       : html`${opts.title}`;
   const meta = (opts.meta ?? []).map((m) => html`<span><b>${m.k}</b> ${m.v}</span>`);
-  const metaBlock = meta.length > 0 ? html`<div class="meta">${meta}</div>` : raw('');
+  const metaAttrs = opts.metaId ? ` id="${escape(opts.metaId)}" hx-swap-oob="true"` : '';
+  const metaBlock =
+    meta.length > 0 ? html`<div class="meta" ${raw(metaAttrs)}>${meta}</div>` : raw('');
   return html`
     <header class="view-head">
       <div class="lead">
@@ -522,8 +527,16 @@ export function inp(
   );
 }
 
-export function filtersBar(children: SafeHtml[]): SafeHtml {
-  return html`<form class="filters" method="get">${children}</form>`;
+/** With `hxTarget`/`hxGet` set, the form swaps only `hxTarget` via HTMX; without JS it stays a plain GET. */
+export function filtersBar(
+  children: SafeHtml[],
+  opts?: { hxTarget?: string; hxGet?: string },
+): SafeHtml {
+  const hx =
+    opts?.hxTarget && opts.hxGet
+      ? ` hx-get="${escape(opts.hxGet)}" hx-target="${escape(opts.hxTarget)}" hx-select="${escape(opts.hxTarget)}" hx-swap="outerHTML" hx-push-url="true"`
+      : '';
+  return html`<form class="filters" method="get" ${raw(hx)}>${children}</form>`;
 }
 
 /**
@@ -567,12 +580,21 @@ export interface PagerOpts {
   hasMore: boolean;
   pageHrefBuilder: (page: number) => string;
   totalLabel?: string;
+  /** True filtered total row count; when provided, renders "PAGE X OF Y". */
+  total?: number;
 }
 
 export function pager(opts: PagerOpts): SafeHtml {
+  const pageCount =
+    opts.total !== undefined ? Math.max(1, Math.ceil(opts.total / PAGE_SIZE)) : undefined;
   return html`
     <div class="pager">
-      <span>PAGE ${opts.page + 1}${opts.totalLabel ? ` · ${opts.totalLabel}` : ''}</span>
+      <span
+        >PAGE
+        ${opts.page + 1}${pageCount !== undefined ? ` OF ${pageCount}` : ''}${opts.totalLabel
+          ? ` · ${opts.totalLabel}`
+          : ''}</span
+      >
       <span class="pages">
         ${opts.page > 0
           ? html`<a href="${opts.pageHrefBuilder(opts.page - 1)}">‹ PREV</a>`
@@ -586,7 +608,7 @@ export function pager(opts: PagerOpts): SafeHtml {
 }
 
 /** Standard page size for all paginated dashboard listings. */
-export const PAGE_SIZE = 10;
+export const PAGE_SIZE = 50;
 
 /**
  * Build a URL that preserves every search param of `currentUrl` except

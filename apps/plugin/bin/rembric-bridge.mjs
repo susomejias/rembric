@@ -82,6 +82,47 @@ process.stderr.write(
   `[rembric-bridge] projectDir=${projectDir} (from ${projectDirSource}) url=${url}\n`,
 );
 
+// Advisory floor: warn (never block) below this; bump with plugin releases.
+const MIN_SERVER_VERSION = '0.24.0';
+
+function parseSemver(v) {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v ?? '');
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function isOlderThan(version, floor) {
+  const a = parseSemver(version);
+  const b = parseSemver(floor);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
+  return false;
+}
+
+async function checkServerVersion() {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/healthz`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    if (body?.version && isOlderThan(body.version, MIN_SERVER_VERSION)) {
+      process.stderr.write(
+        `[rembric-bridge] server version ${body.version} is older than this plugin expects ` +
+          `(${MIN_SERVER_VERSION}+); some features may not work. Update via the dashboard's ` +
+          'one-click update or see docs/updates.md.\n',
+      );
+    }
+  } catch {
+    // Advisory only — an unreachable /healthz must never block the connection.
+  }
+}
+// Fire-and-forget: runs concurrently with the mcp-remote spawn, delaying neither connect nor shutdown.
+void checkServerVersion();
+
 // Exact pin, never `@latest`: a floating tag re-resolves on every session
 // start (network dependency, non-reproducible) and a broken upstream release
 // would instantly hit all users. Bump deliberately with plugin releases.

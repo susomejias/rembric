@@ -38,8 +38,8 @@ import { raw } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
 describe('PAGE_SIZE', () => {
-  it('is the standard 10 across all paginated listings', () => {
-    expect(PAGE_SIZE).toBe(10);
+  it('is the standard 50 across all paginated listings', () => {
+    expect(PAGE_SIZE).toBe(50);
   });
 });
 
@@ -171,6 +171,32 @@ describe('pager', () => {
       totalLabel: '10 ROWS',
     });
     expect(out.__html).toContain('PAGE 1 · 10 ROWS');
+  });
+
+  it('renders "PAGE X OF Y" when total is provided', () => {
+    const out = pager({ page: 1, hasMore: true, pageHrefBuilder: () => '#', total: 123 });
+    expect(out.__html).toContain('PAGE 2 OF 3');
+  });
+
+  it('shows "PAGE 1 OF 1" for a zero-row total', () => {
+    const out = pager({ page: 0, hasMore: false, pageHrefBuilder: () => '#', total: 0 });
+    expect(out.__html).toContain('PAGE 1 OF 1');
+  });
+
+  it('omits "OF Y" when total is not provided', () => {
+    const out = pager({ page: 0, hasMore: false, pageHrefBuilder: () => '#' });
+    expect(out.__html).not.toContain('OF');
+  });
+
+  it('combines "PAGE X OF Y" with totalLabel', () => {
+    const out = pager({
+      page: 0,
+      hasMore: true,
+      pageHrefBuilder: () => '#',
+      total: 100,
+      totalLabel: '50 ROWS',
+    });
+    expect(out.__html).toContain('PAGE 1 OF 2 · 50 ROWS');
   });
 });
 
@@ -443,6 +469,28 @@ describe('renderSidebar', () => {
       csrf,
     });
     expect(out.__html).not.toContain('class="badge"');
+  });
+
+  it('shows the needs-review badge on the MEMORIES entry when counter > 0', () => {
+    const out = renderSidebar({
+      active: 'home',
+      counters: { needsReview: 5 },
+      collapsed: false,
+      csrf,
+    });
+    expect(out.__html).toMatch(/href="\/dashboard\/memories"[\s\S]*?<span class="badge">5<\/span>/);
+  });
+
+  it('omits the needs-review badge when counter is 0 or absent', () => {
+    const zero = renderSidebar({
+      active: 'home',
+      counters: { needsReview: 0 },
+      collapsed: false,
+      csrf,
+    });
+    expect(zero.__html).not.toContain('class="badge"');
+    const absent = renderSidebar({ active: 'home', counters: {}, collapsed: false, csrf });
+    expect(absent.__html).not.toContain('class="badge"');
   });
 
   it('applies .is-collapsed and EXPAND label when collapsed', () => {

@@ -10,8 +10,11 @@ import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
+import { PAGE_SIZE } from './components.js';
 import { createMemoriesRouter } from './memories.js';
 import type { ResolvedSession } from './types.js';
+
+const SEEDED = PAGE_SIZE + 2;
 
 function widget(id: string): NewMemory {
   return {
@@ -48,10 +51,10 @@ describe('memories dashboard TOTAL meta', () => {
       tokenId: admin.token.id,
     };
 
-    // 12 active rows — more than PAGE_SIZE (10).
+    // More active rows than PAGE_SIZE.
     t.handle.db
       .insert(memory)
-      .values(Array.from({ length: 12 }, (_, i) => widget(`G${i}`)))
+      .values(Array.from({ length: SEEDED }, (_, i) => widget(`G${i}`)))
       .run();
 
     app = new Hono();
@@ -64,20 +67,27 @@ describe('memories dashboard TOTAL meta', () => {
 
   afterEach(() => t.cleanup());
 
-  it('plain list shows the true total (12), not the page slice (10)', async () => {
+  it(`plain list shows the true total (${SEEDED}), not the page slice (${PAGE_SIZE})`, async () => {
     const html = await (await app.request('/')).text();
-    expect(html).toContain('<b>TOTAL</b> 12');
-    expect(html).toContain('<b>SHOWING</b> 10 ROWS');
+    expect(html).toContain(`<b>TOTAL</b> ${SEEDED}`);
+    expect(html).toContain(`<b>SHOWING</b> ${PAGE_SIZE} ROWS`);
+  });
+
+  it('the MEMORIES sidebar entry carries a needs-review badge reflecting the seeded rows', async () => {
+    // Every seeded row is ancient, typed 'project', never confirmed → all need review.
+    const html = await (await app.request('/')).text();
+    expect(html).toMatch(
+      new RegExp(`href="/dashboard/memories"[\\s\\S]*?<span class="badge">${SEEDED}</span>`),
+    );
   });
 
   it('needs_review + query renders a +-suffixed lower-bound total', async () => {
     const html = await (await app.request('/?review=needs_review&q=widget')).text();
-    expect(html).toContain('<b>TOTAL</b> 10+');
+    expect(html).toContain(`<b>TOTAL</b> ${PAGE_SIZE}+`);
   });
 
-  it('FTS search total honours the (default active) status filter, not the raw match count', async () => {
-    // Two more 'widget' matches that are NOT active. The list filters them out
-    // client-side; the count must mirror that, so TOTAL stays 12 (not 14).
+  it(`FTS search total honours the (default active) status filter, not the raw match count`, async () => {
+    // Two non-active 'widget' matches: filtered in SQL, so TOTAL stays SEEDED.
     t.handle.db
       .insert(memory)
       .values([
@@ -86,7 +96,24 @@ describe('memories dashboard TOTAL meta', () => {
       ])
       .run();
     const html = await (await app.request('/?q=widget')).text();
-    expect(html).toContain('<b>TOTAL</b> 12');
-    expect(html).not.toContain('<b>TOTAL</b> 14');
+    expect(html).toContain(`<b>TOTAL</b> ${SEEDED}`);
+    expect(html).not.toContain(`<b>TOTAL</b> ${SEEDED + 2}`);
+  });
+
+  it('the filter form is HTMX-enhanced to swap #memories-list without a full page reload', async () => {
+    const html = await (await app.request('/')).text();
+    expect(html).toContain('hx-get="/dashboard/memories"');
+    expect(html).toContain('hx-target="#memories-list"');
+    expect(html).toContain('hx-select="#memories-list"');
+    expect(html).toContain('hx-push-url="true"');
+    expect(html).toContain('id="memories-list"');
+    expect(html).toContain('id="memories-meta" hx-swap-oob="true"');
+  });
+
+  it('an unresolvable project slug yields an empty list, not every scope', async () => {
+    const html = await (await app.request('/?project=no-such-slug')).text();
+    expect(html).toContain('<b>TOTAL</b> 0');
+    expect(html).toContain('No memories match this filter.');
+    expect(html).not.toContain('widget number');
   });
 });

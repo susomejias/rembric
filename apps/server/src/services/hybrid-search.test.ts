@@ -1,11 +1,11 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
-import { fuseRRF, sanitizeFtsQuery } from './hybrid-search.js';
+import { applyRankingBoost, fuseRRF, sanitizeFtsQuery } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { projectScope, SCOPE_GLOBAL } from './scope.js';
@@ -48,6 +48,78 @@ describe('sanitizeFtsQuery', () => {
     expect(sanitizeFtsQuery('alpha beta gamma delta epsilon')).toBe(
       '"alpha" OR "beta" OR "gamma" OR "delta" OR "epsilon"',
     );
+  });
+});
+
+describe('applyRankingBoost', () => {
+  const NOW = new Date('2026-01-01T00:00:00.000Z');
+  const DAY_MS = 86_400_000;
+
+  function fakeOpts(
+    meta: Map<
+      string,
+      { type: 'user' | 'feedback' | 'project' | 'reference'; lastSeenAt: Date | null }
+    >,
+    confirmations: Map<string, number>,
+  ) {
+    return {
+      repos: {
+        memory: {
+          rankingMetadataByIds: () => meta,
+          confirmationCountsByIds: () => confirmations,
+        },
+      },
+      now: () => NOW,
+      // Minimal fake: applyRankingBoost reads only these two repo methods + `now`.
+    } as unknown as Parameters<typeof applyRankingBoost>[1];
+  }
+
+  it('a heavily-confirmed, recently-seen memory outranks a stale unconfirmed one with a close raw RRF score', () => {
+    const meta = new Map([
+      ['fresh', { type: 'user' as const, lastSeenAt: new Date(NOW.getTime() - 1 * DAY_MS) }],
+      ['stale', { type: 'user' as const, lastSeenAt: new Date(NOW.getTime() - 120 * DAY_MS) }],
+    ]);
+    const confirmations = new Map([['fresh', 3]]);
+    // Close raw scores — stale is nominally ranked first pre-boost.
+    const fused = [
+      { id: 'stale', score: 0.02 },
+      { id: 'fresh', score: 0.0195 },
+    ];
+    const result = applyRankingBoost(fused, fakeOpts(meta, confirmations));
+    expect(result[0]).toBe('fresh');
+  });
+
+  it('never introduces an id absent from the fused pool', () => {
+    const meta = new Map([['a', { type: 'user' as const, lastSeenAt: NOW }]]);
+    const fused = [{ id: 'a', score: 0.05 }];
+    const result = applyRankingBoost(fused, fakeOpts(meta, new Map()));
+    expect(result).toEqual(['a']);
+  });
+
+  it('returns an empty array for an empty fused pool without querying metadata', () => {
+    const rankingMetadataByIds = vi.fn();
+    // Double cast: minimal fake with just the fields applyRankingBoost reads.
+    const opts = {
+      repos: { memory: { rankingMetadataByIds, confirmationCountsByIds: vi.fn() } },
+      now: () => NOW,
+    } as unknown as Parameters<typeof applyRankingBoost>[1];
+    expect(applyRankingBoost([], opts)).toEqual([]);
+    expect(rankingMetadataByIds).not.toHaveBeenCalled();
+  });
+
+  it('clamps the boost so it cannot invert a large raw-score gap', () => {
+    const meta = new Map([
+      ['weak', { type: 'user' as const, lastSeenAt: NOW }],
+      ['strong', { type: 'project' as const, lastSeenAt: new Date(NOW.getTime() - 200 * DAY_MS) }],
+    ]);
+    const confirmations = new Map([['weak', 5]]);
+    // Max boost on weak (0.01·1.4) still can't overtake strong (0.1·0.7 floor).
+    const fused = [
+      { id: 'strong', score: 0.1 },
+      { id: 'weak', score: 0.01 },
+    ];
+    const result = applyRankingBoost(fused, fakeOpts(meta, confirmations));
+    expect(result[0]).toBe('strong');
   });
 });
 
@@ -183,6 +255,87 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       projectScope(projectId),
     );
     expect(res.map((m) => m.id)).toEqual([tagged.id]);
+  });
+
+  it('include_global blends project + global results on the hybrid (query) path', async () => {
+    const projectRow = mem.save(
+      { type: 'user', title: 'Widget project note', content: 'widget project note' },
+      projectScope(projectId),
+    );
+    const globalRow = mem.save(
+      { type: 'user', title: 'Widget global note', content: 'widget global note' },
+      SCOPE_GLOBAL,
+    );
+    await embedAll();
+
+    const withoutGlobal = await mem.search({ query: 'widget note' }, projectScope(projectId));
+    expect(withoutGlobal.map((m) => m.id)).toContain(projectRow.id);
+    expect(withoutGlobal.map((m) => m.id)).not.toContain(globalRow.id);
+
+    const withGlobal = await mem.search(
+      { query: 'widget note', includeGlobal: true },
+      projectScope(projectId),
+    );
+    const ids = withGlobal.map((m) => m.id);
+    expect(ids).toContain(projectRow.id);
+    expect(ids).toContain(globalRow.id);
+  });
+
+  it('include_global blends project + global results on the no-query listing path', async () => {
+    const projectRow = mem.save(
+      { type: 'user', title: 'Listing project row', content: 'listing project row' },
+      projectScope(projectId),
+    );
+    const globalRow = mem.save(
+      { type: 'user', title: 'Listing global row', content: 'listing global row' },
+      SCOPE_GLOBAL,
+    );
+
+    const withoutGlobal = await mem.search({}, projectScope(projectId));
+    expect(withoutGlobal.map((m) => m.id)).not.toContain(globalRow.id);
+
+    const withGlobal = await mem.search({ includeGlobal: true }, projectScope(projectId));
+    const ids = withGlobal.map((m) => m.id);
+    expect(ids).toContain(projectRow.id);
+    expect(ids).toContain(globalRow.id);
+  });
+
+  it('a global-scoped search never returns project rows, even with include_global set', async () => {
+    mem.save(
+      { type: 'user', title: 'Project only widget', content: 'project only widget' },
+      projectScope(projectId),
+    );
+    const globalRow = mem.save(
+      { type: 'user', title: 'Global widget note', content: 'global widget note' },
+      SCOPE_GLOBAL,
+    );
+    await embedAll();
+
+    const res = await mem.search({ query: 'widget', includeGlobal: true }, SCOPE_GLOBAL);
+    expect(res.every((m) => m.scope === 'global')).toBe(true);
+    expect(res.map((m) => m.id)).toContain(globalRow.id);
+  });
+
+  it('the no-query listing path is unaffected by the ranking boost (pure chronological order)', async () => {
+    const older = mem.save(
+      { type: 'user', title: 'Older row', content: 'older row' },
+      projectScope(projectId),
+    );
+    const newer = mem.save(
+      { type: 'project', title: 'Newer row', content: 'newer row' },
+      projectScope(projectId),
+    );
+    // Distinct createdAt so ordering can't tie on the same test-tick millisecond.
+    db.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(1_000, older.id);
+    db.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(2_000, newer.id);
+    // `older` gets every boost signal; the no-query path must still ignore the boost.
+    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
+    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
+    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
+
+    const res = await mem.search({}, projectScope(projectId));
+    const ids = res.map((m) => m.id);
+    expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id));
   });
 
   it('degrades to FTS-only when no embedQuery is wired', async () => {

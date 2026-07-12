@@ -26,12 +26,13 @@ import { createSessionsRouter } from './sessions.js';
 import type { ResolvedSession } from './types.js';
 
 /**
- * Locks the `SHOWING N ROWS` chip to the page-slice size (PAGE_SIZE = 10)
+ * Locks the `SHOWING N ROWS` chip to the page-slice size (`PAGE_SIZE`)
  * across every paginated list view, never the `PAGE_SIZE + 1` lookahead row
  * the queries fetch to detect a next page. Regression coverage for the
  * judgments bug where `SHOWING` read `rows.length` (the lookahead-inclusive
  * count) instead of `visible.length`.
  */
+const SEEDED = PAGE_SIZE + 2;
 describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
   let t: TestDb;
   let repos: Repositories;
@@ -60,12 +61,12 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     return app;
   }
 
-  it('memories list caps SHOWING at PAGE_SIZE for 12 seeded rows', async () => {
+  it(`memories list caps SHOWING at PAGE_SIZE for ${SEEDED} seeded rows`, async () => {
     const memorySvc = new MemoryService(repos, t.handle.db);
     t.handle.db
       .insert(memory)
       .values(
-        Array.from({ length: 12 }, (_, i) => {
+        Array.from({ length: SEEDED }, (_, i) => {
           const content = `widget number ${i}`;
           const row: NewMemory = {
             id: `G${i}`,
@@ -86,12 +87,12 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
       .run();
     const app = appWith(createMemoriesRouter({ repos, memory: memorySvc, sessions }));
     const html = await (await app.request('/')).text();
-    expect(html).toContain('<b>SHOWING</b> 10 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 11 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 12 ROWS');
+    expect(html).toContain(`<b>SHOWING</b> ${PAGE_SIZE} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${PAGE_SIZE + 1} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${SEEDED} ROWS`);
   });
 
-  it('judgments list caps SHOWING at PAGE_SIZE for 12 seeded relations', async () => {
+  it(`judgments list caps SHOWING at PAGE_SIZE for ${SEEDED} seeded relations`, async () => {
     t.handle.db
       .insert(tokens)
       .values({ id: 'tk1', name: 'tok', hash: 'h', scope: '*', createdAt: new Date(500) })
@@ -130,7 +131,7 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     t.handle.db
       .insert(memoryRelations)
       .values(
-        Array.from({ length: 12 }, (_, i) => ({
+        Array.from({ length: SEEDED }, (_, i) => ({
           id: `R${i}`,
           judgmentId: `J${i}`,
           sourceId: 'RS',
@@ -144,16 +145,16 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     const relationsSvc = new RelationsService(repos, t.handle.db);
     const app = appWith(createJudgmentsRouter({ repos, relations: relationsSvc, sessions }));
     const html = await (await app.request('/')).text();
-    expect(html).toContain('<b>SHOWING</b> 10 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 11 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 12 ROWS');
+    expect(html).toContain(`<b>SHOWING</b> ${PAGE_SIZE} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${PAGE_SIZE + 1} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${SEEDED} ROWS`);
   });
 
-  it('prompts list caps SHOWING at PAGE_SIZE for 12 seeded rows', async () => {
+  it(`prompts list caps SHOWING at PAGE_SIZE for ${SEEDED} seeded rows`, async () => {
     t.handle.db
       .insert(prompts)
       .values(
-        Array.from({ length: 12 }, (_, i) => {
+        Array.from({ length: SEEDED }, (_, i) => {
           const row: NewPrompt = {
             id: `P${i}`,
             title: `prompt ${i}`,
@@ -167,12 +168,12 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     const promptsSvc = new PromptsService(repos, t.handle.db);
     const app = appWith(createPromptsRouter({ repos, prompts: promptsSvc, sessions }));
     const html = await (await app.request('/')).text();
-    expect(html).toContain('<b>SHOWING</b> 10 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 11 ROWS');
-    expect(html).not.toContain('<b>SHOWING</b> 12 ROWS');
+    expect(html).toContain(`<b>SHOWING</b> ${PAGE_SIZE} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${PAGE_SIZE + 1} ROWS`);
+    expect(html).not.toContain(`<b>SHOWING</b> ${SEEDED} ROWS`);
   });
 
-  it('sessions list caps SHOWING at PAGE_SIZE for 12 seeded rows', async () => {
+  it(`sessions list caps SHOWING at PAGE_SIZE for ${SEEDED} seeded rows`, async () => {
     t.handle.db
       .insert(tokens)
       .values({ id: 'tk1', name: 'tok', hash: 'h', scope: '*', createdAt: new Date(500) })
@@ -180,7 +181,7 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     t.handle.db
       .insert(agentSessions)
       .values(
-        Array.from({ length: 12 }, (_, i) => ({
+        Array.from({ length: SEEDED }, (_, i) => ({
           id: `S${i}`,
           tokenId: 'tk1',
           agent: 'test',
@@ -192,12 +193,12 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     const app = appWith(createSessionsRouter({ repos, sessions, agentSessions: agentSessionsSvc }));
     const html = await (await app.request('/')).text();
     expect(html).toContain(`${PAGE_SIZE} ROWS`);
-    expect(html).not.toContain('11 ROWS');
-    expect(html).not.toContain('12 ROWS');
+    expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
+    expect(html).not.toContain(`${SEEDED} ROWS`);
   });
 
-  it('consolidation runs list caps SHOWING at PAGE_SIZE for 12 seeded runs', async () => {
-    for (let i = 0; i < 12; i++) {
+  it(`consolidation runs list caps SHOWING at PAGE_SIZE for ${SEEDED} seeded runs`, async () => {
+    for (let i = 0; i < SEEDED; i++) {
       repos.consolidation.insertRun({
         id: `RUN${i}`,
         startedAt: new Date(1_000 + i),
@@ -221,7 +222,7 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     );
     const html = await (await app.request('/')).text();
     expect(html).toContain(`${PAGE_SIZE} ROWS`);
-    expect(html).not.toContain('11 ROWS');
-    expect(html).not.toContain('12 ROWS');
+    expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
+    expect(html).not.toContain(`${SEEDED} ROWS`);
   });
 });

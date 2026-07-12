@@ -390,7 +390,7 @@ export interface ShellOptions {
   view?: string;
   collapsed?: boolean;
   flash?: { kind: 'error' | 'success'; text: string };
-  counters?: { pendingJudgments?: number };
+  counters?: { pendingJudgments?: number; needsReview?: number };
   /** Pre-rendered sidebar (with CSRF). When omitted, the shell renders
    *  without a sidebar — used for the login page. */
   sidebar?: SafeHtml;
@@ -444,6 +444,7 @@ ${body.__html}
 <link rel="shortcut icon" href="/dashboard/assets/favicon.png">
 <link rel="apple-touch-icon" href="/dashboard/assets/favicon.png">
 ${links.join('\n')}
+<script src="/dashboard/assets/htmx.min.js"></script>
 <script>${TS_UPGRADER}</script>
 <script>${MOB_TOGGLE}</script>
 <script>${SB_COLLAPSE}</script>

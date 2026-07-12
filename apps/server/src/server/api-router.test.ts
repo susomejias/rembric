@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
+import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
@@ -12,16 +14,18 @@ import { createApiRouter } from './api-router.js';
 
 let db: TestDb;
 let agentSessions: AgentSessionsService;
+let memory: MemoryService;
 let projects: ProjectsService;
 let tokens: TokensService;
 let adminToken: { id: string; plaintext: string };
 let projectScopedToken: { id: string; plaintext: string };
 let projectSlug: string;
+let projectId: string;
 
 const ADMIN_BOOTSTRAP = 'test-admin-token-with-enough-entropy';
 
 function makeApp() {
-  return createApiRouter({ agentSessions, tokens, projects });
+  return createApiRouter({ agentSessions, memory, tokens, projects });
 }
 
 async function call(
@@ -49,6 +53,7 @@ async function call(
 beforeEach(() => {
   db = createTestDb();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+  memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(createRepositories(db.handle.db));
   tokens = new TokensService(createRepositories(db.handle.db));
 
@@ -62,6 +67,7 @@ beforeEach(() => {
 
   const proj = projects.create({ slug: 'api-test-proj' });
   projectSlug = proj.slug;
+  projectId = proj.id;
 
   const created = tokens.create({ name: 'proj-scoped', scope: `project:${proj.id}` });
   projectScopedToken = { id: created.token.id, plaintext: created.plaintext };
@@ -440,6 +446,121 @@ describe('createApiRouter', () => {
       expect(row?.status).toBe('ended');
       expect(row?.summary).toBe('model wrote');
       expect(row?.title).toBe('Real title');
+    });
+  });
+
+  describe('POST /:slug/memory/recall', () => {
+    it('returns ranked memories and a formatted <memory-context> block', async () => {
+      memory.save(
+        { type: 'user', title: 'auth token handling', content: 'auth token handling notes' },
+        projectScope(projectId),
+      );
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: 'auth token handling' },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      const memories = r.body.memories as { id: string; title: string; snippet: string }[];
+      expect(memories.length).toBeGreaterThan(0);
+      expect(memories[0]?.title).toBe('auth token handling');
+      expect(r.body.formatted).toContain('<memory-context>');
+      expect(r.body.formatted).toContain('auth token handling');
+    });
+
+    it('does not bump last_seen_at (passive recall must not inflate recency)', async () => {
+      const saved = memory.save(
+        { type: 'user', title: 'recency probe row', content: 'recency probe content' },
+        projectScope(projectId),
+      );
+      const before = memory.unsafeGetById(saved.id)?.lastSeenAt?.getTime();
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: 'recency probe' },
+      });
+      expect(r.status).toBe(200);
+      expect((r.body.memories as unknown[]).length).toBeGreaterThan(0);
+      const after = memory.unsafeGetById(saved.id)?.lastSeenAt?.getTime();
+      expect(after).toBe(before);
+    });
+
+    it('returns an empty formatted string when nothing matches', async () => {
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: 'no such memory exists anywhere' },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.memories).toEqual([]);
+      expect(r.body.formatted).toBe('');
+    });
+
+    it('clamps limit above 5 rather than rejecting the request', async () => {
+      for (let i = 0; i < 7; i++) {
+        memory.save(
+          { type: 'user', title: `bulk row ${i}`, content: `bulk row content ${i}` },
+          projectScope(projectId),
+        );
+      }
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: 'bulk row', limit: 50 },
+      });
+      expect(r.status).toBe(200);
+      const memories = r.body.memories as unknown[];
+      expect(memories.length).toBeLessThanOrEqual(5);
+    });
+
+    it('rejects a missing or empty query without executing a search', async () => {
+      const app = makeApp();
+      const missing = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+      expect(missing.status).toBe(400);
+      expect(missing.body.code).toBe('invalid_input');
+
+      const empty = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: '' },
+      });
+      expect(empty.status).toBe(400);
+    });
+
+    it('matches the existing /api/<slug>/* auth/scope error contract', async () => {
+      const app = makeApp();
+
+      const noToken = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        body: { query: 'x' },
+      });
+      expect(noToken.status).toBe(401);
+      expect(noToken.body.code).toBe('missing_token');
+
+      const badToken = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: 'not-a-real-token',
+        body: { query: 'x' },
+      });
+      expect(badToken.status).toBe(401);
+      expect(badToken.body.code).toBe('token_invalid');
+
+      const unknownSlug = await call(app, 'POST', `/unknown-slug-xyz/memory/recall`, {
+        token: adminToken.plaintext,
+        body: { query: 'x' },
+      });
+      expect(unknownSlug.status).toBe(404);
+      expect(unknownSlug.body.code).toBe('project_not_found');
+
+      const otherProj = projects.create({ slug: 'other-recall-proj' });
+      const otherToken = tokens.create({ name: 'other', scope: `project:${otherProj.id}` });
+      const forbidden = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
+        token: otherToken.plaintext,
+        body: { query: 'x' },
+      });
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.body.code).toBe('forbidden');
     });
   });
 });

@@ -71,6 +71,18 @@ export const memorySearchSchema = {
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
   status: z.enum(MEMORY_STATUSES).optional(),
+  include_global: z
+    .boolean()
+    .optional()
+    .describe(
+      'When scoped to a project, also include global memories in the results (e.g. user-wide preferences/conventions). No-op on a global-scoped connection.',
+    ),
+  include_relations: z
+    .boolean()
+    .optional()
+    .describe(
+      "Also fetch each result's one-hop supersedes/superseded_by/conflicts_with counterpart (if not already in the results) as a separate `expanded` array, capped at 5, never counted against `limit`.",
+    ),
   limit: z
     .number()
     .int()
@@ -203,9 +215,15 @@ export const memorySaveOutput = {
   judgmentRequired: z.boolean(),
 };
 
+const expandedMemoryRow = memoryRow.extend({
+  expandedFrom: z.string(),
+  relationKind: z.string(),
+});
+
 export const memorySearchOutput = {
   count: z.number(),
   memories: z.array(memoryRow),
+  expanded: z.array(expandedMemoryRow).optional(),
 };
 
 export const memoryGetOutput = {
@@ -573,6 +591,9 @@ async function handleSave(
   }
 }
 
+const RELATION_EXPANSION_KINDS = new Set(['supersedes', 'superseded_by', 'conflicts_with']);
+const RELATION_EXPANSION_CAP = 5;
+
 async function handleSearch(
   deps: MemoryToolDeps,
   args: {
@@ -580,6 +601,8 @@ async function handleSearch(
     type?: (typeof MEMORY_TYPES)[number];
     tag?: string;
     status?: (typeof MEMORY_STATUSES)[number];
+    include_global?: boolean;
+    include_relations?: boolean;
     limit?: number;
     offset?: number;
     snippet?: number;
@@ -600,6 +623,7 @@ async function handleSearch(
     status: args.status,
     limit: args.limit,
     offset: args.offset,
+    includeGlobal: args.include_global,
   };
 
   try {
@@ -621,21 +645,56 @@ async function handleSearch(
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
         : null;
+    const formatRow = (m: (typeof memories)[number]): Record<string, unknown> => ({
+      id: m.id,
+      scope: m.scope,
+      projectId: m.projectId,
+      type: m.type,
+      title: m.title,
+      content: typeof args.snippet === 'number' ? snippet(m.content, args.snippet) : m.content,
+      tags: m.tags,
+      status: m.status,
+      createdAt: m.createdAt,
+      lastSeenAt: m.lastSeenAt,
+    });
+
+    // One-hop expansion is a capped, un-ranked appendix — never blended into `memories` nor counted against `limit`.
+    let expanded: Record<string, unknown>[] | undefined;
+    if (args.include_relations && relations) {
+      const primaryIds = new Set(memories.map((m) => m.id));
+      const seenTargets = new Set<string>();
+      const candidates: { targetId: string; originId: string; relationKind: string }[] = [];
+      outer: for (const m of memories) {
+        for (const rel of relations.get(m.id) ?? []) {
+          if (!RELATION_EXPANSION_KINDS.has(rel.kind)) continue;
+          if (primaryIds.has(rel.targetId) || seenTargets.has(rel.targetId)) continue;
+          seenTargets.add(rel.targetId);
+          candidates.push({ targetId: rel.targetId, originId: m.id, relationKind: rel.kind });
+          if (candidates.length >= RELATION_EXPANSION_CAP) break outer;
+        }
+      }
+      if (candidates.length > 0) {
+        const expandedRows = deps.memory.getMany(
+          candidates.map((c) => c.targetId),
+          scope,
+        );
+        const rowById = new Map(expandedRows.map((row) => [row.id, row]));
+        expanded = candidates
+          .map((c) => {
+            const row = rowById.get(c.targetId);
+            if (!row) return null;
+            return { ...formatRow(row), expandedFrom: c.originId, relationKind: c.relationKind };
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null);
+      }
+    }
+
     return ok({
       count: memories.length,
       memories: memories.map((m) => {
         const r = review.get(m.id);
         const full: Record<string, unknown> = {
-          id: m.id,
-          scope: m.scope,
-          projectId: m.projectId,
-          type: m.type,
-          title: m.title,
-          content: typeof args.snippet === 'number' ? snippet(m.content, args.snippet) : m.content,
-          tags: m.tags,
-          status: m.status,
-          createdAt: m.createdAt,
-          lastSeenAt: m.lastSeenAt,
+          ...formatRow(m),
           relations: relations?.get(m.id) ?? [],
           ...(r && r.reviewState !== null
             ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
@@ -644,6 +703,7 @@ async function handleSearch(
         if (!fieldSet) return full;
         return Object.fromEntries(Object.entries(full).filter(([k]) => fieldSet.has(k)));
       }),
+      ...(expanded ? { expanded } : {}),
     });
   } catch (err) {
     return errToMcp(err);

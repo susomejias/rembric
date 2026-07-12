@@ -271,6 +271,153 @@ describe('RembricPlugin handlers', () => {
 
     expect(fetchMock.mock.calls.length).toBe(before);
   });
+
+  it('event(message.updated) accumulates the assistant turn, flushed alongside the user turn', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'mu1', parentID: '', title: 'work' } },
+      },
+    } as never);
+    await handlers['chat.message']!(
+      { sessionID: 'mu1' } as never,
+      { parts: [{ type: 'text', text: 'please fix the bug' }], message: {} } as never,
+    );
+    await handlers.event!({
+      event: {
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'm1',
+            role: 'assistant',
+            sessionID: 'mu1',
+            parts: [{ type: 'text', text: 'Fixed it.' }],
+          },
+        },
+      },
+    } as never);
+
+    await handlers.event!({
+      event: { type: 'session.compacted', properties: { sessionID: 'mu1' } },
+    } as never);
+
+    const summaryCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.includes('/sessions/mu1/summary'),
+    );
+    expect(summaryCall).toBeDefined();
+    const body = JSON.parse((summaryCall![1] as { body: string }).body) as { summary: string };
+    expect(body.summary).toContain('please fix the bug');
+    expect(body.summary).toContain('Fixed it.');
+  });
+
+  it('event(message.updated) replaces text in place under streaming updates (same message id)', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'mu2', parentID: '', title: 'work' } },
+      },
+    } as never);
+    for (const partial of ['Hel', 'Hello,', 'Hello, working on it.']) {
+      await handlers.event!({
+        event: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'm-stream',
+              role: 'assistant',
+              sessionID: 'mu2',
+              parts: [{ type: 'text', text: partial }],
+            },
+          },
+        },
+      } as never);
+    }
+
+    await handlers.event!({
+      event: { type: 'session.compacted', properties: { sessionID: 'mu2' } },
+    } as never);
+
+    const summaryCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.includes('/sessions/mu2/summary'),
+    );
+    const body = JSON.parse((summaryCall![1] as { body: string }).body) as { summary: string };
+    expect(body.summary.match(/Hello, working on it\./g)?.length).toBe(1);
+    expect(body.summary).not.toContain('Hel\n');
+  });
+
+  it('event(message.updated) ignores non-assistant roles and unknown session ids', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const before = fetchMock.mock.calls.length;
+
+    await handlers.event!({
+      event: {
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'm-user',
+            role: 'user',
+            sessionID: 'never-registered',
+            parts: [{ type: 'text', text: 'x' }],
+          },
+        },
+      },
+    } as never);
+
+    expect(fetchMock.mock.calls.length).toBe(before);
+  });
+
+  it('event(session.idle) schedules a debounced flush for a known session', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!({
+        event: {
+          type: 'session.created',
+          properties: { info: { id: 'idle1', parentID: '', title: 'work' } },
+        },
+      } as never);
+      await handlers['chat.message']!(
+        { sessionID: 'idle1' } as never,
+        { parts: [{ type: 'text', text: 'turn one' }], message: {} } as never,
+      );
+
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'idle1' } },
+      } as never);
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => typeof url === 'string' && url.includes('/sessions/idle1/summary'),
+        ),
+      ).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => typeof url === 'string' && url.includes('/sessions/idle1/summary'),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('event(session.idle) is a no-op for an unregistered session', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'never-registered' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fetchMock.mock.calls.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('stripPrivateTags against the shared cross-client fixture set', () => {

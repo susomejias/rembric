@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
-# SessionStart (matcher: "compact") hook — Claude Code only.
-#
-# Fires after auto/manual context compaction, when the session resumes with
-# the compact summary in the model's context. SessionStart is one of the
-# three Claude Code events whose stdout IS injected into the model's
-# context (verified against code.claude.com/docs/en/hooks). We exploit
-# that to inject an imperative directing the model to persist the compact
-# summary via memory.session_summary BEFORE continuing its work.
-#
-# Codex CLI does NOT support SessionStart matcher:"compact" — there is no
-# Codex equivalent of this script. Codex compensates via the permanent
-# `initialize.instructions` protocol nudge served by the MCP server.
-#
-# Output cap: ≤120 tokens. Output prefix `rembric:` so Codex's
-# looks_like_json heuristic doesn't flag it (kept for safety even though
-# this script is only wired on Claude Code).
+# SessionStart (matcher:"compact") hook — Claude Code + Codex CLI. Its stdout
+# is injected into the resumed model's context on both clients, so we use it
+# to tell the model to persist the compact summary via memory.session_summary.
+# Prefix `rembric:` keeps Codex's looks_like_json heuristic from flagging it.
 set -u
 trap 'exit 0' ERR
 

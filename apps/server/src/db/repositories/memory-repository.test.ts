@@ -49,7 +49,12 @@ describe('MemoryRepository', () => {
       t.handle.db
         .insert(memory)
         .values([
-          row({ id: '01A', content: 'alpha bravo', createdAt: new Date(1_000) }),
+          row({
+            id: '01A',
+            content: 'alpha bravo',
+            createdAt: new Date(1_000),
+            type: 'project',
+          }),
           row({
             id: '01B',
             content: 'bravo charlie',
@@ -57,32 +62,81 @@ describe('MemoryRepository', () => {
             scope: 'project',
             projectId: 'p1',
             status: 'archived',
+            type: 'project',
           }),
-          row({ id: '01C', content: 'delta', createdAt: new Date(3_000) }),
+          row({ id: '01C', content: 'delta', createdAt: new Date(3_000), type: 'project' }),
         ])
         .run();
     });
 
-    it('matches across all scopes and statuses', () => {
-      const hits = repo.adminSearchFts('bravo', 10, 0);
-      expect(hits.map((m) => m.id).sort()).toEqual(['01A', '01B']);
+    it('filters by status in SQL', () => {
+      const hits = repo.adminSearchFts('bravo', {
+        status: 'active',
+        limit: 10,
+        offset: 0,
+      });
+      expect(hits.map((m) => m.id)).toEqual(['01A']);
+    });
+
+    it('filters by project scope in SQL', () => {
+      const hits = repo.adminSearchFts('bravo', {
+        status: 'archived',
+        project: { kind: 'project', projectId: 'p1' },
+        limit: 10,
+        offset: 0,
+      });
+      expect(hits.map((m) => m.id)).toEqual(['01B']);
     });
 
     it('returns hydrated rows', () => {
-      const [hit] = repo.adminSearchFts('delta', 10, 0);
+      const [hit] = repo.adminSearchFts('delta', { status: 'active', limit: 10, offset: 0 });
       expect(hit?.content).toBe('delta');
       expect(hit?.status).toBe('active');
     });
 
     it('pages consistently with limit/offset', () => {
-      const all = repo.adminSearchFts('bravo', 2, 0).map((m) => m.id);
-      const first = repo.adminSearchFts('bravo', 1, 0).map((m) => m.id);
-      const second = repo.adminSearchFts('bravo', 1, 1).map((m) => m.id);
-      expect([...first, ...second].sort()).toEqual([...all].sort());
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'P1', content: 'bravo', createdAt: new Date(11_000) }),
+          row({ id: 'P2', content: 'bravo', createdAt: new Date(10_000) }),
+        ])
+        .run();
+      const all = repo
+        .adminSearchFts('bravo', { status: 'active', limit: 3, offset: 0 })
+        .map((m) => m.id);
+      const first = repo
+        .adminSearchFts('bravo', { status: 'active', limit: 1, offset: 0 })
+        .map((m) => m.id);
+      const second = repo
+        .adminSearchFts('bravo', { status: 'active', limit: 1, offset: 1 })
+        .map((m) => m.id);
+      const third = repo
+        .adminSearchFts('bravo', { status: 'active', limit: 1, offset: 2 })
+        .map((m) => m.id);
+      expect([...first, ...second, ...third].sort()).toEqual([...all].sort());
     });
 
     it('returns empty for no matches', () => {
-      expect(repo.adminSearchFts('zulu', 10, 0)).toEqual([]);
+      expect(repo.adminSearchFts('zulu', { status: 'active', limit: 10, offset: 0 })).toEqual([]);
+    });
+
+    it('does not under-fill a page when higher-ranked rows are filtered out by status', () => {
+      // The 3 highest-ranked matches are archived; a post-fetch filter would return zero active rows.
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'ARC1', content: 'bravo', createdAt: new Date(9_000), status: 'archived' }),
+          row({ id: 'ARC2', content: 'bravo', createdAt: new Date(8_000), status: 'archived' }),
+          row({ id: 'ARC3', content: 'bravo', createdAt: new Date(7_000), status: 'archived' }),
+          row({ id: 'ACT1', content: 'bravo', createdAt: new Date(6_000), status: 'active' }),
+          row({ id: 'ACT2', content: 'bravo', createdAt: new Date(5_000), status: 'active' }),
+          row({ id: 'ACT3', content: 'bravo', createdAt: new Date(4_000), status: 'active' }),
+        ])
+        .run();
+
+      const page = repo.adminSearchFts('bravo', { status: 'active', limit: 3, offset: 0 });
+      expect(page.map((m) => m.id)).toEqual(['ACT1', 'ACT2', 'ACT3']);
     });
   });
 

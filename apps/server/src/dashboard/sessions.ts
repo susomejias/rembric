@@ -288,6 +288,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             hasMore: visibleHasMore || (includeDeleted && deletedHasMore),
             pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
             totalLabel: `${visibleRows.length} ROWS`,
+            total,
           })
         : raw('')}
     `;

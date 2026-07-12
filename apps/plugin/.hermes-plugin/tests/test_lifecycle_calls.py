@@ -14,6 +14,9 @@ from _loader import fresh_plugin
 class _FakeResponse:
     status = 200
 
+    def __init__(self, body: bytes = b"") -> None:
+        self._body = body
+
     def __enter__(self):
         return self
 
@@ -21,7 +24,7 @@ class _FakeResponse:
         return False
 
     def read(self):
-        return b""
+        return self._body
 
 
 def _captured_post(mock_urlopen, idx: int = 0):
@@ -201,22 +204,25 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(mock_urlopen.call_count, 0)
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_memory_touching_methods_issue_zero_http(self, mock_urlopen: MagicMock) -> None:
+    def test_fully_inert_methods_issue_zero_http(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeResponse()
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
-        # system_prompt_block is now non-empty (protocol nudge) but issues
-        # no HTTP. Just verify it doesn't trigger urlopen.
         block = provider.system_prompt_block()
         self.assertIn("memory.session_summary", block)
         self.assertIn("title", block)
         self.assertEqual(provider.prefetch("anything"), "")
-        self.assertIsNone(provider.queue_prefetch("anything"))
-        self.assertIsNone(provider.sync_turn("u", "a"))
         self.assertIsNone(provider.on_memory_write("add", "MEMORY.md", "x"))
         self.assertIsNone(provider.shutdown())
         self.assertEqual(mock_urlopen.call_count, 0)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_2xx_with_non_json_body_is_treated_as_success(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _FakeResponse(b"OK")
+        self.assertTrue(
+            self.mod._api_post("http://server.example.com:8787", "myproj", "/sessions", {"id": "x"})
+        )
 
 
 if __name__ == "__main__":

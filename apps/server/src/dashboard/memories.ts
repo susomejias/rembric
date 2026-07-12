@@ -48,6 +48,15 @@ export interface MemoriesDeps {
   sessions: SessionsService;
 }
 
+const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
+  (e): e is [MemoryType, number] => typeof e[1] === 'number',
+);
+
+/** All-scope needs-review count for the sidebar's MEMORIES badge. */
+function needsReviewBadgeCount(repos: Repositories): number {
+  return repos.memory.adminCountNeedsReview({ nowMs: Date.now(), ttlByType: TTL_BY_TYPE });
+}
+
 export function createMemoriesRouter(deps: MemoriesDeps): Hono {
   const app = new Hono();
 
@@ -70,23 +79,30 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
     let project: AdminListMemoriesOpts['project'];
+    // A present-but-unresolvable slug (stale/hand-edited URL) must yield an
+    // empty list, not silently drop the filter and show every scope.
+    let unknownProject = false;
     if (projectFilter === '__global__') {
       project = { kind: 'global' };
     } else if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
       if (p) project = { kind: 'project', projectId: p.id };
+      else unknownProject = true;
     }
 
-    const ttlByType = Object.entries(REVIEW_TTL_MS).filter(
-      (e): e is [MemoryType, number] => typeof e[1] === 'number',
-    );
     const nowMs = Date.now();
 
     let rows: Memory[];
-    if (query) {
-      rows = deps.repos.memory
-        .adminSearchFts(query, PAGE_SIZE + 1, offset)
-        .filter((m) => clientSideFilter(m, projectBySlug, projectFilter, statusFilter, typeFilter));
+    if (unknownProject) {
+      rows = [];
+    } else if (query) {
+      rows = deps.repos.memory.adminSearchFts(query, {
+        status: statusFilter as Memory['status'],
+        type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+        project,
+        limit: PAGE_SIZE + 1,
+        offset,
+      });
     } else if (wantNeedsReview) {
       // needs_review implies active; the SQL path filters + paginates correctly.
       rows = deps.repos.memory.adminFindNeedsReview({
@@ -94,7 +110,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         nowMs,
         limit: PAGE_SIZE + 1,
         offset,
-        ttlByType,
+        ttlByType: TTL_BY_TYPE,
       });
     } else {
       rows = deps.repos.memory.adminList({
@@ -134,31 +150,33 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
 
-    // True total for the current filter set (not the page slice). The
-    // needs_review+query path is TS-derived row-by-row, so it can only
-    // report a lower bound.
-    let total: string;
-    if (query && wantNeedsReview) {
-      total = `${visible.length}+`;
+    // needs_review+query has no cheap exact count — leave `totalCount`
+    // undefined there so the pager shows a lower bound, not a wrong "OF Y".
+    let totalCount: number | undefined;
+    if (unknownProject) {
+      totalCount = 0;
+    } else if (query && wantNeedsReview) {
+      totalCount = undefined;
     } else if (query) {
-      total = String(
-        deps.repos.memory.adminCountFts(query, {
-          status: statusFilter as Memory['status'],
-          type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-          project,
-        }),
-      );
+      totalCount = deps.repos.memory.adminCountFts(query, {
+        status: statusFilter as Memory['status'],
+        type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+        project,
+      });
     } else if (wantNeedsReview) {
-      total = String(deps.repos.memory.adminCountNeedsReview({ project, nowMs, ttlByType }));
+      totalCount = deps.repos.memory.adminCountNeedsReview({
+        project,
+        nowMs,
+        ttlByType: TTL_BY_TYPE,
+      });
     } else {
-      total = String(
-        deps.repos.memory.adminCount({
-          status: statusFilter as Memory['status'],
-          type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-          project,
-        }),
-      );
+      totalCount = deps.repos.memory.adminCount({
+        status: statusFilter as Memory['status'],
+        type: typeFilter ? (typeFilter as Memory['type']) : undefined,
+        project,
+      });
     }
+    const total = totalCount === undefined ? `${visible.length}+` : String(totalCount);
 
     const rowsHtml = visible.map((m) => {
       const projectLabel = m.projectId
@@ -199,26 +217,29 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       { value: 'needs_review', label: 'needs_review', selected: wantNeedsReview },
     ];
 
-    const filterBar = filtersBar([
-      filterGroup(
-        'SCOPE',
-        'f-project',
-        sel('project', projectOptions(projectRows, projectFilter), { id: 'f-project' }),
-      ),
-      filterGroup('STATUS', 'f-status', sel('status', statusOptions, { id: 'f-status' })),
-      filterGroup('TYPE', 'f-type', sel('type', typeOptions, { id: 'f-type' })),
-      filterGroup('REVIEW', 'f-review', sel('review', reviewOptions, { id: 'f-review' })),
-      filterGroup(
-        'SEARCH',
-        'f-q',
-        inp('q', query, 'FTS5 keyword, tag, topic', { type: 'search', id: 'f-q' }),
-        { className: 'search' },
-      ),
-      html`<span class="acts">
-        <button class="btn primary" type="submit">FILTER</button>
-        <a class="clear" href="/dashboard/memories">CLEAR</a>
-      </span>`,
-    ]);
+    const filterBar = filtersBar(
+      [
+        filterGroup(
+          'SCOPE',
+          'f-project',
+          sel('project', projectOptions(projectRows, projectFilter), { id: 'f-project' }),
+        ),
+        filterGroup('STATUS', 'f-status', sel('status', statusOptions, { id: 'f-status' })),
+        filterGroup('TYPE', 'f-type', sel('type', typeOptions, { id: 'f-type' })),
+        filterGroup('REVIEW', 'f-review', sel('review', reviewOptions, { id: 'f-review' })),
+        filterGroup(
+          'SEARCH',
+          'f-q',
+          inp('q', query, 'FTS5 keyword, tag, topic', { type: 'search', id: 'f-q' }),
+          { className: 'search' },
+        ),
+        html`<span class="acts">
+          <button class="btn primary" type="submit">FILTER</button>
+          <a class="clear" href="/dashboard/memories">CLEAR</a>
+        </span>`,
+      ],
+      { hxTarget: '#memories-list', hxGet: '/dashboard/memories' },
+    );
 
     const body = html`
       ${viewHead({
@@ -229,6 +250,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
           { k: 'TOTAL', v: total },
           { k: 'SHOWING', v: `${visible.length} ROWS` },
         ],
+        metaId: 'memories-meta',
       })}
 
       <div class="append-only-banner">
@@ -240,37 +262,46 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       </div>
 
       ${filterBar}
-      ${visible.length === 0
-        ? tblEmpty('No memories match this filter.')
-        : html`
-            <div class="tbl-host">
-              <table>
-                <thead>
-                  <tr>
-                    <th>scope</th>
-                    <th>project</th>
-                    <th>type</th>
-                    <th>title</th>
-                    <th>status</th>
-                    <th>review</th>
-                    <th>created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rowsHtml}
-                </tbody>
-              </table>
-            </div>
-          `}
-      ${pager({
-        page,
-        hasMore,
-        pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
-        totalLabel: `${visible.length} ROWS`,
-      })}
+      <div id="memories-list">
+        ${visible.length === 0
+          ? tblEmpty('No memories match this filter.')
+          : html`
+              <div class="tbl-host">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>scope</th>
+                      <th>project</th>
+                      <th>type</th>
+                      <th>title</th>
+                      <th>status</th>
+                      <th>review</th>
+                      <th>created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rowsHtml}
+                  </tbody>
+                </table>
+              </div>
+            `}
+        ${pager({
+          page,
+          hasMore,
+          pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
+          totalLabel: `${visible.length} ROWS`,
+          total: totalCount,
+        })}
+      </div>
     `;
 
-    return c.html(renderPage(c, deps.sessions, body, { title: 'Memories', activeNav: 'memories' }));
+    return c.html(
+      renderPage(c, deps.sessions, body, {
+        title: 'Memories',
+        activeNav: 'memories',
+        counters: { needsReview: needsReviewBadgeCount(deps.repos) },
+      }),
+    );
   });
 
   app.get('/:id', (c) => {
@@ -284,13 +315,17 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         renderPage(c, deps.sessions, html`<p class="flash error">Memory not found.</p>`, {
           title: 'Memory',
           activeNav: 'memories',
+          counters: { needsReview: needsReviewBadgeCount(deps.repos) },
         }),
         404,
       );
     }
 
     const project = row.projectId ? deps.repos.projects.adminFindById(row.projectId) : null;
-    const predecessors = deps.repos.memory.adminGetByIds(row.replaces);
+    // `adminGetByIds` has no ORDER BY; sort to honor the chronological contract.
+    const predecessors = deps.repos.memory
+      .adminGetByIds(row.replaces)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
     const lastConfirmedAt =
       deps.repos.memory.latestConfirmationTsByIds([row.id]).get(row.id) ?? null;
@@ -298,6 +333,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       { type: row.type, createdAt: row.createdAt, status: row.status, lastConfirmedAt },
       new Date(),
     );
+    const successor =
+      row.status === 'superseded' ? deps.repos.memory.findSuccessorId(row.id) : undefined;
 
     const confirmForm = html`
       <form action="/dashboard/memories/${row.id}/confirm" method="post" class="inline">
@@ -362,6 +399,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                   <tr>
                     <th>status</th>
                     <th>title</th>
+                    <th>content</th>
                     <th>created</th>
                   </tr>
                 </thead>
@@ -373,6 +411,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                         <td>
                           <a href="/dashboard/memories/${p.id}">${truncate(p.title, 120)}</a>
                         </td>
+                        <td class="small muted">${truncate(p.content, 160)}</td>
                         <td class="muted">${formatTs(p.createdAt)}</td>
                       </tr>
                     `,
@@ -456,6 +495,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         kv({ k: 'Type', v: row.type }),
         kv({ k: 'Confirms', v: confirmCount }),
         kv({ k: 'Created', v: formatTs(row.createdAt) }),
+        kv({ k: 'Last seen', v: formatTs(row.lastSeenAt) }),
         kv({ k: 'Source', v: sourceLabel }),
         kv({
           k: 'Session',
@@ -463,6 +503,14 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
             ? html`<a href="/dashboard/sessions/${row.sessionId}">${shortId(row.sessionId)}</a>`
             : '—',
         }),
+        ...(successor
+          ? [
+              kv({
+                k: 'Superseded by',
+                v: html`<a href="/dashboard/memories/${successor}">${shortId(successor)}</a>`,
+              }),
+            ]
+          : []),
         ...reviewKv,
       ])}
 
@@ -487,6 +535,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       renderPage(c, deps.sessions, body, {
         title: `Memory ${shortId(row.id)}`,
         activeNav: 'memories',
+        counters: { needsReview: needsReviewBadgeCount(deps.repos) },
       }),
     );
   });
@@ -540,23 +589,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
   });
 
   return app;
-}
-
-function clientSideFilter(
-  m: Memory,
-  projectBySlug: Map<string, { id: string }>,
-  projectFilter: string,
-  statusFilter: string,
-  typeFilter: string,
-): boolean {
-  if (statusFilter && m.status !== statusFilter) return false;
-  if (typeFilter && m.type !== typeFilter) return false;
-  if (projectFilter === '__global__') return m.scope === 'global';
-  if (projectFilter) {
-    const p = projectBySlug.get(projectFilter);
-    return m.scope === 'project' && m.projectId === p?.id;
-  }
-  return true;
 }
 
 function sourceLine(source: Memory['source']): string {

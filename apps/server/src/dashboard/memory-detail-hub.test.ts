@@ -12,20 +12,10 @@ import { SCOPE_GLOBAL } from '../services/scope.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { extractCsrf } from '../test/forms.js';
 
 import { createMemoriesRouter } from './memories.js';
 import type { ResolvedSession } from './types.js';
-
-function extractCsrf(html: string, action: string): string {
-  const formRe = new RegExp(
-    `<form[^>]*action="${action.replace(/[/.]/g, (m) => '\\' + m)}"[\\s\\S]*?</form>`,
-  );
-  const m = formRe.exec(html);
-  if (!m) throw new Error(`form for action ${action} not found`);
-  const c = /<input[^>]*name="csrf"[^>]*value="([^"]+)"/.exec(m[0]);
-  if (!c?.[1]) throw new Error(`csrf input not found in form ${action}`);
-  return c[1];
-}
 
 describe('memory detail hub', () => {
   let t: TestDb;
@@ -119,6 +109,71 @@ describe('memory detail hub', () => {
 
     const html = await (await app.request(`/${c2.id}`)).text();
     expect(html).toContain(`href="/dashboard/memories/${b.id}"`);
+  });
+
+  it('a superseded memory links forward to its successor; an active one shows no such link', async () => {
+    const b = memorySvc.save(
+      { type: 'feedback', title: 'succ-b', content: 'succ-b', topicKey: 'topic-succ' },
+      SCOPE_GLOBAL,
+    );
+    const c2 = memorySvc.save(
+      { type: 'feedback', title: 'succ-b-v2', content: 'succ-b-v2', topicKey: 'topic-succ' },
+      SCOPE_GLOBAL,
+    );
+
+    const supersededHtml = await (await app.request(`/${b.id}`)).text();
+    expect(supersededHtml).toContain('Superseded by');
+    expect(supersededHtml).toContain(`href="/dashboard/memories/${c2.id}"`);
+
+    const activeHtml = await (await app.request(`/${c2.id}`)).text();
+    expect(activeHtml).not.toContain('Superseded by');
+  });
+
+  it('shows last_seen_at in the metadata block regardless of status', async () => {
+    const row = memorySvc.save(
+      { type: 'feedback', title: 'last-seen-marker', content: 'last-seen-marker' },
+      SCOPE_GLOBAL,
+    );
+    const html = await (await app.request(`/${row.id}`)).text();
+    expect(html).toMatch(/Last seen[\s\S]{0,200}data-rembric-ts/);
+  });
+
+  it('Predecessors table shows content snapshots ordered chronologically', async () => {
+    const a = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'predecessor-a',
+        content: 'predecessor-a-content',
+        topicKey: 'topic-y',
+      },
+      SCOPE_GLOBAL,
+    );
+    const b = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'predecessor-b',
+        content: 'predecessor-b-content',
+        topicKey: 'topic-y',
+      },
+      SCOPE_GLOBAL,
+    );
+    const head = memorySvc.save(
+      { type: 'feedback', title: 'predecessor-head', content: 'predecessor-head-content' },
+      SCOPE_GLOBAL,
+    );
+    // `replaces` order reversed from chronological, to prove the view sorts by createdAt.
+    t.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(1_000, a.id);
+    t.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(2_000, b.id);
+    t.handle.raw
+      .prepare('UPDATE memory SET replaces = ? WHERE id = ?')
+      .run(JSON.stringify([b.id, a.id]), head.id);
+
+    const html = await (await app.request(`/${head.id}`)).text();
+    expect(html).toContain('predecessor-a-content');
+    expect(html).toContain('predecessor-b-content');
+    expect(html.indexOf('predecessor-a-content')).toBeLessThan(
+      html.indexOf('predecessor-b-content'),
+    );
   });
 
   it('Judgments section lists relations touching the memory, title-linked, with judgment links; empty state otherwise', async () => {

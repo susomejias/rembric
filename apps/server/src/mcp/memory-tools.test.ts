@@ -8,6 +8,7 @@ import { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { RelationsService } from '../services/relations.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
@@ -390,6 +391,48 @@ describe('memory.search — projection (snippet / fields)', () => {
     const row: Record<string, unknown> = memories[0] ?? {};
     expect(Object.keys(row).sort()).toEqual(['id', 'status', 'title', 'type']);
     expect(row.content).toBeUndefined();
+  });
+});
+
+describe('memory.search — relation expansion (include_relations)', () => {
+  it('caps expansion at 5 entries even when more conflicts_with counterparts exist', async () => {
+    const relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
+    const expandedHandlers = buildMemoryHandlers({ memory, relations });
+
+    // No token shared between source and targets, or FTS would pull the targets into the primary results.
+    const source = memory.save(
+      { type: 'user', title: 'zzsourcemarker', content: 'zzsourcemarker' },
+      projectScope(projectA.id),
+    );
+    const targetIds: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const target = memory.save(
+        { type: 'user', title: `unrelated filler row ${i}`, content: `unrelated filler row ${i}` },
+        projectScope(projectA.id),
+      );
+      targetIds.push(target.id);
+      relations.compare({
+        sourceId: source.id,
+        targetId: target.id,
+        relation: 'conflicts_with',
+        actor: 'test',
+        kind: 'agent',
+        confidence: 0.9,
+        reason: 'cap test',
+      });
+    }
+
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        expandedHandlers.search({ query: 'zzsourcemarker', include_relations: true }),
+      ),
+    );
+    const { expanded } = parseText<{
+      expanded?: { id: string; expandedFrom: string; relationKind: string }[];
+    }>(r);
+    expect(expanded).toHaveLength(5);
+    expect(expanded?.every((e) => e.relationKind === 'conflicts_with')).toBe(true);
+    expect(expanded?.every((e) => targetIds.includes(e.id))).toBe(true);
   });
 });
 
