@@ -380,13 +380,9 @@ async function handleMcpRequest(
   });
 
   // 4. Hand off to the transport inside the per-request context.
-  const bridgeInstanceId = headerString(req.headers['x-rembric-bridge-instance']);
-  await runWithContext(
-    { ...ctx, mcpSessionId: sessionId ?? null, bridgeInstanceId: bridgeInstanceId ?? null },
-    async () => {
-      await transport.handleRequest(req, res, body);
-    },
-  );
+  await runWithContext({ ...ctx, mcpSessionId: sessionId ?? null }, async () => {
+    await transport.handleRequest(req, res, body);
+  });
 }
 
 const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024;

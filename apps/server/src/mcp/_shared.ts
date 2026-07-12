@@ -105,16 +105,8 @@ export function routerKey(): { tokenId: string; mcpSessionId: string } | null {
  * Resolve the active Rembric session id for a write, in precedence order:
  *   1. an explicit `sessionId` arg,
  *   2. the `SessionRouter` entry for this transport (set by `memory.session_start`),
- *   3. the most recently-active session tagged with the request's
- *      `X-Rembric-Bridge-Instance` header, scoped to the caller's token —
- *      disambiguates concurrently active sessions under one token that
- *      step 2 never populated a router entry for (see
- *      `mcp-api/spec.md`'s "Session auto-attachment MUST prefer a
- *      bridge-instance-scoped signal over the ambiguous transport
- *      fallback"). A header that resolves to no match falls through.
- *   4. the most recently-active session for `(tokenId, projectId)` — captures
- *      sessions created out-of-band by the plugin's HTTP hooks. Ambiguous
- *      under concurrent sessions; only reached when steps 2-3 don't apply.
+ *   3. the most recently-active session for `(tokenId, projectId)` — captures
+ *      sessions created out-of-band by the plugin's HTTP hooks.
  * Returns null when none resolve. Shared by session_end/summary, save_prompt,
  * and capture_passive; `projectId` is the caller's already-resolved scope.
  */
@@ -129,13 +121,6 @@ export function resolveSessionId(
   if (key) {
     const routerHit = deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId;
     if (routerHit) return routerHit;
-  }
-  if (ctx.bridgeInstanceId) {
-    const byInstance = deps.agentSessions.findActiveByBridgeInstance({
-      tokenId: ctx.token.id,
-      bridgeInstanceId: ctx.bridgeInstanceId,
-    });
-    if (byInstance) return byInstance.id;
   }
   const active = deps.agentSessions.findActiveForTransport({
     tokenId: ctx.token.id,

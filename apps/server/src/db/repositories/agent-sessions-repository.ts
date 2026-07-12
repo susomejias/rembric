@@ -138,27 +138,6 @@ export class AgentSessionsRepository {
       .get();
   }
 
-  /**
-   * Scoped to `tokenId` so a bridge-instance header can never resolve a
-   * session belonging to a different token.
-   */
-  findActiveByBridgeInstance(tokenId: string, bridgeInstanceId: string): AgentSession | undefined {
-    return this.db
-      .select()
-      .from(agentSessions)
-      .where(
-        and(
-          eq(agentSessions.tokenId, tokenId),
-          eq(agentSessions.bridgeInstanceId, bridgeInstanceId),
-          eq(agentSessions.status, 'active'),
-          isNull(agentSessions.deletedAt),
-        ),
-      )
-      .orderBy(desc(agentSessions.startedAt))
-      .limit(1)
-      .get();
-  }
-
   recentForContext(projectId: string | null, limit: number): AgentSession[] {
     const scopeCondition =
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId);

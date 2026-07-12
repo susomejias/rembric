@@ -397,14 +397,9 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
  * Sources, in order of precedence:
  *   1. The `SessionRouter` entry for `(tokenId, mcpSessionId)` — set by
  *      an explicit `memory.session_start` call over MCP.
- *   2. The most recently-active session tagged with the request's
- *      `X-Rembric-Bridge-Instance` header, scoped to the caller's token —
- *      disambiguates concurrently active sessions under one token. A
- *      header that resolves to no match falls through to step 3.
- *   3. The most recently-started `status='active'` row for `(tokenId,
+ *   2. The most recently-started `status='active'` row for `(tokenId,
  *      projectId)` — captures sessions created out-of-band by the plugin's
- *      HTTP hooks (`POST /api/<slug>/sessions`). Ambiguous under
- *      concurrent sessions; only reached when steps 1-2 don't apply.
+ *      HTTP hooks (`POST /api/<slug>/sessions`).
  *
  * Returns null when no active session can be resolved (the memory is
  * saved with `session_id = NULL`, the back-compat path for clients that
@@ -415,13 +410,6 @@ function resolveActiveSessionId(deps: MemoryToolDeps, projectId: string | null):
   if (ctx.mcpSessionId && deps.router) {
     const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
     if (entry?.rembricSessionId) return entry.rembricSessionId;
-  }
-  if (ctx.bridgeInstanceId && deps.agentSessions) {
-    const byInstance = deps.agentSessions.findActiveByBridgeInstance({
-      tokenId: ctx.token.id,
-      bridgeInstanceId: ctx.bridgeInstanceId,
-    });
-    if (byInstance) return byInstance.id;
   }
   if (deps.agentSessions) {
     const row = deps.agentSessions.findActiveForTransport({

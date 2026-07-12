@@ -52,31 +52,23 @@ export interface ApiRouterDeps {
 const ID_RE_SOURCE = '^[A-Za-z0-9_-]{8,128}$';
 const ID_RE = new RegExp(ID_RE_SOURCE);
 
-// Opaque bridge-instance correlation id (see agent-sessions.ts's
-// EnsureSessionInput.bridgeInstanceId) — bounded length, not otherwise
-// validated, since the server never interprets its contents.
-const bridgeInstanceIdSchema = z.string().min(1).max(128).optional();
-
 const sessionPostSchema = z.object({
   id: z.string().regex(ID_RE, `id must match ${ID_RE_SOURCE}`),
   cwd: z.string().max(4096).optional(),
   agent: z.string().min(1).max(120).optional(),
   description: z.string().max(2000).optional(),
-  bridgeInstanceId: bridgeInstanceIdSchema,
 });
 
 const sessionSummarySchema = z.object({
   summary: z.string().min(1).max(20_000),
   title: z.string().min(1).max(100).optional(),
   final: z.boolean().optional(),
-  bridgeInstanceId: bridgeInstanceIdSchema,
 });
 
 const sessionEndSchema = z.object({
   summary: z.string().min(1).max(20_000).optional(),
   title: z.string().min(1).max(100).optional(),
   final: z.boolean().optional(),
-  bridgeInstanceId: bridgeInstanceIdSchema,
 });
 
 const RECALL_SNIPPET_CHARS = 240;
@@ -118,7 +110,6 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         agent: parsed.data.agent ?? 'unknown',
         description: parsed.data.description ?? null,
         cwd: parsed.data.cwd ?? null,
-        bridgeInstanceId: parsed.data.bridgeInstanceId ?? null,
       });
       deps.sweep?.(ctx.project.id);
       return c.json({
@@ -159,7 +150,6 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         summary: truncateSummary(parsed.data.summary),
         title: parsed.data.title,
         final: parsed.data.final,
-        bridgeInstanceId: parsed.data.bridgeInstanceId ?? null,
       });
       return c.json({
         ok: true,
@@ -197,7 +187,6 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
           parsed.data.summary !== undefined ? truncateSummary(parsed.data.summary) : undefined,
         title: parsed.data.title,
         final: parsed.data.final,
-        bridgeInstanceId: parsed.data.bridgeInstanceId ?? null,
       });
       return c.json({
         ok: true,

@@ -91,15 +91,6 @@ export interface EnsureSessionInput {
   description?: string | null;
   /** Optional cwd used to compute the placeholder title. */
   cwd?: string | null;
-  /**
-   * Opaque instance id of the MCP bridge process this client is paired
-   * with, read from the local correlation file. Lets MCP tool-call
-   * auto-attachment (resolveSessionId) disambiguate this session from a
-   * concurrently active one under the same token. Omitted when the
-   * correlation file doesn't exist yet (bridge not started, or older
-   * client).
-   */
-  bridgeInstanceId?: string | null;
 }
 
 export interface EnsureSessionResult {
@@ -119,8 +110,6 @@ export interface EndSessionInput {
   title?: string;
   /** Precedence flag for summary/title writes. Defaults to false. */
   final?: boolean;
-  /** See `EnsureSessionInput.bridgeInstanceId`. Not subject to any precedence — set unconditionally when provided. */
-  bridgeInstanceId?: string | null;
 }
 
 export interface SummarizeSessionInput {
@@ -134,8 +123,6 @@ export interface WriteSummaryInput {
   title?: string;
   /** Precedence flag. Defaults to false. */
   final?: boolean;
-  /** See `EnsureSessionInput.bridgeInstanceId`. Not subject to any precedence — set unconditionally when provided. */
-  bridgeInstanceId?: string | null;
 }
 
 export interface RecentForContextInput {
@@ -195,14 +182,6 @@ export class AgentSessionsService {
           `sessions.ensure: id '${input.id}' is already in use by a different token`,
         );
       }
-      if (input.bridgeInstanceId && existing.bridgeInstanceId !== input.bridgeInstanceId) {
-        const updated = this.repos.agentSessions.updateById(
-          input.id,
-          { bridgeInstanceId: input.bridgeInstanceId },
-          { requireActive: false },
-        );
-        return { session: updated ?? existing, created: false };
-      }
       return { session: existing, created: false };
     }
     const ts = this.now();
@@ -219,7 +198,6 @@ export class AgentSessionsService {
       summaryFinal: false,
       titleFinal: false,
       status: 'active',
-      bridgeInstanceId: input.bridgeInstanceId ?? null,
     });
     if (!row) throw new DomainError('conflict', 'sessions.ensure: insert returned no row');
     return { session: row, created: true };
@@ -284,9 +262,6 @@ export class AgentSessionsService {
       set.title = titleUpdate.value;
       set.titleFinal = titleUpdate.final;
     }
-    if (input.bridgeInstanceId && existing.bridgeInstanceId !== input.bridgeInstanceId) {
-      set.bridgeInstanceId = input.bridgeInstanceId;
-    }
     if (Object.keys(set).length === 0) {
       return existing;
     }
@@ -346,9 +321,6 @@ export class AgentSessionsService {
         set.title = titleUpdate.value;
         set.titleFinal = titleUpdate.final;
       }
-      if (input.bridgeInstanceId && existing.bridgeInstanceId !== input.bridgeInstanceId) {
-        set.bridgeInstanceId = input.bridgeInstanceId;
-      }
       if (Object.keys(set).length === 0) {
         return existing;
       }
@@ -367,9 +339,6 @@ export class AgentSessionsService {
     if (titleUpdate.changed) {
       set.title = titleUpdate.value;
       set.titleFinal = titleUpdate.final;
-    }
-    if (input.bridgeInstanceId && existing.bridgeInstanceId !== input.bridgeInstanceId) {
-      set.bridgeInstanceId = input.bridgeInstanceId;
     }
     const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
@@ -415,24 +384,6 @@ export class AgentSessionsService {
     // Soft-deleted sessions must NOT surface here — auto-resolution would
     // otherwise stamp memories onto a deleted row.
     return this.repos.agentSessions.findActiveForTransport(input.tokenId, input.projectId) ?? null;
-  }
-
-  /**
-   * Find the most recently-started active session tagged with the given
-   * `bridgeInstanceId`, scoped to `tokenId` — a header value can never
-   * resolve a session belonging to a different token. Used by
-   * `resolveSessionId`/`resolveActiveSessionId` as the highest-precedence
-   * signal ahead of the ambiguous `findActiveForTransport` fallback, when
-   * the MCP request carries a valid `X-Rembric-Bridge-Instance` header.
-   */
-  findActiveByBridgeInstance(input: {
-    tokenId: string;
-    bridgeInstanceId: string;
-  }): AgentSession | null {
-    return (
-      this.repos.agentSessions.findActiveByBridgeInstance(input.tokenId, input.bridgeInstanceId) ??
-      null
-    );
   }
 
   /**
