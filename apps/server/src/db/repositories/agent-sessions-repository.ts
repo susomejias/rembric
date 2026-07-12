@@ -122,6 +122,18 @@ export class AgentSessionsRepository {
       .get();
   }
 
+  /**
+   * The auto-attachment fallback for MCP writes that omit an explicit
+   * sessionId and have no SessionRouter entry for this transport. Returns
+   * undefined — never guesses — when more than one active session matches
+   * `(tokenId, projectId)`: two concurrently active sessions (e.g. two
+   * different clients, or two windows of the same client) are genuinely
+   * ambiguous, and silently attaching to "whichever started most recently"
+   * can attach to the WRONG one. Preferring no attachment over a wrong one
+   * is the whole point of this method's contract — see
+   * `sessions/spec.md`'s "findActiveForTransport MUST NOT guess under
+   * concurrent ambiguity".
+   */
   findActiveForTransport(tokenId: string, projectId: string | null): AgentSession | undefined {
     const conditions = [
       eq(agentSessions.tokenId, tokenId),
@@ -129,13 +141,14 @@ export class AgentSessionsRepository {
       isNull(agentSessions.deletedAt),
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
     ];
-    return this.db
+    const rows = this.db
       .select()
       .from(agentSessions)
       .where(and(...conditions))
       .orderBy(desc(agentSessions.startedAt))
-      .limit(1)
-      .get();
+      .limit(2)
+      .all();
+    return rows.length === 1 ? rows[0] : undefined;
   }
 
   recentForContext(projectId: string | null, limit: number): AgentSession[] {

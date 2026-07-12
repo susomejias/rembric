@@ -160,17 +160,24 @@ describe('AgentSessionsService', () => {
     });
   });
 
-  it('findActiveForTransport returns the most recent active session for the pair', () => {
+  it('findActiveForTransport returns the sole active session for the pair', () => {
     const a = sessions.start({ tokenId, projectId, agent: 'a' });
-    // Sleep so b's startedAt > a's startedAt.
-    const b = sessions.start({ tokenId, projectId, agent: 'b' });
     const found = sessions.findActiveForTransport({ tokenId, projectId });
-    expect(found?.id).toBe(b.id);
-    expect(found?.id).not.toBe(a.id);
+    expect(found?.id).toBe(a.id);
   });
 
   it('findActiveForTransport returns null when the token has no active session', () => {
     expect(sessions.findActiveForTransport({ tokenId, projectId })).toBeNull();
+  });
+
+  it('findActiveForTransport returns null (never guesses) when TWO active sessions match — concurrency is genuinely ambiguous', () => {
+    const a = sessions.start({ tokenId, projectId, agent: 'a' });
+    const b = sessions.start({ tokenId, projectId, agent: 'b' });
+    const found = sessions.findActiveForTransport({ tokenId, projectId });
+    expect(found).toBeNull();
+    // Neither session was silently (and possibly wrongly) chosen.
+    expect(found?.id).not.toBe(a.id);
+    expect(found?.id).not.toBe(b.id);
   });
 
   it('abandonStale flips old active rows to abandoned', () => {

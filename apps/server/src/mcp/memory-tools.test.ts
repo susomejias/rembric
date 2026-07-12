@@ -758,7 +758,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     expect(persisted?.sessionId).toBe('sess-http-created-1');
   });
 
-  it('attaches to the MOST recent active session when multiple exist', async () => {
+  it('saves with session_id=null (never guesses) when two active sessions exist for the same token+project', async () => {
     agentSessions.ensure({
       id: 'sess-older',
       tokenId: realTokenId,
@@ -778,13 +778,14 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
       fallbackHandlers.save({
         scope: 'project',
         type: 'project',
-        title: 'attaches to newer',
-        content: 'attaches to newer',
+        title: 'ambiguous concurrent sessions',
+        content: 'ambiguous concurrent sessions',
       }),
     );
     const { id } = parseText<{ id: string }>(r);
     const persisted = memory.unsafeGetById(id);
-    expect(persisted?.sessionId).toBe('sess-newer');
+    // Neither candidate was silently (and possibly wrongly) chosen.
+    expect(persisted?.sessionId).toBeNull();
   });
 
   it('saves with session_id=null when no active session exists', async () => {
