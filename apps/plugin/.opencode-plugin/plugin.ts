@@ -13,7 +13,8 @@
 //
 // Session lifecycle:
 //   - session.created → POST /api/<slug>/sessions  (idempotent register)
-//   - chat.message    → accumulate user turn in sessionMessages
+//   - chat.message    → accumulate user turn; also arms the debounced flush
+//                       session.idle uses (below)
 //   - message.updated → accumulate/upsert assistant turn (by message.id)
 //   - session.idle    → debounced (500ms) flush via POST /summary  ← PRIMARY
 //   - server.instance.disposed → fire-and-forget POST /summary  ← BEST-EFFORT
@@ -388,7 +389,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
         output.parts.push({ type: 'text', text: SUMMARY_NUDGE });
       }
 
-      void flushSessionSummary(input.sessionID);
+      // Same debounce as session.idle — avoids a second uncoordinated POST.
+      scheduleIdleFlush(input.sessionID);
     },
 
     'experimental.session.compacting': async (input, output) => {

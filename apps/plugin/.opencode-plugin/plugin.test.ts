@@ -296,24 +296,30 @@ describe('RembricPlugin handlers', () => {
     }
   });
 
-  it('chat.message triggers a per-turn flushSessionSummary for a known, non-subagent session', async () => {
-    const handlers = await RembricPlugin({ directory: dir } as never);
-    await handlers.event!({
-      event: {
-        type: 'session.created',
-        properties: { info: { id: 'flush-1', parentID: '', title: 'work' } },
-      },
-    } as never);
+  it('chat.message arms a debounced flush for a known, non-subagent session', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!({
+        event: {
+          type: 'session.created',
+          properties: { info: { id: 'flush-1', parentID: '', title: 'work' } },
+        },
+      } as never);
 
-    await handlers['chat.message']!(
-      { sessionID: 'flush-1' } as never,
-      { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
-    );
+      await handlers['chat.message']!(
+        { sessionID: 'flush-1' } as never,
+        { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+      );
+      await vi.advanceTimersByTimeAsync(500);
 
-    const summaryCall = fetchMock.mock.calls.find(
-      ([url]) => typeof url === 'string' && url.includes('/sessions/flush-1/summary'),
-    );
-    expect(summaryCall).toBeDefined();
+      const summaryCall = fetchMock.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/sessions/flush-1/summary'),
+      );
+      expect(summaryCall).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('chat.message does NOT flush for a sub-agent session', async () => {
@@ -334,27 +340,33 @@ describe('RembricPlugin handlers', () => {
     expect(fetchMock.mock.calls.length).toBe(before);
   });
 
-  it('the per-turn flush never blocks the handler from returning', async () => {
-    const handlers = await RembricPlugin({ directory: dir } as never);
-    await handlers.event!({
-      event: {
-        type: 'session.created',
-        properties: { info: { id: 'flush-slow', parentID: '', title: 'work' } },
-      },
-    } as never);
+  it('the debounced flush never blocks the handler from returning', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!({
+        event: {
+          type: 'session.created',
+          properties: { info: { id: 'flush-slow', parentID: '', title: 'work' } },
+        },
+      } as never);
 
-    let released: () => void = () => {};
-    const hang = new Promise<Response>((resolve) => {
-      released = () => resolve(new Response('', { status: 200 }));
-    });
-    fetchMock.mockImplementation(() => hang);
+      let released: () => void = () => {};
+      const hang = new Promise<Response>((resolve) => {
+        released = () => resolve(new Response('', { status: 200 }));
+      });
+      fetchMock.mockImplementation(() => hang);
 
-    await handlers['chat.message']!(
-      { sessionID: 'flush-slow' } as never,
-      { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
-    );
+      await handlers['chat.message']!(
+        { sessionID: 'flush-slow' } as never,
+        { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+      );
+      await vi.advanceTimersByTimeAsync(500);
 
-    released();
+      released();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('event(session.compacted) flushes the accumulator for a known session', async () => {
