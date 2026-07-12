@@ -4,6 +4,14 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.18.1](https://github.com/susomejias/rembric/compare/plugin-v0.18.0...plugin-v0.18.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **plugin:** capture opencode assistant text and stop crashing on injected nudges ([ef4ac49](https://github.com/susomejias/rembric/commit/ef4ac499ced8e13ac2480e20b84491a3d93b158c))
+* **plugin:** log Hermes prefetch/on_turn_start invocation to stderr ([07a92ff](https://github.com/susomejias/rembric/commit/07a92ff9b5157b6febed2ef737ee2b3193601218))
+
 ## [0.18.0](https://github.com/susomejias/rembric/compare/plugin-v0.17.1...plugin-v0.18.0) (2026-07-12)
 
 
