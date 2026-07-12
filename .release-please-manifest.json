@@ -1,4 +1,4 @@
 {
   "apps/server": "0.24.1",
-  "apps/plugin": "0.16.2"
+  "apps/plugin": "0.17.0"
 }
