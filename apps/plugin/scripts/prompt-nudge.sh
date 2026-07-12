@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook — Claude Code + Codex CLI. Fires on every user prompt
+# (matcher-less; Codex ignores the manifest matcher anyway) and carries BOTH
+# the save and session-summary reminders on one per-session turn counter.
+# Plain stdout is the correct injection shape on UserPromptSubmit for both
+# clients (unlike PostToolUse, which requires hookSpecificOutput JSON).
+set -u
+trap 'exit 0' ERR
+
+SAVE_NUDGE_EVERY=5
+SUMMARY_NUDGE_EVERY=10
+SAVE_NUDGE='rembric: if recent work produced a decision, fix, or discovery, call memory.save now (title ≤100 + content).'
+SUMMARY_NUDGE='rembric: call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./_api.sh
+source "${SCRIPT_DIR}/_api.sh"
+
+INPUT=""
+if [ ! -t 0 ]; then
+  INPUT="$(cat)"
+fi
+
+SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
+[ -z "$SESSION_ID" ] && SESSION_ID="nosession"
+SAFE_ID="$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+
+DIR="${TMPDIR:-/tmp}/rembric-turnnudge"
+mkdir -p "$DIR" 2>/dev/null || true
+FILE="${DIR}/${SAFE_ID}"
+COUNT=0
+[ -f "$FILE" ] && COUNT="$(cat "$FILE" 2>/dev/null || printf '0')"
+case "$COUNT" in
+  '' | *[!0-9]*) COUNT=0 ;;
+esac
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" >"$FILE" 2>/dev/null || true
+
+[ $((COUNT % SAVE_NUDGE_EVERY)) -eq 0 ] && echo "$SAVE_NUDGE"
+if [ "$COUNT" -eq 1 ] || [ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ]; then
+  echo "$SUMMARY_NUDGE"
+fi
+
+exit 0

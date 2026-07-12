@@ -100,19 +100,6 @@ rembric_cwd_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
-# Extract the tool name from a PostToolUse hook stdin blob. Prefers Claude
-# Code's `tool_name`; falls back to Codex's `toolName`.
-rembric_tool_name_from_stdin_json() {
-  local input="${1:-}"
-  [ -z "$input" ] && return 0
-  local name
-  name="$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  if [ -z "$name" ]; then
-    name="$(printf '%s' "$input" | sed -n 's/.*"toolName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  fi
-  printf '%s' "$name"
-}
-
 # Extract `prompt` from UserPromptSubmit hook stdin JSON (jq, sed fallback).
 rembric_prompt_from_stdin_json() {
   local input="${1:-}"

@@ -109,7 +109,8 @@ _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
 _SYNC_TURN_HEARTBEAT_EVERY = 5
-_SAVE_HINT_EVERY = 3
+_SAVE_HINT_EVERY = 5
+_SUMMARY_HINT_EVERY = 10
 _COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
 _SAVE_HINT = (
@@ -119,6 +120,11 @@ _SAVE_HINT = (
 _SAVE_HINT_URGENT = (
     "<memory-hint>Context is about to compact — save anything important "
     "with memory.save NOW before it is lost.</memory-hint>"
+)
+_SUMMARY_HINT = (
+    "<memory-hint>call memory.session_summary({title, summary}) now — "
+    "title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · "
+    "Accomplished · Next Steps · Files.</memory-hint>"
 )
 
 
@@ -389,16 +395,20 @@ class RembricMemoryProvider(MemoryProvider):
         del query
         session_id = kwargs.get("session_id") or self._session_id
         recalled = self._prefetch_cache.get(session_id or "", "")
+        hints: list[str] = []
         if self._compaction_imminent:
             self._compaction_imminent = False
             self._compaction_warned = True
-            hint = _SAVE_HINT_URGENT
+            hints.append(_SAVE_HINT_URGENT)
         elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
-            hint = _SAVE_HINT
-        else:
-            hint = ""
-        if not hint:
+            hints.append(_SAVE_HINT)
+        if self._turn_number > 0 and (
+            self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
+        ):
+            hints.append(_SUMMARY_HINT)
+        if not hints:
             return recalled
+        hint = "\n".join(hints)
         return f"{recalled}\n{hint}" if recalled else hint
 
     def queue_prefetch(self, query: str, **kwargs: Any) -> None:

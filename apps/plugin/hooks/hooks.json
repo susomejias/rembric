@@ -29,15 +29,12 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/prompt-search.sh"
           }
         ]
-      }
-    ],
-    "PostToolUse": [
+      },
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/post-tool.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/prompt-nudge.sh"
           }
         ]
       }

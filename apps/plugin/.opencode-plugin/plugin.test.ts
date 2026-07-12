@@ -12,6 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDotenv, readRembricSlug } from '../bin/rembric-dotenv.mjs';
 import { RembricPlugin } from './plugin.js';
 
+const nudgeFixtures = JSON.parse(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'nudge-fixtures.json'),
+    'utf8',
+  ),
+) as { save: string; summary: string };
+
 describe('parseDotenv', () => {
   it('returns {} for empty input', () => {
     expect(parseDotenv('')).toEqual({});
@@ -179,10 +186,11 @@ describe('RembricPlugin handlers', () => {
         parts: [{ type: 'text', text }],
         message: {},
       };
+      // Each case is a fresh session's turn 1, so the summary nudge ALSO
+      // fires alongside the recall nudge — assert on presence, not position.
       await handlers['chat.message']!({ sessionID: `s-recall-${i}` } as never, output as never);
-      const lastPart = output.parts[output.parts.length - 1];
-      expect(lastPart.text).toContain('rembric: User intent: recall');
-      expect(lastPart.text).toContain('memory.search');
+      const recallPart = output.parts.find((p) => p.text?.includes('rembric: User intent: recall'));
+      expect(recallPart?.text).toContain('memory.search');
     }
   });
 
@@ -193,14 +201,17 @@ describe('RembricPlugin handlers', () => {
       'fix the failing build',
       'add a new endpoint at /api/foo',
     ];
-    for (const text of cases) {
+    for (const [i, text] of cases.entries()) {
       const output = {
         parts: [{ type: 'text', text }],
         message: {},
       };
-      await handlers['chat.message']!({ sessionID: 's-no-recall' } as never, output as never);
-      // Only the original part remains; nudge was not appended.
-      expect(output.parts).toHaveLength(1);
+      // Fresh session per case (turn 1) so the summary nudge's turn-1 fire
+      // doesn't get confused with the recall nudge under test here.
+      await handlers['chat.message']!({ sessionID: `s-no-recall-${i}` } as never, output as never);
+      expect(output.parts.some((p) => p.text?.includes('rembric: User intent: recall'))).toBe(
+        false,
+      );
       expect(output.parts[0].text).toBe(text);
     }
   });
@@ -214,6 +225,45 @@ describe('RembricPlugin handlers', () => {
       if (output.parts.some((p) => p.text?.includes('memory.save'))) pushed.push(turn);
     }
     expect(pushed).toEqual([5, 10]);
+  });
+
+  it('chat.message appends the exact fixture summary nudge on turn 1 and every 10th turn, not before', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const pushed: number[] = [];
+    for (let turn = 1; turn <= 11; turn++) {
+      const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
+      await handlers['chat.message']!({ sessionID: 's-summary' } as never, output as never);
+      const summaryPart = output.parts.find((p) => p.text === nudgeFixtures.summary);
+      if (summaryPart) pushed.push(turn);
+    }
+    expect(pushed).toEqual([1, 10]);
+  });
+
+  it('chat.message pushes BOTH save and summary parts on turn 10, neither replacing the other', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    let output: { parts: Array<{ type: string; text?: string }>; message: object } = {
+      parts: [],
+      message: {},
+    };
+    for (let turn = 1; turn <= 10; turn++) {
+      output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
+      await handlers['chat.message']!({ sessionID: 's-coincide' } as never, output as never);
+    }
+    expect(output.parts.some((p) => p.text === nudgeFixtures.save)).toBe(true);
+    expect(output.parts.some((p) => p.text === nudgeFixtures.summary)).toBe(true);
+  });
+
+  it('chat.message never nudges (save, summary, or recall) a sub-agent session on turn 1', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'sub-summary', parentID: 'parent', title: 'sub work' } },
+      },
+    } as never);
+    const output = { parts: [{ type: 'text', text: 'first message' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 'sub-summary' } as never, output as never);
+    expect(output.parts).toHaveLength(1);
   });
 
   it('chat.message never nudges a sub-agent session', async () => {
@@ -344,11 +394,15 @@ describe('RembricPlugin handlers', () => {
       event: { type: 'session.compacted', properties: { sessionID: 'mu1' } },
     } as never);
 
-    const summaryCall = fetchMock.mock.calls.find(
+    const summaryCalls = fetchMock.mock.calls.filter(
       ([url]) => typeof url === 'string' && url.includes('/sessions/mu1/summary'),
     );
-    expect(summaryCall).toBeDefined();
-    const body = JSON.parse((summaryCall![1] as { body: string }).body) as { summary: string };
+    expect(summaryCalls.length).toBeGreaterThan(0);
+    const body = JSON.parse(
+      (summaryCalls[summaryCalls.length - 1]![1] as { body: string }).body,
+    ) as {
+      summary: string;
+    };
     expect(body.summary).toContain('please fix the bug');
     expect(body.summary).toContain('Fixed it.');
   });
@@ -425,22 +479,19 @@ describe('RembricPlugin handlers', () => {
         { sessionID: 'idle1' } as never,
         { parts: [{ type: 'text', text: 'turn one' }], message: {} } as never,
       );
+      const countSummary = () =>
+        fetchMock.mock.calls.filter(
+          ([url]) => typeof url === 'string' && url.includes('/sessions/idle1/summary'),
+        ).length;
+      const beforeIdle = countSummary();
 
       await handlers.event!({
         event: { type: 'session.idle', properties: { sessionID: 'idle1' } },
       } as never);
-      expect(
-        fetchMock.mock.calls.some(
-          ([url]) => typeof url === 'string' && url.includes('/sessions/idle1/summary'),
-        ),
-      ).toBe(false);
+      expect(countSummary()).toBe(beforeIdle);
 
       await vi.advanceTimersByTimeAsync(500);
-      expect(
-        fetchMock.mock.calls.some(
-          ([url]) => typeof url === 'string' && url.includes('/sessions/idle1/summary'),
-        ),
-      ).toBe(true);
+      expect(countSummary()).toBeGreaterThan(beforeIdle);
     } finally {
       vi.useRealTimers();
     }
