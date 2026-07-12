@@ -137,9 +137,8 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         mock_urlopen.reset_mock()
 
         self.assertIsNone(provider.sync_turn("hi", "hello"))
-        thread = provider._sync_thread
-        self.assertIsInstance(thread, threading.Thread)
-        thread.join(timeout=5.0)
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         self.assertEqual(mock_urlopen.call_count, 1)
         url, body = _captured_post(mock_urlopen)
         self.assertEqual(
@@ -151,7 +150,8 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
 
         for _ in range(3):
             provider.sync_turn("hi again", "hello again")
-            provider._sync_thread.join(timeout=5.0)
+            self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+            provider._sync_lock.release()
         self.assertEqual(mock_urlopen.call_count, 4)
 
     @patch("rembric_hermes_plugin.urlopen")
@@ -170,12 +170,14 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         mock_urlopen.side_effect = slow_urlopen
 
         provider.sync_turn("hi", "hello")
-        self.assertTrue(provider._sync_thread.is_alive())
+        # The background thread holds the lock for the duration of the slow POST.
+        self.assertFalse(provider._sync_lock.acquire(timeout=0))
         release.set()
-        provider._sync_thread.join(timeout=5.0)
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_sync_turn_joins_the_prior_thread_with_a_5s_timeout_before_spawning_a_new_one(
+    def test_sync_turn_serializes_concurrent_calls_via_the_lock(
         self, mock_urlopen: MagicMock
     ) -> None:
         mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
@@ -183,36 +185,32 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
 
-        release = threading.Event()
+        first_started = threading.Event()
+        first_release = threading.Event()
+        second_started = threading.Event()
 
         def slow_urlopen(*_a, **_kw):
-            release.wait(timeout=5.0)
+            if not first_started.is_set():
+                first_started.set()
+                first_release.wait(timeout=5.0)
+            else:
+                second_started.set()
             return _FakeJsonResponse({"ok": True})
 
         mock_urlopen.side_effect = slow_urlopen
 
         provider.sync_turn("first", "reply")
-        first_thread = provider._sync_thread
-        self.assertTrue(first_thread.is_alive())
+        self.assertTrue(first_started.wait(timeout=5.0))
 
-        join_calls: list[tuple] = []
-        original_join = threading.Thread.join
+        provider.sync_turn("second", "reply2")
+        # Second call's background thread is blocked acquiring the lock,
+        # not yet POSTing — bounded wait shorter than first_release.
+        self.assertFalse(second_started.wait(timeout=0.2))
 
-        def spy_join(self_thread, *args, **kwargs):
-            if self_thread is first_thread:
-                join_calls.append((args, kwargs))
-                release.set()
-            return original_join(self_thread, *args, **kwargs)
-
-        with patch.object(threading.Thread, "join", spy_join):
-            provider.sync_turn("second", "reply2")
-            second_thread = provider._sync_thread
-            self.assertIsNot(second_thread, first_thread)
-            second_thread.join(timeout=5.0)
-
-        self.assertEqual(len(join_calls), 1)
-        args, kwargs = join_calls[0]
-        self.assertEqual(kwargs.get("timeout") or (args[0] if args else None), 5.0)
+        first_release.set()
+        self.assertTrue(second_started.wait(timeout=5.0))
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("rembric_hermes_plugin.urlopen")
@@ -232,10 +230,43 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
                 {"role": "assistant", "content": "turn one reply"},
             ],
         )
-        provider._sync_thread.join(timeout=5.0)
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         _, body = _captured_post(mock_urlopen)
         self.assertIn("turn one", body["summary"])
         self.assertIn("turn one reply", body["summary"])
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_on_session_end_drains_a_pending_sync_turn_before_posting_end(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        started = threading.Event()
+        release = threading.Event()
+        order: list[str] = []
+
+        def slow_urlopen(req, *_a, **_kw):
+            if req.full_url.endswith("/summary"):
+                started.set()
+                release.wait(timeout=5.0)
+                order.append("summary")
+            else:
+                order.append("end")
+            return _FakeJsonResponse({"ok": True})
+
+        mock_urlopen.side_effect = slow_urlopen
+
+        provider.sync_turn("hi", "hello")
+        self.assertTrue(started.wait(timeout=5.0))
+        release.set()
+
+        provider.on_session_end([{"role": "user", "content": "bye"}])
+
+        self.assertEqual(order, ["summary", "end"])
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_initialize_skips_session_creation_for_a_subagent_context(

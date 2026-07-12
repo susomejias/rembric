@@ -126,7 +126,8 @@ class FormatTranscriptRoleFilterTest(unittest.TestCase):
                 {"role": "assistant", "content": "Fixed it."},
             ],
         )
-        provider._sync_thread.join(timeout=5.0)
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         request = mock_urlopen.call_args_list[0].args[0]
         body = json.loads(request.data.decode("utf-8"))
         self.assertNotIn("Toolset docs", body["summary"])

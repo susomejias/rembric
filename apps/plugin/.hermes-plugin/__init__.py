@@ -289,7 +289,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._initialized: bool = False
         # queue_prefetch warms this per-session; prefetch reads it back inline.
         self._prefetch_cache: dict[str, str] = {}
-        self._sync_thread: threading.Thread | None = None
+        self._sync_lock: threading.Lock = threading.Lock()
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
@@ -438,25 +438,25 @@ class RembricMemoryProvider(MemoryProvider):
                 {"role": "assistant", "content": assistant},
             ]
         base, slug, session_id = self._base, self._slug, self._session_id
-        prior_thread = self._sync_thread
 
         def _sync() -> None:
-            # Join + formatting run here, not on the caller — the caller
-            # is Hermes's shared single-worker executor.
-            if prior_thread is not None and prior_thread.is_alive():
-                prior_thread.join(timeout=5.0)
-            transcript = _format_transcript(messages)
-            if not transcript:
-                return
-            _api_post(
-                base,
-                slug,
-                f"/sessions/{session_id}/summary",
-                {"summary": transcript, "final": False},
-            )
+            # Bounded so a hung POST can't wedge the lock forever.
+            acquired = self._sync_lock.acquire(timeout=5.0)
+            try:
+                transcript = _format_transcript(messages)
+                if not transcript:
+                    return
+                _api_post(
+                    base,
+                    slug,
+                    f"/sessions/{session_id}/summary",
+                    {"summary": transcript, "final": False},
+                )
+            finally:
+                if acquired:
+                    self._sync_lock.release()
 
-        self._sync_thread = threading.Thread(target=_sync, daemon=True)
-        self._sync_thread.start()
+        threading.Thread(target=_sync, daemon=True).start()
         return None
 
     def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
@@ -485,6 +485,9 @@ class RembricMemoryProvider(MemoryProvider):
         )
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return
+        # A late sync_turn write would be rejected once /end flips status.
+        if self._sync_lock.acquire(timeout=5.0):
+            self._sync_lock.release()
         transcript = _format_transcript(messages)
         title = _derive_title_from_messages(messages)
         body: dict[str, Any] = {}
@@ -539,6 +542,9 @@ class RembricMemoryProvider(MemoryProvider):
             return
         old_id = self._session_id
         if self._slug and self._base and old_id and old_id != new_session_id:
+            # Same drain as on_session_end.
+            if self._sync_lock.acquire(timeout=5.0):
+                self._sync_lock.release()
             _api_post(
                 self._base,
                 self._slug,
