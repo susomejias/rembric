@@ -359,11 +359,8 @@ A session row SHALL be physically deletable from the `sessions` table ONLY throu
 
 1. `status IN ('ended', 'abandoned')`.
 2. `deleted_at IS NULL` (the row has not been operator-soft-deleted; soft-deleted rows are preserved as operator intent).
-3. `summary IS NULL` and `title_final = false` (no human-meaningful label was ever written).
+3. `NOT sessionHasContent(s, { requireCuratedSummary: false })` — no summary text at all (curated or raw) was ever written, AND `title_final = false` (no human-meaningful label was ever written), AND no row is anchored via `memory`, non-deleted `prompts`, or `confirmations` (see "`sessionHasContent` is the single source-of-truth predicate..."). A session with a raw, uncurated summary no longer satisfies "empty" for this purpose — only the complete absence of any summary text does.
 4. `ended_at IS NOT NULL AND ended_at < (now − 3_600_000)` (a 1-hour grace period after end to avoid racing with late-arriving summary writes).
-5. No row exists in `memory` with `session_id = sessions.id`.
-6. No row exists in `prompts` with `session_id = sessions.id` AND `deleted_at IS NULL`. (Soft-deleted prompts are interpreted as already removed from the session's logical footprint and do NOT block purge.)
-7. No row exists in `confirmations` with `session_id = sessions.id`.
 
 The method SHALL run the predicate and the `DELETE` inside a single SQLite transaction. The method SHALL write a `consolidation_ops` row with `op_type = 'session_purge'`, `affected_ids` carrying the deleted ids, and a static `reasoning` string, in the same transaction.
 
@@ -376,6 +373,13 @@ Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ..
 - **THEN** the row SHALL be removed from `sessions`
 - **AND** a row SHALL exist in `consolidation_ops` with `op_type='session_purge'` and `affected_ids` containing `S.id`
 - **AND** the response SHALL include `S.id` in `deletedIds`
+
+#### Scenario: A session with a genuine but uncurated summary is no longer purged
+
+- **GIVEN** session `S` with `status='ended'`, `deleted_at=NULL`, `summary='<substantive raw transcript>'`, `summary_final=false`, `title_final=false`, `ended_at = now − 2h`, and zero referencing rows in `memory`, non-deleted `prompts`, `confirmations`
+- **WHEN** `AgentSessionsService.purgeEmpty({ adminBypass: true })` is called
+- **THEN** the row SHALL remain in `sessions` (clause 3 is no longer satisfied — the session has summary text, even though it was never curated)
+- **AND** `S.id` SHALL NOT appear in the response's `deletedIds`
 
 #### Scenario: A session within the grace period is preserved
 
@@ -490,38 +494,56 @@ The method SHALL NOT call into `abandonStale` and `abandonStale` SHALL NOT call 
 
 ### Requirement: `sessionHasContent` is the single source-of-truth predicate for "this session is worth surfacing"
 
-`AgentSessionsService` SHALL define an internal SQL predicate, `sessionHasContent(s)`, returning TRUE for a `sessions` row `s` iff at least ONE of the following holds:
+`AgentSessionsService` SHALL define an internal SQL predicate, `sessionHasContent(s, { requireCuratedSummary: boolean })`, returning TRUE for a `sessions` row `s` iff at least ONE of the following holds:
 
-1. `s.summary IS NOT NULL`, OR
+1. `requireCuratedSummary` is `true` AND `s.summary IS NOT NULL AND s.summary_final = 1`; OR `requireCuratedSummary` is `false` AND `s.summary IS NOT NULL` (curation not required), OR
 2. `s.title_final = 1`, OR
 3. there exists at least one row in `memory` with `session_id = s.id`, OR
 4. there exists at least one row in `prompts` with `session_id = s.id` AND `deleted_at IS NULL`, OR
 5. there exists at least one row in `confirmations` with `session_id = s.id`.
 
-Soft-deleted prompts (`deleted_at IS NOT NULL`) DO NOT make a session content-bearing; the operator has already marked them as obsolete, and a session that has nothing else SHALL be eligible for purge and SHALL NOT surface in `memory.context.recentSessions`.
+`recentForContext` SHALL evaluate the predicate with `requireCuratedSummary: true` — a session whose only "content" is a raw, uncurated transcript dump (`summary IS NOT NULL` but `summary_final = 0`) SHALL NOT satisfy clause 1 for this purpose, and therefore SHALL NOT surface in `memory.context.recentSessions` unless clauses 2–5 apply. This is unchanged from the prior version of this requirement.
 
-The predicate SHALL be implemented as a single private SQL-fragment helper inside `apps/server/src/services/agent-sessions.ts`. It SHALL be the ONLY place in the codebase where this five-clause predicate is expressed. The `countPurgeableEmpty` and `purgeEmpty` methods SHALL consume the predicate in negated form (`NOT sessionHasContent(s)`) as part of their "purgeable" check. `recentForContext` SHALL consume the predicate in positive form as part of its "is useful to surface" check.
+`countPurgeableEmpty` and `purgeEmpty` (see "Sessions MAY be physically purged when empty") SHALL evaluate the predicate with `requireCuratedSummary: false` — a session with ANY summary text, curated or not, satisfies clause 1 for purge-eligibility purposes and is therefore NOT purge-eligible on that basis alone. This is the behavioral change this requirement introduces: a session is no longer treated as "empty" for deletion purposes merely because its summary was never curated.
 
-When a future content-bearing table is added with a `session_id` foreign key (the canonical example being a hypothetical `tool_calls` table), the predicate SHALL be the single point of update — the new EXISTS clause is added once, and every call site picks it up automatically.
+Soft-deleted prompts (`deleted_at IS NOT NULL`) DO NOT make a session content-bearing; the operator has already marked them as obsolete, and a session that has nothing else SHALL be eligible for purge (under the `requireCuratedSummary: false` evaluation) and SHALL NOT surface in `memory.context.recentSessions` (under the `requireCuratedSummary: true` evaluation).
 
-#### Scenario: A session with a written summary satisfies the predicate
+The predicate SHALL be implemented as a single private SQL-fragment helper. It SHALL be the ONLY place in the codebase where this five-clause predicate is expressed, for either evaluation mode — the two modes SHALL differ only in clause 1's curation requirement, never in clauses 2–5, and SHALL NOT be expressed as two independently-maintained SQL fragments. The `countPurgeableEmpty` and `purgeEmpty` methods SHALL consume the predicate in negated form (`NOT sessionHasContent(s, {requireCuratedSummary: false})`) as part of their "purgeable" check. `recentForContext` SHALL consume the predicate in positive form with `requireCuratedSummary: true` as part of its "is useful to surface" check.
 
-- **GIVEN** session `S` with `summary = 'Goal: ...'` and no anchored memory/prompt/confirmation rows
-- **WHEN** any call site evaluates `sessionHasContent(S)`
-- **THEN** the predicate SHALL return TRUE
+When a future content-bearing table is added with a `session_id` foreign key (the canonical example being a hypothetical `tool_calls` table), the predicate SHALL be the single point of update — the new EXISTS clause is added once, to clauses 2–5, and every call site (both evaluation modes) picks it up automatically.
 
-#### Scenario: A session with no content fails the predicate
+#### Scenario: A session with a curated summary satisfies the predicate under both evaluation modes
+
+- **GIVEN** session `S` with `summary = 'Goal: ...'`, `summary_final = 1`, and no anchored memory/prompt/confirmation rows
+- **WHEN** any call site evaluates `sessionHasContent(S, {requireCuratedSummary: true})` or `sessionHasContent(S, {requireCuratedSummary: false})`
+- **THEN** the predicate SHALL return TRUE in both cases
+
+#### Scenario: A session with only a raw, uncurated summary fails the context-surfacing evaluation but satisfies the purge evaluation
+
+- **GIVEN** session `S` with `summary = '<raw transcript dump>'`, `summary_final = 0`, `title_final = 0`, and no anchored memory/prompt/confirmation rows
+- **WHEN** `recentForContext` evaluates `sessionHasContent(S, {requireCuratedSummary: true})`
+- **THEN** the predicate SHALL return FALSE, and `S` SHALL NOT appear in `memory.context.recentSessions`
+- **WHEN** `countPurgeableEmpty`/`purgeEmpty` evaluate `sessionHasContent(S, {requireCuratedSummary: false})`
+- **THEN** the predicate SHALL return TRUE (via clause 1's relaxed form), and `S` SHALL NOT become eligible for `purgeEmpty` regardless of age
+
+#### Scenario: A session with anchored memory but no curated summary still satisfies the predicate
+
+- **GIVEN** session `S` with `summary_final = 0` (or `summary IS NULL`) and at least one `memory` row with `session_id = S.id`
+- **WHEN** any call site evaluates `sessionHasContent(S, ...)` (either mode)
+- **THEN** the predicate SHALL return TRUE via clause 3 — anchored content keeps a session surfacing and non-purgeable regardless of the evaluation mode
+
+#### Scenario: A session with no content at all fails the predicate under both evaluation modes
 
 - **GIVEN** session `S` with `summary IS NULL`, `title_final = 0`, and zero anchored rows in `memory`, `prompts`, `confirmations`
-- **WHEN** any call site evaluates `sessionHasContent(S)`
-- **THEN** the predicate SHALL return FALSE
+- **WHEN** any call site evaluates `sessionHasContent(S, ...)` (either mode)
+- **THEN** the predicate SHALL return FALSE in both cases, and `S` remains eligible for `purgeEmpty` once its age crosses the existing purge floor
 
 #### Scenario: Drift between purge predicate and context predicate is impossible
 
 - **GIVEN** the codebase as a whole
 - **WHEN** any reviewer reads `countPurgeableEmpty`, `purgeEmpty`, and `recentForContext`
-- **THEN** each SHALL reference `sessionHasContent` rather than inlining its five clauses
-- **AND** a code search for `EXISTS (SELECT 1 FROM memory WHERE session_id` outside the helper definition SHALL return zero matches within `apps/server/src/services/agent-sessions.ts`
+- **THEN** each SHALL reference `sessionHasContent` rather than inlining its five clauses, passing only the `requireCuratedSummary` option to select the evaluation mode
+- **AND** a code search for `EXISTS (SELECT 1 FROM memory WHERE session_id` outside the helper definition SHALL return zero matches
 
 ### Requirement: `recentForContext` MUST exclude empty sessions by default
 
@@ -692,3 +714,45 @@ The MCP surface SHALL expose a `memory.session_get` tool that returns a single s
 - **GIVEN** a session `S` in the caller's scope with `deleted_at IS NOT NULL`
 - **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
 - **THEN** the tool SHALL return a structured `not_found` error
+
+### Requirement: `findActiveForTransport` MUST NOT guess under concurrent ambiguity
+
+`AgentSessionsService.findActiveForTransport({ tokenId, projectId })` (and the repository method behind it) is the fallback used to auto-attach an MCP write (`memory.save`, `memory.confirm`, `memory.session_summary`) or to decide session reuse (`memory.session_start`) when the caller supplied no explicit `sessionId` and no `SessionRouter` entry exists for the calling transport. It SHALL query for `status='active'` rows matching `(tokenId, projectId)` and:
+
+1. Return that row when exactly one matches.
+2. Return `null` when zero rows match.
+3. Return `null` — never an arbitrary pick — when two or more rows match. Two or more concurrently active sessions under the same token+project is genuinely ambiguous; the method SHALL NOT use recency (`started_at`) or any other heuristic to break the tie, since doing so risks attaching to the wrong session, which is a worse outcome than no attachment.
+
+Callers already handle a `null` result: `memory.save`/`memory.confirm` persist with `session_id = NULL`; `memory.session_start`'s reuse logic falls through to minting a fresh session rather than adopting an ambiguous one.
+
+#### Scenario: Exactly one active session resolves normally
+
+- **GIVEN** exactly one `active` session exists for `(tokenId, projectId)`
+- **WHEN** `findActiveForTransport({ tokenId, projectId })` is called
+- **THEN** it SHALL return that session
+
+#### Scenario: No active session resolves to null
+
+- **GIVEN** zero `active` sessions exist for `(tokenId, projectId)`
+- **WHEN** `findActiveForTransport({ tokenId, projectId })` is called
+- **THEN** it SHALL return `null`
+
+#### Scenario: Two concurrently active sessions resolve to null, not the most recent
+
+- **GIVEN** two `active` sessions exist for the same `(tokenId, projectId)`, one started before the other
+- **WHEN** `findActiveForTransport({ tokenId, projectId })` is called
+- **THEN** it SHALL return `null`
+- **AND** neither session id SHALL be returned, regardless of which started more recently
+
+#### Scenario: A memory.save with no explicit sessionId saves unattached under ambiguity
+
+- **GIVEN** two `active` sessions exist for the caller's `(tokenId, projectId)` and no `SessionRouter` entry exists for the calling transport
+- **WHEN** `memory.save` is called without an explicit `sessionId`
+- **THEN** the saved row's `session_id` SHALL be `NULL`
+- **AND** neither of the two candidate sessions SHALL be chosen
+
+#### Scenario: memory.session_start mints a fresh session instead of reusing an ambiguous one
+
+- **GIVEN** two `active` sessions already exist for the caller's `(tokenId, projectId)`
+- **WHEN** `memory.session_start` is called with no explicit project-scoped session to resume
+- **THEN** the server SHALL mint a new session row (the reuse-lookup finds no unambiguous candidate) rather than adopting either of the two existing ones
