@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.2](https://github.com/susomejias/rembric/compare/server-v0.24.1...server-v0.24.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **server:** close session context-pollution gap and harden session lifecycle ([961f7d0](https://github.com/susomejias/rembric/commit/961f7d04932efad7c12d2919a2ca9c0cf532003a))
+* **server:** document merge-commit requirement for release-please ([011564e](https://github.com/susomejias/rembric/commit/011564e1366da8ab0e6a94e5c8a4e31a77dc7896))
+
 ## [0.24.1](https://github.com/susomejias/rembric/compare/server-v0.24.0...server-v0.24.1) (2026-07-12)
 
 
