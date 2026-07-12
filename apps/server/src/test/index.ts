@@ -8,3 +8,4 @@ export type { TestDb } from './db.js';
 export { TestClock } from './clock.js';
 export { FakeEmbedder } from './embedder.js';
 export { mintTestToken } from './tokens.js';
+export { extractCsrf } from './forms.js';

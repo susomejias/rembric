@@ -12,6 +12,7 @@ import {
   type Embedder,
 } from '../embeddings/embedder.js';
 import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
+import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -73,12 +74,13 @@ export async function bootstrap(
   overrides: BootstrapOverrides = {},
 ): Promise<BootstrappedServer> {
   const config = loadConfig(env);
+  setLogLevel(config.logLevel);
   printStartupBanner(config);
 
   const staleVars = findStaleEnvVars(env);
   if (staleVars.length > 0) {
-    console.error(
-      `  ⚠ ignoring removed env vars (chat LLM, consolidation cron and embedding provider were removed): ${staleVars.join(', ')}`,
+    logger.warn(
+      `ignoring removed env vars (chat LLM, consolidation cron and embedding provider were removed): ${staleVars.join(', ')}`,
     );
   }
 
@@ -100,7 +102,7 @@ export async function bootstrap(
     olderThanMs: config.sessions.abandonAfterMs,
   });
   if (abandoned.abandoned > 0) {
-    console.error(`  ↻ ${abandoned.abandoned} stale session(s) marked abandoned`);
+    logger.info(`${abandoned.abandoned} stale session(s) marked abandoned`);
   }
 
   const firstRun = tokens.count() === 0;
@@ -157,14 +159,12 @@ export async function bootstrap(
   const embedStart = Date.now();
   const embedder = overrides.embedder ?? (await loadEmbedder());
   if (!overrides.embedder) {
-    console.error(
-      `  ✓ embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`,
-    );
+    logger.info(`embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`);
   }
   const vectorReset = ensureVectorModel(repos, config.dataDir);
   if (vectorReset.wiped > 0) {
-    console.error(
-      `  ↻ embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
+    logger.warn(
+      `embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
     );
   }
 
@@ -182,7 +182,7 @@ export async function bootstrap(
   const embedTick = (): void => {
     embeddingWorker.processBatch().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
-      console.error('embedding worker error:', message);
+      logger.error('embedding worker error', { message });
     });
   };
   // First pass immediately to backfill anything pending from a prior run.
@@ -212,10 +212,9 @@ export async function bootstrap(
       try {
         runner.sweepFor(projectId);
       } catch (err) {
-        console.error(
-          'consolidation sweep failed:',
-          err instanceof Error ? err.message : String(err),
-        );
+        logger.error('consolidation sweep failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     });
   };
@@ -294,10 +293,9 @@ export async function bootstrap(
     try {
       writeStateMarker(config.dataDir, queryCounts(dbDiagnostics));
     } catch (err) {
-      console.error(
-        'state marker refresh failed:',
-        err instanceof Error ? err.message : String(err),
-      );
+      logger.error('state marker refresh failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }, 60_000);
   markerTimer.unref?.();
@@ -361,10 +359,9 @@ export async function bootstrap(
       try {
         writeStateMarker(config.dataDir, queryCounts(dbDiagnostics));
       } catch (err) {
-        console.error(
-          'state marker write on shutdown failed:',
-          err instanceof Error ? err.message : String(err),
-        );
+        logger.error('state marker write on shutdown failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
       clearInterval(embedTimer);
       await http.close();

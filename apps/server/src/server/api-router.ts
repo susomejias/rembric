@@ -2,10 +2,13 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
+import { snippet } from '../mcp/_shared.js';
 import { truncateSummary, type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
+import type { MemoryService } from '../services/memory.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
+import { projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
 
@@ -31,6 +34,7 @@ type ApiContext = Context<ApiEnv>;
 
 export interface ApiRouterDeps {
   agentSessions: AgentSessionsService;
+  memory: MemoryService;
   tokens: TokensService;
   projects: ProjectsService;
   /** OAuth access-token fallback, so /api auth matches /mcp. Null when OAuth is off. */
@@ -67,11 +71,20 @@ const sessionEndSchema = z.object({
   final: z.boolean().optional(),
 });
 
+const RECALL_SNIPPET_CHARS = 240;
+
+const memoryRecallSchema = z.object({
+  query: z.string().min(1),
+  // Unbounded here; the handler clamps to [1, 5] rather than rejecting.
+  limit: z.number().int().min(1).optional(),
+});
+
 export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
 
   app.use('/:slug/sessions/*', authMiddleware(deps));
   app.use('/:slug/sessions', authMiddleware(deps));
+  app.use('/:slug/memory/*', authMiddleware(deps));
 
   app.post('/:slug/sessions', async (c) => {
     const ctx = c.get('rembricCtx');
@@ -185,6 +198,41 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     } catch (err) {
       return domainErr(c, err);
     }
+  });
+
+  app.post('/:slug/memory/recall', async (c) => {
+    const ctx = c.get('rembricCtx');
+    if (!ctx.project) {
+      return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
+    }
+    if (!isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
+    const body = await readJson(c);
+    const parsed = memoryRecallSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
+    }
+    const limit = Math.min(parsed.data.limit ?? 5, 5);
+    // touch:false — passive per-turn recall must not bump last_seen_at.
+    const rows = await deps.memory.search(
+      { query: parsed.data.query, limit },
+      projectScope(ctx.project.id),
+      { touch: false },
+    );
+    const memories = rows.map((m) => ({
+      id: m.id,
+      title: m.title,
+      snippet: snippet(m.content, RECALL_SNIPPET_CHARS),
+    }));
+    const formatted =
+      memories.length === 0
+        ? ''
+        : `<memory-context>\n${memories.map((m) => `- ${m.title}: ${m.snippet}`).join('\n')}\n</memory-context>`;
+    return c.json({ ok: true, memories, formatted });
   });
 
   app.all('/*', (c) => c.json({ ok: false, code: 'not_found', path: c.req.path }, 404));

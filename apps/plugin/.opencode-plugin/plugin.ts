@@ -19,6 +19,9 @@
 //   - server.instance.disposed → fire-and-forget POST /summary  ← BEST-EFFORT
 //   - session.deleted → clean in-memory state
 //
+// message.updated and session.idle are Event union members, dispatched via
+// the `event` hook — NOT top-level Hooks keys (opencode never invokes those).
+//
 // Why two flush paths? opencode kills the subprocess on
 // server.instance.disposed BEFORE async handlers complete (spike verified
 // 2026-05-19 — see design.md::Decision 4 resolved). The per-turn flush
@@ -59,16 +62,16 @@ type ChatMessageOutput = {
   message: { summary?: { title?: string; body?: string } };
 };
 
-type MessageUpdatedInput = { sessionID: string };
-type MessageUpdatedOutput = {
-  message: {
-    id: string;
+type MessageUpdatedEventProps = {
+  info?: {
+    id?: string;
     role?: string;
+    sessionID?: string;
     parts?: Array<{ type: string; text?: string }>;
   };
 };
 
-type SessionIdleInput = { sessionID: string };
+type SessionIdleEventProps = { sessionID?: string };
 
 type CompactingInput = { sessionID?: string };
 type CompactingOutput = { context: string[] };
@@ -80,8 +83,6 @@ type TranscriptEntry = { role: 'user' | 'assistant'; text: string; id?: string }
 type PluginReturn = {
   event?: (input: EventInput) => Promise<void>;
   'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => Promise<void>;
-  'message.updated'?: (input: MessageUpdatedInput, output: MessageUpdatedOutput) => Promise<void>;
-  'session.idle'?: (input: SessionIdleInput) => Promise<void>;
   'experimental.session.compacting'?: (
     input: CompactingInput,
     output: CompactingOutput,
@@ -318,6 +319,32 @@ export const RembricPlugin: Plugin = async (ctx) => {
         diag(`session.compacted sessionId=${sessionId}`);
         await flushSessionSummary(sessionId);
       }
+
+      if (event.type === 'message.updated') {
+        const info = (event.properties as MessageUpdatedEventProps | undefined)?.info ?? {};
+        const sessionId = info.sessionID ?? '';
+        if (!sessionId || subAgentSessions.has(sessionId)) return;
+        if (info.role !== 'assistant') return;
+        if (!info.id) return;
+
+        const text = (info.parts ?? [])
+          .filter((p) => p.type === 'text')
+          .map((p) => p.text ?? '')
+          .join('\n')
+          .trim();
+
+        if (!text) return;
+        upsertAssistantMessage(sessionId, info.id, text);
+      }
+
+      if (event.type === 'session.idle') {
+        const props = (event.properties as SessionIdleEventProps | undefined) ?? {};
+        const sessionId = props.sessionID ?? '';
+        if (!sessionId) return;
+        if (subAgentSessions.has(sessionId)) return;
+        if (!knownSessions.has(sessionId)) return;
+        scheduleIdleFlush(sessionId);
+      }
     },
 
     'chat.message': async (input, output) => {
@@ -343,27 +370,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (RECALL_REGEX.test(content)) {
         output.parts.push({ type: 'text', text: RECALL_NUDGE });
       }
-    },
-
-    'message.updated': async (input, output) => {
-      if (subAgentSessions.has(input.sessionID)) return;
-      if (output.message.role !== 'assistant') return;
-      if (!output.message.id) return;
-
-      const text = (output.message.parts ?? [])
-        .filter((p) => p.type === 'text')
-        .map((p) => p.text ?? '')
-        .join('\n')
-        .trim();
-
-      if (!text) return;
-      upsertAssistantMessage(input.sessionID, output.message.id, text);
-    },
-
-    'session.idle': async (input) => {
-      if (subAgentSessions.has(input.sessionID)) return;
-      if (!knownSessions.has(input.sessionID)) return;
-      scheduleIdleFlush(input.sessionID);
     },
 
     'experimental.session.compacting': async (input, output) => {

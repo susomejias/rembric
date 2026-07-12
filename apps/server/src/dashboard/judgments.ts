@@ -68,6 +68,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
 
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
+    const total = deps.repos.relations.adminCountWithFilters(filters);
 
     const statusOptions = [
       { value: '', label: 'all statuses', selected: statusFilter === '' },
@@ -140,7 +141,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         title: 'Rembric Judgments.',
         hl: 'Rembric',
         meta: [
-          { k: 'TOTAL', v: String(deps.repos.relations.adminCountWithFilters(filters)) },
+          { k: 'TOTAL', v: String(total) },
           { k: 'SHOWING', v: `${visible.length} ROWS` },
         ],
       })}
@@ -171,6 +172,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
         hasMore,
         pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
         totalLabel: `${visible.length} ROWS`,
+        total,
       })}
     `;
     return c.html(

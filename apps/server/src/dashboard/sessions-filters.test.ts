@@ -12,6 +12,7 @@ import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
+import { PAGE_SIZE } from './components.js';
 import { createSessionsRouter } from './sessions.js';
 import type { ResolvedSession } from './types.js';
 
@@ -107,8 +108,8 @@ describe('sessions filter bar', () => {
   });
 
   it('the pager preserves active filter query params across pages', async () => {
-    // Seed past PAGE_SIZE (10) more claude-code/ended rows so a NEXT link renders.
-    const extra: NewAgentSession[] = Array.from({ length: 10 }, (_, i) =>
+    // Seed past PAGE_SIZE more claude-code/ended rows so a NEXT link renders.
+    const extra: NewAgentSession[] = Array.from({ length: PAGE_SIZE }, (_, i) =>
       row({ id: `X${i}`, agent: 'claude-code', status: 'ended', startedAt: new Date(5_000 + i) }),
     );
     t.handle.db.insert(agentSessions).values(extra).run();

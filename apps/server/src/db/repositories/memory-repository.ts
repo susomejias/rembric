@@ -30,6 +30,8 @@ export interface SearchMemoryIdsOpts {
   tag?: string;
   limit: number;
   offset: number;
+  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
+  includeGlobal?: boolean;
 }
 
 export interface SearchBm25IdsOpts {
@@ -42,6 +44,8 @@ export interface SearchBm25IdsOpts {
   tag?: string;
   /** Bounded rank window depth (no OFFSET — fusion paginates in memory). */
   limit: number;
+  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
+  includeGlobal?: boolean;
 }
 
 export interface AdminListMemoriesOpts {
@@ -225,7 +229,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
           AND m.status = ${opts.status}
           ${typeClause}
           ${tagClause}
@@ -253,7 +257,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
+          AND ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
           AND m.status = ${opts.status}
           ${typeClause}
           ${tagClause}
@@ -463,6 +467,35 @@ export class MemoryRepository {
     return out;
   }
 
+  /** Confirmation count per memory id (search ranking boost input). */
+  confirmationCountsByIds(ids: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    if (ids.length === 0) return out;
+    const rows = this.db
+      .select({ memoryId: confirmations.memoryId, n: count() })
+      .from(confirmations)
+      .where(inArray(confirmations.memoryId, [...ids]))
+      .groupBy(confirmations.memoryId)
+      .all();
+    for (const r of rows) out.set(r.memoryId, r.n);
+    return out;
+  }
+
+  /** Lightweight `(type, last_seen_at)` projection per id (search ranking boost input). */
+  rankingMetadataByIds(
+    ids: readonly string[],
+  ): Map<string, { type: MemoryType; lastSeenAt: Date | null }> {
+    const out = new Map<string, { type: MemoryType; lastSeenAt: Date | null }>();
+    if (ids.length === 0) return out;
+    const rows = this.db
+      .select({ id: memory.id, type: memory.type, lastSeenAt: memory.lastSeenAt })
+      .from(memory)
+      .where(inArray(memory.id, [...ids]))
+      .all();
+    for (const r of rows) out.set(r.id, { type: r.type, lastSeenAt: r.lastSeenAt });
+    return out;
+  }
+
   /**
    * Active in-scope memories past their review shelf life, oldest affirmation
    * baseline first. The per-type TTL ladder is built from `ttlByType` (passed
@@ -614,21 +647,32 @@ export class MemoryRepository {
     this.db.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
   }
 
-  /**
-   * FTS5 keyword search across ALL scopes, hydrated rows. Rank-ordered id
-   * selection; hydration order follows the IN-list scan, matching the
-   * previous inline dashboard query.
-   */
-  adminSearchFts(query: string, limit: number, offset: number): Memory[] {
+  /** Shared by `adminSearchFts` + `adminCountFts` so the list and its total filter the same set. */
+  private adminFtsConds(
+    query: string,
+    opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'project'>,
+  ): SQL[] {
+    const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
+    if (opts.type) conds.push(sql`m.type = ${opts.type}`);
+    if (opts.project?.kind === 'global') {
+      conds.push(scopeWhere('global', null, 'm'));
+    } else if (opts.project?.kind === 'project') {
+      conds.push(scopeWhere('project', opts.project.projectId, 'm'));
+    }
+    return conds;
+  }
+
+  adminSearchFts(query: string, opts: AdminListMemoriesOpts): Memory[] {
+    const conds = this.adminFtsConds(query, opts);
     const ids = this.db
       .all<{ id: string }>(
         sql`
           SELECT m.id
           FROM memory m
           JOIN memory_fts f ON f.rowid = m.rowid
-          WHERE memory_fts MATCH ${query}
+          WHERE ${sql.join(conds, sql` AND `)}
           ORDER BY rank, m.created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
+          LIMIT ${opts.limit} OFFSET ${opts.offset}
         `,
       )
       .map((r) => r.id);
@@ -670,17 +714,7 @@ export class MemoryRepository {
   }
 
   adminCountFts(query: string, opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
-    // Mirror the status/type/scope filters the dashboard applies client-side to
-    // the FTS page (see `clientSideFilter` in dashboard/memories.ts). Without
-    // them the TOTAL counts superseded/out-of-scope matches the list drops,
-    // diverging from what the user can actually page through.
-    const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
-    if (opts.type) conds.push(sql`m.type = ${opts.type}`);
-    if (opts.project?.kind === 'global') {
-      conds.push(sql`m.scope = 'global' AND m.project_id IS NULL`);
-    } else if (opts.project?.kind === 'project') {
-      conds.push(sql`m.scope = 'project' AND m.project_id = ${opts.project.projectId}`);
-    }
+    const conds = this.adminFtsConds(query, opts);
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v
       FROM memory m

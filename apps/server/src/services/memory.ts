@@ -95,6 +95,8 @@ export interface SearchMemoriesInput {
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
+  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
+  includeGlobal?: boolean;
 }
 
 export interface MemoryWithHistory {
@@ -310,7 +312,11 @@ export class MemoryService {
    * one it is the chronological listing with exact pagination. Scope is
    * enforced at the SQL level; the agent cannot opt out by widening a filter.
    */
-  async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
+  async search(
+    input: SearchMemoriesInput,
+    scope: Scope,
+    opts: { touch?: boolean } = {},
+  ): Promise<Memory[]> {
     const status = input.status ?? 'active';
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
@@ -330,6 +336,7 @@ export class MemoryService {
           tag: input.tag,
           limit,
           offset,
+          includeGlobal: input.includeGlobal,
         })
       : this.repos.memory.searchMemoryIds({
           scope: memScope,
@@ -339,6 +346,7 @@ export class MemoryService {
           tag: input.tag,
           limit,
           offset,
+          includeGlobal: input.includeGlobal,
         });
     if (ids.length === 0) return [];
 
@@ -349,7 +357,8 @@ export class MemoryService {
       const m = byId.get(id);
       if (m) ordered.push(m);
     }
-    this.repos.memory.touchLastSeenBatch(ids, this.now());
+    // Passive callers pass touch:false so per-turn recall doesn't inflate the recency signal.
+    if (opts.touch !== false) this.repos.memory.touchLastSeenBatch(ids, this.now());
     return ordered;
   }
 

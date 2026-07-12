@@ -104,6 +104,9 @@ _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
 _SUMMARY_MAX_CHARS = 20_000
 _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
+_RECALL_LIMIT = 5
+_SYNC_TURN_HEARTBEAT_EVERY = 5
+_NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
 
 
 # ---------------------------------------------------------------------------
@@ -189,18 +192,20 @@ def _stderr(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
-def _api_post(
+def _api_request(
     base: str,
     slug: str,
     path: str,
     body: dict | None,
     timeout: int = _API_TIMEOUT_SEC,
-) -> bool:
-    """POST JSON to ``${base}/api/<slug>${path}``. Return True on 2xx."""
+) -> dict | None:
+    """POST JSON to ``${base}/api/<slug>${path}``, returning the parsed JSON
+    response body on 2xx, or ``None`` on any failure (never raises — the
+    provider must not crash the host session)."""
     token = os.environ.get("REMBRIC_API_TOKEN")
     if not base or not token or not slug:
         _stderr(f"[rembric] missing base/token/slug; skipping POST {path}")
-        return False
+        return None
     url = f"{base.rstrip('/')}/api/{slug}{path}"
     data = json.dumps(body or {}).encode("utf-8")
     headers = {
@@ -209,14 +214,32 @@ def _api_post(
     }
     req = Request(url, data=data, headers=headers, method="POST")
     try:
-        with urlopen(req, timeout=timeout):
-            return True
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
     except (URLError, TimeoutError) as err:
         _stderr(f"[rembric] POST {path} failed: {err}")
-        return False
+        return None
     except Exception as err:  # noqa: BLE001 — provider must not crash the host
         _stderr(f"[rembric] POST {path} failed: {err!r}")
-        return False
+        return None
+    # urlopen already raised on non-2xx; a non-JSON body still counts as success ({}).
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _api_post(
+    base: str,
+    slug: str,
+    path: str,
+    body: dict | None,
+    timeout: int = _API_TIMEOUT_SEC,
+) -> bool:
+    """POST JSON to ``${base}/api/<slug>${path}``. Return True on 2xx."""
+    return _api_request(base, slug, path, body, timeout) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +268,9 @@ class RembricMemoryProvider(MemoryProvider):
         self._session_id: str | None = None
         self._cwd: str | None = None
         self._initialized: bool = False
+        # queue_prefetch warms this per-session; prefetch reads it back inline.
+        self._prefetch_cache: dict[str, str] = {}
+        self._sync_turn_count: int = 0
 
     @property
     def name(self) -> str:
@@ -274,21 +300,27 @@ class RembricMemoryProvider(MemoryProvider):
         self._slug = _resolve_slug(cwd)
         self._session_id = session_id
         self._initialized = True
+        # Only a primary context creates a session row, so subagent/cron runs don't inflate the dashboard.
+        agent_context = kwargs.get("agent_context", "primary")
         if not self._slug:
             _stderr(
                 f"[rembric] no project slug for session {session_id}; "
                 "skipping session POST"
             )
-            return
-        if not self._base:
+        elif not self._base:
             _stderr("[rembric] REMBRIC_SERVER_URL is unset; skipping session POST")
-            return
-        _api_post(
-            self._base,
-            self._slug,
-            "/sessions",
-            {"id": session_id, "cwd": cwd, "agent": "hermes"},
-        )
+        elif agent_context in _NON_PRIMARY_AGENT_CONTEXTS:
+            _stderr(
+                f"[rembric] agent_context={agent_context!r} is non-primary; "
+                "skipping session POST"
+            )
+        else:
+            _api_post(
+                self._base,
+                self._slug,
+                "/sessions",
+                {"id": session_id, "cwd": cwd, "agent": "hermes"},
+            )
 
     def get_tool_schemas(self) -> list[dict]:
         return []
@@ -305,15 +337,7 @@ class RembricMemoryProvider(MemoryProvider):
         )
 
     def system_prompt_block(self) -> str:
-        # Hermes does NOT consume the MCP server's initialize.instructions and
-        # exposes no per-turn hook, so this is its ONLY nudging surface. It
-        # returns the SAME unified nudge as the server's buildInstructions()
-        # BASE (the SAVE/RECALL/SUMMARIZE flows) — one version for every
-        # client. The text is duplicated across the TS/Python boundary (no
-        # cross-language sharing is possible) and MUST be kept byte-identical
-        # to instructions.ts::BASE; content tests on both sides guard drift.
-        # No cap comes from Hermes (upstream build_system_prompt joins blocks
-        # with no truncation); the ≤1000-char ceiling is our own token budget.
+        # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
             "Rembric — persistent memory across sessions. Use these tools "
             "proactively, not only when asked; each tool's description has the "
@@ -333,12 +357,49 @@ class RembricMemoryProvider(MemoryProvider):
         )
 
     def prefetch(self, query: str, **kwargs: Any) -> str:
-        return ""
+        # Inline on the turn path — read the cache only, never a network call.
+        del query
+        session_id = kwargs.get("session_id") or self._session_id
+        return self._prefetch_cache.get(session_id or "", "")
 
     def queue_prefetch(self, query: str, **kwargs: Any) -> None:
+        session_id = kwargs.get("session_id") or self._session_id
+        if not query or not session_id or not self._slug or not self._base:
+            return None
+        response = _api_request(
+            self._base,
+            self._slug,
+            "/memory/recall",
+            {"query": query, "limit": _RECALL_LIMIT},
+        )
+        if response is None:
+            return None
+        formatted = response.get("formatted")
+        if isinstance(formatted, str) and formatted:
+            self._prefetch_cache[session_id] = formatted
         return None
 
     def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
+        self._sync_turn_count += 1
+        if self._sync_turn_count % _SYNC_TURN_HEARTBEAT_EVERY != 0:
+            return None
+        if not self._initialized or not self._slug or not self._base or not self._session_id:
+            return None
+        messages = kwargs.get("messages")
+        if not isinstance(messages, list):
+            messages = [
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": assistant},
+            ]
+        transcript = _format_transcript(messages)
+        if not transcript:
+            return None
+        _api_post(
+            self._base,
+            self._slug,
+            f"/sessions/{self._session_id}/summary",
+            {"summary": transcript, "final": False},
+        )
         return None
 
     def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
@@ -382,6 +443,7 @@ class RembricMemoryProvider(MemoryProvider):
             f"/sessions/{self._session_id}/end",
             body,
         )
+        self._prefetch_cache.pop(self._session_id, None)
 
     def on_session_switch(
         self,
@@ -420,6 +482,8 @@ class RembricMemoryProvider(MemoryProvider):
                 f"/sessions/{old_id}/end",
                 {},
             )
+        if old_id and old_id != new_session_id:
+            self._prefetch_cache.pop(old_id, None)
         self._session_id = new_session_id
         if self._slug and self._base and new_session_id:
             _api_post(

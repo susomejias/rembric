@@ -100,6 +100,17 @@ rembric_cwd_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
+# Extract `prompt` from UserPromptSubmit hook stdin JSON (jq, sed fallback).
+rembric_prompt_from_stdin_json() {
+  local input="${1:-}"
+  [ -z "$input" ] && return 0
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null
+  else
+    printf '%s' "$input" | sed -n 's/.*"prompt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
+  fi
+}
+
 # Extract `transcript_path` from a hook stdin JSON blob. Returns empty
 # when missing or null. Used by session-end.sh (Claude Code) and
 # session-stop.sh (Codex) to find the JSONL conversation log on disk.

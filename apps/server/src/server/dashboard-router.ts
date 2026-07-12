@@ -584,6 +584,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       memory: deps.memory,
       prompts: deps.prompts,
       tokens: deps.tokens,
+      dataDir: deps.dataDir,
     }),
   );
 

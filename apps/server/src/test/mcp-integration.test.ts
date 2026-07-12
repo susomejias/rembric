@@ -840,6 +840,33 @@ describe('MCP protocol conformance', () => {
     const gotPayload = readJson(got) as { memory: { status: string } };
     expect(gotPayload.memory.status).toBe('superseded');
 
+    // include_relations co-surfaces the successor as an `expanded` entry.
+    const searched = (await client.callTool({
+      name: 'memory.search',
+      arguments: {
+        query: 'auth model JWT',
+        status: 'superseded',
+        include_relations: true,
+      },
+    })) as ToolResult;
+    expect(searched.isError).toBeFalsy();
+    const searchedPayload = readJson(searched) as {
+      memories: { id: string }[];
+      expanded?: { id: string; expandedFrom: string; relationKind: string }[];
+    };
+    expect(searchedPayload.memories.map((m) => m.id)).toContain(firstPayload.id);
+    const head = searchedPayload.expanded?.find((e) => e.expandedFrom === firstPayload.id);
+    expect(head?.id).toBe(secondPayload.id);
+    expect(head?.relationKind).toBe('superseded_by');
+
+    // Without include_relations, the response carries no `expanded` field.
+    const searchedNoExpand = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'auth model JWT', status: 'superseded' },
+    })) as ToolResult;
+    const noExpandPayload = readJson(searchedNoExpand) as { expanded?: unknown };
+    expect(noExpandPayload.expanded).toBeUndefined();
+
     await client.close();
   });
 

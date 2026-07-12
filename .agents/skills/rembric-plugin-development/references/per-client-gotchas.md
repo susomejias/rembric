@@ -14,7 +14,7 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 - `${user_config.*}` is NOT substituted (verified against `developers.openai.com/codex/plugins/build` and the codex-rs source). No user-config schema.
 - Subprocess env is **cleared** before MCP spawn (`Command::env_clear()` in `codex-rs/rmcp-client/src/utils.rs`). Only names listed in `env_vars: [...]` are forwarded from the parent shell. Hooks read process env directly.
 - `${CLAUDE_PLUGIN_ROOT}` is NOT substituted in MCP `args`. Use `cwd: "."` (resolved to plugin root) + relative args like `"./bin/rembric-bridge.mjs"`. Substitution DOES work in hook `command` strings.
-- The `plugin_hooks` feature is `under development` in `codex-cli 0.130.0` (`codex features list` shows `false`). User must `codex features enable plugin_hooks` AND approve each hook via `/hooks`. Will be on-by-default in a future release; document the gate when troubleshooting "Codex hooks not firing."
+- Hooks are stable and enabled by default as of `codex-cli 0.142.3+` (`codex features list` shows `hooks stable true`; the `plugin_hooks` feature flag was REMOVED upstream — do not tell users to run `codex features enable plugin_hooks`, that flag no longer exists). The only remaining platform-required step is opening `/hooks` inside Codex and trusting each of the plugin's hook types; until trusted, a hook loads but does not execute. Document that gate when troubleshooting "Codex hooks not firing."
 
 ## Hermes Agent
 

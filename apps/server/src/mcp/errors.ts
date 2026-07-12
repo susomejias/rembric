@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+
+import { logger } from '../logger.js';
 import { DomainError } from '../services/errors.js';
 
 /**
@@ -18,14 +21,17 @@ export function mcpError(code: string, message: string, extra?: Record<string, u
 }
 
 /**
- * Map a thrown error to an MCP response: domain errors keep their stable
- * `code`; anything else becomes `internal_error`. The single mapping shared
- * by every tool-handler module.
+ * Map a thrown error to an MCP response: domain errors keep their `code`;
+ * anything else becomes `internal_error` with a correlatable error id, the
+ * stack logged server-side but never returned to the client (mcp-api spec).
  */
 export function errToMcp(err: unknown) {
   if (err instanceof DomainError) {
     return mcpError(err.code, err.message);
   }
+  const errorId = randomUUID();
   const message = err instanceof Error ? err.message : String(err);
-  return mcpError('internal_error', message);
+  const stack = err instanceof Error ? err.stack : undefined;
+  logger.error('unhandled MCP tool error', { errorId, message, stack });
+  return mcpError('internal_error', 'An unexpected error occurred.', { errorId });
 }

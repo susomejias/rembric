@@ -91,19 +91,17 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const hasMore = rows.length > PAGE_SIZE;
     const visible = rows.slice(0, PAGE_SIZE);
 
-    // The FTS branch filters client-side after `adminSearchFts` has already
-    // paginated, so (as with memories' needs_review+query combo) a true
-    // filtered count isn't cheaply derivable here — report a lower bound.
-    const total = query
-      ? `${visible.length}+`
-      : String(
-          deps.repos.prompts.adminCount({
-            includeDeleted,
-            project,
-            agent: agentFilter || undefined,
-            sessionIdPrefix: sessionFilter || undefined,
-          }),
-        );
+    // A text query has no cheap exact count (FTS filters post-pagination) —
+    // leave `totalCount` undefined so the pager shows a lower bound.
+    const totalCount: number | undefined = query
+      ? undefined
+      : deps.repos.prompts.adminCount({
+          includeDeleted,
+          project,
+          agent: agentFilter || undefined,
+          sessionIdPrefix: sessionFilter || undefined,
+        });
+    const total = totalCount === undefined ? `${visible.length}+` : String(totalCount);
 
     const flash = justDeleted
       ? html`<p class="flash success">
@@ -263,6 +261,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
             hasMore,
             pageHrefBuilder: (p) => urlWithPage(c.req.url, p),
             totalLabel: `${visible.length} ROWS`,
+            total: totalCount,
           })
         : raw('')}
     `;
