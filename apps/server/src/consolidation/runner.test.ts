@@ -2,11 +2,14 @@ import { desc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
-import { consolidationRuns } from '../db/schema/consolidation.js';
+import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
 import { memory, type MemoryType, type NewMemory } from '../db/schema/memory.js';
+import { tokens as tokensSchema } from '../db/schema/tokens.js';
+import { AgentSessionsService } from '../services/agent-sessions.js';
 import { deriveTitle } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
+import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { type DecayThresholds } from './decay.js';
@@ -22,14 +25,27 @@ import { ConsolidationRunner } from './runner.js';
 let db: TestDb;
 let runner: ConsolidationRunner;
 let projects: ProjectsService;
+let sessions: AgentSessionsService;
+let tokens: TokensService;
+let tokenId: string;
 
 beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(createRepositories(db.handle.db));
+  sessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens.bootstrapAdmin('test-admin-token-with-enough-entropy');
+  const admin = db.handle.db
+    .select()
+    .from(tokensSchema)
+    .where(eq(tokensSchema.name, 'admin'))
+    .get();
+  tokenId = admin!.id;
   runner = new ConsolidationRunner({
     repos: createRepositories(db.handle.db),
     tx: db.handle.db,
     relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
+    agentSessions: sessions,
   });
 });
 
@@ -91,6 +107,41 @@ describe('ConsolidationRunner sweep', () => {
     const summary = runner.runAll();
     expect(summary.runs.length).toBeGreaterThan(0);
   });
+
+  it('purges a noise session (fails sessionHasContent, past the age floor) on the next sweep and journals it', () => {
+    const projectId = projects.create({ slug: 'sweep-purge-test' }).id;
+    const s = sessions.start({ tokenId, projectId, agent: 'noise' });
+    sessions.end(s.id, { tokenId });
+    db.handle.raw
+      .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+      .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+    const summary = runner.runAll({ force: true });
+    expect(summary.purgedSessionIds).toContain(s.id);
+    expect(sessions.getById(s.id)).toBeUndefined();
+
+    const ops = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.opType, 'session_purge'))
+      .all();
+    expect(ops.length).toBe(1);
+    expect(ops[0]!.affectedIds).toContain(s.id);
+  });
+
+  it('skips the purge step when the global scope is throttled (not this call)', () => {
+    runner.runAll(); // primes the global scope's throttle
+    const projectId = projects.create({ slug: 'sweep-purge-throttled' }).id;
+    const s = sessions.start({ tokenId, projectId, agent: 'noise' });
+    sessions.end(s.id, { tokenId });
+    db.handle.raw
+      .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+      .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+    const summary = runner.runAll(); // unforced — global is within the throttle window
+    expect(summary.purgedSessionIds).toBeUndefined();
+    expect(sessions.getById(s.id)).toBeDefined();
+  });
 });
 
 function decayRow(id: string, type: MemoryType, lastSeenAt: Date): NewMemory {
@@ -123,6 +174,7 @@ describe('ConsolidationRunner per-type decay', () => {
       repos: createRepositories(db.handle.db),
       tx: db.handle.db,
       relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
+      agentSessions: new AgentSessionsService(createRepositories(db.handle.db), db.handle.db),
       decay,
     });
   }

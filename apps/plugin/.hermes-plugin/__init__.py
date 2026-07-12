@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -108,7 +109,6 @@ _SUMMARY_MAX_CHARS = 20_000
 _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
-_SYNC_TURN_HEARTBEAT_EVERY = 5
 _SAVE_HINT_EVERY = 5
 _SUMMARY_HINT_EVERY = 10
 _COMPACTION_TOKEN_FLOOR = 20_000
@@ -289,7 +289,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._initialized: bool = False
         # queue_prefetch warms this per-session; prefetch reads it back inline.
         self._prefetch_cache: dict[str, str] = {}
-        self._sync_turn_count: int = 0
+        self._sync_thread: threading.Thread | None = None
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
@@ -429,9 +429,6 @@ class RembricMemoryProvider(MemoryProvider):
         return None
 
     def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
-        self._sync_turn_count += 1
-        if self._sync_turn_count % _SYNC_TURN_HEARTBEAT_EVERY != 0:
-            return None
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return None
         messages = kwargs.get("messages")
@@ -443,12 +440,15 @@ class RembricMemoryProvider(MemoryProvider):
         transcript = _format_transcript(messages)
         if not transcript:
             return None
-        _api_post(
-            self._base,
-            self._slug,
-            f"/sessions/{self._session_id}/summary",
-            {"summary": transcript, "final": False},
+        base, slug, session_id = self._base, self._slug, self._session_id
+        if self._sync_thread is not None and self._sync_thread.is_alive():
+            self._sync_thread.join(timeout=5.0)
+        self._sync_thread = threading.Thread(
+            target=_api_post,
+            args=(base, slug, f"/sessions/{session_id}/summary", {"summary": transcript, "final": False}),
+            daemon=True,
         )
+        self._sync_thread.start()
         return None
 
     def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
@@ -587,7 +587,9 @@ def _format_transcript(messages: list) -> str:
     for msg in messages or []:
         if not isinstance(msg, dict):
             continue
-        role = str(msg.get("role", "")).strip() or "unknown"
+        role = str(msg.get("role", "")).strip()
+        if role not in ("user", "assistant"):
+            continue
         content = msg.get("content", "")
         if not isinstance(content, str):
             try:

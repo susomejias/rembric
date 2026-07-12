@@ -204,9 +204,11 @@ export class AgentSessionsService {
   }
 
   /**
-   * Write summary/title without transitioning status. Used by the
-   * MCP `memory.session_summary` tool (always final:true) and by the
-   * Codex per-turn `Stop` HTTP hook (always final:false).
+   * Write summary/title without transitioning status. Called by two
+   * classes of HTTP writer: the curated path (MCP `memory.session_summary`,
+   * always final:true) and the raw per-turn sync path shared by every
+   * client's periodic transcript sync (Codex `Stop`, Claude `Stop`, the
+   * opencode `chat.message` flush, Hermes `sync_turn` — all final:false).
    *
    * Writes are subject to the per-field final precedence: a column whose
    * `_final` flag is already true ignores incoming `final:false` writes

@@ -296,6 +296,67 @@ describe('RembricPlugin handlers', () => {
     }
   });
 
+  it('chat.message triggers a per-turn flushSessionSummary for a known, non-subagent session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'flush-1', parentID: '', title: 'work' } },
+      },
+    } as never);
+
+    await handlers['chat.message']!(
+      { sessionID: 'flush-1' } as never,
+      { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+    );
+
+    const summaryCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.includes('/sessions/flush-1/summary'),
+    );
+    expect(summaryCall).toBeDefined();
+  });
+
+  it('chat.message does NOT flush for a sub-agent session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'flush-sub', parentID: 'parent', title: 'sub work' } },
+      },
+    } as never);
+    const before = fetchMock.mock.calls.length;
+
+    await handlers['chat.message']!(
+      { sessionID: 'flush-sub' } as never,
+      { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+    );
+
+    expect(fetchMock.mock.calls.length).toBe(before);
+  });
+
+  it('the per-turn flush never blocks the handler from returning', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'flush-slow', parentID: '', title: 'work' } },
+      },
+    } as never);
+
+    let released: () => void = () => {};
+    const hang = new Promise<Response>((resolve) => {
+      released = () => resolve(new Response('', { status: 200 }));
+    });
+    fetchMock.mockImplementation(() => hang);
+
+    await handlers['chat.message']!(
+      { sessionID: 'flush-slow' } as never,
+      { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+    );
+
+    released();
+  });
+
   it('event(session.compacted) flushes the accumulator for a known session', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
 

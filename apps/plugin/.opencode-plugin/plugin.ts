@@ -387,6 +387,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0) {
         output.parts.push({ type: 'text', text: SUMMARY_NUDGE });
       }
+
+      void flushSessionSummary(input.sessionID);
     },
 
     'experimental.session.compacting': async (input, output) => {

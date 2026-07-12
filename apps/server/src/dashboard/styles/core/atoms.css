@@ -77,6 +77,13 @@
 .pill.needs_review::before {
   background: var(--warn);
 }
+.pill.raw {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn), transparent 70%);
+}
+.pill.raw::before {
+  background: var(--warn);
+}
 .pill.judged::before {
   background: var(--lime);
 }

@@ -26,7 +26,7 @@ import {
 } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { formatTs, html, raw, scopePill, shortId, statusPill } from './templates.js';
+import { formatTs, html, raw, rawPill, scopePill, shortId, statusPill } from './templates.js';
 
 export interface SessionsDeps {
   repos: Repositories;
@@ -392,8 +392,12 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             ${mdBody(row.description)}`
         : raw('')}
 
-      <h2>Summary</h2>
-      ${row.summary ? mdBody(row.summary) : html`<p>—</p>`}
+      <h2>Summary${row.summary && !row.summaryFinal ? html` ${rawPill()}` : raw('')}</h2>
+      ${row.summary
+        ? row.summaryFinal
+          ? mdBody(row.summary)
+          : html`<pre>${row.summary}</pre>`
+        : html`<p>—</p>`}
 
       <h2>Memories (${memories.length})</h2>
       ${memories.length === 0

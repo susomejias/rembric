@@ -447,6 +447,16 @@ describe('AgentSessionsService', () => {
       expect(result.deletedIds).not.toContain(s.id);
     });
 
+    it('purges a session whose only content is a raw, uncurated summary (summary_final=0)', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'raw-summary-purge' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
+      endAndBackdate(s.id, 2 * 60 * 60 * 1000);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).toContain(s.id);
+      expect(sessions.getById(s.id)).toBeUndefined();
+    });
+
     it('skips sessions referenced by a memory row', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'with-memory' });
       // Stamp a memory row referencing this session.
@@ -527,6 +537,26 @@ describe('AgentSessionsService', () => {
     it('includes a session that has a summary written', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-summary' });
       sessions.summarize(s.id, { tokenId, summary: 'goal: x' });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(true);
+    });
+
+    it('excludes a session with only a raw, uncurated summary (summary_final=0)', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'raw-summary-only' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
+      const recent = sessions.recentForContext({ projectId, limit: 25 });
+      expect(recent.some((r) => r.id === s.id)).toBe(false);
+    });
+
+    it('includes a session with an uncurated summary but an anchored memory row (clause 3)', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'raw-summary-plus-memory' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
+      db.handle.raw
+        .prepare(
+          `INSERT INTO memory (id, scope, project_id, type, title, content, status, replaces, created_at, session_id)
+           VALUES (?, 'project', ?, 'user', 'mem title', 'x', 'active', '[]', ?, ?)`,
+        )
+        .run(newSessionId('mem-raw'), projectId, Date.now(), s.id);
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(true);
     });

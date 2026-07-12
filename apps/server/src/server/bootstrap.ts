@@ -205,6 +205,7 @@ export async function bootstrap(
     repos,
     tx: dbHandle.db,
     relations: relationsSvc,
+    agentSessions: agentSessionsSvc,
     orphanDeadlineMs: config.judgments.orphanDeadlineMs,
   });
   const sweepOnSessionStart = (projectId: string | null): void => {
