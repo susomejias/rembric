@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,18 @@ function runPromptNudge(stdin: string): string {
     input: stdin,
     encoding: 'utf8',
     env: { ...process.env, TMPDIR: counterDir },
+  });
+}
+
+function runPromptNudgeAsync(stdin: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'bash',
+      [promptNudgeSh],
+      { encoding: 'utf8', env: { ...process.env, TMPDIR: counterDir } },
+      (err, stdout) => (err ? reject(err) : resolve(stdout)),
+    );
+    child.stdin?.end(stdin);
   });
 }
 
@@ -78,5 +90,16 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
   it('falls back to a session key and exits 0 on empty/unparseable stdin', () => {
     expect(runPromptNudge('').trim()).toBe(fixtures.summary);
     expect(runPromptNudge('not json').trim()).toBe('');
+  });
+
+  it('does not lose increments under concurrent invocations for the same session', async () => {
+    const n = 20;
+    await Promise.all(
+      Array.from({ length: n }, () =>
+        runPromptNudgeAsync(JSON.stringify({ session_id: 's-concurrent' })),
+      ),
+    );
+    const counterFile = join(counterDir, 'rembric-turnnudge', 's-concurrent');
+    expect(readFileSync(counterFile, 'utf8').length).toBe(n);
   });
 });

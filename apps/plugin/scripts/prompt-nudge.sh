@@ -28,13 +28,14 @@ SAFE_ID="$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.-' '_')"
 DIR="${TMPDIR:-/tmp}/rembric-turnnudge"
 mkdir -p "$DIR" 2>/dev/null || true
 FILE="${DIR}/${SAFE_ID}"
-COUNT=0
-[ -f "$FILE" ] && COUNT="$(cat "$FILE" 2>/dev/null || printf '0')"
+# Append-and-count-bytes instead of read-increment-write: a single O_APPEND
+# write is atomic even across concurrent invocations, so turns can never be
+# lost to a race the way a read-modify-write counter could.
+printf '.' >>"$FILE" 2>/dev/null || true
+COUNT="$(wc -c <"$FILE" 2>/dev/null | tr -d '[:space:]')"
 case "$COUNT" in
   '' | *[!0-9]*) COUNT=0 ;;
 esac
-COUNT=$((COUNT + 1))
-printf '%s' "$COUNT" >"$FILE" 2>/dev/null || true
 
 [ $((COUNT % SAVE_NUDGE_EVERY)) -eq 0 ] && echo "$SAVE_NUDGE"
 if [ "$COUNT" -eq 1 ] || [ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ]; then
