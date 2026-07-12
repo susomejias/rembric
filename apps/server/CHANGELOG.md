@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.1](https://github.com/susomejias/rembric/compare/server-v0.24.0...server-v0.24.1) (2026-07-12)
+
+
+### Features
+
+* improve recall ranking and cross-client plugin parity ([#228](https://github.com/susomejias/rembric/issues/228)) ([42e9809](https://github.com/susomejias/rembric/commit/42e98093c6ea7c9364dcd3eddbd605379368ffd8))
+
+
+### Bug Fixes
+
+* **mcp:** stabilize roots-discovery flake on slow CI ([#226](https://github.com/susomejias/rembric/issues/226)) ([d62d254](https://github.com/susomejias/rembric/commit/d62d25436a7476e5fbab65f2d991814c71aa79d3))
+
 ## [0.24.0](https://github.com/susomejias/rembric/compare/server-v0.23.0...server-v0.24.0) (2026-07-11)
 
 
