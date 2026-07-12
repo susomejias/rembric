@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.4](https://github.com/susomejias/rembric/compare/server-v0.24.3...server-v0.24.4) (2026-07-12)
+
+
+### Features
+
+* **plugin:** calibrate curation nudges + Hermes per-turn title parity ([db3092e](https://github.com/susomejias/rembric/commit/db3092ed3e14b5a589661c99d15bf6737aecad65))
+
 ## [0.24.3](https://github.com/susomejias/rembric/compare/server-v0.24.2...server-v0.24.3) (2026-07-12)
 
 
