@@ -73,15 +73,15 @@ The file SHALL expose a module-level `register(ctx)` function that calls `ctx.re
   - When no slug is resolvable, skip the POST and log a single-line stderr diagnostic of the form `[rembric] no project slug for session <session_id>; skipping session POST`. The provider SHALL still register; subsequent lifecycle calls SHALL silently skip their HTTP work.
   - Cache the resolved slug, session id, and cwd on the provider instance; subsequent lifecycle calls within the same session SHALL NOT re-resolve.
   - `initialize` SHALL NOT attempt to warm the prefetch cache: Hermes calls `prefetch` with the real first user message before `queue_prefetch` ever runs (`queue_prefetch` only warms the _next_ turn's cache), so there is no meaningful query available at `initialize` time. The first turn's `prefetch` call therefore returns `""` by construction — an accepted, documented at-most-one-turn-behind tradeoff, not a bug.
-- `on_pre_compress(messages, **kwargs)` SHALL, if a slug and session id were cached at `initialize`, build a textual transcript from `messages` via `_format_transcript(messages)` (oldest-first `role: content` lines, truncated from the head if the result exceeds 19,500 characters), and `POST /api/<slug>/sessions/<session_id>/summary` with body `{"summary": <transcript>, "final": false}`. The provider SHALL NOT include `title` in this POST — title derivation is reserved for `on_session_end` and the server-side placeholder. Timeout 3 seconds. Failures are silent stderr diagnostics. The provider SHALL NOT mutate the `messages` argument. The provider's return value SHALL be `""` (empty string — the docstring promises it goes into the compressor prompt; we contribute nothing yet).
-- `on_session_end(messages, **kwargs)` SHALL, if a slug and session id were cached, build a transcript via `_format_transcript(messages)`, derive a title from the first non-empty assistant message in `messages` (truncated to 100 chars; falling back to empty string if no assistant message exists), and `POST /api/<slug>/sessions/<session_id>/end` with body `{"summary": <transcript>, "title": <derived_title>, "final": false}`. When the transcript is empty (no messages), the body SHALL be `{}` (degraded end). Timeout 3 seconds. Failures are silent stderr diagnostics. The provider SHALL NOT call `memory.session_end` over MCP.
+- `on_pre_compress(messages, **kwargs)` SHALL, if a slug and session id were cached at `initialize`, build a textual transcript from `messages` via `_format_transcript(messages)` (conversational roles ONLY — messages whose `role` is not `user` or `assistant`, e.g. `system` or tool payloads, SHALL be skipped; oldest-first `role: content` lines, truncated from the head if the result exceeds 20,000 characters — figure corrected from the prior spec's 19,500, which never matched the code's `_SUMMARY_MAX_CHARS = 20_000`; the server's 10,000-char cap remains the authoritative trimmer), and `POST /api/<slug>/sessions/<session_id>/summary` with body `{"summary": <transcript>, "final": false}`. The provider SHALL NOT include `title` in this POST — title derivation is reserved for `on_session_end` and the server-side placeholder. Timeout 3 seconds. Failures are silent stderr diagnostics. The provider SHALL NOT mutate the `messages` argument. The provider's return value SHALL be `""` (empty string — the docstring promises it goes into the compressor prompt; we contribute nothing yet).
+- `on_session_end(messages, **kwargs)` SHALL, if a slug and session id were cached, build a transcript via `_format_transcript(messages)` (same conversational-roles-only filtering as `on_pre_compress`), derive a title from the first non-empty assistant message in `messages` (truncated to 100 chars; falling back to empty string if no assistant message exists), and `POST /api/<slug>/sessions/<session_id>/end` with body `{"summary": <transcript>, "title": <derived_title>, "final": false}`. When the transcript is empty (no messages), the body SHALL be `{}` (degraded end). Timeout 3 seconds. Failures are silent stderr diagnostics. The provider SHALL NOT call `memory.session_end` over MCP.
 - `on_session_switch(new_session_id, *, parent_session_id="", reset=False, **kwargs)` SHALL override per the "Provider MUST override on_session_switch" requirement.
 - `get_tool_schemas` SHALL return `[]`. The provider contributes no agent-callable tools.
 - `handle_tool_call(name, args)` SHALL return `json.dumps({"error": "unknown_tool", "hint": "register the rembric MCP bridge in mcp_servers.rembric to access memory tools"})`.
 - `system_prompt_block` SHALL return the unified Rembric nudge — the SAME text as the server's `initialize.instructions` BASE (the SAVE/RECALL/SUMMARIZE flows defined by the `mcp-api` capability), kept byte-identical across the TS/Python boundary. It SHALL therefore direct the agent to SAVE proactively (`memory.save` the moment something noteworthy happens — with the required short `title` headline plus the `content`, and the `topic_key` supersede and `candidates[]`→`memory.judge` paths), RECALL on-demand (`memory.context`/`memory.search` when starting/resuming work, after `/compact`, or asked "what did we do", only if prior detail is missing), and SUMMARIZE at the end of every working turn (`memory.session_summary({title, summary})`, never ending a working turn silent — the trigger SHALL NOT be bound to the literal word "done"; title ≤100 chars, NOT the cwd; summary follows Goal · Discoveries · Accomplished · Next Steps · Files), plus the `memory.about` update pointer. The block SHALL be ≤1000 chars — a self-imposed token-budget ceiling matching the server's `INSTRUCTIONS_MAX_LENGTH`, NOT a Hermes contract: upstream `agent/memory_manager.py::build_system_prompt` joins provider blocks with no truncation or length cap. Hermes additionally exposes a real per-turn recall surface via `prefetch`/`queue_prefetch` (see below); `system_prompt_block` remains a necessary complementary surface because Hermes does NOT consume the MCP server's `initialize.instructions` block, and because the per-turn surface only carries recalled memory context, not the SAVE/SUMMARIZE protocol guidance.
 - `prefetch(query, **kwargs)` SHALL return the provider's cached recall result for the current session (populated by `queue_prefetch`), formatted as a `<memory-context>...</memory-context>` block ready for injection, or `""` if no cache entry exists yet for the session. `prefetch` SHALL NOT make a network call — it only reads the in-memory cache.
 - `queue_prefetch(query, **kwargs)` SHALL, given a cached slug and session id, `POST ${REMBRIC_SERVER_URL}/api/<slug>/memory/recall` with body `{"query": query, "limit": 5}` and a 3-second timeout, and on success cache the response's `formatted` string keyed by session id for the next `prefetch` call to read. Failures are silent stderr diagnostics and leave the prior cache entry (if any) in place. When no slug is resolvable, `queue_prefetch` SHALL be a no-op.
-- `sync_turn(user, assistant, **kwargs)` SHALL increment an in-provider per-session turn counter and, every 5th call (`turn_count % 5 == 0`), if a slug and session id were cached, `POST /api/<slug>/sessions/<session_id>/summary` with body `{"summary": <transcript built from the session's accumulated turns>, "final": false}`, timeout 3 seconds, failures silent. On calls where the counter is not a multiple of 5, `sync_turn` SHALL be a no-op beyond incrementing the counter.
+- `sync_turn(user, assistant, **kwargs)` SHALL, on EVERY call (no throttle, no modulo counter), if a slug and session id were cached, dispatch `POST /api/<slug>/sessions/<session_id>/summary` with body `{"summary": <transcript built via _format_transcript from the session's accumulated turns — same conversational-roles-only filtering>, "final": false}` on a background thread rather than inline: before starting a new one, IF the provider's previously-spawned sync thread (if any) `.is_alive()`, `.join(timeout=5.0)` it; THEN spawn a new `daemon=True` `threading.Thread` targeting the POST call and start it without joining. This follows Hermes's own documented "Threading Contract" (`memory-provider-plugin.md`) for provider-initiated background work — it does not fight an event loop, because `MemoryProvider` has none. Timeout on the POST itself remains 3 seconds; failures are silent stderr diagnostics, observed only by whichever thread's join (if any) surfaces them.
 - `on_memory_write(action, target, content, **kwargs)` SHALL be a no-op.
 - `shutdown(**kwargs)` SHALL be a no-op.
 
@@ -157,13 +157,27 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentia
 - **WHEN** `prefetch(query, session_id=<id>)` is called
 - **THEN** it SHALL return `""` and SHALL NOT make a network call
 
-#### Scenario: sync_turn only POSTs every fifth call
+#### Scenario: sync_turn dispatches a background POST on every call
 
-- **GIVEN** a resolved slug and session id
-- **WHEN** `sync_turn` is called 4 times in a row for the same session
-- **THEN** no HTTP request SHALL be issued
-- **WHEN** `sync_turn` is called a 5th time
-- **THEN** exactly one `POST /api/<slug>/sessions/<session_id>/summary` SHALL be issued
+- **GIVEN** a resolved slug and session id, and no previously-spawned sync thread
+- **WHEN** `sync_turn` is called once
+- **THEN** exactly one background `threading.Thread` SHALL be spawned targeting `POST /api/<slug>/sessions/<session_id>/summary`
+- **AND** `sync_turn` itself SHALL return without blocking on that thread
+
+#### Scenario: sync_turn joins the prior thread before spawning a new one
+
+- **GIVEN** a resolved slug and session id, and a previously-spawned sync thread that is still `.is_alive()`
+- **WHEN** `sync_turn` is called again
+- **THEN** the provider SHALL `join(timeout=5.0)` the prior thread before spawning and starting the new one
+- **AND** at most one sync thread SHALL be alive per provider instance at a time (modulo the bounded 5-second overlap during the join)
+
+#### Scenario: Transcript serialization excludes non-conversational roles
+
+- **GIVEN** a `messages` list containing a large `role: system` message (e.g. Hermes's toolset documentation), a `role: user` message, and a `role: assistant` message
+- **WHEN** `_format_transcript(messages)` runs (via `sync_turn`, `on_pre_compress`, or `on_session_end`)
+- **THEN** the resulting transcript SHALL contain ONLY the `user:` and `assistant:` lines
+- **AND** no fragment of the system message SHALL appear in the POSTed `summary`, regardless of tail-truncation
+- **AND** `_derive_title_from_messages` SHALL continue to derive the title from the first non-empty assistant message, unchanged
 
 #### Scenario: initialize skips session creation for a subagent context
 
@@ -402,3 +416,49 @@ All four steps SHALL silently swallow HTTP errors (single-line stderr diagnostic
 - **GIVEN** `initialize` ran with no resolvable slug (provider in degraded mode)
 - **WHEN** Hermes calls `on_session_switch` for any reason
 - **THEN** the provider SHALL only update `self._session_id` (no HTTP calls)
+
+### Requirement: The Hermes provider SHALL emit unified per-turn save and summary reminders, plus a pre-compaction save reminder
+
+The Hermes `MemoryProvider` (`apps/plugin/.hermes-plugin/__init__.py`) SHALL reinforce both saving and curation through `prefetch()` (whose return is injected as `<memory-context>` every turn) and `on_turn_start()` (which observes `remaining_tokens`), reusing the `_turn_number` counter. This is the only per-turn reinforcement Hermes has, since it does not consume the server's `initialize.instructions`.
+
+- `on_turn_start(turn_number, message, **kwargs)` SHALL be listed in `plugin.yaml`'s `hooks:` array (the array gates override invocation). It SHALL record the turn number and, when `remaining_tokens` is an int below `_COMPACTION_TOKEN_FLOOR` and no urgent reminder has yet fired this session, arm an urgent flag.
+- `prefetch()` SHALL return the cached recall context and SHALL additionally append, as separate lines:
+  - the **save** hint when `_turn_number % _SAVE_HINT_EVERY == 0` (`_SAVE_HINT_EVERY = 5`);
+  - the **summary** hint when `_turn_number == 1` OR `_turn_number % _SUMMARY_HINT_EVERY == 0` (`_SUMMARY_HINT_EVERY = 10`);
+  - when the urgent flag is armed, the **urgent pre-compaction** save reminder INSTEAD of the normal save hint, then mark itself warned (fires at most once per session). The urgent reminder and the summary hint are independent — both MAY appear.
+- The save, summary, and urgent reminders SHALL be mutually independent lines; none SHALL overwrite another.
+- The summary hint text SHALL direct `memory.session_summary({title≤100, summary})` with the `Goal · Discoveries · Accomplished · Next Steps · Files` structure, byte-identical to the Claude/Codex and opencode copies.
+- `prefetch()` SHALL remain inline (no network call) and SHALL return a non-empty hint even when the recall cache is empty.
+- The urgent/warned flags and the turn counter SHALL reset on session end and session switch.
+
+#### Scenario: prefetch appends the save hint every 5th turn
+
+- **GIVEN** an initialized Hermes provider with an empty recall cache
+- **WHEN** `prefetch` is called on the 5th turn with no low-token signal
+- **THEN** it SHALL return a string containing the terse save hint even though the recall cache is empty
+
+#### Scenario: prefetch appends the summary hint on turn 1 and every 10th turn
+
+- **WHEN** `prefetch` is called on the 1st turn
+- **THEN** it SHALL return a string containing the `memory.session_summary` hint
+- **AND** SHALL append it again on the 10th turn and not on turns 2–9
+
+#### Scenario: save and summary hints coexist as separate lines
+
+- **GIVEN** a turn on which both the save cadence (`%5`) and the summary cadence (`%10`) apply
+- **WHEN** `prefetch` is called
+- **THEN** the returned string SHALL contain both the save hint line and the summary hint line, neither replacing the other
+
+#### Scenario: on_turn_start arms the urgent reminder only below the floor
+
+- **WHEN** `on_turn_start` is called with `remaining_tokens` above `_COMPACTION_TOKEN_FLOOR`
+- **THEN** no urgent flag SHALL be armed
+- **WHEN** it is later called with `remaining_tokens` below the floor
+- **THEN** the urgent flag SHALL be armed
+
+#### Scenario: The pre-compaction reminder fires once and does not suppress the summary hint
+
+- **GIVEN** the urgent flag is armed
+- **WHEN** `prefetch` is next called on a summary-firing turn
+- **THEN** it SHALL return the urgent pre-compaction save reminder (in place of the normal save hint) AND MAY also include the summary hint
+- **AND** a subsequent `prefetch` on a later low-token turn SHALL NOT repeat the urgent reminder (warned once per session)

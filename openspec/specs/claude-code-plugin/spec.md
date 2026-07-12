@@ -58,11 +58,11 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ### Requirement: The plugin SHALL ship exactly four hooks at `apps/plugin/hooks/hooks.json`
 
-The plugin's hook catalog SHALL declare four entries: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit`, and `SessionEnd`. The prior `Stop` and `PreCompact` entries SHALL NOT be wired in this version. The prior `pre-compact.sh` script SHALL be deleted from the repo.
+The plugin's hook catalog SHALL declare: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit` (TWO entries — the keyword-gated recall entry and the matcher-less unified per-turn save+summary nudge), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop`. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` unified nudge in the `proactive-save-nudges` change).
 
-The prior `Stop` hook was a semantic bug: Claude Code's `Stop` fires once per assistant turn (verified against `code.claude.com/docs/en/hooks`), not at session end. Wiring it to `POST /end` transitioned the session to `ended` on turn 1 and silently failed on every subsequent turn. `SessionEnd` is the correct lifecycle hook for one-per-session terminal behaviour.
+`PreCompact` and `PostCompact` (re-added after this requirement previously removed them) snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` unified nudge emits throttled `memory.save` and `memory.session_summary` reminders as plain stdout (see the `proactive-save-nudges` change; unchanged by this one). Full behavioral detail lives in those requirements/changes and is not restated here — this requirement's scope is the catalog's shape plus the hooks detailed below.
 
-The prior `PreCompact` hook had two problems: (1) its stdout is not injected into the model's context (`PreCompact` is documented as "side effects only", unlike `SessionStart`); (2) its POST body was the hook event metadata blob, not the transcript. Removed entirely.
+The historical reason a `Stop` hook was once removed was a **semantic bug**, not a structural prohibition on `Stop` itself: Claude Code's `Stop` fires once per assistant turn (verified against `code.claude.com/docs/en/hooks`), not at session end. The prior `Stop` hook posted to `/end` (session termination), so the first turn prematurely transitioned the session to `ended` and every subsequent turn's call failed silently. `SessionEnd` remains the correct lifecycle hook for one-per-session terminal behaviour and is unchanged. The `Stop` hook re-added by this requirement never posts to `/end` and never transitions session status — it cannot trigger that bug. It also never emits `hookSpecificOutput.additionalContext` or any other model-facing output, so it is a categorically different use of the event from a model-facing nudge (which a separate change, `proactive-save-nudges`, evaluated and declined for `Stop` due to forced-continuation risk — that decision is unaffected).
 
 #### SessionStart (matcher: startup|resume|clear)
 
@@ -79,7 +79,7 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 
 - Type: `command`.
 - Matcher: `compact`.
-- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code` (new script).
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code`.
 - The script SHALL read `session_id` and `cwd` from hook stdin (slug resolution piggybacks on `.rembric` as elsewhere).
 - The script SHALL emit an imperative instruction block to stdout, prefixed `rembric:` so Codex's `looks_like_json` heuristic does not flag it. The instruction SHALL direct the model to: (1) call `memory.session_summary({title, summary})` with the compact summary it just produced (which appears in its context above the hook output), specifying Title (≤100 chars, descriptive) and Summary (Goal · Discoveries · Accomplished · Next Steps · Files); (2) call `memory.context` if it needs prior context to continue.
 - Output cap: ≤120 tokens (the instruction needs more room than a nudge).
@@ -95,12 +95,23 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 #### SessionEnd
 
 - Type: `command`.
-- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh` (new script, REPLACES `session-stop.sh`).
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh`.
 - The script SHALL read `session_id`, `cwd`, `transcript_path`, and `reason` from hook stdin.
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
 - When both resolve, the script SHALL read `transcript_path` if the file exists, format the transcript via the shared `_transcript.sh` helper (oldest-first `role: content` lines, truncated to 19500 chars), extract a title from the first non-empty assistant message (truncated to 100 chars), and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body `{"summary": "<formatted>", "title": "<derived>", "final": false}`.
 - When `transcript_path` is missing/unreadable/empty, the script SHALL POST `/end {}` (degraded mode — transition without summary).
 - The script SHALL discard the response, SHALL emit no stdout (`SessionEnd` is not stdout-injected), and SHALL exit `0` on any error.
+
+#### Stop
+
+- Type: `command`.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-sync.sh`.
+- The script SHALL read `session_id`, `cwd`, and `transcript_path` from hook stdin.
+- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
+- When both resolve and `transcript_path` is readable, the script SHALL format the transcript via the SAME shared `_transcript.sh` helpers `SessionEnd` uses (`rembric_format_transcript_claude_code`, `rembric_extract_first_assistant_claude_code`) and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/summary` with body `{"summary": "<formatted>", "title": "<derived>"}` — the `final` field SHALL be omitted (never `true`), so the write can never mark the session curated.
+- The script SHALL emit NO stdout under any circumstance — no `hookSpecificOutput`, no plain text. This hook exists purely as a side effect; it SHALL NOT be used as a channel to inject anything into the model's context.
+- The hook entry SHALL declare `"async": true`. IF validated (during this capability's e2e pass) to genuinely decouple the POST from turn completion, the script SHALL run unconditionally on every `Stop`, with no throttle. IF validation shows `async` does not reliably decouple latency, the script SHALL instead maintain a per-session counter file (mirroring the per-session counter-file pattern used by `prompt-nudge.sh`, e.g. `${TMPDIR}/rembric-turnnudge/`) and only POST every 3rd `Stop`.
+- The script SHALL discard the response and SHALL exit `0` on any error, identically to every other hook script's fail-safe discipline.
 
 #### Scenario: SessionStart hook creates a session and writes the placeholder title
 
@@ -136,11 +147,33 @@ The prior `PreCompact` hook had two problems: (1) its stdout is not injected int
 - **THEN** the row SHALL transition to `ended`
 - **AND** `summary` and `title` SHALL remain the model-authored values (the `final:false` writes are silently skipped due to precedence)
 
+#### Scenario: Stop hook syncs summary and title without touching the model
+
+- **GIVEN** a Claude Code session mid-conversation, whose `transcript_path` JSONL contains at least one assistant message
+- **WHEN** Claude Code fires `Stop` with stdin `{"session_id": "...", "transcript_path": "/path/to/transcript.jsonl", "cwd": "..."}`
+- **THEN** `stop-sync.sh` SHALL POST `/api/foo/sessions/<S>/summary` with body `{"summary": "<formatted>", "title": "<derived>"}` (no `final` field)
+- **AND** the row's `summary_final` and `title_final` SHALL remain (or become) `false`
+- **AND** the hook SHALL emit no stdout of any kind — nothing reaches the model's context from this event
+
+#### Scenario: Stop hook never overwrites a curated summary
+
+- **GIVEN** a session whose `summary_final = true` (set via `memory.session_summary`)
+- **WHEN** `Stop` fires and `stop-sync.sh` POSTs a freshly-formatted raw transcript
+- **THEN** the write SHALL be silently skipped by the existing `final`-precedence rule
+- **AND** the curated `summary`/`title` SHALL remain unchanged
+
+#### Scenario: Stop hook cadence falls back to a throttle if async doesn't decouple latency
+
+- **GIVEN** the `"async": true` hook declaration is validated NOT to decouple the POST from turn completion
+- **WHEN** `Stop` fires
+- **THEN** `stop-sync.sh` SHALL only POST on every 3rd matched call for that session, using the same counter-file pattern as `prompt-nudge.sh`
+- **AND** SHALL emit no output on the 2 skipped calls
+
 #### Scenario: Hook catalog lives at the new path
 
 - **WHEN** Claude Code consumes the plugin from the marketplace
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
-- **AND** the file SHALL declare the four hooks listed above
+- **AND** the file SHALL declare the hook entries listed above (`SessionStart` × 2 matchers, `UserPromptSubmit` × 2 — recall + unified nudge, `SessionEnd`, `PreCompact`, `PostCompact`, `Stop`), with NO `PostToolUse` entry
 
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
@@ -241,6 +274,49 @@ This bridge is shared unmodified by the Codex CLI plugin (`.codex-plugin/mcp.jso
 - **WHEN** the bridge starts
 - **THEN** no version-related stderr line SHALL be printed
 - **AND** the bridge SHALL proceed to spawn `mcp-remote` exactly as it would without this requirement
+
+### Requirement: The plugin SHALL ship a unified `UserPromptSubmit` per-turn nudge hook
+
+The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a matcher-less `UserPromptSubmit` entry — distinct from the existing keyword-gated recall entry (`prompt-search.sh`) — invoking a new shared script `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-nudge.sh` that carries BOTH the save and the session-summary reminders on a per-turn cadence. The plugin SHALL NOT ship a `PostToolUse` save-nudge hook (the prior `post-tool.sh` approach is removed; `hooks.json` SHALL contain no `PostToolUse` entry emitting a `memory.save` reminder).
+
+- The entry SHALL declare NO matcher, so it fires on every user prompt. Claude Code supports multiple entries per hook event (`SessionStart` already declares two), so this coexists with the recall entry.
+- The script SHALL read `session_id` from hook stdin and maintain a per-session turn counter file under `${TMPDIR:-/tmp}/rembric-turnnudge/<sanitized-session-id>`, incrementing once per invocation.
+- On each turn the script SHALL emit, as PLAIN text on stdout (NOT a `hookSpecificOutput` JSON object — plain stdout is the documented `UserPromptSubmit` injection shape):
+  - the **save** nudge line when `count % 5 == 0`;
+  - the **summary** nudge line when `count == 1` OR `count % 10 == 0`.
+  - Both lines MAY be emitted on the same turn (their cadences coincide every 10th turn); zero lines are emitted on turns matching neither.
+- Both nudge texts SHALL be `rembric:`-prefixed (so the shared Codex path's `looks_like_json` heuristic does not flag them). The save text directs `memory.save` (title ≤100 + content); the summary text directs `memory.session_summary({title≤100, summary})` with the `Goal · Discoveries · Accomplished · Next Steps · Files` structure. Both SHALL be byte-identical to the opencode and Hermes copies.
+- The script SHALL make NO network call and needs no `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN`.
+- The script SHALL fail safe: unreadable/empty stdin or any error SHALL exit 0 (still maintaining the counter under a fallback key).
+
+#### Scenario: Save nudge fires every 5th turn
+
+- **GIVEN** the plugin is installed and a Claude Code session
+- **WHEN** `UserPromptSubmit` fires for the 5th time with stdin `{"session_id":"claude-sess-abc"}`
+- **THEN** `prompt-nudge.sh` SHALL emit the plain `rembric:` save nudge on stdout
+- **AND** SHALL NOT emit the save nudge on turns 1–4
+
+#### Scenario: Summary nudge fires on turn 1 and every 10th turn
+
+- **WHEN** `UserPromptSubmit` fires for the 1st time in a session
+- **THEN** `prompt-nudge.sh` SHALL emit the plain `rembric:` summary nudge
+- **AND** SHALL emit it again on turn 10 (`count % 10 == 0`) and not on turns 2–9
+
+#### Scenario: Both nudges emit on a coinciding turn
+
+- **WHEN** the turn count is a multiple of 10 (both `%5` and `%10` match)
+- **THEN** `prompt-nudge.sh` SHALL emit BOTH the save line and the summary line as plain stdout (two lines), neither replacing the other
+
+#### Scenario: No PostToolUse save-nudge hook exists
+
+- **WHEN** `apps/plugin/hooks/hooks.json` is inspected
+- **THEN** it SHALL contain no `PostToolUse` entry emitting a `memory.save` reminder
+- **AND** `apps/plugin/scripts/post-tool.sh` SHALL NOT exist
+
+#### Scenario: Fail-safe on unreadable stdin
+
+- **WHEN** `UserPromptSubmit` fires and stdin is empty or unparseable
+- **THEN** `prompt-nudge.sh` SHALL exit 0 and emit nothing that breaks the host
 
 ## Hook script invariants
 

@@ -68,9 +68,20 @@ const listSelection = {
 
 // "Session has something worth surfacing" — adding a new table that anchors
 // to a session id (e.g. a future `tool_calls`) MUST update only this helper.
-function sessionHasContentSql(alias: 's' | 'sessions') {
+// requireCuratedSummary distinguishes the two consumers' bars on clause 1
+// only: context-surfacing (true, default) trusts only a curated summary;
+// purge-eligibility (false) treats any summary text as "not empty", since
+// deleting genuine-but-uncurated content is irreversible while merely not
+// surfacing it in memory.context is not.
+function sessionHasContentSql(
+  alias: 's' | 'sessions',
+  opts: { requireCuratedSummary: boolean } = { requireCuratedSummary: true },
+) {
+  const summaryClause = opts.requireCuratedSummary
+    ? `${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1`
+    : `${alias}.summary IS NOT NULL`;
   return sql.raw(
-    `((${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1)` +
+    `((${summaryClause})` +
       ` OR ${alias}.title_final = 1` +
       ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
       ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
@@ -111,6 +122,18 @@ export class AgentSessionsRepository {
       .get();
   }
 
+  /**
+   * The auto-attachment fallback for MCP writes that omit an explicit
+   * sessionId and have no SessionRouter entry for this transport. Returns
+   * undefined — never guesses — when more than one active session matches
+   * `(tokenId, projectId)`: two concurrently active sessions (e.g. two
+   * different clients, or two windows of the same client) are genuinely
+   * ambiguous, and silently attaching to "whichever started most recently"
+   * can attach to the WRONG one. Preferring no attachment over a wrong one
+   * is the whole point of this method's contract — see
+   * `sessions/spec.md`'s "findActiveForTransport MUST NOT guess under
+   * concurrent ambiguity".
+   */
   findActiveForTransport(tokenId: string, projectId: string | null): AgentSession | undefined {
     const conditions = [
       eq(agentSessions.tokenId, tokenId),
@@ -118,13 +141,14 @@ export class AgentSessionsRepository {
       isNull(agentSessions.deletedAt),
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
     ];
-    return this.db
+    const rows = this.db
       .select()
       .from(agentSessions)
       .where(and(...conditions))
       .orderBy(desc(agentSessions.startedAt))
-      .limit(1)
-      .get();
+      .limit(2)
+      .all();
+    return rows.length === 1 ? rows[0] : undefined;
   }
 
   recentForContext(projectId: string | null, limit: number): AgentSession[] {
@@ -133,7 +157,13 @@ export class AgentSessionsRepository {
     return this.db
       .select()
       .from(agentSessions)
-      .where(and(scopeCondition, isNull(agentSessions.deletedAt), sessionHasContentSql('sessions')))
+      .where(
+        and(
+          scopeCondition,
+          isNull(agentSessions.deletedAt),
+          sessionHasContentSql('sessions', { requireCuratedSummary: true }),
+        ),
+      )
       .orderBy(desc(agentSessions.startedAt))
       .limit(limit)
       .all();
@@ -185,7 +215,7 @@ export class AgentSessionsRepository {
          AND s.deleted_at IS NULL
          AND s.ended_at IS NOT NULL
          AND s.ended_at < ${cutoffMs}
-         AND NOT ${sessionHasContentSql('s')}
+         AND NOT ${sessionHasContentSql('s', { requireCuratedSummary: false })}
     `) as { v: number } | undefined;
     return row?.v ?? 0;
   }
@@ -199,7 +229,7 @@ export class AgentSessionsRepository {
            AND s.deleted_at IS NULL
            AND s.ended_at IS NOT NULL
            AND s.ended_at < ${cutoffMs}
-           AND NOT ${sessionHasContentSql('s')}
+           AND NOT ${sessionHasContentSql('s', { requireCuratedSummary: false })}
       `,
       )
       .map((r) => r.id);
