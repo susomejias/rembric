@@ -27,11 +27,11 @@ export type AdminSessionRow = Pick<
   projectSlug: Project['slug'] | null;
 };
 
-export type AdminSessionDetail = AdminSessionRow & Pick<AgentSession, 'summary'>;
+export type AdminSessionDetail = AdminSessionRow & Pick<AgentSession, 'summary' | 'summaryFinal'>;
 
 export type AdminRecentSession = Pick<
   AgentSession,
-  'id' | 'agent' | 'startedAt' | 'endedAt' | 'status' | 'summary'
+  'id' | 'agent' | 'startedAt' | 'endedAt' | 'status' | 'summary' | 'summaryFinal'
 > & {
   projectSlug: Project['slug'] | null;
   memCount: number;
@@ -70,7 +70,7 @@ const listSelection = {
 // to a session id (e.g. a future `tool_calls`) MUST update only this helper.
 function sessionHasContentSql(alias: 's' | 'sessions') {
   return sql.raw(
-    `(${alias}.summary IS NOT NULL` +
+    `((${alias}.summary IS NOT NULL AND ${alias}.summary_final = 1)` +
       ` OR ${alias}.title_final = 1` +
       ` OR EXISTS (SELECT 1 FROM memory        WHERE session_id = ${alias}.id)` +
       ` OR EXISTS (SELECT 1 FROM prompts       WHERE session_id = ${alias}.id AND deleted_at IS NULL)` +
@@ -269,7 +269,11 @@ export class AgentSessionsRepository {
 
   adminGetDetail(id: string): AdminSessionDetail | undefined {
     return this.db
-      .select({ ...listSelection, summary: agentSessions.summary })
+      .select({
+        ...listSelection,
+        summary: agentSessions.summary,
+        summaryFinal: agentSessions.summaryFinal,
+      })
       .from(agentSessions)
       .leftJoin(tokens, eq(tokens.id, agentSessions.tokenId))
       .leftJoin(projects, eq(projects.id, agentSessions.projectId))
@@ -286,6 +290,7 @@ export class AgentSessionsRepository {
         endedAt: agentSessions.endedAt,
         status: agentSessions.status,
         summary: agentSessions.summary,
+        summaryFinal: agentSessions.summaryFinal,
         projectSlug: projects.slug,
         memCount: sql<number>`(SELECT COUNT(*) FROM memory m WHERE m.session_id = ${agentSessions.id})`,
       })

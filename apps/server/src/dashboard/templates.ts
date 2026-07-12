@@ -510,6 +510,11 @@ export function reviewPill(): SafeHtml {
   return raw('<span class="pill needs_review">needs_review</span>');
 }
 
+/** Badge for an uncurated (`summary_final = 0`) session summary. */
+export function rawPill(): SafeHtml {
+  return raw('<span class="pill raw">RAW</span>');
+}
+
 export function scopePill(scope: string): SafeHtml {
   const cls = escape(scope);
   const label = scope === 'global' ? 'GLOBAL' : 'PROJECT';

@@ -864,8 +864,8 @@ async function handleContext(
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       status: s.status,
-      title: s.title,
-      summary: s.summary ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
+      title: s.titleFinal ? s.title : null,
+      summary: s.summary && s.summaryFinal ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
     }));
 
   const recentMemories = deps.repos.memory

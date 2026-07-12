@@ -14,7 +14,7 @@
 # raw transcript when no final summary exists.
 #
 # Codex CLI has no equivalent hook event — Codex uses Stop per-turn
-# (see session-stop.sh) and sessions stay active until abandonStale.
+# (see stop-sync.sh codex-cli) and sessions stay active until abandonStale.
 #
 # SessionEnd stdout is NOT injected into the model's context (the model
 # is already gone), so we emit nothing.

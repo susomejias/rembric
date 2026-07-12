@@ -23,7 +23,7 @@ type ApiContext = Context<ApiEnv>;
  * Non-MCP HTTP API for client-driven session lifecycle.
  *
  * The plugin's `command`-type hooks (Claude Code's `session-start.sh`,
- * `pre-compact.sh`, `session-stop.sh` and the Codex equivalents) POST
+ * `pre-compact.sh`, `stop-sync.sh` and the Codex equivalents) POST
  * here directly so sessions are tracked regardless of whether the agent
  * remembers to call `memory.session_start` over MCP.
  *

@@ -7,6 +7,7 @@ import type { SessionsService } from '../services/sessions.js';
 
 import {
   backLink,
+  flash,
   flashErrorPage,
   getSession,
   kv,
@@ -69,6 +70,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const url = new URL(c.req.url);
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
+    const purgedSessions = url.searchParams.get('purged-sessions');
 
     const runsRaw = deps.repos.consolidation.adminListRuns(PAGE_SIZE + 1, offset);
     const hasMore = runsRaw.length > PAGE_SIZE;
@@ -109,9 +111,9 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         action="/dashboard/consolidation/run"
         method="post"
         class="inline"
-        data-confirm="Force a consolidation sweep across all scopes now? Ops are journaled and reversible."
+        data-confirm="Force a consolidation sweep across all scopes now? Decay/orphan ops are journaled and reversible, but this also purges empty sessions — that purge is irreversible."
         data-confirm-label="RUN SWEEP"
-        data-confirm-tone="warn"
+        data-confirm-tone="danger"
       >
         ${csrfInput(session.session, deps.sessions, 'sweep.run')}
         <button class="warn" type="submit">Run sweep now</button>
@@ -125,6 +127,13 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
         hl: 'Rembric',
         meta: [{ k: 'TOTAL', v: String(deps.repos.consolidation.adminCountRuns()) }],
       })}
+      ${purgedSessions !== null
+        ? flash({
+            tone: 'success',
+            label: 'PURGED',
+            body: html`Removed ${purgedSessions} empty session row(s) as part of this sweep.`,
+          })
+        : raw('')}
       <p>${sweepForm}</p>
       ${runs.length === 0
         ? tblEmpty(
@@ -166,8 +175,13 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
     const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'sweep.run');
     if (form instanceof Response) return form;
-    deps.triggerSweep();
-    return c.redirect('/dashboard/consolidation');
+    const summary = deps.triggerSweep();
+    const purgedCount = summary.purgedSessionIds?.length ?? 0;
+    return c.redirect(
+      purgedCount > 0
+        ? `/dashboard/consolidation?purged-sessions=${purgedCount}`
+        : '/dashboard/consolidation',
+    );
   });
 
   app.get('/:id', (c) => {

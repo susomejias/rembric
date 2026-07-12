@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -127,17 +128,17 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         )
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_sync_turn_only_posts_every_fifth_call(self, mock_urlopen: MagicMock) -> None:
+    def test_sync_turn_posts_on_every_call_via_a_background_thread(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
 
-        for _ in range(4):
-            self.assertIsNone(provider.sync_turn("hi", "hello"))
-        mock_urlopen.assert_not_called()
-
         self.assertIsNone(provider.sync_turn("hi", "hello"))
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         self.assertEqual(mock_urlopen.call_count, 1)
         url, body = _captured_post(mock_urlopen)
         self.assertEqual(
@@ -146,6 +147,71 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertEqual(body["final"], False)
         self.assertIn("hi", body["summary"])
         self.assertIn("hello", body["summary"])
+
+        for _ in range(3):
+            provider.sync_turn("hi again", "hello again")
+            self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+            provider._sync_lock.release()
+        self.assertEqual(mock_urlopen.call_count, 4)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_sync_turn_does_not_block_the_calling_thread(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        release = threading.Event()
+
+        def slow_urlopen(*_a, **_kw):
+            release.wait(timeout=5.0)
+            return _FakeJsonResponse({"ok": True})
+
+        mock_urlopen.side_effect = slow_urlopen
+
+        provider.sync_turn("hi", "hello")
+        # The background thread holds the lock for the duration of the slow POST.
+        self.assertFalse(provider._sync_lock.acquire(timeout=0))
+        release.set()
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_sync_turn_serializes_concurrent_calls_via_the_lock(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        first_started = threading.Event()
+        first_release = threading.Event()
+        second_started = threading.Event()
+
+        def slow_urlopen(*_a, **_kw):
+            if not first_started.is_set():
+                first_started.set()
+                first_release.wait(timeout=5.0)
+            else:
+                second_started.set()
+            return _FakeJsonResponse({"ok": True})
+
+        mock_urlopen.side_effect = slow_urlopen
+
+        provider.sync_turn("first", "reply")
+        self.assertTrue(first_started.wait(timeout=5.0))
+
+        provider.sync_turn("second", "reply2")
+        # Second call's background thread is blocked acquiring the lock,
+        # not yet POSTing — bounded wait shorter than first_release.
+        self.assertFalse(second_started.wait(timeout=0.2))
+
+        first_release.set()
+        self.assertTrue(second_started.wait(timeout=5.0))
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
+        self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_sync_turn_heartbeat_prefers_the_full_messages_list_when_given(
@@ -156,8 +222,6 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
 
-        for _ in range(4):
-            provider.sync_turn("latest user msg", "latest assistant msg")
         provider.sync_turn(
             "latest user msg",
             "latest assistant msg",
@@ -166,9 +230,43 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
                 {"role": "assistant", "content": "turn one reply"},
             ],
         )
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
         _, body = _captured_post(mock_urlopen)
         self.assertIn("turn one", body["summary"])
         self.assertIn("turn one reply", body["summary"])
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_on_session_end_drains_a_pending_sync_turn_before_posting_end(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        started = threading.Event()
+        release = threading.Event()
+        order: list[str] = []
+
+        def slow_urlopen(req, *_a, **_kw):
+            if req.full_url.endswith("/summary"):
+                started.set()
+                release.wait(timeout=5.0)
+                order.append("summary")
+            else:
+                order.append("end")
+            return _FakeJsonResponse({"ok": True})
+
+        mock_urlopen.side_effect = slow_urlopen
+
+        provider.sync_turn("hi", "hello")
+        self.assertTrue(started.wait(timeout=5.0))
+        release.set()
+
+        provider.on_session_end([{"role": "user", "content": "bye"}])
+
+        self.assertEqual(order, ["summary", "end"])
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_initialize_skips_session_creation_for_a_subagent_context(

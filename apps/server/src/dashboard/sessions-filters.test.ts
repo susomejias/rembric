@@ -10,20 +10,11 @@ import { tokens } from '../db/schema/tokens.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/db.js';
+import { agentSessionRow as row, createTestDb, type TestDb } from '../test/index.js';
 
 import { PAGE_SIZE } from './components.js';
 import { createSessionsRouter } from './sessions.js';
 import type { ResolvedSession } from './types.js';
-
-function row(overrides: Partial<NewAgentSession> & { id: string }): NewAgentSession {
-  return {
-    tokenId: 'tk1',
-    agent: 'claude-code',
-    startedAt: new Date(1_000),
-    ...overrides,
-  };
-}
 
 describe('sessions filter bar', () => {
   let t: TestDb;

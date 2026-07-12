@@ -1,4 +1,4 @@
-"""prefetch save-hint cadence + on_turn_start pre-compaction reminder."""
+"""prefetch save/summary-hint cadence + on_turn_start pre-compaction reminder."""
 
 from __future__ import annotations
 
@@ -53,8 +53,28 @@ class ProactiveSaveTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
-        provider.on_turn_start(3, None)
+        provider.on_turn_start(5, None)
         self.assertEqual(provider.prefetch("q", session_id="01XYZ"), self.mod._SAVE_HINT)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_prefetch_appends_summary_hint_on_turn_1_even_with_empty_cache(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+
+        provider.on_turn_start(1, None)
+        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), self.mod._SUMMARY_HINT)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_prefetch_appends_summary_hint_every_10th_turn(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+
+        provider.on_turn_start(10, None)
+        self.assertIn(self.mod._SUMMARY_HINT, provider.prefetch("q", session_id="01XYZ"))
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_emits_nothing_off_cadence(self, mock_urlopen: MagicMock) -> None:
@@ -62,8 +82,23 @@ class ProactiveSaveTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
-        provider.on_turn_start(1, None)
+        provider.on_turn_start(2, None)
         self.assertEqual(provider.prefetch("q", session_id="01XYZ"), "")
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_prefetch_appends_both_hints_as_separate_lines_on_turn_10(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+
+        provider.on_turn_start(10, None)
+        out = provider.prefetch("q", session_id="01XYZ")
+        self.assertIn(self.mod._SAVE_HINT, out)
+        self.assertIn(self.mod._SUMMARY_HINT, out)
+        # Neither replaces the other — both appear as distinct lines.
+        self.assertEqual(out, f"{self.mod._SAVE_HINT}\n{self.mod._SUMMARY_HINT}")
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_hint_after_the_recalled_context(
@@ -76,7 +111,7 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         provider.queue_prefetch("warm", session_id="01XYZ")
 
-        provider.on_turn_start(3, None)
+        provider.on_turn_start(5, None)
         out = provider.prefetch("q", session_id="01XYZ")
         self.assertIn("<memory-context>", out)
         self.assertTrue(out.endswith(self.mod._SAVE_HINT))
@@ -106,6 +141,22 @@ class ProactiveSaveTest(unittest.TestCase):
 
         provider.on_turn_start(4, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
         self.assertNotIn(self.mod._SAVE_HINT_URGENT, provider.prefetch("q", session_id="01XYZ"))
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_urgent_reminder_does_not_suppress_the_summary_hint(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+
+        # Turn 10 is a summary-firing turn; force the urgent flag armed too.
+        provider.on_turn_start(10, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
+        out = provider.prefetch("q", session_id="01XYZ")
+        self.assertIn(self.mod._SAVE_HINT_URGENT, out)
+        self.assertIn(self.mod._SUMMARY_HINT, out)
+        # The urgent reminder replaces the NORMAL save hint, not the summary one.
+        self.assertNotIn(self.mod._SAVE_HINT, out.replace(self.mod._SAVE_HINT_URGENT, ""))
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_session_switch_resets_turn_state(self, mock_urlopen: MagicMock) -> None:

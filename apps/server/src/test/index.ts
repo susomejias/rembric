@@ -3,6 +3,7 @@
  * by `*.test.ts` files in the same package.
  */
 
+export { agentSessionRow } from './agent-sessions.js';
 export { createTestDb } from './db.js';
 export type { TestDb } from './db.js';
 export { TestClock } from './clock.js';

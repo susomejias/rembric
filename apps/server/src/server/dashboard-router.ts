@@ -33,6 +33,7 @@ import {
   escape,
   html,
   raw,
+  rawPill,
   shell,
   statusPill,
   verdictPill,
@@ -425,7 +426,11 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                           ${s.projectSlug
                             ? html`<span class="proj">/ ${s.projectSlug}</span>`
                             : raw('<span class="pill global">GLOBAL</span>')}
-                          <span class="desc">${truncate(s.summary ?? '—', 60)}</span>
+                          <span class="desc"
+                            >${truncate(s.summary ?? '—', 60)}${s.summary && !s.summaryFinal
+                              ? html` ${rawPill()}`
+                              : raw('')}</span
+                          >
                         </div>
                         <div class="right">
                           <span><b>${s.memCount}</b> MEM</span>

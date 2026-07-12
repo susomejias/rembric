@@ -2,6 +2,7 @@ import { ulid } from 'ulid';
 
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
+import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { RelationsService } from '../services/relations.js';
 
 import type { ScopeKey } from './candidates.js';
@@ -21,6 +22,15 @@ import { applyDecay, recordOrphanPromote, type ConsolidationDeps } from './opera
  *      re-exposed to agents via `memory.context.pendingJudgments[]` for
  *      fresh-context judgment via `memory.judge`.
  *
+ * Plus one global (not per-scope) step piggybacked on the global scope's
+ * own throttle: empty-session purge, via the same `AgentSessionsService
+ * .purgeEmpty` the `/dashboard/maintenance` button already calls directly.
+ * `purgeEmpty` has no scope filter (sessions aren't necessarily
+ * project-scoped the way memory is), so it runs once per sweep call,
+ * gated on whether the global scope actually ran this time (every sweep
+ * call — `runAll` and `sweepFor` alike — always includes the global
+ * scope, so this reuses the existing throttle rather than adding one).
+ *
  * Triggered lazily on session start (throttled per scope) and manually
  * via `POST /admin/consolidation/run` (force). There is no cron.
  */
@@ -29,6 +39,7 @@ export interface ConsolidationRunnerOptions {
   repos: ConsolidationDeps & Pick<Repositories, 'projects'>;
   tx: TransactionRunner;
   relations: RelationsService;
+  agentSessions: Pick<AgentSessionsService, 'purgeEmpty'>;
   decay?: DecayThresholds;
   /** Pending relations older than this are orphaned by the sweep. */
   orphanDeadlineMs?: number;
@@ -39,6 +50,8 @@ export interface ConsolidationRunnerOptions {
 export interface ConsolidationRunSummary {
   runs: ScopeRunResult[];
   skipped: ScopeKey[];
+  /** Session ids purged this call, if the global scope ran and any were eligible. */
+  purgedSessionIds?: string[];
 }
 
 export interface ScopeRunResult {
@@ -87,7 +100,11 @@ export class ConsolidationRunner {
       }
       runs.push(this.runScope(scope));
     }
-    return { runs, skipped };
+    const globalRan = runs.some((r) => r.scope.scope === 'global');
+    const purgedSessionIds = globalRan
+      ? this.opts.agentSessions.purgeEmpty({ adminBypass: true }).deletedIds
+      : undefined;
+    return { runs, skipped, purgedSessionIds };
   }
 
   private recentlySwept(scope: ScopeKey, now: Date = new Date()): boolean {

@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -108,8 +109,8 @@ _SUMMARY_MAX_CHARS = 20_000
 _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
-_SYNC_TURN_HEARTBEAT_EVERY = 5
-_SAVE_HINT_EVERY = 3
+_SAVE_HINT_EVERY = 5
+_SUMMARY_HINT_EVERY = 10
 _COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
 _SAVE_HINT = (
@@ -119,6 +120,11 @@ _SAVE_HINT = (
 _SAVE_HINT_URGENT = (
     "<memory-hint>Context is about to compact — save anything important "
     "with memory.save NOW before it is lost.</memory-hint>"
+)
+_SUMMARY_HINT = (
+    "<memory-hint>call memory.session_summary({title, summary}) now — "
+    "title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · "
+    "Accomplished · Next Steps · Files.</memory-hint>"
 )
 
 
@@ -283,7 +289,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._initialized: bool = False
         # queue_prefetch warms this per-session; prefetch reads it back inline.
         self._prefetch_cache: dict[str, str] = {}
-        self._sync_turn_count: int = 0
+        self._sync_lock: threading.Lock = threading.Lock()
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
@@ -389,16 +395,20 @@ class RembricMemoryProvider(MemoryProvider):
         del query
         session_id = kwargs.get("session_id") or self._session_id
         recalled = self._prefetch_cache.get(session_id or "", "")
+        hints: list[str] = []
         if self._compaction_imminent:
             self._compaction_imminent = False
             self._compaction_warned = True
-            hint = _SAVE_HINT_URGENT
+            hints.append(_SAVE_HINT_URGENT)
         elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
-            hint = _SAVE_HINT
-        else:
-            hint = ""
-        if not hint:
+            hints.append(_SAVE_HINT)
+        if self._turn_number > 0 and (
+            self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
+        ):
+            hints.append(_SUMMARY_HINT)
+        if not hints:
             return recalled
+        hint = "\n".join(hints)
         return f"{recalled}\n{hint}" if recalled else hint
 
     def queue_prefetch(self, query: str, **kwargs: Any) -> None:
@@ -419,9 +429,6 @@ class RembricMemoryProvider(MemoryProvider):
         return None
 
     def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
-        self._sync_turn_count += 1
-        if self._sync_turn_count % _SYNC_TURN_HEARTBEAT_EVERY != 0:
-            return None
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return None
         messages = kwargs.get("messages")
@@ -430,15 +437,26 @@ class RembricMemoryProvider(MemoryProvider):
                 {"role": "user", "content": user},
                 {"role": "assistant", "content": assistant},
             ]
-        transcript = _format_transcript(messages)
-        if not transcript:
-            return None
-        _api_post(
-            self._base,
-            self._slug,
-            f"/sessions/{self._session_id}/summary",
-            {"summary": transcript, "final": False},
-        )
+        base, slug, session_id = self._base, self._slug, self._session_id
+
+        def _sync() -> None:
+            # Bounded so a hung POST can't wedge the lock forever.
+            acquired = self._sync_lock.acquire(timeout=5.0)
+            try:
+                transcript = _format_transcript(messages)
+                if not transcript:
+                    return
+                _api_post(
+                    base,
+                    slug,
+                    f"/sessions/{session_id}/summary",
+                    {"summary": transcript, "final": False},
+                )
+            finally:
+                if acquired:
+                    self._sync_lock.release()
+
+        threading.Thread(target=_sync, daemon=True).start()
         return None
 
     def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
@@ -467,6 +485,9 @@ class RembricMemoryProvider(MemoryProvider):
         )
         if not self._initialized or not self._slug or not self._base or not self._session_id:
             return
+        # A late sync_turn write would be rejected once /end flips status.
+        if self._sync_lock.acquire(timeout=5.0):
+            self._sync_lock.release()
         transcript = _format_transcript(messages)
         title = _derive_title_from_messages(messages)
         body: dict[str, Any] = {}
@@ -521,6 +542,9 @@ class RembricMemoryProvider(MemoryProvider):
             return
         old_id = self._session_id
         if self._slug and self._base and old_id and old_id != new_session_id:
+            # Same drain as on_session_end.
+            if self._sync_lock.acquire(timeout=5.0):
+                self._sync_lock.release()
             _api_post(
                 self._base,
                 self._slug,
@@ -577,7 +601,9 @@ def _format_transcript(messages: list) -> str:
     for msg in messages or []:
         if not isinstance(msg, dict):
             continue
-        role = str(msg.get("role", "")).strip() or "unknown"
+        role = str(msg.get("role", "")).strip()
+        if role not in ("user", "assistant"):
+            continue
         content = msg.get("content", "")
         if not isinstance(content, str):
             try:

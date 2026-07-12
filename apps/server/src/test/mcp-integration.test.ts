@@ -660,7 +660,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.context surfaces an uncurated (placeholder) session title verbatim, not null', async () => {
+  it('memory.context suppresses an uncurated (placeholder) session title as null', async () => {
     const client = await connect();
     const started = (await client.callTool({
       name: 'memory.session_start',
@@ -668,7 +668,8 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    // Content-bearing via an anchored memory; never summarized with a title → placeholder stands.
+    // Content-bearing via an anchored memory; never summarized with a title → titleFinal stays
+    // false, so the placeholder title must not leak into agent-facing context.
     await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -688,8 +689,48 @@ describe('MCP protocol conformance', () => {
     };
     const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
     expect(seen).toBeDefined();
-    expect(typeof seen?.title).toBe('string');
-    expect((seen?.title ?? '').length).toBeGreaterThan(0);
+    expect(seen?.title).toBeNull();
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.context suppresses a raw (uncurated) session summary even when the session is content-bearing via another clause', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'raw-summary session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    // Content-bearing via an anchored memory, not via a curated summary.
+    await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'anchor row, raw summary',
+        content: 'anchor row, raw summary',
+      },
+    });
+
+    // A per-turn raw sync (summary_final=0), never curated.
+    server.dbHandle.db
+      .update(agentSessions)
+      .set({ summary: 'raw transcript dump, never curated', summaryFinal: false })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
+    expect(seen).toBeDefined();
+    expect(seen?.summary).toBeNull();
 
     await client.callTool({ name: 'memory.session_end', arguments: {} });
     await client.close();

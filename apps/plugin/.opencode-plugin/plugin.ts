@@ -13,7 +13,8 @@
 //
 // Session lifecycle:
 //   - session.created → POST /api/<slug>/sessions  (idempotent register)
-//   - chat.message    → accumulate user turn in sessionMessages
+//   - chat.message    → accumulate user turn; also arms the debounced flush
+//                       session.idle uses (below)
 //   - message.updated → accumulate/upsert assistant turn (by message.id)
 //   - session.idle    → debounced (500ms) flush via POST /summary  ← PRIMARY
 //   - server.instance.disposed → fire-and-forget POST /summary  ← BEST-EFFORT
@@ -51,6 +52,9 @@ const RECALL_NUDGE =
 const SAVE_NUDGE_EVERY = 5;
 const SAVE_NUDGE =
   'rembric: if recent work produced a decision, fix, or discovery, call memory.save now (title ≤100 + content).';
+const SUMMARY_NUDGE_EVERY = 10;
+const SUMMARY_NUDGE =
+  'rembric: call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files.';
 
 type EventInput = {
   event: {
@@ -381,6 +385,12 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (turn % SAVE_NUDGE_EVERY === 0) {
         output.parts.push({ type: 'text', text: SAVE_NUDGE });
       }
+      if (turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0) {
+        output.parts.push({ type: 'text', text: SUMMARY_NUDGE });
+      }
+
+      // Same debounce as session.idle — avoids a second uncoordinated POST.
+      scheduleIdleFlush(input.sessionID);
     },
 
     'experimental.session.compacting': async (input, output) => {

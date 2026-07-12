@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helper for the Rembric plugin hook scripts.
 #
-# Sourced by session-start.sh, pre-compact.sh, and session-stop.sh. Exposes:
+# Sourced by session-start.sh, pre-compact.sh, and stop-sync.sh. Exposes:
 #   - rembric_parse_dotenv <path>     → echoes "KEY=VALUE\n..." pairs
 #   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
@@ -100,19 +100,6 @@ rembric_cwd_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
-# Extract the tool name from a PostToolUse hook stdin blob. Prefers Claude
-# Code's `tool_name`; falls back to Codex's `toolName`.
-rembric_tool_name_from_stdin_json() {
-  local input="${1:-}"
-  [ -z "$input" ] && return 0
-  local name
-  name="$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  if [ -z "$name" ]; then
-    name="$(printf '%s' "$input" | sed -n 's/.*"toolName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  fi
-  printf '%s' "$name"
-}
-
 # Extract `prompt` from UserPromptSubmit hook stdin JSON (jq, sed fallback).
 rembric_prompt_from_stdin_json() {
   local input="${1:-}"
@@ -125,8 +112,8 @@ rembric_prompt_from_stdin_json() {
 }
 
 # Extract `transcript_path` from a hook stdin JSON blob. Returns empty
-# when missing or null. Used by session-end.sh (Claude Code) and
-# session-stop.sh (Codex) to find the JSONL conversation log on disk.
+# when missing or null. Used by session-end.sh, stop-sync.sh, and
+# pre-compact.sh to find the JSONL conversation log on disk.
 rembric_transcript_path_from_stdin_json() {
   local input="${1:-}"
   [ -z "$input" ] && return 0

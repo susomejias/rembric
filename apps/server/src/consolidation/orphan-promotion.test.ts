@@ -42,6 +42,7 @@ beforeEach(() => {
     repos: createRepositories(db.handle.db),
     tx: db.handle.db,
     relations,
+    agentSessions: { purgeEmpty: () => ({ deletedIds: [] }) },
     orphanDeadlineMs,
   });
 });
