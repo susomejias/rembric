@@ -41,6 +41,7 @@ function makeContext(token: Token, overrides: Partial<RequestContext> = {}): Req
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
+    bridgeInstanceId: null,
     ...overrides,
   };
 }

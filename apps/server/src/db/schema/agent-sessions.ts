@@ -82,11 +82,25 @@ export const agentSessions = sqliteTable(
      * references from `memory` and `confirmations` remain valid.
      */
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+    /**
+     * Opaque id of the MCP bridge process (`rembric-bridge.mjs`) this
+     * session's client is paired with, set once per bridge startup and
+     * carried on lifecycle POSTs via the correlation file the bridge
+     * writes. Disambiguates MCP tool-call session auto-attachment when
+     * multiple sessions are concurrently active under one token — see
+     * `resolveSessionId`/`resolveActiveSessionId`. NULL for sessions from
+     * clients that predate this mechanism or never paired with a bridge.
+     */
+    bridgeInstanceId: text('bridge_instance_id'),
   },
   (table) => ({
     tokenStatusIdx: index('sessions_token_status_idx').on(table.tokenId, table.status),
     projectStartedIdx: index('sessions_project_started_idx').on(table.projectId, table.startedAt),
     statusStartedIdx: index('sessions_status_started_idx').on(table.status, table.startedAt),
+    tokenBridgeInstanceIdx: index('sessions_token_bridge_instance_idx').on(
+      table.tokenId,
+      table.bridgeInstanceId,
+    ),
   }),
 );
 

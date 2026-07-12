@@ -34,6 +34,15 @@ export interface RequestContext {
    * (e.g. the initial `initialize` request itself).
    */
   mcpSessionId: string | null;
+  /**
+   * Opaque bridge-instance correlation id read from the
+   * `X-Rembric-Bridge-Instance` header, when the caller's MCP bridge sent
+   * one. Used by `resolveSessionId`/`resolveActiveSessionId` as the
+   * highest-precedence session-auto-attachment signal, ahead of the
+   * `SessionRouter` mapping and the ambiguous `(tokenId, projectId)`
+   * fallback. `null` when absent (older bridge, or no correlation file).
+   */
+  bridgeInstanceId: string | null;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

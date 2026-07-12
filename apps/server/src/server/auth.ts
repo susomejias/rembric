@@ -87,6 +87,7 @@ export async function authenticate(input: {
     project,
     requestedSlug: pathSlug && pathSlug.length > 0 ? pathSlug : null,
     mcpSessionId: null,
+    bridgeInstanceId: null,
   };
 }
 

@@ -575,6 +575,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0015_tidy_consolidation_journal.sql',
       '0016_add_memory_title.sql',
       '0017_oauth_project_binding.sql',
+      '0018_agent_sessions_bridge_instance.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -747,5 +748,77 @@ describe('migration 0017_oauth_project_binding', () => {
       .get();
     expect(row?.project_id).toBeNull();
     expect(row?.revoked_at).not.toBeNull();
+  });
+});
+
+describe('migration 0018_agent_sessions_bridge_instance', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig18-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig18-slice-'));
+
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const f of all) {
+      if (f.startsWith('0018_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  it('adds a nullable bridge_instance_id column and its index, preserving existing rows', () => {
+    raw
+      .prepare(
+        "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok-mig18', 'tok', 'h', 'global', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO sessions (id, token_id, agent, started_at, status) VALUES ('s-mig18', 'tok-mig18', 'a', 0, 'active')",
+      )
+      .run();
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0018_agent_sessions_bridge_instance.sql');
+
+    const cols = raw
+      .prepare<[], { name: string }>('PRAGMA table_info(sessions)')
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain('bridge_instance_id');
+
+    const row = raw
+      .prepare<
+        [],
+        { bridge_instance_id: string | null }
+      >("SELECT bridge_instance_id FROM sessions WHERE id = 's-mig18'")
+      .get();
+    expect(row?.bridge_instance_id).toBeNull();
+
+    const indexes = raw
+      .prepare<[], { name: string }>("PRAGMA index_list('sessions')")
+      .all()
+      .map((i) => i.name);
+    expect(indexes).toContain('sessions_token_bridge_instance_idx');
   });
 });

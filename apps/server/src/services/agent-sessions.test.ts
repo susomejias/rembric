@@ -374,6 +374,82 @@ describe('AgentSessionsService', () => {
         expect(result.created).toBe(true);
       }
     });
+
+    it('persists bridgeInstanceId on a fresh insert', () => {
+      const { session } = sessions.ensure({
+        id: 'sess-with-bridge-1',
+        tokenId,
+        projectId,
+        agent: 'opencode',
+        bridgeInstanceId: 'bi-42',
+      });
+      expect(session.bridgeInstanceId).toBe('bi-42');
+    });
+
+    it('backfills bridgeInstanceId on an idempotent hit when the first call omitted it', () => {
+      sessions.ensure({ id: 'sess-backfill-1', tokenId, projectId, agent: 'opencode' });
+      const { session, created } = sessions.ensure({
+        id: 'sess-backfill-1',
+        tokenId,
+        projectId,
+        agent: 'opencode',
+        bridgeInstanceId: 'bi-later',
+      });
+      expect(created).toBe(false);
+      expect(session.bridgeInstanceId).toBe('bi-later');
+    });
+  });
+
+  describe('bridgeInstanceId threading on writeSummary/end + findActiveByBridgeInstance', () => {
+    it('writeSummary backfills bridgeInstanceId when the session lacks one', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'a' });
+      const updated = sessions.writeSummary(s.id, {
+        tokenId,
+        summary: 'raw transcript',
+        final: false,
+        bridgeInstanceId: 'bi-summary',
+      });
+      expect(updated.bridgeInstanceId).toBe('bi-summary');
+    });
+
+    it('end backfills bridgeInstanceId when the session lacks one', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'a' });
+      const ended = sessions.end(s.id, { tokenId, bridgeInstanceId: 'bi-end' });
+      expect(ended.bridgeInstanceId).toBe('bi-end');
+    });
+
+    it('end on an already-ended session still backfills bridgeInstanceId', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'a' });
+      sessions.end(s.id, { tokenId });
+      const second = sessions.end(s.id, { tokenId, bridgeInstanceId: 'bi-late' });
+      expect(second.bridgeInstanceId).toBe('bi-late');
+    });
+
+    it('findActiveByBridgeInstance resolves the tagged session, scoped to the caller token', () => {
+      const a = sessions.ensure({
+        id: 'sess-find-bi-a',
+        tokenId,
+        projectId,
+        agent: 'x',
+        bridgeInstanceId: 'bi-a',
+      });
+      sessions.ensure({
+        id: 'sess-find-bi-b',
+        tokenId: otherTokenId,
+        projectId,
+        agent: 'x',
+        bridgeInstanceId: 'bi-a',
+      });
+
+      const found = sessions.findActiveByBridgeInstance({ tokenId, bridgeInstanceId: 'bi-a' });
+      expect(found?.id).toBe(a.session.id);
+    });
+
+    it('findActiveByBridgeInstance returns null for an unknown instance id', () => {
+      expect(
+        sessions.findActiveByBridgeInstance({ tokenId, bridgeInstanceId: 'no-such-instance' }),
+      ).toBeNull();
+    });
   });
 
   describe('purgeEmpty', () => {

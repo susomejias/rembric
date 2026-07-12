@@ -29,6 +29,7 @@ function buildCtx(overrides: Partial<RequestContext> = {}): RequestContext {
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
+    bridgeInstanceId: null,
     ...overrides,
   };
 }

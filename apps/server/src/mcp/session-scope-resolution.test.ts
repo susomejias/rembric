@@ -53,6 +53,7 @@ function makeContext(token: Token, overrides: Partial<RequestContext> = {}): Req
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
+    bridgeInstanceId: null,
     ...overrides,
   };
 }
@@ -227,6 +228,83 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
     expect(recents.length).toBe(1);
     expect(recents[0]?.content).toBe('remember this');
+  });
+
+  describe('memory.save_prompt session attachment (resolveSessionId precedence)', () => {
+    it('X-Rembric-Bridge-Instance header disambiguates a concurrent, OLDER session by instance id', async () => {
+      const project = projects.create({ slug: 'bridge-prompt', displayName: null });
+      agentSessions.ensure({
+        id: 'sess-prompt-tagged',
+        tokenId: adminToken.id,
+        projectId: project.id,
+        agent: 'opencode',
+        bridgeInstanceId: 'bi-prompt-1',
+      });
+      await new Promise((res) => setTimeout(res, 5));
+      agentSessions.ensure({
+        id: 'sess-prompt-untagged-newer',
+        tokenId: adminToken.id,
+        projectId: project.id,
+        agent: 'claude-code',
+      });
+      router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+      const r = await runWithContext(
+        makeContext(adminToken, { bridgeInstanceId: 'bi-prompt-1' }),
+        () => Promise.resolve(handlers.savePrompt({ content: 'tagged prompt', title: 't' })),
+      );
+      expect(decode(r).isError).toBeFalsy();
+
+      const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
+      expect(recents[0]?.sessionId).toBe('sess-prompt-tagged');
+    });
+
+    it('a header matching no active session falls back to the ambiguous DB fallback unchanged', async () => {
+      const project = projects.create({ slug: 'bridge-prompt-fallback', displayName: null });
+      agentSessions.ensure({
+        id: 'sess-prompt-fallback-only',
+        tokenId: adminToken.id,
+        projectId: project.id,
+        agent: 'a',
+      });
+      router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+      const r = await runWithContext(
+        makeContext(adminToken, { bridgeInstanceId: 'bi-unknown' }),
+        () => Promise.resolve(handlers.savePrompt({ content: 'fallback prompt', title: 't' })),
+      );
+      expect(decode(r).isError).toBeFalsy();
+
+      const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
+      expect(recents[0]?.sessionId).toBe('sess-prompt-fallback-only');
+    });
+
+    it('a bridge instance id belonging to a different token never resolves — falls through instead', async () => {
+      const project = projects.create({ slug: 'bridge-prompt-cross-token', displayName: null });
+      agentSessions.ensure({
+        id: 'sess-prompt-other-token',
+        tokenId: otherToken.id,
+        projectId: project.id,
+        agent: 'other',
+        bridgeInstanceId: 'bi-prompt-shared',
+      });
+      agentSessions.ensure({
+        id: 'sess-prompt-real-token-fallback',
+        tokenId: adminToken.id,
+        projectId: project.id,
+        agent: 'a',
+      });
+      router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+
+      const r = await runWithContext(
+        makeContext(adminToken, { bridgeInstanceId: 'bi-prompt-shared' }),
+        () => Promise.resolve(handlers.savePrompt({ content: 'cross-token test', title: 't' })),
+      );
+      expect(decode(r).isError).toBeFalsy();
+
+      const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
+      expect(recents[0]?.sessionId).toBe('sess-prompt-real-token-fallback');
+    });
   });
 
   it('memory.capture_passive writes into the router-pinned project scope', async () => {

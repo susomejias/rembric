@@ -47,6 +47,7 @@ function fakeContext(project: Project | null): RequestContext {
     project,
     requestedSlug: project?.slug ?? null,
     mcpSessionId: null,
+    bridgeInstanceId: null,
   };
 }
 
@@ -507,6 +508,7 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
       project: null,
       requestedSlug: null,
       mcpSessionId: MCP_SESSION,
+      bridgeInstanceId: null,
     };
   }
 
@@ -613,6 +615,7 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
       project: null,
       requestedSlug: null,
       mcpSessionId: MCP_SESSION,
+      bridgeInstanceId: null,
     };
   }
 
@@ -799,6 +802,100 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     const { id } = parseText<{ id: string }>(r);
     const persisted = memory.unsafeGetById(id);
     expect(persisted?.sessionId).toBeNull();
+  });
+
+  it('X-Rembric-Bridge-Instance header disambiguates a concurrent, OLDER session by instance id — not the most recently started one', async () => {
+    agentSessions.ensure({
+      id: 'sess-tagged-older',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'opencode',
+      bridgeInstanceId: 'bi-target',
+    });
+    await new Promise((res) => setTimeout(res, 5));
+    agentSessions.ensure({
+      id: 'sess-untagged-newer',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'claude-code',
+    });
+
+    const ctxWithHeader: RequestContext = {
+      ...ctxWithRealToken(projectA),
+      bridgeInstanceId: 'bi-target',
+    };
+    const r = await runWithContext(ctxWithHeader, () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        title: 'disambiguated by bridge instance',
+        content: 'disambiguated by bridge instance',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-tagged-older');
+  });
+
+  it('a header matching no active session for this token falls back to the DB fallback unchanged', async () => {
+    agentSessions.ensure({
+      id: 'sess-fallback-only',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'a',
+    });
+
+    const ctxWithUnknownHeader: RequestContext = {
+      ...ctxWithRealToken(projectA),
+      bridgeInstanceId: 'bi-does-not-exist',
+    };
+    const r = await runWithContext(ctxWithUnknownHeader, () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        title: 'falls back when header does not resolve',
+        content: 'falls back when header does not resolve',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-fallback-only');
+  });
+
+  it('a bridge instance id belonging to a different token never resolves — falls through instead', async () => {
+    const { TokensService } = await import('../services/tokens.js');
+    const otherTokens = new TokensService(createRepositories(db.handle.db));
+    const { token: otherToken } = otherTokens.create({ name: 'other-bridge-test', scope: '*' });
+
+    agentSessions.ensure({
+      id: 'sess-other-token',
+      tokenId: otherToken.id,
+      projectId: projectA.id,
+      agent: 'other',
+      bridgeInstanceId: 'bi-shared',
+    });
+    agentSessions.ensure({
+      id: 'sess-real-token-fallback',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'a',
+    });
+
+    const ctxWithSharedHeader: RequestContext = {
+      ...ctxWithRealToken(projectA),
+      bridgeInstanceId: 'bi-shared',
+    };
+    const r = await runWithContext(ctxWithSharedHeader, () =>
+      fallbackHandlers.save({
+        scope: 'project',
+        type: 'project',
+        title: 'does not cross the token boundary',
+        content: 'does not cross the token boundary',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    expect(persisted?.sessionId).toBe('sess-real-token-fallback');
   });
 
   it('SessionRouter entry takes precedence over the DB fallback', async () => {

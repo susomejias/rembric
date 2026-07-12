@@ -133,6 +133,28 @@ describe('createApiRouter', () => {
       expect(typeof r.body.startedAt).toBe('string');
     });
 
+    it('accepts and persists an optional bridgeInstanceId', async () => {
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-with-bridge-1', bridgeInstanceId: 'bi-http-1' },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-with-bridge-1');
+      expect(row?.bridgeInstanceId).toBe('bi-http-1');
+    });
+
+    it('omitting bridgeInstanceId behaves exactly as before (backward compatible)', async () => {
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-no-bridge-1' },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-no-bridge-1');
+      expect(row?.bridgeInstanceId).toBeNull();
+    });
+
     it('is idempotent: second POST returns created: false', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {

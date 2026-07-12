@@ -139,3 +139,82 @@ describe('AgentSessionsRepository admin filters', () => {
     });
   });
 });
+
+describe('AgentSessionsRepository.findActiveByBridgeInstance', () => {
+  let t: TestDb;
+  let repo: AgentSessionsRepository;
+
+  beforeEach(() => {
+    t = createTestDb();
+    repo = new AgentSessionsRepository(t.handle.db);
+    t.handle.db
+      .insert(tokens)
+      .values([
+        { id: 'tk1', name: 'test-1', hash: 'x', scope: '*', createdAt: new Date(500) },
+        { id: 'tk2', name: 'test-2', hash: 'y', scope: '*', createdAt: new Date(500) },
+      ])
+      .run();
+  });
+
+  afterEach(() => t.cleanup());
+
+  it('resolves the session tagged with the given bridge instance id', () => {
+    t.handle.db
+      .insert(agentSessions)
+      .values([
+        row({
+          id: 'S1',
+          status: 'active',
+          bridgeInstanceId: 'bi-1',
+          startedAt: new Date(1_000),
+        }),
+        row({
+          id: 'S2',
+          status: 'active',
+          bridgeInstanceId: 'bi-2',
+          startedAt: new Date(2_000),
+        }),
+      ])
+      .run();
+
+    const found = repo.findActiveByBridgeInstance('tk1', 'bi-1');
+    expect(found?.id).toBe('S1');
+  });
+
+  it('never resolves a session belonging to a different token', () => {
+    t.handle.db
+      .insert(agentSessions)
+      .values([
+        row({
+          id: 'S1',
+          tokenId: 'tk1',
+          status: 'active',
+          bridgeInstanceId: 'bi-shared',
+          startedAt: new Date(1_000),
+        }),
+      ])
+      .run();
+
+    expect(repo.findActiveByBridgeInstance('tk2', 'bi-shared')).toBeUndefined();
+  });
+
+  it('ignores an ended session even with a matching instance id', () => {
+    t.handle.db
+      .insert(agentSessions)
+      .values([
+        row({
+          id: 'S1',
+          status: 'ended',
+          bridgeInstanceId: 'bi-1',
+          startedAt: new Date(1_000),
+        }),
+      ])
+      .run();
+
+    expect(repo.findActiveByBridgeInstance('tk1', 'bi-1')).toBeUndefined();
+  });
+
+  it('returns undefined when no session carries the given instance id', () => {
+    expect(repo.findActiveByBridgeInstance('tk1', 'bi-unknown')).toBeUndefined();
+  });
+});
