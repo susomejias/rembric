@@ -437,17 +437,25 @@ class RembricMemoryProvider(MemoryProvider):
                 {"role": "user", "content": user},
                 {"role": "assistant", "content": assistant},
             ]
-        transcript = _format_transcript(messages)
-        if not transcript:
-            return None
         base, slug, session_id = self._base, self._slug, self._session_id
-        if self._sync_thread is not None and self._sync_thread.is_alive():
-            self._sync_thread.join(timeout=5.0)
-        self._sync_thread = threading.Thread(
-            target=_api_post,
-            args=(base, slug, f"/sessions/{session_id}/summary", {"summary": transcript, "final": False}),
-            daemon=True,
-        )
+        prior_thread = self._sync_thread
+
+        def _sync() -> None:
+            # Join + formatting run here, not on the caller — the caller
+            # is Hermes's shared single-worker executor.
+            if prior_thread is not None and prior_thread.is_alive():
+                prior_thread.join(timeout=5.0)
+            transcript = _format_transcript(messages)
+            if not transcript:
+                return
+            _api_post(
+                base,
+                slug,
+                f"/sessions/{session_id}/summary",
+                {"summary": transcript, "final": False},
+            )
+
+        self._sync_thread = threading.Thread(target=_sync, daemon=True)
         self._sync_thread.start()
         return None
 

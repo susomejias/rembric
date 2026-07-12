@@ -174,7 +174,7 @@ describe('ConsolidationRunner per-type decay', () => {
       repos: createRepositories(db.handle.db),
       tx: db.handle.db,
       relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
-      agentSessions: new AgentSessionsService(createRepositories(db.handle.db), db.handle.db),
+      agentSessions: { purgeEmpty: () => ({ deletedIds: [] }) },
       decay,
     });
   }

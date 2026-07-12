@@ -199,19 +199,20 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         original_join = threading.Thread.join
 
         def spy_join(self_thread, *args, **kwargs):
-            join_calls.append((args, kwargs))
-            release.set()
+            if self_thread is first_thread:
+                join_calls.append((args, kwargs))
+                release.set()
             return original_join(self_thread, *args, **kwargs)
 
         with patch.object(threading.Thread, "join", spy_join):
             provider.sync_turn("second", "reply2")
+            second_thread = provider._sync_thread
+            self.assertIsNot(second_thread, first_thread)
+            second_thread.join(timeout=5.0)
 
         self.assertEqual(len(join_calls), 1)
         args, kwargs = join_calls[0]
         self.assertEqual(kwargs.get("timeout") or (args[0] if args else None), 5.0)
-        self.assertIsNot(provider._sync_thread, first_thread)
-
-        provider._sync_thread.join(timeout=5.0)
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("rembric_hermes_plugin.urlopen")
