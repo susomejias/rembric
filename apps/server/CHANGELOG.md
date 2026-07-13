@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.5](https://github.com/susomejias/rembric/compare/server-v0.24.4...server-v0.24.5) (2026-07-13)
+
+
+### Bug Fixes
+
+* **server:** truncate over-length session summary/title instead of rejecting ([6d77846](https://github.com/susomejias/rembric/commit/6d7784632f28127c89061c6c85278c5f0add0114))
+
 ## [0.24.4](https://github.com/susomejias/rembric/compare/server-v0.24.3...server-v0.24.4) (2026-07-12)
 
 
