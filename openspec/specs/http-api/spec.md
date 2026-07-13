@@ -80,9 +80,15 @@ The server SHALL respond `200 OK` on both insert and upsert paths with body `{ o
 
 ### Requirement: `POST /api/<slug>/sessions/:id/summary` MUST write a summary and close the session
 
-The endpoint SHALL accept a JSON body `{ summary: string, title?: string, final?: boolean }`. The `summary` field SHALL be a string of length ≥1 and ≤20,000 chars at the zod transport boundary (kept as a wire DoS guard, distinct from the effective service-layer cap). The `title` field SHALL be a string of length ≤100 chars (when present, length ≥1). The `final` field SHALL default to `false`.
+The endpoint SHALL accept a JSON body `{ summary: string, title?: string, final?: boolean }`. The `summary` field SHALL be a non-empty string (length ≥1); the `title` field, when present, SHALL be non-empty (length ≥1). The `final` field SHALL default to `false`.
 
-Before the service-layer call, the handler SHALL apply server-side truncation: if `summary.length > SUMMARY_MAX_CHARS`, the handler SHALL replace `summary` with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` (where `SUFFIX = '…[truncated]'`, length 13 in JavaScript code units) before calling `agentSessions.writeSummary`. The resulting written length SHALL be exactly `SUMMARY_MAX_CHARS` when truncation fired. This truncation is silent at the HTTP boundary (response status remains `200 OK` and the truncated value is echoed back in the response body) because the HTTP clients are hook scripts (bash / Python / opencode plugin) that cannot react to an error — the suffix is the operator-visible signal.
+The HTTP path is used by non-interactive writers (bash / Python / opencode hook scripts) that cannot react to an `invalid_input` rejection. Therefore, for the length-bounded fields, the endpoint SHALL **truncate, never reject by length**:
+
+- The server MAY keep a wire-level DoS guard, but that guard SHALL have enough margin that a body which respects the plugins' own character cap can never be rejected by it. Specifically: because plugins truncate by Unicode **code points** while the server measures string length in **UTF-16 code units**, a `summary` of up to the plugins' code-point cap can measure up to ~2× that many UTF-16 units. The wire guard (if expressed as a character `max`) SHALL therefore sit at ≥ that worst-case expansion (or be delegated to the request body-size bound), so a compliant plugin body is NEVER rejected via the code-point↔UTF-16 mismatch. A `summary` at exactly the plugins' code-point cap that contains characters outside the BMP (e.g. emoji) SHALL be accepted and truncated, NOT rejected.
+- Before the service-layer call, the handler SHALL apply server-side truncation to `summary`: if `summary.length > SUMMARY_MAX_CHARS`, replace it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` (`SUFFIX = '…[truncated]'`, length 13 in JavaScript code units). The cut point SHALL NOT split a UTF-16 surrogate pair: if the character immediately before the cut is a high surrogate, the cut SHALL back off by one further code unit, dropping the whole trailing character rather than leaving an unpaired surrogate (which downstream storage can corrupt). The written length SHALL be exactly `SUMMARY_MAX_CHARS` when truncation fires, EXCEPT in the rare case where the surrogate-pair back-off applies, in which case it SHALL be `SUMMARY_MAX_CHARS - 1`.
+- Before the service-layer call, the handler SHALL apply server-side truncation to `title` when present: if `title.length > TITLE_MAX_LENGTH` (100), the handler SHALL hard-cut it to `TITLE_MAX_LENGTH` UTF-16 units before calling `agentSessions.writeSummary`, applying the same surrogate-pair back-off as `summary` (so the result may be `TITLE_MAX_LENGTH - 1` in that rare case). An over-length `title` SHALL NOT produce `invalid_input` on the HTTP path.
+
+Both truncations are silent at the HTTP boundary (response status remains `200 OK` and the truncated values are echoed back) — the summary suffix is the operator-visible signal. (The MCP path, `memory.session_summary`, is the interactive counterpart and CONTINUES to reject over-cap input so the agent can retry.)
 
 The server SHALL resolve the session by `(token_id, id)` — token-mismatch SHALL surface as `session_not_found`. When the resolved row's `deleted_at IS NOT NULL`, the call SHALL be rejected with `session_deleted`.
 
@@ -112,10 +118,32 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 - **AND** the row's `summary` SHALL end with the literal suffix `…[truncated]`
 - **AND** the response body's `summary` field SHALL echo the truncated value
 
-#### Scenario: Wire-DoS guard at 20,001 chars
+#### Scenario: Emoji summary at the code-point cap is truncated, not rejected (UTF-16 mismatch)
 
-- **WHEN** a client POSTs `{ summary: 'A'.repeat(20001) }` (one char over the wire upper bound)
-- **THEN** the server SHALL respond `400` with `{ ok: false, code: 'invalid_input' }` at the zod boundary, before the truncation helper runs
+- **GIVEN** an active session row with `summary_final = false`
+- **WHEN** a client POSTs a `summary` whose Unicode code-point count equals the plugins' truncation cap but whose UTF-16 `.length` exceeds it because it contains characters outside the BMP (e.g. a transcript ending in emoji)
+- **THEN** the response SHALL be `200 OK` and the summary SHALL be persisted (at most `SUMMARY_MAX_CHARS` UTF-16 units, per the truncation rule above)
+- **AND** the server SHALL NOT respond `400 invalid_input` for that body
+
+#### Scenario: Truncation never splits a surrogate pair
+
+- **GIVEN** an active session row
+- **WHEN** a client POSTs a `summary` (or `title`) whose truncation cut point would otherwise land between the two UTF-16 code units of a single character outside the BMP (e.g. an emoji)
+- **THEN** the handler SHALL back the cut off by one further code unit, dropping the whole character rather than persisting an unpaired surrogate
+- **AND** the persisted value SHALL NOT contain an unpaired surrogate (which downstream storage can otherwise corrupt into multiple garbage characters on read-back)
+
+#### Scenario: Oversized title is truncated server-side, not rejected
+
+- **GIVEN** an active session row
+- **WHEN** a client POSTs `{ summary: '…', title: 'A'.repeat(150) }` (or a 100-code-point title whose UTF-16 length exceeds 100 via emoji)
+- **THEN** the response SHALL be `200 OK`
+- **AND** the persisted `title` SHALL be at most `TITLE_MAX_LENGTH` (100) UTF-16 units
+- **AND** the server SHALL NOT respond `400 invalid_input` for the title length
+
+#### Scenario: Wire body-size guard still applies
+
+- **WHEN** a client POSTs a body far beyond any plausible transcript (e.g. exceeding the authenticated-surface request body-size bound)
+- **THEN** the server SHALL still reject it at the transport/DoS boundary — the truncate-don't-reject rule covers plausible transcript overflow, not unbounded payloads
 
 #### Scenario: Final write blocks later non-final write
 
@@ -128,11 +156,6 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 
 - **WHEN** a client POSTs `{ summary: '' }` or `{ summary: '   ' }`
 - **THEN** the server SHALL respond `400` with `{ ok: false, code: 'invalid_input' }` and SHALL NOT mutate the row
-
-#### Scenario: Title too long
-
-- **WHEN** a client POSTs `{ summary: '…', title: 'A'.repeat(101) }`
-- **THEN** the server SHALL respond `400` with `{ ok: false, code: 'invalid_input' }`
 
 #### Scenario: Session not found / wrong token
 
@@ -151,13 +174,13 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 
 ### Requirement: `POST /api/<slug>/sessions/:id/end` MUST close a session without a summary
 
-The endpoint SHALL accept a JSON body `{ summary?: string, title?: string, final?: boolean }`. All fields are optional; an empty body `{}` is valid. The same wire-DoS bound (`summary` length ≤20,000 chars at the zod boundary) and the same `final` precedence rules as `/summary` apply when those fields are provided.
+The endpoint SHALL accept a JSON body `{ summary?: string, title?: string, final?: boolean }`. All fields are optional; an empty body `{}` is valid. The same truncate-never-reject-by-length rule as `/summary` applies to `summary` and `title` when provided: the wire DoS guard has margin over the plugins' code-point cap (or is delegated to the request body-size bound), and the handler truncates `summary` (to `SUMMARY_MAX_CHARS`) and `title` (to `TITLE_MAX_LENGTH`) server-side rather than returning `invalid_input`. The same `final` precedence rules as `/summary` apply.
 
-Before the service-layer call, the handler SHALL apply server-side truncation to the `summary` field, identical to `/summary`: when `summary` is present and `summary.length > SUMMARY_MAX_CHARS`, the handler SHALL replace it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'` before calling `agentSessions.end`. The response remains `200 OK` with the truncated value echoed back.
+Before the service-layer call, the handler SHALL apply server-side truncation to `summary` (identical to `/summary`) and to `title` when present, then call `agentSessions.end`. The response remains `200 OK` with the truncated values echoed back.
 
 The server SHALL resolve the session by `(token_id, id)` and, when active, atomically:
 
-1. Apply any provided summary/title writes subject to the precedence rules (after the truncation helper has run on `summary`).
+1. Apply any provided summary/title writes subject to the precedence rules (after the truncation helpers have run).
 2. Set `ended_at = now` and `status = 'ended'`.
 
 Soft-deleted rows SHALL be rejected with `session_deleted`. Already-ended rows SHALL be treated as an idempotent no-op: any summary/title fields in the body are still applied subject to precedence (with truncation), but `ended_at` and `status` SHALL NOT be re-written. The response SHALL be `{ ok: true, sessionId, endedAt, summary, title }`.
@@ -180,6 +203,13 @@ Soft-deleted rows SHALL be rejected with `session_deleted`. Already-ended rows S
 - **THEN** the response SHALL be `200 OK`
 - **AND** the row's `summary` SHALL be of length exactly `SUMMARY_MAX_CHARS` with the literal suffix `…[truncated]`
 - **AND** `status` SHALL be `'ended'` and `ended_at` SHALL be set
+
+#### Scenario: End with an emoji summary/title at the code-point cap is truncated, not rejected
+
+- **GIVEN** an active session row
+- **WHEN** a client POSTs to `/end` a `summary` (and/or `title`) whose code-point count is within the plugins' cap but whose UTF-16 length exceeds the old wire/field cap because of characters outside the BMP
+- **THEN** the response SHALL be `200 OK`, the session SHALL be ended, and the summary/title SHALL be persisted (truncated as needed)
+- **AND** the server SHALL NOT respond `400 invalid_input`
 
 #### Scenario: End on already-ended session with new summary (write-once protected)
 

@@ -18,7 +18,7 @@ Every closed session in the dashboard SHALL display a non-null `summary` wheneve
 
 A session SHALL be considered to have "converged on a summary" if its `sessions.summary` column is non-null. Coverage in the contrary case (transcript file missing, hook scripts never fired, agent ignored every instruction, Hermes messages list empty, opencode hard-crashed before `server.instance.disposed` could fire) is OUT of scope — these are degenerate states the dashboard surfaces as "no summary captured" without crashing.
 
-Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`, opencode dispose-time flush) MAY post bodies up to the HTTP wire upper bound (`summary` ≤20,000 chars at the zod boundary). The server SHALL truncate any body whose `summary.length` exceeds `SUMMARY_MAX_CHARS` at the HTTP handler before calling the service, by replacing it with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'`. Convergence is therefore on a row whose stored `summary` is bounded by `SUMMARY_MAX_CHARS` regardless of what the fallback writer sent. Historical specs used literal numbers (`19500`, then `2000`) for derived or previous caps; this spec now references the server cap (`SUMMARY_MAX_CHARS`) abstractly so it does not drift when the cap is changed in a future OpenSpec change.
+Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`, opencode dispose-time flush) truncate their transcript by Unicode **code points**, while the server measures string length in **UTF-16 code units**. The HTTP length guard SHALL account for this skew so a body within a plugin's code-point cap is NEVER rejected by it (the `http-api` capability holds the authoritative endpoint contract). On the HTTP path the server SHALL **truncate, never reject by length**: any `summary` whose length exceeds `SUMMARY_MAX_CHARS` SHALL be replaced with `summary.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + '…[truncated]'`, and any over-length `title` SHALL be hard-cut to `TITLE_MAX_LENGTH`, before calling the service. Convergence is therefore on a row whose stored `summary` is bounded by `SUMMARY_MAX_CHARS` regardless of what the fallback writer sent — INCLUDING transcripts rich in emoji or other non-BMP characters, which previously could trip an over-strict wire cap (a `summary` at the plugin's code-point cap measuring >cap UTF-16 units) and leave the session with NO summary at all. Historical specs used literal numbers (`19500`, then `2000`, then `20000`) for derived or previous caps; this spec references the server cap (`SUMMARY_MAX_CHARS`) abstractly so it does not drift when the cap changes.
 
 #### Scenario: Claude Code short session with cooperating agent
 
@@ -55,6 +55,13 @@ Plugin-side fallback writers (bash transcript dump, Hermes `_format_transcript`,
 - **AND** the server SHALL truncate any body exceeding `SUMMARY_MAX_CHARS` before storing
 - **AND** `sessions.summary` SHALL be non-null and of length ≤ `SUMMARY_MAX_CHARS`
 - **AND** `sessions.status` SHALL be `'ended'`
+
+#### Scenario: Hermes emoji-rich transcript still converges (no UTF-16 wire-cap rejection)
+
+- **GIVEN** a Hermes session whose per-turn `sync_turn` transcript contains emoji or other non-BMP characters and whose code-point length is at or near the plugin's client-side truncation cap
+- **WHEN** the plugin POSTs `/sessions/<id>/summary` and the body's UTF-16 `.length` exceeds the plugin's code-point cap
+- **THEN** the server SHALL accept and truncate the body (200 OK), NOT reject it with `400 invalid_input`
+- **AND** `sessions.summary` SHALL be non-null (the session converges) — this is the behaviour change vs. the prior over-strict wire cap that left such sessions empty
 
 #### Scenario: opencode short session with cooperating agent
 
