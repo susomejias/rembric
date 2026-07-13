@@ -2,5 +2,7 @@
   "saveCore": "if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
   "save": "rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
   "summaryCore": "did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.",
-  "summary": "rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip."
+  "summary": "rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.",
+  "sessionIdCoreTemplate": "sessionId=\"{{SESSION_ID}}\" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.",
+  "sessionIdTemplate": "rembric: sessionId=\"{{SESSION_ID}}\" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one."
 }

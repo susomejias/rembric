@@ -222,7 +222,7 @@ describe('RembricPlugin handlers', () => {
     for (let turn = 1; turn <= 10; turn++) {
       const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
       await handlers['chat.message']!({ sessionID: 's-save' } as never, output as never);
-      if (output.parts.some((p) => p.text?.includes('memory.save'))) pushed.push(turn);
+      if (output.parts.some((p) => p.text?.includes('memory.save now'))) pushed.push(turn);
     }
     expect(pushed).toEqual([5, 10]);
   });

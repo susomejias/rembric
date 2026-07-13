@@ -203,6 +203,32 @@ The save and session-summary nudge strings emitted per-turn by every client — 
 - **WHEN** the cadence constants are inspected across clients (`SUMMARY_NUDGE_EVERY`, `SAVE_NUDGE_EVERY`, and the `turn === 1` summary trigger)
 - **THEN** they SHALL be unchanged by this requirement — only the nudge text changes
 
+### Requirement: Clients that know their own session id MUST surface it per-turn as a standalone nudge
+
+The server cannot resolve which of several concurrently-active sessions an implicit MCP write belongs to (see the `sessions` capability's `findActiveForTransport` never-guess contract). Clients that DO know their own current session id at nudge-emission time — Claude Code/Codex (`session_id` from hook stdin), opencode (`input.sessionID`), Hermes (`session_id` from the `prefetch` kwarg, falling back to `self._session_id`) — SHALL surface it to the model as a separate, standalone nudge line whenever the save or summary nudge fires (same turn, emitted first), so the model can pass it explicitly to the tools named in the `mcp-api` `sessionId` reinforcement requirement.
+
+- The line SHALL be sourced from the shared template `apps/plugin/test/nudge-fixtures.json`'s `sessionIdTemplate`/`sessionIdCoreTemplate` (a `{{SESSION_ID}}` placeholder interpolated with the real value), byte-identical across clients modulo that interpolation — the same lock-step discipline as the save/summary nudge text.
+- The line SHALL be OMITTED when no session id is known (e.g. the host provided none) — never emit a placeholder or invented id.
+- The line SHALL NOT change the save/summary nudge cadence or text; it is purely additive.
+
+#### Scenario: sessionId nudge fires alongside the save nudge
+
+- **GIVEN** a client that knows its session id
+- **WHEN** the save nudge fires (turn is a multiple of `SAVE_NUDGE_EVERY`)
+- **THEN** the sessionId nudge line SHALL be emitted immediately before the save nudge line, with the real session id interpolated into `sessionIdTemplate`
+
+#### Scenario: sessionId nudge fires alongside the summary nudge
+
+- **GIVEN** a client that knows its session id
+- **WHEN** the summary nudge fires (turn 1 or a multiple of `SUMMARY_NUDGE_EVERY`)
+- **THEN** the sessionId nudge line SHALL be emitted immediately before the summary nudge line
+
+#### Scenario: sessionId nudge is omitted when the session id is unknown
+
+- **GIVEN** a client turn where no session id could be resolved (e.g. Claude Code/Codex with unparseable hook stdin, or Hermes with no `initialize()` call yet)
+- **WHEN** the save or summary nudge fires
+- **THEN** the sessionId nudge line SHALL NOT be emitted — only the save/summary nudge line(s) appear, unchanged from before this requirement
+
 ### Requirement: Per-client lifecycle mapping MUST be honoured
 
 The cross-client write contract maps lifecycle events to HTTP endpoints as follows. Implementations SHALL conform; divergences from this mapping SHALL be considered specification violations.

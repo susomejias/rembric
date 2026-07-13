@@ -117,7 +117,7 @@ export interface CreateMcpServerOptions {
 }
 
 const SAVE_DESCRIPTION =
-  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key. If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
+  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 
 const SEARCH_DESCRIPTION =
   'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters. Returns a small default page (8); if every result looks relevant and you need more, prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (results are ranked by relevance over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory).';
@@ -265,7 +265,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_end',
     {
       description:
-        'End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned.',
+        'End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
       inputSchema: sessionEndSchema,
       outputSchema: sessionEndOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('End session'),
@@ -275,7 +275,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   server.registerTool(
     'memory.session_summary',
     {
-      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd) }. Keep it concise but include useful handoff detail. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.`,
+      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Keep it concise but include useful handoff detail. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.`,
       inputSchema: sessionSummarySchema,
       outputSchema: sessionSummaryOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),
@@ -319,7 +319,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.capture_passive',
     {
       description:
-        'Bulk-save learnings: extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls.',
+        'Bulk-save learnings: extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
       inputSchema: capturePassiveSchema,
       outputSchema: capturePassiveOutput,
       annotations: WRITE_ANNOTATIONS('Capture learnings'),
@@ -330,7 +330,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.save_prompt',
     {
       description:
-        "Persist the user's most recent prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). Call this when the user states a goal or constraint worth remembering. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`.",
+        "Persist the user's most recent prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). Call this when the user states a goal or constraint worth remembering. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`), sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`.",
       inputSchema: savePromptSchema,
       outputSchema: savePromptOutput,
       annotations: WRITE_ANNOTATIONS('Save prompt'),

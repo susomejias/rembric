@@ -11,6 +11,7 @@ SAVE_NUDGE_EVERY=5
 SUMMARY_NUDGE_EVERY=10
 SAVE_NUDGE='rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).'
 SUMMARY_NUDGE='rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.'
+SESSION_ID_NUDGE_TEMPLATE='rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh
@@ -21,7 +22,8 @@ if [ ! -t 0 ]; then
   INPUT="$(cat)"
 fi
 
-SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
+RAW_SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
+SESSION_ID="$RAW_SESSION_ID"
 [ -z "$SESSION_ID" ] && SESSION_ID="nosession"
 SAFE_ID="$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.-' '_')"
 
@@ -37,9 +39,15 @@ case "$COUNT" in
   '' | *[!0-9]*) COUNT=0 ;;
 esac
 
-[ $((COUNT % SAVE_NUDGE_EVERY)) -eq 0 ] && echo "$SAVE_NUDGE"
-if [ "$COUNT" -eq 1 ] || [ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ]; then
-  echo "$SUMMARY_NUDGE"
+SAVE_FIRES=0
+SUMMARY_FIRES=0
+[ $((COUNT % SAVE_NUDGE_EVERY)) -eq 0 ] && SAVE_FIRES=1
+{ [ "$COUNT" -eq 1 ] || [ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ]; } && SUMMARY_FIRES=1
+
+if [ -n "$RAW_SESSION_ID" ] && { [ "$SAVE_FIRES" -eq 1 ] || [ "$SUMMARY_FIRES" -eq 1 ]; }; then
+  echo "${SESSION_ID_NUDGE_TEMPLATE//\{\{SESSION_ID\}\}/$RAW_SESSION_ID}"
 fi
+[ "$SAVE_FIRES" -eq 1 ] && echo "$SAVE_NUDGE"
+[ "$SUMMARY_FIRES" -eq 1 ] && echo "$SUMMARY_NUDGE"
 
 exit 0

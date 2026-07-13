@@ -27,6 +27,13 @@ export const savePromptSchema = {
   title: z.string().min(1).max(100),
   tags: z.array(z.string().min(1)).optional(),
   replaces: z.string().min(1).optional(),
+  sessionId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
+    ),
 };
 
 export const searchPromptsSchema = {
@@ -88,6 +95,7 @@ async function handleSavePrompt(
     title: string;
     tags?: string[];
     replaces?: string;
+    sessionId?: string;
   },
 ) {
   const ctx = getRequestContext();
@@ -109,7 +117,7 @@ async function handleSavePrompt(
   }
   const sessionId = resolveSessionId(
     deps,
-    undefined,
+    args.sessionId,
     scope.kind === 'project' ? scope.projectId : null,
   );
   try {

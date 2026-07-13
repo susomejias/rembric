@@ -45,6 +45,9 @@ class ProactiveSaveTest(unittest.TestCase):
     def _provider(self):
         return self.mod.RembricMemoryProvider()
 
+    def _session_id_hint(self, session_id: str) -> str:
+        return self.mod._SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
+
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_save_hint_on_cadence_even_with_empty_cache(
         self, mock_urlopen: MagicMock
@@ -54,7 +57,8 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
         provider.on_turn_start(5, None)
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), self.mod._SAVE_HINT)
+        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT}"
+        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_summary_hint_on_turn_1_even_with_empty_cache(
@@ -65,7 +69,8 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
         provider.on_turn_start(1, None)
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), self.mod._SUMMARY_HINT)
+        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SUMMARY_HINT}"
+        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_summary_hint_every_10th_turn(self, mock_urlopen: MagicMock) -> None:
@@ -75,6 +80,15 @@ class ProactiveSaveTest(unittest.TestCase):
 
         provider.on_turn_start(10, None)
         self.assertIn(self.mod._SUMMARY_HINT, provider.prefetch("q", session_id="01XYZ"))
+
+    def test_prefetch_omits_session_id_hint_when_session_id_is_unknown(self) -> None:
+        # No initialize() call: self._session_id stays None (its __init__
+        # default), and no session_id kwarg is passed either.
+        provider = self._provider()
+        provider.on_turn_start(5, None)
+        out = provider.prefetch("q")
+        self.assertEqual(out, self.mod._SAVE_HINT)
+        self.assertNotIn("sessionId=", out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_emits_nothing_off_cadence(self, mock_urlopen: MagicMock) -> None:
@@ -98,7 +112,10 @@ class ProactiveSaveTest(unittest.TestCase):
         self.assertIn(self.mod._SAVE_HINT, out)
         self.assertIn(self.mod._SUMMARY_HINT, out)
         # Neither replaces the other — both appear as distinct lines.
-        self.assertEqual(out, f"{self.mod._SAVE_HINT}\n{self.mod._SUMMARY_HINT}")
+        expected = (
+            f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT}\n{self.mod._SUMMARY_HINT}"
+        )
+        self.assertEqual(out, expected)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_hint_after_the_recalled_context(
@@ -137,7 +154,8 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
         provider.on_turn_start(2, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), self.mod._SAVE_HINT_URGENT)
+        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT_URGENT}"
+        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
 
         provider.on_turn_start(4, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
         self.assertNotIn(self.mod._SAVE_HINT_URGENT, provider.prefetch("q", session_id="01XYZ"))

@@ -25,7 +25,13 @@ import { ok } from './result.js';
 
 export const capturePassiveSchema = {
   text: z.string().min(1).max(50_000),
-  sessionId: z.string().min(1).optional(),
+  sessionId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
+    ),
 };
 
 const counts = z.record(z.string(), z.number());

@@ -11,7 +11,12 @@ const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
   save: string;
   summary: string;
+  sessionIdTemplate: string;
 };
+
+function sessionIdLine(sessionId: string): string {
+  return fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', sessionId);
+}
 
 let counterDir: string;
 
@@ -41,9 +46,9 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
   });
   afterEach(() => rmSync(counterDir, { recursive: true, force: true }));
 
-  it('emits ONLY the summary nudge on turn 1 (plain stdout, no JSON wrapper)', () => {
+  it('emits the sessionId line + summary nudge on turn 1 (plain stdout, no JSON wrapper)', () => {
     const out = runPromptNudge(JSON.stringify({ session_id: 's-turn1' }));
-    expect(out.trim()).toBe(fixtures.summary);
+    expect(out.trim()).toBe(`${sessionIdLine('s-turn1')}\n${fixtures.summary}`);
     expect(out).not.toContain('hookSpecificOutput');
   });
 
@@ -55,21 +60,21 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
     }
   });
 
-  it('emits ONLY the save nudge on turn 5', () => {
+  it('emits the sessionId line + save nudge on turn 5', () => {
     let last = '';
     for (let i = 1; i <= 5; i++) {
       last = runPromptNudge(JSON.stringify({ session_id: 's-five' }));
     }
-    expect(last.trim()).toBe(fixtures.save);
+    expect(last.trim()).toBe(`${sessionIdLine('s-five')}\n${fixtures.save}`);
   });
 
-  it('emits BOTH nudges on turn 10 (two lines, save first)', () => {
+  it('emits the sessionId line + BOTH nudges on turn 10 (save first)', () => {
     let last = '';
     for (let i = 1; i <= 10; i++) {
       last = runPromptNudge(JSON.stringify({ session_id: 's-ten' }));
     }
     const lines = last.split('\n').filter((l) => l.length > 0);
-    expect(lines).toEqual([fixtures.save, fixtures.summary]);
+    expect(lines).toEqual([sessionIdLine('s-ten'), fixtures.save, fixtures.summary]);
   });
 
   it('persists the counter per session across invocations', () => {
@@ -78,13 +83,13 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
     runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
     runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
     const out = runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    expect(out.trim()).toBe(fixtures.save);
+    expect(out.trim()).toBe(`${sessionIdLine('s-persist')}\n${fixtures.save}`);
   });
 
   it('tracks separate sessions independently', () => {
     for (let i = 1; i <= 5; i++) runPromptNudge(JSON.stringify({ session_id: 's-a' }));
     const outB = runPromptNudge(JSON.stringify({ session_id: 's-b' }));
-    expect(outB.trim()).toBe(fixtures.summary);
+    expect(outB.trim()).toBe(`${sessionIdLine('s-b')}\n${fixtures.summary}`);
   });
 
   it('falls back to a session key and exits 0 on empty/unparseable stdin', () => {

@@ -558,6 +558,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 2. **A recall flow** — directing the agent that when starting or resuming work, after a `/compact` event, or when asked "what did we do", it SHALL call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
 3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files), AND the summary length cap (currently ≤10000 chars, derived from `SUMMARY_MAX_CHARS`). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1000-character ceiling.
 4. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins).
+5. **The `sessionId` reinforcement clause** — a terse directive telling the agent to pass its current session id explicitly when it knows one, and to never guess/invent one, so writes attach correctly instead of falling through the ambiguous-session fallback (see the `sessionId` reinforcement requirement below).
 
 #### Scenario: An MCP client connects on `/mcp/<slug>`
 
@@ -605,6 +606,28 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **THEN** both outputs SHALL contain the substrings `memory.save`, `memory.context`, `memory.session_summary`, AND `memory.about`
 - **AND** both outputs SHALL be ≤1000 chars
 - **AND** existing assertions for `memory.search`, scope notes, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass
+
+### Requirement: Tools that attach a write to a session MUST accept an explicit `sessionId` override, reinforced in their descriptions
+
+`memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` SHALL accept an optional `sessionId: string` argument. When provided, it SHALL take precedence over the transport's own session resolution (the `SessionRouter` entry, then the ambiguous-active-session fallback) — mirroring the explicit-first precedence `memory.session_summary`/`memory.session_end` already apply via `resolveSessionId`. Each tool's description SHALL mention `sessionId` explicitly (not only via the input schema's per-argument `describe()`, since some MCP clients do not surface per-property schema descriptions to the model) with guidance to pass it only if genuinely known and never invent one.
+
+This closes a blind spot: `memory.session_summary`'s and `memory.session_end`'s zod schemas already declared `sessionId` as optional, but their tool descriptions never mentioned it — a model reading only the description had no reason to believe passing it was possible. `memory.save` and `memory.save_prompt` did not accept the argument at all prior to this requirement.
+
+#### Scenario: memory.save accepts and prioritizes an explicit sessionId
+
+- **GIVEN** two sessions are concurrently active for the same `(tokenId, projectId)` (the ambiguous-fallback case where auto-resolution returns null)
+- **WHEN** the agent calls `memory.save({..., sessionId: '<S>'})` with an explicit, valid session id
+- **THEN** the saved memory's `session_id` SHALL be `'<S>'`, NOT null — the explicit value bypasses the ambiguous fallback entirely
+
+#### Scenario: memory.save_prompt accepts and prioritizes an explicit sessionId
+
+- **WHEN** the agent calls `memory.save_prompt({content, title, sessionId: '<S>'})`
+- **THEN** the persisted prompt row's `session_id` SHALL be `'<S>'`
+
+#### Scenario: Tool descriptions mention sessionId explicitly
+
+- **WHEN** the `memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` tool descriptions are inspected
+- **THEN** each SHALL contain the substring `sessionId` with guidance not to invent one when unknown
 
 ### Requirement: The MCP server MUST expose `memory.suggest_topic_key`
 
@@ -799,8 +822,9 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.save_prompt` for p
 - `title: string` (required, ≤100 chars).
 - `tags?: string[]` (optional; each element is a non-empty string).
 - `replaces?: string` (optional; ULID of a predecessor prompt in the same scope).
+- `sessionId?: string` (optional; when provided, takes precedence over the session-attach helper's own resolution — see the `sessionId` reinforcement requirement below).
 
-Standard behaviour: the server SHALL insert a new row into `prompts` with `content`, `title`, `tags`, the resolved `session_id` (via the existing session-attach helper), the active scope's `project_id`, and `agent` copied from the token name. The row SHALL be created with `deleted_at = NULL`, `replaces = NULL`.
+Standard behaviour: the server SHALL insert a new row into `prompts` with `content`, `title`, `tags`, the resolved `session_id` (the caller's explicit `sessionId` when provided, else the existing session-attach helper), the active scope's `project_id`, and `agent` copied from the token name. The row SHALL be created with `deleted_at = NULL`, `replaces = NULL`.
 
 Refine behaviour: when `replaces` is provided, the server SHALL run an atomic SQLite transaction that:
 

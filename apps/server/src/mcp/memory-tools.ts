@@ -64,6 +64,13 @@ export const memorySaveSchema = {
   content: z.string().min(1),
   tags: z.array(z.string()).max(64).optional(),
   topic_key: z.string().min(1).max(128).optional(),
+  sessionId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
+    ),
 };
 
 export const memorySearchSchema = {
@@ -395,6 +402,7 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
  * Resolve the active Rembric session id for a memory write.
  *
  * Sources, in order of precedence:
+ *   0. An explicit `sessionId` passed by the caller.
  *   1. The `SessionRouter` entry for `(tokenId, mcpSessionId)` — set by
  *      an explicit `memory.session_start` call over MCP.
  *   2. The most recently-started `status='active'` row for `(tokenId,
@@ -405,7 +413,12 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
  * saved with `session_id = NULL`, the back-compat path for clients that
  * neither run the plugin nor call `memory.session_start`).
  */
-function resolveActiveSessionId(deps: MemoryToolDeps, projectId: string | null): string | null {
+function resolveActiveSessionId(
+  deps: MemoryToolDeps,
+  projectId: string | null,
+  explicit?: string,
+): string | null {
+  if (explicit) return explicit;
   const ctx = getRequestContext();
   if (ctx.mcpSessionId && deps.router) {
     const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
@@ -430,6 +443,7 @@ async function handleSave(
     content: string;
     tags?: string[];
     topic_key?: string;
+    sessionId?: string;
   },
 ) {
   const ctx = getRequestContext();
@@ -493,6 +507,7 @@ async function handleSave(
   const resolvedSessionId = resolveActiveSessionId(
     deps,
     scope.kind === 'project' ? scope.projectId : null,
+    args.sessionId,
   );
   const input: SaveMemoryInput = {
     type: args.type,

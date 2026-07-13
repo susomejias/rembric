@@ -127,6 +127,11 @@ _SUMMARY_HINT = (
     "work, not cwd); summary: Goal · Discoveries · Accomplished · Next "
     "Steps · Files. Nothing memorable? Skip.</memory-hint>"
 )
+_SESSION_ID_HINT_TEMPLATE = (
+    '<memory-hint>sessionId="{{SESSION_ID}}" — pass it explicitly to '
+    "memory.save/memory.session_summary/memory.save_prompt now, to "
+    "guarantee correct attachment; never guess a different one.</memory-hint>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -370,9 +375,8 @@ class RembricMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric — persistent memory across sessions. Use these tools "
-            "proactively, not only when asked; each tool's description has the "
-            "exact mechanics.\n\n"
+            "Rembric — persistent memory across sessions. Use tools "
+            "proactively; each description has exact mechanics.\n\n"
             "SAVE: the moment it happens — bug fix · decision · discovery · "
             "config · pattern · preference — call memory.save with a title≤100 "
             "headline + content (don't batch). Evolving a prior topic? pass "
@@ -384,7 +388,8 @@ class RembricMemoryProvider(MemoryProvider):
             "memory.session_summary({title≤100 (the work, not cwd), "
             "summary≤10000}) — Goal · Discoveries · Accomplished · Next "
             "Steps · Files. Trivial? Skip.\n"
-            "Update Rembric itself: memory.about."
+            "Know your sessionId? Pass it — never guess it.\n"
+            "Update Rembric: memory.about."
         )
 
     def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:
@@ -422,6 +427,11 @@ class RembricMemoryProvider(MemoryProvider):
         ):
             hints.append(_SUMMARY_HINT)
             hint_tags.append("summary")
+        if hints and session_id:
+            hints.insert(
+                0, _SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
+            )
+            hint_tags.insert(0, "session_id")
         # Whether Hermes actually surfaces this return value to the model is
         # otherwise unobservable from the host side; this line is the only way
         # to confirm a hint was even offered.
