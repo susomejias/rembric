@@ -3,7 +3,11 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { snippet } from '../mcp/_shared.js';
-import { truncateSummary, type AgentSessionsService } from '../services/agent-sessions.js';
+import {
+  truncateSummary,
+  truncateTitle,
+  type AgentSessionsService,
+} from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { OAuthService } from '../services/oauth.js';
@@ -60,14 +64,14 @@ const sessionPostSchema = z.object({
 });
 
 const sessionSummarySchema = z.object({
-  summary: z.string().min(1).max(20_000),
-  title: z.string().min(1).max(100).optional(),
+  summary: z.string().min(1).max(40_000),
+  title: z.string().min(1).max(200).optional(),
   final: z.boolean().optional(),
 });
 
 const sessionEndSchema = z.object({
-  summary: z.string().min(1).max(20_000).optional(),
-  title: z.string().min(1).max(100).optional(),
+  summary: z.string().min(1).max(40_000).optional(),
+  title: z.string().min(1).max(200).optional(),
   final: z.boolean().optional(),
 });
 
@@ -148,7 +152,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       const updated = deps.agentSessions.writeSummary(sessionId, {
         tokenId: ctx.token.id,
         summary: truncateSummary(parsed.data.summary),
-        title: parsed.data.title,
+        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
         final: parsed.data.final,
       });
       return c.json({
@@ -185,7 +189,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         tokenId: ctx.token.id,
         summary:
           parsed.data.summary !== undefined ? truncateSummary(parsed.data.summary) : undefined,
-        title: parsed.data.title,
+        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
         final: parsed.data.final,
       });
       return c.json({

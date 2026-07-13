@@ -35,7 +35,7 @@ import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -236,6 +236,14 @@ def _api_request(
     try:
         with urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
+    except HTTPError as err:
+        detail = ""
+        try:
+            detail = err.read().decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 — body read is best-effort
+            pass
+        _stderr(f"[rembric] POST {path} failed: {err} body={detail}")
+        return None
     except (URLError, TimeoutError) as err:
         _stderr(f"[rembric] POST {path} failed: {err}")
         return None

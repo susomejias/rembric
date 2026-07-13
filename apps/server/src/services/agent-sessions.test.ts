@@ -158,6 +158,37 @@ describe('AgentSessionsService', () => {
       expect(out.length).toBe(SUMMARY_MAX_CHARS);
       expect(out.endsWith('…[truncated]')).toBe(true);
     });
+
+    it('never leaves a lone high surrogate when the cut lands inside an emoji', async () => {
+      const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
+      const cutPoint = SUMMARY_MAX_CHARS - '…[truncated]'.length;
+      const s = 'a'.repeat(cutPoint - 1) + '😀' + 'a'.repeat(2000);
+      const out = truncateSummary(s);
+      const content = out.slice(0, out.length - '…[truncated]'.length);
+      const lastCode = content.charCodeAt(content.length - 1);
+      const isHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
+      expect(isHighSurrogate).toBe(false);
+    });
+  });
+
+  describe('truncateTitle helper', () => {
+    it('returns input unchanged when within the cap', async () => {
+      const { truncateTitle } = await import('./agent-sessions.js');
+      expect(truncateTitle('hi')).toBe('hi');
+      expect(truncateTitle('t'.repeat(100))).toHaveLength(100);
+    });
+
+    it('hard-cuts oversize input with no suffix', async () => {
+      const { truncateTitle } = await import('./agent-sessions.js');
+      const out = truncateTitle('t'.repeat(150));
+      expect(out).toBe('t'.repeat(100));
+    });
+
+    it('drops a whole emoji rather than splitting its surrogate pair at the boundary', async () => {
+      const { truncateTitle } = await import('./agent-sessions.js');
+      const out = truncateTitle('t'.repeat(99) + '😀');
+      expect(out).toBe('t'.repeat(99));
+    });
   });
 
   it('findActiveForTransport returns the sole active session for the pair', () => {

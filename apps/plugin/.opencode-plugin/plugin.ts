@@ -204,7 +204,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
         signal: AbortSignal.timeout(POST_TIMEOUT_MS),
       });
       if (!res.ok) {
-        diag(`POST ${path} ${res.status}`);
+        const detail = await res.text().catch(() => '');
+        diag(`POST ${path} ${res.status} body=${detail}`);
       }
     } catch (err) {
       diag(`POST ${path} ${(err as Error).message ?? 'error'}`);

@@ -36,9 +36,24 @@ export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';
  * silently bring oversized bodies under the cap before calling the service.
  * The service itself rejects oversized inputs unconditionally.
  */
+function sliceWithoutSplittingSurrogatePair(s: string, maxLen: number): string {
+  let end = maxLen;
+  const code = s.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return s.slice(0, end);
+}
+
 export function truncateSummary(s: string): string {
   if (s.length <= SUMMARY_MAX_CHARS) return s;
-  return s.slice(0, SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_SUFFIX.length) + SUMMARY_TRUNCATE_SUFFIX;
+  return (
+    sliceWithoutSplittingSurrogatePair(s, SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_SUFFIX.length) +
+    SUMMARY_TRUNCATE_SUFFIX
+  );
+}
+
+/** HTTP-layer counterpart to `truncateSummary`; hard-cut, no suffix. */
+export function truncateTitle(s: string): string {
+  return s.length <= TITLE_MAX_LENGTH ? s : sliceWithoutSplittingSurrogatePair(s, TITLE_MAX_LENGTH);
 }
 
 function assertSummaryWithinCap(callsite: string, summary: string | undefined): void {

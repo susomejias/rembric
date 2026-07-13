@@ -339,7 +339,41 @@ describe('createApiRouter', () => {
       expect((r.body.summary as string).length).toBe(SUMMARY_MAX_CHARS);
     });
 
-    it('400 invalid_input on summary > 20_000 (wire DoS guard fires before truncation)', async () => {
+    it('summary just over the old 20_000 wire boundary now truncates instead of rejecting', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-old-boundary' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-old-boundary/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'A'.repeat(20_001) },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-old-boundary');
+      expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
+      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+    });
+
+    it('a summary at the plugin code-point cap containing emoji truncates instead of rejecting', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-emoji-summary' },
+      });
+      const emojiSummary = 'a'.repeat(19_999) + '😀';
+      expect(emojiSummary.length).toBe(20_001);
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-emoji-summary/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: emojiSummary },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.code).not.toBe('invalid_input');
+      const row = agentSessions.getById('sess-emoji-summary');
+      expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
+    });
+
+    it('400 invalid_input on summary > 40_000 (raised wire DoS guard still fires)', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -347,7 +381,55 @@ describe('createApiRouter', () => {
       });
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-dos-summary/summary`, {
         token: adminToken.plaintext,
-        body: { summary: 'A'.repeat(20_001) },
+        body: { summary: 'A'.repeat(40_001) },
+      });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('invalid_input');
+    });
+
+    it('title over TITLE_MAX_LENGTH truncates instead of rejecting', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-long-title' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-long-title/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'x', title: 'T'.repeat(150) },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-long-title');
+      expect(row?.title?.length).toBe(100);
+    });
+
+    it('a title at the plugin code-point cap containing emoji truncates instead of rejecting', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-emoji-title' },
+      });
+      const emojiTitle = 't'.repeat(99) + '😀';
+      expect(emojiTitle.length).toBe(101);
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-emoji-title/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'x', title: emojiTitle },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.code).not.toBe('invalid_input');
+      const row = agentSessions.getById('sess-emoji-title');
+      expect(row?.title?.length).toBeLessThanOrEqual(100);
+      expect(row?.title).toBe('t'.repeat(99));
+    });
+
+    it('400 invalid_input on title > 200 (raised wire DoS guard still fires)', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-dos-title' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-dos-title/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'x', title: 'T'.repeat(201) },
       });
       expect(r.status).toBe(400);
       expect(r.body.code).toBe('invalid_input');
