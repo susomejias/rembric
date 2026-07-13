@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.6](https://github.com/susomejias/rembric/compare/server-v0.24.5...server-v0.24.6) (2026-07-13)
+
+
+### Features
+
+* **mcp:** reinforce explicit sessionId across session-attaching tools ([b14368d](https://github.com/susomejias/rembric/commit/b14368d8c6814840f1c4b88eca5e24c185f84191))
+
 ## [0.24.5](https://github.com/susomejias/rembric/compare/server-v0.24.4...server-v0.24.5) (2026-07-13)
 
 
