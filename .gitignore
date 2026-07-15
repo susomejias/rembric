@@ -49,3 +49,6 @@ yarn-error.log*
 
 # Codex CLI auto-generated companion (equivalent to CLAUDE.md, per-user)
 AGENTS.md
+
+# Orca local artifacts (agent orchestrator scratch)
+.orca/
