@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.7](https://github.com/susomejias/rembric/compare/server-v0.24.6...server-v0.24.7) (2026-07-15)
+
+
+### Bug Fixes
+
+* **plugin:** correct awk transcript fallback (regexp constant as function arg) ([10fca8b](https://github.com/susomejias/rembric/commit/10fca8bced5614240695320cab3c59b4ef7f610f))
+
 ## [0.24.6](https://github.com/susomejias/rembric/compare/server-v0.24.5...server-v0.24.6) (2026-07-13)
 
 
