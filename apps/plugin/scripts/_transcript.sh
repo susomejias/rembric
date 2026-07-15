@@ -180,9 +180,7 @@ _rembric_extract_first_assistant_claude_code_jq() {
 _rembric_format_transcript_claude_code_fallback() {
   local path="$1"
   awk '
-    function extract(line, pat,   s) {
-      if (match(line, pat) == 0) return ""
-      s = substr(line, RSTART, RLENGTH)
+    function clean(s) {
       sub(/.*:[[:space:]]*"/, "", s)
       sub(/"$/, "", s)
       gsub(/\\n/, " ", s)
@@ -199,8 +197,9 @@ _rembric_format_transcript_claude_code_fallback() {
       sub(/.*"type"[[:space:]]*:[[:space:]]*"/, "", tag)
       sub(/".*/, "", tag)
       role = tag
-      content = extract(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
-      if (content == "") content = extract(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
+      content = ""
+      if (match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      if (content == "" && match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)
@@ -213,9 +212,7 @@ _rembric_format_transcript_claude_code_fallback() {
 _rembric_extract_first_assistant_claude_code_fallback() {
   local path="$1"
   awk '
-    function extract(line, pat,   s) {
-      if (match(line, pat) == 0) return ""
-      s = substr(line, RSTART, RLENGTH)
+    function clean(s) {
       sub(/.*:[[:space:]]*"/, "", s)
       sub(/"$/, "", s)
       gsub(/\\n/, " ", s)
@@ -228,8 +225,9 @@ _rembric_extract_first_assistant_claude_code_fallback() {
     {
       line = $0
       if (line !~ /"type"[[:space:]]*:[[:space:]]*"assistant"/) next
-      content = extract(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
-      if (content == "") content = extract(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
+      content = ""
+      if (match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      if (content == "" && match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)
@@ -308,9 +306,7 @@ _rembric_extract_first_assistant_codex_cli_jq() {
 _rembric_format_transcript_codex_cli_fallback() {
   local path="$1"
   awk '
-    function extract(line, pat,   s) {
-      if (match(line, pat) == 0) return ""
-      s = substr(line, RSTART, RLENGTH)
+    function clean(s) {
       sub(/.*:[[:space:]]*"/, "", s)
       sub(/"$/, "", s)
       gsub(/\\n/, " ", s)
@@ -330,7 +326,8 @@ _rembric_format_transcript_codex_cli_fallback() {
         role = "assistant"
       }
       if (role == "") next
-      content = extract(line, /"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
+      content = ""
+      if (match(line, /"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)
@@ -343,9 +340,7 @@ _rembric_format_transcript_codex_cli_fallback() {
 _rembric_extract_first_assistant_codex_cli_fallback() {
   local path="$1"
   awk '
-    function extract(line, pat,   s) {
-      if (match(line, pat) == 0) return ""
-      s = substr(line, RSTART, RLENGTH)
+    function clean(s) {
       sub(/.*:[[:space:]]*"/, "", s)
       sub(/"$/, "", s)
       gsub(/\\n/, " ", s)
@@ -359,7 +354,8 @@ _rembric_extract_first_assistant_codex_cli_fallback() {
       line = $0
       if (line !~ /"type"[[:space:]]*:[[:space:]]*"event_msg"/) next
       if (line !~ /"type"[[:space:]]*:[[:space:]]*"agent_message"/) next
-      content = extract(line, /"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)
+      content = ""
+      if (match(line, /"message"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)

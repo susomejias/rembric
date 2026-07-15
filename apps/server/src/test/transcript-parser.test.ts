@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,15 +68,45 @@ const CASES: ParserCase[] = [
   },
 ];
 
+// A jq-free PATH sandbox: mirrors the minimal system dirs but omits `jq`.
+// Merely stripping PATH to the standard dirs is NOT enough — `jq` commonly
+// lives in `/usr/bin` (CI, most Linux), survives the strip, and the parser
+// prefers it, so the "awk fallback" cases would silently exercise jq. The
+// dispatcher uses `command -v jq`, so jq must be genuinely absent (a failing
+// shim wouldn't do — the parser would just return empty). Symlinking every
+// entry except jq guarantees the awk path runs while all other tools remain.
+let jqlessPathDir: string | null = null;
+function buildJqlessPath(): string {
+  if (jqlessPathDir) return jqlessPathDir;
+  const dir = mkdtempSync(join(tmpdir(), 'rbr-nojq-'));
+  const linked = new Set<string>();
+  for (const d of ['/usr/bin', '/bin', '/usr/sbin', '/sbin']) {
+    let entries: string[];
+    try {
+      entries = readdirSync(d);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (name === 'jq' || linked.has(name)) continue;
+      try {
+        symlinkSync(join(d, name), join(dir, name));
+        linked.add(name);
+      } catch {
+        /* first-wins across dirs; skip collisions and unreadable entries */
+      }
+    }
+  }
+  jqlessPathDir = dir;
+  return dir;
+}
+
 function runBash(script: string, hideJq: boolean): string {
   // Spawn a fresh bash that sources the helper, runs the function, and
   // prints the result. Empty stdout is a valid (empty) parser output.
   const env = { ...process.env };
   if (hideJq) {
-    // Strip Homebrew + common jq locations from PATH so the awk path is
-    // exercised. `awk` ships with macOS BSD / Linux gawk, so it stays
-    // available even with a minimal PATH.
-    env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+    env.PATH = buildJqlessPath();
   }
   return execFileSync('bash', ['-c', script], {
     encoding: 'utf8',
