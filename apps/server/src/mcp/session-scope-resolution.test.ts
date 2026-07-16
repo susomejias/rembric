@@ -657,8 +657,6 @@ describe('memory.timeline neighbors are scope-filtered', () => {
       agent: 'test',
     });
     const base = 1_700_000_000_000;
-    // Target M in the project; a cross-scope neighbor G in GLOBAL, same session,
-    // created later so it WOULD be an "after" neighbor absent the scope filter.
     repos.memory.insert({
       id: 'tl-target',
       scope: 'project',

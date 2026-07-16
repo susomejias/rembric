@@ -187,7 +187,6 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
     expect(payload.code).toBe('forbidden');
-    // The supersede side effect must NOT have fired: b stays active, a keeps its head status.
     expect(memory.get(b.id, { kind: 'project', projectId: projectA.id })?.memory.status).toBe(
       'active',
     );
