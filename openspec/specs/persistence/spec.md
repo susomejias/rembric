@@ -136,7 +136,7 @@ Indexes:
 
 ### Requirement: The `memory` table MUST gain a `topic_key` column
 
-The schema SHALL add `topic_key TEXT` (nullable) to the `memory` table. A partial index SHALL exist for fast lookups of the active row per topic:
+The schema SHALL add `topic_key TEXT` (nullable) to the `memory` table. A non-unique partial index SHALL serve fast lookups of the active row per topic:
 
 ```
 CREATE INDEX memory_topic_key_active_idx
@@ -144,7 +144,19 @@ CREATE INDEX memory_topic_key_active_idx
   WHERE status = 'active' AND topic_key IS NOT NULL
 ```
 
+Convergence — at most one `active` row per `(scope, project_id, topic_key)` slot — SHALL additionally be enforced by a UNIQUE partial index so the storage layer rejects a second `active` row regardless of the write path, backing the service-layer convergence guarantee (`memory` capability, upsert-by-topic-key) and the consolidation-undo guarantee (`consolidation` capability):
+
+```
+CREATE UNIQUE INDEX memory_topic_key_active_uidx
+  ON memory(scope, COALESCE(project_id, ''), topic_key)
+  WHERE status = 'active' AND topic_key IS NOT NULL
+```
+
+The UNIQUE index SHALL key on `COALESCE(project_id, '')`, NOT the raw `project_id` column: SQLite treats `NULL` as DISTINCT in a UNIQUE index, so a plain UNIQUE index on `(scope, project_id, topic_key)` would fail to constrain global memories (`project_id IS NULL`). `saveWithTopicKey` supersedes the prior active row and inserts the new one within a single transaction (supersede-then-insert order), so it never holds two active rows in a slot simultaneously and is unaffected by the constraint.
+
 The column SHALL allow any TEXT value of length ≤ 128 with no NUL bytes. The empty string SHALL be normalized to `NULL` by the service layer before insert.
+
+The migration that introduces the UNIQUE index SHALL first heal any pre-existing duplicate-active slots (which the non-unique index permitted): for every `(scope, project_id, topic_key)` slot holding more than one `active` row, it SHALL keep the most-recently-created active row (`ORDER BY created_at DESC, id DESC`) and transition the others to `superseded` — a status flip only (append-only-safe), a no-op on a healthy database. Adding the index is index-only DDL and requires no table rebuild.
 
 #### Scenario: Migration on an existing v0.1 database
 
@@ -155,6 +167,18 @@ The column SHALL allow any TEXT value of length ≤ 128 with no NUL bytes. The e
 
 - **WHEN** two `memory.save` calls with the same `(scope, project_id, topic_key)` race
 - **THEN** SQLite's per-row transaction guarantees serialize them; one wins (its target is superseded), the other's candidate-detection step sees the winner as a candidate, and the response surfaces it for judgment
+
+#### Scenario: The UNIQUE index heals pre-existing duplicate-active slots
+
+- **GIVEN** a database in which a `(scope, project_id, topic_key)` slot holds two `active` rows R1 (older) and R2 (newer)
+- **WHEN** the migration introducing the UNIQUE partial index is applied
+- **THEN** R2 SHALL remain `active`, R1 SHALL be transitioned to `superseded`, and the UNIQUE index SHALL be created successfully
+
+#### Scenario: The UNIQUE index rejects a second active row in a global slot
+
+- **GIVEN** an `active` global memory (`project_id IS NULL`) with `topic_key = K`
+- **WHEN** a write attempts to add a second `active` global row with `topic_key = K` without superseding the incumbent
+- **THEN** SQLite SHALL reject it with a UNIQUE-constraint failure (the `COALESCE(project_id, '')` key makes the NULL project_id a concrete slot key)
 
 ### Requirement: The schema MUST track consolidation operations
 
