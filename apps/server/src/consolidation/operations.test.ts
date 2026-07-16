@@ -148,7 +148,6 @@ describe('undoOp / undoRun', () => {
 
 describe('undoOp preserves topic_key convergence', () => {
   it('does not reactivate a decayed row whose topic slot a newer save claimed', () => {
-    // R owns topic K, then decays; a later save N claims the slot.
     const r = memoryService.saveWithTopicKey(
       { type: 'user', title: 'r', content: 'r', topicKey: 'k' },
       projectScope(projectId),
@@ -168,7 +167,6 @@ describe('undoOp preserves topic_key convergence', () => {
     expect(memoryService.unsafeGetById(n.id)!.status).toBe('active');
     expect(memoryService.unsafeGetById(r.id)!.status).toBe('archived');
     expect(result.skipped).toEqual([{ id: r.id, topicKey: 'k', occupiedBy: n.id }]);
-    // The op is still marked reverted (undone to the extent convergence allows).
     const op = db.handle.db
       .select()
       .from(consolidationOps)
@@ -195,8 +193,6 @@ describe('undoOp preserves topic_key convergence', () => {
   });
 
   it('orphan_promote undo skips a target whose topic slot is occupied but still resets the relation', () => {
-    // Target T owns topic K; a supersedes relation is orphan-promoted (T
-    // superseded). A later save N claims the slot. Undo must not resurrect T.
     const source = memoryService.save(
       { type: 'user', title: 'src', content: 'src' },
       projectScope(projectId),
@@ -231,7 +227,6 @@ describe('undoOp preserves topic_key convergence', () => {
       appliedAt: clock.value,
     });
 
-    // A newer save claims topic K after the promotion.
     const n = memoryService.saveWithTopicKey(
       { type: 'user', title: 'n', content: 'n', topicKey: 'k' },
       projectScope(projectId),
@@ -242,7 +237,6 @@ describe('undoOp preserves topic_key convergence', () => {
     expect(memoryService.unsafeGetById(n.id)!.status).toBe('active');
     expect(memoryService.unsafeGetById(target.id)!.status).toBe('superseded');
     expect(result.skipped.map((s) => s.id)).toContain(target.id);
-    // Relation still reset to pending; source's replaces[] still stripped of T.
     expect(repos.relations.findByJudgmentId(pending.judgmentId)?.status).toBe('pending');
     expect(memoryService.unsafeGetById(source.id)!.replaces).not.toContain(target.id);
   });

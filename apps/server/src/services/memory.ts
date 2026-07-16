@@ -175,9 +175,6 @@ export class MemoryService {
         }
       }
 
-      // Supersede the prior row BEFORE inserting the new active row: the
-      // UNIQUE partial index on the active-topic slot (migration 0018) would
-      // otherwise reject the insert while both rows are momentarily active.
       if (supersededByTopicKey) {
         this.repos.memory.markSuperseded(supersededByTopicKey.id);
       }

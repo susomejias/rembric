@@ -4,13 +4,6 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-/**
- * Faithful test of migration 0018 (topic_key convergence). Runs the actual
- * migration SQL against a minimal `memory` table so both the heal pre-pass and
- * the UNIQUE partial index — including the global-slot (project_id NULL) case
- * the COALESCE key exists to cover — are exercised.
- */
-
 const MIGRATION_SQL = readFileSync(
   fileURLToPath(new URL('./migrations/0018_unique_topic_key_active_index.sql', import.meta.url)),
   'utf8',
@@ -94,8 +87,6 @@ describe('migration 0018 — UNIQUE index enforcement', () => {
 
   it('rejects a second active row in a GLOBAL slot (project_id NULL)', () => {
     seed('gx', 'global', null, 'k', 1000);
-    // Without COALESCE(project_id,'') SQLite would treat the NULLs as distinct
-    // and admit this row; the expression key makes the constraint bite.
     expect(() => seed('gy', 'global', null, 'k', 2000)).toThrow(/UNIQUE/i);
   });
 

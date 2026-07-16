@@ -20,7 +20,6 @@ import { type ConsolidationOpType } from '../db/schema/consolidation.js';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
 
-/** A row an undo declined to reactivate because its topic slot is taken. */
 export interface SkippedRow {
   id: string;
   topicKey: string;
@@ -32,12 +31,6 @@ export interface UndoResult {
   skipped: SkippedRow[];
 }
 
-/**
- * A memory carrying a `topic_key` may be reactivated by undo only if its
- * `(scope, project_id, topic_key)` slot is free; a newer save may have claimed
- * it. Returns the id of the occupying active row (different from `row`), or
- * null when the slot is free (or the row has no topic_key).
- */
 function topicSlotOccupiedBy(
   repos: ConsolidationDeps,
   row: {
@@ -179,9 +172,6 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
   tx.transaction(() => {
     if (op.opType === 'merge' || op.opType === 'supersede' || op.opType === 'decay') {
-      // Reactivate only rows whose topic_key slot is still free — a later save
-      // may have claimed it, and two active rows in one slot would break
-      // topic_key convergence (the UNIQUE index would also reject it).
       const reactivatable: string[] = [];
       for (const row of repos.memory.unsafeGetByIds(op.affectedIds)) {
         const occupiedBy = topicSlotOccupiedBy(repos, row);
