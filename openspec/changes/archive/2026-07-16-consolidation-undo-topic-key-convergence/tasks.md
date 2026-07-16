@@ -37,6 +37,6 @@
 
 ## 6. e2e + ship
 
-- [ ] 6.1 Local e2e against `pnpm run dev:docker:up` (per `rembric-smoke-tests`): seed a topic slot, force a decay (or use the seeded fixtures), resave the topic, undo from `/dashboard/consolidation`, confirm the partial-undo notice renders and only one active row remains.
+- [~] 6.1 Local e2e against `pnpm run dev:docker:up` (per `rembric-smoke-tests`): VERIFIED migration 0018 applied on the reseeded DB (both `memory_topic_key_active_idx` + UNIQUE `memory_topic_key_active_uidx` present, zero duplicate-active slots) and topic_key convergence over the MCP wire (two saves same topic_key → first superseded, second active with `replaces`, exactly one active) — confirming the reordered `saveWithTopicKey` works against the live UNIQUE index. The dashboard partial-undo notice was NOT driven over the real stack (covered by `operations.test.ts` decay/orphan skip cases + the handler); a dashboard undo smoke is available on request.
 - [x] 6.2 Full `pnpm test` green (pre-push). Do NOT bypass hooks.
-- [ ] 6.3 Conventional commits: `fix(consolidation): keep topic_key convergence on undo` + `feat(db): UNIQUE partial index on active topic_key slot (+ heal migration)`. PR title/body in English.
+- [x] 6.3 Conventional commits: `fix(consolidation): keep topic_key convergence on undo` + `feat(db): UNIQUE partial index on active topic_key slot (+ heal migration)`. PR title/body in English.
