@@ -11,6 +11,7 @@ import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
+  assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
@@ -136,11 +137,15 @@ async function handleCapturePassive(
   if (items.length === 0) {
     return ok({ saved: 0, ids: [] as string[] });
   }
-  const explicitSession = resolveSessionId(
-    deps,
-    args.sessionId,
-    scope.kind === 'project' ? scope.projectId : null,
-  );
+  const captureProjectId = scope.kind === 'project' ? scope.projectId : null;
+  let explicitSession: string | null;
+  try {
+    if (args.sessionId)
+      assertExplicitSessionOwned(deps.agentSessions, args.sessionId, captureProjectId);
+    explicitSession = resolveSessionId(deps, args.sessionId, captureProjectId);
+  } catch (err) {
+    return errToMcp(err);
+  }
   const ids: string[] = [];
   for (const content of items) {
     const m = deps.memory.save(

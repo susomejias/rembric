@@ -266,7 +266,7 @@ async function handleCompare(
   }
   let scope: Scope;
   try {
-    scope = await requireScope(deps, 'read');
+    scope = await requireScope(deps, 'write');
   } catch (err) {
     return errToMcp(err);
   }

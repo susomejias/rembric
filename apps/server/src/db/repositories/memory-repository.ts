@@ -128,14 +128,24 @@ export class MemoryRepository {
       .all();
   }
 
-  /** Timeline neighbors within the same session, before/after a pivot. */
+  /**
+   * Timeline neighbors within the same session, before/after a pivot.
+   * Filtered by the caller's effective `(scope, project_id)` as well as
+   * `session_id`: a single session can hold memories in more than one scope
+   * (an unscoped connection can save a global and a project memory in the
+   * same session), so filtering by `session_id` alone would leak another
+   * scope's `content` — mirroring `windowNeighbors`.
+   */
   sessionNeighbors(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
     sessionId: string;
     pivotCreatedAt: Date;
     pivotId: string;
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
+    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
     const cmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} < ${opts.pivotCreatedAt.getTime()}`
@@ -143,7 +153,14 @@ export class MemoryRepository {
     const rows = this.db
       .select()
       .from(memory)
-      .where(and(eq(memory.sessionId, opts.sessionId), cmp, sql`${memory.id} != ${opts.pivotId}`))
+      .where(
+        and(
+          scopeFilter,
+          eq(memory.sessionId, opts.sessionId),
+          cmp,
+          sql`${memory.id} != ${opts.pivotId}`,
+        ),
+      )
       .orderBy(opts.direction === 'before' ? desc(memory.createdAt) : memory.createdAt)
       .limit(opts.limit)
       .all();

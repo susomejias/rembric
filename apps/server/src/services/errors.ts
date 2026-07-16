@@ -13,6 +13,7 @@ export type DomainErrorCode =
   | 'session_active_must_end'
   | 'session_already_ended'
   | 'session_not_found'
+  | 'session_deleted'
   | 'invalid_input'
   | 'forbidden'
   | 'scope_locked'
