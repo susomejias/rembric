@@ -129,16 +129,6 @@ export function resolveSessionId(
   return active?.id ?? null;
 }
 
-/**
- * Validate a caller-supplied `sessionId` before a write is attached to it.
- * The transport/active-session fallbacks resolve to a session the caller
- * already owns within scope, but an explicit id is attacker-controlled: it
- * must name a session owned by this token, in the effective project, and not
- * soft-deleted. Foreign-token and cross-project ids are masked as
- * `session_not_found` (so a caller cannot probe which ids exist elsewhere),
- * matching the session-lifecycle tools' contract; a self-owned soft-deleted
- * session is rejected as `session_deleted`.
- */
 export function assertExplicitSessionOwned(
   agentSessions: AgentSessionsService,
   sessionId: string,

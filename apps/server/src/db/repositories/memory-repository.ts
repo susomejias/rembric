@@ -128,14 +128,7 @@ export class MemoryRepository {
       .all();
   }
 
-  /**
-   * Timeline neighbors within the same session, before/after a pivot.
-   * Filtered by the caller's effective `(scope, project_id)` as well as
-   * `session_id`: a single session can hold memories in more than one scope
-   * (an unscoped connection can save a global and a project memory in the
-   * same session), so filtering by `session_id` alone would leak another
-   * scope's `content` — mirroring `windowNeighbors`.
-   */
+  /** Timeline neighbors within the same session, before/after a pivot. */
   sessionNeighbors(opts: {
     scope: MemoryScope;
     projectId: string | null;
