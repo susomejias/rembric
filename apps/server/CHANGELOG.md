@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.8](https://github.com/susomejias/rembric/compare/server-v0.24.7...server-v0.24.8) (2026-07-16)
+
+
+### Bug Fixes
+
+* **consolidation:** keep topic_key convergence on undo + UNIQUE index ([9aa5d13](https://github.com/susomejias/rembric/commit/9aa5d13f527ef77333191da57ffc3861f12f4328))
+* **mcp:** harden scope/authz on compare, sessionId, and timeline ([3cc9324](https://github.com/susomejias/rembric/commit/3cc9324d0c846a54df1f70a3767abab7ad813350))
+
 ## [0.24.7](https://github.com/susomejias/rembric/compare/server-v0.24.6...server-v0.24.7) (2026-07-15)
 
 
