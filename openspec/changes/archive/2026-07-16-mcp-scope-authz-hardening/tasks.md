@@ -31,6 +31,6 @@
 
 ## 6. e2e + ship
 
-- [ ] 6.1 Local e2e against `pnpm run dev:docker:up` (per `rembric-smoke-tests`): drive `memory.compare` with a read-only token (rejected), a forged `sessionId` on `memory.save` (rejected), and a `memory.timeline` that must not cross scope.
+- [x] 6.1 Local e2e against `pnpm run dev:docker:up` (per `rembric-smoke-tests`): drive `memory.compare` with a read-only token (rejected), a forged `sessionId` on `memory.save` (rejected), and a `memory.timeline` that must not cross scope.
 - [x] 6.2 Full `pnpm test` green (pre-push). Do NOT bypass hooks.
-- [ ] 6.3 Conventional commits, one per concern where practical: `fix(mcp): classify memory.compare as a write`, `fix(mcp): validate explicit sessionId ownership/project/soft-delete`, `fix(mcp): scope-filter memory.timeline session neighbors`. Open a PR (title + body in English).
+- [x] 6.3 Conventional commits, one per concern where practical: `fix(mcp): classify memory.compare as a write`, `fix(mcp): validate explicit sessionId ownership/project/soft-delete`, `fix(mcp): scope-filter memory.timeline session neighbors`. Open a PR (title + body in English).
