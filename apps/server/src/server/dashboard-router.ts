@@ -6,7 +6,11 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
-import { DEFAULT_MIN_INTERVAL_MS, type ConsolidationRunSummary } from '../consolidation/index.js';
+import {
+  DEFAULT_MIN_INTERVAL_MS,
+  type ConsolidationRunSummary,
+  type SkippedRow,
+} from '../consolidation/index.js';
 import { createAssetsMiddleware } from '../dashboard/assets.js';
 import {
   btn,
@@ -82,8 +86,8 @@ export interface DashboardDeps {
   /** Forced sweep across all scopes (same lambda as the admin endpoint). */
   triggerSweep: () => ConsolidationRunSummary;
   /** Bound consolidation undo lambdas (wired in bootstrap). */
-  undoRun: (runId: string) => void;
-  undoOp: (opId: string) => void;
+  undoRun: (runId: string) => { reverted: string[]; skipped: SkippedRow[] };
+  undoOp: (opId: string) => { reverted: string; skipped: SkippedRow[] };
   /** Resolved judgment aging thresholds (from `config.judgments`). */
   orphanAfterMs: number;
   orphanDeadlineMs: number;

@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 
-import type { ConsolidationRunSummary } from '../consolidation/index.js';
+import type { ConsolidationRunSummary, SkippedRow } from '../consolidation/index.js';
 import { NotUndoableError, PurgedRowMissingError } from '../consolidation/operations.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { SessionsService } from '../services/sessions.js';
@@ -28,8 +28,8 @@ export interface ConsolidationDeps {
   /** Forced sweep across all scopes (same lambda as the admin endpoint). */
   triggerSweep: () => ConsolidationRunSummary;
   /** Bound consolidation undo lambdas (wired in bootstrap). */
-  undoRun: (runId: string) => void;
-  undoOp: (opId: string) => void;
+  undoRun: (runId: string) => { reverted: string[]; skipped: SkippedRow[] };
+  undoOp: (opId: string) => { reverted: string; skipped: SkippedRow[] };
 }
 
 /** `project:<id>` → project slug when the project still exists; raw value otherwise. */
@@ -345,17 +345,48 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     return flashErrorPage(c, deps.sessions, message, view, 400);
   }
 
+  function renderPartialUndo(c: Context, runId: string, skipped: SkippedRow[]): Response {
+    const view = { title: 'Consolidation', activeNav: 'consolidation' } as const;
+    const rows = skipped.map(
+      (s) =>
+        html`<li>
+          <code>${shortId(s.id)}</code> — topic <code>${s.topicKey}</code> is now held by
+          <code>${shortId(s.occupiedBy)}</code>
+        </li>`,
+    );
+    return c.html(
+      renderPage(
+        c,
+        deps.sessions,
+        html`${flash({
+            tone: 'warn',
+            label: 'PARTIAL UNDO',
+            body: html`${skipped.length} row(s) were not reactivated — a newer memory now owns their
+            topic slot. The rest of the undo was applied.`,
+          })}
+          <ul>
+            ${rows}
+          </ul>
+          <p>${backLink({ href: `/dashboard/consolidation/${runId}`, label: 'Back to run' })}</p>`,
+        view,
+      ),
+      200,
+    );
+  }
+
   app.post('/:id/undo', async (c) => {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
     const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'run.undo');
     if (form instanceof Response) return form;
     const id = c.req.param('id');
+    let result: { reverted: string[]; skipped: SkippedRow[] };
     try {
-      deps.undoRun(id);
+      result = deps.undoRun(id);
     } catch (err) {
       return renderUndoError(c, err);
     }
+    if (result.skipped.length > 0) return renderPartialUndo(c, id, result.skipped);
     return c.redirect(`/dashboard/consolidation/${id}`);
   });
 
@@ -366,12 +397,15 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     if (form instanceof Response) return form;
     const opId = c.req.param('opId');
     const op = deps.repos.consolidation.adminGetOp(opId);
+    const runId = op?.runId ?? '';
+    let result: { reverted: string; skipped: SkippedRow[] };
     try {
-      deps.undoOp(opId);
+      result = deps.undoOp(opId);
     } catch (err) {
       return renderUndoError(c, err);
     }
-    return c.redirect(`/dashboard/consolidation/${op?.runId ?? ''}`);
+    if (result.skipped.length > 0) return renderPartialUndo(c, runId, result.skipped);
+    return c.redirect(`/dashboard/consolidation/${runId}`);
   });
 
   return app;

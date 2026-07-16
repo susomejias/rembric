@@ -20,6 +20,42 @@ import { type ConsolidationOpType } from '../db/schema/consolidation.js';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
 
+/** A row an undo declined to reactivate because its topic slot is taken. */
+export interface SkippedRow {
+  id: string;
+  topicKey: string;
+  occupiedBy: string;
+}
+
+export interface UndoResult {
+  reverted: string;
+  skipped: SkippedRow[];
+}
+
+/**
+ * A memory carrying a `topic_key` may be reactivated by undo only if its
+ * `(scope, project_id, topic_key)` slot is free; a newer save may have claimed
+ * it. Returns the id of the occupying active row (different from `row`), or
+ * null when the slot is free (or the row has no topic_key).
+ */
+function topicSlotOccupiedBy(
+  repos: ConsolidationDeps,
+  row: {
+    id: string;
+    scope: 'global' | 'project';
+    projectId: string | null;
+    topicKey: string | null;
+  },
+): string | null {
+  if (!row.topicKey) return null;
+  const active = repos.memory.findActiveByTopicKey({
+    scope: row.scope,
+    projectId: row.projectId,
+    topicKey: row.topicKey,
+  });
+  return active && active.id !== row.id ? active.id : null;
+}
+
 export interface DecayOpInput {
   runId: string;
   ids: string[];
@@ -115,7 +151,7 @@ export class NotUndoableError extends Error {
  * Throws `PurgedRowMissingError` when rows referenced by the op have been
  * physically removed; throws `NotUndoableError` for terminal purge ops.
  */
-export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: string): void {
+export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: string): UndoResult {
   const op = repos.consolidation.findOpById(opId);
   if (!op) throw new Error(`undoOp: ${opId} not found`);
   if (op.revertedAt) throw new Error(`undoOp: ${opId} already reverted`);
@@ -139,15 +175,26 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
   }
 
   const now = new Date();
+  const skipped: SkippedRow[] = [];
 
   tx.transaction(() => {
-    if (op.opType === 'merge' || op.opType === 'supersede') {
-      repos.memory.reactivate(op.affectedIds);
+    if (op.opType === 'merge' || op.opType === 'supersede' || op.opType === 'decay') {
+      // Reactivate only rows whose topic_key slot is still free — a later save
+      // may have claimed it, and two active rows in one slot would break
+      // topic_key convergence (the UNIQUE index would also reject it).
+      const reactivatable: string[] = [];
+      for (const row of repos.memory.unsafeGetByIds(op.affectedIds)) {
+        const occupiedBy = topicSlotOccupiedBy(repos, row);
+        if (occupiedBy && row.topicKey) {
+          skipped.push({ id: row.id, topicKey: row.topicKey, occupiedBy });
+        } else {
+          reactivatable.push(row.id);
+        }
+      }
+      repos.memory.reactivate(reactivatable);
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
       }
-    } else if (op.opType === 'decay') {
-      repos.memory.reactivate(op.affectedIds);
     } else if (op.opType === 'orphan_promote' && op.createdId) {
       // createdId carries the promoted relation's judgment_id. Undo a
       // 'supersedes' verdict by reactivating the target and stripping it
@@ -155,7 +202,13 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       const rel = repos.relations.findByJudgmentId(op.createdId);
       if (rel) {
         if (rel.relation === 'supersedes' && rel.status === 'judged') {
-          repos.memory.reactivateOne(rel.targetId);
+          const [targetRow] = repos.memory.unsafeGetByIds([rel.targetId]);
+          const occupiedBy = targetRow ? topicSlotOccupiedBy(repos, targetRow) : null;
+          if (occupiedBy && targetRow?.topicKey) {
+            skipped.push({ id: targetRow.id, topicKey: targetRow.topicKey, occupiedBy });
+          } else {
+            repos.memory.reactivateOne(rel.targetId);
+          }
           const replaces = repos.memory.findReplaces(rel.sourceId);
           if (replaces) {
             repos.memory.setReplaces(
@@ -170,21 +223,25 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
     repos.consolidation.markReverted(opId, now);
   });
+
+  return { reverted: opId, skipped };
 }
 
 export function undoRun(
   repos: ConsolidationDeps,
   tx: TransactionRunner,
   runId: string,
-): { reverted: string[] } {
+): { reverted: string[]; skipped: SkippedRow[] } {
   const ops = repos.consolidation.listActiveOps(runId);
   const reverted: string[] = [];
+  const skipped: SkippedRow[] = [];
   // Reverse order so dependent ops unwind cleanly.
   for (const op of [...ops].reverse()) {
-    undoOp(repos, tx, op.id);
+    const result = undoOp(repos, tx, op.id);
     reverted.push(op.id);
+    skipped.push(...result.skipped);
   }
-  return { reverted };
+  return { reverted, skipped };
 }
 
 export type { ConsolidationOpType };
