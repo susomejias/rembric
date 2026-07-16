@@ -175,6 +175,13 @@ export class MemoryService {
         }
       }
 
+      // Supersede the prior row BEFORE inserting the new active row: the
+      // UNIQUE partial index on the active-topic slot (migration 0018) would
+      // otherwise reject the insert while both rows are momentarily active.
+      if (supersededByTopicKey) {
+        this.repos.memory.markSuperseded(supersededByTopicKey.id);
+      }
+
       const inserted = this.repos.memory.insert({
         id,
         scope: scope.kind === 'global' ? 'global' : 'project',
@@ -193,10 +200,6 @@ export class MemoryService {
       });
       if (!inserted) {
         throw new DomainError('conflict', 'memory.save: insert did not return a row');
-      }
-
-      if (supersededByTopicKey) {
-        this.repos.memory.markSuperseded(supersededByTopicKey.id);
       }
 
       return { memory: inserted, supersededByTopicKey };

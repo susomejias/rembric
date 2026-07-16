@@ -87,7 +87,11 @@ export const memory = sqliteTable(
     sessionIdx: index('memory_session_idx').on(table.sessionId),
     // Partial index for topic_key resolution — see migration 0005 for
     // the WHERE clause (Drizzle's index helper doesn't expose the
-    // `WHERE` syntax, so the index DDL lives in raw SQL).
+    // `WHERE` syntax, so the index DDL lives in raw SQL). Convergence (at
+    // most one active row per (scope, project_id, topic_key)) is enforced
+    // by the UNIQUE index `memory_topic_key_active_uidx` (migration 0018),
+    // keyed on COALESCE(project_id,'') so global slots (project_id NULL,
+    // which SQLite treats as distinct in a UNIQUE index) are constrained too.
   }),
 );
 

@@ -146,6 +146,108 @@ describe('undoOp / undoRun', () => {
   });
 });
 
+describe('undoOp preserves topic_key convergence', () => {
+  it('does not reactivate a decayed row whose topic slot a newer save claimed', () => {
+    // R owns topic K, then decays; a later save N claims the slot.
+    const r = memoryService.saveWithTopicKey(
+      { type: 'user', title: 'r', content: 'r', topicKey: 'k' },
+      projectScope(projectId),
+    ).memory;
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: [r.id],
+      reasoning: 'stale',
+    });
+    const n = memoryService.saveWithTopicKey(
+      { type: 'user', title: 'n', content: 'n', topicKey: 'k' },
+      projectScope(projectId),
+    ).memory;
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(memoryService.unsafeGetById(n.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(r.id)!.status).toBe('archived');
+    expect(result.skipped).toEqual([{ id: r.id, topicKey: 'k', occupiedBy: n.id }]);
+    // The op is still marked reverted (undone to the extent convergence allows).
+    const op = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.id, opId))
+      .get();
+    expect(op?.revertedAt).not.toBeNull();
+  });
+
+  it('reactivates normally when the topic slot is free (no regression)', () => {
+    const r = memoryService.saveWithTopicKey(
+      { type: 'user', title: 'r', content: 'r', topicKey: 'free' },
+      projectScope(projectId),
+    ).memory;
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: [r.id],
+      reasoning: 'stale',
+    });
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(memoryService.unsafeGetById(r.id)!.status).toBe('active');
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('orphan_promote undo skips a target whose topic slot is occupied but still resets the relation', () => {
+    // Target T owns topic K; a supersedes relation is orphan-promoted (T
+    // superseded). A later save N claims the slot. Undo must not resurrect T.
+    const source = memoryService.save(
+      { type: 'user', title: 'src', content: 'src' },
+      projectScope(projectId),
+    );
+    const target = memoryService.saveWithTopicKey(
+      { type: 'user', title: 'tgt', content: 'tgt', topicKey: 'k' },
+      projectScope(projectId),
+    ).memory;
+    const pending = repos.relations.insert({
+      id: `rel-${target.id}`,
+      judgmentId: `jmt-${target.id}`,
+      sourceId: source.id,
+      targetId: target.id,
+      relation: 'supersedes',
+      status: 'judged',
+      confidence: 1,
+      markedByKind: 'agent',
+      markedByActor: 'test',
+      judgedAt: clock.value,
+      createdAt: clock.value,
+    })!;
+    repos.memory.markSuperseded(target.id);
+    repos.memory.setReplaces(source.id, [target.id]);
+    const opId = `op-orphan-${target.id}`;
+    repos.consolidation.insertOp({
+      id: opId,
+      runId,
+      opType: 'orphan_promote',
+      affectedIds: [source.id, target.id],
+      createdId: pending.judgmentId,
+      reasoning: 'supersedes: promoted',
+      appliedAt: clock.value,
+    });
+
+    // A newer save claims topic K after the promotion.
+    const n = memoryService.saveWithTopicKey(
+      { type: 'user', title: 'n', content: 'n', topicKey: 'k' },
+      projectScope(projectId),
+    ).memory;
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(memoryService.unsafeGetById(n.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(target.id)!.status).toBe('superseded');
+    expect(result.skipped.map((s) => s.id)).toContain(target.id);
+    // Relation still reset to pending; source's replaces[] still stripped of T.
+    expect(repos.relations.findByJudgmentId(pending.judgmentId)?.status).toBe('pending');
+    expect(memoryService.unsafeGetById(source.id)!.replaces).not.toContain(target.id);
+  });
+});
+
 describe('undoOp with purged rows', () => {
   it('blocks undo with PurgedRowMissingError listing the missing ids', () => {
     const c = memoryService.save(
