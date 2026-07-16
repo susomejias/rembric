@@ -16,6 +16,7 @@ import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
+  assertExplicitSessionOwned,
   clamp,
   requireScope,
   resolveEffectiveScope,
@@ -418,7 +419,10 @@ function resolveActiveSessionId(
   projectId: string | null,
   explicit?: string,
 ): string | null {
-  if (explicit) return explicit;
+  if (explicit) {
+    if (deps.agentSessions) assertExplicitSessionOwned(deps.agentSessions, explicit, projectId);
+    return explicit;
+  }
   const ctx = getRequestContext();
   if (ctx.mcpSessionId && deps.router) {
     const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
@@ -504,11 +508,16 @@ async function handleSave(
     return errToMcp(err);
   }
 
-  const resolvedSessionId = resolveActiveSessionId(
-    deps,
-    scope.kind === 'project' ? scope.projectId : null,
-    args.sessionId,
-  );
+  let resolvedSessionId: string | null;
+  try {
+    resolvedSessionId = resolveActiveSessionId(
+      deps,
+      scope.kind === 'project' ? scope.projectId : null,
+      args.sessionId,
+    );
+  } catch (err) {
+    return errToMcp(err);
+  }
   const input: SaveMemoryInput = {
     type: args.type,
     title: args.title,
@@ -990,7 +999,12 @@ async function handleTimeline(
   const t = target.memory;
 
   if (t.sessionId) {
+    const neighborScope = {
+      scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+    };
     const beforeRows = deps.repos.memory.sessionNeighbors({
+      ...neighborScope,
       sessionId: t.sessionId,
       pivotCreatedAt: t.createdAt,
       pivotId: t.id,
@@ -998,6 +1012,7 @@ async function handleTimeline(
       limit: before,
     });
     const afterRows = deps.repos.memory.sessionNeighbors({
+      ...neighborScope,
       sessionId: t.sessionId,
       pivotCreatedAt: t.createdAt,
       pivotId: t.id,

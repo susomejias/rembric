@@ -10,6 +10,7 @@ import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
+  assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
@@ -115,11 +116,15 @@ async function handleSavePrompt(
   } catch (err) {
     return errToMcp(err);
   }
-  const sessionId = resolveSessionId(
-    deps,
-    args.sessionId,
-    scope.kind === 'project' ? scope.projectId : null,
-  );
+  const promptProjectId = scope.kind === 'project' ? scope.projectId : null;
+  let sessionId: string | null;
+  try {
+    if (args.sessionId)
+      assertExplicitSessionOwned(deps.agentSessions, args.sessionId, promptProjectId);
+    sessionId = resolveSessionId(deps, args.sessionId, promptProjectId);
+  } catch (err) {
+    return errToMcp(err);
+  }
   try {
     const row = deps.prompts.save({
       content: args.content,

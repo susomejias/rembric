@@ -163,6 +163,59 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     expect(payload.code).toBe('forbidden');
     expect(repos.relations.findByJudgmentId(pending.judgmentId)?.status).toBe('pending');
   });
+
+  it('memory.compare rejects a read:* token with forbidden; no relation is written and no status flips', async () => {
+    const a = memory.save(
+      { type: 'project', title: 'a', content: 'a', topicKey: 'k' },
+      { kind: 'project', projectId: projectA.id },
+    );
+    const b = memory.save(
+      { type: 'project', title: 'b', content: 'b' },
+      { kind: 'project', projectId: projectA.id },
+    );
+
+    const r = await runWithContext(
+      ctxFor('read:*', { project: projectA, requestedSlug: projectA.slug }),
+      () =>
+        relationsHandlers.compare({
+          memoryIdA: a.id,
+          memoryIdB: b.id,
+          relation: 'supersedes',
+          confidence: 1,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('forbidden');
+    // The supersede side effect must NOT have fired: b stays active, a keeps its head status.
+    expect(memory.get(b.id, { kind: 'project', projectId: projectA.id })?.memory.status).toBe(
+      'active',
+    );
+  });
+
+  it('memory.compare succeeds for a write-capable token (records a judged relation)', async () => {
+    const a = memory.save(
+      { type: 'project', title: 'a2', content: 'a2' },
+      { kind: 'project', projectId: projectA.id },
+    );
+    const b = memory.save(
+      { type: 'project', title: 'b2', content: 'b2' },
+      { kind: 'project', projectId: projectA.id },
+    );
+    const r = await runWithContext(
+      ctxFor('*', { project: projectA, requestedSlug: projectA.slug }),
+      () =>
+        relationsHandlers.compare({
+          memoryIdA: a.id,
+          memoryIdB: b.id,
+          relation: 'related',
+          confidence: 0.9,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(false);
+    expect(payload.status).toBe('judged');
+  });
 });
 
 describe('project-restricted token cannot read or write outside its project', () => {

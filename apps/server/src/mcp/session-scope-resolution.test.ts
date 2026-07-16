@@ -527,3 +527,181 @@ describe('memory.save_prompt — refine flow via MCP', () => {
     expect(payload.code).toBe('prompt_already_deleted');
   });
 });
+
+describe('explicit sessionId on write-attaching tools is validated', () => {
+  it('memory.save rejects a sessionId owned by a different token (session_not_found)', async () => {
+    const project = projects.create({ slug: 'own-a', displayName: null });
+    const foreign = agentSessions.start({
+      tokenId: otherToken.id,
+      projectId: project.id,
+      agent: 'test',
+    });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project, requestedSlug: project.slug }),
+      () =>
+        handlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 't',
+          content: 'c',
+          sessionId: foreign.id,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('session_not_found');
+  });
+
+  it('memory.save rejects a sessionId from a different project (session_not_found)', async () => {
+    const projectA = projects.create({ slug: 'own-pa', displayName: null });
+    const projectB = projects.create({ slug: 'own-pb', displayName: null });
+    const inB = agentSessions.start({
+      tokenId: adminToken.id,
+      projectId: projectB.id,
+      agent: 'test',
+    });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project: projectA, requestedSlug: projectA.slug }),
+      () =>
+        handlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 't',
+          content: 'c',
+          sessionId: inB.id,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('session_not_found');
+  });
+
+  it('memory.save rejects a self-owned soft-deleted sessionId (session_deleted)', async () => {
+    const project = projects.create({ slug: 'own-del', displayName: null });
+    const s = agentSessions.start({
+      tokenId: adminToken.id,
+      projectId: project.id,
+      agent: 'test',
+    });
+    agentSessions.softDelete(s.id, { tokenId: adminToken.id });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project, requestedSlug: project.slug }),
+      () =>
+        handlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 't',
+          content: 'c',
+          sessionId: s.id,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('session_deleted');
+  });
+
+  it('memory.save attaches a valid own in-scope sessionId', async () => {
+    const project = projects.create({ slug: 'own-ok', displayName: null });
+    const s = agentSessions.start({
+      tokenId: adminToken.id,
+      projectId: project.id,
+      agent: 'test',
+    });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project, requestedSlug: project.slug }),
+      () =>
+        handlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 't',
+          content: 'c',
+          sessionId: s.id,
+        }),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(false);
+    const saved = memory.get(payload.id as string, projectScope(project.id));
+    expect(saved?.memory.sessionId).toBe(s.id);
+  });
+
+  it('memory.save_prompt rejects a foreign-token sessionId (session_not_found)', async () => {
+    const project = projects.create({ slug: 'own-sp', displayName: null });
+    const foreign = agentSessions.start({
+      tokenId: otherToken.id,
+      projectId: project.id,
+      agent: 'test',
+    });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project, requestedSlug: project.slug }),
+      () =>
+        Promise.resolve(handlers.savePrompt({ content: 'c', title: 't', sessionId: foreign.id })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('session_not_found');
+  });
+});
+
+describe('memory.timeline neighbors are scope-filtered', () => {
+  it('does not return a same-session memory that lives in another scope', async () => {
+    const repos = createRepositories(db.handle.db);
+    const project = projects.create({ slug: 'tl-scope', displayName: null });
+    const session = agentSessions.start({
+      tokenId: adminToken.id,
+      projectId: project.id,
+      agent: 'test',
+    });
+    const base = 1_700_000_000_000;
+    // Target M in the project; a cross-scope neighbor G in GLOBAL, same session,
+    // created later so it WOULD be an "after" neighbor absent the scope filter.
+    repos.memory.insert({
+      id: 'tl-target',
+      scope: 'project',
+      projectId: project.id,
+      type: 'project',
+      title: 'target in project',
+      content: 'target in project',
+      tags: [],
+      status: 'active',
+      replaces: [],
+      createdAt: new Date(base),
+      lastSeenAt: new Date(base),
+      source: null,
+      sessionId: session.id,
+      topicKey: null,
+    });
+    repos.memory.insert({
+      id: 'tl-global-neighbor',
+      scope: 'global',
+      projectId: null,
+      type: 'reference',
+      title: 'GLOBAL neighbor leak',
+      content: 'GLOBAL neighbor leak',
+      tags: [],
+      status: 'active',
+      replaces: [],
+      createdAt: new Date(base + 60_000),
+      lastSeenAt: new Date(base + 60_000),
+      source: null,
+      sessionId: session.id,
+      topicKey: null,
+    });
+
+    const r = await runWithContext(
+      makeContext(adminToken, { project, requestedSlug: project.slug }),
+      () => Promise.resolve(handlers.timeline({ memoryId: 'tl-target' })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBe(false);
+    const ids = [
+      ...(payload.before as Array<{ id: string }>),
+      ...(payload.after as Array<{ id: string }>),
+    ].map((m) => m.id);
+    expect(ids).not.toContain('tl-global-neighbor');
+  });
+});

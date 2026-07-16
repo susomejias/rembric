@@ -129,6 +129,35 @@ export function resolveSessionId(
   return active?.id ?? null;
 }
 
+/**
+ * Validate a caller-supplied `sessionId` before a write is attached to it.
+ * The transport/active-session fallbacks resolve to a session the caller
+ * already owns within scope, but an explicit id is attacker-controlled: it
+ * must name a session owned by this token, in the effective project, and not
+ * soft-deleted. Foreign-token and cross-project ids are masked as
+ * `session_not_found` (so a caller cannot probe which ids exist elsewhere),
+ * matching the session-lifecycle tools' contract; a self-owned soft-deleted
+ * session is rejected as `session_deleted`.
+ */
+export function assertExplicitSessionOwned(
+  agentSessions: AgentSessionsService,
+  sessionId: string,
+  projectId: string | null,
+): void {
+  const ctx = getRequestContext();
+  const row = agentSessions.getById(sessionId);
+  if (!row || row.tokenId !== ctx.token.id || row.projectId !== projectId) {
+    throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+  }
+  if (row.deletedAt) {
+    throw new DomainError(
+      'session_deleted',
+      `session '${sessionId}' was soft-deleted at ${row.deletedAt.toISOString()}; ` +
+        `ask an operator to undelete it before attaching writes to it`,
+    );
+  }
+}
+
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.min(Math.max(n, lo), hi);
 }
