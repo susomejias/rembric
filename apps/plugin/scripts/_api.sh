@@ -28,6 +28,11 @@ rembric_parse_dotenv() {
     esac
     key="${key%"${key##*[![:space:]]}"}"
     val="${val#"${val%%[![:space:]]*}"}"
+    # rtrim: bash's [:space:] class includes \r, so this also strips a
+    # trailing CR from a CRLF-saved .rembric file — without it, a value
+    # with trailing whitespace or CRLF fails SLUG_RE and the hook silently
+    # no-ops while the JS bridge (which trims both sides) reads it fine.
+    val="${val%"${val##*[![:space:]]}"}"
     case "$val" in
       \"*\") val="${val#\"}"; val="${val%\"}" ;;
       \'*\') val="${val#\'}"; val="${val%\'}" ;;
@@ -160,8 +165,8 @@ rembric_compaction_summary_from_stdin_json() {
 }
 
 # Escape a string for embedding in a JSON value: backslashes, double quotes,
-# and control chars (\n \r \t). Good enough for transcripts captured from
-# hook stdin; not a general-purpose JSON encoder.
+# and control chars (\n \r \t plus the remaining C0 range). Good enough for
+# transcripts captured from hook stdin; not a general-purpose JSON encoder.
 rembric_json_escape() {
   local s="${1:-}"
   s="${s//\\/\\\\}"
@@ -169,5 +174,24 @@ rembric_json_escape() {
   s="${s//$'\n'/\\n}"
   s="${s//$'\r'/\\r}"
   s="${s//$'\t'/\\t}"
+  # JSON requires every U+0000-U+001F control char escaped, not just \n \r
+  # \t. A transcript containing e.g. an ANSI escape (\x1b, from pasted
+  # colored terminal output) would otherwise produce an invalid JSON body
+  # that the server's JSON.parse rejects outright — silently dropping the
+  # whole POST (session-end fallback summary, stop-sync turn, or
+  # pre-compact snapshot) for the rest of the session.
+  local i hex c
+  i=1
+  while [ "$i" -le 31 ]; do
+    case "$i" in 9 | 10 | 13)
+      i=$((i + 1))
+      continue
+      ;;
+    esac
+    hex=$(printf '%02x' "$i")
+    c=$(printf "\\x$hex")
+    s="${s//$c/\\u00$hex}"
+    i=$((i + 1))
+  done
   printf '%s' "$s"
 }

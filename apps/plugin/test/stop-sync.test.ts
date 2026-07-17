@@ -139,6 +139,37 @@ describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
     expect('final' in body).toBe(false);
   });
 
+  it('a torn trailing JSONL line does not discard the good lines before it (#260)', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = join(dir, 'torn.jsonl');
+    const goodLines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'please fix the bug' } }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: 'Fixed it, running tests now.' },
+      }),
+    ];
+    // A line torn mid-write (Stop hook racing the append, or a crash) —
+    // valid JSON up to a point, then cut off. jq errors on THIS line but
+    // has already streamed the two good lines above by the time it does.
+    const tornLine = '{"type":"user","message":{"content":"cut off mid-wri';
+    writeFileSync(transcriptPath, goodLines.join('\n') + '\n' + tornLine);
+
+    const out = await runStopSync(
+      JSON.stringify({ session_id: 'sess-torn', cwd: dir, transcript_path: transcriptPath }),
+    );
+    expect(out).toBe('');
+
+    await waitForRequest();
+    expect(requests).toHaveLength(1);
+    const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
+    // Before the fix, the bash wrapper's `|| out=""` discarded jq's partial
+    // output because jq exits non-zero on the parse error — the summary
+    // would have been empty instead of containing the two good lines.
+    expect(body.summary).toContain('please fix the bug');
+    expect(body.summary).toContain('Fixed it, running tests now.');
+  });
+
   it('returns almost immediately even when the server is slow to respond', async () => {
     writeRembricFile(dir, 'demo');
     const transcriptPath = writeTranscript(dir, 'transcript.jsonl');
