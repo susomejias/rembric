@@ -5,7 +5,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import type { MemoryScope } from '../db/schema/memory.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
@@ -100,8 +100,6 @@ export interface CreateMcpServerOptions {
     content: string,
     scope: MemoryScope,
     projectId: string | null,
-    status: MemoryStatus,
-    type: MemoryType,
   ) => Promise<boolean>;
   router: SessionRouter;
   repos: Repositories;

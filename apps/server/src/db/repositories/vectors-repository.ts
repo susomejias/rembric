@@ -136,16 +136,16 @@ export class VectorsRepository {
     return row?.v ?? 0;
   }
 
-  insertEmbedding(
-    memoryId: string,
-    embedding: Buffer,
-    partitionKey: string,
-    status: MemoryStatus,
-    type: MemoryType,
-  ): void {
+  /**
+   * status/type are read from `memory` in this same statement rather than
+   * accepted as parameters, so a status change racing an in-flight embed
+   * (e.g. a topic_key supersede) can never be written stale.
+   */
+  insertEmbedding(memoryId: string, embedding: Buffer, partitionKey: string): void {
     this.db.run(
       sql`INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding)
-          VALUES (${memoryId}, ${partitionKey}, ${status}, ${type}, ${embedding})`,
+          SELECT ${memoryId}, ${partitionKey}, m.status, m.type, ${embedding}
+          FROM memory m WHERE m.id = ${memoryId}`,
     );
   }
 

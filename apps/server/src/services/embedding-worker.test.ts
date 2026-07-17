@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
@@ -83,15 +83,7 @@ describe('EmbeddingWorker', () => {
       { type: 'feedback', title: 'Inline row', content: 'inline row' },
       SCOPE_GLOBAL,
     );
-    const ok = await worker.embedNow(
-      row.id,
-      row.title,
-      row.content,
-      row.scope,
-      row.projectId,
-      row.status,
-      row.type,
-    );
+    const ok = await worker.embedNow(row.id, row.title, row.content, row.scope, row.projectId);
     expect(ok).toBe(true);
     expect(vecCount()).toBe(1);
     // The drain has nothing left for this row.
@@ -112,5 +104,49 @@ describe('EmbeddingWorker', () => {
     const retry = await worker.processBatch();
     expect(retry.processed).toBe(1);
     expect(vecCount()).toBe(2);
+  });
+});
+
+describe('EmbeddingWorker — possiblyPending gate (#267)', () => {
+  it('skips the backlog scan once a call has confirmed the queue is empty', async () => {
+    const repos = createRepositories(db.handle.db);
+    const spy = vi.spyOn(repos.vectors, 'findMissingEmbeddings');
+    const gated = new EmbeddingWorker({ repos, embedder, batchSize: 50 });
+
+    await gated.processBatch(); // first call: possiblyPending starts true → scans, finds 0
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    await gated.processBatch(); // drained → should skip the query entirely
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes scanning after embedNow records a failure', async () => {
+    const repos = createRepositories(db.handle.db);
+    const memSvc = new MemoryService(repos, db.handle.db);
+    const spy = vi.spyOn(repos.vectors, 'findMissingEmbeddings');
+    const gated = new EmbeddingWorker({ repos, embedder, batchSize: 50 });
+
+    await gated.processBatch(); // drains to empty, flag flips false
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    const row = memSvc.save({ type: 'feedback', title: 'x', content: 'x' }, SCOPE_GLOBAL);
+    embedder.failOnce(new Error('inference blip'));
+    const ok = await gated.embedNow(row.id, row.title, row.content, row.scope, row.projectId);
+    expect(ok).toBe(false);
+
+    await gated.processBatch(); // failure should have flipped possiblyPending back to true
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('force bypasses the gate even when drained', async () => {
+    const repos = createRepositories(db.handle.db);
+    const spy = vi.spyOn(repos.vectors, 'findMissingEmbeddings');
+    const gated = new EmbeddingWorker({ repos, embedder, batchSize: 50 });
+
+    await gated.processBatch();
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    await gated.processBatch({ force: true });
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });

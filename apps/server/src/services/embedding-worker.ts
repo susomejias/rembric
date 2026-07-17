@@ -1,6 +1,6 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
-import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import type { MemoryScope } from '../db/schema/memory.js';
 import { type Embedder, embeddingInput } from '../embeddings/embedder.js';
 
 /**
@@ -26,6 +26,13 @@ export interface EmbeddingWorkerOptions {
 export class EmbeddingWorker {
   private readonly batchSize: number;
   private hadWork = false;
+  // The only inserter into `memory` (memory.save) always calls embedNow
+  // inline right after its transaction commits, so in steady state the
+  // backlog is empty. True by default (covers first-boot backfill and
+  // crash recovery); flipped false once a scan confirms zero pending, and
+  // back to true by embedNow's own failure path. Lets processBatch skip
+  // the full-table scan once drained, instead of re-running it every tick.
+  private possiblyPending = true;
 
   constructor(private readonly opts: EmbeddingWorkerOptions) {
     this.batchSize = opts.batchSize ?? 25;
@@ -44,8 +51,6 @@ export class EmbeddingWorker {
     content: string,
     scope: MemoryScope,
     projectId: string | null,
-    status: MemoryStatus,
-    type: MemoryType,
   ): Promise<boolean> {
     try {
       const vector = await this.opts.embedder.embed(embeddingInput(title, content));
@@ -53,13 +58,12 @@ export class EmbeddingWorker {
         memoryId,
         Buffer.from(vector.buffer),
         partitionKeyFor(scope, projectId),
-        status,
-        type,
       );
       return true;
     } catch (err) {
       // Benign race with the drain (row already embedded) or an inference
       // failure — never break the save; the drain retries the row.
+      this.possiblyPending = true;
       console.error(
         'embedNow failed (drain will retry):',
         err instanceof Error ? err.message : String(err),
@@ -70,11 +74,20 @@ export class EmbeddingWorker {
 
   /**
    * Process up to `batchSize` memories without an embedding. Returns the
-   * number of embeddings successfully inserted.
+   * number of embeddings successfully inserted. Skips the backlog scan
+   * entirely when a prior call already confirmed the queue is empty,
+   * unless `force` is set (used by a slow periodic safety-net timer).
    */
-  async processBatch(): Promise<{ processed: number; failed: number }> {
+  async processBatch(
+    opts: { force?: boolean } = {},
+  ): Promise<{ processed: number; failed: number }> {
+    if (!opts.force && !this.possiblyPending) {
+      return { processed: 0, failed: 0 };
+    }
+
     const pending = this.opts.repos.vectors.findMissingEmbeddings(this.batchSize);
     if (pending.length === 0) {
+      this.possiblyPending = false;
       if (this.hadWork) {
         this.hadWork = false;
         this.opts.onDrained?.();
@@ -82,6 +95,7 @@ export class EmbeddingWorker {
       return { processed: 0, failed: 0 };
     }
     this.hadWork = true;
+    this.possiblyPending = true; // more may remain past this batch
 
     let processed = 0;
     let failed = 0;
@@ -93,8 +107,6 @@ export class EmbeddingWorker {
           row.id,
           Buffer.from(vector.buffer),
           partitionKeyFor(row.scope, row.projectId),
-          row.status,
-          row.type,
         );
         processed++;
       } catch {

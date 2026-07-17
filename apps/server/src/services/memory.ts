@@ -355,7 +355,10 @@ export class MemoryService {
     const ordered: Memory[] = [];
     for (const id of ids) {
       const m = byId.get(id);
-      if (m) ordered.push(m);
+      // The dense branch's candidate ids come from memory_vec.status, which
+      // is derived asynchronously — belt-and-suspenders against any future
+      // staleness there: re-check the live row's status before returning it.
+      if (m && m.status === status) ordered.push(m);
     }
     // Passive callers pass touch:false so per-turn recall doesn't inflate the recency signal.
     if (opts.touch !== false) this.repos.memory.touchLastSeenBatch(ids, this.now());
