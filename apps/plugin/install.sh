@@ -530,6 +530,21 @@ bring_up() {
   else
     docker compose pull 2>/dev/null || say "  ${DIM}(pull skipped — using local image)${RESET}"
   fi
+  # The image runs as non-root UID 10001 and can't chown itself; on a rootful
+  # Linux Docker host, `up -d` would otherwise auto-create a missing `./data`
+  # bind-mount source as root:root, leaving the server unable to open its
+  # SQLite DB. Prefer chown-to-the-exact-uid (only root/CAP_CHOWN can do
+  # this; harmless no-op if already correct) — it's the docs/docker.md
+  # -sanctioned remedy and doesn't grant every local user on the host
+  # read/write on the memory DB the way a blanket chmod 0777 would. Only
+  # fall back to world-writable when chown isn't possible (no root), and
+  # say so explicitly rather than silently weakening permissions.
+  mkdir -p ./data
+  if ! chown 10001:10001 ./data 2>/dev/null; then
+    chmod 0777 ./data
+    say "  ${WARN}Could not chown ./data to the container's uid (10001) — no root${RESET}; made it world-writable so the server can open its DB."
+    say "  ${DIM}For tighter permissions: sudo chown -R 10001:10001 ./data${RESET}"
+  fi
   # Capture so a daemon error (e.g. a name conflict) becomes a friendly message
   # instead of a raw dump; `up -d` output is short, so we re-print it on success.
   # `if x=$(…); then` keeps the capture set -e-safe (a bare `x=$(failing)` aborts).
@@ -550,6 +565,7 @@ bring_up() {
       else
         say "  ${DANGER}The container started but /healthz did not report ok within ~30s${RESET} — it may still be booting, or it crashed."
         say "  Inspect with: ${BOLD}docker compose logs${RESET} — then retry: ${BOLD}docker compose up -d${RESET}"
+        say "  ${DIM}If the logs show it can't open the database, ./data's permissions are the likely cause: sudo chown -R 10001:10001 ./data${RESET}"
       fi
     fi
   else
