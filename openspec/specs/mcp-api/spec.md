@@ -928,7 +928,7 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register a new MCP tool `memory.sea
 
 Input schema:
 
-- `query?: string` — free-text query; when provided, the server SHALL use the `prompts_fts` virtual table via `MATCH` against `content + tags`.
+- `query?: string` — free-text query; when provided, the server SHALL sanitize it (the same sanitizer used by `memory.search`'s hybrid retrieval — see the `memory` capability) and use the `prompts_fts` virtual table via `MATCH` against `content + tags`. A query that sanitizes to nothing (e.g. pure punctuation) SHALL be treated as no query (recency fallback) rather than raising an error.
 - `sessionId?: string` — restrict to prompts whose `session_id = <sessionId>`.
 - `agent?: string` — restrict to prompts whose `agent = <agent>`.
 - `includeDeleted?: boolean` — default `false`; when `true`, soft-deleted prompts SHALL be included.
@@ -997,6 +997,18 @@ The tool SHALL resolve effective project via the existing `scopeFromContext` pre
 - **GIVEN** a token connected to `/mcp/foo` AND a prompt belonging to project `bar`
 - **WHEN** the agent calls `memory.search_prompts({ query: "anything matching bar" })`
 - **THEN** the `bar` prompt SHALL NOT appear in the response
+
+#### Scenario: `memory.search_prompts` does not raise an FTS5 syntax error on ordinary punctuation
+
+- **GIVEN** a prompt in scope with content `"what's the deploy plan?"`
+- **WHEN** the agent calls `memory.search_prompts({ query: "what's the deploy plan?" })`
+- **THEN** the call SHALL succeed and SHALL NOT raise an FTS5 syntax error
+- **AND** the response SHALL include the matching prompt
+
+#### Scenario: A query that sanitizes to nothing falls back to recency
+
+- **WHEN** the agent calls `memory.search_prompts({ query: "??? !!!" })`
+- **THEN** the call SHALL succeed and return the most recent in-scope prompts, as if no query had been given
 
 ### Requirement: The MCP server MUST expose a read-only `memory.about` update-guidance tool
 
