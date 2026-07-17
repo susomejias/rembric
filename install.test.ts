@@ -7,7 +7,6 @@ import {
   existsSync,
   mkdirSync,
   chmodSync,
-  chownSync,
   statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -568,6 +567,7 @@ describe('server bring-up (--up) with a stubbed docker', () => {
     composeUp: 'ok' | 'conflict',
     healthz: 'healthy' | 'down' = 'healthy',
     chown: 'ok' | 'fail' = 'ok',
+    statUid?: string,
   ): string {
     const d = mkdtempSync(join(tmpdir(), 'rembric-fakebin-'));
     const up =
@@ -598,6 +598,14 @@ esac
     // independently of whether the test runner itself happens to be root.
     writeFileSync(join(d, 'chown'), chown === 'ok' ? '#!/bin/sh\nexit 0\n' : '#!/bin/sh\nexit 1\n');
     chmodSync(join(d, 'chown'), 0o755);
+    // When provided, stub `stat` to report this owning uid — lets a test
+    // simulate an already-10001-owned ./data without needing root to
+    // actually chown it (CI runs non-root). Ignores args so both the GNU
+    // `stat -c '%u'` and BSD `stat -f '%u'` forms return it.
+    if (statUid !== undefined) {
+      writeFileSync(join(d, 'stat'), `#!/bin/sh\necho ${statUid}\nexit 0\n`);
+      chmodSync(join(d, 'stat'), 0o755);
+    }
     return d;
   }
 
@@ -699,18 +707,18 @@ esac
     // of whether ./data is already fine (e.g. fixed by a prior manual `sudo
     // chown`, or working transparently under Docker Desktop) — that failure
     // alone must never cause a re-run to downgrade an already-correct,
-    // already-working install to world-writable.
+    // already-working install to world-writable. `stat` is stubbed to report
+    // uid 10001 (we can't really chown to 10001 without root, and CI runs
+    // non-root), so this exercises the installer's decision, not the syscall.
     const dataDir = join(dir, 'data');
     mkdirSync(dataDir, { mode: 0o750 });
-    chownSync(dataDir, 10001, 10001);
-    const bin = fakeDockerDir('ok', 'healthy', 'fail');
+    const bin = fakeDockerDir('ok', 'healthy', 'fail', '10001');
     const { code, out } = run(['--server', '--action=install', '--up'], {
       cwd: dir,
       path: `${bin}:${process.env.PATH}`,
     });
     rmSync(bin, { recursive: true, force: true });
     expect(code).toBe(0);
-    expect(statSync(dataDir).uid).toBe(10001);
     expect(statSync(dataDir).mode & 0o777).toBe(0o750); // unchanged, NOT widened to 0777
     expect(out).not.toContain('Could not chown');
     expect(out).not.toContain('world-writable');
