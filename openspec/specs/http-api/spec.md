@@ -90,7 +90,7 @@ The HTTP path is used by non-interactive writers (bash / Python / opencode hook 
 
 Both truncations are silent at the HTTP boundary (response status remains `200 OK` and the truncated values are echoed back) — the summary suffix is the operator-visible signal. (The MCP path, `memory.session_summary`, is the interactive counterpart and CONTINUES to reject over-cap input so the agent can retry.)
 
-The server SHALL resolve the session by `(token_id, id)` — token-mismatch SHALL surface as `session_not_found`. When the resolved row's `deleted_at IS NOT NULL`, the call SHALL be rejected with `session_deleted`.
+The endpoint SHALL first check that the connected token's scope authorizes `write` on the connected project (the same `isAuthorized` check the sibling `POST /api/<slug>/sessions` and `/api/<slug>/memory/recall` routes apply), rejecting with `403 forbidden` before touching the session row. The server SHALL then resolve the session by `(token_id, project_id, id)` — a token-id mismatch OR a project-id mismatch (the session belongs to a different project than the one the request is connected to) SHALL surface identically as `session_not_found`, so the response never confirms whether a session with that id exists under a different project. When the resolved row's `deleted_at IS NOT NULL`, the call SHALL be rejected with `session_deleted`.
 
 For each provided field, the server SHALL apply the precedence rule:
 
@@ -162,6 +162,19 @@ Calls on an `ended` or `abandoned` session SHALL be rejected with `session_alrea
 - **WHEN** a client POSTs to `/api/foo/sessions/never-existed/summary` OR to a session id owned by a different token
 - **THEN** the server SHALL respond `404` with `{ ok: false, code: 'session_not_found' }`
 
+#### Scenario: Session belongs to a different project than the connected slug
+
+- **GIVEN** a session `<S>` whose `project_id` is project `P`, owned by token `T`, where `P` has since been archived
+- **WHEN** token `T` POSTs to `/api/<other-non-archived-slug>/sessions/<S>/summary` (a slug resolving to a project other than `P`)
+- **THEN** the server SHALL respond `404` with `{ ok: false, code: 'session_not_found' }` — identical to the wrong-token case
+- **AND** the row SHALL NOT be mutated
+- **AND** this SHALL hold even though `T` is authenticated and owns `<S>`, because the archived-project write-freeze must not be bypassable by connecting through an unrelated slug
+
+#### Scenario: Token lacks write authorization for the connected project
+
+- **WHEN** a token whose scope does not cover project `P` POSTs to `/api/<P-slug>/sessions/<any-id>/summary`
+- **THEN** the server SHALL respond `403` with `{ ok: false, code: 'forbidden' }` before resolving the session
+
 #### Scenario: Session already ended
 
 - **WHEN** a client POSTs a summary for a row whose `status = 'ended'` or `'abandoned'`
@@ -178,7 +191,7 @@ The endpoint SHALL accept a JSON body `{ summary?: string, title?: string, final
 
 Before the service-layer call, the handler SHALL apply server-side truncation to `summary` (identical to `/summary`) and to `title` when present, then call `agentSessions.end`. The response remains `200 OK` with the truncated values echoed back.
 
-The server SHALL resolve the session by `(token_id, id)` and, when active, atomically:
+The endpoint SHALL first check that the connected token's scope authorizes `write` on the connected project (the same `isAuthorized` check the sibling `POST /api/<slug>/sessions` and `/api/<slug>/memory/recall` routes apply), rejecting with `403 forbidden` before touching the session row. The server SHALL then resolve the session by `(token_id, project_id, id)` — a token-id mismatch OR a project-id mismatch SHALL surface identically as `session_not_found` — and, when active, atomically:
 
 1. Apply any provided summary/title writes subject to the precedence rules (after the truncation helpers have run).
 2. Set `ended_at = now` and `status = 'ended'`.
@@ -229,6 +242,18 @@ Soft-deleted rows SHALL be rejected with `session_deleted`. Already-ended rows S
 
 - **WHEN** the resolution rules apply
 - **THEN** the server SHALL respond with the same error codes (`session_not_found`, `session_deleted`)
+
+#### Scenario: Session belongs to a different project than the connected slug (archived-project bypass)
+
+- **GIVEN** a session `<S>` whose `project_id` is project `P`, owned by token `T`, where `P` has since been archived
+- **WHEN** token `T` POSTs to `/api/<other-non-archived-slug>/sessions/<S>/end`
+- **THEN** the server SHALL respond `404` with `{ ok: false, code: 'session_not_found' }`
+- **AND** the row SHALL NOT be mutated (status remains whatever it was, `ended_at` is not set)
+
+#### Scenario: Token lacks write authorization for the connected project
+
+- **WHEN** a token whose scope does not cover project `P` POSTs to `/api/<P-slug>/sessions/<any-id>/end`
+- **THEN** the server SHALL respond `403` with `{ ok: false, code: 'forbidden' }` before resolving the session
 
 ### Requirement: Sessions registered via HTTP MUST integrate with the SessionRouter so subsequent MCP tools attach memories to them
 
