@@ -196,10 +196,15 @@ def _slug_from_url() -> str | None:
 
 
 def _resolve_slug(cwd: str) -> str | None:
-    """Cascade through the four sources, returning the first valid slug."""
+    """Cascade through the four sources, returning the first valid slug.
+
+    .rembric wins over the env var so a per-repo file overrides the global
+    default set once via the install flow, matching plugin.yaml's own
+    "Overridden per-cwd if a .rembric file is present" wording.
+    """
     for source in (
-        _slug_from_env,
         lambda: _slug_from_dotrembric(cwd),
+        _slug_from_env,
         _slug_from_url,
     ):
         candidate = source()
@@ -304,6 +309,7 @@ class RembricMemoryProvider(MemoryProvider):
         # queue_prefetch warms this per-session; prefetch reads it back inline.
         self._prefetch_cache: dict[str, str] = {}
         self._sync_lock: threading.Lock = threading.Lock()
+        self._suppressed: bool = False
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
@@ -336,8 +342,11 @@ class RembricMemoryProvider(MemoryProvider):
         self._slug = _resolve_slug(cwd)
         self._session_id = session_id
         self._initialized = True
-        # Only a primary context creates a session row, so subagent/cron runs don't inflate the dashboard.
+        # Only a primary context creates a session row, so subagent/cron runs
+        # don't inflate the dashboard. Cached for the session's lifetime —
+        # every later lifecycle HTTP call must skip too, not just this POST.
         agent_context = kwargs.get("agent_context", "primary")
+        self._suppressed = agent_context in _NON_PRIMARY_AGENT_CONTEXTS
         if not self._slug:
             _stderr(
                 f"[rembric] no project slug for session {session_id}; "
@@ -462,7 +471,13 @@ class RembricMemoryProvider(MemoryProvider):
         return None
 
     def sync_turn(self, user: str, assistant: str, **kwargs: Any) -> None:
-        if not self._initialized or not self._slug or not self._base or not self._session_id:
+        if (
+            not self._initialized
+            or not self._slug
+            or not self._base
+            or not self._session_id
+            or self._suppressed
+        ):
             return None
         messages = kwargs.get("messages")
         if not isinstance(messages, list):
@@ -475,6 +490,11 @@ class RembricMemoryProvider(MemoryProvider):
         def _sync() -> None:
             # Bounded so a hung POST can't wedge the lock forever.
             acquired = self._sync_lock.acquire(timeout=5.0)
+            if not acquired:
+                # A prior POST is still in flight past the timeout — the
+                # next sync_turn resends the full transcript, so skipping
+                # this write loses nothing but avoids racing it.
+                return
             try:
                 transcript = _format_transcript(messages)
                 if not transcript:
@@ -500,7 +520,13 @@ class RembricMemoryProvider(MemoryProvider):
         # Returning "" is the documented no-contribution signal; the
         # important effect is the side-effect POST below. Hermes feeds the
         # return value into the compressor prompt; we choose not to.
-        if not self._initialized or not self._slug or not self._base or not self._session_id:
+        if (
+            not self._initialized
+            or not self._slug
+            or not self._base
+            or not self._session_id
+            or self._suppressed
+        ):
             return ""
         transcript = _format_transcript(messages)
         if not transcript:
@@ -520,7 +546,13 @@ class RembricMemoryProvider(MemoryProvider):
             f"messages_count={len(messages) if messages else 0} "
             f"initialized={self._initialized} slug={self._slug!r}"
         )
-        if not self._initialized or not self._slug or not self._base or not self._session_id:
+        if (
+            not self._initialized
+            or not self._slug
+            or not self._base
+            or not self._session_id
+            or self._suppressed
+        ):
             return
         # A late sync_turn write would be rejected once /end flips status.
         if self._sync_lock.acquire(timeout=5.0):
@@ -578,7 +610,13 @@ class RembricMemoryProvider(MemoryProvider):
         if not self._initialized:
             return
         old_id = self._session_id
-        if self._slug and self._base and old_id and old_id != new_session_id:
+        if (
+            self._slug
+            and self._base
+            and old_id
+            and old_id != new_session_id
+            and not self._suppressed
+        ):
             # Same drain as on_session_end.
             if self._sync_lock.acquire(timeout=5.0):
                 self._sync_lock.release()
@@ -592,7 +630,7 @@ class RembricMemoryProvider(MemoryProvider):
             self._prefetch_cache.pop(old_id, None)
             self._reset_turn_state()
         self._session_id = new_session_id
-        if self._slug and self._base and new_session_id:
+        if self._slug and self._base and new_session_id and not self._suppressed:
             _api_post(
                 self._base,
                 self._slug,
