@@ -33,7 +33,7 @@ export function buildAboutReport(): AboutReport {
       update: 'On the server host: docker compose pull && docker compose up -d',
     },
     plugins: {
-      note: "Client plugins are installed per machine — one per computer where you use Rembric. This server cannot see them or their versions. On each machine, run `status` first (read-only): it reports the server and each plugin's installed-vs-available version with a per-agent `action` (none|update|ahead|unknown). Only run an update where action is `update`.",
+      note: "Client plugins are installed per machine — one per computer where you use Rembric. This server cannot see them or their versions. On each machine, run `status` first (read-only): it reports the server and each plugin's installed-vs-available version with a per-agent `action` (none|update|ahead|unknown). `update_all` updates every installed plugin that has an update available and skips the rest (not-installed, already up to date, or ahead) — safe to run without checking `status` first.",
       status: `curl -fsSL ${INSTALLER_URL} | sh -s -- --status --json`,
       interactive: `curl -fsSL ${INSTALLER_URL} | sh`,
       update_all: `curl -fsSL ${INSTALLER_URL} | sh -s -- --action=update`,

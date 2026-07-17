@@ -264,6 +264,59 @@ describe('agent routing', () => {
   });
 });
 
+describe('--action=update with no --agent (update-all)', () => {
+  // #262 / memory.about's `update_all` command: before this feature, a bare
+  // `--action=update` errored ("--agent requires --action" is backwards —
+  // actually it fell through to the usage error because ARG_AGENTS was
+  // empty). This section proves the fix: it updates only what has an update
+  // available and never errors, even with nothing installed.
+
+  function ageOpencodePlugin(version: string): void {
+    const dir = join(home, '.config', 'opencode', 'plugins');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'rembric.ts'),
+      `// @rembric-plugin-version ${version}\nimport { readRembricSlug } from './lib/rembric-dotenv.mjs';\nexport const RembricPlugin = () => ({});\n`,
+    );
+  }
+
+  it('updates only the installed-and-outdated agent, skips the rest, never errors', () => {
+    ageOpencodePlugin('0.0.1'); // older than PLUGIN_VERSION.opencode from the manifest
+    const { code, out } = run(['--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('Updating all plugins with an update available');
+    // opencode was outdated → updated (its update note, not the install-only one).
+    expect(out).toContain('restart opencode');
+    expect(out).not.toContain('paste the printed MCP block');
+    // claude/codex/hermes were never installed → skipped, not errored.
+    expect(out).toContain('claude: not installed — skipped');
+    expect(out).toContain('codex: not installed — skipped');
+    expect(out).toContain('hermes: not installed — skipped');
+    expect(out).toContain('Done: 1 updated, 3 skipped.');
+  });
+
+  it('with nothing installed, updates nothing and still exits 0', () => {
+    const { code, out } = run(['--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('Done: 0 updated, 4 skipped.');
+  });
+
+  it('--agent=all --action=update is an explicit alias for the same behavior', () => {
+    ageOpencodePlugin('0.0.1');
+    const { code, out } = run(['--agent=all', '--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('Done: 1 updated, 3 skipped.');
+  });
+
+  it('an up-to-date agent is skipped as "up to date", not re-updated', () => {
+    ageOpencodePlugin(PLUGIN_VERSION.opencode); // matches the manifest exactly
+    const { code, out } = run(['--action=update'], { home });
+    expect(code).toBe(0);
+    expect(out).toContain('opencode: up to date — skipped');
+    expect(out).toContain('Done: 0 updated, 4 skipped.');
+  });
+});
+
 describe('opencode installer verifications', () => {
   const OPENCODE_INSTALL = join(REPO_ROOT, 'apps', 'plugin', '.opencode-plugin', 'install.sh');
 

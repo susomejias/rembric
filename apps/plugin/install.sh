@@ -766,6 +766,41 @@ do_client() { # $1 client, $2 action
   return 0
 }
 
+# do_update_all: update every installed client that has an update available
+# (per vercmp), skipping agents that are up to date, ahead, not installed, or
+# whose version can't be determined. This is what `memory.about`'s
+# `update_all` command relies on — it MUST work with no --agent given.
+do_update_all() {
+  load_manifest
+  say "${BOLD}Updating all plugins with an update available…${RESET}"
+  _updated=0; _skipped=0
+  for c in claude codex hermes opencode; do
+    _inst=$(installed_version "$c" 2>/dev/null || true)
+    _avail=$(available_version "$(component_key "$c")")
+    _state=$(vercmp "$_inst" "$_avail")
+    case "$_state" in
+      update)
+        do_client "$c" update
+        _updated=$((_updated + 1)) ;;
+      none)
+        say "  ${DIM}${c}: up to date — skipped${RESET}"
+        _skipped=$((_skipped + 1)) ;;
+      install)
+        say "  ${DIM}${c}: not installed — skipped (use --agent=${c} --action=install)${RESET}"
+        _skipped=$((_skipped + 1)) ;;
+      ahead)
+        say "  ${DIM}${c}: ahead of the published version — skipped${RESET}"
+        _skipped=$((_skipped + 1)) ;;
+      *)
+        say "  ${DIM}${c}: version unknown — skipped${RESET}"
+        _skipped=$((_skipped + 1)) ;;
+    esac
+  done
+  say ""
+  say "${BOLD}Done: ${_updated} updated, ${_skipped} skipped.${RESET}"
+  return 0
+}
+
 usage() {
   cat >&2 <<EOF
 rembric installer — interactive TUI, or a headless CLI for agents/automation.
@@ -774,12 +809,14 @@ Interactive:   sh install.sh
 Status:        sh install.sh --status [--json]
 Server:        sh install.sh --server [--token=<tok>] [--port=<n>] [--up]
 Plugins:       sh install.sh --agent=opencode,hermes --action=install|update|uninstall
+Update all:    sh install.sh --action=update   (no --agent: updates every
+               installed plugin that has an update available, skips the rest)
 
 Flags:
   --status            print the agent/version table headless (no menu); exit
   --json              machine-readable output for --status
   --server            prepare the server (docker-compose.yml + .env + token)
-  --agent=<a,b,..>   one or more of: claude codex hermes opencode
+  --agent=<a,b,..>   one or more of: claude codex hermes opencode, or 'all'
   --action=<a>        install | update | uninstall
   --token=<tok>       admin token for --server (default: auto-generate)
   --port=<n>          REMBRIC_PORT for --server (default: 8787)
@@ -846,7 +883,12 @@ if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
   banner
   did=0
   [ "$ARG_SERVER" = "1" ] && { do_server "${ARG_ACTION:-install}"; did=1; }
-  if [ -n "$ARG_AGENTS" ]; then
+  # `--action=update` with no --agent (or the explicit --agent=all alias)
+  # updates every installed plugin that has an update available, skipping
+  # the rest — this is the command memory.about advertises as `update_all`.
+  if [ "$ARG_ACTION" = "update" ] && { [ -z "$ARG_AGENTS" ] || [ "$ARG_AGENTS" = "all" ]; }; then
+    do_update_all; did=1
+  elif [ -n "$ARG_AGENTS" ]; then
     [ -z "$ARG_ACTION" ] && { printf '[rembric] error: --agent requires --action\n' >&2; usage; exit 2; }
     load_manifest
     OLDIFS=$IFS; IFS=','
@@ -882,9 +924,10 @@ while :; do
     1)
       screen
       print_table
-      arrow_menu "Which agent?" "claude" "codex" "hermes" "opencode"
+      arrow_menu "Which agent?" "all — update outdated" "claude" "codex" "hermes" "opencode"
       case "$MENU_INDEX" in
-        0) c=claude ;; 1) c=codex ;; 2) c=hermes ;; 3) c=opencode ;; *) c='' ;;
+        0) c=''; screen; do_update_all; pause ;;
+        1) c=claude ;; 2) c=codex ;; 3) c=hermes ;; 4) c=opencode ;; *) c='' ;;
       esac
       if [ -n "$c" ]; then
         screen
