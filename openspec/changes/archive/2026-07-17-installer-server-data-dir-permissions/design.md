@@ -7,7 +7,8 @@
 **Goals:**
 
 - Make `install.sh --server --up` succeed on a fresh rootful Linux Docker host with zero manual intervention, matching what CI already has to do to make its own e2e check pass.
-- Keep the fix POSIX `/bin/sh`-safe and dependency-free (no new tool requirement) — `mkdir`/`chmod` are already required baseline tools.
+- Never relax the permissions of an already-correctly-configured `./data` on a re-run — a `chown` failure must not be treated as proof something is broken.
+- Keep the fix POSIX `/bin/sh`-safe. `stat` (needed to distinguish "not root" from "not root, and nothing to fix") isn't in the installer's existing baseline-tool list, but it's present alongside `docker`/`curl` on every practical target for this flow; both GNU (`stat -c`) and BSD/macOS (`stat -f`) invocation forms are tried.
 
 **Non-Goals:**
 
@@ -23,9 +24,11 @@ The initial draft of this change used `chmod 0777` unconditionally, matching CI'
 The corrected approach:
 
 1. Attempt `chown 10001:10001 ./data` first. This only succeeds for root/`CAP_CHOWN` — exactly the precondition needed to do the _precise_ fix (only UID 10001 and root gain access). It's a harmless no-op when the directory is already correctly owned.
-2. Only when that `chown` fails (the common case: a self-hoster running the installer as a normal user with no `sudo`) fall back to `chmod 0777`, and print an explicit, non-suppressed warning naming exactly what happened and how to tighten it later (`sudo chown -R 10001:10001 ./data`). The fallback still exists — dropping it entirely would leave non-root self-hosters back at the original crash loop, defeating the issue's "zero manual intervention" goal — but it is never applied silently.
+2. When that `chown` fails, DON'T assume that means anything is broken — `chown` to an arbitrary UID fails for _every_ non-root invocation, including one against a `./data` that's already correctly set up (a prior manual `sudo chown`, or Docker Desktop's transparent UID translation on macOS). Check the directory's current owning UID first (`stat -c '%u' ./data`, falling back to BSD `stat -f '%u'`): if it's already `10001`, leave the directory completely untouched and print nothing. Only when the owner is genuinely something else fall back to `chmod 0777`, with an explicit, non-suppressed warning naming exactly what happened and how to tighten it later (`sudo chown -R 10001:10001 ./data`).
 
-No root-detection branching (`id -u`, sudo-availability probing) is needed: attempting the operation and checking its exit code is simpler and correct in every case, including ones root-detection would get wrong (e.g. `CAP_CHOWN` without full root).
+An earlier revision of this decision fell back to `chmod 0777` on ANY `chown` failure, full stop — that regresses an already-working install: re-running the (patched) installer as a non-root user against a `./data` that a prior manual `chown` already fixed would silently widen it back to world-writable on every future `--up`/update, plus print a scary, unwarranted warning. The `stat`-based ownership check closes that gap while still healing a genuinely broken (root-owned) `./data` on a re-run.
+
+No root-detection branching (`id -u`, sudo-availability probing) is needed for the _chown attempt itself_: attempting the operation and checking its exit code is simpler and correct in every case, including ones root-detection would get wrong (e.g. `CAP_CHOWN` without full root). The `stat` check exists only to distinguish _why_ chown failed — "not root" vs. "not root, and nothing to fix anyway."
 
 ### D1a. Fallback runs on every `bring_up` that needs it, not just first-time creation
 
@@ -37,7 +40,7 @@ An operator who hit the crash loop _before_ this fix shipped already has a root-
 
 ## Verification
 
-- Headless tests (`install.test.ts`, extended, 2 new cases against a stubbed `docker`/`chown`): a non-interactive `--server --action=install --up` run with a stubbed-successful `chown` asserts `./data` exists and NO fallback warning is printed; a run with a stubbed-_failing_ `chown` asserts `./data` ends up mode `0777` (the real `chmod` runs, only `chown` is stubbed) AND the warning + `sudo chown -R 10001:10001 ./data` hint both appear in output.
+- Headless tests (`install.test.ts`, extended, 3 new cases against a stubbed `docker`/`chown`): a non-interactive `--server --action=install --up` run with a stubbed-successful `chown` asserts `./data` exists and NO fallback warning is printed; a run with a stubbed-_failing_ `chown` against a FRESH `./data` (owner defaults to whoever ran the installer, never uid 10001) asserts it ends up mode `0777` (the real `chmod` runs, only `chown` is stubbed) AND the warning + `sudo chown -R 10001:10001 ./data` hint both appear; a third case pre-creates `./data` for real, `chown`s it to uid 10001 (the test runner is root, so this is a genuine syscall, not a mock), then runs with a stubbed-_failing_ `chown` and asserts the directory's mode and ownership are completely unchanged and no warning appears — the regression this decision exists to prevent.
 - `sh -n apps/plugin/install.sh` — POSIX syntax check (per the e2e playbook's Layer 1).
 - Docker layer (manual, where available): the exact scenario from the issue — a fresh directory on a rootful Linux Docker host, `install.sh --server --up`, asserting the server reaches a healthy `/healthz` instead of crash-looping (via the `chown` path, since a real rootful Docker invocation is typically run as root or with a root-equivalent Docker socket). CI's own `mkdir -p data && chmod 0777 data` pre-step in its e2e check is left in place as belt-and-suspenders — harmless, and CI's runner has no other local accounts to expose.
 

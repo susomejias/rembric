@@ -536,14 +536,22 @@ bring_up() {
   # SQLite DB. Prefer chown-to-the-exact-uid (only root/CAP_CHOWN can do
   # this; harmless no-op if already correct) — it's the docs/docker.md
   # -sanctioned remedy and doesn't grant every local user on the host
-  # read/write on the memory DB the way a blanket chmod 0777 would. Only
-  # fall back to world-writable when chown isn't possible (no root), and
-  # say so explicitly rather than silently weakening permissions.
+  # read/write on the memory DB the way a blanket chmod 0777 would.
   mkdir -p ./data
   if ! chown 10001:10001 ./data 2>/dev/null; then
-    chmod 0777 ./data
-    say "  ${WARN}Could not chown ./data to the container's uid (10001) — no root${RESET}; made it world-writable so the server can open its DB."
-    say "  ${DIM}For tighter permissions: sudo chown -R 10001:10001 ./data${RESET}"
+    # chown fails for ANY non-root invocation, including one against a
+    # ./data that's already correctly set up (a prior manual `sudo chown`,
+    # or Docker Desktop's transparent UID translation on macOS) — that
+    # failure alone doesn't mean anything is broken. Only relax to
+    # world-writable when the directory's owner genuinely isn't uid 10001
+    # yet, so re-running the installer never downgrades an already-working
+    # install's permissions.
+    _data_uid=$(stat -c '%u' ./data 2>/dev/null || stat -f '%u' ./data 2>/dev/null || echo '')
+    if [ "$_data_uid" != "10001" ]; then
+      chmod 0777 ./data
+      say "  ${WARN}Could not chown ./data to the container's uid (10001) — no root${RESET}; made it world-writable so the server can open its DB."
+      say "  ${DIM}For tighter permissions: sudo chown -R 10001:10001 ./data${RESET}"
+    fi
   fi
   # Capture so a daemon error (e.g. a name conflict) becomes a friendly message
   # instead of a raw dump; `up -d` output is short, so we re-print it on success.

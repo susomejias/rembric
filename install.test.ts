@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   chmodSync,
+  chownSync,
   statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -678,7 +679,7 @@ esac
     expect(out).not.toContain('Could not chown');
   });
 
-  it('falls back to a world-writable ./data and warns when chown is not possible (no root)', () => {
+  it('falls back to a world-writable ./data and warns when a FRESH directory is not owned by uid 10001 and chown is not possible', () => {
     const bin = fakeDockerDir('ok', 'healthy', 'fail');
     const { code, out } = run(['--server', '--action=install', '--up'], {
       cwd: dir,
@@ -691,6 +692,28 @@ esac
     expect(statSync(dataDir).mode & 0o777).toBe(0o777);
     expect(out).toContain('Could not chown ./data to the container');
     expect(out).toContain('sudo chown -R 10001:10001 ./data');
+  });
+
+  it('does NOT relax an existing ./data already owned by uid 10001, even when chown is not possible', () => {
+    // Regression guard: chown fails on every non-root invocation regardless
+    // of whether ./data is already fine (e.g. fixed by a prior manual `sudo
+    // chown`, or working transparently under Docker Desktop) — that failure
+    // alone must never cause a re-run to downgrade an already-correct,
+    // already-working install to world-writable.
+    const dataDir = join(dir, 'data');
+    mkdirSync(dataDir, { mode: 0o750 });
+    chownSync(dataDir, 10001, 10001);
+    const bin = fakeDockerDir('ok', 'healthy', 'fail');
+    const { code, out } = run(['--server', '--action=install', '--up'], {
+      cwd: dir,
+      path: `${bin}:${process.env.PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(statSync(dataDir).uid).toBe(10001);
+    expect(statSync(dataDir).mode & 0o777).toBe(0o750); // unchanged, NOT widened to 0777
+    expect(out).not.toContain('Could not chown');
+    expect(out).not.toContain('world-writable');
   });
 
   it('container-name conflict: friendly message, never clobbers, no raw daemon dump', () => {
