@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.24.9](https://github.com/susomejias/rembric/compare/server-v0.24.8...server-v0.24.9) (2026-07-17)
+
+
+### Features
+
+* **installer:** update-all — action=update with no --agent updates every outdated plugin ([a188587](https://github.com/susomejias/rembric/commit/a188587c7dffd31a0920beca327eaf1cd025d733)), closes [#262](https://github.com/susomejias/rembric/issues/262)
+
+
+### Bug Fixes
+
+* **dashboard:** escape prompt tags/project slug (XSS), sanitize search-box FTS queries ([0ea09a2](https://github.com/susomejias/rembric/commit/0ea09a28c3b3e05aa43cfd57336acc1c4a6ee694))
+* **db:** close FTS5 dangling-posting leak, memory_vec status race, embed-worker polling ([74fbe18](https://github.com/susomejias/rembric/commit/74fbe181afbd835c3eb324ad6a093b9e282c3829))
+* **server:** unify internal-error handling, close session-route project bypass ([3cb64f4](https://github.com/susomejias/rembric/commit/3cb64f4654e5bf9072432332032c83afa9f8782f))
+
+
+### Performance
+
+* **auth:** cache verified token lookups, skip scrypt on repeat requests ([009720d](https://github.com/susomejias/rembric/commit/009720dfaf222f5d427ffe701198796ff94248ed)), closes [#266](https://github.com/susomejias/rembric/issues/266)
+* **db:** materialize memory_replaces derived edge table ([94d98cf](https://github.com/susomejias/rembric/commit/94d98cff97a892835b8a56bd04a5954110924630))
+* **db:** tune connection pragmas, index recentForContext, rewrite purge predicate ([6d839f7](https://github.com/susomejias/rembric/commit/6d839f78cc4cb92abbebb1db0eed08e5325b39c4))
+
 ## [0.24.8](https://github.com/susomejias/rembric/compare/server-v0.24.7...server-v0.24.8) (2026-07-16)
 
 
