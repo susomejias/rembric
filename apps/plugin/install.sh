@@ -112,6 +112,11 @@ _wm_static() { printf '  %s\n  %s\n  %s\n  %s\n  %s\n' "$WM1" "$WM2" "$WM3" "$WM
 # final frame has zero overlay = full banner. Plays once, interactive TTY only.
 _wm_anim() {
   printf '\033[?25l'
+  # Same class of bug as arrow_menu's stty trap: a bare EXIT trap wouldn't
+  # actually stop the process on Ctrl-C mid-reveal, and without any trap the
+  # cursor stays hidden if interrupted here.
+  trap 'printf "\033[?25h"' EXIT
+  trap 'printf "\033[?25h"; exit 130' INT TERM
   _w=0
   while :; do
     printf '%s' "$LIME"; _wm_static; printf '%s' "$RESET"
@@ -128,6 +133,7 @@ _wm_anim() {
     _w=$((_w + 6))
   done
   printf '\033[?25h'
+  trap - EXIT INT TERM
 }
 wordmark() {
   # Block-letter REMBRIC + hero tagline in lime when colour is active; plain
@@ -229,8 +235,13 @@ arrow_menu() {
 
   stty -echo -icanon min 1 time 0 </dev/tty 2>/dev/null
   printf '\033[?25l' >/dev/tty   # hide cursor
-  # Restore terminal no matter how we leave.
-  trap 'stty "$_saved" </dev/tty 2>/dev/null; printf "\033[?25h" >/dev/tty' EXIT INT TERM
+  # Restore terminal no matter how we leave. A caught INT/TERM does NOT
+  # terminate the process by default once a trap is installed for it — an
+  # EXIT-only trap here left Ctrl-C restoring cooked mode but the read_key
+  # loop kept running, now requiring Enter per keystroke and echoing input.
+  # INT/TERM get their own trap that also exits explicitly.
+  trap 'stty "$_saved" </dev/tty 2>/dev/null; printf "\033[?25h" >/dev/tty' EXIT
+  trap 'stty "$_saved" </dev/tty 2>/dev/null; printf "\033[?25h" >/dev/tty; exit 130' INT TERM
 
   printf '%s%s%s\n' "$BOLD" "$_title" "$RESET" >/dev/tty
   printf '%s  ↑/↓ move · Enter select · q quit%s\n' "$DIM" "$RESET" >/dev/tty
