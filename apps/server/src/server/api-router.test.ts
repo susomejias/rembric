@@ -267,6 +267,41 @@ describe('createApiRouter', () => {
       expect(r.body.code).toBe('session_not_found');
     });
 
+    // #256 — a session created under an archived project must not be
+    // writable by connecting through an unrelated, non-archived slug: the
+    // handler must check the SESSION's own projectId, not only ownership.
+    it('404 when the session belongs to a different project than the URL slug (archived-project bypass)', async () => {
+      const app = makeApp();
+      const archivedProj = projects.create({ slug: 'archived-proj' });
+      await call(app, 'POST', `/${archivedProj.slug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-in-archived-proj' },
+      });
+      projects.archive(archivedProj.id);
+
+      // Same (admin) token, but connecting via a DIFFERENT, non-archived slug.
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-in-archived-proj/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'bypass attempt' },
+      });
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('session_not_found');
+      // The write never landed.
+      const row = agentSessions.getById('sess-in-archived-proj');
+      expect(row?.summary).toBeNull();
+    });
+
+    it('403 when a project-scoped token lacks write authorization for the URL slug', async () => {
+      const app = makeApp();
+      const other = projects.create({ slug: 'other-write-proj' });
+      const r = await call(app, 'POST', `/${other.slug}/sessions/whatever-id/summary`, {
+        token: projectScopedToken.plaintext,
+        body: { summary: 'x' },
+      });
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('forbidden');
+    });
+
     it('non-final write is silently blocked when summary_final is true', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
@@ -505,6 +540,35 @@ describe('createApiRouter', () => {
       expect(row?.endedAt).not.toBeNull();
       expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
       expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+    });
+
+    it('404 when the session belongs to a different project than the URL slug (archived-project bypass)', async () => {
+      const app = makeApp();
+      const archivedProj = projects.create({ slug: 'archived-proj-end' });
+      await call(app, 'POST', `/${archivedProj.slug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-in-archived-proj' },
+      });
+      projects.archive(archivedProj.id);
+
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-in-archived-proj/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'bypass attempt' },
+      });
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('session_not_found');
+      const row = agentSessions.getById('sess-end-in-archived-proj');
+      expect(row?.status).toBe('active');
+    });
+
+    it('403 when a project-scoped token lacks write authorization for the URL slug', async () => {
+      const app = makeApp();
+      const other = projects.create({ slug: 'other-end-proj' });
+      const r = await call(app, 'POST', `/${other.slug}/sessions/whatever-id/end`, {
+        token: projectScopedToken.plaintext,
+      });
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('forbidden');
     });
 
     it('end on already-ended session preserves final summary against non-final overwrite', async () => {

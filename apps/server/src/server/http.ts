@@ -26,6 +26,7 @@ import { REMBRIC_VERSION } from '../version.js';
 import { createApiRouter } from './api-router.js';
 import { AuthError, authenticate } from './auth.js';
 import { createDashboardRouter, type DashboardDeps } from './dashboard-router.js';
+import { httpInternalError } from './error-response.js';
 import type { AuthLockout, RateLimiter } from './rate-limit.js';
 import { runWithContext } from './request-context.js';
 
@@ -158,8 +159,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
         const result = await trigger();
         return c.json({ ok: true, result });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ ok: false, code: 'internal_error', message }, 500);
+        return c.json(httpInternalError(err, 'unhandled /admin/consolidation/run error'), 500);
       }
     });
   }
@@ -459,8 +459,7 @@ function respondJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function respondInternal(res: ServerResponse, err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err);
-  respondJson(res, 500, { ok: false, code: 'internal_error', message });
+  respondJson(res, 500, httpInternalError(err, 'unhandled /mcp request error'));
 }
 
 interface AdminAuthFailure {
