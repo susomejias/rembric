@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { CapabilityDetector, SelfUpdateCapability } from './capability.js';
-import type { PullProgressEvent } from './engine-api.js';
+import type { PruneFilters, PullProgressEvent } from './engine-api.js';
 import { createPreUpdateBackup, SelfUpdateOrchestrator } from './orchestrator.js';
 
 const AVAILABLE: SelfUpdateCapability = {
@@ -27,11 +27,15 @@ interface EngineCalls {
   pulls: Array<{ repo: string; tag: string }>;
   created: Array<{ name: string; payload: Record<string, unknown> }>;
   started: string[];
+  containerPrunes: PruneFilters[];
+  imagePrunes: PruneFilters[];
+  sequence: string[];
 }
 
-function fakeEngine(calls: EngineCalls, opts: { failPull?: boolean } = {}) {
+function fakeEngine(calls: EngineCalls, opts: { failPull?: boolean; failPrune?: boolean } = {}) {
   return {
     pullImage: (repo: string, tag: string, onProgress?: (ev: PullProgressEvent) => void) => {
+      calls.sequence.push('pull');
       calls.pulls.push({ repo, tag });
       if (opts.failPull) return Promise.reject(new Error('no space left on device'));
       onProgress?.({ status: 'Downloading', id: 'aaa' });
@@ -39,12 +43,29 @@ function fakeEngine(calls: EngineCalls, opts: { failPull?: boolean } = {}) {
       return Promise.resolve();
     },
     createContainer: (name: string, payload: unknown) => {
+      calls.sequence.push('create');
       calls.created.push({ name, payload: payload as Record<string, unknown> });
       return Promise.resolve({ Id: 'helper789' });
     },
     startContainer: (id: string) => {
+      calls.sequence.push('start');
       calls.started.push(id);
       return Promise.resolve();
+    },
+    pruneContainers: (filters: PruneFilters) => {
+      calls.sequence.push('pruneContainers');
+      calls.containerPrunes.push(filters);
+      if (opts.failPrune) return Promise.reject(new Error('a prune operation is already running'));
+      // null mirrors the daemon's nothing-reclaimed shape.
+      return Promise.resolve({ ContainersDeleted: null, SpaceReclaimed: 0 });
+    },
+    pruneImages: (filters: PruneFilters) => {
+      calls.sequence.push('pruneImages');
+      calls.imagePrunes.push(filters);
+      return Promise.resolve({
+        ImagesDeleted: [{ Deleted: 'sha256:old' }],
+        SpaceReclaimed: 1_400_000,
+      });
     },
   };
 }
@@ -106,16 +127,29 @@ describe('createPreUpdateBackup', () => {
 });
 
 describe('SelfUpdateOrchestrator', () => {
-  function build(opts: { cap?: SelfUpdateCapability; failPull?: boolean; failBackup?: boolean }): {
+  function build(opts: {
+    cap?: SelfUpdateCapability;
+    failPull?: boolean;
+    failBackup?: boolean;
+    failPrune?: boolean;
+  }): {
     orch: SelfUpdateOrchestrator;
     calls: EngineCalls;
     backups: string[];
   } {
-    const calls: EngineCalls = { pulls: [], created: [], started: [] };
+    const calls: EngineCalls = {
+      pulls: [],
+      created: [],
+      started: [],
+      containerPrunes: [],
+      imagePrunes: [],
+      sequence: [],
+    };
     const backups: string[] = [];
     const orch = new SelfUpdateOrchestrator({
       capability: fakeCapability(opts.cap ?? AVAILABLE),
-      engineFactory: () => fakeEngine(calls, { failPull: opts.failPull }),
+      engineFactory: () =>
+        fakeEngine(calls, { failPull: opts.failPull, failPrune: opts.failPrune }),
       backup: (v) => {
         if (opts.failBackup) throw new Error('disk full');
         backups.push(v);
@@ -176,6 +210,31 @@ describe('SelfUpdateOrchestrator', () => {
     expect(calls.started).toEqual(['helper789']);
     expect(orch.status().phase).toBe('restarting');
     expect(orch.status().pull).toEqual({ done: 1, total: 1 });
+  });
+
+  it('cleanup runs pre-pull with label-scoped filters', async () => {
+    const { orch, calls } = build({});
+    await orch.start('0.22.0');
+    await settle();
+    expect(calls.sequence).toEqual(['pruneContainers', 'pruneImages', 'pull', 'create', 'start']);
+    // Literals on purpose (not the orchestrator constants): upgraders and
+    // images created by PAST releases carry these exact strings, so a rename
+    // that would strand that on-host backlog must fail here consciously.
+    expect(calls.containerPrunes).toEqual([{ label: ['rembric.upgrader=1'] }]);
+    expect(calls.imagePrunes).toEqual([{ dangling: ['true'], label: ['rembric.stage=runtime'] }]);
+  });
+
+  it('a failing container sweep still prunes images and launches the upgrader', async () => {
+    const { orch, calls } = build({ failPrune: true });
+    await orch.start('0.22.0');
+    await settle();
+    // The two prunes fail independently: a 409 on the container sweep must
+    // not skip the image prune (the leak this feature exists to fix).
+    expect(calls.imagePrunes.length).toBe(1);
+    expect(calls.created.length).toBe(1);
+    expect(calls.started).toEqual(['helper789']);
+    expect(orch.status().phase).toBe('restarting');
+    expect(orch.status().error).toBeNull();
   });
 
   it('pull failure surfaces in status and unlocks re-runs', async () => {

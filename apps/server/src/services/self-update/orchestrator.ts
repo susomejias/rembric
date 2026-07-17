@@ -35,6 +35,20 @@ export type StartResult =
 const BACKUP_PREFIX = 'pre-update-';
 const BACKUP_KEEP = 3;
 
+// The exact values are load-bearing against on-host history: upgraders and
+// images created by past releases carry them, so a rename would silently stop
+// matching that backlog (orchestrator.test.ts pins the literals for this reason).
+const UPGRADER_LABEL_KEY = 'rembric.upgrader';
+const UPGRADER_LABEL_VALUE = '1';
+const UPGRADER_LABEL_FILTER = `${UPGRADER_LABEL_KEY}=${UPGRADER_LABEL_VALUE}`;
+/** MUST match `LABEL rembric.stage=runtime` in apps/server/Dockerfile — sync-tested in invariants.test.ts; a silent mismatch would resurrect the per-update image leak. */
+export const RUNTIME_IMAGE_LABEL_FILTER = 'rembric.stage=runtime';
+
+type UpdateEngine = Pick<
+  DockerEngineApi,
+  'pullImage' | 'createContainer' | 'startContainer' | 'pruneContainers' | 'pruneImages'
+>;
+
 export interface BackupDeps {
   /** Runs `VACUUM INTO` to the given absolute path (throws on failure). */
   vacuumInto: (destPath: string) => void;
@@ -72,9 +86,7 @@ export function createPreUpdateBackup(deps: BackupDeps): (targetVersion: string)
 
 export interface OrchestratorDeps {
   capability: CapabilityDetector;
-  engineFactory: (
-    socketPath: string,
-  ) => Pick<DockerEngineApi, 'pullImage' | 'createContainer' | 'startContainer'>;
+  engineFactory: (socketPath: string) => UpdateEngine;
   /** Takes the pre-update snapshot; returns its path (named in recovery hints). */
   backup: (targetVersion: string) => string;
   socketPath?: string;
@@ -158,6 +170,11 @@ export class SelfUpdateOrchestrator {
     const tag = cap.imageTag ?? 'latest';
     const engine = this.deps.engineFactory(this.socketPath);
 
+    // Reclaim BEFORE pulling: on a disk-full host (the very incident this
+    // exists for) the pull is the step that fails with ENOSPC — cleanup must
+    // run first or it is unreachable exactly when it is most needed.
+    await this.cleanupStaleUpdateArtifacts(engine);
+
     this.current.phase = 'pull';
     const layers = new Map<string, boolean>();
     await engine.pullImage(repo, tag, (ev: PullProgressEvent) => {
@@ -194,7 +211,7 @@ export class SelfUpdateOrchestrator {
         // operator-facing recovery messages, never opened by the helper.
         `REMBRIC_UPGRADE_BACKUP=${backupPath}`,
       ],
-      Labels: { 'rembric.upgrader': '1' },
+      Labels: { [UPGRADER_LABEL_KEY]: UPGRADER_LABEL_VALUE },
       HostConfig: {
         Binds: [`${this.socketPath}:/var/run/docker.sock`],
         AutoRemove: false,
@@ -204,6 +221,46 @@ export class SelfUpdateOrchestrator {
     this.log(`  ↑ self-update to v${targetVersion} handed off to upgrader ${name}`);
     this.current.phase = 'restarting';
     // `running` stays true: this process is now waiting to be replaced.
+  }
+
+  /**
+   * Best-effort reclaim of leftovers from previous updates: finished
+   * upgrader containers, then dangling Rembric runtime images (that order —
+   * sweeping a zombie unpins the image it holds, making it reclaimable in
+   * the same pass). Runs while the current container still pins its own
+   * image, so the daemon can never prune it — the previous version always
+   * survives one cycle for rollback. Each step fails independently and
+   * never aborts the update: cleanup is an optimization, the update is the job.
+   */
+  private async cleanupStaleUpdateArtifacts(engine: UpdateEngine): Promise<void> {
+    this.log('  ↑ reclaiming stale update artifacts (finished upgraders, dangling images)');
+    let swept = 0;
+    let pruned = 0;
+    let bytes = 0;
+    try {
+      const r = await engine.pruneContainers({ label: [UPGRADER_LABEL_FILTER] });
+      swept = r.ContainersDeleted?.length ?? 0;
+      bytes += r.SpaceReclaimed ?? 0;
+    } catch (err) {
+      this.log(
+        `  ↑ upgrader sweep skipped (update continues): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const r = await engine.pruneImages({
+        dangling: ['true'],
+        label: [RUNTIME_IMAGE_LABEL_FILTER],
+      });
+      pruned = r.ImagesDeleted?.length ?? 0;
+      bytes += r.SpaceReclaimed ?? 0;
+    } catch (err) {
+      this.log(
+        `  ↑ image prune skipped (update continues): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    this.log(
+      `  ↑ reclaimed ${swept} stale upgrader(s), ${pruned} image entries, ~${Math.round(bytes / 1e6)} MB`,
+    );
   }
 
   private fail(message: string): void {

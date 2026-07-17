@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
+
 /**
  * Append-only contract invariants enforced as a CI grep gate.
  *
@@ -252,7 +254,12 @@ describe('image packaging invariants', () => {
     const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
     expect(runtimeIdx).toBeGreaterThan(-1);
     const runtimeBlock = dockerfile.slice(runtimeIdx);
-    expect(/LABEL\s+rembric\.stage=runtime\b/.test(runtimeBlock)).toBe(true);
+    // Anchored to a whole line and built from the self-update prune-filter
+    // constant: Docker's label filter is exact-match, so a commented-out
+    // LABEL or a value drift (runtime2) must fail here, not silently stop
+    // image cleanup and resurrect the per-update leak.
+    const escaped = RUNTIME_IMAGE_LABEL_FILTER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(new RegExp(`^LABEL\\s+${escaped}\\s*$`, 'm').test(runtimeBlock)).toBe(true);
   });
 
   it('Dockerfile: the `dev` stage declares LABEL rembric.stage=dev', () => {

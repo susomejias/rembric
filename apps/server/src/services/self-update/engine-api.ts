@@ -61,6 +61,25 @@ interface EngineResponse {
   body: string;
 }
 
+export interface PruneFilters {
+  label: [string, ...string[]];
+  dangling?: string[];
+}
+
+export interface ContainersPruneResult {
+  /** The daemon returns null (not []) when nothing was reclaimed. */
+  ContainersDeleted: string[] | null;
+  /** Optional: docker-compat shims (e.g. Podman) may omit it. */
+  SpaceReclaimed?: number;
+}
+
+export interface ImagesPruneResult {
+  /** The daemon returns null (not []) when nothing was reclaimed. */
+  ImagesDeleted: Array<{ Untagged?: string; Deleted?: string }> | null;
+  /** Optional: docker-compat shims (e.g. Podman) may omit it. */
+  SpaceReclaimed?: number;
+}
+
 export class DockerEngineApi {
   constructor(private readonly socketPath: string = DEFAULT_DOCKER_SOCKET) {}
 
@@ -136,6 +155,37 @@ export class DockerEngineApi {
       `/containers/${encodeURIComponent(id)}/rename?name=${encodeURIComponent(name)}`,
     );
     this.assertOk(res, `rename ${id} → ${name}`);
+  }
+
+  async pruneContainers(filters: PruneFilters): Promise<ContainersPruneResult> {
+    return this.prune('containers', filters);
+  }
+
+  async pruneImages(filters: PruneFilters): Promise<ImagesPruneResult> {
+    return this.prune('images', filters);
+  }
+
+  private async prune<T>(kind: 'containers' | 'images', filters: PruneFilters): Promise<T> {
+    // An unscoped prune would sweep every stopped container / dangling image
+    // on the host, including other services'. The type requires a label, but
+    // JS callers bypass types — refuse at runtime too, before any socket I/O.
+    const labels: unknown = filters.label;
+    if (
+      !Array.isArray(labels) ||
+      labels.length === 0 ||
+      labels.some((l) => typeof l !== 'string' || l.trim() === '')
+    ) {
+      throw new EngineApiError(
+        `${kind} prune refused: filters must include a non-empty label scope`,
+        null,
+      );
+    }
+    const res = await this.request(
+      'POST',
+      `/${kind}/prune?filters=${encodeURIComponent(JSON.stringify(filters))}`,
+    );
+    this.assertOk(res, `${kind} prune`);
+    return JSON.parse(res.body) as T;
   }
 
   async removeContainer(id: string, force = false): Promise<void> {

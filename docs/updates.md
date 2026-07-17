@@ -50,9 +50,13 @@ If your `.env` pins `REMBRIC_VERSION=x.y.z`, the compose file declares that exac
 ### What an update does, in order
 
 1. **Backup** — `VACUUM INTO /data/backups/pre-update-v<target>-<ts>.sqlite`. If this fails (e.g. disk full) the update aborts before any container is touched. The 3 most recent pre-update backups are kept.
-2. **Pull** — the new image is downloaded; the running container is untouched until the pull succeeds.
-3. **Swap** — a one-shot upgrader container (created from the new image, labeled `rembric.upgrader=1`) stops the old container, renames it aside, recreates it under the original name with identical configuration (ports, volumes, env, labels, restart policy) and the new image, and waits for the health check.
-4. **Verify or roll back** — healthy: the old container is removed and your dashboard page reloads on the new version. Unhealthy: the replacement is removed, the old container is renamed back and restarted — you stay on the previous version and the upgrader's logs (`docker logs <upgrader>`) explain what happened.
+2. **Reclaim** — leftovers from _previous_ updates are removed before anything is downloaded (so a disk nearly full of stale images doesn't doom the pull): finished upgrader containers (label `rembric.upgrader=1`) and dangling Rembric images (label `rembric.stage=runtime`). The image you are updating _from_ is still in use by the running container, so Docker never prunes it — **exactly one previous image always stays on the host for rollback**. Tagged images (a pinned `x.y.z`) and anything belonging to other services are never touched. A failure here is logged and never blocks the update.
+3. **Pull** — the new image is downloaded; the running container is untouched until the pull succeeds.
+4. **Swap** — a one-shot upgrader container (created from the new image, labeled `rembric.upgrader=1`) stops the old container, renames it aside, recreates it under the original name with identical configuration (ports, volumes, env, labels, restart policy) and the new image, and waits for the health check.
+5. **Verify or roll back** — healthy: the old container is removed and your dashboard page reloads on the new version. Unhealthy: the replacement is removed, the old container is renamed back and restarted — you stay on the previous version and the upgrader's logs (`docker logs <upgrader>`) explain what happened.
+
+> [!NOTE]
+> Hosts that accumulated dangling images from updates **before** this reclaim step existed can free that space once with `docker image prune` (dangling images only — safe for everything tagged). Reach for `docker image prune -a` only if you also want to drop tagged-but-unused images, and check `docker image ls` first: it removes every image no container uses, including older Rembric versions you might want to keep for rollback.
 
 ## Recovery
 

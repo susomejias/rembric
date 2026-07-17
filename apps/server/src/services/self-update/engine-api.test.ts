@@ -5,7 +5,12 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DockerEngineApi, EngineApiError, ENGINE_API_VERSION } from './engine-api.js';
+import {
+  DockerEngineApi,
+  EngineApiError,
+  ENGINE_API_VERSION,
+  type PruneFilters,
+} from './engine-api.js';
 
 interface Seen {
   method: string;
@@ -58,6 +63,14 @@ describe('DockerEngineApi', () => {
             }) + '\n',
           );
           res.end(JSON.stringify({ status: 'Status: Downloaded newer image' }) + '\n');
+        } else if (url.includes('/containers/prune')) {
+          res
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ ContainersDeleted: ['dead1'], SpaceReclaimed: 2048 }));
+        } else if (url.includes('/images/prune')) {
+          res
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ ImagesDeleted: null, SpaceReclaimed: 0 }));
         } else if (url.includes('/containers/create')) {
           res
             .writeHead(201, { 'content-type': 'application/json' })
@@ -119,6 +132,45 @@ describe('DockerEngineApi', () => {
     expect(events).toContain('Downloading');
     expect(seen.at(-1)?.url).toContain('fromImage=ghcr.io%2Fsusomejias%2Frembric');
     expect(seen.at(-1)?.url).toContain('tag=0.22.0');
+  });
+
+  it('prunes containers with the exact label-scoped filter string', async () => {
+    const api = new DockerEngineApi(socketPath);
+    const r = await api.pruneContainers({ label: ['rembric.upgrader=1'] });
+    expect(r.ContainersDeleted).toEqual(['dead1']);
+    expect(r.SpaceReclaimed).toBe(2048);
+    expect(seen.at(-1)?.url).toBe(
+      `/${ENGINE_API_VERSION}/containers/prune?filters=${encodeURIComponent('{"label":["rembric.upgrader=1"]}')}`,
+    );
+  });
+
+  it('prunes images and tolerates a null ImagesDeleted', async () => {
+    const api = new DockerEngineApi(socketPath);
+    const r = await api.pruneImages({ dangling: ['true'], label: ['rembric.stage=runtime'] });
+    expect(r.ImagesDeleted).toBeNull();
+    const url = decodeURIComponent(seen.at(-1)?.url ?? '');
+    expect(url).toContain('/images/prune?filters=');
+    expect(url).toContain('"dangling":["true"]');
+    expect(url).toContain('"label":["rembric.stage=runtime"]');
+  });
+
+  it('refuses an unscoped prune before any socket I/O', async () => {
+    const api = new DockerEngineApi(socketPath);
+    const before = seen.length;
+    // The PruneFilters type already rejects these shapes at compile time; the
+    // casts exist to exercise the runtime guard that protects JS callers.
+    const unscoped = {} as PruneFilters;
+    const noLabel = { dangling: ['true'] } as unknown as PruneFilters;
+    const emptyLabel = { label: [] } as unknown as PruneFilters;
+    const stringLabel = { label: 'rembric.upgrader=1' } as unknown as PruneFilters;
+    await expect(api.pruneContainers(unscoped)).rejects.toThrow(/label/);
+    await expect(api.pruneImages(noLabel)).rejects.toThrow(/label/);
+    await expect(api.pruneContainers(emptyLabel)).rejects.toThrow(/label/);
+    await expect(api.pruneImages({ label: [' '] })).rejects.toThrow(/label/);
+    // A string label from an untyped caller must hit the guard's
+    // EngineApiError, not a raw TypeError from labels.some().
+    await expect(api.pruneContainers(stringLabel)).rejects.toThrow(EngineApiError);
+    expect(seen.length).toBe(before);
   });
 
   it('creates, starts, stops, renames, removes', async () => {
