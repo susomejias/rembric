@@ -37,7 +37,7 @@ The `plugins` command strings SHALL be derived from the canonical installer entr
 - **WHEN** the tool's `plugins` command strings are compared against the canonical installer entrypoint defined by the `tui-installer` capability
 - **THEN** the interactive and `--action=update` invocations SHALL reference that same entrypoint and flag set (no forked URL or flags)
 
-#### Scenario: The tool offers a read-only status command, and directs status-first checking to the subset path
+#### Scenario: The tool offers a read-only status command to check before updating
 
 - **WHEN** the `plugins` axis is inspected
 - **THEN** it SHALL include a `status` command using the installer's `--status --json` mode that references the canonical entrypoint
