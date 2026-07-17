@@ -5,6 +5,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import { type Prompt } from '../db/schema/prompts.js';
 
 import { DomainError } from './errors.js';
+import { sanitizeFtsQuery } from './hybrid-search.js';
 import { type Scope } from './scope.js';
 
 const PROMPT_TITLE_MAX_LENGTH = 100;
@@ -279,10 +280,16 @@ export class PromptsService {
     const clamped = requestedLimit !== limit;
     const offset = Math.max(0, input.offset ?? 0);
     const projectId = input.scope.kind === 'project' ? input.scope.projectId : null;
+    // Sanitize before it reaches `prompts_fts MATCH` — an arbitrary
+    // natural-language query (punctuation, an unbalanced quote, a bareword
+    // FTS5 operator) would otherwise raise a syntax error. Empty after
+    // sanitizing means "skip the FTS branch"; undefined falls back to the
+    // recency path the same as no query at all.
+    const sanitized = input.query ? sanitizeFtsQuery(input.query) : undefined;
 
     const { prompts, total } = this.repos.prompts.searchByScope({
       projectId,
-      query: input.query,
+      query: sanitized || undefined,
       sessionId: input.sessionId,
       agent: input.agent,
       includeDeleted: input.includeDeleted,

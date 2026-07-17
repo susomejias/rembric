@@ -306,6 +306,24 @@ describe('PromptsService.searchByScope', () => {
     });
     expect(result.prompts.map((p) => p.content).sort()).toEqual(['p1', 'p2'].sort());
   });
+
+  it('sanitizes a query containing FTS5 metacharacters instead of throwing (#258)', () => {
+    prompts.save({ content: "what's the deploy plan?", title: 'plan', projectId });
+
+    // An apostrophe/question-mark would otherwise raise an FTS5 syntax error.
+    const result = prompts.searchByScope({
+      scope: projectScope(projectId),
+      query: "what's the deploy plan?",
+    });
+    expect(result.prompts.map((p) => p.content)).toEqual(["what's the deploy plan?"]);
+  });
+
+  it('falls back to recency when the query sanitizes to nothing', () => {
+    const p1 = prompts.save({ content: 'first', title: 'first', projectId });
+
+    const result = prompts.searchByScope({ scope: projectScope(projectId), query: '??? !!!' });
+    expect(result.prompts.map((p) => p.id)).toEqual([p1.id]);
+  });
 });
 
 describe('PromptsService.countPurgeableDeleted', () => {

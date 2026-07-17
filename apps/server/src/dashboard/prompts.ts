@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { AdminListPromptsOpts, Repositories } from '../db/repositories/index.js';
 import type { Prompt } from '../db/schema/prompts.js';
 import { DomainError } from '../services/errors.js';
+import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { SessionsService } from '../services/sessions.js';
 
@@ -46,7 +47,12 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const projectFilter = url.searchParams.get('project') ?? '';
     const agentFilter = url.searchParams.get('agent') ?? '';
     const sessionFilter = url.searchParams.get('session') ?? '';
-    const query = url.searchParams.get('q') ?? '';
+    const rawQuery = url.searchParams.get('q') ?? '';
+    // Sanitized before it reaches `prompts_fts MATCH` — ordinary punctuation
+    // (an apostrophe, a stray quote, "docker-compose") otherwise raises an
+    // FTS5 syntax error and 500s the page. The unsanitized `rawQuery` is
+    // still what's redisplayed in the search box.
+    const query = sanitizeFtsQuery(rawQuery);
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
@@ -200,7 +206,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       filterGroup(
         'SEARCH',
         'f-q',
-        inp('q', query, 'FTS5 over content + tags', { type: 'search', id: 'f-q' }),
+        inp('q', rawQuery, 'FTS5 over content + tags', { type: 'search', id: 'f-q' }),
         { className: 'search' },
       ),
       includeDeleted ? raw('<input type="hidden" name="include_deleted" value="1" />') : raw(''),
