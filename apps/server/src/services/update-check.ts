@@ -149,23 +149,27 @@ export class UpdateCheckService {
         return this.cache;
       }
       this.lastFetchFailed = false;
-      const latest = releases.find(
-        (r) =>
-          !r.draft &&
-          !r.prerelease &&
-          typeof r.tag_name === 'string' &&
-          r.tag_name.startsWith(SERVER_TAG_PREFIX) &&
-          parseSemver(r.tag_name.slice(SERVER_TAG_PREFIX.length)) !== null,
+      // GitHub's /releases ordering is not newest-first (observed: a release
+      // published hours later listed BELOW an older one), so never take the
+      // first match — pick the highest server semver in the page.
+      const candidates = releases.flatMap((r) => {
+        if (r.draft || r.prerelease || typeof r.tag_name !== 'string') return [];
+        if (!r.tag_name.startsWith(SERVER_TAG_PREFIX)) return [];
+        const version = r.tag_name.slice(SERVER_TAG_PREFIX.length);
+        return parseSemver(version) ? [{ release: r, version }] : [];
+      });
+      const latest = candidates.reduce<(typeof candidates)[number] | null>(
+        (best, c) => (best && !semverGt(c.version, best.version) ? best : c),
+        null,
       );
-      if (!latest?.tag_name) return this.cache;
-      const version = latest.tag_name.slice(SERVER_TAG_PREFIX.length);
-      this.cache = semverGt(version, this.currentVersion)
+      if (!latest) return this.cache;
+      this.cache = semverGt(latest.version, this.currentVersion)
         ? {
             currentVersion: this.currentVersion,
-            latestVersion: version,
-            publishedAt: latest.published_at ? new Date(latest.published_at) : null,
-            changelog: latest.body ?? '',
-            releaseUrl: latest.html_url ?? '',
+            latestVersion: latest.version,
+            publishedAt: latest.release.published_at ? new Date(latest.release.published_at) : null,
+            changelog: latest.release.body ?? '',
+            releaseUrl: latest.release.html_url ?? '',
           }
         : null;
       return this.cache;

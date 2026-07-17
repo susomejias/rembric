@@ -84,6 +84,24 @@ describe('UpdateCheckService', () => {
     expect(await svc({ fetchImpl: older.fetchImpl }).refresh()).toBeNull();
   });
 
+  it('picks the highest server semver even when GitHub lists it out of order', async () => {
+    // Regression (2026-07-17): the API returned server-v0.24.9 ABOVE the
+    // hours-newer server-v0.24.10, so first-match reported "up to date".
+    const { fetchImpl } = fakeFetch([
+      {
+        status: 200,
+        body: [
+          release({ tag_name: 'server-v0.24.9' }),
+          release({ tag_name: 'server-v0.24.10' }),
+          release({ tag_name: 'plugin-v0.21.0' }),
+          release({ tag_name: 'server-v0.24.8' }),
+        ],
+      },
+    ]);
+    const info = await svc({ fetchImpl, currentVersion: '0.24.9' }).refresh();
+    expect(info?.latestVersion).toBe('0.24.10');
+  });
+
   it('skips prereleases, drafts, and non-server components', async () => {
     const { fetchImpl } = fakeFetch([
       {
