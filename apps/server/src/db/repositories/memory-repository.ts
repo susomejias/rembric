@@ -326,8 +326,9 @@ export class MemoryRepository {
       .all<{ id: string }>(
         sql`
           SELECT m.id
-          FROM memory m, json_each(m.replaces) je
-          WHERE je.value = ${id}
+          FROM memory_replaces mr
+          JOIN memory m ON m.id = mr.successor_id
+          WHERE mr.predecessor_id = ${id}
           ORDER BY m.created_at DESC
           LIMIT 1
         `,
@@ -825,7 +826,7 @@ export class MemoryRepository {
 // filter is load-bearing — do not remove it.
 const PURGE_PREDICATE = sql`m.status = 'archived'
          AND m.id NOT IN (
-             SELECT je.value FROM memory m2, json_each(m2.replaces) je)
+             SELECT predecessor_id FROM memory_replaces)
          AND m.id NOT IN (
              SELECT created_id FROM consolidation_ops WHERE created_id IS NOT NULL)
          AND m.id NOT IN (

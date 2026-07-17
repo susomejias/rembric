@@ -178,6 +178,75 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
+  describe('findSuccessorId — memory_replaces join', () => {
+    // The pre-rewrite json_each scan, kept verbatim as the equivalence oracle.
+    function legacyFindSuccessorId(id: string): string | undefined {
+      return t.handle.raw
+        .prepare<
+          [string],
+          { id: string }
+        >(`SELECT m.id FROM memory m, json_each(m.replaces) je WHERE je.value = ? ORDER BY m.created_at DESC LIMIT 1`)
+        .get(id)?.id;
+    }
+
+    it('matches the legacy json_each scan for a simple chain', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          mem({ id: 'M1', status: 'superseded' }),
+          mem({ id: 'M2', status: 'active', replaces: ['M1'] }),
+        ])
+        .run();
+
+      expect(repo.findSuccessorId('M1')).toBe(legacyFindSuccessorId('M1'));
+      expect(repo.findSuccessorId('M1')).toBe('M2');
+    });
+
+    it('matches the legacy scan when a predecessor has no successor', () => {
+      t.handle.db
+        .insert(memory)
+        .values([mem({ id: 'LONE', status: 'active' })])
+        .run();
+      expect(repo.findSuccessorId('LONE')).toBe(legacyFindSuccessorId('LONE'));
+      expect(repo.findSuccessorId('LONE')).toBeUndefined();
+    });
+
+    it('picks the newest successor when more than one row claims the same predecessor', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          mem({ id: 'M1', status: 'superseded' }),
+          mem({ id: 'OLDER', status: 'superseded', replaces: ['M1'], createdAt: new Date(1_000) }),
+          mem({ id: 'NEWER', status: 'active', replaces: ['M1'], createdAt: new Date(2_000) }),
+        ])
+        .run();
+
+      expect(repo.findSuccessorId('M1')).toBe(legacyFindSuccessorId('M1'));
+      expect(repo.findSuccessorId('M1')).toBe('NEWER');
+    });
+
+    it('a 500-row table does not make findSuccessorId scale with table size', () => {
+      const rows: NewMemory[] = [mem({ id: 'HEAD', status: 'superseded' })];
+      for (let i = 0; i < 499; i++) {
+        rows.push(mem({ id: `filler-${i}`, status: 'archived' }));
+      }
+      t.handle.db.insert(memory).values(rows).run();
+      t.handle.db
+        .insert(memory)
+        .values([mem({ id: 'TAIL', status: 'active', replaces: ['HEAD'] })])
+        .run();
+
+      const started = performance.now();
+      for (let i = 0; i < 100; i++) repo.findSuccessorId('HEAD');
+      const elapsedMs = performance.now() - started;
+
+      expect(repo.findSuccessorId('HEAD')).toBe('TAIL');
+      // A PK-indexed join stays sub-millisecond per call even repeated 100x;
+      // the pre-rewrite json_each scan measured ~11ms per call on its own.
+      expect(elapsedMs).toBeLessThan(200);
+    });
+  });
+
   describe('recentForContext expression index', () => {
     function planFor(scope: 'global' | 'project', projectId: string | null): string {
       const conds = [
