@@ -434,6 +434,9 @@ export const RembricPlugin: Plugin = async (ctx) => {
     'chat.message': async (input, output) => {
       if (subAgentSessions.has(input.sessionID)) return;
 
+      // Covers a session resumed without a fresh session.created event.
+      await ensureSession(input.sessionID);
+
       const fromParts = output.parts
         .filter((p) => p.type === 'text')
         .map((p) => p.text ?? '')

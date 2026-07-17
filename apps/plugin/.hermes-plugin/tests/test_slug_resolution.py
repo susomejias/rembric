@@ -1,9 +1,9 @@
 """Cascade behavior for ``_resolve_slug``.
 
-Cascade since 0.4.0 is four steps:
+Cascade is four steps, .rembric-first:
 
-1. ``REMBRIC_PROJECT_SLUG`` env
-2. ``<cwd>/.rembric`` ``PROJECT_SLUG``
+1. ``<cwd>/.rembric`` ``PROJECT_SLUG``
+2. ``REMBRIC_PROJECT_SLUG`` env
 3. trailing ``/mcp/<slug>`` segment of ``REMBRIC_SERVER_URL``
 4. ``None`` (degraded)
 """
@@ -28,9 +28,16 @@ class SlugCascadeTest(unittest.TestCase):
     def _plugin(self, **env: str):
         return fresh_plugin(env=env, home=str(self.tmp_path / "home"))
 
-    def test_env_wins_over_dotrembric(self) -> None:
+    def test_dotrembric_wins_over_env(self) -> None:
         (self.tmp_path / "cwd" / ".rembric").write_text("PROJECT_SLUG=gamma\n")
         mod = self._plugin(REMBRIC_PROJECT_SLUG="alpha")
+        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
+
+    def test_env_wins_when_no_dotrembric(self) -> None:
+        mod = self._plugin(
+            REMBRIC_PROJECT_SLUG="alpha",
+            REMBRIC_SERVER_URL="https://memory.example.com/mcp/delta",
+        )
         self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "alpha")
 
     def test_dotrembric_wins_over_url(self) -> None:
@@ -46,11 +53,11 @@ class SlugCascadeTest(unittest.TestCase):
         )
         self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "delta")
 
-    def test_invalid_env_candidate_falls_through(self) -> None:
-        (self.tmp_path / "cwd" / ".rembric").write_text("PROJECT_SLUG=gamma\n")
-        mod = self._plugin(
-            REMBRIC_PROJECT_SLUG="Has_Underscores",  # invalid: caps + underscore
+    def test_invalid_dotrembric_candidate_falls_through_to_env(self) -> None:
+        (self.tmp_path / "cwd" / ".rembric").write_text(
+            "PROJECT_SLUG=Has_Underscores\n"  # invalid: caps + underscore
         )
+        mod = self._plugin(REMBRIC_PROJECT_SLUG="gamma")
         self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
 
     def test_invalid_url_segment_falls_through_to_none(self) -> None:

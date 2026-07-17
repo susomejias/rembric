@@ -188,6 +188,39 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(provider._session_id, "01NEW")
 
     @patch("rembric_hermes_plugin.urlopen")
+    def test_suppressed_context_makes_no_http_calls_from_sync_or_end(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize(
+            "01SUB", cwd=str(self.tmp / "cwd"), agent_context="subagent"
+        )
+        mock_urlopen.reset_mock()
+        provider.sync_turn("hi", "hello")
+        self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
+        provider._sync_lock.release()
+        provider.on_pre_compress([{"role": "user", "content": "x"}])
+        provider.on_session_end([{"role": "assistant", "content": "bye"}])
+        self.assertEqual(mock_urlopen.call_count, 0)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_suppressed_context_switch_makes_no_http_calls_for_either_session(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize(
+            "01OLD", cwd=str(self.tmp / "cwd"), agent_context="cron"
+        )
+        mock_urlopen.reset_mock()
+        provider.on_session_switch(
+            "01NEW", parent_session_id="01OLD", reset=False
+        )
+        self.assertEqual(mock_urlopen.call_count, 0)
+        self.assertEqual(provider._session_id, "01NEW")
+
+    @patch("rembric_hermes_plugin.urlopen")
     def test_no_slug_skips_all_posts(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeResponse()
         provider = self._provider()

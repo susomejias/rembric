@@ -340,6 +340,31 @@ describe('RembricPlugin handlers', () => {
     expect(fetchMock.mock.calls.length).toBe(before);
   });
 
+  it('chat.message registers a session that never got a session.created event', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+
+      await handlers['chat.message']!(
+        { sessionID: 'resumed-1' } as never,
+        { parts: [{ type: 'text', text: 'continue where we left off' }], message: {} } as never,
+      );
+
+      const registerCall = fetchMock.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.endsWith('/api/demo/sessions'),
+      );
+      expect(registerCall).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(500);
+      const summaryCall = fetchMock.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/sessions/resumed-1/summary'),
+      );
+      expect(summaryCall).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the debounced flush never blocks the handler from returning', async () => {
     vi.useFakeTimers();
     try {

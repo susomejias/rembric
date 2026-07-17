@@ -215,6 +215,26 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("rembric_hermes_plugin.urlopen")
+    def test_sync_turn_aborts_without_posting_when_lock_acquire_times_out(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        fake_lock = MagicMock()
+        fake_lock.acquire.return_value = False
+        provider._sync_lock = fake_lock
+
+        provider.sync_turn("hi", "hello")
+        deadline = threading.Event()
+        deadline.wait(timeout=0.2)
+        fake_lock.acquire.assert_called_once_with(timeout=5.0)
+        fake_lock.release.assert_not_called()
+        mock_urlopen.assert_not_called()
+
+    @patch("rembric_hermes_plugin.urlopen")
     def test_sync_turn_heartbeat_prefers_the_full_messages_list_when_given(
         self, mock_urlopen: MagicMock
     ) -> None:
