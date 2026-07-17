@@ -36,7 +36,11 @@ FILE="${DIR}/${SAFE_ID}"
 printf '.' >>"$FILE" 2>/dev/null || true
 COUNT="$(wc -c <"$FILE" 2>/dev/null | tr -d '[:space:]')"
 case "$COUNT" in
-  '' | *[!0-9]*) COUNT=0 ;;
+  # Counter unreadable (unwritable TMPDIR, squatted counter dir, etc.) —
+  # fail CLOSED: emit nothing. Defaulting to 0 here would satisfy BOTH
+  # modulo checks below (0 % 5 == 0 and 0 % 10 == 0), spamming every
+  # nudge on every single turn for the rest of the session.
+  '' | *[!0-9]*) exit 0 ;;
 esac
 
 SAVE_FIRES=0

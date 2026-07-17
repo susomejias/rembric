@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -106,5 +106,19 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
     );
     const counterFile = join(counterDir, 'rembric-turnnudge', 's-concurrent');
     expect(readFileSync(counterFile, 'utf8').length).toBe(n);
+  });
+
+  it('fails closed (emits nothing) when the counter file is unreadable, instead of spamming every nudge (#260)', () => {
+    // TMPDIR pointing at a regular file (not a directory) makes
+    // `mkdir -p "$TMPDIR/rembric-turnnudge"` fail, so the counter can never
+    // be written or read — the exact "COUNT unreadable" case.
+    const notADir = join(counterDir, 'this-is-a-file-not-a-dir');
+    writeFileSync(notADir, '');
+    const out = execFileSync('bash', [promptNudgeSh], {
+      input: JSON.stringify({ session_id: 's-broken-counter' }),
+      encoding: 'utf8',
+      env: { ...process.env, TMPDIR: notADir },
+    });
+    expect(out.trim()).toBe('');
   });
 });

@@ -120,10 +120,17 @@ rembric_format_transcript_claude_code() {
     return 0
   fi
   local out
+  # No `|| out=""` fallback: jq streams output as it parses, so a torn
+  # trailing line (e.g. a Stop hook racing a mid-write append, or a crash)
+  # makes jq exit non-zero but still leaves every GOOD line it already
+  # printed in `out` via the command substitution. An `||` here would
+  # discard that already-captured partial transcript instead of keeping
+  # it — command substitution already yields "" on a total failure, so
+  # no explicit fallback is needed for that case either.
   if command -v jq >/dev/null 2>&1; then
-    out="$(_rembric_format_transcript_claude_code_jq "$path" 2>/dev/null)" || out=""
+    out="$(_rembric_format_transcript_claude_code_jq "$path" 2>/dev/null)"
   else
-    out="$(_rembric_format_transcript_claude_code_fallback "$path" 2>/dev/null)" || out=""
+    out="$(_rembric_format_transcript_claude_code_fallback "$path" 2>/dev/null)"
   fi
   _rembric_truncate_transcript "$out"
 }
@@ -258,10 +265,13 @@ rembric_format_transcript_codex_cli() {
     return 0
   fi
   local out
+  # See the identical comment in rembric_format_transcript_claude_code — no
+  # `|| out=""` fallback, so a torn trailing line doesn't discard the good
+  # lines jq already printed before hitting the parse error.
   if command -v jq >/dev/null 2>&1; then
-    out="$(_rembric_format_transcript_codex_cli_jq "$path" 2>/dev/null)" || out=""
+    out="$(_rembric_format_transcript_codex_cli_jq "$path" 2>/dev/null)"
   else
-    out="$(_rembric_format_transcript_codex_cli_fallback "$path" 2>/dev/null)" || out=""
+    out="$(_rembric_format_transcript_codex_cli_fallback "$path" 2>/dev/null)"
   fi
   _rembric_truncate_transcript "$out"
 }
