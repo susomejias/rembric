@@ -96,6 +96,57 @@ The view SHALL paginate at 50 rows per page (`PAGE_SIZE` shared constant). The v
 
 **The free-text query SHALL be sanitized before it reaches the `prompts_fts` `MATCH` expression**, using the same sanitizer as `memory.search`'s hybrid retrieval, so that ordinary punctuation degrades to no lexical match rather than raising an FTS5 syntax error. The search input SHALL redisplay the operator's original, unsanitized text — not the transformed match expression.
 
+Each row SHALL render a `Delete` form (soft-delete, `data-confirm-tone="warn"`, action `prompt.delete`). Rows shown under `?include_deleted=1` SHALL additionally render an `Undelete` form (action `prompt.undelete`). A row whose `replaces` is not NULL AND whose `deleted_at` is not NULL SHALL render a `REFINED` badge instead of the default `DELETED` indicator — the `replaces` link encodes that the deletion was the consequence of an agent-driven refine, not an operator action.
+
+The view SHALL NOT include a detail page at `/dashboard/prompts/:id` in this revision; long contents SHALL be expandable inline via an HTMX `<details>` toggle.
+
+#### Scenario: An operator opens the prompts list
+
+- **WHEN** an authenticated admin operator navigates to `/dashboard/prompts`
+- **THEN** the server SHALL return a paginated list of the 50 most recent prompts (active and not-deleted) ordered by `created_at DESC`
+- **AND** each row SHALL include the documented columns
+- **AND** the table header SHALL NOT contain a `<th>` labelled `id`
+- **AND** each row SHALL include a `Delete` form using `data-confirm` modal attributes on the `<form>` element
+
+#### Scenario: An operator searches prompts by content
+
+- **GIVEN** prompts exist with content "deploy via Docker Compose" and "refactor the auth middleware"
+- **WHEN** the operator submits `?q=deploy` on `/dashboard/prompts`
+- **THEN** the server SHALL return only the first prompt
+- **AND** the SQL query SHALL use a `JOIN` against `prompts_fts MATCH 'deploy'`
+
+#### Scenario: An operator filters by session
+
+- **GIVEN** session `S1` has 3 prompts and session `S2` has 1 prompt
+- **WHEN** the operator submits `?session=<S1-shortId>`
+- **THEN** the response SHALL contain exactly the 3 prompts whose `session_id = S1.id`
+
+#### Scenario: Soft-deleted prompts are hidden by default
+
+- **GIVEN** prompts `P1`, `P2` exist and `P2.deleted_at IS NOT NULL`
+- **WHEN** the operator navigates to `/dashboard/prompts`
+- **THEN** the response SHALL contain `P1` and SHALL NOT contain `P2`
+
+#### Scenario: `?include_deleted=1` reveals deleted prompts with Undelete actions
+
+- **GIVEN** prompts `P1`, `P2` exist and `P2.deleted_at IS NOT NULL`
+- **WHEN** the operator navigates to `/dashboard/prompts?include_deleted=1`
+- **THEN** the response SHALL contain both prompts
+- **AND** `P2`'s row SHALL render an `Undelete` form using CSRF action `prompt.undelete`
+
+#### Scenario: A refined prompt renders a REFINED badge
+
+- **GIVEN** prompt `P1` was refined: its `deleted_at IS NOT NULL` and there exists a successor `P2` with `P2.replaces = ['<P1.id>']`
+- **WHEN** the operator navigates to `/dashboard/prompts?include_deleted=1`
+- **THEN** `P1`'s row SHALL render a `REFINED` badge (NOT the default `DELETED` indicator)
+
+#### Scenario: Delete form opens the confirmation modal
+
+- **GIVEN** an authenticated admin operator viewing the prompts list
+- **WHEN** the operator clicks the `Delete` button of a row
+- **THEN** the global `#rbr-confirm` dialog SHALL open with `data-confirm-tone="warn"` styling
+- **AND** the form SHALL submit only after the operator confirms via the dialog
+
 #### Scenario: A search query containing an apostrophe or question mark does not crash the page
 
 - **GIVEN** the operator types `what's the plan?` into the prompts search box

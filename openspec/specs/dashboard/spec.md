@@ -44,6 +44,8 @@ The view header SHALL render a `TOTAL` meta chip whose value is the true count o
 
 For the single combination of `review = needs_review` AND a non-empty free-text query — where review state is derived after the page slice rather than in SQL — the `TOTAL` chip SHALL render the page-slice count suffixed with `+` (a "at least N" lower bound) rather than an inexact exact-looking number.
 
+**The free-text query SHALL be sanitized before it reaches the `memory_fts` `MATCH` expression**, using the same sanitizer as `memory.search`'s hybrid retrieval, so that ordinary punctuation (an apostrophe, a stray quote, a hyphenated word) degrades to no lexical match rather than raising an FTS5 syntax error. The search input SHALL redisplay the operator's original, unsanitized text — not the transformed match expression.
+
 #### Scenario: Filtering by status
 
 - **WHEN** the operator selects `status = 'archived'` in the filter form
@@ -92,6 +94,13 @@ For the single combination of `review = needs_review` AND a non-empty free-text 
 - **WHEN** the operator views `/dashboard/memories` under that combination
 - **THEN** the header `TOTAL` chip SHALL render the page-slice count suffixed with `+` (e.g. `10+`)
 - **AND** it SHALL NOT render an exact-looking number that under- or over-states the match set
+
+#### Scenario: A search query containing FTS5 metacharacters does not crash the page
+
+- **GIVEN** the operator types `docker-compose?` or `what's the deploy plan` into the memories search box
+- **WHEN** the query is submitted
+- **THEN** the page SHALL render normally (no 500), showing matches for the sanitized terms
+- **AND** the search input SHALL redisplay exactly what the operator typed, not the sanitized match expression
 
 ### Requirement: Memory detail MUST display the history chain
 
@@ -748,6 +757,8 @@ A logged-in dashboard user SHALL see a list of curated user prompts for the acti
 
 The view SHALL paginate at 50 rows per page (`PAGE_SIZE` shared constant). The view SHALL support a free-text query box that submits as the `q` query parameter; when non-empty, the server-side handler SHALL use the FTS5 `prompts_fts` index (matching against `content` + `tags`). The view SHALL support filters by `project_slug`, `session_id` (shortId match), and `agent`.
 
+**The free-text query SHALL be sanitized before it reaches the `prompts_fts` `MATCH` expression**, using the same sanitizer as `memory.search`'s hybrid retrieval, so that ordinary punctuation degrades to no lexical match rather than raising an FTS5 syntax error. The search input SHALL redisplay the operator's original, unsanitized text — not the transformed match expression.
+
 Each row SHALL render a `Delete` form (soft-delete, `data-confirm-tone="warn"`, action `prompt.delete`). Rows shown under `?include_deleted=1` SHALL additionally render an `Undelete` form (action `prompt.undelete`). A row whose `replaces` is not NULL AND whose `deleted_at` is not NULL SHALL render a `REFINED` badge instead of the default `DELETED` indicator — the `replaces` link encodes that the deletion was the consequence of an agent-driven refine, not an operator action.
 
 The view SHALL NOT include a detail page at `/dashboard/prompts/:id` in this revision; long contents SHALL be expandable inline via an HTMX `<details>` toggle.
@@ -798,6 +809,13 @@ The view SHALL NOT include a detail page at `/dashboard/prompts/:id` in this rev
 - **WHEN** the operator clicks the `Delete` button of a row
 - **THEN** the global `#rbr-confirm` dialog SHALL open with `data-confirm-tone="warn"` styling
 - **AND** the form SHALL submit only after the operator confirms via the dialog
+
+#### Scenario: A search query containing an apostrophe or question mark does not crash the page
+
+- **GIVEN** the operator types `what's the plan?` into the prompts search box
+- **WHEN** the query is submitted
+- **THEN** the page SHALL render normally (no 500), showing matches for the sanitized terms
+- **AND** the search input SHALL redisplay exactly what the operator typed, not the sanitized match expression
 
 ### Requirement: The dashboard sidebar MUST include a `PROMPTS` entry
 
@@ -1230,3 +1248,21 @@ Every paginated dashboard list view (`/dashboard/memories`, `/dashboard/sessions
 - **GIVEN** a filter that matches zero rows
 - **WHEN** an operator views the resulting list
 - **THEN** the pager SHALL display "PAGE 1 OF 1"
+
+### Requirement: User-supplied text rendered outside the Markdown pipeline MUST be HTML-escaped
+
+Any dashboard template that interpolates user- or agent-supplied text via the `raw()` helper (i.e. outside the Markdown-rendering pipeline covered by the Markdown-escaping requirement) SHALL escape that text with `escape()` first. This applies in particular to prompt tags (agent-supplied via `memory.save_prompt`, rendered on the session detail and prompts list views) and project slugs (operator-supplied at project creation; legacy slugs may predate the current slug validation regex and are not guaranteed to be free of HTML metacharacters).
+
+#### Scenario: A prompt tag containing HTML metacharacters renders as literal text
+
+- **GIVEN** a prompt anchored to a session, with a tag containing `<` or `>` characters
+- **WHEN** the operator opens the session detail view or the prompts list view
+- **THEN** the tag SHALL render as escaped literal text
+- **AND** SHALL NOT be interpreted as HTML or execute as script in the operator's browser
+
+#### Scenario: A legacy project slug containing HTML metacharacters renders as literal text
+
+- **GIVEN** a project whose `slug` predates the current slug-validation regex and contains HTML metacharacters
+- **WHEN** the operator opens a dashboard view that renders that slug (e.g. the sessions list)
+- **THEN** the slug SHALL render as escaped literal text
+- **AND** SHALL NOT be interpreted as HTML or execute as script in the operator's browser
