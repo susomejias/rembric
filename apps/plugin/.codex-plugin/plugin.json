@@ -1,6 +1,6 @@
 {
   "name": "rembric",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "description": "Memory for Codex CLI, backed by your self-hosted Rembric server.",
   "author": {
     "name": "rembric contributors",
