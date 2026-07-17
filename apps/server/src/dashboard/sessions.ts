@@ -26,7 +26,16 @@ import {
 } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { formatTs, html, raw, rawPill, scopePill, shortId, statusPill } from './templates.js';
+import {
+  escape,
+  formatTs,
+  html,
+  raw,
+  rawPill,
+  scopePill,
+  shortId,
+  statusPill,
+} from './templates.js';
 
 export interface SessionsDeps {
   repos: Repositories;
@@ -100,7 +109,9 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             <a href="/dashboard/sessions/${r.id}">${displayTitle}</a>
           </td>
           <td>${r.agent}</td>
-          <td>${r.projectSlug ? raw(`<code>${r.projectSlug}</code>`) : scopePill('global')}</td>
+          <td>
+            ${r.projectSlug ? raw(`<code>${escape(r.projectSlug)}</code>`) : scopePill('global')}
+          </td>
           <td class="small">
             ${r.tokenName ?? '—'}
             ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
@@ -453,7 +464,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
                         <td>${truncate(p.content, 120)}</td>
                         <td>
                           ${Array.isArray(p.tags) && p.tags.length > 0
-                            ? raw(p.tags.map((t) => `<code>${t}</code>`).join(' '))
+                            ? raw(p.tags.map((t) => `<code>${escape(t)}</code>`).join(' '))
                             : raw('—')}
                         </td>
                         <td class="muted">${formatTs(p.createdAt)}</td>

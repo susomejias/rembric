@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
 import type { Memory, MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
+import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
 import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/review.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
@@ -70,7 +71,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const typeFilter = url.searchParams.get('type') ?? '';
     const reviewFilter = url.searchParams.get('review') ?? '';
     const wantNeedsReview = reviewFilter === 'needs_review';
-    const query = url.searchParams.get('q') ?? '';
+    const rawQuery = url.searchParams.get('q') ?? '';
+    // Sanitized before it reaches `memory_fts MATCH` — ordinary punctuation
+    // (an apostrophe, a stray quote, "docker-compose") otherwise raises an
+    // FTS5 syntax error and 500s the page. `rawQuery` is still what's
+    // redisplayed in the search box.
+    const query = sanitizeFtsQuery(rawQuery);
     const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
     const offset = page * PAGE_SIZE;
 
@@ -230,7 +236,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         filterGroup(
           'SEARCH',
           'f-q',
-          inp('q', query, 'FTS5 keyword, tag, topic', { type: 'search', id: 'f-q' }),
+          inp('q', rawQuery, 'FTS5 keyword, tag, topic', { type: 'search', id: 'f-q' }),
           { className: 'search' },
         ),
         html`<span class="acts">
