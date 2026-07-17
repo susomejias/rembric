@@ -30,7 +30,7 @@ This is the one genuinely user-visible behavior change in the package: a Hermes 
 
 ### D3. Suppression as persistent state, checked at every HTTP call site
 
-`self._suppressed = kwargs.get("agent_context", "primary") in _NON_PRIMARY_AGENT_CONTEXTS`, set once in `initialize` alongside the existing slug/base/session_id caching. `sync_turn`, `on_pre_compress`, `on_session_end`, and `on_session_switch` each gain `or self._suppressed` in their existing early-return guard (all four already guard on `not self._initialized or not self._slug or not self._base or not self._session_id`, so this is a one-token addition per site, not new control flow). `on_session_switch`'s registration POST for the _new_ session id is also suppressed — a subagent that switches sessions is still a subagent.
+`self._suppressed = kwargs.get("agent_context", "primary") in _NON_PRIMARY_AGENT_CONTEXTS`, set once in `initialize` alongside the existing slug/base/session*id caching. `sync_turn`, `on_pre_compress`, `on_session_end`, and `on_session_switch` each gain `or self._suppressed` in their existing early-return guard (all four already guard on `not self._initialized or not self._slug or not self._base or not self._session_id`, so this is a one-token addition per site, not new control flow). `on_session_switch`'s registration POST for the \_new* session id is also suppressed — a subagent that switches sessions is still a subagent.
 
 ### D4. `ensureSession` at the top of `chat.message`, not inside a new gate
 
