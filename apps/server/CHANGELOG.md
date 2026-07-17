@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.10](https://github.com/susomejias/rembric/compare/server-v0.24.9...server-v0.24.10) (2026-07-17)
+
+
+### Features
+
+* **self-update:** reclaim stale upgrader containers and dangling images before each update ([4f3b6ea](https://github.com/susomejias/rembric/commit/4f3b6ea31faa323230611235b762eb3bfb6c20fd)), closes [#282](https://github.com/susomejias/rembric/issues/282)
+
 ## [0.24.9](https://github.com/susomejias/rembric/compare/server-v0.24.8...server-v0.24.9) (2026-07-17)
 
 
