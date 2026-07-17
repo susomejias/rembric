@@ -1,6 +1,4 @@
-import { randomUUID } from 'node:crypto';
-
-import { logger } from '../logger.js';
+import { logInternalError } from '../server/error-response.js';
 import { DomainError } from '../services/errors.js';
 
 /**
@@ -29,9 +27,6 @@ export function errToMcp(err: unknown) {
   if (err instanceof DomainError) {
     return mcpError(err.code, err.message);
   }
-  const errorId = randomUUID();
-  const message = err instanceof Error ? err.message : String(err);
-  const stack = err instanceof Error ? err.stack : undefined;
-  logger.error('unhandled MCP tool error', { errorId, message, stack });
+  const errorId = logInternalError(err, 'unhandled MCP tool error');
   return mcpError('internal_error', 'An unexpected error occurred.', { errorId });
 }

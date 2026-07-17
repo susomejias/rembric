@@ -17,6 +17,7 @@ import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
 
 import { AuthError, authenticate } from './auth.js';
+import { httpInternalError } from './error-response.js';
 import type { AuthLockout } from './rate-limit.js';
 import type { RequestContext } from './request-context.js';
 
@@ -135,8 +136,14 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
+    if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
     const sessionId = c.req.param('id');
-    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, ctx.project.id);
     if (blocked) {
       return c.json(blocked.body, blocked.status);
     }
@@ -173,8 +180,14 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
+    if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
     const sessionId = c.req.param('id');
-    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, ctx.project.id);
     if (blocked) {
       return c.json(blocked.body, blocked.status);
     }
@@ -286,9 +299,14 @@ function rejectIfDeleted(
   deps: ApiRouterDeps,
   sessionId: string,
   callerTokenId: string,
+  projectId: string,
 ): { status: 404 | 409; body: { ok: false; code: string; message: string } } | null {
   const row = deps.agentSessions.getById(sessionId);
-  if (!row || row.tokenId !== callerTokenId) {
+  // A project-id mismatch is treated identically to token-id mismatch —
+  // "not found" rather than "forbidden" — so this never confirms whether a
+  // session with that id exists under a different project (avoids the URL
+  // :slug becoming a decorative check a caller could probe past).
+  if (!row || row.tokenId !== callerTokenId || row.projectId !== projectId) {
     return {
       status: 404,
       body: { ok: false, code: 'session_not_found', message: `session '${sessionId}' not found` },
@@ -312,8 +330,7 @@ function domainErr(c: ApiContext, err: unknown) {
     const status = statusForCode(err.code);
     return c.json({ ok: false, code: err.code, message: err.message }, status);
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return c.json({ ok: false, code: 'internal_error', message }, 500);
+  return c.json(httpInternalError(err, 'unhandled API request error'), 500);
 }
 
 function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 500 {
