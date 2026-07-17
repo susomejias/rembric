@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   chmodSync,
+  statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -565,6 +566,7 @@ describe('server bring-up (--up) with a stubbed docker', () => {
   function fakeDockerDir(
     composeUp: 'ok' | 'conflict',
     healthz: 'healthy' | 'down' = 'healthy',
+    chown: 'ok' | 'fail' = 'ok',
   ): string {
     const d = mkdtempSync(join(tmpdir(), 'rembric-fakebin-'));
     const up =
@@ -591,6 +593,10 @@ esac
     chmodSync(join(d, 'curl'), 0o755);
     writeFileSync(join(d, 'sleep'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(d, 'sleep'), 0o755);
+    // Stubbed so the test controls the chown-vs-chmod-fallback branch
+    // independently of whether the test runner itself happens to be root.
+    writeFileSync(join(d, 'chown'), chown === 'ok' ? '#!/bin/sh\nexit 0\n' : '#!/bin/sh\nexit 1\n');
+    chmodSync(join(d, 'chown'), 0o755);
     return d;
   }
 
@@ -658,6 +664,33 @@ esac
     expect(out).toContain('REMBRIC_NO_PULL'); // the "pull skipped" notice
     expect(out).not.toContain('FAKEPULL'); // pull was NOT invoked
     expect(out).toContain('Up.');
+  });
+
+  it('creates ./data and chowns it to uid 10001 when chown succeeds (no chmod fallback noise)', () => {
+    const bin = fakeDockerDir('ok', 'healthy', 'ok');
+    const { code, out } = run(['--server', '--action=install', '--up'], {
+      cwd: dir,
+      path: `${bin}:${process.env.PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, 'data'))).toBe(true);
+    expect(out).not.toContain('Could not chown');
+  });
+
+  it('falls back to a world-writable ./data and warns when chown is not possible (no root)', () => {
+    const bin = fakeDockerDir('ok', 'healthy', 'fail');
+    const { code, out } = run(['--server', '--action=install', '--up'], {
+      cwd: dir,
+      path: `${bin}:${process.env.PATH}`,
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(code).toBe(0);
+    const dataDir = join(dir, 'data');
+    expect(existsSync(dataDir)).toBe(true);
+    expect(statSync(dataDir).mode & 0o777).toBe(0o777);
+    expect(out).toContain('Could not chown ./data to the container');
+    expect(out).toContain('sudo chown -R 10001:10001 ./data');
   });
 
   it('container-name conflict: friendly message, never clobbers, no raw daemon dump', () => {
