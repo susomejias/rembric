@@ -4,6 +4,22 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.21.0](https://github.com/susomejias/rembric/compare/plugin-v0.20.1...plugin-v0.21.0) (2026-07-17)
+
+
+### Features
+
+* **installer:** update-all — action=update with no --agent updates every outdated plugin ([a188587](https://github.com/susomejias/rembric/commit/a188587c7dffd31a0920beca327eaf1cd025d733)), closes [#262](https://github.com/susomejias/rembric/issues/262)
+
+
+### Bug Fixes
+
+* **installer:** exit on ctrl-c in the arrow menu / banner reveal ([11baad7](https://github.com/susomejias/rembric/commit/11baad7227e2773cdfec5e5b0ee625fcf8cdd13a)), closes [#259](https://github.com/susomejias/rembric/issues/259)
+* **installer:** never relax an already-correctly-owned ./data on chown failure ([11e0b78](https://github.com/susomejias/rembric/commit/11e0b789840859d1008448cfb9e4ac07f8e0c5fd))
+* **installer:** repair ./data ownership before bring-up so the server can open its DB ([0e05816](https://github.com/susomejias/rembric/commit/0e05816fd3bbc4cd9175c0a4d37a2a072fbfa313))
+* **plugin:** dotenv trailing trim, full C0 json-escape, no-discard transcript, fail-closed nudge ([f40dd3a](https://github.com/susomejias/rembric/commit/f40dd3a241a16c57cc524b55d4b707e85a431c65)), closes [#260](https://github.com/susomejias/rembric/issues/260)
+* **plugin:** hermes slug precedence, suppression propagation, opencode resume gap ([377fc8d](https://github.com/susomejias/rembric/commit/377fc8d684304d200ac0384864fb4376531b180e))
+
 ## [0.20.1](https://github.com/susomejias/rembric/compare/plugin-v0.20.0...plugin-v0.20.1) (2026-07-15)
 
 
