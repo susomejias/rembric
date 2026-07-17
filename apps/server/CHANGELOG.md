@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.11](https://github.com/susomejias/rembric/compare/server-v0.24.10...server-v0.24.11) (2026-07-17)
+
+
+### Bug Fixes
+
+* **update-check:** pick the highest server semver instead of trusting GitHub's release order ([f460927](https://github.com/susomejias/rembric/commit/f4609279dabb8f8e55848d3e8d8cba88955cc558))
+
 ## [0.24.10](https://github.com/susomejias/rembric/compare/server-v0.24.9...server-v0.24.10) (2026-07-17)
 
 
