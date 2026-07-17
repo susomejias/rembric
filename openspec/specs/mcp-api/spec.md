@@ -1007,7 +1007,7 @@ The tool acts as the cross-client equivalent of a Claude-Code skill: it is the p
 The response SHALL be split into two axes that are never conflated:
 
 - `server`: an object containing the running server version (the value of `REMBRIC_VERSION`), a human-readable note that this is the server (which runs wherever the tool executes, e.g. the operator's VPS), and the server update path on that host (`docker compose pull && docker compose up -d`). This axis SHALL NOT claim anything about client plugin state.
-- `plugins`: an object containing the canonical TUI-installer commands — a **read-only status command** (`… --status --json`) that reports the server and each plugin's installed-vs-available version with a per-agent `action` (`none`/`update`/`ahead`/`unknown`), the interactive entrypoint (`curl -fsSL <install-url> | sh`), the update-all variant (`… --action=update`), and a subset example (`… --action=update --agent=<a,b>`) — together with an explicit note that plugins are installed per client machine, that this server cannot see them, that the operator runs the command on each machine where Rembric is used, and that the operator should run the status command first and update only where `action` is `update`.
+- `plugins`: an object containing the canonical TUI-installer commands — a **read-only status command** (`… --status --json`) that reports the server and each plugin's installed-vs-available version with a per-agent `action` (`none`/`update`/`ahead`/`unknown`), the interactive entrypoint (`curl -fsSL <install-url> | sh`), the update-all variant (`… --action=update`), and a subset example (`… --action=update --agent=<a,b>`) — together with an explicit note that plugins are installed per client machine, that this server cannot see them, that the operator runs the command on each machine where Rembric is used, and that the `update_all` command is safe to run directly (it updates only agents with an update available and skips the rest without erroring) — the status-first-then-selective-update advice applies to the `subset` command, where the operator names specific agents.
 
 The status command SHALL be the installer's existing read-only `--status --json` mode; the tool SHALL NOT compute installed-vs-available state itself (that detection is client-side and owned by the installer). The status command SHALL NOT include `--action=update` or any mutating flag.
 
@@ -1040,7 +1040,8 @@ The `plugins` command strings SHALL be derived from the canonical installer entr
 - **WHEN** the `plugins` axis is inspected
 - **THEN** it SHALL include a `status` command using the installer's `--status --json` mode that references the canonical entrypoint
 - **AND** that command SHALL NOT contain `--action=update` or any other mutating flag
-- **AND** the `plugins.note` SHALL direct the operator to run the status command first and update only where the reported `action` is `update`
+- **AND** the `plugins.note` SHALL state that `update_all` is safe to run directly without checking `status` first
+- **AND** the `plugins.note` SHALL direct the operator to check `status` first specifically when using the `subset` command to update named agents
 
 ### Requirement: The MCP endpoint MUST advertise the authorization server on `401` when OAuth is enabled
 
