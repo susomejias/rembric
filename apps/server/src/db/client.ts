@@ -49,18 +49,30 @@ export function createDb(opts: CreateDbOptions): DbHandle {
   // Load the sqlite-vec extension before anything touches the DB.
   sqliteVec.load(sqlite);
 
-  // WAL + safety pragmas. journal_mode=WAL allows concurrent readers while
-  // a writer is active and reduces fsync cost. synchronous=NORMAL is the
-  // recommended pairing for WAL.
+  // Read-only-safe tuning pragmas, applied to every connection: a bigger page
+  // cache and mmap window cut syscalls on the FTS/vec read path, temp_store in
+  // memory keeps ORDER BY / GROUP BY sorts off disk, and a non-zero busy_timeout
+  // stops the read-only CLI `status` path from hitting immediate SQLITE_BUSY
+  // under a concurrent writer. These never write to the database.
+  sqlite.pragma('busy_timeout = 5000');
+  sqlite.pragma('cache_size = -65536'); // 64 MB
+  sqlite.pragma('mmap_size = 268435456'); // 256 MB
+  sqlite.pragma('temp_store = MEMORY');
+
   if (!opts.readonly) {
+    // Write pragmas: journal_mode=WAL allows concurrent readers while a writer
+    // is active; synchronous=NORMAL is the recommended pairing for WAL.
     sqlite.pragma('journal_mode = WAL');
     sqlite.pragma('synchronous = NORMAL');
     sqlite.pragma('foreign_keys = ON');
-    sqlite.pragma('busy_timeout = 5000');
 
     migrate(sqlite, {
       migrationsDir: opts.migrationsDir ?? defaultMigrationsDir(),
     });
+
+    // Refresh sqlite_stat1 so the planner has statistics from the first query.
+    // Only valid on a writable connection (it writes the stat table).
+    sqlite.pragma('optimize');
   }
 
   const db = drizzle(sqlite, { schema });
@@ -68,7 +80,11 @@ export function createDb(opts: CreateDbOptions): DbHandle {
   return {
     db,
     raw: sqlite,
-    close: () => sqlite.close(),
+    close: () => {
+      // Update statistics for tables touched this run before closing.
+      if (!opts.readonly) sqlite.pragma('optimize');
+      sqlite.close();
+    },
   };
 }
 
