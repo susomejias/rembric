@@ -179,17 +179,21 @@ export async function bootstrap(
     onDrained: () => logSimilarityDistribution(repos),
   });
 
-  const embedTick = (): void => {
-    embeddingWorker.processBatch().catch((err: unknown) => {
+  const embedTick = (force = false): void => {
+    embeddingWorker.processBatch({ force }).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('embedding worker error', { message });
     });
   };
   // First pass immediately to backfill anything pending from a prior run.
-  embedTick();
-  const embedTimer = setInterval(embedTick, 30_000);
+  embedTick(true);
+  const embedTimer = setInterval(() => embedTick(), 30_000);
   // Don't keep the event loop alive solely for this timer during shutdown.
   embedTimer.unref?.();
+  // Safety net: force a full backlog re-check periodically in case some
+  // future insert path forgets to signal the worker's possiblyPending flag.
+  const embedFallbackTimer = setInterval(() => embedTick(true), 60 * 60_000);
+  embedFallbackTimer.unref?.();
 
   // Doctor report builder — captures live services for `memory.doctor`.
   const buildDoctorReport = buildDoctorReportFactory({
@@ -234,8 +238,8 @@ export async function bootstrap(
         candidates: {
           perSaveMax: config.candidates.perSaveMax,
         },
-        embedNow: (memoryId, title, content, scope, projectId, status, type) =>
-          embeddingWorker.embedNow(memoryId, title, content, scope, projectId, status, type),
+        embedNow: (memoryId, title, content, scope, projectId) =>
+          embeddingWorker.embedNow(memoryId, title, content, scope, projectId),
         router: sessionRouter,
         repos,
         doctor: buildDoctorReport,

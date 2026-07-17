@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import type { MemoryScope } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -360,8 +360,6 @@ export interface MemoryToolDeps {
     content: string,
     scope: MemoryScope,
     projectId: string | null,
-    status: MemoryStatus,
-    type: MemoryType,
   ) => Promise<boolean>;
   /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
   router?: SessionRouter;
@@ -576,8 +574,7 @@ async function handleSave(
         // Give the new row its vector before detection runs, so the vec
         // pass has a self-vector to kNN from (model is warm by boot
         // contract; on failure detection degrades to FTS5 for this save).
-        if (deps.embedNow)
-          await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId, m.status, m.type);
+        if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
         const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
         for (const c of detected) {
           // Skip the topic_key supersede target — we already wrote that relation.

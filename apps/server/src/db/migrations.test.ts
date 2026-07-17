@@ -577,6 +577,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0017_oauth_project_binding.sql',
       '0018_unique_topic_key_active_index.sql',
       '0019_memory_scope_seen_index.sql',
+      '0020_fix_fts_delete_triggers.sql',
     ]);
 
     // FK integrity after the rebuild.

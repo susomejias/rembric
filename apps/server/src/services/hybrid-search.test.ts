@@ -195,6 +195,28 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(ids).not.toContain(supersededRow.id);
   });
 
+  it('excludes a row from search results if memory_vec.status is stale, even though the dense branch returned its id', async () => {
+    // Simulates the pre-fix race (#257): construct a memory_vec row whose
+    // cached `status` disagrees with the live `memory.status`, bypassing
+    // the normal insert/sync paths entirely (a raw UPDATE to memory_vec
+    // does not go through the memory_vec_status_sync trigger, which is
+    // defined ON `memory`, not on `memory_vec`). This proves the search
+    // hydration guard — not the trigger, not insertEmbedding — is what
+    // keeps a stale vec row from leaking into results.
+    const stale = mem.save(
+      { type: 'user', title: 'Stale vector token', content: 'stale vector token' },
+      projectScope(projectId),
+    );
+    await embedAll();
+    db.handle.raw.prepare("UPDATE memory SET status = 'superseded' WHERE id = ?").run(stale.id);
+    db.handle.raw
+      .prepare("UPDATE memory_vec SET status = 'active' WHERE memory_id = ?")
+      .run(stale.id);
+
+    const res = await mem.search({ query: 'stale vector token' }, projectScope(projectId));
+    expect(res.map((m) => m.id)).not.toContain(stale.id);
+  });
+
   it('finds a memory with no embedding via the lexical branch (coverage gap)', async () => {
     mem.save(
       { type: 'user', title: 'Embedded one widget', content: 'embedded one widget' },

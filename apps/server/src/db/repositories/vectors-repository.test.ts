@@ -65,13 +65,7 @@ describe('VectorsRepository', () => {
       .insert(memory)
       .values([row({ id, content: `content ${id}`, scope, projectId, status })])
       .run();
-    repo.insertEmbedding(
-      id,
-      Buffer.from(embedding.buffer),
-      partitionKeyFor(scope, projectId),
-      status,
-      'project',
-    );
+    repo.insertEmbedding(id, Buffer.from(embedding.buffer), partitionKeyFor(scope, projectId));
   }
 
   describe('knnCandidates', () => {
@@ -160,6 +154,33 @@ describe('VectorsRepository', () => {
       // V4 and V5 are identical vectors: nearest-neighbor similarity 1.
       expect(out[0]!.sim).toBeCloseTo(1, 5);
       expect(out[1]!.sim).toBeCloseTo(1, 5);
+    });
+  });
+
+  describe('insertEmbedding status/type derivation (#257)', () => {
+    it('derives status from the live memory row, not whatever was true earlier', () => {
+      // Insert as 'active', then flip status BEFORE insertEmbedding runs —
+      // simulating a supersede that lands while an embed was in flight.
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'RACE', content: 'content RACE', status: 'active' })])
+        .run();
+      t.handle.raw.prepare("UPDATE memory SET status = 'superseded' WHERE id = 'RACE'").run();
+
+      repo.insertEmbedding('RACE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('global', null));
+
+      const row_ = t.handle.raw
+        .prepare<[string], { status: string }>('SELECT status FROM memory_vec WHERE memory_id = ?')
+        .get('RACE');
+      expect(row_?.status).toBe('superseded');
+    });
+
+    it('inserts nothing if the memory row no longer exists', () => {
+      repo.insertEmbedding('GONE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('global', null));
+      const count = t.handle.raw
+        .prepare<[], { c: number }>('SELECT count(*) c FROM memory_vec')
+        .get();
+      expect(count?.c).toBe(0);
     });
   });
 });
