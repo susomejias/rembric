@@ -1,4 +1,5 @@
 import {
+  createHash,
   createHmac,
   randomBytes,
   scrypt,
@@ -20,7 +21,15 @@ import { DomainError } from './errors.js';
  * Plaintext tokens are high-entropy (32 random bytes ≈ 256 bits) and never
  * persisted. We store a scrypt-derived hash with a per-token salt; matching
  * is by linear scan + constant-time compare. For realistic deployments
- * (< 100 tokens) this is fast and avoids any caching subtlety.
+ * (< 100 tokens) the O(tokens) scan is fast; the actual cost is scrypt's
+ * fixed ~20ms-per-verify KDF work, paid on every authenticated request
+ * regardless of token count (every MCP tool call and `/api` request
+ * re-authenticates — see `server/auth.ts`). `authenticate` caches the
+ * (fast-hashed) plaintext → token id mapping after a successful scrypt
+ * verify so a repeat caller skips the KDF; revocation/expiry are always
+ * re-checked against a fresh row read on a cache hit, so revoking a token
+ * still takes effect on its very next request regardless of cache state —
+ * the cache only ever skips the *hashing*, never the authorization check.
  *
  * Scope grammar:
  *   - `*`                       → full access (admin)
@@ -32,6 +41,8 @@ import { DomainError } from './errors.js';
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keylen: 64 } as const;
 const HASH_VERSION = 's1';
 const TOKEN_BYTES = 32;
+/** Bound on the verified-credential cache; oldest entry evicted past this. */
+const VERIFIED_CACHE_MAX = 64;
 
 export type TokenScope = '*' | 'read:*' | `project:${string}` | `read:project:${string}`;
 
@@ -55,9 +66,14 @@ export interface ResolvedToken {
 }
 
 export class TokensService {
+  /** sha256(plaintext) hex → token id, for successfully scrypt-verified tokens. */
+  private readonly verifiedCache = new Map<string, string>();
+
   constructor(
     private readonly repos: Pick<Repositories, 'tokens'>,
     private readonly now: () => Date = () => new Date(),
+    /** Injectable for tests; production callers use the default bound. */
+    private readonly verifiedCacheMax: number = VERIFIED_CACHE_MAX,
   ) {}
 
   count(): number {
@@ -120,19 +136,41 @@ export class TokensService {
    * additionally throttled by the pre-auth lockout (see `AuthLockout`).
    */
   async authenticate(plaintext: string): Promise<ResolvedToken> {
+    const cacheKey = createHash('sha256').update(plaintext).digest('hex');
+    const cachedId = this.verifiedCache.get(cacheKey);
+    if (cachedId !== undefined) {
+      const row = this.repos.tokens.findById(cachedId);
+      // A cache hit only ever skips the scrypt verify, never the
+      // authorization check: revoked/expired/missing is re-read fresh
+      // every time, so revocation takes effect on the very next request.
+      if (row) return this.authorizeRow(row);
+    }
     const all = this.repos.tokens.listAll();
     for (const row of all) {
       if (await verifyToken(plaintext, row.hash)) {
-        if (row.revokedAt) {
-          throw new DomainError('token_revoked', 'token has been revoked');
-        }
-        if (row.expiresAt && row.expiresAt.getTime() <= this.now().getTime()) {
-          throw new DomainError('token_expired', 'token has expired');
-        }
-        return { token: row, scope: row.scope as TokenScope };
+        this.cacheVerified(cacheKey, row.id);
+        return this.authorizeRow(row);
       }
     }
     throw new DomainError('token_not_found', 'token not recognized');
+  }
+
+  private authorizeRow(row: Token): ResolvedToken {
+    if (row.revokedAt) {
+      throw new DomainError('token_revoked', 'token has been revoked');
+    }
+    if (row.expiresAt && row.expiresAt.getTime() <= this.now().getTime()) {
+      throw new DomainError('token_expired', 'token has expired');
+    }
+    return { token: row, scope: row.scope as TokenScope };
+  }
+
+  private cacheVerified(cacheKey: string, tokenId: string): void {
+    if (this.verifiedCache.size >= this.verifiedCacheMax) {
+      const oldest = this.verifiedCache.keys().next().value;
+      if (oldest !== undefined) this.verifiedCache.delete(oldest);
+    }
+    this.verifiedCache.set(cacheKey, tokenId);
   }
 
   /**
