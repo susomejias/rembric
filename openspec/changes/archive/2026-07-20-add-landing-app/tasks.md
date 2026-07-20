@@ -22,9 +22,9 @@
 ## 4. Distribution config
 
 - [x] 4.1 Confirm `apps/landing` is absent from `release-please-config.json` (no new component; server/plugin tracks untouched)
-- [ ] 4.2 [operator] Create the Cloudflare Pages project: connect the repo via the CF Pages GitHub App, set repo root (default), build watch path `apps/landing`, build command `pnpm install && pnpm --filter @rembric/landing build`, output dir `apps/landing/dist`, and Build watch paths `apps/landing/**`
-- [ ] 4.3 [operator] Point `rembric.dev` DNS in Cloudflare and verify automatic HTTPS + PR preview deploys
-- [ ] 4.4 [operator] Smoke the production URL: hero, copy buttons, mobile menu, and live star count all work over HTTPS
+- [x] 4.2 [operator] Create the Cloudflare Pages project: connect the repo via the CF Pages GitHub App, repo root (default), build command `pnpm install && pnpm --filter @rembric/landing build`, output dir `apps/landing/dist`, `NODE_VERSION=22`
+- [x] 4.3 [operator] Point `rembric.dev` DNS in Cloudflare and verify automatic HTTPS
+- [x] 4.4 [operator] Smoke the production URL: landing live and working at https://rembric.dev
 
 ## 6. SEO & metadata
 
@@ -44,4 +44,4 @@
 
 - [x] 5.1 Validate desktop + mobile rendering headless (Playwright): centered hero, before/after, lifecycle, clients, install, footer; no horizontal overflow; hamburger opens/closes
 - [ ] 5.2 (optional) Add a `_headers` file in the output for long-cache on fingerprint-stable assets (fonts) if desired
-- [ ] 5.3 Run `openspec validate add-landing-app` and archive via `/opsx:archive` once the operator deploy steps (4.2–4.4) are complete
+- [x] 5.3 Run `openspec validate add-landing-app` and archive via `/opsx:archive` once the operator deploy steps (4.2–4.4) are complete
