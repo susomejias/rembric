@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.12](https://github.com/susomejias/rembric/compare/server-v0.24.11...server-v0.24.12) (2026-07-20)
+
+
+### Features
+
+* **mcp:** add memory.archive tool for agent-initiated retirement ([6b8c8c9](https://github.com/susomejias/rembric/commit/6b8c8c9c0733892d1694e8224df303675f2ac31f))
+
 ## [0.24.11](https://github.com/susomejias/rembric/compare/server-v0.24.10...server-v0.24.11) (2026-07-17)
 
 
