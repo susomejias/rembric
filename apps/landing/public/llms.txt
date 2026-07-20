@@ -1,0 +1,23 @@
+# Rembric
+
+> Self-hosted memory, sessions, and an operator dashboard for AI coding agents. One Docker image, one process, one SQLite file — reversible by design, and shared across any MCP client (Claude Code, Codex CLI, ChatGPT, Cursor, and more).
+
+Rembric (from _remember + fabric_) is the persistent memory layer beneath AI coding agents. Agents call MCP tools — `memory.save`, `memory.context`, `memory.search`, `memory.judge`, `memory.confirm` — against one append-only store: memories are never deleted or rewritten, every change is journaled in `consolidation_ops` and is reversible. It is self-hosted: a single Node process over one SQLite file, with no data leaving your infrastructure. It solves the problem that AI coding agents forget everything between sessions, including decisions and rejected approaches that leave no trace in the code.
+
+## Docs
+
+- [GitHub repository](https://github.com/susomejias/rembric): source code, README, and architecture overview
+- [Quickstart](https://github.com/susomejias/rembric#quickstart): one-command install and first run
+- [Agent integration](https://github.com/susomejias/rembric/blob/main/docs/agents.md): per-client MCP setup — Claude Code, Codex CLI, Hermes Agent, opencode, ChatGPT (OAuth connector), Cursor, Windsurf, and any other MCP client
+
+## Install
+
+- One command: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh`
+- Docker image: `ghcr.io/susomejias/rembric`
+
+## Key facts
+
+- License: MIT, open source
+- Supported clients: first-class plugins for Claude Code, Codex CLI, Hermes Agent, and opencode; ChatGPT via a custom MCP connector over OAuth 2.1; any other MCP client (Cursor, Windsurf, Claude Desktop, Cline, Goose, Gemini CLI, …) over a plain MCP URL
+- Core properties: append-only and reversible, scope enforced per-project, deterministic consolidation (no cron, no LLM), built-in operator dashboard
+- Distribution: single Docker image; the landing site is static (no backend)

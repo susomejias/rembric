@@ -1,0 +1,15 @@
+{
+  "name": "@rembric/landing",
+  "version": "0.0.0",
+  "description": "Rembric product landing — static HTML/CSS, deployed to Cloudflare Pages. NOT a release-please component.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 4321 --directory public",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0"
+  }
+}

@@ -18,6 +18,7 @@ export default tseslint.config(
       '!apps/plugin/bin/**',
       'plugin/**',
       'apps/server/src/dashboard/public/**',
+      'apps/landing/public/**',
       '**/*.d.ts',
     ],
   },
@@ -75,10 +76,15 @@ export default tseslint.config(
   {
     // Shipped runtime bridges. They live outside the TS projectService, so
     // lint them with recommended (non-type-checked) rules only.
-    files: ['apps/plugin/bin/**/*.mjs'],
+    files: ['apps/plugin/bin/**/*.mjs', 'apps/landing/build.mjs'],
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: {
-      globals: { process: 'readonly', fetch: 'readonly', AbortSignal: 'readonly' },
+      globals: {
+        process: 'readonly',
+        fetch: 'readonly',
+        AbortSignal: 'readonly',
+        console: 'readonly',
+      },
       parserOptions: { projectService: false },
     },
   },

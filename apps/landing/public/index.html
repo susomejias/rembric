@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
+    <title>Rembric — Self-hosted memory for AI coding agents</title>
+    <meta
+      name="description"
+      content="A self-hosted MCP server that gives Claude Code, Codex, ChatGPT, and any MCP client durable memory, sessions, and an operator dashboard. One Docker image, one SQLite file."
+    />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://rembric.dev/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Rembric" />
+    <meta property="og:url" content="https://rembric.dev/" />
+    <meta property="og:locale" content="en" />
+    <meta property="og:title" content="Rembric — Self-hosted memory for AI coding agents" />
+    <meta
+      property="og:description"
+      content="Durable memory, sessions, and a dashboard for AI coding agents — self-hosted, reversible, shared across any MCP client."
+    />
+    <meta property="og:image" content="https://rembric.dev/assets/logo.png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="1024" />
+    <meta property="og:image:alt" content="Rembric logo" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Rembric — Self-hosted memory for AI coding agents" />
+    <meta
+      name="twitter:description"
+      content="Durable memory, sessions, and a dashboard for AI coding agents — self-hosted, reversible, shared across any MCP client."
+    />
+    <meta name="twitter:image" content="https://rembric.dev/assets/logo.png" />
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16.png" />
+    <link rel="shortcut icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/favicon.png" />
+
+    <!-- Preload the LCP-critical fonts (hero headline + body) -->
+    <link
+      rel="preload"
+      href="/assets/fonts/space-grotesk-700.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/inter-400.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/landing.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Rembric",
+        "url": "https://rembric.dev/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Docker / Linux / macOS / Windows",
+        "description": "Self-hosted memory, sessions, and an operator dashboard for AI coding agents. One Docker image, one SQLite file, reversible by design; works with any MCP client.",
+        "license": "https://github.com/susomejias/rembric/blob/main/LICENSE",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "codeRepository": "https://github.com/susomejias/rembric",
+        "keywords": "MCP, AI agents, memory, self-hosted, Claude Code, Codex, ChatGPT, open source"
+      }
+    </script>
+  </head>
+  <body>
+    <div class="bg-fx" aria-hidden="true"></div>
+
+    <div class="nav-shell">
+      <header class="wrap">
+        <nav class="nav">
+          <a class="brand" href="/" aria-label="Rembric — home">
+            <img class="brand-mark" src="/assets/logo-transparent.png" alt="" />
+            <span class="brand-word">embric</span>
+          </a>
+          <div class="nav-right">
+            <div class="nav-links" id="nav-links">
+              <a href="#features">Features</a>
+              <a href="#how">How it works</a>
+              <a href="#clients">Clients</a>
+              <a href="#install">Install</a>
+            </div>
+            <a
+              class="btn btn-ghost btn-sm gh-star"
+              href="https://github.com/susomejias/rembric"
+              data-gh="susomejias/rembric"
+            >
+              <span class="star">★</span> <span class="gh-label">Star on GitHub</span>
+            </a>
+            <button
+              class="nav-toggle"
+              type="button"
+              aria-label="Open menu"
+              aria-expanded="false"
+              aria-controls="nav-links"
+            >
+              <span class="bars" aria-hidden="true"></span>
+            </button>
+          </div>
+        </nav>
+      </header>
+    </div>
+
+    <main>
+      <!-- Hero -->
+      <section class="wrap hero">
+        <span class="badge"><span class="dot"></span> Open source · MIT · self-hosted</span>
+        <h1>Persistent <span class="hl">memory</span> for your coding agents.</h1>
+        <p class="lede">
+          A self-hosted MCP server that gives Claude Code, Codex, ChatGPT, and any MCP client
+          durable memory, sessions, and an operator dashboard — one Docker image, one SQLite file,
+          reversible by design.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">Self-host in one command</a>
+          <a class="btn btn-ghost" href="https://github.com/susomejias/rembric">View on GitHub →</a>
+        </div>
+
+        <div class="terminal reveal">
+          <div class="term-bar">
+            <span class="dots"><i></i><i></i><i></i></span>
+            <span class="title">bash — rembric</span>
+            <button class="btn btn-ghost btn-sm copy-btn term-copy" data-copy-prev>Copy</button>
+          </div>
+          <pre
+            class="term-body"
+          ><span class="cmt"># one command — server, memory & dashboard in one container</span>
+<span class="pmt">$</span> <span class="cmd-text">curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh</span>
+
+<span class="cmt"># then point any MCP client at your server — that's it.</span><span class="cur"></span></pre>
+        </div>
+      </section>
+
+      <!-- Marquee -->
+      <div class="marquee" aria-hidden="true">
+        <div class="track">
+          <span>Append-only</span><span>Reversible by design</span><span>Self-hosted</span
+          ><span>Any MCP client</span><span>Single SQLite file</span><span>Full audit trail</span
+          ><span>Zero data egress</span><span>Append-only</span><span>Reversible by design</span
+          ><span>Self-hosted</span><span>Any MCP client</span><span>Single SQLite file</span
+          ><span>Full audit trail</span><span>Zero data egress</span>
+        </div>
+      </div>
+
+      <!-- Before / after -->
+      <section class="wrap band">
+        <div class="compare reveal">
+          <div class="cmp cmp-before">
+            <div class="cmp-head"><span>Without rembric</span><span class="tick">✗</span></div>
+            <pre><span class="cmt"># a brand-new session sees only the current code</span>
+<span class="pmt">&gt;</span> <span class="q">the nightly export got slow — how do we fix it?</span>
+
+<span class="bad">✗</span> <span class="cmt">"just add an index on orders.created_at" — looks obvious</span>
+<span class="bad">✗</span> <span class="cmt">but that deadlocked the batch writer back in March</span>
+<span class="bad">✗</span> <span class="cmt">the revert left no trace in the code — so it happens again</span></pre>
+          </div>
+          <div class="cmp cmp-after">
+            <div class="cmp-head"><span>With rembric</span><span class="tick">✓</span></div>
+            <pre><span class="tool">●</span> <span class="tool">memory.context</span> <span class="cmt">→ recalls the March incident</span>
+<span class="pmt">&gt;</span> <span class="q">the nightly export got slow — how do we fix it?</span>
+
+<span class="ok">✓</span> <span class="q">"skip the created_at index — it deadlocked in March"</span>
+<span class="ok">✓</span> <span class="q">points you to the partial index you shipped instead</span>
+<span class="ok">✓</span> <span class="cmt">a decision the code can't tell you — only memory can</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="wrap section" id="features">
+        <div class="section-head reveal">
+          <span class="section-label">// Why rembric</span>
+          <h2>Your agents forget everything. Rembric doesn't.</h2>
+          <p class="sub">
+            The memory layer that survives compaction, context windows, and tool switches — without
+            handing your data to anyone.
+          </p>
+        </div>
+        <div class="features reveal">
+          <div class="feature">
+            <span class="k">Append-only</span>
+            <h3>Reversible by design</h3>
+            <p>
+              Memories are never deleted or rewritten. Lifecycle is status flips plus links, and
+              every consolidation op is journaled — so any change can be undone.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="k">Any MCP client</span>
+            <h3>Shared across your tools</h3>
+            <p>
+              One memory surface for every agent that speaks MCP. First-class plugins for four
+              clients; everything else connects with a plain URL.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="k">Self-hosted</span>
+            <h3>Your data, your box</h3>
+            <p>
+              A single Node process over one SQLite file. No external services, no telemetry, no
+              data leaving your infrastructure.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="k">Scoped</span>
+            <h3>Global and per-project</h3>
+            <p>
+              Scope is enforced at the service layer. Project memory stays in the project; cross-
+              scope reads simply don't happen.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="k">Consolidation</span>
+            <h3>Memory that ages gracefully</h3>
+            <p>
+              A deterministic sweep decays stale memories and surfaces conflicts for fresh-context
+              judgment — no cron, no LLM in the loop.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="k">Operator UI</span>
+            <h3>A dashboard for everything</h3>
+            <p>
+              Inspect tokens, projects, sessions, judgments, memories, and consolidation from a
+              built-in operator dashboard.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section class="wrap section" id="how">
+        <div class="section-head reveal">
+          <span class="section-label">// How it works</span>
+          <h2>The memory lifecycle, in the open.</h2>
+          <p class="sub">
+            It's all MCP tool calls against one append-only store — no black box. Every write is
+            journaled and reversible.
+          </p>
+        </div>
+        <div class="lifecycle reveal">
+          <div class="phase">
+            <span class="phase-n">01 · CAPTURE</span>
+            <h3>Agents write facts</h3>
+            <p>
+              An agent calls <code>memory.save</code> with a title, content, and optional
+              <code>topic_key</code>. Session lifecycle runs over HTTP, so
+              <code>session_id</code> is attached automatically — no manual threading.
+            </p>
+          </div>
+          <div class="phase">
+            <span class="phase-n">02 · RECONCILE</span>
+            <h3>Conflicts get judged</h3>
+            <p>
+              Contradictions surface as <code>candidates[]</code> and are closed with
+              <code>memory.judge</code>. Same-topic writes supersede atomically by
+              <code>topic_key</code> — the old row flips to <code>superseded</code>, never deleted.
+            </p>
+          </div>
+          <div class="phase">
+            <span class="phase-n">03 · RECALL</span>
+            <h3>Context comes back</h3>
+            <p>
+              On a fresh session or after <code>/compact</code>, <code>memory.context</code> and
+              <code>memory.search</code> return scope-filtered, ranked memory straight into the
+              model's window.
+            </p>
+          </div>
+          <div class="phase">
+            <span class="phase-n">04 · CONSOLIDATE</span>
+            <h3>Memory ages out</h3>
+            <p>
+              A deterministic sweep decays stale rows by access + confidence and flags others for
+              review via <code>memory.confirm</code> — no cron, no LLM, throttled on session start.
+            </p>
+          </div>
+        </div>
+        <div class="arch-bar reveal">
+          <div>
+            <span class="k">One process</span>
+            <p>
+              Server, memory, sessions, judgments, and the operator dashboard run in a single Node
+              process over one SQLite file.
+            </p>
+          </div>
+          <div>
+            <span class="k">Append-only</span>
+            <p>
+              Rows are never deleted or rewritten. Lifecycle is <code>status</code> flips plus
+              <code>replaces</code> links; every op is journaled and reversible.
+            </p>
+          </div>
+          <div>
+            <span class="k">Scoped</span>
+            <p>
+              Scope is enforced at the service layer — global vs per-project, with cross-scope reads
+              returning <code>not_found</code>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clients -->
+      <section class="wrap section" id="clients">
+        <div class="section-head reveal">
+          <span class="section-label">// Works everywhere</span>
+          <h2>Any agent that speaks MCP.</h2>
+          <p class="sub">
+            First-class plugins for four clients handle session lifecycle, per-project scoping, and
+            client-side <code>&lt;private&gt;</code> redaction automatically. Everything else
+            connects with a plain MCP URL — or OAuth 2.1, no static token.
+          </p>
+        </div>
+        <div class="clients reveal">
+          <div class="client-tier">
+            <div class="tier-head">
+              <span class="tier-label">First-class plugins</span>
+              <span class="tier-note">Session lifecycle · path-scoping · private redaction</span>
+            </div>
+            <div class="client-grid">
+              <div class="client">Claude Code</div>
+              <div class="client">Codex CLI</div>
+              <div class="client">Hermes Agent</div>
+              <div class="client">opencode</div>
+            </div>
+          </div>
+          <div class="client-tier">
+            <div class="tier-head">
+              <span class="tier-label">Connect over MCP / OAuth</span>
+              <span class="tier-note">Same memory tools · plain URL or OAuth 2.1</span>
+            </div>
+            <div class="client-grid">
+              <div class="client">ChatGPT <small>OAuth connector</small></div>
+              <div class="client">Cursor</div>
+              <div class="client">Windsurf</div>
+              <div class="client">Claude Desktop</div>
+              <div class="client">Cline</div>
+              <div class="client">Gemini CLI</div>
+              <div class="client">Goose</div>
+              <div class="client more">+ any MCP client</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Install -->
+      <section class="wrap section" id="install">
+        <div class="section-head reveal">
+          <span class="section-label">// Quickstart</span>
+          <h2>Self-host in one command.</h2>
+        </div>
+        <div class="install-block reveal">
+          <div class="install-cmd">
+            <code
+              ><span class="pmt">$ </span
+              ><span class="cmd-text"
+                >curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh |
+                sh</span
+              ></code
+            >
+            <button class="btn btn-ghost btn-sm copy-btn" data-copy-prev>Copy</button>
+          </div>
+        </div>
+        <p class="install-note">
+          The interactive installer sets up the server and wires up your agents. Docker is the
+          canonical runtime — see the
+          <a href="https://github.com/susomejias/rembric#quickstart">quickstart</a> for topologies
+          and upgrades.
+        </p>
+      </section>
+
+      <!-- Final CTA -->
+      <section class="wrap section">
+        <div class="cta-band reveal">
+          <h2>Give your agents a memory.</h2>
+          <p>Self-hosted · open source · reversible</p>
+          <a class="btn" href="https://github.com/susomejias/rembric">Get started on GitHub →</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap">
+      <div class="foot">
+        <div class="col about">
+          <a class="brand" href="/" aria-label="Rembric — home">
+            <img class="brand-mark" src="/assets/logo-transparent.png" alt="" />
+            <span class="brand-word">embric</span>
+          </a>
+          <p>
+            Self-hosted memory, sessions, and dashboard for AI coding agents. One brain, one
+            dashboard, one audit trail.
+          </p>
+        </div>
+        <div class="col">
+          <h4>Product</h4>
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#install">Install</a>
+        </div>
+        <div class="col">
+          <h4>Resources</h4>
+          <a href="https://github.com/susomejias/rembric">GitHub</a>
+          <a href="https://github.com/susomejias/rembric#quickstart">Docs</a>
+          <a href="https://github.com/susomejias/rembric/blob/main/LICENSE">License</a>
+        </div>
+      </div>
+      <div class="foot-bar">
+        <span>Rembric · Self-hosted agent memory</span>
+        <span>MIT licensed · remember + fabric</span>
+      </div>
+    </footer>
+
+    <script src="/scripts/landing.js"></script>
+  </body>
+</html>
