@@ -1,22 +1,32 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
- * Audit and reversal journal for the consolidation sweep.
+ * Audit and reversal journal for memory-lifecycle operations.
  *
- * Each run produces a row in consolidation_runs and one or more rows in
+ * The deterministic consolidation sweep is the main producer, but non-sweep
+ * lifecycle actions journal here too via synthetic single-op `maintenance`
+ * runs: the operator purges (`session_purge`, `archived_memory_purge`,
+ * `prompt_purge`) and the agent archive (`agent_memory_archive`). Each run
+ * produces a row in consolidation_runs and one or more rows in
  * consolidation_ops. Every op is reversible; reversal sets `revertedAt`.
  */
 
-export type ConsolidationOpType =
-  | 'merge'
-  | 'supersede'
-  | 'decay'
-  | 'noop'
-  | 'failed'
-  | 'orphan_promote'
-  | 'session_purge'
-  | 'archived_memory_purge'
-  | 'prompt_purge';
+// Single source of truth for op types — the table `enum` below derives from
+// this tuple, so a new op type is declared in exactly one place.
+export const CONSOLIDATION_OP_TYPES = [
+  'merge',
+  'supersede',
+  'decay',
+  'noop',
+  'failed',
+  'orphan_promote',
+  'session_purge',
+  'archived_memory_purge',
+  'agent_memory_archive',
+  'prompt_purge',
+] as const;
+
+export type ConsolidationOpType = (typeof CONSOLIDATION_OP_TYPES)[number];
 
 export const consolidationRuns = sqliteTable(
   'consolidation_runs',
@@ -40,19 +50,7 @@ export const consolidationOps = sqliteTable(
     runId: text('run_id')
       .notNull()
       .references(() => consolidationRuns.id),
-    opType: text('op_type', {
-      enum: [
-        'merge',
-        'supersede',
-        'decay',
-        'noop',
-        'failed',
-        'orphan_promote',
-        'session_purge',
-        'archived_memory_purge',
-        'prompt_purge',
-      ],
-    }).notNull(),
+    opType: text('op_type', { enum: CONSOLIDATION_OP_TYPES }).notNull(),
     /** Memory ids touched by this op (predecessors, archived ones). */
     affectedIds: text('affected_ids', { mode: 'json' }).$type<string[]>().notNull(),
     /** New memory id introduced by the op (set for merge/supersede). */

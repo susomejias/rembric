@@ -105,6 +105,32 @@ describe('applyDecay', () => {
 });
 
 describe('undoOp / undoRun', () => {
+  it('reverts an agent_memory_archive op: the archived memory is active again', () => {
+    const m = memoryService.save(
+      { type: 'user', title: 'm', content: 'm' },
+      projectScope(projectId),
+    );
+    memoryService.archive(m.id, projectScope(projectId));
+    expect(memoryService.unsafeGetById(m.id)!.status).toBe('archived');
+
+    const op = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.opType, 'agent_memory_archive'))
+      .get();
+    expect(op).toBeDefined();
+
+    undoOp(repos, db.handle.db, op!.id);
+
+    expect(memoryService.unsafeGetById(m.id)!.status).toBe('active');
+    const reverted = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.id, op!.id))
+      .get();
+    expect(reverted!.revertedAt).not.toBeNull();
+  });
+
   it('reverts a historical merge: predecessors active again, merged-into archived', () => {
     const { aId, bId, mergedId, opId } = seedHistoricalMerge();
 

@@ -20,6 +20,8 @@ import {
   buildMemoryHandlers,
   contextOutput,
   contextSchema,
+  memoryArchiveOutput,
+  memoryArchiveSchema,
   memoryConfirmOutput,
   memoryConfirmSchema,
   memoryGetOutput,
@@ -126,6 +128,9 @@ const GET_DESCRIPTION =
 const CONFIRM_DESCRIPTION =
   'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it. Pass `ids: string[]` to re-affirm several memories in one call — e.g. close out all of memory.context.needsReview when they are all still true.';
 
+const ARCHIVE_DESCRIPTION =
+  'Retire a memory: flip one active memory in this scope to `archived` so it stops surfacing in recall. Call this ONLY when the user explicitly asks to retire, remove, or forget a specific memory — never as autonomous cleanup or housekeeping while recalling or saving, and never on your own judgement that a memory looks stale. If a replacement exists, do NOT archive: prefer a supersede (memory.save with the same `topic_key`, or memory.judge) which keeps a successor link — archive is the no-successor path for genuine retirement. Also use it as the second half of a user-requested cross-project move: memory.save the memory into the destination project, then memory.archive the original here. Args: { id }. Errors: `not_found` if the id is missing or in another scope, `conflict` if it is not active. Reversible: an operator can undo the archive from the dashboard.';
+
 // Rembric is append-only (rows are never deleted; supersede is a reversible,
 // journaled status flip) and a closed local store, so destructiveHint and
 // openWorldHint are false for EVERY tool — defined once here so no per-tool
@@ -217,6 +222,16 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       annotations: WRITE_ANNOTATIONS('Confirm memory'),
     },
     memoryHandlers.confirm,
+  );
+  server.registerTool(
+    'memory.archive',
+    {
+      description: ARCHIVE_DESCRIPTION,
+      inputSchema: memoryArchiveSchema,
+      outputSchema: memoryArchiveOutput,
+      annotations: WRITE_ANNOTATIONS('Archive memory'),
+    },
+    memoryHandlers.archive,
   );
 
   // ── Session lifecycle tools ───────────────────────────────────────

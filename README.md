@@ -404,7 +404,7 @@ Single Node process, single SQLite file, packaged as a multi-arch Docker image (
 
 Four load-bearing invariants:
 
-- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible.
+- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
 - **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.

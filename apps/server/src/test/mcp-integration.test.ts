@@ -185,6 +185,27 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.archive description steers against autonomous retirement', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const archive = tools.find((t) => t.name === 'memory.archive');
+    const desc = archive?.description ?? '';
+
+    // Gated on explicit user request to retire/remove/forget.
+    expect(desc).toMatch(/explicit/i);
+    expect(desc).toMatch(/retire|remove|forget/i);
+    // Prefer supersede when a replacement exists (no-successor path).
+    expect(desc).toMatch(/supersede/i);
+    expect(desc).toMatch(/topic_key/i);
+    // No autonomous cleanup during recall/save.
+    expect(desc).toMatch(/autonomous|cleanup|housekeeping/i);
+    // Reversible from the dashboard.
+    expect(desc).toMatch(/revers|undo/i);
+    expect(desc).toMatch(/dashboard/i);
+
+    await client.close();
+  });
+
   it('memory.session_summary description matches the schema hard limit', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
@@ -224,6 +245,7 @@ describe('MCP protocol conformance', () => {
     const WRITE_TOOLS = new Set([
       'memory.save',
       'memory.confirm',
+      'memory.archive',
       'memory.capture_passive',
       'memory.save_prompt',
       'memory.session_start',

@@ -156,6 +156,13 @@ export const memoryConfirmSchema = {
     ),
 };
 
+export const memoryArchiveSchema = {
+  id: z
+    .string()
+    .min(1)
+    .describe('The id of the active memory to retire. Must be in the connection’s scope.'),
+};
+
 export const contextSchema = {
   sessions: z.number().int().min(0).max(25).optional(),
   prompts: z.number().int().min(0).max(50).optional(),
@@ -279,6 +286,12 @@ export const memoryConfirmOutput = {
   confirmed: z.number().optional(),
 };
 
+export const memoryArchiveOutput = {
+  ok: z.literal(true),
+  id: z.string(),
+  status: z.literal('archived'),
+};
+
 export const contextOutput = {
   scope: z.string(),
   recentSessions: z.array(
@@ -392,6 +405,7 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
     search: handleSearch.bind(null, deps),
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
+    archive: handleArchive.bind(null, deps),
     context: handleContext.bind(null, deps),
     timeline: handleTimeline.bind(null, deps),
   };
@@ -836,6 +850,20 @@ async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: st
     }
     deps.memory.confirm(args.id, scope, { tokenName: ctx.token.name });
     return ok({ ok: true });
+  } catch (err) {
+    if (err instanceof DomainError && err.code === 'memory_not_found') {
+      return mcpError('not_found', 'memory not found');
+    }
+    return errToMcp(err);
+  }
+}
+
+async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
+  const { scope } = await resolveEffectiveScope(deps);
+  try {
+    assertAuthorized('write', scope);
+    deps.memory.archive(args.id, scope);
+    return ok({ ok: true, id: args.id, status: 'archived' as const });
   } catch (err) {
     if (err instanceof DomainError && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
