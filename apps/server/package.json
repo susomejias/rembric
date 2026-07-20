@@ -24,7 +24,7 @@
     "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.11.1",
-    "drizzle-orm": "^0.36.0",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "hono": "^4.6.0",
     "markdown-it": "^14.2.0",
