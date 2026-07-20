@@ -883,9 +883,12 @@ a.brand:hover .brand-word {
   }
   .features,
   .lifecycle,
-  .client-grid,
-  .foot {
+  .client-grid {
     grid-template-columns: 1fr;
+  }
+  /* Footer keeps Product + Resources side by side; about spans full width. */
+  .foot {
+    grid-template-columns: 1fr 1fr;
   }
   .feature {
     border-right: none !important;
