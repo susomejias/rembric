@@ -20,6 +20,17 @@ import { type ConsolidationOpType } from '../db/schema/consolidation.js';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
 
+// Op types whose undo reactivates the affected memory rows (archived/superseded
+// → active). `merge` additionally re-archives its created row; the others are
+// plain reactivations. Kept in one place so `undoOp`'s guard and reactivate
+// branches can't drift.
+const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
+  'merge',
+  'supersede',
+  'decay',
+  'agent_memory_archive',
+]);
+
 export interface SkippedRow {
   id: string;
   topicKey: string;
@@ -157,7 +168,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
   // `orphan_promote` operates on relation rows (append-only, unaffected by
   // the purge paths); the others operate on memory rows.
-  if (op.opType === 'merge' || op.opType === 'supersede' || op.opType === 'decay') {
+  if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
     const expected = new Set<string>(op.affectedIds);
     if (op.opType === 'merge' && op.createdId) expected.add(op.createdId);
     const existing = repos.memory.existingIds([...expected]);
@@ -171,7 +182,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
   const skipped: SkippedRow[] = [];
 
   tx.transaction(() => {
-    if (op.opType === 'merge' || op.opType === 'supersede' || op.opType === 'decay') {
+    if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
       const reactivatable: string[] = [];
       for (const row of repos.memory.unsafeGetByIds(op.affectedIds)) {
         const occupiedBy = topicSlotOccupiedBy(repos, row);

@@ -323,6 +323,61 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
   });
 });
 
+describe('memory.archive — strict path scoping', () => {
+  let projectAId: string;
+  let projectBId: string;
+
+  beforeEach(() => {
+    projectAId = memory.save(
+      { type: 'user', title: 'A', content: 'A' },
+      projectScope(projectA.id),
+    ).id;
+    projectBId = memory.save(
+      { type: 'user', title: 'B', content: 'B' },
+      projectScope(projectB.id),
+    ).id;
+  });
+
+  it('path-scoped: archive(own-project active id) → ok, flips to archived', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.archive({ id: projectAId })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    const payload = parseText<{ ok: boolean; id: string; status: string }>(r);
+    expect(payload).toMatchObject({ ok: true, id: projectAId, status: 'archived' });
+    expect(memory.unsafeGetById(projectAId)!.status).toBe('archived');
+  });
+
+  it('path-scoped: archive(other-project id) → not_found', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.archive({ id: projectBId })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('not_found');
+    expect(memory.unsafeGetById(projectBId)!.status).toBe('active');
+  });
+
+  it('unscoped /mcp: archive(project id) → not_found (no cross-scope archive)', async () => {
+    const r = await runWithContext(fakeContext(null), () =>
+      Promise.resolve(handlers.archive({ id: projectAId })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('not_found');
+    expect(memory.unsafeGetById(projectAId)!.status).toBe('active');
+  });
+
+  it('archiving an already-archived memory → conflict', async () => {
+    await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.archive({ id: projectAId })),
+    );
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.archive({ id: projectAId })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('conflict');
+  });
+});
+
 describe('memory.confirm — batch (ids)', () => {
   it('confirms each id once; duplicates collapse to one; reports the count', async () => {
     const m1 = memory.save({ type: 'user', title: 'c1', content: 'c1' }, projectScope(projectA.id));

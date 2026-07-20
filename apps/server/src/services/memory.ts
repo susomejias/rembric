@@ -2,6 +2,7 @@ import { ulid } from 'ulid';
 
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
+import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
@@ -10,6 +11,7 @@ import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js'
 import { memoryMatchesScope, type Scope } from './scope.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
+const AGENT_MEMORY_ARCHIVE_REASONING = 'agent archived memory at explicit user request';
 
 /**
  * Domain service for the memory lifecycle.
@@ -410,7 +412,51 @@ export class MemoryService {
         `memory.archive: id=${id} is not in 'active' state (current=${existing.status})`,
       );
     }
-    this.repos.memory.markArchived(id, this.now());
+    const ts = this.now();
+    // Journaled in the same transaction as the flip so an agent-initiated
+    // retirement is attributable and reversible through the same
+    // consolidation_ops journal the sweep and purge use.
+    this.tx.transaction(() => {
+      this.repos.memory.markArchived(id, ts);
+      this.journalMaintenanceOp(ts, {
+        opType: 'agent_memory_archive',
+        affectedIds: [id],
+        reasoning: AGENT_MEMORY_ARCHIVE_REASONING,
+        summary: { kind: 'agent_memory_archive', archived: 1 },
+      });
+    });
+  }
+
+  // Journal a single non-sweep lifecycle op (agent archive, operator purges)
+  // as a synthetic one-op `maintenance` run. Run scope 'maintenance' stays
+  // clear of the sweep's global/project:* throttle keys. Callers own the
+  // enclosing transaction so the journal is atomic with the mutation.
+  private journalMaintenanceOp(
+    ts: Date,
+    op: {
+      opType: ConsolidationOpType;
+      affectedIds: string[];
+      reasoning: string;
+      summary: Record<string, unknown>;
+    },
+  ): void {
+    const runId = ulid(ts.getTime());
+    this.repos.consolidation.insertRun({
+      id: runId,
+      startedAt: ts,
+      finishedAt: ts,
+      scope: 'maintenance',
+      summary: JSON.stringify(op.summary),
+    });
+    this.repos.consolidation.insertOp({
+      id: ulid(ts.getTime()),
+      runId,
+      opType: op.opType,
+      affectedIds: op.affectedIds,
+      createdId: null,
+      reasoning: op.reasoning,
+      appliedAt: ts,
+    });
   }
 
   // Purge predicate + DELETE live in MemoryRepository (the only file
@@ -443,22 +489,11 @@ export class MemoryService {
 
       this.repos.memory.purgeByIds(deletedIds);
 
-      const runId = ulid(ts.getTime());
-      this.repos.consolidation.insertRun({
-        id: runId,
-        startedAt: ts,
-        finishedAt: ts,
-        scope: 'maintenance',
-        summary: JSON.stringify({ kind: 'archived_memory_purge', deleted: deletedIds.length }),
-      });
-      this.repos.consolidation.insertOp({
-        id: ulid(ts.getTime()),
-        runId,
+      this.journalMaintenanceOp(ts, {
         opType: 'archived_memory_purge',
         affectedIds: deletedIds,
-        createdId: null,
         reasoning: ARCHIVED_MEMORY_PURGE_REASONING,
-        appliedAt: ts,
+        summary: { kind: 'archived_memory_purge', deleted: deletedIds.length },
       });
 
       return { deletedIds };

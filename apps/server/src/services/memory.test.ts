@@ -275,6 +275,48 @@ describe('memory.archive', () => {
     memory.archive(m.id, projectScope(projectId));
     expect(() => memory.archive(m.id, projectScope(projectId))).toThrow(/not in 'active'/);
   });
+
+  it('journals the archive as a reversible agent_memory_archive op', () => {
+    const m = memory.save(
+      { type: 'user', title: 'Sample x', content: 'x' },
+      projectScope(projectId),
+    );
+    memory.archive(m.id, projectScope(projectId));
+
+    const ops = db.handle.raw
+      .prepare(`SELECT op_type, affected_ids, reasoning, reverted_at FROM consolidation_ops`)
+      .all() as {
+      op_type: string;
+      affected_ids: string;
+      reasoning: string;
+      reverted_at: number | null;
+    }[];
+    const archiveOp = ops.find((o) => o.op_type === 'agent_memory_archive');
+    expect(archiveOp).toBeDefined();
+    expect(JSON.parse(archiveOp!.affected_ids)).toEqual([m.id]);
+    expect(archiveOp!.reasoning).toMatch(/agent archived memory at explicit user request/);
+    // Not reverted, and the row is still physically present → reversible.
+    expect(archiveOp!.reverted_at).toBeNull();
+    expect(memory.unsafeGetById(m.id)).toBeDefined();
+  });
+
+  it('does not mutate content/title/replaces or insert a supersedes relation', () => {
+    const m = memory.save(
+      { type: 'user', title: 'Immutable title', content: 'immutable body' },
+      projectScope(projectId),
+    );
+    memory.archive(m.id, projectScope(projectId));
+
+    const refetched = memory.unsafeGetById(m.id);
+    expect(refetched?.title).toBe('Immutable title');
+    expect(refetched?.content).toBe('immutable body');
+    expect(refetched?.replaces).toEqual([]);
+
+    const relations = db.handle.raw
+      .prepare(`SELECT count(*) AS n FROM memory_relations WHERE source_id = ? OR target_id = ?`)
+      .get(m.id, m.id) as { n: number };
+    expect(relations.n).toBe(0);
+  });
 });
 
 describe('memory.purgeDisconnectedArchived', () => {
@@ -288,6 +330,30 @@ describe('memory.purgeDisconnectedArchived', () => {
     const result = memory.purgeDisconnectedArchived({ adminBypass: true });
     expect(result.deletedIds).toContain(m.id);
     expect(memory.unsafeGetById(m.id)).toBeUndefined();
+  });
+
+  // Explicitly pins the `agent_memory_archive` purge carve-out (PURGE_PREDICATE
+  // excludes that op_type from the affected_ids pin). Archiving journals an
+  // agent_memory_archive op referencing the row; without the carve-out that op
+  // would pin the row and this purge would find nothing. Kept separate from the
+  // generic "not referenced anywhere" case so a future refactor of that test
+  // can't silently stop exercising the carve-out.
+  it('purges an agent-archived memory whose only reference is its own archive op', () => {
+    const m = memory.save(
+      { type: 'user', title: 'Agent archived', content: 'agent-archived' },
+      projectScope(projectId),
+    );
+    memory.archive(m.id, projectScope(projectId));
+
+    const archiveOp = (
+      db.handle.raw
+        .prepare(`SELECT op_type, affected_ids FROM consolidation_ops WHERE op_type=?`)
+        .all('agent_memory_archive') as { op_type: string; affected_ids: string }[]
+    ).find((o) => (JSON.parse(o.affected_ids) as string[]).includes(m.id));
+    expect(archiveOp, 'archive must journal an agent_memory_archive op for the row').toBeDefined();
+
+    const result = memory.purgeDisconnectedArchived({ adminBypass: true });
+    expect(result.deletedIds).toContain(m.id);
   });
 
   it('writes an archived_memory_purge op to consolidation_ops with the ids', () => {

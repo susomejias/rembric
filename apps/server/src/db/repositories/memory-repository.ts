@@ -814,7 +814,9 @@ export class MemoryRepository {
  *   - status = 'archived'
  *   - no other memory row references this id in its `replaces` JSON
  *   - no consolidation_ops row references this id via `affected_ids`
- *     or `created_id`
+ *     (EXCEPT an `agent_memory_archive` op: that op IS the archive that
+ *     retired this memory, so it must not pin its own subject against a
+ *     later operator purge) or `created_id`
  *   - no memory_relations row references this id as source or target
  *   - no confirmations row references this id as `memory_id`
  */
@@ -830,7 +832,8 @@ const PURGE_PREDICATE = sql`m.status = 'archived'
          AND m.id NOT IN (
              SELECT created_id FROM consolidation_ops WHERE created_id IS NOT NULL)
          AND m.id NOT IN (
-             SELECT je2.value FROM consolidation_ops co, json_each(co.affected_ids) je2)
+             SELECT je2.value FROM consolidation_ops co, json_each(co.affected_ids) je2
+              WHERE co.op_type != 'agent_memory_archive')
          AND m.id NOT IN (
              SELECT source_id FROM memory_relations
               UNION ALL SELECT target_id FROM memory_relations)
