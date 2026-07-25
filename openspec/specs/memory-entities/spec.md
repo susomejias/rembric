@@ -1,0 +1,310 @@
+# memory-entities Specification
+
+## Purpose
+
+Deterministic, no-LLM extraction of syntactically-recognisable identifiers (file paths, git refs, URLs, error codes, tickets, CVEs, IPv4 addresses, self-hosted hostnames, systemd units, MAC addresses, env vars, UUIDs) from a memory's `title + content`, indexed and scoped like memories themselves. The index backs exact-address retrieval (an index lookup, not a ranked query), a save-time conflict-detection channel for entity overlap, and a precise seed for context relevance — while staying out of the existing hybrid-search RRF fusion, which it must not affect.
+
+## Requirements
+
+### Requirement: Entity extraction MUST be deterministic and MUST NOT use a model
+
+Entities SHALL be extracted from a memory's `title + content` by a pure function with no inference, no model, and no network call, so extraction is reproducible, auditable, and free. Only entity kinds recognisable from syntax with high confidence SHALL be extracted: file paths, git refs, error codes, URLs, ticket-style identifiers, CVE ids, IPv4 addresses, self-hosted hostnames, systemd units, MAC addresses, environment variables, and UUIDs.
+
+A kind SHALL be admitted only when its syntax is closed enough to reject prose without a denylist of English words. Kinds whose shape cannot be bounded that way — symbol identifiers, package names, semver strings, Docker image references, cron expressions — SHALL remain deliberately unsupported until a measured precision case exists for them.
+
+An identifier class whose shape it shares with another class SHALL be separated by an anchor or a closed list, never by pattern order. Specifically: a token in `SCREAMING_SNAKE_CASE` SHALL NOT be typed on shape alone — it is indistinguishable between an error code, an environment variable and an ordinary constant — so `error_code` SHALL match only prefixed families (`ERR_`, `SQLITE_`, `E_`) plus closed name lists, and `env_var` SHALL require a `$`, `${}` or `=` anchor.
+
+#### Scenario: An unanchored SCREAMING_SNAKE token is not typed
+
+- **WHEN** a memory's content reads "export DATABASE_URL before starting"
+- **THEN** no entity SHALL be linked for that token
+
+#### Scenario: An anchored environment variable is typed
+
+- **WHEN** a memory's content contains `NODE_ENV=production` or `$DATABASE_URL`
+- **THEN** an entity of kind `env_var` SHALL be linked, carrying the bare name
+
+#### Scenario: A UUID does not yield a git ref
+
+- **WHEN** a memory's content contains `550e8400-e29b-41d4-a716-446655440000`
+- **THEN** an entity of kind `uuid` SHALL be linked and no `git_ref` SHALL be linked for its segments
+
+Extraction and linking SHALL run **immediately after the save commits**, best-effort, and an extraction failure SHALL NOT fail the save — the memory is the primary record and the index is derived. They are deliberately NOT inside the save transaction: the save path computes the row's embedding between the commit and the linking, and holding a write transaction open across that would serialise every concurrent save behind one model call for the sake of an index that is rebuildable by construction. A memory whose linking never ran is indistinguishable from one the backfill has not reached yet, and the same resumable drain corrects both.
+
+Prose that merely resembles an entity SHALL NOT be extracted: precision is preferred over recall, because a false entity link pollutes exact-address lookup, which is the mechanism's whole value.
+
+#### Scenario: A file path in memory content is extracted
+
+- **WHEN** a memory is saved whose content references `apps/server/src/db/migrate.ts`
+- **THEN** an entity of kind `path` SHALL be linked to that memory
+
+#### Scenario: Extraction is reproducible
+
+- **WHEN** the extractor runs twice over identical text
+- **THEN** it SHALL produce an identical set of entities
+
+#### Scenario: An extraction failure does not fail the save
+
+- **WHEN** extraction or linking throws for a given memory
+- **THEN** the memory SHALL still be saved, the failure SHALL be logged, and the row SHALL remain visible to the backfill drain
+
+#### Scenario: Ordinary prose does not produce entities
+
+- **WHEN** a memory is saved whose content is prose containing no path, ref, identifier, URL, or ticket id
+- **THEN** no entity SHALL be linked to it
+
+### Requirement: A kind MUST earn its place against the lexical branch, not merely be plausible
+
+The lexical branch already resolves some identifier classes exactly: `sanitizeFtsQuery` quotes each whitespace-delimited token as an FTS5 phrase, and FTS5's `unicode61` tokenizer drops `/`, `.`, `_`, `#` and `-`. An identifier whose tokens the tokenizer preserves as a phrase that cannot occur inside a longer valid identifier of the same class, and cannot occur as ordinary prose, is therefore already retrieved without false positives. Adding a kind for such an identifier buys enumeration, not precision, and the distinction SHALL be recorded rather than assumed.
+
+A kind SHALL be justified by one of: (a) a measured false-positive rate through the lexical branch, (b) removal of an existing false extraction, or (c) an enumeration or typed-projection capability the lexical branch structurally cannot provide.
+
+The measurement SHALL exist as a committed, runnable artifact, not as prose. A published figure without a reproducible measurement behind it is indistinguishable from a guess, and the previous table contained one that was wrong in both directions: `error_code` was credited 0% as "self-terminating under tokenization" for the whole kind, when its closed gRPC name list measures 50% (the tokenizer drops `_` exactly as it drops the `.` the table penalised `hostname` for, so `NOT_FOUND` is the phrase "not found" and matches ordinary prose), while `hostname` was under-reported at 50% against a measured 67%.
+
+The apparatus SHALL therefore be: an adversarial corpus committed alongside the code, a measurement that runs the REAL lexical path (`sanitizeFtsQuery` into the production BM25 read over a live FTS5 index), and a test asserting each published figure so the table cannot drift from the measurement and a new kind cannot be added on prose alone. Each probe declares one identifier, one document that genuinely references it, and decoy documents that do not — and every decoy SHALL be admissible under exactly one of the two mechanisms the lexical branch actually exhibits: a **near-miss identifier** (a different valid identifier of the same class whose token phrase contains the target's), or a **tokenization collision** (ordinary prose reachable only because the tokenizer dropped the separator that made the target an identifier). Without that rule any figure could be inflated by writing more prose. Figures are reported as the WORST case across a kind's probes, because the corpus is adversarial and a mean would let a benign probe dilute a real collision.
+
+Measured against that corpus:
+
+| kind                                       | justification            | measured worst-case lexical noise                                                                                                                                                                                              |
+| ------------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`                                     | precision                | 67% — a path is a prefix (`.bak`) and a suffix (`test/…`) of other valid paths                                                                                                                                                 |
+| `hostname`                                 | precision                | 67% — the dot is dropped, so `nas.local` matches "the nas local drive" and `backup-nas.local`                                                                                                                                  |
+| `env_var`                                  | precision                | 67% — the underscore is dropped, so `DATABASE_URL` matches the prose "database url" and `DATABASE_URL_REPLICA`                                                                                                                 |
+| `ticket`                                   | precision                | 50% — the `#` is dropped, so `#36` matches "36 files"; `PROJ-1234` is a phrase prefix of `PROJ-1234-B`                                                                                                                         |
+| `ip_address`                               | precision                | 50% — an address is a phrase prefix of a longer dotted string                                                                                                                                                                  |
+| `systemd_unit`                             | precision                | 50% — the dot is dropped, so `caddy.service` matches "the caddy service"; the suffix set is reduced (see below)                                                                                                                |
+| `error_code` — `GRPC_STATUS_NAMES`         | precision                | 50% — the underscore is dropped, so `NOT_FOUND` and `PERMISSION_DENIED` are ordinary two-word prose                                                                                                                            |
+| `error_code` — `ERR_`/`SQLITE_`/`E_`/errno | fixes a false extraction | 0% — prefixed and errno names have no prose form and no shorter valid sibling; the kind's value here is that unanchored `SCREAMING_SNAKE` was typed `error_code`, so `DATABASE_URL` and `MAX_RETRIES` polluted the error index |
+| `uuid`                                     | fixes a false extraction | 0% — a UUID's first group satisfied the git-SHA shape, yielding a bogus `git_ref`                                                                                                                                              |
+| `cve_id`                                   | fixes a false extraction | 0% — `CVE-2024-3094` yielded a bogus `ticket` of `CVE-2024`                                                                                                                                                                    |
+| `mac_address`                              | enumeration              | 0% — the lexical branch cannot enumerate devices                                                                                                                                                                               |
+| `git_ref`, `url`                           | enumeration              | 0% — these are self-terminating under tokenization                                                                                                                                                                             |
+
+A kind measuring 0% is not thereby unjustified: it may still earn its place under (b) or (c), and the table names which clause each kind rests on.
+
+A kind's pattern MAY be narrower than the identifier class it names when the excluded shapes collide with ordinary prose. `systemd_unit` omits `.target`, `.path`, `.slice`, `.scope` and `.mount` for this reason: they are also everyday property accessors (`event.target`, `array.slice`, `req.path`, `wrapper.mount`), measuring 8 false positives across 9 lines of ordinary code prose versus 1 with the reduced set.
+
+The runtime cost of the index SHALL stay negligible against the vector index it sits beside; at introduction it measured 0.05% of memory-related storage and under 2ms per memory to extract and index. Extraction SHALL stay linear in input length: the patterns are applied to a truncated slice, and a pattern whose label group backtracks quadratically has blocked the single-threaded event loop for 19 seconds on one save, so the linearity SHALL be held by a test with a budget far below any hang guard.
+
+#### Scenario: Every published figure is measured
+
+- **WHEN** the noise-rate measurement runs over the committed corpus
+- **THEN** each kind's measured worst-case rate SHALL equal the figure published in this table
+
+#### Scenario: A new kind cannot be published without a probe
+
+- **WHEN** a new entity kind is declared without a probe in the adversarial corpus
+- **THEN** the measurement suite SHALL fail, naming the kind
+
+#### Scenario: A probe's truth document is retrievable
+
+- **WHEN** a probe is measured
+- **THEN** the lexical branch SHALL return the document that genuinely references the identifier, so a broken query is never reported as a noisy class
+
+#### Scenario: Extraction stays linear on an adversarial label run
+
+- **WHEN** `extractEntities` runs over 200KB of repeated dot-separated single-character labels
+- **THEN** it SHALL complete in well under 50ms
+
+#### Scenario: A CVE id does not also yield a ticket entity
+
+- **WHEN** a memory referencing `CVE-2024-3094` is saved
+- **THEN** an entity of kind `cve_id` SHALL be linked, and no entity of kind `ticket` SHALL be linked for the same text
+
+#### Scenario: A hostname is not extracted from prose that merely contains its labels
+
+- **WHEN** a memory's content reads "the nas local drive is full"
+- **THEN** no entity of kind `hostname` SHALL be linked
+
+#### Scenario: An out-of-range dotted quad is not an address
+
+- **WHEN** a memory's content contains `999.1.1.1`
+- **THEN** no entity of kind `ip_address` SHALL be linked
+
+### Requirement: Entities MUST be scoped, and entity lookup MUST respect scope isolation
+
+Each entity SHALL be scoped exactly as memories are — global, or belonging to one project. The identity of an entity is `(scope, project_id, kind, value)`, enforced by a unique index, so the same literal string in two projects is two distinct entities and no join between them exists to be exploited. Retrieval by entity SHALL return only memories the caller's scope permits, and SHALL never return a memory from a different project. An entity string appearing in two projects SHALL NOT join their memories.
+
+A project-scoped read MAY be widened to also include GLOBAL entities, and only global ones: the widening SHALL admit `(global, NULL)` alongside the caller's own `(project, id)` and SHALL never admit a third project's rows. This mirrors the widening the ranked branches already implement for `include_global`, and it is the difference between an agent seeing a user-wide convention about a file and silently not seeing it.
+
+#### Scenario: The same path in two projects does not join them
+
+- **GIVEN** memories in project A and project B both referencing `src/index.ts`
+- **WHEN** entity retrieval is performed on a connection scoped to project A
+- **THEN** only project A's memories SHALL be returned
+
+#### Scenario: Global entities are available to a project-scoped read when requested
+
+- **GIVEN** a global memory referencing `src/shared.ts` and a project memory referencing the same path
+- **WHEN** entity retrieval is performed in the project scope including globals
+- **THEN** both SHALL be returned, each labelled with its scope
+
+#### Scenario: Widening to globals does not widen to other projects
+
+- **GIVEN** a third project's memory referencing the same path
+- **WHEN** entity retrieval is performed in project A's scope including globals
+- **THEN** the third project's memory SHALL NOT be returned
+
+### Requirement: Retrieval by entity MUST bypass ranking
+
+Exact-address retrieval is not a relevance problem: the caller has supplied an exact key. Retrieval by entity SHALL be an index lookup returning the linked memories in the requested scope, ordered chronologically, with no fusion, no rank window, no similarity threshold, and no post-fusion boost. It SHALL be complete within the scope up to an explicit, generous bound — a memory linked to the entity SHALL NOT be omitted because of a RANKING cutoff, and an omitted `limit` SHALL NOT be interpreted as the ranked branches' small default page. The bound SHALL be the same over-fetch ceiling those branches already use, so "complete" means "every linked memory, up to a stated cap far above any realistic per-entity link count" rather than "everything, unbounded" — an unbounded read of a pathologically common entity would return the whole corpus in one response. A `limit` the caller states explicitly SHALL still bound the page, exactly as on the ranked path (see `mcp-api`); completeness is what an OMITTED limit means, not an override of a stated one.
+
+The same selection filters the ranked path accepts (`status`, `type`, `tag`, `topic_key`, and the global widening above) SHALL apply here with the same meaning. Filtering is not ranking: narrowing to what the caller asked for does not reintroduce relevance ordering, whereas silently ignoring a filter returns rows the caller explicitly excluded.
+
+`status` composes only if the index covers every status, so **archived memories SHALL be indexed**. Excluding them made `status: 'archived'` a filter that could never match anything, and made every extractor recipe change drop the archived corpus's links permanently — a row archived before the bump is re-scanned by nothing, ever. Extraction is a pure synchronous function of `title + content`, so the only cost is a longer first drain on a corpus with many archived rows, paid once. The drain's queue and the operator-visible backlog count SHALL agree on that population, or the backlog never reaches zero.
+
+Chronological ordering SHALL be a TOTAL order. `created_at` has millisecond resolution and a batch capture writes several memories inside one millisecond, so it alone is a partial order; the result is paged by the caller, and an unstable tie makes page 2 repeat or skip a row page 1 already showed. The ordering SHALL therefore carry a deterministic tiebreaker that is itself chronological.
+
+A text `query` supplied alongside an entity SHALL narrow, not rank: the entity's memories are filtered by case-insensitive substring containment over `title + content`, and the fetch SHALL cover more than the requested page so a match older than one page is not window-dropped. Substring containment, not the lexical branch, is deliberate — routing the narrowing through FTS5 would reintroduce exactly the tokenizer imprecision this index exists to remove.
+
+This is deliberately the opposite of the text-query branch, and it exists because the identifier query class is the one where ranked retrieval performs worst.
+
+#### Scenario: Every linked memory is returned
+
+- **GIVEN** twenty memories in scope linked to one entity
+- **WHEN** entity retrieval is performed for that entity with no `limit`
+- **THEN** all twenty SHALL be returned — the omitted `limit` means the generous bound, not the ranked default page
+
+#### Scenario: An explicit limit still bounds the page
+
+- **GIVEN** the same twenty linked memories
+- **WHEN** entity retrieval is performed with `limit: 5`
+- **THEN** five SHALL be returned; a stated limit is honoured rather than overridden by completeness
+
+#### Scenario: An archived memory is reachable by entity
+
+- **GIVEN** a memory linked to an entity and subsequently archived
+- **WHEN** entity retrieval is performed for that entity with `status: 'archived'`
+- **THEN** that memory SHALL be returned
+
+#### Scenario: Same-millisecond rows page without repeating
+
+- **GIVEN** four in-scope memories linked to one entity and all carrying the same `created_at`
+- **WHEN** two consecutive pages of two are read
+- **THEN** the four rows SHALL be partitioned across the pages, with none repeated and none dropped
+
+#### Scenario: Narrowing by query is substring containment, not a second ranked pass
+
+- **GIVEN** an entity linked to more memories than one page holds, one of them the oldest and the only one containing the query text
+- **WHEN** entity retrieval is performed with that query
+- **THEN** that memory SHALL be returned, matched case-insensitively, and the result SHALL NOT be ordered by any relevance score
+
+#### Scenario: A rare identifier is found regardless of embedding distance
+
+- **GIVEN** a memory whose only connection to a query is a rare identifier, and which no text query surfaces in its top results
+- **WHEN** entity retrieval is performed on that identifier
+- **THEN** the memory SHALL be returned
+
+#### Scenario: Entity retrieval applies no relevance boost
+
+- **WHEN** entity retrieval returns results
+- **THEN** the ordering SHALL be chronological and SHALL NOT be modified by confirmation count, recency, or type
+
+### Requirement: Entity overlap MUST be a save-time conflict-detection channel
+
+Two memories can contradict each other while sharing almost no vocabulary and sitting far apart in embedding space — a fix and its reversal, stated in different words about the same file. Lexical and dense similarity both miss that case. A newly saved memory sharing a sufficiently rare entity with an existing active memory in the same scope SHALL therefore be eligible as a save-time candidate, alongside the existing lexical and dense channels.
+
+Candidates surfaced this way SHALL carry a source identifying the entity channel, so the agent judging them knows why they were proposed. Common entities SHALL NOT generate candidates: an entity linked to a large share of the scope's memories carries no signal and would flood the per-save candidate budget.
+
+The three channels are merged into one list by a reported `similarity`, so that number SHALL be ONE quantity in every channel. Entity rarity SHALL NOT be that quantity. Rarity is the channel's ADMISSION gate — it decides whether the entity proposes anything at all — and reporting `1 - linkCount / scopeMemoryCount` as the similarity made a once-linked entity in a large scope report a near-1 score purely because the scope was large, outranking any realistic cosine and re-introducing the corpus-size dependence that was already removed from the lexical side. Every channel SHALL therefore report the same bounded `[0,1]` measure of how alike the two memories' text is: cosine where the dense branch found the pair, query-token containment otherwise.
+
+Because that measure is near zero for exactly the pairs this channel exists to find, the channel's precedence SHALL be explicit rather than expressed through its score: entity-sourced candidates SHALL lead the merged list, and a target found by both the entity channel and another SHALL be reported as the entity one, because only that form carries the shared identifier. Ranking the channel on the shared measure alone would push its whole reason for existing past the per-save cap, behind candidates the other two channels would have surfaced anyway.
+
+#### Scenario: A contradiction about the same file is surfaced
+
+- **GIVEN** an active memory stating one approach for a specific file, and a new memory stating an incompatible approach for the same file, with little shared vocabulary
+- **WHEN** the new memory is saved
+- **THEN** the existing memory SHALL be surfaced as a candidate with the entity channel as its source
+
+#### Scenario: A very common entity generates no candidates
+
+- **GIVEN** an entity linked to a large share of the scope's active memories
+- **WHEN** a new memory linked to that entity is saved
+- **THEN** that entity alone SHALL NOT generate candidates
+
+#### Scenario: The per-save candidate budget is respected
+
+- **WHEN** the entity channel would surface more candidates than the per-save maximum permits
+- **THEN** the total number of candidates SHALL still respect that maximum
+
+#### Scenario: The reported similarity is text likeness, not entity rarity
+
+- **GIVEN** a near-duplicate of the saved memory and an entity match sharing the identifier but almost no vocabulary
+- **WHEN** candidates are detected
+- **THEN** the entity candidate's reported `similarity` SHALL be the low text-likeness value and the near-duplicate's SHALL be higher
+- **AND** the entity candidate SHALL still be first in the list, and SHALL survive a per-save maximum of one
+
+### Requirement: The entity index MUST be rebuildable and its drift MUST be observable
+
+All THREE entity tables are derived data, reconstructible from the append-only memory rows alone — the same class as the search and vector indexes. A rebuild path SHALL exist that recomputes them from `memory`, and it SHALL clear the scan bookkeeping table (`memory_entity_scan`) as well as the entity and link tables: the bookkeeping records THAT a memory was scanned, so a rebuild that empties only the knowledge tables leaves every row marked done and the drain finds nothing to do. Following a two-table procedure literally makes the rebuild a silent no-op, which is worse than no rebuild path at all because the operator believes the index was repaired.
+
+The wipe SHALL be atomic, and the scan table SHALL be cleared FIRST. Three statements are three failure points, and the recipe marker is already on disk by the time the wipe runs, so a partial wipe leaves the index inconsistent with a marker asserting it was rebuilt and nothing ever notices. Ordering is the second half of the guarantee: clearing bookkeeping first means the worst reachable partial state is "bookkeeping gone, links intact", which the drain repairs idempotently, whereas the reverse leaves scan rows without links — a backlog reporting zero over a permanently empty index. After a wipe the drain SHALL consider work pending again without needing to be forced.
+
+An entity lookup issued while the drain is still running SHALL be distinguishable from a lookup of an unknown entity. Both return no rows, and after a recipe change the whole corpus is in that state for as long as the drain takes, so an agent told "empty means it is not there" concludes the identifier is unknown and falls back to a text query. An empty entity result over a scope that still has unscanned memories SHALL therefore carry a signal saying so.
+
+The diagnostics surface SHALL report a link-count delta so drift caused by a missed backfill, a failed extraction, or a future table-rebuild migration is visible rather than silent.
+
+#### Scenario: The index is rebuilt from primary data
+
+- **GIVEN** a populated entity index
+- **WHEN** all three tables are emptied and the rebuild runs
+- **THEN** the index SHALL be reconstructed and entity retrieval SHALL return the same results as before it was emptied
+
+#### Scenario: A rebuild that leaves scan bookkeeping is not a rebuild
+
+- **GIVEN** a populated entity index
+- **WHEN** the entity and link tables are emptied but `memory_entity_scan` is left populated
+- **THEN** the drain SHALL find no work, and the documented rebuild procedure SHALL therefore clear all three
+
+#### Scenario: An interrupted wipe cannot leave the index unrecoverable
+
+- **WHEN** the wipe fails part-way through
+- **THEN** no partial state SHALL be visible, and the drain SHALL still see the corpus as unscanned
+
+#### Scenario: A lookup during a drain is not reported as an unknown entity
+
+- **GIVEN** a memory referencing an identifier, saved but not yet scanned
+- **WHEN** entity retrieval is performed for that identifier
+- **THEN** the result SHALL be empty AND SHALL carry the draining signal
+- **AND** once the scope is fully scanned, a genuine miss SHALL NOT carry it
+
+#### Scenario: Drift is reported
+
+- **GIVEN** memories whose entities were never extracted
+- **WHEN** diagnostics are read
+- **THEN** a non-zero delta SHALL be reported as a warning
+
+### Requirement: A change to the extraction recipe MUST retroactively correct already-indexed memories
+
+Because the scan bookkeeping records THAT a memory was scanned and not WHICH recipe scanned it, a corrected pattern would otherwise apply only to newly-saved memories, leaving every existing one misclassified forever. A misclassification is therefore not permanent by construction: the extractor SHALL carry a version tag covering its patterns, its normalization and its kind set, and a mismatch against the tag recorded on disk SHALL invalidate the derived index at boot so the ordinary backfill drain recomputes it from the append-only `memory` rows.
+
+The reset SHALL NOT be triggered by an ordinary deployment — only by a recipe change — and SHALL NOT modify any `memory` row. A rebuild SHALL also remain available on demand from the operator dashboard, so a fix need not wait for a release.
+
+The drain SHALL be paced so this window is bounded: entity retrieval is specified as complete within scope, and a corpus-wide rebuild leaves it incomplete until the drain finishes.
+
+#### Scenario: A misclassified memory is corrected by a recipe change
+
+- **GIVEN** a memory indexed under a recipe that classified it incorrectly
+- **WHEN** the pattern is fixed and the extractor version is bumped
+- **THEN** the incorrect entity link SHALL be gone after the drain, the correct one present, and the memory's `content` unchanged
+
+#### Scenario: An ordinary deployment does not rebuild the index
+
+- **GIVEN** an install whose recorded extractor version matches the compiled-in one
+- **WHEN** the server boots
+- **THEN** the entity index SHALL NOT be truncated and no re-scan SHALL be scheduled
+
+#### Scenario: A corpus scanned to zero entities is still re-scanned
+
+- **GIVEN** an install whose memories were all scanned under an older recipe but produced no entities
+- **WHEN** the extractor version no longer matches
+- **THEN** the scan bookkeeping SHALL be cleared so the drain re-scans them
+
+### Requirement: Entity retrieval MUST NOT be added as a fusion stream in this change
+
+Published evidence indicates that adding a graph stream to a BM25-plus-vector fusion **reduced** Recall@5, NDCG@10 and MRR against BM25 alone in its own author's benchmark. Entity retrieval SHALL therefore remain a separate exact-address mechanism and SHALL NOT contribute a ranked list to the text-query branch's Reciprocal Rank Fusion. Introducing such a stream SHALL require a measured improvement on the evaluation harness, recorded in a dedicated change.
+
+#### Scenario: The text-query branch is unchanged
+
+- **WHEN** `memory.search` is called with a text query and no entity filter
+- **THEN** the fused result SHALL be identical to what the same query returns without the entity index present

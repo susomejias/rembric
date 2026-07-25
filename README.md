@@ -415,6 +415,41 @@ Four load-bearing invariants:
 
 Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
 
+### Entity index (exact-address retrieval)
+
+Hybrid ranking is the right tool for "what did we decide about auth" and the wrong one for "what do I know about `apps/server/src/db/migrate.ts`". Identifiers are where ranked retrieval performs worst: quoted as an FTS5 phrase, a path also matches every longer path containing it (`migrate.ts` → `migrate.ts.bak`, `test/…/migrate.ts`), and separators the tokenizer drops take the identifier's precision with them (`#36` degrades to any bare "36"; `nas.local` matches the prose "the nas local drive"). Measured against an adversarial corpus, that is a 50–75% false-positive rate on those classes.
+
+So Rembric keeps a small derived index of **syntactically unambiguous identifiers** — extracted by a pure regex function, no LLM, no network, ~5µs per memory, 0.05% of memory-related storage:
+
+| kind           | examples                                                                 |
+| -------------- | ------------------------------------------------------------------------ |
+| `path`         | `apps/server/src/db/migrate.ts`, `.rembric`                              |
+| `ticket`       | `#282`, `PROJ-1234`                                                      |
+| `cve_id`       | `CVE-2024-3094`                                                          |
+| `ip_address`   | `192.168.1.50`, `172.18.0.0/16`                                          |
+| `hostname`     | `nas.local`, `plex.home` (`.local`/`.lan`/`.home`/`.internal`)           |
+| `git_ref`      | `cfb5c04`, full 40-char SHAs                                             |
+| `url`          | `https://…`                                                              |
+| `error_code`   | `ENOENT`, `SQLITE_CANTOPEN`, `ERR_MODULE_NOT_FOUND`, `PERMISSION_DENIED` |
+| `env_var`      | `$DATABASE_URL`, `${REMBRIC_TOKEN}`, `NODE_ENV=…`                        |
+| `uuid`         | `550e8400-e29b-41d4-a716-446655440000`                                   |
+| `systemd_unit` | `caddy.service`, `rembric-backup.timer`, `docker.socket`                 |
+| `mac_address`  | `de:ad:be:ef:00:01`                                                      |
+
+Extraction is precision-first by design: only closed, bounded syntax is admitted (a whitelist of errno and gRPC names rather than "any capitalised word", range-validated IP octets, fixed suffix lists, a `$`/`=` anchor for env vars). Where two classes share a shape they are separated by an anchor or a closed list, never by pattern order — a bare `SCREAMING_SNAKE` token is deliberately left untyped, since it is indistinguishable between an error code, an env var and a constant. A pattern is also narrowed below the class it names when the difference is prose: `systemd_unit` omits `.target`/`.path`/`.slice`/`.mount` because those are everyday property accessors (`event.target`, `array.slice`). Symbol identifiers, package names, semver, Docker image refs and cron expressions are **not** extracted at all — their shape cannot be bounded without matching prose, and a false link is worse than a missing one because it degrades exact lookup into bad text search.
+
+The patterns live in one registry (`extractor-rules.ts`) where every rule must declare both the text it catches and the prose it must reject; a single suite runs the whole registry against those declarations, so a new kind is covered the moment it is added.
+
+**A misclassification is never permanent.** Both entity tables are derived, so fixing a pattern is: correct it, bump the extractor version, deploy. The mismatch invalidates the index at boot and the drain recomputes it from the append-only `memory` rows — the bad link disappears, no memory is touched, and nothing needs migrating. An ordinary deployment does _not_ trigger this; only a recipe change does. Operators can also rebuild on demand from `/dashboard/entities` without waiting for a release.
+
+The index backs three things, two of which need no agent opt-in:
+
+- **`memory.search({ entity })`** — every linked memory in scope, chronological, complete: no ranking, no cutoff. Combined with `query` it narrows rather than fuses.
+- **`memory.context`** — identifiers found in the session's focus text seed exact matches ahead of the ranked fallback (tagged `via: 'entity'`).
+- **Save-time conflict detection** — a new memory sharing a sufficiently _rare_ entity with an active one becomes a `candidates[]` entry, catching contradictions that share no vocabulary and sit far apart in embedding space. Common entities are gated out (the same idea as IDF, applied to link counts).
+
+It deliberately does **not** contribute a stream to the hybrid RRF fusion: in its own author's published benchmark, adding a graph stream to BM25+vector _reduced_ Recall@5 versus BM25 alone. Operators can browse and rebuild the index at `/dashboard/entities`.
+
 <details>
 <summary><b>Process diagram</b> — transports, service layer, storage, in-process background work</summary>
 

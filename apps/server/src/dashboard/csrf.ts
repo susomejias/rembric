@@ -28,13 +28,8 @@ export async function verifyCsrf(
   sessions: SessionsService,
   formName: string,
 ): Promise<true | Response> {
-  const form = await c.req.formData();
-  const submitted = form.get(CSRF_FIELD);
-  const candidate = typeof submitted === 'string' ? submitted : '';
-  if (!candidate || !sessions.verifyCsrf(session, formName, candidate)) {
-    return c.json({ ok: false, code: 'csrf_invalid' }, 403);
-  }
-  return true;
+  const form = await readFormAndVerifyCsrf(c, session, sessions, formName);
+  return form instanceof Response ? form : true;
 }
 
 /** Read the parsed form data + verify CSRF in one helper. */
@@ -44,11 +39,18 @@ export async function readFormAndVerifyCsrf(
   sessions: SessionsService,
   formName: string,
 ): Promise<FormData | Response> {
-  const form = await c.req.formData();
+  const reject = () => c.json({ ok: false, code: 'csrf_invalid' }, 403);
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    // An unparseable body carries no token, so it fails CSRF by definition.
+    return reject();
+  }
   const submitted = form.get(CSRF_FIELD);
   const candidate = typeof submitted === 'string' ? submitted : '';
   if (!candidate || !sessions.verifyCsrf(session, formName, candidate)) {
-    return c.json({ ok: false, code: 'csrf_invalid' }, 403);
+    return reject();
   }
   return form;
 }

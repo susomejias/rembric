@@ -15,6 +15,7 @@ import {
   inp,
   mdBody,
   PAGE_SIZE,
+  pageParam,
   pager,
   projectOptions,
   sel,
@@ -53,7 +54,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     // FTS5 syntax error and 500s the page. The unsanitized `rawQuery` is
     // still what's redisplayed in the search box.
     const query = sanitizeFtsQuery(rawQuery);
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();

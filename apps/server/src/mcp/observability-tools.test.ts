@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import type { Token } from '../db/schema/tokens.js';
@@ -12,7 +13,12 @@ import { RelationsService } from '../services/relations.js';
 import { SCOPE_GLOBAL } from '../services/scope.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { buildObservabilityHandlers, parseKeyLearnings } from './observability-tools.js';
+import {
+  buildObservabilityHandlers,
+  doctorOutput,
+  parseKeyLearnings,
+  parseRunSummary,
+} from './observability-tools.js';
 
 describe('parseKeyLearnings — capture_passive parser', () => {
   it('returns [] when no Key Learnings section exists', () => {
@@ -108,6 +114,47 @@ describe('parseKeyLearnings — capture_passive parser', () => {
   });
 });
 
+describe('doctor consolidation.lastRunOps contract', () => {
+  const lastRunOpsSchema = z.object(doctorOutput).shape.consolidation.shape.lastRunOps;
+
+  // Every in-repo writer of consolidation_runs.summary. Keep in sync: a shape
+  // the output contract rejects makes memory.doctor return isError.
+  const writerSummaries = [
+    { archives: 0, orphaned: 0 },
+    { archives: 3, orphaned: 1 },
+    { kind: 'agent_memory_archive', archived: 1 },
+    { kind: 'archived_memory_purge', deleted: 12 },
+    { kind: 'session_purge', deleted: 4 },
+    { kind: 'prompt_purge', deleted: 2 },
+  ];
+
+  it('admits every writer shape unchanged', () => {
+    for (const summary of writerSummaries) {
+      const normalized = parseRunSummary(JSON.stringify(summary));
+      expect(normalized).toEqual(summary);
+      expect(lastRunOpsSchema.safeParse(normalized).success).toBe(true);
+    }
+  });
+
+  it('drops values the contract cannot carry instead of failing the report', () => {
+    for (const raw of [
+      'not json at all',
+      'null',
+      '[1,2,3]',
+      '{"kind":7,"archived":1}',
+      '{"archives":"many"}',
+      '{"nested":{"a":1}}',
+      '{"archives":null}',
+    ]) {
+      const normalized = parseRunSummary(raw);
+      expect(lastRunOpsSchema.safeParse(normalized).success).toBe(true);
+    }
+    expect(parseRunSummary('{"kind":7,"archived":1}')).toEqual({ archived: 1 });
+    expect(parseRunSummary('{"archives":"many"}')).toEqual({});
+    expect(parseRunSummary('[1,2,3]')).toEqual({});
+  });
+});
+
 describe('memory.capture_passive — handler-level (fix-audited-defects)', () => {
   let db: TestDb;
   let repos: Repositories;
@@ -144,8 +191,10 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
       doctor: () => ({
         db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
         embeddings: { model: 'test', backlog: 0 },
+        entities: { backlog: 0 },
         consolidation: { lastRunAt: null, lastRunOps: {} },
         sessions: { active: 0 },
+        review: { needsReview: 0, pendingJudgments: 0 },
         warnings: [],
       }),
       relations,

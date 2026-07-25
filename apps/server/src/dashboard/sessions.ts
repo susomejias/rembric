@@ -16,6 +16,7 @@ import {
   kv,
   kvGrid,
   PAGE_SIZE,
+  pageParam,
   pager,
   mdBody,
   sel,
@@ -61,7 +62,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const statusFilter = (AGENT_SESSION_STATUSES as readonly string[]).includes(statusFilterRaw)
       ? (statusFilterRaw as AgentSessionStatus)
       : undefined;
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();

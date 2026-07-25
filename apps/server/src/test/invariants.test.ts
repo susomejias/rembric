@@ -343,6 +343,17 @@ describe('distroless runtime node-path invariants', () => {
     expect(/^\s*-\s*node\s*$/m.test(compose)).toBe(false);
   });
 
+  it('dev compose overrides the healthcheck (its target is node:22-bookworm-slim, not distroless)', () => {
+    const dev = readFileSync(join(repoRoot, 'docker-compose.dev.yml'), 'utf8').replace(
+      /^\s*#.*$/gm,
+      '',
+    );
+    // Without !override the dev stack inherits the distroless path, and
+    // `up --wait` never returns healthy: stat /nodejs/bin/node: no such file.
+    expect(/^\s*healthcheck:\s*!override\s*$/m.test(dev)).toBe(true);
+    expect(dev).not.toContain(NODE);
+  });
+
   it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
     const orch = readFileSync(join(srcRoot, 'services/self-update/orchestrator.ts'), 'utf8');
     expect(orch).toContain(`'${NODE}'`);

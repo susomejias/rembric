@@ -1,18 +1,20 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
+import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
 
 /**
  * Save-time candidate detector for `memory.save`.
  *
- * Runs two passes, deduplicates by target id, ranks by max(vec, fts),
- * returns the top N.
+ * Runs three passes, deduplicates by target id, ranks by the single
+ * similarity quantity every pass reports, returns the top N.
  *
  *   1. Vec kNN (when an embedding for the just-saved row already
  *      exists; otherwise this pass is a no-op for THIS save and the
  *      FTS pass below picks up the slack).
  *   2. FTS5 BM25 query against the row's content.
+ *   3. Entity overlap — rarity-gated, and it leads the merged list.
  *
  * Scope isolation: the SQL filters by `(scope, project_id)` matching
  * the just-saved row. Rows already linked to it via `replaces` are
@@ -38,6 +40,24 @@ import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
  */
 export const VEC_THRESHOLD = 0.7;
 
+/**
+ * Rarity gate for the entity candidate channel (design.md Decision 6): an
+ * entity linked to more than this proportion of the scope's active
+ * memories carries no signal — every memory in a small project might
+ * mention the project's own package name — and would otherwise flood the
+ * per-save budget with noise, starving the lexical/dense channels. A
+ * proportion, not an absolute count, so it adapts to corpus size (the same
+ * lesson the inverted BM25 threshold taught: absolute thresholds over
+ * corpus-relative quantities don't hold).
+ *
+ * It is an ADMISSION gate and never a score. Reporting `1 - linkCount /
+ * scopeMemoryCount` as `similarity` made a once-linked entity in a
+ * 1000-memory scope report 0.999 and outrank any realistic cosine in a merge
+ * that claims to compare one quantity — a rarity proportion dressed as a
+ * similarity, and corpus-size dependent besides.
+ */
+export const ENTITY_RARITY_THRESHOLD = 0.15;
+
 export interface CandidateOptions {
   perSaveMax: number;
   /** Internal candidate pool size before the cap is applied; default 20. */
@@ -46,19 +66,28 @@ export interface CandidateOptions {
 
 export interface SaveCandidate {
   targetId: string;
-  /** 0..1, normalized */
+  /**
+   * 0..1, normalized, and the SAME quantity whichever channel reported it:
+   * cosine for `vec`, query-token containment for `fts` and `entity`. An
+   * entity match routinely shares no vocabulary with the saved row, so a low
+   * value here is expected and is not a weak match — `source`/`entityValue`
+   * carry that evidence, and the ordering below carries its precedence.
+   */
   similarity: number;
   /** Which detector surfaced this match. */
-  source: 'vec' | 'fts';
+  source: 'vec' | 'fts' | 'entity';
   title: string;
   snippet: string;
   topicKey: string | null;
+  /** Set only for `source: 'entity'` — the value both memories share. */
+  entityValue?: string;
 }
 
 export function findSaveTimeCandidates(
-  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations'>,
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities'>,
   saved: Memory,
   opts: CandidateOptions,
+  extractedEntities: ExtractedEntity[] = [],
 ): SaveCandidate[] {
   const poolSize = opts.poolSize ?? 20;
 
@@ -95,7 +124,9 @@ export function findSaveTimeCandidates(
   // first and LIMITs to poolSize, so every returned row is admitted. The
   // REPORTED similarity is a separate concern — bounded token containment
   // over the sanitized token set, truthful against its documented `0..1`
-  // range and comparable enough to cosine for the max(vec, fts) merge below.
+  // range and comparable to cosine. The entity pass reports the same quantity,
+  // so the merge below compares one thing rather than three.
+  const queryTokens = tokenSet(saved.content);
   const matchExpr = sanitizeFtsQuery(saved.content, { maxTerms: 16 });
   const ftsPool: SaveCandidate[] = [];
   if (matchExpr.length > 0) {
@@ -107,7 +138,6 @@ export function findSaveTimeCandidates(
       excludeIds,
       limit: poolSize,
     });
-    const queryTokens = tokenSet(saved.content);
     for (const r of ftsRows) {
       ftsPool.push({
         targetId: r.id,
@@ -120,17 +150,85 @@ export function findSaveTimeCandidates(
     }
   }
 
-  // --- 3. Merge + dedupe ----------------------------------------------
-  // For each unique target id, keep the higher-scoring source (vec wins
-  // ties because vec is semantic, fts is lexical). Both similarities are
-  // now bounded [0,1] and corpus-independent, so this comparison is
-  // meaningful — it wasn't while fts reported an inverted, unbounded proxy.
-  const byId = new Map<string, SaveCandidate>();
-  for (const c of [...vecPool, ...ftsPool]) {
-    const prev = byId.get(c.targetId);
-    if (!prev || c.similarity > prev.similarity) byId.set(c.targetId, c);
+  // Entity overlap: a candidate source neither text nor vector similarity
+  // can reach — two memories about the same file/error code can share
+  // almost no vocabulary and sit far apart in embedding space. Gated by
+  // rarity (see `ENTITY_RARITY_THRESHOLD`): a common entity generates no
+  // candidates at all, never a low-scoring one. Rarity gates admission; the
+  // reported similarity is the lexical-containment quantity, same as the pass above.
+  const entityPool: SaveCandidate[] = [];
+  if (extractedEntities.length > 0) {
+    const excludeIdSet = new Set(excludeIds);
+    // Depends only on (scope, projectId) — computed once per save, not once
+    // per extracted entity. `excludeMemoryId` guards against self-inflation
+    // structurally even though the caller already sequences linking after
+    // candidate detection (see `saveMemoryWithCandidates`).
+    const scopeMemoryCount = repos.entities.scopeActiveMemoryCount({
+      scope: saved.scope,
+      projectId: saved.projectId,
+      excludeMemoryId: saved.id,
+    });
+
+    for (const e of extractedEntities) {
+      if (scopeMemoryCount === 0) continue;
+      const linkCount = repos.entities.entityLinkCount({
+        scope: saved.scope,
+        projectId: saved.projectId,
+        kind: e.kind,
+        value: e.value,
+        excludeMemoryId: saved.id,
+      });
+      if (linkCount / scopeMemoryCount > ENTITY_RARITY_THRESHOLD) continue;
+
+      const rows = repos.entities.findOtherMemoriesForEntity({
+        scope: saved.scope,
+        projectId: saved.projectId,
+        kind: e.kind,
+        value: e.value,
+        excludeMemoryId: saved.id,
+        excludeIds,
+        limit: poolSize,
+      });
+      for (const r of rows) {
+        if (excludeIdSet.has(r.id)) continue;
+        entityPool.push({
+          targetId: r.id,
+          similarity: tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`)),
+          source: 'entity',
+          title: r.title,
+          snippet: snippet(r.content, 200),
+          topicKey: r.topicKey,
+          entityValue: e.value,
+        });
+      }
+    }
   }
-  const all = [...byId.values()].sort((a, b) => b.similarity - a.similarity);
+
+  // For each unique target id keep the higher-scoring source (vec wins ties
+  // because vec is semantic and fts is lexical), except that an entity row
+  // always survives: only it carries `entityValue`, the exact address that
+  // explains why the pair was proposed at all.
+  const byId = new Map<string, SaveCandidate>();
+  for (const c of [...vecPool, ...ftsPool, ...entityPool]) {
+    const prev = byId.get(c.targetId);
+    if (!prev) {
+      byId.set(c.targetId, c);
+    } else if (
+      prev.source !== 'entity' &&
+      (c.source === 'entity' || c.similarity > prev.similarity)
+    ) {
+      byId.set(c.targetId, c);
+    }
+  }
+  // Entity candidates lead. Precedence is explicit here rather than smuggled in
+  // through an inflated score, and it is not optional: a shared rare identifier
+  // with near-zero vocabulary overlap is the case the channel exists for, so
+  // ranking on `similarity` alone would push it past `perSaveMax` behind
+  // candidates the other two channels would have found anyway.
+  const all = [...byId.values()].sort(
+    (a, b) =>
+      Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
+  );
   return all.slice(0, opts.perSaveMax);
 }
 

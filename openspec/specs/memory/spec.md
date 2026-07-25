@@ -103,12 +103,14 @@ Every memory row SHALL carry a `scope` of either `global` or `project`. When `sc
 
 ### Requirement: Memory retrieval MUST expose history
 
-`memory.get(id)` SHALL return the memory along with its full ancestry: the chain of predecessors via `replaces`, the count of confirmations against the current head, AND the set of judged relations involving the memory (sourced from `memory_relations`).
+`memory.get(id)` SHALL return the memory along with its ancestry: the predecessors reachable via `replaces`, the count of AFFIRMING confirmations against the current head, AND the set of judged relations involving the memory (sourced from `memory_relations`).
+
+The ancestry projection is bounded and content-free — see "Supersedes-chain reads MUST be bounded and content-free", which governs it: each predecessor is `{id, title, status, createdAt}`, the traversal stops at a compile-time cap, and the response reports `predecessorCount` and `truncated`. "Full ancestry" therefore means "every predecessor up to the cap, identified but not quoted": a caller that needs a predecessor's content fetches it by id, which is what the batch read exists for. Predecessor **content snapshots** SHALL NOT be returned, because a deep `topic_key` chain would otherwise multiply one call's token cost by its own history.
 
 #### Scenario: Retrieving a merged memory
 
 - **WHEN** `memory.get('M')` is called and M was formed by merging A and B
-- **THEN** the response SHALL include the content of M, the predecessor ids `['A','B']`, the predecessors' content snapshots, the current confirmation count for M, and a `relations` array containing the `supersedes` entries for A and B
+- **THEN** the response SHALL include the content of M, the predecessor projections for `['A','B']` (id, title, status, createdAt — no content), the current affirmation count for M, and a `relations` array containing the `supersedes` entries for A and B
 
 #### Scenario: Retrieving a memory with a pending judgment
 
@@ -176,7 +178,7 @@ The data dir SHALL record the embedding identity, comprising BOTH the compiled-i
 
 ### Requirement: Memory search MUST implement standard hybrid retrieval on the text-query branch
 
-When `memory.search` is called with a non-empty text `query`, the system SHALL implement the standard hybrid-search pattern used by mainstream search engines: run an independent **lexical retriever** (FTS5/BM25 ranked ids) and **dense retriever** (vector k-nearest-neighbor ranked ids), then combine their ranked lists using Reciprocal Rank Fusion (RRF): `score(id) = Σ 1/(rank_constant + rank_branch(id))` over the branches in which the id appears. Each child retriever SHALL over-fetch into a bounded **rank window** (at least `limit + offset`, clamped to a fixed ceiling set strictly above the maximum `limit` so an unbounded `offset` cannot force a near-full partition scan) so that fusion is not artificially recall-capped. When `memory.search` is called WITHOUT a text `query`, the system SHALL use the existing chronological listing path unchanged (ordered by `created_at`, with exact `limit`/`offset`). The dense branch SHALL NOT apply a similarity threshold — fusion orders results, it does not filter them. The text query SHALL be sanitized before it is passed to the FTS5 `MATCH` so that an arbitrary natural-language query cannot raise an FTS5 syntax error or be reinterpreted as an FTS5 query expression. The sanitizer SHALL keep whole Unicode word tokens (it SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII — e.g. accented or CJK text), SHALL strip FTS5 metacharacters and balance quotes, and SHALL neutralize FTS5 bareword operators (`AND`, `OR`, `NOT`, `NEAR`) so a phrase like "coffee OR tea" matches literal terms rather than being parsed as a boolean expression. (The FTS tokenizer folds diacritics, so a sanitized accented or ASCII-folded token matches accented stored content either way; the binding requirement is to preserve whole tokens and neutralize operators, not to special-case accents.) A failure of either branch SHALL degrade gracefully to the other branch rather than failing the whole search. Filters SHALL have explicit guarantees: `status` and `type` apply to BOTH branches; `tag` is exact on the lexical branch and post-filters dense candidates inside the bounded rank window (so no wrong-tag rows are returned, but dense+tag recall is bounded by the rank window rather than globally complete). Result rows SHALL carry the same shape as today (including the `relations` array and the `last_seen_at` touch).
+When `memory.search` is called with a non-empty text `query`, the system SHALL implement the standard hybrid-search pattern used by mainstream search engines: run an independent **lexical retriever** (FTS5/BM25 ranked ids) and **dense retriever** (vector k-nearest-neighbor ranked ids), then combine their ranked lists using Reciprocal Rank Fusion (RRF): `score(id) = Σ 1/(rank_constant + rank_branch(id))` over the branches in which the id appears. Each child retriever SHALL over-fetch into a bounded **rank window** (at least `limit + offset`, clamped to a fixed ceiling set strictly above the maximum `limit` so an unbounded `offset` cannot force a near-full partition scan) so that fusion is not artificially recall-capped. When `memory.search` is called WITHOUT a text `query`, the system SHALL use the existing chronological listing path unchanged (ordered by `created_at`, with exact `limit`/`offset`). The dense branch SHALL NOT apply a similarity threshold — fusion orders results, it does not filter them. The text query SHALL be sanitized before it is passed to the FTS5 `MATCH` so that an arbitrary natural-language query cannot raise an FTS5 syntax error or be reinterpreted as an FTS5 query expression. The sanitizer SHALL keep whole Unicode word tokens (it SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII — e.g. accented or CJK text), SHALL strip FTS5 metacharacters and balance quotes, and SHALL neutralize FTS5 bareword operators (`AND`, `OR`, `NOT`, `NEAR`) so a phrase like "coffee OR tea" matches literal terms rather than being parsed as a boolean expression. (The FTS tokenizer folds diacritics, so a sanitized accented or ASCII-folded token matches accented stored content either way; the binding requirement is to preserve whole tokens and neutralize operators, not to special-case accents.) A failure of either branch SHALL degrade gracefully to the other branch rather than failing the whole search. Filters SHALL have explicit guarantees: `status` and `type` apply to BOTH branches; `tag` is exact on the lexical branch and post-filters dense candidates inside the bounded rank window (so no wrong-tag rows are returned, but dense+tag recall is bounded by the rank window rather than globally complete). Result rows SHALL carry the same shape as today (including the `relations` array). Search SHALL NOT advance `last_seen_at` for any returned row — see "Being returned by a search MUST NOT be sufficient to confer durability".
 
 After RRF produces the fused, ordered candidate pool for the over-fetched rank window, the system SHALL apply a post-fusion multiplier BEFORE truncating to the top `limit` results: `finalScore(id) = rrfScore(id) * boost(id)`, where `boost(id)` is a compile-time-constant function of the candidate row's `confirmationCount`, time since `last_seen_at`, and `type`, clamped to a fixed range (declared `[0.7, 1.4]`; reachable in practice `[0.9, 1.35]` given the current per-signal weights). Applying the boost before truncation is deliberate: it CAN and is meant to change which rows make the page — a fresh, confirmed memory SHALL be able to outrank a stale unconfirmed one at a close raw RRF score. The clamp bounds the multiplier's magnitude; it does not, and is not meant to, prevent reordering near-ties. This boost applies ONLY to the text-query (fused hybrid-search) branch; the no-query chronological listing path is UNCHANGED and continues to use exact chronological order with no boost applied. The boost multiplier SHALL NOT be exposed as a per-request tunable — it is a fixed constant, matching the existing style of `RANK_CONSTANT` and the rank-window ceiling.
 
@@ -294,27 +296,35 @@ Both gates SHALL be disabled by default and SHALL be enabled only with values ca
 
 ### Requirement: Search results MUST be diversified across originating sessions
 
-A single verbose session can supply enough highly-ranked memories to occupy an entire result page, displacing the one memory from a different session that answers the query. The fused, ordered candidate pool SHALL be walked in order and at most a small fixed number of results per originating session SHALL be admitted; when the cap would leave the page under the requested limit, the page SHALL be backfilled from the skipped remainder in fused order, so the cap never reduces the number of results returned.
+A single verbose session can supply enough highly-ranked memories to occupy an entire result page, displacing the one memory from a different session that answers the query. This requirement specifies the SHAPE of the diversification, not that it is currently switched on: `DIVERSITY_CAP` ships `null` (see "Retrieval and lifecycle constants MUST be named and bounded in one place" for why, and for what re-enabling it requires), so every clause below is conditional on a non-null cap and describes what the cap MUST do when one is configured.
+
+When a per-session cap is configured, the fused, ordered candidate pool SHALL be walked in order and at most that many results per originating session SHALL be admitted; when the cap would leave the page under the requested limit, the page SHALL be backfilled from the skipped remainder in fused order, so the cap never reduces the number of results returned.
 
 Memories with no originating session SHALL NOT be grouped together by that absence.
 
 #### Scenario: One session cannot monopolise a page
 
-- **GIVEN** a fused pool whose top eight results all originate in the same session, and further results from other sessions
+- **GIVEN** a configured per-session cap and a fused pool whose top eight results all originate in the same session, and further results from other sessions
 - **WHEN** the page is assembled at a limit of eight
 - **THEN** at most the per-session cap SHALL come from that session, and the remainder SHALL come from other sessions
 
 #### Scenario: The cap never shrinks the result set
 
-- **GIVEN** a fused pool in which every candidate originates in the same session
+- **GIVEN** a configured per-session cap and a fused pool in which every candidate originates in the same session
 - **WHEN** the page is assembled at a limit of eight
 - **THEN** eight results SHALL still be returned, backfilled in fused order
 
 #### Scenario: Session-less memories are not treated as one session
 
-- **GIVEN** a fused pool containing several memories with a null session id
+- **GIVEN** a configured per-session cap and a fused pool containing several memories with a null session id
 - **WHEN** the page is assembled
 - **THEN** those memories SHALL NOT be capped as though they shared a session
+
+#### Scenario: With no cap configured the page is the fused page
+
+- **GIVEN** `DIVERSITY_CAP` is `null`, as it ships
+- **WHEN** a page is assembled from a fused pool whose rows all share one session
+- **THEN** the returned rows SHALL be the top of the fused order unchanged, and no diversification work SHALL be performed
 
 ### Requirement: The vector index MUST mirror the memory lifecycle and support scoped kNN over an arbitrary query vector
 
@@ -377,7 +387,7 @@ The `memory` table SHALL gain a nullable `topic_key TEXT` column. When `memory.s
 
 ### Requirement: `memory.save` MUST surface candidate conflicts at save-time
 
-After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always) and vec kNN neighbors (when the just-saved row has an embedding), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates ordered by max(vec, fts) score descending.
+After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always), vec kNN neighbors (when the just-saved row has an embedding), and entity-overlap neighbors (see `memory-entities`'s save-time conflict-detection requirement — gated by a rarity threshold so a common entity contributes nothing), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates ordered by max(vec, fts, entity) score descending.
 
 The lexical pass SHALL build its FTS5 `MATCH` expression with the SAME Unicode-aware builder used by interactive `memory.search` (see the `mcp-api` hybrid-retrieval contract): it SHALL keep whole Unicode word tokens and SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII (accented or CJK text), and it SHALL apply a bounded term cap so a long save body cannot build an unbounded `MATCH` expression. Consequently, save-time candidate detection SHALL NOT silently degrade to vector-only for non-ASCII content: a non-ASCII memory body SHALL produce a non-empty `MATCH` expression and SHALL be eligible to surface `source: 'fts'` candidates. The lexical pass SHALL still skip only when the builder yields no usable tokens at all.
 
@@ -605,11 +615,12 @@ Each memory with `status = 'active'` SHALL expose a **derived, read-time-only** 
 
 For an `active` memory of type `T`:
 
-- `reviewBaseline` SHALL be `max(created_at, latest confirmation event_ts)` — the last time the memory was **affirmed** (its own creation, or a `memory.confirm` recorded against the head of its supersedes chain). `last_seen_at` SHALL NOT be used as the baseline, because `last_seen_at` advances on every read (access), not on affirmation.
+- `reviewBaseline` SHALL be `max(created_at, latest AFFIRMING confirmation event_ts)` — the last time the memory was **affirmed** (its own creation, or a `memory.confirm` with verdict `affirm` recorded against the head of its supersedes chain). A refuting confirmation SHALL NOT advance it. `last_seen_at` SHALL NOT be used as the baseline: it is the ACCESS signal, advanced by dereferencing a memory (`memory.get` on a single id), by an affirming `memory.confirm`, and by an operator undoing a decay archival — never by a search returning a row, and never by the batch `memory.get({ids})` form. Access and affirmation are different facts about a memory, which is the whole reason the two axes exist.
 - `reviewAfter` SHALL be `reviewBaseline + REVIEW_TTL_MS[T]` when `REVIEW_TTL_MS` has an entry for `T`, and `null` otherwise.
 - `reviewState` SHALL be `'needs_review'` when `reviewAfter` is non-null AND `reviewAfter <= now`; otherwise `'fresh'`.
+- A refutation newer than `reviewBaseline` SHALL force `reviewState = 'needs_review'` regardless of `T`'s TTL, and `reviewAfter` SHALL then report the refutation's timestamp.
 
-`REVIEW_TTL_MS` SHALL be a per-`type` shelf-life map exported from a single source (`apps/server/src/services/review.ts`). A type with no entry SHALL never produce `needs_review`. The shelf life is a soft re-verification nudge, not a hard expiry: a `needs_review` memory SHALL remain `active` and SHALL be unaffected in ranking, scope isolation, or decay eligibility.
+`REVIEW_TTL_MS` SHALL be a per-`type` shelf-life map exported from a single source (`apps/server/src/services/review.ts`). A type with no entry SHALL never produce `needs_review` on the clock. The shelf life is a soft re-verification nudge, not a hard expiry: a `needs_review` memory SHALL remain `active` and SHALL be unaffected in ranking, scope isolation, or decay eligibility.
 
 Memories whose `status` is `superseded` or `archived` SHALL NOT carry a review state (`reviewState` is omitted / null for them).
 
@@ -630,27 +641,150 @@ The time derivation SHALL live in one pure function (`deriveReviewState`) so it 
 #### Scenario: Confirming a memory clears needs_review
 
 - **GIVEN** an `active` memory currently deriving `reviewState = 'needs_review'`
-- **WHEN** `memory.confirm` records a confirmation event at `now`
+- **WHEN** `memory.confirm` records an affirming confirmation event at `now`
 - **THEN** the next derivation SHALL use `reviewBaseline = now`, yielding `reviewAfter = now + REVIEW_TTL_MS[type]` and `reviewState = 'fresh'`
-- **AND** no `memory` row SHALL have been mutated to achieve this (the confirmation is the only write)
+- **AND** no `memory` row SHALL have been mutated to achieve this (the confirmation is the only write, plus the access-signal touch that an affirmation carries)
 
 #### Scenario: Reading a memory does NOT clear needs_review
 
 - **GIVEN** an `active` memory deriving `reviewState = 'needs_review'`
-- **WHEN** the memory is fetched via `memory.get` or returned by `memory.search` (both of which touch `last_seen_at`)
-- **THEN** its derived `reviewState` SHALL remain `'needs_review'` — access does not count as affirmation
+- **WHEN** the memory is dereferenced via `memory.get({id})` (which advances `last_seen_at`), fetched via `memory.get({ids})` (which does not), or returned by `memory.search` (which does not)
+- **THEN** its derived `reviewState` SHALL remain `'needs_review'` in all three cases — access does not count as affirmation, whether or not the read advanced the access signal
 
-#### Scenario: A type without a TTL never needs review
+#### Scenario: A type without a TTL never needs review on the clock
 
-- **GIVEN** an `active` memory whose `type` has no `REVIEW_TTL_MS` entry, created arbitrarily long ago, never confirmed
+- **GIVEN** an `active` memory whose `type` has no `REVIEW_TTL_MS` entry, created arbitrarily long ago, never confirmed and never refuted
 - **WHEN** its review state is derived
 - **THEN** `reviewAfter` SHALL be `null` and `reviewState` SHALL be `'fresh'`
+
+#### Scenario: A refuted TTL-less memory still needs review
+
+- **GIVEN** an `active` `reference` memory (no TTL) that has been refuted since its affirmation baseline
+- **WHEN** its review state is derived
+- **THEN** `reviewState` SHALL be `'needs_review'` and `reviewAfter` SHALL be the refutation's timestamp
 
 #### Scenario: Non-active memories carry no review state
 
 - **GIVEN** a memory with `status = 'superseded'` or `status = 'archived'`
 - **WHEN** it is retrieved
 - **THEN** `reviewState` SHALL be omitted (or null) and `reviewAfter` SHALL be omitted
+
+### Requirement: Being returned by a search MUST NOT be sufficient to confer durability
+
+A memory appearing in a page of search results is evidence that it ranked, not that it was useful. The access signal that drives decay eligibility and the retrieval recency boost SHALL NOT be advanced merely by a row being included in a result page, because doing so makes ranking self-reinforcing: a row that ranks well becomes decay-immune, gains a recency boost that helps it rank well again, and is pinned to the top of subsequent context pulls, with no evidence the agent read past its title.
+
+Whatever signal the system adopts for "accessed", it SHALL be advanced only by an interaction that distinguishes a dereferenced memory from a listed one, and any row that is filtered out before reaching the caller SHALL NOT have its access signal advanced.
+
+The shipped resolution is the strongest form of that rule: search advances the access signal for **no** row — neither the rows it returns nor the rows it drops — and only dereferencing a memory by id advances it. The drop-before-return scenario below is therefore satisfied vacuously today; it remains a stated requirement so that a future re-introduction of a search-time touch cannot reach a row the caller never saw.
+
+#### Scenario: A broad search does not confer durability on every hit
+
+- **GIVEN** a corpus in which a memory is old enough to be decay-eligible
+- **WHEN** a search returns that memory in a page of results and the caller does not dereference it
+- **THEN** the memory SHALL remain decay-eligible
+
+#### Scenario: A dereferenced memory is treated as accessed
+
+- **WHEN** a memory is fetched by id
+- **THEN** its access signal SHALL be advanced
+
+#### Scenario: A row dropped before return is not touched
+
+- **GIVEN** a row retrieved by a retrieval branch but excluded by the live-status re-check before the response is built
+- **WHEN** the search completes
+- **THEN** that row's access signal SHALL NOT have been advanced
+
+### Requirement: The system MUST accept a negative affirmation, recorded append-only
+
+The only affirmation verb today is positive, and autonomous archival is deliberately forbidden. An agent that surfaces a memory, acts on it, and discovers it is stale or wrong therefore has no way to record that — while the act of retrieving it has advanced its access signal, making it more durable than an untouched memory. The system SHALL accept a refutation against a memory, recorded as an append-only event carrying the refuting agent's reason.
+
+A refutation SHALL NOT advance the memory's access signal, SHALL NOT mutate or delete the memory, and SHALL NOT itself archive it. It SHALL be an input to the read-time derivation of review state, so review state remains derived and never stored.
+
+Its consequences for the review queue SHALL be exactly these:
+
+- A refuted memory SHALL surface in the review queue immediately, whatever its type's shelf life and whether or not its type has one.
+- A refutation SHALL NOT advance the affirmation baseline. Refuting is not affirming, so the ordering signal the queue uses to find the least-recently-affirmed memory SHALL be untouched by it.
+- Because the baseline is untouched, a freshly-refuted memory would sort LAST under baseline ordering — so the queue SHALL surface refuted rows ahead of merely-expired ones, bounded as the sibling requirement specifies.
+- An affirming `memory.confirm` newer than the refutation SHALL clear the state: the baseline advances past the refutation and the memory derives `fresh` again. That is the ONLY way a refuted memory leaves the queue short of being superseded or archived — there is no second verb, and reading it does not clear it.
+- Affirmation counts SHALL count affirming events only, so a refutation never inflates the confidence signal that decay reads.
+
+#### Scenario: A refuted memory needs review immediately
+
+- **GIVEN** an active memory whose derived review state is `fresh`
+- **WHEN** an agent refutes it
+- **THEN** its derived review state SHALL become `needs_review` without waiting out its type TTL
+
+#### Scenario: A refutation is not an access
+
+- **WHEN** an agent refutes a memory
+- **THEN** the memory's access signal SHALL be unchanged
+
+#### Scenario: A refutation preserves the memory
+
+- **WHEN** an agent refutes a memory
+- **THEN** the memory's `content`, `title` and `status` SHALL be unchanged, and the refutation SHALL be recoverable as an event
+
+#### Scenario: A refutation does not advance the affirmation baseline
+
+- **GIVEN** an active memory with a known `reviewBaseline`
+- **WHEN** an agent refutes it
+- **THEN** `reviewBaseline` SHALL be unchanged and the affirmation count SHALL be unchanged
+
+#### Scenario: A refuted memory can be re-affirmed
+
+- **GIVEN** a memory that was refuted and subsequently confirmed
+- **WHEN** its review state is derived
+- **THEN** the later confirmation SHALL advance the affirmation baseline, and the memory SHALL derive `fresh` and leave the review queue
+
+### Requirement: The review queue MUST have a terminal state
+
+A memory that is retrieved regularly but never re-affirmed crosses its review TTL and then remains `needs_review` indefinitely: reads deliberately do not clear it, and — because reads advance the access signal — decay cannot archive it either. The two staleness axes do not cover this case, and the affected population only grows.
+
+The escalation SHALL be a **read-time derived signal**, `reviewEscalated`, true once the memory has been unaffirmed for a bounded multiple of its own type TTL (`reviewBaseline + ttl * (1 + ESCALATION_MULTIPLIER) <= now`). It SHALL be derived by the same pure function as the rest of the review state, SHALL be reported on the single-`id` `memory.get` read alongside `reviewState`/`reviewAfter` (see `mcp-api`), and SHALL introduce no column, no sweep and no new mutation verb. It SHALL NOT be produced by the decay axis: the decay pass reads `last_seen_at` and the confidence floor only, and coupling it to the review clock would break the orthogonality the two axes are built on.
+
+Two populations are deliberately outside the escalation clock, and both are stated rather than left implicit:
+
+- A type with no TTL has no clock to be a multiple of, so it never escalates. It also never enters the queue on the clock, so this is closure, not limbo.
+- A **refuted** memory of a TTL-less type is the one genuinely open case: it is in the queue with no TTL to escalate against, so it stays `needs_review` until it is re-affirmed, superseded, or archived by explicit action. This exemption is deliberate. The limbo the escalation signal exists to close is the one nobody chose — a memory nobody ever formed an opinion about — whereas a refutation is an explicit, attributed, reasoned claim that the memory is wrong; expiring that claim on a timer would discard the strongest evidence in the system on the grounds that it had been ignored for long enough. Its queue POSITION is time-bounded (see the sibling requirement) so it cannot starve the rest of the queue; its STATE is not.
+
+#### Scenario: A long-unaffirmed but frequently-read memory escalates
+
+- **GIVEN** an active memory that has been `needs_review` for a bounded multiple of its type TTL, and whose access signal has been advanced throughout that period
+- **WHEN** its review state is derived
+- **THEN** `reviewEscalated` SHALL be true, distinguishing it from a memory that has only just entered `needs_review`
+
+#### Scenario: Escalation stores no state
+
+- **WHEN** a memory escalates within the review axis
+- **THEN** no column SHALL record the escalation and no sweep SHALL be required to produce it
+
+#### Scenario: A recently-expired memory is not escalated
+
+- **GIVEN** an active memory one day past its `reviewAfter`
+- **WHEN** its review state is derived
+- **THEN** `reviewState` SHALL be `'needs_review'` and `reviewEscalated` SHALL be false
+
+#### Scenario: A TTL-less type never escalates
+
+- **GIVEN** an active memory of a type with no `REVIEW_TTL_MS` entry, refuted long ago and never re-affirmed
+- **WHEN** its review state is derived
+- **THEN** `reviewState` SHALL be `'needs_review'` and `reviewEscalated` SHALL be false
+
+### Requirement: Review and judgment queue depths MUST be observable by the agent
+
+`memory.context` returns only the few oldest memories needing review and no total, and the observability tools report no review or pending-judgment counts, so an agent cannot distinguish a healthy corpus from one with hundreds of unaffirmed memories — even though the count is already computed for the operator sidebar. The agent-facing surfaces SHALL report the total number of memories needing review and the total number of unresolved pending judgments in the effective scope, so an agent can batch-affirm using the existing multi-id form rather than clearing a three-item drip.
+
+The scoped guarantee binds `memory.context` and `memory.stats`. The equivalent field in the `memory.doctor` report SHALL be server-wide rather than scope-resolved, deliberately matching the precedent that `memory.doctor`'s `sessions.active` is already server-wide while `memory.stats`'s session counter is scoped.
+
+#### Scenario: The context response reports queue depth
+
+- **WHEN** `memory.context` is called in a scope with more memories needing review than it returns
+- **THEN** the response SHALL include the total count alongside the returned subset
+
+#### Scenario: Stats report both queues
+
+- **WHEN** `memory.stats` is called
+- **THEN** the response SHALL include the count of memories needing review and the count of unresolved pending judgments, scoped to the request context
 
 ### Requirement: A scope-enforced batch retrieve MUST back the batch `memory.get`
 
@@ -793,12 +927,20 @@ Reciprocal Rank Fusion with rank constant `k` only preserves the intended orderi
 
 The rank window SHALL be floored at or above the crossover implied by the rank constant, so that a single-branch rank-1 match is never displaced by rows whose only advantage is appearing in both branches' windows. Both retrievers already over-fetch and the dense kNN cost is flat in `k`, so the floor SHALL be implemented by widening the window rather than by lowering the rank constant. This guarantee is bounded by construction: at most `window - (rank_constant + 2)` rows can simultaneously rank below the crossover in both branches. A single-branch match displaced by more genuinely-relevant competitors than fit on a page is not a violation of this requirement — no window floor can or should prevent a page from filling with better matches.
 
+The guarantee is a property of **fusion**, and it holds over fused RRF scores only. The post-fusion boost is applied afterwards and is explicitly licensed to reorder near-ties (see "The post-fusion boost's documented guarantee MUST match its behavior"): its reachable multiplier spread is far wider than the fusion margin this floor protects, so a boosted row CAN overtake a single-branch rank-1 row. That is the boost doing its job, not a window violation, and the two requirements SHALL be read in that order.
+
 #### Scenario: An exact single-branch match outranks a both-branches pair
 
 - **GIVEN** a query whose exact-token match is returned at rank 1 by the lexical branch and is absent from the dense branch's window
 - **AND** two rows that appear near the bottom of both branches' windows
 - **WHEN** the ranked lists are fused at the default result limit
-- **THEN** the exact match SHALL outrank both of those rows
+- **THEN** the exact match SHALL outrank both of those rows in the FUSED ordering, before the boost is applied
+
+#### Scenario: The boost may reorder what fusion ordered
+
+- **GIVEN** the same fused ordering
+- **WHEN** the post-fusion boost is applied and a trailing row carries a materially higher boost
+- **THEN** the reordering SHALL be permitted, and SHALL NOT be treated as a failure of the window floor
 
 #### Scenario: An identifier query returns the memory naming it
 
@@ -826,3 +968,52 @@ Coverage of this behavior SHALL use test inputs inside the range fusion can actu
 
 - **WHEN** the boost's documented range is compared against the sum of its reachable terms
 - **THEN** the documentation SHALL not claim bounds the implementation cannot reach
+
+### Requirement: A refutation MUST lead the review queue only while it is recent
+
+The review queue is ordered by affirmation baseline, oldest first, and a refutation deliberately does not advance that baseline — so a just-refuted memory sorts LAST and the agent that called it wrong never sees it come back. Refuted rows therefore lead the queue. That lead SHALL NOT be permanent: `memory.context` returns three rows, so a handful of refuted memories nobody attends to would hold the head of the queue forever and every TTL-expired memory in the corpus would be starved out of the only channel that surfaces it. The failure is silent and it worsens monotonically, because refuted rows only accumulate.
+
+The queue SHALL order by a **time-bounded** refutation lead: a row whose refutation is newer than a bounded window sorts ahead of the rest, and past that window it queues by affirmation baseline like any other expired row. Crossing the window SHALL NOT change the row's `reviewState` — it is still `needs_review` and still counted in the queue depth; only its position changes. The window SHALL be a single named constant declared beside `REVIEW_TTL_MS`, and the ordering SHALL be computed in one place so the scoped queue read and its unscoped dashboard twin cannot drift apart.
+
+#### Scenario: A fresh refutation leads
+
+- **GIVEN** a scope containing a memory refuted today whose affirmation baseline is the newest in scope, and older memories past their TTL
+- **WHEN** the review queue is read with a limit of one
+- **THEN** the refuted memory SHALL be returned
+
+#### Scenario: An unattended refutation stops starving the queue
+
+- **GIVEN** three memories whose refutations are all older than the lead window, and one memory past its TTL whose affirmation baseline is the oldest in scope
+- **WHEN** the review queue is read with a limit of three
+- **THEN** the TTL-expired memory SHALL be in the page
+
+#### Scenario: Losing the lead does not leave the queue
+
+- **GIVEN** the same corpus
+- **WHEN** the queue depth is counted
+- **THEN** all four memories SHALL still be counted as needing review
+
+### Requirement: Retrieval and lifecycle constants MUST be named and bounded in one place
+
+Ranking, projection and lifecycle behaviour is governed by a set of compile-time constants that no requirement previously named, which made each one invisible to review and free to drift. None SHALL be operator-configurable or exposed as a per-request tunable, and each SHALL be declared once, as a named constant, in the module that owns the behaviour:
+
+- `RANK_WINDOW_MARGIN` — the over-fetch added to `limit + offset` before the floor and ceiling are applied, so a page near a window edge still fuses over more candidates than it returns.
+- `RANK_WINDOW_CEILING` — the hard cap on that window, set strictly above the maximum `limit`. It doubles as the entity path's page size when no `limit` is given (see `mcp-api`), so exact-address retrieval is complete-within-a-bound rather than truncated to a ranked default.
+- `RELEVANCE_LIMIT` — the cap on `memory.context`'s relevance channel, shared by its entity pre-pass and its ranked pass.
+- `ENTITY_RARITY_THRESHOLD` — the maximum share of a scope's active memories an entity may be linked to before it stops proposing save-time candidates. A proportion, not an absolute count, so it does not become inert as a corpus grows.
+- `ENTITIES_PROJECTION_CAP` — the per-memory bound on the `entities[]` projection, whose exhaustion is reported to the caller.
+- `PREDECESSOR_CAP` — the bound on the supersedes-chain walk.
+- `ESCALATION_MULTIPLIER` — the multiple of its own TTL a memory sits `needs_review` before `reviewEscalated` derives true.
+- `REBUILD_MAX_BATCHES` — the bound on one operator-triggered derived-index rebuild pass, so the rebuild cannot become an unbounded blocking loop.
+
+Two gates SHIP DISABLED (`null`) and SHALL remain so until calibrated against the evaluation harness, and their disabled state is part of the contract rather than a temporary condition to be quietly flipped: the abstention floor and gap ratio (see "Recall MUST be able to return nothing"), and the per-session `DIVERSITY_CAP`. The diversity cap is disabled for a measured reason: it is applied to the whole fused pool before the page is sliced, so a held-back row is replaced by whatever ranked next in a 64–400 row pool rather than by a comparable row, and on a single-topic session that measurably swaps most of page 1 for noise. The evaluation corpus cannot see the regression because every corpus row carries a null session id, which is never grouped — so re-enabling it SHALL require a session-labelled fixture first.
+
+#### Scenario: A constant is not reachable as a request parameter
+
+- **WHEN** any MCP tool input schema is inspected
+- **THEN** none of the constants above SHALL be settable per request
+
+#### Scenario: A disabled gate stays disabled without a calibration
+
+- **WHEN** the abstention floor, the gap ratio, or the diversity cap is enabled
+- **THEN** the change SHALL be accompanied by a measurement on the evaluation harness, and for the diversity cap by a session-labelled fixture the harness can see the regression through

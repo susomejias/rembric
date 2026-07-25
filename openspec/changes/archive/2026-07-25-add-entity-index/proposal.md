@@ -1,6 +1,6 @@
 ## Why
 
-`memory_relations` is a graph of **judgements** between memories — supersedes, conflicts, related — not a graph of what memories are *about*. There are zero entities anywhere in the server. For a memory system serving coding agents, that is the most consequential absence: the agent cannot ask "what do I know about this file", "what have I learned about this package", "have I seen this error code before" — even though those are the questions it has an exact key for, and they are the questions it asks right before making a change.
+`memory_relations` is a graph of **judgements** between memories — supersedes, conflicts, related — not a graph of what memories are _about_. There are zero entities anywhere in the server. For a memory system serving coding agents, that is the most consequential absence: the agent cannot ask "what do I know about this file", "what have I learned about this package", "have I seen this error code before" — even though those are the questions it has an exact key for, and they are the questions it asks right before making a change.
 
 The reason this matters more than it looks is a defect the audit reproduced. Hybrid search is worst precisely on **exact-identifier** queries: a file path, a symbol name, an error code, a ULID. The dense branch, given one or two rare tokens, returns a window of vaguely-related neighbours that does not include the row containing the token; the lexical branch nails it at rank 1; and the fusion constants then let any row appearing in both windows outscore it. `fix-retrieval-ranking-math` corrects the arithmetic, but the deeper point stands: **ranking is the wrong mechanism for a question that has an exact answer.** An entity index makes those lookups an index hit rather than a scoring contest — no fusion, no window, no threshold.
 
@@ -40,12 +40,14 @@ So this change does **not** add a graph stream to RRF fusion. That specific use 
 ## Impact
 
 New:
+
 - `apps/server/src/services/entities.ts` — the extractor (pure, exhaustively unit-tested)
 - `apps/server/src/db/schema/entities.ts`, `apps/server/src/db/repositories/entities-repository.ts`
 - a migration creating both tables plus a backfill over existing memories
 - `apps/server/src/dashboard/entities.ts`
 
 Touched:
+
 - `apps/server/src/services/memory.ts` — extraction inside the save transaction; the `entity` filter
 - `apps/server/src/services/save-time-candidates.ts` — the entity channel
 - `apps/server/src/mcp/memory-tools.ts` — the filter argument and the `entities[]` projection

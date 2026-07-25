@@ -12,11 +12,13 @@ The runtime container is [distroless](./docker.md#the-container-has-no-shell): i
 
 > **Append-only is a backup ally.** Rows are never DELETEd and `content` is never overwritten. An older snapshot is missing recent rows, never corrupted or internally inconsistent.
 
+> **Only `memory` (and the other operator tables) hold primary data.** Five tables are derived and fully regenerable from the append-only rows alone: `memory_fts` and `memory_vec` (search and vector indexes) plus `memory_entities`, `memory_entity_links` and `memory_entity_scan` (the entity index). A backup that carries them is fine; a restore that loses them costs a rebuild, not data. What a restore _can_ get wrong is leaving them pinned to the wrong recipe — see [Restoring a snapshot](#restoring-a-snapshot) step 3.
+
 ## Dashboard backup (the default, online, no shell needed)
 
 Open the dashboard → **Maintenance** → **Backup now**. This runs SQLite's online backup API (`VACUUM INTO`) in-process — the same mechanism the self-update flow uses before every upgrade — and writes the snapshot into `$REMBRIC_DATA_DIR/backups/`. Every snapshot in that directory is individually downloadable from the same page, including the mandatory pre-update snapshot self-update takes before an upgrade.
 
-Automate it by hitting the same form endpoint from cron with a valid admin bearer token (the dashboard session cookie, or scripted form POST with CSRF — see `apps/server/src/dashboard/maintenance.ts` for the exact routes), or simply click it periodically for personal/small deployments; on-demand snapshots keep only the 3 most recent, so unattended cron isn't required to avoid unbounded growth.
+This is a dashboard form, not an API: the route authenticates by dashboard session cookie and CSRF token, so a bearer token gets a redirect to the login page and a cron job built on one acquires zero backups while looking successful. For unattended backups use **litestream** (below) or script the **cold copy** — both work without a session. Clicking it periodically is fine for personal/small deployments; on-demand snapshots keep only the 3 most recent, so nothing grows unbounded if you forget.
 
 ## Cold copy (works against any image, a few seconds of downtime)
 
@@ -37,15 +39,23 @@ For deployments where minutes-level data loss is unacceptable. [Litestream](http
 
 1. Stop the server: `docker compose down` (or however you run it).
 2. Replace the live file: `cp /path/to/snapshot.sqlite ./data/data.db` (remove any stale `./data/data.db-wal` / `./data/data.db-shm` first — they must not survive from the pre-restore state).
-3. **If the snapshot is older/smaller than the current file**, the data-loss guard refuses to boot: it compares row counts recorded in a state marker against the file you just restored, and a shrink looks indistinguishable from an operator overwriting the DB with stale data by mistake. The boot error names the fix:
+3. **Delete the two derived-index recipe markers** next to the database:
 
+   ```bash
+   rm -f ./data/entity-state.json ./data/embedding-state.json
    ```
+
+   These record which extraction/embedding recipe the derived tables inside the DB were built with. A **missing** marker is the safe direction: the server treats the identity as unknown, wipes the derived index and re-derives it from the restored rows. A **surviving marker that matches** the running build is the hazard — the server concludes the restored index is already current, and because the restored `memory_entity_scan` says every row was scanned, the backfill drain finds nothing to do. The index then stays pinned to whatever recipe built the snapshot, indefinitely and with no error anywhere. Deleting the markers costs one background rebuild; keeping them can cost silently wrong entity lookups.
+
+4. **If the restored file has ≥ 50% fewer rows than the live one in any monitored table**, the data-loss guard refuses to boot. It compares `memory`, `projects`, `sessions`, `tokens` and `prompts` against the counts in `./data/.rembric-state.json` and trips only when a table's previous count was above zero and its new count is below half of it — a smaller-but-similar snapshot boots normally, and so does a restore into an empty deployment. To acknowledge the shrink, uncomment the line in your `.env` and start the server:
+
+   ```dotenv
    REMBRIC_ALLOW_DATA_SHRINKAGE=1
    ```
 
-   Set that environment variable for the restore boot (e.g. `REMBRIC_ALLOW_DATA_SHRINKAGE=1 docker compose up -d`), confirm the server starts and the data looks right, then **remove the variable again** — it is an explicit one-time acknowledgment, not a standing config flag. Restoring a snapshot that is newer than or equal to the live file's row counts does not trip the guard at all.
+   It must go in `.env`, not in your shell: the compose service passes `env_file: .env` and declares no `environment:` block, so `REMBRIC_ALLOW_DATA_SHRINKAGE=1 docker compose up -d` is only interpolated into the compose file and never reaches the container — you get the identical refusal. Confirm the server starts and the data looks right, then **comment the line out again**: it is a one-time acknowledgment, not a standing config flag.
 
-4. Start the server: `docker compose up -d`. Migrations apply automatically on boot; the schema version lives in the file itself, so an older snapshot from a prior Rembric version upgrades in place.
+5. Start the server: `docker compose up -d`. Migrations apply automatically on boot; the schema version lives in the file itself, so an older snapshot from a prior Rembric version upgrades in place. The derived indexes rebuild in paced background batches — `memory.search`'s dense branch and entity lookups return partial results until the drain finishes, visible as `embeddings.backlog` / `entities.backlog` in `memory.doctor` and on the dashboard maintenance page.
 
 ## What NOT to do
 

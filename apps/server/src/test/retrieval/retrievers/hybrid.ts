@@ -15,7 +15,6 @@ export const hybridRetriever: Retriever<IngestedCorpus> = {
       scope.scope === 'global'
         ? { kind: 'global' }
         : { kind: 'project', projectId: scope.projectId! },
-      { touch: false },
     );
     return results.map((m) => m.id);
   },

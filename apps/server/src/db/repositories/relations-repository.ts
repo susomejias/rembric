@@ -396,6 +396,20 @@ export class RelationsRepository {
       .all();
   }
 
+  /** Scoped total pending-judgment count. */
+  countPendingInScope(opts: { scope: MemoryScope; projectId: string | null }): number {
+    const row = this.db
+      .select({ value: count() })
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(eq(memoryRelations.status, 'pending'), endpointsInScope(opts.scope, opts.projectId)),
+      )
+      .get();
+    return row?.value ?? 0;
+  }
+
   adminRecentJudged(limit: number): AdminRelationWithContent[] {
     return this.db
       .select(withContentSelection)

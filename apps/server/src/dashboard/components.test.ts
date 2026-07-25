@@ -21,6 +21,7 @@ import {
   mdBody,
   pager,
   PAGE_SIZE,
+  pageParam,
   projectOptions,
   renderMarkdown,
   renderMobileBar,
@@ -40,6 +41,24 @@ import type { ResolvedSession } from './types.js';
 describe('PAGE_SIZE', () => {
   it('is the standard 50 across all paginated listings', () => {
     expect(PAGE_SIZE).toBe(50);
+  });
+});
+
+describe('pageParam', () => {
+  const p = (q: string) => pageParam(new URL(`http://x/dashboard/memories${q}`));
+
+  it('defaults to 0 and floors garbage to 0', () => {
+    for (const q of ['', '?page=0', '?page=-5', '?page=abc', '?page=NaN', "?page=' OR 1=1 --"]) {
+      expect(p(q)).toBe(0);
+    }
+  });
+
+  it('reads a normal page index', () => {
+    expect(p('?page=3')).toBe(3);
+  });
+
+  it('clamps so page * PAGE_SIZE stays a safe integer', () => {
+    expect(Number.isSafeInteger(p('?page=99999999999999999999') * PAGE_SIZE)).toBe(true);
   });
 });
 
@@ -423,9 +442,9 @@ describe('flashErrorPage + domainErrorPage', () => {
 });
 
 describe('NAV', () => {
-  it('exposes 9 entries in MAIN + ADMIN groups', () => {
-    expect(NAV).toHaveLength(9);
-    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(6);
+  it('exposes 10 entries in MAIN + ADMIN groups', () => {
+    expect(NAV).toHaveLength(10);
+    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(7);
     expect(NAV.filter((n) => n.group === 'ADMIN')).toHaveLength(3);
   });
 

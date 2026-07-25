@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
-import { REVIEW_TTL_MS } from '../../services/review.js';
+import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '../../services/review.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { confirmations } from '../schema/confirmations.js';
 import { memory, type NewMemory } from '../schema/memory.js';
@@ -239,6 +239,50 @@ describe('MemoryRepository', () => {
     });
   });
 
+  describe('scoped search status default', () => {
+    const base = { scope: 'global', projectId: null, limit: 10, offset: 0 } as const;
+
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '05A', content: 'runbook alpha', createdAt: new Date(3_000) }),
+          row({
+            id: '05B',
+            content: 'runbook bravo',
+            status: 'superseded',
+            createdAt: new Date(2_000),
+          }),
+          row({
+            id: '05C',
+            content: 'runbook charlie',
+            status: 'archived',
+            createdAt: new Date(1_000),
+          }),
+        ])
+        .run();
+    });
+
+    it('searchMemoryIds omits archived without a status and filters exactly with one', () => {
+      expect(repo.searchMemoryIds(base)).toEqual(['05A', '05B']);
+      expect(repo.searchMemoryIds({ ...base, status: 'active' })).toEqual(['05A']);
+      expect(repo.searchMemoryIds({ ...base, status: 'superseded' })).toEqual(['05B']);
+      expect(repo.searchMemoryIds({ ...base, status: 'archived' })).toEqual(['05C']);
+    });
+
+    it('searchBm25Ids omits archived without a status and filters exactly with one', () => {
+      const ids = (status?: 'active' | 'superseded' | 'archived') =>
+        repo
+          .searchBm25Ids({ ...base, matchExpr: 'runbook', status })
+          .map((h) => h.id)
+          .sort();
+      expect(ids()).toEqual(['05A', '05B']);
+      expect(ids('active')).toEqual(['05A']);
+      expect(ids('superseded')).toEqual(['05B']);
+      expect(ids('archived')).toEqual(['05C']);
+    });
+  });
+
   it('adminCountConfirmations counts events for a memory', () => {
     t.handle.db
       .insert(memory)
@@ -297,17 +341,17 @@ describe('MemoryRepository', () => {
     });
 
     it('selects rows past their per-type threshold; longer-lived & fresh rows exempt; missing type uses default', () => {
-      const ids = repo.findDecayCandidateIds(
-        'global',
-        null,
-        NOW,
-        [
+      const ids = repo.findDecayCandidateIds({
+        scope: 'global',
+        projectId: null,
+        nowMs: NOW,
+        thresholdByType: [
           ['project', 100],
           ['user', 10_000],
         ],
-        1_000, // defaultThresholdMs — covers 'feedback' (no explicit entry)
-        1, // confidenceFloor
-      );
+        defaultThresholdMs: 1_000, // covers 'feedback' (no explicit entry)
+        confidenceFloor: 1,
+      });
       // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
       // U_SAME: user age 200 < 10_000 → out (longer threshold than project).
       // F_OLD: feedback age 2_000 > default 1_000 → in.  F_NEW: 500 < 1_000 → out.
@@ -321,7 +365,7 @@ describe('MemoryRepository', () => {
       (e): e is [NonNullable<NewMemory['type']>, number] => typeof e[1] === 'number',
     );
 
-    it('latestConfirmationTsByIds returns the max event_ts per id; empty for no input', () => {
+    it('reviewTimestampsByIds returns the max event_ts per id per verdict; empty for no input', () => {
       t.handle.db
         .insert(memory)
         .values([row({ id: 'm1', content: 'x' })])
@@ -331,12 +375,14 @@ describe('MemoryRepository', () => {
         .values([
           { id: 'k1', memoryId: 'm1', eventTs: new Date(5_000) },
           { id: 'k2', memoryId: 'm1', eventTs: new Date(9_000) },
+          { id: 'k3', memoryId: 'm1', eventTs: new Date(7_000), verdict: 'refute' },
         ])
         .run();
-      const map = repo.latestConfirmationTsByIds(['m1', 'absent']);
-      expect(map.get('m1')?.getTime()).toBe(9_000);
+      const map = repo.reviewTimestampsByIds(['m1', 'absent']);
+      expect(map.get('m1')?.affirmedAt?.getTime()).toBe(9_000);
+      expect(map.get('m1')?.refutedAt?.getTime()).toBe(7_000);
       expect(map.has('absent')).toBe(false);
-      expect(repo.latestConfirmationTsByIds([]).size).toBe(0);
+      expect(repo.reviewTimestampsByIds([]).size).toBe(0);
     });
 
     it('findNeedsReview returns active in-scope rows past their TTL, oldest baseline first', () => {
@@ -358,8 +404,43 @@ describe('MemoryRepository', () => {
         nowMs,
         limit: 10,
         ttlByType,
+        refutedPriorityMs: REFUTED_PRIORITY_MS,
       });
       expect(found.map((m) => m.id)).toEqual(['old1', 'old2']); // oldest baseline first; ref/arch/fresh excluded
+    });
+
+    it('sorts refuted rows ahead of TTL-expired ones so a capped page still shows them', () => {
+      // Refutation does not advance the baseline, so a freshly-created refuted
+      // row has the NEWEST baseline and would sort last under baseline-only
+      // ordering — invisible behind memory.context's 3-row cap.
+      const old = new Date(1_000);
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'o1', content: 'expired one', createdAt: old }),
+          row({ id: 'o2', content: 'expired two', createdAt: old }),
+          row({ id: 'o3', content: 'expired three', createdAt: old }),
+          row({ id: 'refuted', content: 'just refuted', type: 'reference', createdAt: old }),
+        ])
+        .run();
+      const nowMs = old.getTime() + PROJECT_TTL + 1;
+      t.handle.db
+        .insert(confirmations)
+        .values([
+          { id: 'r1', memoryId: 'refuted', eventTs: new Date(nowMs - 1), verdict: 'refute' },
+        ])
+        .run();
+
+      const page = repo.findNeedsReview({
+        scope: 'global',
+        projectId: null,
+        nowMs,
+        limit: 3,
+        ttlByType,
+        refutedPriorityMs: REFUTED_PRIORITY_MS,
+      });
+      expect(page.map((m) => m.id)).toContain('refuted');
+      expect(page[0]?.id).toBe('refuted');
     });
 
     it('findNeedsReview uses the latest confirmation as the baseline', () => {
@@ -370,7 +451,14 @@ describe('MemoryRepository', () => {
       const nowMs = 1_000 + PROJECT_TTL + 1; // would be stale by created_at alone
       expect(
         repo
-          .findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType })
+          .findNeedsReview({
+            scope: 'global',
+            projectId: null,
+            nowMs,
+            limit: 10,
+            ttlByType,
+            refutedPriorityMs: REFUTED_PRIORITY_MS,
+          })
           .map((m) => m.id),
       ).toEqual(['c']);
       t.handle.db
@@ -378,7 +466,14 @@ describe('MemoryRepository', () => {
         .values([{ id: 'cc', memoryId: 'c', eventTs: new Date(nowMs - 1) }])
         .run();
       expect(
-        repo.findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType }),
+        repo.findNeedsReview({
+          scope: 'global',
+          projectId: null,
+          nowMs,
+          limit: 10,
+          ttlByType,
+          refutedPriorityMs: REFUTED_PRIORITY_MS,
+        }),
       ).toHaveLength(0);
     });
 
@@ -406,19 +501,113 @@ describe('MemoryRepository', () => {
       const nowMs = PROJECT_TTL + 1_000;
       expect(
         repo
-          .findNeedsReview({ scope: 'project', projectId: 'p1', nowMs, limit: 10, ttlByType })
+          .findNeedsReview({
+            scope: 'project',
+            projectId: 'p1',
+            nowMs,
+            limit: 10,
+            ttlByType,
+            refutedPriorityMs: REFUTED_PRIORITY_MS,
+          })
           .map((m) => m.id),
       ).toEqual(['a1', 'a2']);
       expect(
         repo
-          .findNeedsReview({ scope: 'project', projectId: 'p1', nowMs, limit: 1, ttlByType })
+          .findNeedsReview({
+            scope: 'project',
+            projectId: 'p1',
+            nowMs,
+            limit: 1,
+            ttlByType,
+            refutedPriorityMs: REFUTED_PRIORITY_MS,
+          })
           .map((m) => m.id),
       ).toEqual(['a1']);
       expect(
         repo
-          .findNeedsReview({ scope: 'global', projectId: null, nowMs, limit: 10, ttlByType })
+          .findNeedsReview({
+            scope: 'global',
+            projectId: null,
+            nowMs,
+            limit: 10,
+            ttlByType,
+            refutedPriorityMs: REFUTED_PRIORITY_MS,
+          })
           .map((m) => m.id),
       ).toEqual(['g']);
+    });
+
+    describe('refuted-first ordering is time-bounded', () => {
+      const DAY = 24 * 60 * 60 * 1000;
+      const NOW = 400 * DAY;
+
+      /** A row whose only reason to need review is a refutation at `refutedAt`. */
+      function refuted(id: string, refutedAt: number): void {
+        t.handle.db
+          .insert(memory)
+          .values([row({ id, content: id, createdAt: new Date(NOW - 30 * DAY) })])
+          .run();
+        t.handle.db
+          .insert(confirmations)
+          .values([
+            {
+              id: `c-${id}`,
+              memoryId: id,
+              eventTs: new Date(refutedAt),
+              verdict: 'refute',
+              reason: 'wrong',
+            },
+          ])
+          .run();
+      }
+
+      it('a recent refutation leads the queue even with the newest baseline', () => {
+        t.handle.db
+          .insert(memory)
+          .values([row({ id: 'ttl-old', content: 'stale', createdAt: new Date(NOW - 300 * DAY) })])
+          .run();
+        refuted('just-refuted', NOW - DAY);
+
+        expect(
+          repo
+            .findNeedsReview({
+              scope: 'global',
+              projectId: null,
+              nowMs: NOW,
+              limit: 1,
+              ttlByType,
+              refutedPriorityMs: REFUTED_PRIORITY_MS,
+            })
+            .map((m) => m.id),
+        ).toEqual(['just-refuted']);
+      });
+
+      it('refutations older than the priority window stop starving TTL-expired rows', () => {
+        // Three unattended refutations, each older than the lead window, all
+        // with baselines newer than the TTL-expired row's.
+        refuted('r1', NOW - 20 * DAY);
+        refuted('r2', NOW - 21 * DAY);
+        refuted('r3', NOW - 22 * DAY);
+        t.handle.db
+          .insert(memory)
+          .values([row({ id: 'ttl-old', content: 'stale', createdAt: new Date(NOW - 300 * DAY) })])
+          .run();
+
+        const page = repo.findNeedsReview({
+          scope: 'global',
+          projectId: null,
+          nowMs: NOW,
+          limit: 3,
+          ttlByType,
+          refutedPriorityMs: REFUTED_PRIORITY_MS,
+        });
+        expect(page.map((m) => m.id)).toContain('ttl-old');
+        expect(page[0]!.id).toBe('ttl-old');
+        // All four still need review — only the ordering changed.
+        expect(
+          repo.countNeedsReview({ scope: 'global', projectId: null, nowMs: NOW, ttlByType }),
+        ).toBe(4);
+      });
     });
   });
 });

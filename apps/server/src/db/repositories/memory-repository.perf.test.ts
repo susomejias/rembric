@@ -1,11 +1,13 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_DECAY } from '../../consolidation/decay.js';
+import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '../../services/review.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { confirmations } from '../schema/confirmations.js';
 import { consolidationOps, consolidationRuns } from '../schema/consolidation.js';
 import { memoryRelations } from '../schema/memory-relations.js';
-import { memory, type NewMemory } from '../schema/memory.js';
+import { memory, type MemoryType, type NewMemory } from '../schema/memory.js';
 
 import { MemoryRepository } from './memory-repository.js';
 
@@ -178,6 +180,59 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
+  describe('purgeByIds — SQLite bind-variable ceiling', () => {
+    // Above SQLITE_MAX_VARIABLE_NUMBER (32 766).
+    const OVER_BIND_CEILING = 40_000;
+
+    it('purges an id list larger than the 32 766 bind-variable ceiling', () => {
+      const insert = t.handle.raw.prepare(
+        `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at, last_seen_at)
+         VALUES (?, 'global', NULL, 'project', 't', 'c', '[]', 'archived', '[]', 1000, 1000)`,
+      );
+      t.handle.raw.transaction(() => {
+        for (let i = 0; i < OVER_BIND_CEILING; i++) insert.run(`m-${i}`);
+      })();
+
+      // Derived rows on a subset, so the entity DELETEs (which must precede the
+      // memory DELETE — no ON DELETE CASCADE) are actually exercised.
+      t.handle.raw
+        .prepare(
+          `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at) VALUES ('e1','global',NULL,'path','/tmp/x',1000)`,
+        )
+        .run();
+      const link = t.handle.raw.prepare(
+        `INSERT INTO memory_entity_links (entity_id, memory_id) VALUES ('e1', ?)`,
+      );
+      const scan = t.handle.raw.prepare(
+        `INSERT INTO memory_entity_scan (memory_id, scanned_at) VALUES (?, 1000)`,
+      );
+      const vec = t.handle.raw.prepare(
+        `INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, '__global__', 'archived', 'project', ?)`,
+      );
+      const embedding = Buffer.from(new Float32Array(768).buffer);
+      t.handle.raw.transaction(() => {
+        for (let i = 0; i < 10; i++) {
+          link.run(`m-${i}`);
+          scan.run(`m-${i}`);
+          vec.run(`m-${i}`, embedding);
+        }
+      })();
+
+      const ids = repo.findPurgeableDisconnectedArchivedIds();
+      expect(ids).toHaveLength(OVER_BIND_CEILING);
+
+      repo.purgeByIds(ids);
+
+      const countOf = (table: string) =>
+        (t.handle.raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+      expect(countOf('memory')).toBe(0);
+      expect(countOf('memory_entity_links')).toBe(0);
+      expect(countOf('memory_entity_scan')).toBe(0);
+      expect(countOf('memory_vec')).toBe(0);
+      expect(countOf('memory_fts'), 'memory_ad must keep the FTS mirror in step').toBe(0);
+    });
+  });
+
   describe('findSuccessorId — memory_replaces join', () => {
     // The pre-rewrite json_each scan, kept verbatim as the equivalence oracle.
     function legacyFindSuccessorId(id: string): string | undefined {
@@ -292,6 +347,128 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
 
       // Effective recency: B=9000, A=5000, C=3000; D excluded (archived).
       expect(ids).toEqual(['B', 'A', 'C']);
+    });
+  });
+
+  describe('confirmations composite index on the review axis', () => {
+    /**
+     * Explains the SQL the repository actually executes. The needs-review
+     * predicate is built by a private method, so reconstructing it here would
+     * let the assertion pass against a query the production path no longer runs.
+     */
+    function planLines(run: () => void): string[] {
+      const raw = t.handle.raw;
+      const bound = raw.prepare.bind(raw);
+      const seen: string[] = [];
+      const wrap = (stmt: object, text: string): object =>
+        new Proxy(stmt, {
+          get(target, prop) {
+            const value: unknown = Reflect.get(target, prop);
+            if (typeof value !== 'function') return value;
+            const method = value as (...a: unknown[]) => unknown;
+            if (prop === 'all' || prop === 'get' || prop === 'run') {
+              return (...params: unknown[]) => {
+                seen.push(
+                  ...bound<unknown[], { detail: string }>(`EXPLAIN QUERY PLAN ${text}`)
+                    .all(...params)
+                    .map((r) => r.detail),
+                );
+                return method.apply(target, params);
+              };
+            }
+            return (...args: unknown[]) => {
+              const result = method.apply(target, args);
+              // `raw()` / `pluck()` return the statement itself, and drizzle
+              // reaches the terminal all/get/run through them.
+              return result === target ? wrap(target, text) : result;
+            };
+          },
+        });
+      // better-sqlite3 types `prepare` as generic over its row and parameter
+      // tuples; the interceptor observes only SQL text and bound values, so the
+      // generics are erased across this assignment.
+      raw.prepare = ((text: string) => wrap(bound(text), text)) as typeof raw.prepare;
+      try {
+        run();
+      } finally {
+        Reflect.deleteProperty(raw, 'prepare');
+      }
+      return seen;
+    }
+
+    const ttlByType = reviewTtlEntries();
+    const decayThresholds = Object.entries(DEFAULT_DECAY.thresholdByType).filter(
+      (e): e is [MemoryType, number] => typeof e[1] === 'number',
+    );
+    const nowMs = 10_000_000_000;
+
+    const reviewReads: Record<string, (repo: MemoryRepository) => void> = {
+      findNeedsReview: (repo) => {
+        repo.findNeedsReview({
+          scope: 'global',
+          projectId: null,
+          nowMs,
+          limit: 3,
+          ttlByType,
+          refutedPriorityMs: REFUTED_PRIORITY_MS,
+        });
+      },
+      countNeedsReview: (repo) => {
+        repo.countNeedsReview({ scope: 'global', projectId: null, nowMs, ttlByType });
+      },
+      adminCountNeedsReview: (repo) => {
+        repo.adminCountNeedsReview({ nowMs, ttlByType });
+      },
+      findDecayCandidateIds: (repo) => {
+        repo.findDecayCandidateIds({
+          scope: 'global',
+          projectId: null,
+          nowMs,
+          thresholdByType: decayThresholds,
+          defaultThresholdMs: DEFAULT_DECAY.defaultThresholdMs,
+          confidenceFloor: DEFAULT_DECAY.confidenceFloor,
+        });
+      },
+    };
+
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([mem({ id: 'M1' }), mem({ id: 'M2', type: 'procedural' })])
+        .run();
+      t.handle.db
+        .insert(confirmations)
+        .values([
+          { id: 'k1', memoryId: 'M1', eventTs: new Date(2_000), verdict: 'affirm' },
+          { id: 'k2', memoryId: 'M1', eventTs: new Date(3_000), verdict: 'refute' },
+          { id: 'k3', memoryId: 'M2', eventTs: new Date(4_000), verdict: 'affirm' },
+        ])
+        .run();
+    });
+
+    for (const [name, run] of Object.entries(reviewReads)) {
+      it(`${name} reads confirmations only through the covering composite index`, () => {
+        const touchesConfirmations = planLines(() => run(repo)).filter((line) =>
+          line.includes('confirmations'),
+        );
+
+        // A CREATE INDEX the planner ignores is pure write cost on an
+        // append-only table, so the plan is the assertion. COVERING is the
+        // second half: `event_ts` in the index means no table lookup at all.
+        expect(touchesConfirmations.length).toBeGreaterThan(0);
+        for (const line of touchesConfirmations) {
+          expect(line).toContain('USING COVERING INDEX confirmations_memory_verdict_ts_idx');
+        }
+      });
+    }
+
+    it('falls back to a non-covering scan of confirmations without the composite index', () => {
+      t.handle.raw.exec('DROP INDEX confirmations_memory_verdict_ts_idx');
+      const lines = planLines(() => reviewReads['countNeedsReview']!(repo)).filter((line) =>
+        line.includes('confirmations'),
+      );
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.every((l) => l.includes('COVERING'))).toBe(false);
     });
   });
 });

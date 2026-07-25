@@ -410,6 +410,19 @@ describe('dashboard E2E', () => {
     expect(row?.endedAt).toBeInstanceOf(Date);
   });
 
+  it('a post with no parseable form body returns 403, not 500', async () => {
+    const jar: CookieJar = { cookie: null };
+    await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+    const res = await fetch(`${baseUrl}/dashboard/sessions/anything/delete`, {
+      method: 'POST',
+      headers: { cookie: jar.cookie ?? '', 'content-type': 'application/json' },
+      body: '{}',
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('csrf_invalid');
+  });
+
   it('sessions abandon without csrf returns 403', async () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });

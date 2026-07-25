@@ -2,17 +2,26 @@ import { ulid } from 'ulid';
 
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
+import type { ConfirmationVerdict } from '../db/schema/confirmations.js';
 import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
-import { hybridSearch } from './hybrid-search.js';
-import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
+import { hybridSearch, RANK_WINDOW_CEILING } from './hybrid-search.js';
+import {
+  deriveReviewState,
+  REFUTED_PRIORITY_MS,
+  reviewTtlEntries,
+  type ReviewState,
+} from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
 const AGENT_MEMORY_ARCHIVE_REASONING = 'agent archived memory at explicit user request';
+
+// The candidate query has no LIMIT, so keep the per-statement payload bounded.
+const PURGE_DELETE_SLICE = 5_000;
 
 /**
  * Domain service for the memory lifecycle.
@@ -94,12 +103,32 @@ export interface SaveResult {
   supersededByTopicKey: Memory | null;
 }
 
+export interface ConfirmOptions {
+  source?: MemorySource;
+  sessionId?: string | null;
+  /** Default `'affirm'`. `'refute'` requires `reason` and never touches `last_seen_at`. */
+  verdict?: ConfirmationVerdict;
+  /** Required when `verdict: 'refute'`; optional otherwise. */
+  reason?: string;
+}
+
 export interface SearchMemoriesInput {
   query?: string;
   type?: MemoryType;
   tag?: string;
   /** Exact topic_key filter — see openspec/changes/fix-audited-defects. */
   topicKey?: string;
+  /**
+   * Exact-address retrieval by entity value (see `add-entity-index`):
+   * every memory linked to this value, chronological, no ranking, no
+   * fusion. Combined with `query`, narrows to the entity's memories that
+   * also match the text query — it never fuses the two into one ranked
+   * set (design.md Decision 5). `type`/`tag`/`topicKey`/`status` narrow it
+   * with the same meaning they carry on the ranked path, except that an
+   * omitted `status` means "any but archived" rather than "active" — the
+   * branch is specified as complete within scope.
+   */
+  entity?: string;
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
@@ -123,6 +152,8 @@ export interface MemoryWithHistory {
   reviewState: ReviewState | null;
   /** Derived re-verification deadline of the head; null when no TTL applies. */
   reviewAfter: Date | null;
+  /** Review queue's terminal state: derived, never stored, never a decay input. */
+  reviewEscalated: boolean;
 }
 
 /** A single `needsReview` context entry: the stale memory plus its derived timing. */
@@ -134,7 +165,7 @@ export interface NeedsReviewItem {
 
 export class MemoryService {
   constructor(
-    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors'>,
+    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors' | 'entities'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     /**
@@ -234,10 +265,17 @@ export class MemoryService {
     const { rows: predecessors, truncated } = this.collectPredecessors(found);
     const { head, truncated: headTruncated } = this.findHead(found);
     const confirmationCount = this.repos.memory.countConfirmations(head.id);
-    const lastConfirmedAt =
-      this.repos.memory.latestConfirmationTsByIds([head.id]).get(head.id) ?? null;
-    const { reviewState, reviewAfter } = deriveReviewState(
-      { type: head.type, createdAt: head.createdAt, status: head.status, lastConfirmedAt },
+    const ts = this.repos.memory.reviewTimestampsByIds([head.id]).get(head.id);
+    const lastConfirmedAt = ts?.affirmedAt ?? null;
+    const lastRefutedAt = ts?.refutedAt ?? null;
+    const { reviewState, reviewAfter, reviewEscalated } = deriveReviewState(
+      {
+        type: head.type,
+        createdAt: head.createdAt,
+        status: head.status,
+        lastConfirmedAt,
+        lastRefutedAt,
+      },
       this.now(),
     );
     this.repos.memory.touchLastSeen(head.id, this.now());
@@ -251,6 +289,7 @@ export class MemoryService {
       confirmationCount,
       reviewState,
       reviewAfter,
+      reviewEscalated,
     };
   }
 
@@ -283,14 +322,16 @@ export class MemoryService {
     const out = new Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }>();
     if (memories.length === 0) return out;
     const now = this.now();
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(memories.map((m) => m.id));
+    const ids = memories.map((m) => m.id);
+    const reviewTs = this.repos.memory.reviewTimestampsByIds(ids);
     for (const m of memories) {
       const { reviewState, reviewAfter } = deriveReviewState(
         {
           type: m.type,
           createdAt: m.createdAt,
           status: m.status,
-          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+          lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+          lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
         },
         now,
       );
@@ -312,12 +353,12 @@ export class MemoryService {
       projectId: scope.kind === 'project' ? scope.projectId : null,
       nowMs: now.getTime(),
       limit,
-      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
-        (e): e is [MemoryType, number] => typeof e[1] === 'number',
-      ),
+      ttlByType: reviewTtlEntries(),
+      refutedPriorityMs: REFUTED_PRIORITY_MS,
     });
     if (rows.length === 0) return [];
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+    const ids = rows.map((m) => m.id);
+    const reviewTs = this.repos.memory.reviewTimestampsByIds(ids);
     const items: NeedsReviewItem[] = [];
     for (const m of rows) {
       const { reviewAfter, reviewBaseline } = deriveReviewState(
@@ -325,7 +366,8 @@ export class MemoryService {
           type: m.type,
           createdAt: m.createdAt,
           status: m.status,
-          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+          lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+          lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
         },
         now,
       );
@@ -335,17 +377,33 @@ export class MemoryService {
   }
 
   /**
+   * Total needs-review count in scope — the queue-depth signal
+   * `memory.context` and `memory.stats` surface (separate-access-from-
+   * usefulness). An agent that knows the queue is 800 deep can batch-
+   * confirm with the `ids` form it already has; seeing only the 3 oldest
+   * (`needsReviewForContext`'s cap) can't distinguish a healthy corpus from
+   * a collapsing one.
+   */
+  countNeedsReview(scope: Scope): number {
+    return this.repos.memory.countNeedsReview({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      nowMs: this.now().getTime(),
+      ttlByType: reviewTtlEntries(),
+    });
+  }
+
+  /**
    * Scope-restricted search. With a text query this is hybrid retrieval
    * (dense vec ⊕ lexical FTS, RRF-fused — see `hybrid-search.ts`); without
    * one it is the chronological listing with exact pagination. Scope is
    * enforced at the SQL level; the agent cannot opt out by widening a filter.
+   *
+   * Does NOT advance `last_seen_at`: being returned in a page is not evidence
+   * a row was useful. Only `memory.get` touches.
    */
-  async search(
-    input: SearchMemoriesInput,
-    scope: Scope,
-    opts: { touch?: boolean } = {},
-  ): Promise<Memory[]> {
-    return (await this.searchWithAbstention(input, scope, opts)).memories;
+  async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
+    return (await this.searchWithAbstention(input, scope)).memories;
   }
 
   /**
@@ -358,15 +416,72 @@ export class MemoryService {
   async searchWithAbstention(
     input: SearchMemoriesInput,
     scope: Scope,
-    opts: { touch?: boolean } = {},
-  ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string }> {
-    const status = input.status ?? 'active';
+  ): Promise<{
+    memories: Memory[];
+    abstained: boolean;
+    reason?: string;
+    viaEntity?: boolean;
+    entityIndexDraining?: boolean;
+  }> {
+    // Ranked-branch default only. A `topic_key` filter addresses a convergent
+    // topic's whole history, and every row in that slot but the newest is
+    // `superseded` — so an absent `status` means "any but archived" there
+    // rather than the usual `active` default. An explicit `status` still
+    // narrows. The entity branch is specified as complete within scope, so it
+    // takes `input.status` directly and never inherits this default.
+    const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
     const memScope = scope.kind === 'global' ? 'global' : 'project';
     const projectId = scope.kind === 'project' ? scope.projectId : null;
 
     const query = input.query?.trim();
+    const entity = input.entity?.trim();
+
+    if (entity) {
+      // Exact-address retrieval: no fusion, no rank window, no threshold, no
+      // boost. `query` narrows rather than fusing — a containment filter over
+      // the entity's own memories, applied AFTER the fetch, so the fetch must
+      // cover more than the final page or a match older than one page is
+      // silently dropped. `RANK_WINDOW_CEILING` is the over-fetch ceiling used
+      // elsewhere in this file; here it doubles as the page size when the
+      // caller named no `limit`, since the branch is specified as complete
+      // within scope and the 8-row ranked default would truncate that.
+      const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
+      const rows = this.repos.entities.findMemoriesByEntity({
+        scope: memScope,
+        projectId,
+        value: entity,
+        status: input.status,
+        type: input.type,
+        tag: input.tag,
+        topicKey: input.topicKey,
+        includeGlobal: input.includeGlobal,
+        limit: query ? Math.max(offset + entityLimit, RANK_WINDOW_CEILING) : offset + entityLimit,
+      });
+      const filtered = query
+        ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
+        : rows;
+      const page = filtered.slice(offset, offset + entityLimit);
+      // "Unknown entity" and "the index has not reached those memories yet"
+      // are the same empty response, and a recipe bump makes the second one
+      // last minutes over a large corpus. Only computed on a miss, so the hit
+      // path pays nothing for it.
+      const draining =
+        rows.length === 0 &&
+        this.repos.entities.countPendingScans({
+          scope: memScope,
+          projectId,
+          includeGlobal: input.includeGlobal,
+        }) > 0;
+      return {
+        memories: page,
+        abstained: false,
+        viaEntity: true,
+        ...(draining ? { entityIndexDraining: true } : {}),
+      };
+    }
+
     let ids: string[];
     let abstained = false;
     let reason: string | undefined;
@@ -411,10 +526,9 @@ export class MemoryService {
       // The dense branch's candidate ids come from memory_vec.status, which
       // is derived asynchronously — belt-and-suspenders against any future
       // staleness there: re-check the live row's status before returning it.
-      if (m && m.status === status) ordered.push(m);
+      if (m && (status === undefined ? m.status !== 'archived' : m.status === status))
+        ordered.push(m);
     }
-    // Passive callers pass touch:false so per-turn recall doesn't inflate the recency signal.
-    if (opts.touch !== false) this.repos.memory.touchLastSeenBatch(ids, this.now());
     return { memories: ordered, abstained, reason };
   }
 
@@ -425,12 +539,17 @@ export class MemoryService {
    * stopped at its hop cap without finding an active row — an explicit
    * signal rather than silently confirming a non-active row.
    */
-  confirm(
-    id: string,
-    scope: Scope,
-    source?: MemorySource,
-    sessionId?: string | null,
-  ): { headTruncated: boolean } {
+  confirm(id: string, scope: Scope, opts: ConfirmOptions = {}): { headTruncated: boolean } {
+    const verdict = opts.verdict ?? 'affirm';
+    if (verdict === 'refute') {
+      if (!opts.reason || opts.reason.trim().length === 0) {
+        throw new DomainError(
+          'invalid_input',
+          'memory.confirm: verdict=refute requires a non-empty reason',
+        );
+      }
+      assertNoNul('memory.confirm', 'reason', opts.reason);
+    }
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) {
       throw new DomainError('memory_not_found', `memory.confirm: id=${id} not found`);
@@ -441,10 +560,13 @@ export class MemoryService {
       id: ulid(ts.getTime()),
       memoryId: head.id,
       eventTs: ts,
-      source: source ?? null,
-      sessionId: sessionId ?? null,
+      source: opts.source ?? null,
+      sessionId: opts.sessionId ?? null,
+      verdict,
+      reason: opts.reason ?? null,
     });
-    this.repos.memory.touchLastSeen(head.id, ts);
+    // Refuting must not extend a memory's life.
+    if (verdict === 'affirm') this.repos.memory.touchLastSeen(head.id, ts);
     return { headTruncated: truncated };
   }
 
@@ -456,14 +578,13 @@ export class MemoryService {
   confirmMany(
     ids: readonly string[],
     scope: Scope,
-    source?: MemorySource,
-    sessionId?: string | null,
+    opts: ConfirmOptions = {},
   ): { confirmed: number; headTruncated: boolean } {
     const unique = [...new Set(ids)];
     return this.tx.transaction(() => {
       let headTruncated = false;
       for (const id of unique) {
-        const result = this.confirm(id, scope, source, sessionId);
+        const result = this.confirm(id, scope, opts);
         headTruncated = headTruncated || result.headTruncated;
       }
       return { confirmed: unique.length, headTruncated };
@@ -556,7 +677,9 @@ export class MemoryService {
         return { deletedIds: [] };
       }
 
-      this.repos.memory.purgeByIds(deletedIds);
+      for (let i = 0; i < deletedIds.length; i += PURGE_DELETE_SLICE) {
+        this.repos.memory.purgeByIds(deletedIds.slice(i, i + PURGE_DELETE_SLICE));
+      }
 
       this.journalMaintenanceOp(ts, {
         opType: 'archived_memory_purge',

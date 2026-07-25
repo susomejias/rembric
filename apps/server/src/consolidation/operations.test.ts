@@ -406,12 +406,16 @@ describe('op-type classification is exhaustive (fix-audited-defects)', () => {
 describe('reactivation durability (fix-audited-defects)', () => {
   it('stamps last_seen_at on reactivate so the next sweep does not re-archive the row', () => {
     // Save the memory with a last_seen_at far past its type's decay window
-    // (user = 730 days) so the ORIGINAL timestamp alone would make it
+    // (reference = 3650 days) so the ORIGINAL timestamp alone would make it
     // decay-eligible again after undo — that is exactly the bug: reactivate()
-    // used to leave last_seen_at untouched.
-    clock.set(new Date('2020-01-01T00:00:00Z'));
+    // used to leave last_seen_at untouched. `reference` is used deliberately
+    // (separate-access-from-usefulness): it has no review TTL, so it can
+    // never become escalation-eligible — this test is specifically about
+    // the recency+confidence decay path, not escalation, and an ancient
+    // `createdAt` on a TTL-having type would otherwise trip escalation too.
+    clock.set(new Date('2000-01-01T00:00:00Z'));
     const m = memoryService.save(
-      { type: 'user', title: 'm', content: 'm' },
+      { type: 'reference', title: 'm', content: 'm' },
       projectScope(projectId),
     );
 
@@ -450,5 +454,73 @@ describe('reactivation durability (fix-audited-defects)', () => {
     undoOp(repos, db.handle.db, opId);
 
     expect(repos.memory.countConfirmations(m.id)).toBe(beforeConfirmations);
+  });
+});
+
+describe('escalation', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('escalation is derived at read time and never archives: a long-unaffirmed but frequently-read memory stays out of the decay candidates', () => {
+    const m = memoryService.save(
+      { type: 'project', title: 'Plan', content: 'plan' },
+      projectScope(projectId),
+    );
+
+    // Frequent reads keep last_seen_at fresh, so the recency rule cannot fire.
+    // project's TTL is 3 months, so 350 days is well past escalation.
+    for (let i = 0; i < 10; i++) {
+      clock.advance(35 * DAY_MS);
+      memoryService.get(m.id, projectScope(projectId));
+    }
+
+    const candidates = findDecayCandidates(
+      repos,
+      { scope: 'project', projectId },
+      DEFAULT_DECAY,
+      clock.value,
+    );
+    expect(candidates).not.toContain(m.id);
+
+    const seen = memoryService.get(m.id, projectScope(projectId));
+    expect(seen?.reviewState).toBe('needs_review');
+    expect(seen?.reviewEscalated).toBe(true);
+  });
+
+  it('does NOT trip escalation before the multiplier threshold is reached', () => {
+    const m = memoryService.save(
+      { type: 'project', title: 'Plan', content: 'plan' },
+      projectScope(projectId),
+    );
+
+    clock.advance(60 * DAY_MS); // inside the first TTL: not even needs_review
+    memoryService.get(m.id, projectScope(projectId));
+
+    const candidates = findDecayCandidates(
+      repos,
+      { scope: 'project', projectId },
+      DEFAULT_DECAY,
+      clock.value,
+    );
+    expect(candidates).not.toContain(m.id);
+  });
+
+  it('a confirmation resets the escalation baseline', () => {
+    const m = memoryService.save(
+      { type: 'project', title: 'Plan', content: 'plan' },
+      projectScope(projectId),
+    );
+
+    clock.advance(200 * DAY_MS);
+    memoryService.confirm(m.id, projectScope(projectId));
+    clock.advance(60 * DAY_MS); // baseline moved: well inside the window again
+    memoryService.get(m.id, projectScope(projectId));
+
+    const candidates = findDecayCandidates(
+      repos,
+      { scope: 'project', projectId },
+      DEFAULT_DECAY,
+      clock.value,
+    );
+    expect(candidates).not.toContain(m.id);
   });
 });

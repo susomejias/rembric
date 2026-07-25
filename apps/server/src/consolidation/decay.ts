@@ -6,8 +6,9 @@ import type { ScopeKey } from './candidates.js';
 /**
  * Identify memories eligible for deterministic decay (archive).
  *
- * Rule: status='active' AND last_seen_at < (now - per-type threshold) AND
- * confidence (count of confirmations) < confidenceFloor.
+ * Rule: status='active' AND last_seen_at < now - per-type threshold
+ * AND confidence < confidenceFloor. Reads nothing from the review axis: the two
+ * are orthogonal and escalation is derived at read time, never swept.
  *
  * Returns the ids only; the consolidation runner records the op via
  * `applyDecay`. No LLM call is required for this category.
@@ -54,12 +55,12 @@ export function findDecayCandidates(
   const thresholdByType = Object.entries(thresholds.thresholdByType).filter(
     (e): e is [MemoryType, number] => typeof e[1] === 'number',
   );
-  return repos.memory.findDecayCandidateIds(
-    scope.scope,
-    scope.projectId,
-    now.getTime(),
+  return repos.memory.findDecayCandidateIds({
+    scope: scope.scope,
+    projectId: scope.projectId,
+    nowMs: now.getTime(),
     thresholdByType,
-    thresholds.defaultThresholdMs,
-    thresholds.confidenceFloor,
-  );
+    defaultThresholdMs: thresholds.defaultThresholdMs,
+    confidenceFloor: thresholds.confidenceFloor,
+  });
 }

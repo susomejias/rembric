@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
+import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { DomainError } from './errors.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
@@ -239,6 +240,435 @@ describe('memory.search', () => {
     ).toBe(3);
     expect((await memory.search({ limit: 12 }, projectScope(projectId))).length).toBe(12);
   });
+
+  it('never touches last_seen_at, in either the query or chronological branch (separate-access-from-usefulness)', async () => {
+    const m = memory.save(
+      { type: 'user', title: 'Prefers tabs over spaces', content: 'prefers tabs over spaces' },
+      projectScope(projectId),
+    );
+    const originalLastSeen = memory.unsafeGetById(m.id)!.lastSeenAt?.getTime();
+
+    clock.advance(1000);
+    await memory.search({ query: 'tabs' }, projectScope(projectId));
+    await memory.search({ query: 'tabs' }, projectScope(projectId));
+    await memory.search({}, projectScope(projectId));
+
+    expect(memory.unsafeGetById(m.id)!.lastSeenAt?.getTime()).toBe(originalLastSeen);
+  });
+});
+
+describe('memory.search — entity filter (add-entity-index)', () => {
+  it('returns every memory linked to an entity, bypassing ranking, and reports viaEntity', async () => {
+    const repos = createRepositories(db.handle.db);
+    const a = memory.save(
+      { type: 'project', title: 'Fix', content: 'fixed the migration bug' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+      clock.now(),
+    );
+
+    const result = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(result.memories.map((m) => m.id)).toEqual([a.id]);
+    expect(result.viaEntity).toBe(true);
+    expect(result.abstained).toBe(false);
+  });
+
+  it('finds a rare identifier invisible to a plain text query', async () => {
+    const repos = createRepositories(db.handle.db);
+    const a = memory.save(
+      {
+        type: 'project',
+        title: 'X',
+        content: 'completely unrelated prose with no shared vocabulary',
+      },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'error_code', value: 'ENOENT' }],
+      clock.now(),
+    );
+
+    // The content never mentions "ENOENT" literally, so a text query for
+    // it finds nothing — the entity link is the only way to surface this.
+    const byText = await memory.search({ query: 'ENOENT' }, projectScope(projectId));
+    expect(byText.map((m) => m.id)).not.toContain(a.id);
+
+    const byEntity = await memory.search({ entity: 'ENOENT' }, projectScope(projectId));
+    expect(byEntity.map((m) => m.id)).toEqual([a.id]);
+  });
+
+  it('an unknown entity returns empty and does not degrade into a text query', async () => {
+    memory.save(
+      { type: 'project', title: 'X', content: 'never-linked-anywhere' },
+      projectScope(projectId),
+    );
+    const result = await memory.search(
+      { entity: 'never-linked-anywhere' },
+      projectScope(projectId),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('distinguishes an unscanned index from an unknown entity', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Fix', content: 'fixed apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+
+    // The row exists but has never been scanned — exactly the state a recipe
+    // bump leaves the whole corpus in. Empty alone would read as "unknown".
+    const draining = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(draining.memories).toEqual([]);
+    expect(draining.entityIndexDraining).toBe(true);
+
+    new EntityBackfillWorker({ repos, tx: db.handle.db }).processBatch({ force: true });
+
+    const hit = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(hit.memories.map((r) => r.id)).toEqual([m.id]);
+    expect(hit.entityIndexDraining).toBeUndefined();
+
+    // A genuine miss over a fully-drained scope says nothing about the index.
+    const miss = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/never.ts' },
+      projectScope(projectId),
+    );
+    expect(miss.memories).toEqual([]);
+    expect(miss.entityIndexDraining).toBeUndefined();
+  });
+
+  it('the same path in two projects does not join them', async () => {
+    const repos = createRepositories(db.handle.db);
+    const otherId = projects.create({ slug: 'other-app' }).id;
+    const a = memory.save(
+      { type: 'project', title: 'A', content: 'in project A' },
+      projectScope(projectId),
+    );
+    const b = memory.save(
+      { type: 'project', title: 'B', content: 'in project B' },
+      projectScope(otherId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'src/shared.ts' }],
+      clock.now(),
+    );
+    repos.entities.linkMemory(
+      b.id,
+      'project',
+      otherId,
+      [{ kind: 'path', value: 'src/shared.ts' }],
+      clock.now(),
+    );
+
+    const result = await memory.search({ entity: 'src/shared.ts' }, projectScope(projectId));
+    expect(result.map((m) => m.id)).toEqual([a.id]);
+  });
+
+  it('entity plus query narrows rather than fusing — only entity memories matching the query too', async () => {
+    const repos = createRepositories(db.handle.db);
+    const matching = memory.save(
+      { type: 'project', title: 'A', content: 'discusses migration ordering concerns' },
+      projectScope(projectId),
+    );
+    const nonMatching = memory.save(
+      { type: 'project', title: 'B', content: 'discusses something else entirely' },
+      projectScope(projectId),
+    );
+    for (const m of [matching, nonMatching]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search(
+      { entity: 'apps/server/src/db/migrate.ts', query: 'ordering' },
+      projectScope(projectId),
+    );
+    expect(result.map((m) => m.id)).toEqual([matching.id]);
+  });
+
+  it('entity plus query finds a matching memory older than the default page size (regression: narrowing must not window-drop)', async () => {
+    const repos = createRepositories(db.handle.db);
+    const old = memory.save(
+      { type: 'project', title: 'Old', content: 'discusses migration ordering concerns' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      old.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+      clock.now(),
+    );
+    // 20 newer memories sharing the same entity but not the query text —
+    // more than the default page size, so `old` sits outside a naive
+    // offset+limit fetch window if the query filter is applied afterward
+    // on too small a pool.
+    for (let i = 0; i < 20; i++) {
+      const m = memory.save(
+        { type: 'project', title: `Newer ${i}`, content: `unrelated note ${i}` },
+        projectScope(projectId),
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search(
+      { entity: 'apps/server/src/db/migrate.ts', query: 'ordering' },
+      projectScope(projectId),
+    );
+    expect(result.map((m) => m.id)).toEqual([old.id]);
+  });
+
+  it('combines with the status, type, tag and topic_key filters', async () => {
+    const repos = createRepositories(db.handle.db);
+    const pref = memory.save(
+      { type: 'user', title: 'Pref', content: 'prefers tabs', tags: ['editor'] },
+      projectScope(projectId),
+    );
+    const note = memory.save(
+      { type: 'project', title: 'Note', content: 'a project note', topicKey: 'topic/note' },
+      projectScope(projectId),
+    );
+    const retired = memory.save(
+      { type: 'project', title: 'Retired', content: 'retired note' },
+      projectScope(projectId),
+    );
+    memory.archive(retired.id, projectScope(projectId));
+    for (const m of [pref, note, retired]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'src/mixed.ts' }],
+        clock.now(),
+      );
+    }
+    const scope = projectScope(projectId);
+
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', type: 'user' }, scope)).map((m) => m.id),
+    ).toEqual([pref.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', tag: 'editor' }, scope)).map((m) => m.id),
+    ).toEqual([pref.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', topicKey: 'topic/note' }, scope)).map(
+        (m) => m.id,
+      ),
+    ).toEqual([note.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', status: 'archived' }, scope)).map((m) => m.id),
+    ).toEqual([retired.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', status: 'active' }, scope))
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual([note.id, pref.id].sort());
+  });
+
+  it('defaults to any status but archived, not to active, and an explicit status still filters exactly', async () => {
+    const repos = createRepositories(db.handle.db);
+    const scope = projectScope(projectId);
+    const old = memory.save(
+      { type: 'project', title: 'Old take', content: 'the old take', topicKey: 'decision/take' },
+      scope,
+    );
+    const fresh = memory.save(
+      { type: 'project', title: 'New take', content: 'the new take', topicKey: 'decision/take' },
+      scope,
+    );
+    const retired = memory.save(
+      { type: 'project', title: 'Retired take', content: 'the retired take' },
+      scope,
+    );
+    memory.archive(retired.id, scope);
+    for (const m of [old, fresh, retired]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'src/takes.ts' }],
+        clock.now(),
+      );
+    }
+
+    expect(
+      (await memory.search({ entity: 'src/takes.ts' }, scope)).map((m) => m.id).sort(),
+    ).toEqual([fresh.id, old.id].sort());
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'active' }, scope)).map((m) => m.id),
+    ).toEqual([fresh.id]);
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'superseded' }, scope)).map(
+        (m) => m.id,
+      ),
+    ).toEqual([old.id]);
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'archived' }, scope)).map((m) => m.id),
+    ).toEqual([retired.id]);
+  });
+
+  it('returns every linked memory when no limit is given, past the ranked default page of 8', async () => {
+    const repos = createRepositories(db.handle.db);
+    const ids: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const m = memory.save(
+        { type: 'project', title: `Note ${i}`, content: `note ${i}` },
+        projectScope(projectId),
+      );
+      ids.push(m.id);
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'error_code', value: 'ERR_TWELVE' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search({ entity: 'ERR_TWELVE' }, projectScope(projectId));
+    expect(result.map((m) => m.id).sort()).toEqual([...ids].sort());
+    // An explicit `limit` still bounds the page.
+    const bounded = await memory.search(
+      { entity: 'ERR_TWELVE', limit: 3 },
+      projectScope(projectId),
+    );
+    expect(bounded).toHaveLength(3);
+  });
+
+  it('includeGlobal admits a global memory sharing the entity, and only when asked', async () => {
+    const repos = createRepositories(db.handle.db);
+    const globalMem = memory.save(
+      { type: 'user', title: 'Global', content: 'user-wide convention' },
+      SCOPE_GLOBAL,
+    );
+    const projectMem = memory.save(
+      { type: 'project', title: 'Project', content: 'project convention' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      globalMem.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'src/both.ts' }],
+      clock.now(),
+    );
+    repos.entities.linkMemory(
+      projectMem.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'src/both.ts' }],
+      clock.now(),
+    );
+
+    expect(
+      (await memory.search({ entity: 'src/both.ts' }, projectScope(projectId))).map((m) => m.id),
+    ).toEqual([projectMem.id]);
+    expect(
+      (await memory.search({ entity: 'src/both.ts', includeGlobal: true }, projectScope(projectId)))
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual([globalMem.id, projectMem.id].sort());
+  });
+});
+
+describe('memory.search — topic_key history', () => {
+  it('returns every memory ever saved under a key, and an explicit status still narrows', async () => {
+    for (let i = 0; i < 4; i++) {
+      memory.save(
+        {
+          type: 'project',
+          title: `Runbook v${i}`,
+          content: `deploy runbook revision ${i}`,
+          topicKey: 'decision/deploy-runbook',
+        },
+        projectScope(projectId),
+      );
+    }
+
+    const history = await memory.search(
+      { topicKey: 'decision/deploy-runbook' },
+      projectScope(projectId),
+    );
+    expect(history).toHaveLength(4);
+    expect(history.filter((m) => m.status === 'active')).toHaveLength(1);
+    expect(history.filter((m) => m.status === 'superseded')).toHaveLength(3);
+
+    const activeOnly = await memory.search(
+      { topicKey: 'decision/deploy-runbook', status: 'active' },
+      projectScope(projectId),
+    );
+    expect(activeOnly).toHaveLength(1);
+  });
+
+  it('omits an archived row but keeps the superseded ones, on both the listing and the lexical branch', async () => {
+    const scope = projectScope(projectId);
+    const topicKey = 'decision/deploy-runbook';
+    const retired = memory.save(
+      { type: 'project', title: 'Runbook v0', content: 'deploy runbook revision zero', topicKey },
+      scope,
+    );
+    memory.archive(retired.id, scope);
+    const old = memory.save(
+      { type: 'project', title: 'Runbook v1', content: 'deploy runbook revision one', topicKey },
+      scope,
+    );
+    const fresh = memory.save(
+      { type: 'project', title: 'Runbook v2', content: 'deploy runbook revision two', topicKey },
+      scope,
+    );
+
+    const listing = await memory.search({ topicKey }, scope);
+    expect(listing.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
+    expect(listing.map((m) => m.status).sort()).toEqual(['active', 'superseded']);
+
+    // Same default through the hybrid path, whose lexical branch is the one
+    // that used to drop the status predicate entirely.
+    const lexical = await memory.search({ topicKey, query: 'deploy runbook revision' }, scope);
+    expect(lexical.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
+
+    for (const query of [undefined, 'deploy runbook revision']) {
+      expect(
+        (await memory.search({ topicKey, query, status: 'archived' }, scope)).map((m) => m.id),
+      ).toEqual([retired.id]);
+      expect(
+        (await memory.search({ topicKey, query, status: 'superseded' }, scope)).map((m) => m.id),
+      ).toEqual([old.id]);
+      expect(
+        (await memory.search({ topicKey, query, status: 'active' }, scope)).map((m) => m.id),
+      ).toEqual([fresh.id]);
+    }
+  });
 });
 
 describe('memory.get', () => {
@@ -305,6 +735,81 @@ describe('memory.confirm', () => {
 
   it('throws not_found for unknown ids', () => {
     expect(() => memory.confirm('nope', SCOPE_GLOBAL)).toThrow(/not found/);
+  });
+});
+
+describe('memory.confirm — refutation (separate-access-from-usefulness)', () => {
+  it('requires a non-empty reason', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    expect(() => memory.confirm(m.id, projectScope(projectId), { verdict: 'refute' })).toThrow(
+      /reason/,
+    );
+    expect(() =>
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: '   ' }),
+    ).toThrow(/reason/);
+  });
+
+  it('rejects a reason containing a NUL byte', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    expect(() =>
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'bad\0reason' }),
+    ).toThrow(/invalid_input|NUL/i);
+  });
+
+  it('flips derived review state to needs_review immediately, without touching last_seen_at, content, title, or status', () => {
+    const m = memory.save(
+      { type: 'project', title: 'Runbook', content: 'do the thing' },
+      projectScope(projectId),
+    );
+    const before = memory.unsafeGetById(m.id)!;
+    clock.advance(1000); // refutation must postdate createdAt to flip the baseline
+    memory.confirm(m.id, projectScope(projectId), {
+      verdict: 'refute',
+      reason: 'this step is now wrong',
+    });
+    const after = memory.unsafeGetById(m.id)!;
+
+    expect(after.lastSeenAt?.getTime()).toBe(before.lastSeenAt?.getTime());
+    expect(after.content).toBe(before.content);
+    expect(after.title).toBe(before.title);
+    expect(after.status).toBe(before.status);
+
+    const result = memory.get(m.id, projectScope(projectId));
+    expect(result?.reviewState).toBe('needs_review');
+  });
+
+  it('a later affirmation clears a refutation (advances the baseline past it)', () => {
+    const m = memory.save(
+      { type: 'project', title: 'Runbook', content: 'do the thing' },
+      projectScope(projectId),
+    );
+    clock.advance(1000);
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'wrong' });
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('needs_review');
+
+    clock.advance(1000); // affirmation must postdate the refutation to clear it
+    memory.confirm(m.id, projectScope(projectId));
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('fresh');
+  });
+
+  it('does not count toward the affirmation confirmationCount', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'wrong' });
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'still wrong' });
+    memory.confirm(m.id, projectScope(projectId));
+    const result = memory.get(m.id, projectScope(projectId));
+    expect(result?.confirmationCount).toBe(1);
+  });
+
+  it('forces needs_review even for a type with no TTL (reference)', () => {
+    const m = memory.save(
+      { type: 'reference', title: 'Doc link', content: 'https://example.com' },
+      projectScope(projectId),
+    );
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('fresh');
+    clock.advance(1000);
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'link is dead' });
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('needs_review');
   });
 });
 
@@ -590,6 +1095,26 @@ describe('memory.purgeDisconnectedArchived', () => {
     expect(result.deletedIds).toEqual([]);
   });
 
+  it('purges a backlog larger than the 32 766 bind-variable ceiling', () => {
+    const backlog = 40_000;
+    const insert = db.handle.raw.prepare(
+      `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at, last_seen_at)
+       VALUES (?, 'global', NULL, 'project', 't', 'c', '[]', 'archived', '[]', 1000, 1000)`,
+    );
+    db.handle.raw.transaction(() => {
+      for (let i = 0; i < backlog; i++) insert.run(`backlog-${i}`);
+    })();
+
+    const result = memory.purgeDisconnectedArchived({ adminBypass: true });
+
+    expect(result.deletedIds).toHaveLength(backlog);
+    expect(memory.countPurgeableDisconnectedArchived()).toBe(0);
+    const remaining = db.handle.raw.prepare(`SELECT count(*) AS n FROM memory`).get() as {
+      n: number;
+    };
+    expect(remaining.n).toBe(0);
+  });
+
   it('throws forbidden when adminBypass is not strictly true', () => {
     expect(() =>
       memory.purgeDisconnectedArchived({ adminBypass: false as unknown as true }),
@@ -673,6 +1198,47 @@ describe('derived review state', () => {
     const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     const review = memory.reviewStateForMemories(results);
     expect(review.get(results[0]!.id)?.reviewState).toBe('needs_review');
+  });
+
+  describe('countNeedsReview (separate-access-from-usefulness)', () => {
+    it('counts stale memories in scope, isolated from other scopes', () => {
+      const otherId = projects.create({ slug: 'other-app' }).id;
+      memory.save({ type: 'project', title: 'A goal', content: 'A goal' }, projectScope(projectId));
+      memory.save({ type: 'project', title: 'B goal', content: 'B goal' }, projectScope(otherId));
+
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(0);
+      clock.advance(100 * DAY);
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(1);
+      expect(memory.countNeedsReview(projectScope(otherId))).toBe(1);
+      expect(memory.countNeedsReview(SCOPE_GLOBAL)).toBe(0);
+    });
+
+    it('stays consistent with needsReviewForContext for the same scope (task 5.3)', () => {
+      memory.save(
+        { type: 'project', title: 'Ship v1', content: 'ship v1' },
+        projectScope(projectId),
+      );
+      memory.save(
+        { type: 'project', title: 'Ship v2', content: 'ship v2' },
+        projectScope(projectId),
+      );
+      clock.advance(100 * DAY);
+
+      const total = memory.countNeedsReview(projectScope(projectId));
+      const surfaced = memory.needsReviewForContext(projectScope(projectId), 10);
+      expect(total).toBe(surfaced.length);
+    });
+
+    it('a refuted no-TTL reference memory counts too', () => {
+      const m = memory.save(
+        { type: 'reference', title: 'Doc link', content: 'https://example.com' },
+        projectScope(projectId),
+      );
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(0);
+      clock.advance(1000);
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'dead link' });
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(1);
+    });
   });
 });
 

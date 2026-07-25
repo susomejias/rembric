@@ -14,15 +14,18 @@ import {
 import { ensureVectorModel } from '../embeddings/state.js';
 import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
-import type { DoctorReport } from '../mcp/observability-tools.js';
+import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
+import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
+import { ensureEntityExtractor } from '../services/entity-state.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
+import { reviewTtlEntries } from '../services/review.js';
 import { CapabilityDetector } from '../services/self-update/capability.js';
 import { DockerEngineApi } from '../services/self-update/engine-api.js';
 import {
@@ -191,6 +194,49 @@ export async function bootstrap(
   const embedFallbackTimer = setInterval(() => embedTick(true), 60 * 60_000);
   embedFallbackTimer.unref?.();
 
+  // Resumable entity-extraction backfill (add-entity-index) — same
+  // in-process tick+timer shape as the embedding worker, but synchronous
+  // (no model, no network) so the tick itself never needs a `.catch()`.
+  try {
+    if (ensureEntityExtractor(repos, config.dataDir, dbHandle.db).reset) {
+      logger.warn('entity extractor recipe changed → index reset; re-scanning in background');
+    }
+  } catch (err) {
+    logger.warn(`entity extractor identity check failed; leaving index as-is: ${String(err)}`);
+  }
+  const entityBackfillWorker = new EntityBackfillWorker({ repos, tx: dbHandle.db });
+  const entityBackfillTick = (force = false): void => {
+    try {
+      entityBackfillWorker.processBatch({ force });
+    } catch (err) {
+      logger.error('entity backfill worker error', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  // Self-scheduling: a recipe-change rebuild drains a whole corpus, and a fixed
+  // 30s tick left `entity` lookups incomplete for ~100min on 10k memories.
+  const ENTITY_DRAIN_DELAY_MS = 500;
+  const ENTITY_IDLE_DELAY_MS = 30_000;
+  let entityBackfillTimer: NodeJS.Timeout | undefined;
+  let entityBackfillStopped = false;
+  const scheduleEntityBackfill = (delayMs: number): void => {
+    if (entityBackfillStopped) return;
+    entityBackfillTimer = setTimeout(() => {
+      entityBackfillTick();
+      scheduleEntityBackfill(
+        entityBackfillWorker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS,
+      );
+    }, delayMs);
+    entityBackfillTimer.unref?.();
+  };
+  entityBackfillTick(true);
+  scheduleEntityBackfill(
+    entityBackfillWorker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS,
+  );
+  const entityBackfillFallbackTimer = setInterval(() => entityBackfillTick(true), 60 * 60_000);
+  entityBackfillFallbackTimer.unref?.();
+
   // Periodic stale-session reaper — the boot-time sweep above only catches
   // rows leaked by a PRIOR process run; a client killed mid-session (SIGKILL,
   // OOM, closed terminal) while THIS process keeps running would otherwise
@@ -358,6 +404,7 @@ export async function bootstrap(
       updates,
       selfUpdate,
       triggerSweep: () => runner.runAll({ force: true }),
+      entityBackfillWorker,
       undoRun: (runId) => undoRun(repos, dbHandle.db, runId),
       undoOp: (opId) => undoOp(repos, dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
@@ -386,6 +433,9 @@ export async function bootstrap(
       }
       clearInterval(embedTimer);
       clearInterval(embedFallbackTimer);
+      entityBackfillStopped = true;
+      if (entityBackfillTimer) clearTimeout(entityBackfillTimer);
+      clearInterval(entityBackfillFallbackTimer);
       clearInterval(sessionReapTimer);
       await http.close();
       dbHandle.close();
@@ -454,34 +504,40 @@ function buildDoctorReportFactory(deps: {
 
     if (integrity !== 'ok') warnings.push(`db integrity: ${integrity}`);
 
-    const lastConsolidation = deps.repos.consolidation.latestRun();
+    const lastConsolidation = deps.repos.consolidation.adminLatestRun();
 
-    let lastRunOps: Record<string, number> = {};
-    if (lastConsolidation?.summary) {
-      try {
-        lastRunOps = JSON.parse(lastConsolidation.summary) as Record<string, number>;
-      } catch {
-        // ignore malformed JSON; the journal stays the source of truth
-      }
-    }
+    const lastRunOps = lastConsolidation?.summary ? parseRunSummary(lastConsolidation.summary) : {};
 
-    const backlog = deps.repos.vectors.backlogCount();
+    const backlog = deps.repos.vectors.adminBacklogCount();
     if (backlog > 100) {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
 
-    // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session
-    // count is server-wide, unlike memory.stats's scoped one.
+    const entitiesBacklog = deps.repos.entities.adminBacklogCount();
+    if (entitiesBacklog > 100) {
+      warnings.push(`entities backlog: ${entitiesBacklog}`);
+    }
+
+    // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session,
+    // needsReview, and pendingJudgments counts are all server-wide, unlike
+    // memory.stats's scoped ones — same precedent, applied consistently.
     const sessionsByStatus = deps.agentSessions.adminCountByStatus();
+    const needsReview = deps.repos.memory.adminCountNeedsReview({
+      nowMs: Date.now(),
+      ttlByType: reviewTtlEntries(),
+    });
+    const pendingJudgments = deps.repos.relations.adminCountByStatus('pending');
 
     return {
       db: { open: true, journalMode, integrity, sizeBytes },
       embeddings: { model: EMBEDDING_MODEL_ID, backlog },
+      entities: { backlog: entitiesBacklog },
       consolidation: {
         lastRunAt: lastConsolidation?.startedAt ? lastConsolidation.startedAt.toISOString() : null,
         lastRunOps,
       },
       sessions: { active: sessionsByStatus.active },
+      review: { needsReview, pendingJudgments },
       warnings,
     };
   };
@@ -492,7 +548,7 @@ function collectStats(
   agentSessionsSvc: AgentSessionsService,
   relationsSvc: RelationsService,
 ): DashboardStats {
-  const consolidationRow = repos.consolidation.latestRun();
+  const consolidationRow = repos.consolidation.adminLatestRun();
   const sessionsByStatus = agentSessionsSvc.adminCountByStatus();
   const relationsByStatus = relationsSvc.countByStatus();
   const memoriesByStatus = repos.memory.countRowsByStatus();

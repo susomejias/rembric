@@ -119,6 +119,7 @@ export const NAV_ICONS = Object.freeze({
   projects: `${SVG_OPEN}<rect x="1" y="2.5" width="6" height="2.5"/><rect x="1" y="5" width="14" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="3.5" y="9" width="9" height="1"/>${SVG_CLOSE}`,
   tokens: `${SVG_OPEN}<rect x="1" y="5" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="3" y="7" width="2" height="2"/><rect x="7" y="7" width="8" height="2"/><rect x="11" y="9" width="1.5" height="2"/><rect x="13.5" y="9" width="1.5" height="2"/>${SVG_CLOSE}`,
   maintenance: `${SVG_OPEN}<rect x="1" y="7" width="9" height="2"/><rect x="8" y="3.5" width="6.5" height="2"/><rect x="8" y="5.5" width="2.5" height="5"/><rect x="8" y="10.5" width="6.5" height="2"/>${SVG_CLOSE}`,
+  entities: `${SVG_OPEN}<circle cx="3" cy="3" r="2"/><circle cx="13" cy="3" r="2"/><circle cx="8" cy="13" r="2"/><path d="M4.5 4.5 L7 11.5" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M11.5 4.5 L9 11.5" stroke="currentColor" stroke-width="1.2" fill="none"/>${SVG_CLOSE}`,
 } as const);
 
 /* ── nav model ─────────────────────────────────────────────────────── */
@@ -130,6 +131,7 @@ export type NavKey =
   | 'prompts'
   | 'judgments'
   | 'consolidation'
+  | 'entities'
   | 'projects'
   | 'tokens'
   | 'maintenance';
@@ -193,6 +195,14 @@ export const NAV: readonly NavEntry[] = Object.freeze([
     iconKey: 'consolidation',
     label: 'CONSOLIDATION',
     href: '/dashboard/consolidation',
+    group: 'MAIN',
+  },
+  {
+    key: 'entities',
+    num: '05b',
+    iconKey: 'entities',
+    label: 'ENTITIES',
+    href: '/dashboard/entities',
     group: 'MAIN',
   },
   {
@@ -608,6 +618,12 @@ export function pager(opts: PagerOpts): SafeHtml {
 
 /** Standard page size for all paginated dashboard listings. */
 export const PAGE_SIZE = 50;
+
+/** Clamped so `page * PAGE_SIZE` stays a safe integer — SQLite rejects a non-integer OFFSET. */
+export function pageParam(url: URL): number {
+  const raw = parseInt(url.searchParams.get('page') ?? '0', 10) || 0;
+  return Math.min(Math.max(0, raw), Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE));
+}
 
 /**
  * Build a URL that preserves every search param of `currentUrl` except

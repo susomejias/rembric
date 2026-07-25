@@ -16,7 +16,16 @@ import { projects } from './projects.js';
  */
 
 export type MemoryScope = 'global' | 'project';
-export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'procedural';
+
+/**
+ * The single declaration of the type domain, in the shape `ENTITY_KINDS` uses.
+ * Adding a type is one edit here plus a migration: the Drizzle enum, the union,
+ * the two MCP zod enums and the dashboard filter all derive from this array, so
+ * the compiler carries the change instead of a grep.
+ */
+export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
+
 export type MemoryStatus = 'active' | 'superseded' | 'archived';
 
 export interface MemorySource {
@@ -36,9 +45,7 @@ export const memory = sqliteTable(
     id: text('id').primaryKey(),
     scope: text('scope', { enum: ['global', 'project'] }).notNull(),
     projectId: text('project_id').references(() => projects.id),
-    type: text('type', {
-      enum: ['user', 'feedback', 'project', 'reference', 'procedural'],
-    }).notNull(),
+    type: text('type', { enum: [...MEMORY_TYPES] }).notNull(),
     /**
      * Short human-readable label (1..100 chars). Required at save; the DB
      * enforces `NOT NULL` + `CHECK(length(title) BETWEEN 1 AND 100)` (the
@@ -87,9 +94,14 @@ export const memory = sqliteTable(
     statusLastSeenIdx: index('memory_status_last_seen_idx').on(table.status, table.lastSeenAt),
     createdAtIdx: index('memory_created_at_idx').on(table.createdAt),
     sessionIdx: index('memory_session_idx').on(table.sessionId),
-    // Partial index for topic_key resolution — see migration 0005 for
-    // the WHERE clause (Drizzle's index helper doesn't expose the
-    // `WHERE` syntax, so the index DDL lives in raw SQL).
+    topicKeyActiveIdx: index('memory_topic_key_active_idx')
+      .on(table.scope, table.projectId, table.topicKey)
+      .where(sql`status = 'active' AND topic_key IS NOT NULL`),
+    // Two more indexes on this table live in migration SQL only, because
+    // drizzle-kit emits invalid DDL for an `sql` index expression:
+    // `memory_topic_key_active_uidx` (0018, and only an expression index can
+    // enforce that uniqueness across a NULL project_id) and
+    // `memory_scope_seen_idx` (0019). test/schema-drift.test.ts allow-lists both.
   }),
 );
 

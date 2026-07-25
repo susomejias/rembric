@@ -1,11 +1,16 @@
 import { Hono } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
-import type { Memory, MemoryType } from '../db/schema/memory.js';
+import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
-import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/review.js';
+import {
+  deriveReviewState,
+  REFUTED_PRIORITY_MS,
+  REVIEW_TTL_MS,
+  type ReviewState,
+} from '../services/review.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
@@ -19,6 +24,7 @@ import {
   kv,
   kvGrid,
   PAGE_SIZE,
+  pageParam,
   pager,
   mdBody,
   backLink,
@@ -77,7 +83,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // FTS5 syntax error and 500s the page. `rawQuery` is still what's
     // redisplayed in the search box.
     const query = sanitizeFtsQuery(rawQuery);
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();
@@ -117,6 +123,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         limit: PAGE_SIZE + 1,
         offset,
         ttlByType: TTL_BY_TYPE,
+        refutedPriorityMs: REFUTED_PRIORITY_MS,
       });
     } else {
       rows = deps.repos.memory.adminList({
@@ -132,7 +139,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // when the needs_review filter is combined with a text query).
     const reviewById = new Map<string, ReviewState | null>();
     if (rows.length > 0) {
-      const lastConfirmed = deps.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+      const rowIds = rows.map((m) => m.id);
+      const reviewTs = deps.repos.memory.reviewTimestampsByIds(rowIds);
       const at = new Date(nowMs);
       for (const m of rows) {
         reviewById.set(
@@ -142,7 +150,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               type: m.type,
               createdAt: m.createdAt,
               status: m.status,
-              lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+              lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+              lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
             },
             at,
           ).reviewState,
@@ -212,7 +221,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     }));
     const typeOptions = [
       { value: '', label: 'all types', selected: typeFilter === '' },
-      ...(['user', 'feedback', 'project', 'reference', 'procedural'] as const).map((t) => ({
+      ...MEMORY_TYPES.map((t) => ({
         value: t,
         label: t,
         selected: typeFilter === t,
@@ -334,9 +343,17 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
     const lastConfirmedAt =
-      deps.repos.memory.latestConfirmationTsByIds([row.id]).get(row.id) ?? null;
+      deps.repos.memory.reviewTimestampsByIds([row.id]).get(row.id)?.affirmedAt ?? null;
+    const lastRefutedAt =
+      deps.repos.memory.reviewTimestampsByIds([row.id]).get(row.id)?.refutedAt ?? null;
     const { reviewState, reviewAfter } = deriveReviewState(
-      { type: row.type, createdAt: row.createdAt, status: row.status, lastConfirmedAt },
+      {
+        type: row.type,
+        createdAt: row.createdAt,
+        status: row.status,
+        lastConfirmedAt,
+        lastRefutedAt,
+      },
       new Date(),
     );
     const successor =
@@ -584,7 +601,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const scope =
       row.scope === 'project' && row.projectId ? projectScope(row.projectId) : SCOPE_GLOBAL;
     try {
-      deps.memory.confirm(id, scope, { agent: 'dashboard-operator' });
+      deps.memory.confirm(id, scope, { source: { agent: 'dashboard-operator' } });
     } catch (err) {
       if (err instanceof DomainError) {
         return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });

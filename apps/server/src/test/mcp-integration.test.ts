@@ -1056,6 +1056,7 @@ describe('MCP protocol conformance', () => {
       embeddings: { model: string; backlog: number };
       consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
       sessions: { active: number };
+      review: { needsReview: number; pendingJudgments: number };
       warnings: string[];
     };
     expect(payload.db.open).toBe(true);
@@ -1066,7 +1067,49 @@ describe('MCP protocol conformance', () => {
     expect('llm' in payload).toBe(false);
     expect(payload.embeddings.model).toContain('gte-multilingual-base');
     expect('enabled' in payload.embeddings).toBe(false);
+    expect(typeof payload.review.needsReview).toBe('number');
+    expect(typeof payload.review.pendingJudgments).toBe('number');
     expect(Array.isArray(payload.warnings)).toBe(true);
+    await client.close();
+  });
+
+  // memory.archive journals a `maintenance` run whose summary carries a `kind`
+  // string next to the counters, so a doctor output contract that admits only
+  // numbers makes the tool fail from the first archive onwards.
+  it('memory.doctor passes output validation after an archive has been journaled', async () => {
+    const client = await connect();
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'doctor after archive',
+        content: 'doctor-after-archive-marker',
+      },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+
+    const archived = (await client.callTool({
+      name: 'memory.archive',
+      arguments: { id: (readJson(saved) as { id: string }).id },
+    })) as ToolResult;
+    expect(archived.isError).toBeFalsy();
+
+    const result = (await client.callTool({
+      name: 'memory.doctor',
+      arguments: {},
+    })) as ToolResult;
+    if (result.isError) {
+      throw new Error(`memory.doctor failed after an archive: ${JSON.stringify(readJson(result))}`);
+    }
+    const payload = readJson(result) as {
+      consolidation: { lastRunAt: string | null; lastRunOps: Record<string, unknown> };
+    };
+    expect(payload.consolidation.lastRunOps).toEqual({
+      kind: 'agent_memory_archive',
+      archived: 1,
+    });
+    expect(payload.consolidation.lastRunAt).toBeTruthy();
     await client.close();
   });
 
@@ -1225,6 +1268,7 @@ describe('MCP protocol conformance', () => {
         ageMs: number;
       }[];
       pendingJudgments: { judgmentId: string }[];
+      needsReviewTotal: number;
     };
     expect(payload.needsReview).toHaveLength(1);
     expect(payload.needsReview[0]?.id).toBe(id);
@@ -1233,6 +1277,7 @@ describe('MCP protocol conformance', () => {
     expect(typeof payload.needsReview[0]?.reviewAfter).toBe('string');
     // Unary needsReview is disjoint from pairwise pendingJudgments.
     expect(payload.pendingJudgments).toHaveLength(0);
+    expect(payload.needsReviewTotal).toBe(1);
 
     const searched = (await client.callTool({
       name: 'memory.search',
@@ -1254,9 +1299,75 @@ describe('MCP protocol conformance', () => {
       name: 'memory.context',
       arguments: {},
     })) as ToolResult;
+    expect(
+      (readJson(ctxAfter) as { needsReview: unknown[]; needsReviewTotal: number }).needsReviewTotal,
+    ).toBe(0);
     expect((readJson(ctxAfter) as { needsReview: unknown[] }).needsReview).toHaveLength(0);
 
     await client.close();
+  });
+
+  it('memory.stats totals (needsReviewTotal, pendingJudgmentsTotal) are scope-isolated (task 5.3)', async () => {
+    // Two fresh, never-before-used project slugs: the shared global scope
+    // accumulates state across every `it()` in this file, so isolation can
+    // only be asserted against scopes nothing else has touched.
+    const projA = await connect({ projectSlug: 'stats-totals-proj-a' });
+    const projB = await connect({ projectSlug: 'stats-totals-proj-b' });
+    await projA.callTool({
+      name: 'project.use',
+      arguments: { slug: 'stats-totals-proj-a', autocreate: true },
+    });
+    await projB.callTool({
+      name: 'project.use',
+      arguments: { slug: 'stats-totals-proj-b', autocreate: true },
+    });
+
+    const saveOne = (await projA.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'feedback',
+        title: 'stats totals source marker',
+        content: 'stats-totals-source-marker',
+      },
+    })) as ToolResult;
+    const saveTwo = (await projA.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'feedback',
+        title: 'stats totals target marker',
+        content: 'stats-totals-target-marker',
+      },
+    })) as ToolResult;
+    const sourceId = (readJson(saveOne) as { id: string }).id;
+    const targetId = (readJson(saveTwo) as { id: string }).id;
+
+    server.dbHandle.raw
+      .prepare(
+        `INSERT INTO memory_relations (id, judgment_id, source_id, target_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'pending', ?)`,
+      )
+      .run('01TESTRELSTATS0000000000A', 'jdg-stats-itest', sourceId, targetId, Date.now());
+
+    const statsA = (await projA.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
+    const statsAPayload = readJson(statsA) as {
+      needsReviewTotal: number;
+      pendingJudgmentsTotal: number;
+    };
+    expect(statsAPayload.pendingJudgmentsTotal).toBe(1);
+    expect(statsAPayload.needsReviewTotal).toBe(0);
+
+    // A different, untouched project scope sees neither the pending relation
+    // nor any review debt.
+    const statsB = (await projB.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
+    const statsBPayload = readJson(statsB) as {
+      needsReviewTotal: number;
+      pendingJudgmentsTotal: number;
+    };
+    expect(statsBPayload.pendingJudgmentsTotal).toBe(0);
+    expect(statsBPayload.needsReviewTotal).toBe(0);
+
+    await projA.close();
+    await projB.close();
   });
 
   // Regression coverage for enforce-mcp-authorization: every scope-sensitive

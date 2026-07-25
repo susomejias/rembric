@@ -51,12 +51,15 @@ export const ABSTENTION_FLOOR: number | null = null;
  */
 export const GAP_RATIO_THRESHOLD: number | null = null;
 /**
- * At most this many results per originating session (design.md Decision 5)
- * — ships enabled, unlike abstention: it only ever reorders/backfills, it
- * cannot reduce recall. 3 is the figure comparable systems use; with the
- * default limit of 8 that still permits nearly three sessions' worth.
+ * At most this many results per originating session. `null` ships this
+ * disabled, same reasoning as `ABSTENTION_FLOOR`: it is applied to the whole
+ * fused pool before the page is sliced, so a held-back row is replaced by
+ * whatever ranked next in a 64–400 row pool, not by a comparable row. On a
+ * one-topic session that measurably swaps most of page 1 for noise, and the
+ * eval corpus cannot see it (every corpus row has `session_id = NULL`, which
+ * is never grouped). Needs a session-labelled fixture before re-enabling.
  */
-export const DIVERSITY_CAP = 3;
+export const DIVERSITY_CAP: number | null = null;
 
 export interface HybridSearchOpts {
   repos: Pick<Repositories, 'memory' | 'vectors'>;
@@ -64,7 +67,8 @@ export interface HybridSearchOpts {
   query: string;
   scope: MemoryScope;
   projectId: string | null;
-  status: MemoryStatus;
+  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
   /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
@@ -117,7 +121,8 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   const boosted = applyRankingBoost(fused, opts);
   const gapFiltered =
     gapRatioThreshold !== null ? applyGapRatioFilter(boosted, gapRatioThreshold) : boosted;
-  const diversified = applyDiversityCap(gapFiltered, diversityCap);
+  const diversified =
+    diversityCap !== null ? applyDiversityCap(gapFiltered, diversityCap) : gapFiltered;
 
   const ids = diversified.map((r) => r.id);
   return { ids: ids.slice(opts.offset, opts.offset + opts.limit), abstained: false };
@@ -284,7 +289,12 @@ async function denseRetriever(
   rankWindowSize: number,
 ): Promise<{ id: string; score: number }[]> {
   if (!opts.embedQuery || opts.status === 'archived') return [];
-  const status = opts.status;
+  // `memory_vec.status` is an exact-match metadata filter, so an any-status
+  // read enumerates the two non-archived values rather than dropping the
+  // predicate: archived vectors stay out of this branch either way.
+  const statuses: Exclude<MemoryStatus, 'archived'>[] = opts.status
+    ? [opts.status]
+    : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
     // include_global scans the project + global partitions (each with its own
@@ -295,13 +305,15 @@ async function denseRetriever(
         : [partitionKeyFor(opts.scope, opts.projectId)];
     const neighbors = partitionKeys
       .flatMap((partitionKey) =>
-        opts.repos.vectors.knnByQueryVector({
-          queryVector,
-          partitionKey,
-          status,
-          type: opts.type,
-          rankWindowSize,
-        }),
+        statuses.flatMap((status) =>
+          opts.repos.vectors.knnByQueryVector({
+            queryVector,
+            partitionKey,
+            status,
+            type: opts.type,
+            rankWindowSize,
+          }),
+        ),
       )
       .sort((a, b) => a.distance - b.distance);
     // Dedup (nearest wins) before the slice — RRF needs distinct ids.

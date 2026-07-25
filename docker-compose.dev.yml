@@ -25,4 +25,18 @@ services:
       REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1'
       REMBRIC_ALLOW_DATA_SHRINKAGE: '1'
 
+    # Same probe as docker-compose.yml, but the dev target is node:22-bookworm-slim,
+    # where node is on PATH and /nodejs/bin/node (distroless-only) does not exist.
+    # Window matches the dev stage's HEALTHCHECK: tsx watch respawns need ~20s.
+    healthcheck: !override
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
     restart: 'no'

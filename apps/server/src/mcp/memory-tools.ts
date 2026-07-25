@@ -2,10 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryScope } from '../db/schema/memory.js';
+import { MEMORY_TYPES, type Memory, type MemoryScope } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import { extractEntities, type ExtractedEntity } from '../services/entities.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -55,7 +56,6 @@ import { ok } from './result.js';
  *     - memory.get / .confirm        →  project ids are 'not_found' (idem)
  */
 
-const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 const MEMORY_SCOPES = ['global', 'project'] as const;
 const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 
@@ -77,6 +77,13 @@ export const memorySaveSchema = {
 
 export const memorySearchSchema = {
   query: z.string().optional(),
+  entity: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
+    ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
   topic_key: z
@@ -85,7 +92,7 @@ export const memorySearchSchema = {
     .max(128)
     .optional()
     .describe(
-      'Return only memories carrying this exact topic_key (any status). Use to check whether a topic already converged before saving a synonym key — pair with memory.suggest_topic_key.',
+      "Return only memories carrying this exact topic_key. On its own it returns the topic's whole history — the active row plus every row it superseded — because that is what tells you whether the topic already converged before you save a synonym key; pass `status` too to narrow to one. Pair with memory.suggest_topic_key.",
     ),
   status: z.enum(MEMORY_STATUSES).optional(),
   include_global: z
@@ -161,7 +168,7 @@ export const memoryConfirmSchema = {
     .max(100)
     .optional()
     .describe(
-      'Batch re-affirm several memories in one call (e.g. all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
+      'Batch: record the same verdict over several memories in one call (e.g. re-affirm all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
     ),
   sessionId: z
     .string()
@@ -170,6 +177,17 @@ export const memoryConfirmSchema = {
     .describe(
       'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
     ),
+  verdict: z
+    .enum(['affirm', 'refute'])
+    .optional()
+    .describe(
+      "Default 'affirm' (still true, re-verified). Set 'refute' ONLY when a memory you just surfaced turned out wrong or stale AND you have concretely verified that — never as routine cleanup, never for a memory you have not actually acted on. Refuting does not archive or edit anything; it marks the memory needs_review immediately (bypassing its normal shelf life) so a human or a later pass re-verifies it. Requires `reason`.",
+    ),
+  reason: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Required when verdict is "refute": concretely what proved it wrong or stale.'),
 };
 
 export const memoryArchiveSchema = {
@@ -215,7 +233,11 @@ export const candidate = z.object({
   similarity: z.number(),
   source: z.string(),
   topicKey: z.string().nullable(),
+  /** Set only when `source: 'entity'` — the value both memories share. */
+  entityValue: z.string().optional(),
 });
+
+const entityRef = z.object({ kind: z.string(), value: z.string() });
 
 const memoryRow = z.object({
   // Identity fields are always present; the rest MAY be omitted by the
@@ -234,6 +256,9 @@ const memoryRow = z.object({
   relations: z.array(relationView).optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+  /** Bounded projection; `entitiesTruncated` is true when more exist. */
+  entities: z.array(entityRef).optional(),
+  entitiesTruncated: z.boolean().optional(),
 });
 
 const memoryNeighbor = z.object({
@@ -265,6 +290,15 @@ export const memorySearchOutput = {
   expanded: z.array(expandedMemoryRow).optional(),
   abstained: z.boolean(),
   abstainReason: z.string().optional(),
+  /** True when `entity` drove retrieval (exact-address, not ranked). */
+  viaEntity: z.boolean().optional(),
+  /**
+   * Present only on an EMPTY entity lookup whose scope still has unscanned
+   * memories: "not in the index" and "not indexed yet" are otherwise the same
+   * empty response, and after an extractor recipe change the second one lasts
+   * as long as the drain does.
+   */
+  entityIndexDraining: z.boolean().optional(),
 };
 
 export const memoryGetOutput = {
@@ -308,8 +342,14 @@ export const memoryGetOutput = {
   headTruncated: z.boolean().optional(),
   confirmationCount: z.number().optional(),
   relations: z.array(relationView).optional(),
+  // Single-id response's entities[] projection (bounded; see memoryRow for
+  // the batch response's equivalent field).
+  entities: z.array(entityRef).optional(),
+  entitiesTruncated: z.boolean().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+  /** True once the memory has sat in `needs_review` past its escalation window. */
+  reviewEscalated: z.boolean().optional(),
   // Batch response (when `ids` is provided).
   memories: z.array(memoryRow).optional(),
   notFound: z.array(z.string()).optional(),
@@ -369,6 +409,8 @@ export const contextOutput = {
       status: z.string(),
       createdAt: z.string(),
       topicKey: z.string().nullable(),
+      /** How this row was found — exact entity match, or ranked hybrid search. */
+      via: z.enum(['entity', 'ranked']),
     }),
   ),
   pendingJudgments: z.array(
@@ -393,6 +435,12 @@ export const contextOutput = {
       ageMs: z.number(),
     }),
   ),
+  /**
+   * Total in-scope needs-review count — `needsReview` above is capped at
+   * a handful of the oldest. Lets the agent tell a healthy corpus from a
+   * collapsing one and batch-confirm via `memory.confirm({ids})` when deep.
+   */
+  needsReviewTotal: z.number(),
   clamped: z.boolean(),
 };
 
@@ -410,7 +458,7 @@ export interface MemoryToolDeps {
   /** Optional — when present, controls candidate detection thresholds. */
   candidates?: CandidateOptions;
   /** Optional — repositories needed for save-time candidates + context/timeline reads. */
-  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors'>;
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
   /**
    * Optional — embeds the just-saved row inline so vec candidate
    * detection has a self-vector to kNN from.
@@ -516,15 +564,17 @@ export interface SaveTimeCandidateView {
   title: string;
   snippet: string;
   similarity: number;
-  source: 'vec' | 'fts';
+  source: 'vec' | 'fts' | 'entity';
   topicKey: string | null;
+  /** Set only for `source: 'entity'` — the value both memories share. */
+  entityValue?: string;
 }
 
 export interface SaveWithCandidatesDeps {
   memory: MemoryService;
   relations?: RelationsService;
   candidates?: CandidateOptions;
-  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors'>;
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
   embedNow?: (
     memoryId: string,
     title: string,
@@ -575,6 +625,12 @@ export async function saveMemoryWithCandidates(
     }
   }
 
+  // Deterministic entity extraction — pure, no I/O. Linking (below) is
+  // deferred until AFTER candidate detection reads: the just-saved row must
+  // not count toward its own entity's rarity stats, or a save can tip a
+  // borderline-common entity over the gate one save sooner than it should.
+  const extractedEntities: ExtractedEntity[] = extractEntities(m.title, m.content);
+
   // Save-time candidate detection: surface up to N similar active
   // memories so the agent can judge them while the context is fresh.
   let candidates: SaveTimeCandidateView[] = [];
@@ -584,7 +640,7 @@ export async function saveMemoryWithCandidates(
       // pass has a self-vector to kNN from (model is warm by boot
       // contract; on failure detection degrades to FTS5 for this save).
       if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
-      const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
+      const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
       for (const c of detected) {
         // Skip the topic_key supersede target — we already wrote that relation.
         if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;
@@ -600,6 +656,7 @@ export async function saveMemoryWithCandidates(
           similarity: c.similarity,
           source: c.source,
           topicKey: c.topicKey,
+          ...(c.entityValue ? { entityValue: c.entityValue } : {}),
         });
       }
     } catch {
@@ -607,6 +664,18 @@ export async function saveMemoryWithCandidates(
       // FTS5 query rejects an unusual token) must not prevent the
       // save from returning a usable response.
       candidates = [];
+    }
+  }
+
+  // Link the just-saved row into the entity index now that candidate
+  // detection has already read the prior state. Independent of candidate
+  // detection being enabled at all (the index itself must stay current) —
+  // best-effort, never fails the save.
+  if (deps.repos) {
+    try {
+      deps.repos.entities.linkMemory(m.id, m.scope, m.projectId, extractedEntities, m.createdAt);
+    } catch {
+      // Extraction/linking failure must never fail the save.
     }
   }
 
@@ -733,11 +802,13 @@ async function handleSave(
 
 const RELATION_EXPANSION_KINDS = new Set(['supersedes', 'superseded_by', 'conflicts_with']);
 const RELATION_EXPANSION_CAP = 5;
+const ENTITIES_PROJECTION_CAP = 10;
 
 async function handleSearch(
   deps: MemoryToolDeps,
   args: {
     query?: string;
+    entity?: string;
     type?: (typeof MEMORY_TYPES)[number];
     tag?: string;
     topic_key?: string;
@@ -759,6 +830,7 @@ async function handleSearch(
 
   const input: SearchMemoriesInput = {
     query: args.query,
+    entity: args.entity,
     type: args.type,
     tag: args.tag,
     topicKey: args.topic_key,
@@ -769,7 +841,11 @@ async function handleSearch(
   };
 
   try {
-    const { memories, abstained, reason } = await deps.memory.searchWithAbstention(input, scope);
+    const { memories, abstained, reason, viaEntity, entityIndexDraining } =
+      await deps.memory.searchWithAbstention(input, scope);
+    const entitiesByMemory = deps.repos
+      ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
+      : new Map<string, { kind: string; value: string }[]>();
     // Single JOIN against memory_relations — no N+1.
     const relations = deps.relations
       ? deps.relations.listForMemories(
@@ -836,9 +912,12 @@ async function handleSearch(
       count: memories.length,
       memories: memories.map((m) => {
         const r = review.get(m.id);
+        const ents = entitiesByMemory.get(m.id) ?? [];
         const full: Record<string, unknown> = {
           ...formatRow(m),
           relations: relations?.get(m.id) ?? [],
+          entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
+          ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
           ...(r && r.reviewState !== null
             ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
             : {}),
@@ -849,6 +928,8 @@ async function handleSearch(
       ...(expanded ? { expanded } : {}),
       abstained,
       ...(reason ? { abstainReason: reason } : {}),
+      ...(viaEntity ? { viaEntity } : {}),
+      ...(entityIndexDraining ? { entityIndexDraining } : {}),
     });
   } catch (err) {
     return errToMcp(err);
@@ -876,22 +957,30 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
             10,
           )
         : null;
+      const entitiesByMemory = deps.repos
+        ? deps.repos.entities.findEntitiesForMemories(rows.map((m) => m.id))
+        : new Map<string, { kind: string; value: string }[]>();
       const found = new Set(rows.map((m) => m.id));
       return ok({
-        memories: rows.map((m) => ({
-          id: m.id,
-          scope: m.scope,
-          projectId: m.projectId,
-          type: m.type,
-          title: m.title,
-          content: m.content,
-          tags: m.tags,
-          status: m.status,
-          createdAt: m.createdAt,
-          lastSeenAt: m.lastSeenAt,
-          topicKey: m.topicKey,
-          relations: relations?.get(m.id) ?? [],
-        })),
+        memories: rows.map((m) => {
+          const ents = entitiesByMemory.get(m.id) ?? [];
+          return {
+            id: m.id,
+            scope: m.scope,
+            projectId: m.projectId,
+            type: m.type,
+            title: m.title,
+            content: m.content,
+            tags: m.tags,
+            status: m.status,
+            createdAt: m.createdAt,
+            lastSeenAt: m.lastSeenAt,
+            topicKey: m.topicKey,
+            relations: relations?.get(m.id) ?? [],
+            entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
+            ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
+          };
+        }),
         notFound: args.ids.filter((id) => !found.has(id)),
       });
     }
@@ -934,8 +1023,19 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
       headTruncated: result.headTruncated,
       confirmationCount: result.confirmationCount,
       relations: deps.relations ? deps.relations.listForMemory(result.memory.id, 50) : [],
+      ...(() => {
+        const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
+        return {
+          entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
+          ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
+        };
+      })(),
       ...(result.reviewState !== null
-        ? { reviewState: result.reviewState, reviewAfter: result.reviewAfter ?? null }
+        ? {
+            reviewState: result.reviewState,
+            reviewAfter: result.reviewAfter ?? null,
+            reviewEscalated: result.reviewEscalated,
+          }
         : {}),
     });
   } catch (err) {
@@ -945,7 +1045,13 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
 
 async function handleConfirm(
   deps: MemoryToolDeps,
-  args: { id?: string; ids?: string[]; sessionId?: string },
+  args: {
+    id?: string;
+    ids?: string[];
+    sessionId?: string;
+    verdict?: 'affirm' | 'refute';
+    reason?: string;
+  },
 ) {
   const ctx = getRequestContext();
   const { scope } = await resolveEffectiveScope(deps);
@@ -969,24 +1075,20 @@ async function handleConfirm(
     } catch (err) {
       return errToMcp(err);
     }
+    const opts = {
+      source: { tokenName: ctx.token.name },
+      sessionId,
+      verdict: args.verdict,
+      reason: args.reason,
+    };
     if (args.ids !== undefined) {
-      const { confirmed, headTruncated } = deps.memory.confirmMany(
-        args.ids,
-        scope,
-        { tokenName: ctx.token.name },
-        sessionId,
-      );
+      const { confirmed, headTruncated } = deps.memory.confirmMany(args.ids, scope, opts);
       return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
     }
     if (args.id === undefined) {
       return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
     }
-    const { headTruncated } = deps.memory.confirm(
-      args.id,
-      scope,
-      { tokenName: ctx.token.name },
-      sessionId,
-    );
+    const { headTruncated } = deps.memory.confirm(args.id, scope, opts);
     return ok({ ok: true, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
     if (err instanceof DomainError && err.code === 'memory_not_found') {
@@ -1131,25 +1233,64 @@ async function handleContext(
   // Relevance channel — separate from recentMemories (which is pure
   // recency) so the model can tell the two apart. An explicit `focus`
   // always wins; otherwise a seed is derived so the improvement doesn't
-  // depend on the agent knowing to ask. touch:false — a context peek must
-  // not itself inflate the memories it surfaces (the exact feedback loop
-  // this change exists to break).
+  // depend on the agent knowing to ask.
   const focusText = args.focus?.trim() || deriveFocusSeed(deps, scope, recentPrompts);
-  const relevantMemories = focusText
-    ? (
-        await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope, {
-          touch: false,
-        })
-      ).map((m) => ({
-        id: m.id,
-        type: m.type,
-        title: m.title,
-        snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
-        status: m.status,
-        createdAt: m.createdAt.toISOString(),
-        topicKey: m.topicKey,
-      }))
-    : [];
+  let relevantMemories: {
+    id: string;
+    type: string;
+    title: string;
+    snippet: string;
+    status: string;
+    createdAt: string;
+    topicKey: string | null;
+    via: 'entity' | 'ranked';
+  }[] = [];
+  if (focusText) {
+    // Entity-derived results are folded into this one channel rather than
+    // exposed separately (design.md's resolved open question 3: "leaning
+    // fold, more explainable as one channel than two"). An entity
+    // recognized in the seed (most often from a recent prompt naming a
+    // file/error/ticket) is an exact match, so it's admitted ahead of the
+    // ranked hybrid-search fallback, deduped by id, capped at the same
+    // limit. `via` keeps the two populations distinguishable in the
+    // response, matching `memory.search`'s `viaEntity` observability.
+    const memScope = scope.kind === 'global' ? 'global' : 'project';
+    const projectId = scope.kind === 'project' ? scope.projectId : null;
+    const byId = new Map<string, { memory: Memory; via: 'entity' | 'ranked' }>();
+    if (deps.repos) {
+      for (const e of extractEntities('', focusText)) {
+        if (byId.size >= RELEVANCE_LIMIT) break;
+        const rows = deps.repos.entities.findMemoriesByEntity({
+          scope: memScope,
+          projectId,
+          kind: e.kind,
+          value: e.value,
+          limit: RELEVANCE_LIMIT,
+        });
+        for (const r of rows) {
+          if (byId.size >= RELEVANCE_LIMIT) break;
+          if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'entity' });
+        }
+      }
+    }
+    if (byId.size < RELEVANCE_LIMIT) {
+      const ranked = await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope);
+      for (const r of ranked) {
+        if (byId.size >= RELEVANCE_LIMIT) break;
+        if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'ranked' });
+      }
+    }
+    relevantMemories = [...byId.values()].map(({ memory: m, via }) => ({
+      id: m.id,
+      type: m.type,
+      title: m.title,
+      snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
+      status: m.status,
+      createdAt: m.createdAt.toISOString(),
+      topicKey: m.topicKey,
+      via,
+    }));
+  }
 
   // Aged pending relations (older than the orphan threshold) the agent
   // should close with memory.judge while context is fresh. Unjudged rows
@@ -1186,6 +1327,7 @@ async function handleContext(
     reviewAfter: it.reviewAfter.toISOString(),
     ageMs: now - it.reviewBaseline.getTime(),
   }));
+  const needsReviewTotal = deps.memory.countNeedsReview(scope);
 
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
@@ -1195,6 +1337,7 @@ async function handleContext(
     relevantMemories,
     pendingJudgments,
     needsReview,
+    needsReviewTotal,
     clamped,
   });
 }

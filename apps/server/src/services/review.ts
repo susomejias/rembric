@@ -4,11 +4,11 @@ import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
  * Time-based review (affirmation) axis — orthogonal to decay.
  *
  * Decay (consolidation/decay.ts) asks "is this an untrusted memory nobody
- * touches?" keyed on `last_seen_at` (which advances on every read). Review
- * asks "has this been re-affirmed within its shelf life?" keyed on the
- * affirmation baseline = max(created_at, latest confirmation event_ts).
- * Reading a memory is access, not affirmation, so `last_seen_at` is
- * deliberately NOT used here.
+ * touches?" keyed on `last_seen_at` (advanced by dereferencing via
+ * `memory.get`, NOT by being returned from a search). Review asks "has this
+ * been re-affirmed within its shelf life?" keyed on the affirmation baseline
+ * = max(created_at, latest AFFIRMING confirmation event_ts). Reading is
+ * access, not affirmation, so `last_seen_at` is deliberately NOT used here.
  *
  * The state is derived at read time only — never persisted, no sweep, no
  * cron. Re-affirming is the existing `memory.confirm` (it records a
@@ -46,12 +46,40 @@ export function ttlForType(type: MemoryType): number | undefined {
   return REVIEW_TTL_MS[type];
 }
 
+/** `REVIEW_TTL_MS` as tuples, for the SQL layer's per-type CASE ladders. */
+export function reviewTtlEntries(): ReadonlyArray<readonly [MemoryType, number]> {
+  return Object.entries(REVIEW_TTL_MS).filter(
+    (e): e is [MemoryType, number] => typeof e[1] === 'number',
+  );
+}
+
+/**
+ * Multiples of its own TTL a memory may sit `needs_review` before decay stops
+ * requiring a stale `last_seen_at` — closing the "read regularly, never
+ * re-affirmed, un-archivable" case. Types without a TTL never escalate.
+ */
+export const ESCALATION_MULTIPLIER = 2;
+
+/**
+ * How long a refutation keeps a memory at the head of the review queue.
+ * Refuted rows lead because refutation deliberately does not advance the
+ * affirmation baseline, so baseline ordering alone would bury a just-refuted
+ * memory. The lead cannot be permanent: `memory.context` shows three rows, so
+ * an unattended handful of refuted memories would otherwise starve every
+ * TTL-expired row for good. Past the window the row still needs review — it
+ * just queues by baseline like the rest. Matches the two weeks a pending
+ * judgment gets before the sweep orphans it.
+ */
+export const REFUTED_PRIORITY_MS = 14 * 24 * 60 * 60 * 1000;
+
 export interface DeriveReviewInput {
   type: MemoryType;
   createdAt: Date;
   status: MemoryStatus;
-  /** event_ts of the most recent confirmation against the memory, if any. */
+  /** event_ts of the most recent AFFIRMING confirmation, if any. */
   lastConfirmedAt: Date | null;
+  /** event_ts of the most recent REFUTING confirmation, if any. */
+  lastRefutedAt: Date | null;
 }
 
 export interface DerivedReview {
@@ -59,6 +87,12 @@ export interface DerivedReview {
   reviewAfter: Date | null;
   /** max(createdAt, lastConfirmedAt) — null for non-active memories. */
   reviewBaseline: Date | null;
+  /**
+   * Unaffirmed long enough that the deterministic sweep will now archive it,
+   * which distinguishes a row a day overdue from one the queue has given up
+   * on. Never true for a type without a TTL.
+   */
+  reviewEscalated: boolean;
 }
 
 /**
@@ -66,24 +100,41 @@ export interface DerivedReview {
  * `needsReview` context list, so they agree by construction.
  *
  * Non-active memories carry no review state. Types without a TTL are always
- * `fresh` with a null `reviewAfter`.
+ * `fresh` with a null `reviewAfter` — UNLESS refuted more recently than the
+ * last affirmation, which forces `needs_review` immediately regardless of
+ * type or TTL: an explicit "this was wrong" outranks a clock that hasn't
+ * finished counting down, and a `reference` memory (no TTL) is not exempt
+ * from that just because it's never nagged on a schedule.
  */
 export function deriveReviewState(input: DeriveReviewInput, now: Date): DerivedReview {
   if (input.status !== 'active') {
-    return { reviewState: null, reviewAfter: null, reviewBaseline: null };
+    return { reviewState: null, reviewAfter: null, reviewBaseline: null, reviewEscalated: false };
   }
   const baselineMs = Math.max(
     input.createdAt.getTime(),
     input.lastConfirmedAt?.getTime() ?? input.createdAt.getTime(),
   );
   const reviewBaseline = new Date(baselineMs);
-
   const ttl = ttlForType(input.type);
+  const escalated =
+    ttl !== undefined && baselineMs + ttl * (1 + ESCALATION_MULTIPLIER) <= now.getTime();
+
+  const refutedSinceBaseline =
+    input.lastRefutedAt !== null && input.lastRefutedAt.getTime() > baselineMs;
+  if (refutedSinceBaseline) {
+    return {
+      reviewState: 'needs_review',
+      reviewAfter: input.lastRefutedAt,
+      reviewBaseline,
+      reviewEscalated: escalated,
+    };
+  }
+
   if (ttl === undefined) {
-    return { reviewState: 'fresh', reviewAfter: null, reviewBaseline };
+    return { reviewState: 'fresh', reviewAfter: null, reviewBaseline, reviewEscalated: false };
   }
   const reviewAfter = new Date(baselineMs + ttl);
   const reviewState: ReviewState =
     reviewAfter.getTime() <= now.getTime() ? 'needs_review' : 'fresh';
-  return { reviewState, reviewAfter, reviewBaseline };
+  return { reviewState, reviewAfter, reviewBaseline, reviewEscalated: escalated };
 }
