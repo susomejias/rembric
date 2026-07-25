@@ -126,7 +126,14 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
         ],
       })}
       ${flashBanner}
-      <div class="grid-6" style="margin-bottom:var(--s-6)">
+      <div class="grid-kinds" style="margin-bottom:var(--s-6)">
+        ${statCard({
+          // `total` is filter-aware; this card must not shrink as you filter.
+          k: 'ALL KINDS',
+          v: byKind.reduce((sum, b) => sum + b.count, 0),
+          tone: 'lime',
+          href: '/dashboard/entities',
+        })}
         ${ENTITY_KINDS.map((k) => {
           const count = byKind.find((b) => b.kind === k)?.count ?? 0;
           return statCard({

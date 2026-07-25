@@ -1,0 +1,21 @@
+/* ENTITIES — per-kind counters + the entity table */
+
+/* auto-fill, not a fixed column count: the kind set grows (5 → 12 already).
+   Borders live on the cells with a negative margin so adjacent edges collapse
+   into one line — unlike the gap-over-background trick, a partly-filled last
+   row leaves no visible empty cells. */
+.grid-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 0;
+}
+.grid-kinds > .stat {
+  border: 1px solid #383838;
+  margin: -1px 0 0 -1px;
+  min-height: 74px;
+  padding: var(--s-3) var(--s-4);
+  gap: var(--s-2);
+}
+.grid-kinds > .stat .stat-v {
+  font-size: 1.6rem;
+}
