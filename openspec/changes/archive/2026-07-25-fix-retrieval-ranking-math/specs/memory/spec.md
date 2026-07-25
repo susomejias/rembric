@@ -41,7 +41,7 @@ The rank window SHALL be floored at or above the crossover implied by the rank c
 
 #### Scenario: An identifier query returns the memory naming it
 
-- **GIVEN** an active memory whose content contains a rare identifier, and at least eight topically-adjacent memories that both branches surface
+- **GIVEN** an active memory whose content contains a rare identifier, and no more than `window - (rank_constant + 2)` other memories ranked below the crossover in both branches
 - **WHEN** `memory.search` is called with that identifier at the default limit
 - **THEN** the memory containing the identifier SHALL appear in the returned page
 

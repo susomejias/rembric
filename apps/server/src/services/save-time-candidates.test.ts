@@ -144,28 +144,111 @@ describe('topic_key upsert path', () => {
 });
 
 describe('findSaveTimeCandidates', () => {
-  it('returns FTS candidates above the threshold scoped to the same (scope, project)', () => {
-    const a = memorySvc.save(
+  // A 2-row corpus drives FTS5 IDF to ~1e-6, so the old inverted-similarity
+  // gate passed by scoring the "true match" as noise — a fix validated
+  // against a fixture that small proves nothing. These use >=50 heterogeneous
+  // rows so the pool genuinely competes (fix-retrieval-ranking-math).
+  function fillHeterogeneousCorpus(n: number): void {
+    for (let i = 0; i < n; i++) {
+      memorySvc.save(
+        {
+          type: 'feedback',
+          title: `Rollout schedule entry ${i}`,
+          content: `rollout schedule entry ${i} covers timezone rotation and on-call handoff details for cycle ${i}`,
+        },
+        SCOPE_GLOBAL,
+      );
+    }
+  }
+
+  it('surfaces a byte-identical in-scope duplicate with source fts and similarity 1.0 (no embedding, >=50 active rows)', () => {
+    fillHeterogeneousCorpus(48);
+    const original = memorySvc.save(
       {
         type: 'feedback',
         title: 'Use two-space indentation always',
-        content: 'use two-space indentation always',
+        content: 'use two-space indentation always in every file',
       },
       SCOPE_GLOBAL,
     );
-    const b = memorySvc.save(
+    const duplicate = memorySvc.save(
       {
         type: 'feedback',
-        title: 'Use two-space indentation with single quotes',
-        content: 'use two-space indentation always with single quotes',
+        title: 'Use two-space indentation always',
+        content: 'use two-space indentation always in every file',
       },
       SCOPE_GLOBAL,
     );
 
-    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, { perSaveMax: 5 });
-    expect(cands.length).toBeGreaterThanOrEqual(1);
-    expect(cands.some((c) => c.targetId === a.id)).toBe(true);
-    expect(cands.every((c) => c.source === 'fts' || c.source === 'vec')).toBe(true);
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
+      perSaveMax: 5,
+    });
+    const match = cands.find((c) => c.targetId === original.id);
+    expect(match).toBeDefined();
+    expect(match!.source).toBe('fts');
+    expect(match!.similarity).toBe(1);
+  });
+
+  it.each([50, 150, 300])(
+    'does not go silent as the corpus grows — surfaces the duplicate at %i active rows',
+    (n) => {
+      fillHeterogeneousCorpus(n - 2);
+      const original = memorySvc.save(
+        {
+          type: 'feedback',
+          title: 'Prefer explicit error types over generic Error',
+          content: 'prefer explicit error types over a generic Error across the codebase',
+        },
+        SCOPE_GLOBAL,
+      );
+      const duplicate = memorySvc.save(
+        {
+          type: 'feedback',
+          title: 'Prefer explicit error types over generic Error',
+          content: 'prefer explicit error types over a generic Error across the codebase',
+        },
+        SCOPE_GLOBAL,
+      );
+
+      const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
+        perSaveMax: 5,
+      });
+      expect(cands.some((c) => c.targetId === original.id && c.source === 'fts')).toBe(true);
+    },
+  );
+
+  it('a row sharing only a near-universal term is not reported near 1.0 and does not consume the candidate budget', () => {
+    // Every filler row shares the word "rollout" (near-universal here) with
+    // the saved row, but only the genuine match shares its distinctive terms.
+    fillHeterogeneousCorpus(55);
+    const genuine = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'Canary rollout strategy for the checkout service',
+        content:
+          'canary rollout strategy for the checkout service reduces blast radius during releases',
+      },
+      SCOPE_GLOBAL,
+    );
+    const saved = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'Canary rollout plan for the checkout service',
+        content:
+          'canary rollout plan for the checkout service reduces blast radius during releases too',
+      },
+      SCOPE_GLOBAL,
+    );
+
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
+      perSaveMax: 5,
+    });
+    const genuineMatch = cands.find((c) => c.targetId === genuine.id);
+    expect(genuineMatch).toBeDefined();
+    expect(genuineMatch!.similarity).toBeGreaterThan(0.5);
+    for (const c of cands) {
+      if (c.targetId !== genuine.id) expect(c.similarity).toBeLessThan(0.5);
+    }
   });
 
   it('surfaces FTS candidates for non-ASCII content (Unicode-aware MATCH builder)', () => {

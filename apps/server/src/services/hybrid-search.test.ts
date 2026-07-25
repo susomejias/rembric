@@ -5,7 +5,15 @@ import { loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
-import { applyRankingBoost, fuseRRF, sanitizeFtsQuery } from './hybrid-search.js';
+import {
+  applyRankingBoost,
+  computeRankWindowSize,
+  fuseRRF,
+  fuseRRFWithScores,
+  RANK_CONSTANT,
+  RANK_WINDOW_CEILING,
+  sanitizeFtsQuery,
+} from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { projectScope, SCOPE_GLOBAL } from './scope.js';
@@ -48,6 +56,64 @@ describe('sanitizeFtsQuery', () => {
     expect(sanitizeFtsQuery('alpha beta gamma delta epsilon')).toBe(
       '"alpha" OR "beta" OR "gamma" OR "delta" OR "epsilon"',
     );
+  });
+});
+
+describe('rank window floor', () => {
+  it('floors the window at the crossover implied by RANK_CONSTANT for the default page', () => {
+    const window = computeRankWindowSize(8, 0);
+    expect(window).toBeGreaterThan(RANK_CONSTANT + 2); // the derived crossover
+    expect(window).toBe(64);
+  });
+
+  it('leaves large-limit windows unchanged by the floor', () => {
+    expect(computeRankWindowSize(400, 0)).toBe(RANK_WINDOW_CEILING);
+    expect(computeRankWindowSize(370, 30)).toBe(RANK_WINDOW_CEILING);
+  });
+
+  /** Builds dense/lexical ranked lists of exactly `window` length, with `bothCount` ids at the bottom rank of both lists and `single` at rank 1 of the lexical list only. */
+  function buildCrossoverLists(
+    window: number,
+    single: string,
+    bothCount: number,
+  ): { dense: string[]; lexical: string[]; both: string[] } {
+    const both = Array.from({ length: bothCount }, (_, i) => `both-${i}`);
+    const denseFillers = Array.from({ length: window - bothCount }, (_, i) => `dense-filler-${i}`);
+    const lexFillers = Array.from({ length: window - 1 - bothCount }, (_, i) => `lex-filler-${i}`);
+    return {
+      dense: [...denseFillers, ...both],
+      lexical: [single, ...lexFillers, ...both],
+      both,
+    };
+  }
+
+  // Only rows ranked strictly below the k+2 crossover in BOTH branches are
+  // "free passes" a single-branch rank-1 match must survive against — at
+  // window=64, k=60 that's ranks 63-64 (2 rows), not an arbitrary count. A
+  // 3rd "both-branches" row already sits above the crossover and legitimately
+  // outranks a single-signal match, which is correct ranking, not a defect
+  // this fix is meant to (or could) prevent — more genuinely-relevant
+  // competitors than fit on a page is not something any window floor can fix.
+  it('a rank-1 single-branch row outranks bottom-of-window both-branches rows at the floored window', () => {
+    const window = computeRankWindowSize(8, 0); // 64
+    const single = 'single-branch-rank-1';
+    const { dense, lexical, both } = buildCrossoverLists(
+      window,
+      single,
+      window - (RANK_CONSTANT + 2),
+    );
+    const fused = fuseRRFWithScores([dense, lexical], RANK_CONSTANT);
+    const rank = new Map(fused.map((f, i) => [f.id, i]));
+    for (const id of both) expect(rank.get(single)!).toBeLessThan(rank.get(id)!);
+  });
+
+  it('the same construction inverts below the crossover (proves the invariant is real, not vacuous)', () => {
+    const belowCrossoverWindow = RANK_CONSTANT + 1; // 61 < the 62 crossover
+    const single = 'single-branch-rank-1';
+    const { dense, lexical, both } = buildCrossoverLists(belowCrossoverWindow, single, 1);
+    const fused = fuseRRFWithScores([dense, lexical], RANK_CONSTANT);
+    const rank = new Map(fused.map((f, i) => [f.id, i]));
+    expect(rank.get(both[0]!)!).toBeLessThan(rank.get(single)!);
   });
 });
 
@@ -107,19 +173,24 @@ describe('applyRankingBoost', () => {
     expect(rankingMetadataByIds).not.toHaveBeenCalled();
   });
 
-  it('clamps the boost so it cannot invert a large raw-score gap', () => {
+  it('cannot invert a large, still-reachable raw-score gap even at the boost extremes', () => {
+    // 'strong' and 'weak' hit the actual reachable extremes ([0.9, 1.35], not
+    // the declared-but-unreachable [0.7, 1.4] clamp — see hybrid-search.ts).
+    // The old version of this test used a `strong: 0.1` input ~3x above the
+    // maximum two-branch fused score (2/61 ≈ 0.033), so max boost on the
+    // weaker id could never have inverted it regardless of the clamp.
     const meta = new Map([
-      ['weak', { type: 'user' as const, lastSeenAt: NOW }],
-      ['strong', { type: 'project' as const, lastSeenAt: new Date(NOW.getTime() - 200 * DAY_MS) }],
+      ['weak', { type: 'user' as const, lastSeenAt: NOW }], // +0.1 type, +0.1 recency
+      ['strong', { type: 'project' as const, lastSeenAt: new Date(NOW.getTime() - 200 * DAY_MS) }], // +0 type, -0.1 recency
     ]);
-    const confirmations = new Map([['weak', 5]]);
-    // Max boost on weak (0.01·1.4) still can't overtake strong (0.1·0.7 floor).
+    const confirmations = new Map([['weak', 5]]); // +0.15 → weak boost = 1.35
+    // Both scores are within the two-branch RRF ceiling (2/61 ≈ 0.0328).
     const fused = [
-      { id: 'strong', score: 0.1 },
-      { id: 'weak', score: 0.01 },
+      { id: 'strong', score: 0.03 },
+      { id: 'weak', score: 0.005 },
     ];
     const result = applyRankingBoost(fused, fakeOpts(meta, confirmations));
-    expect(result[0]).toBe('strong');
+    expect(result[0]).toBe('strong'); // 0.03·0.9 = 0.027 still beats 0.005·1.35 = 0.00675
   });
 });
 

@@ -19,6 +19,22 @@ export const RANK_CONSTANT = 60;
 /** Hard ceiling on the per-branch rank window, set above the max `limit` (200). */
 export const RANK_WINDOW_CEILING = 400;
 const RANK_WINDOW_MARGIN = 30;
+/**
+ * RRF only preserves "a rank-1 single-branch row outranks a bottom-of-window
+ * both-branches row" while `window > RANK_CONSTANT + 2` (from
+ * `1/(k+1) > 2/(k+window)`). Floored at `+4` for margin over that crossover
+ * — derived from `RANK_CONSTANT`, not a bare literal, so the two constants
+ * can't drift apart again. See fix-retrieval-ranking-math.
+ */
+const RANK_WINDOW_FLOOR = RANK_CONSTANT + 4;
+
+/** The per-branch over-fetch window for a given page — exported for direct unit testing. */
+export function computeRankWindowSize(limit: number, offset: number): number {
+  return Math.min(
+    Math.max(limit + offset + RANK_WINDOW_MARGIN, RANK_WINDOW_FLOOR),
+    RANK_WINDOW_CEILING,
+  );
+}
 
 export interface HybridSearchOpts {
   repos: Pick<Repositories, 'memory' | 'vectors'>;
@@ -40,10 +56,7 @@ export interface HybridSearchOpts {
 }
 
 export async function hybridSearch(opts: HybridSearchOpts): Promise<string[]> {
-  const rankWindowSize = Math.min(
-    opts.limit + opts.offset + RANK_WINDOW_MARGIN,
-    RANK_WINDOW_CEILING,
-  );
+  const rankWindowSize = computeRankWindowSize(opts.limit, opts.offset);
 
   const lexical = lexicalRetriever(opts, rankWindowSize);
   const dense = await denseRetriever(opts, rankWindowSize);
@@ -53,6 +66,10 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<string[]> {
   return boosted.slice(opts.offset, opts.offset + opts.limit);
 }
 
+// Declared clamp bounds; the per-signal weights below only ever reach
+// [0.9, 1.35] in practice (see applyRankingBoost's docstring) — left
+// unreachable-wide rather than tightened, since tightening changes no
+// behavior and would misrepresent this as the fix. See fix-retrieval-ranking-math.
 const BOOST_MIN = 0.7;
 const BOOST_MAX = 1.4;
 const TYPE_WEIGHT: Record<MemoryType, number> = {
@@ -64,8 +81,13 @@ const TYPE_WEIGHT: Record<MemoryType, number> = {
 const DAY_MS = 86_400_000;
 
 /**
- * Re-weights the fused pool by a clamped `[BOOST_MIN, BOOST_MAX]` multiplier
- * before the `limit` truncation. The clamp keeps it from overriding RRF order.
+ * Re-weights the fused pool by a multiplier clamped to `[BOOST_MIN,
+ * BOOST_MAX]` (reachable range `[0.9, 1.35]` given the current per-signal
+ * weights), applied BEFORE the `limit` truncation — so it CAN and is meant
+ * to change page membership: a fresh, confirmed memory should outrank a
+ * stale unconfirmed one at a close raw RRF score. The clamp bounds the
+ * multiplier's magnitude; it does not, and is not meant to, prevent
+ * reordering near-ties.
  */
 export function applyRankingBoost(
   fused: { id: string; score: number }[],
@@ -195,28 +217,35 @@ export function fuseRRF(rankedLists: string[][], rankConstant = RANK_CONSTANT): 
 }
 
 /**
+ * Split text into whole Unicode word/number tokens: splits on whitespace,
+ * strips stray quotes, and drops tokens with no letter/number in any script
+ * (does NOT split at non-ASCII chars or drop accented/CJK tokens, unlike a
+ * naive ASCII-only tokenizer) — a quoted phrase of pure punctuation
+ * tokenizes to nothing and is useless (and risks an empty-phrase parse
+ * edge). Shared by `sanitizeFtsQuery` and the save-time candidate
+ * detector's token-containment similarity, so both use one tokenization rule.
+ */
+export function tokenizeWords(text: string): string[] {
+  const tokens: string[] = [];
+  for (const raw of text.split(/\s+/)) {
+    const t = raw.replace(/"/g, '').trim();
+    if (t && /[\p{L}\p{N}]/u.test(t)) tokens.push(t);
+  }
+  return tokens;
+}
+
+/**
  * Build a crash-proof FTS5 MATCH expression from arbitrary natural-language
- * text. Keeps whole Unicode word tokens (does NOT split at non-ASCII chars or
- * drop accented/CJK tokens, unlike a naive ASCII-only tokenizer), drops
- * pure-punctuation tokens, and quotes each surviving token as a phrase —
+ * text: quotes each token as a phrase — which neutralizes FTS5
+ * metacharacters AND bareword operators (AND/OR/NOT/NEAR) in one move —
  * optionally capped at `maxTerms` OR-phrases (save-time candidate detection
- * passes a cap; interactive search does not).
- * which neutralizes FTS5 metacharacters AND bareword operators (AND/OR/NOT/
- * NEAR) in one move. The OR between quoted phrases is the intended fusion-
- * friendly recall semantics; a user's literal "OR" becomes the phrase `"or"`.
- * Returns '' when nothing usable remains (caller skips the lexical branch).
+ * passes a cap; interactive search does not). The OR between quoted phrases
+ * is the intended fusion-friendly recall semantics; a user's literal "OR"
+ * becomes the phrase `"or"`. Returns '' when nothing usable remains (caller
+ * skips the lexical branch).
  */
 export function sanitizeFtsQuery(query: string, opts?: { maxTerms?: number }): string {
-  const tokens: string[] = [];
-  for (const raw of query.split(/\s+/)) {
-    const t = raw.replace(/"/g, '').trim();
-    if (!t) continue;
-    // Drop tokens with no letter/number in any script — a quoted phrase of
-    // pure punctuation tokenizes to nothing and is useless (and risks an
-    // empty-phrase parse edge).
-    if (!/[\p{L}\p{N}]/u.test(t)) continue;
-    tokens.push(`"${t}"`);
-    if (opts?.maxTerms !== undefined && tokens.length >= opts.maxTerms) break;
-  }
-  return tokens.join(' OR ');
+  const tokens = tokenizeWords(query);
+  const capped = opts?.maxTerms !== undefined ? tokens.slice(0, opts.maxTerms) : tokens;
+  return capped.map((t) => `"${t}"`).join(' OR ');
 }

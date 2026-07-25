@@ -83,7 +83,8 @@ memory.save (MCP)                            ← mcp/memory-tools.ts
    │
    ├─ findSaveTimeCandidates()               ← services/save-time-candidates.ts
    │     ├─ vec pass  cosine kNN over memory_vec   (≥ VEC_THRESHOLD 0.70)
-   │     ├─ FTS5 pass BM25 lexical                 (≥ FTS_THRESHOLD 0.4)
+   │     ├─ FTS5 pass BM25 lexical                 (top-poolSize by rank; reported
+   │     │                                          similarity = token containment)
    │     └─ dedupe by target, higher score wins, cap CANDIDATES_PER_SAVE_MAX
    │
    └─ response: candidates[] → the agent closes each with memory.judge
@@ -107,11 +108,16 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Engine constants (not configuration)
 
-| Constant            | Value                                                    | Lives in                           |
-| ------------------- | -------------------------------------------------------- | ---------------------------------- |
-| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`           | `embeddings/embedder.ts`           |
-| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)               | `embeddings/embedder.ts`           |
-| `VEC_THRESHOLD`     | 0.70 (calibrated 2026-06-05; telemetry on every drain)   | `services/save-time-candidates.ts` |
-| `FTS_THRESHOLD`     | 0.4 (BM25 proxy `1/(1+\|rank\|)`, corpus-size sensitive) | `services/save-time-candidates.ts` |
+| Constant            | Value                                                  | Lives in                           |
+| ------------------- | ------------------------------------------------------ | ---------------------------------- |
+| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`         | `embeddings/embedder.ts`           |
+| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `embeddings/embedder.ts`           |
+| `VEC_THRESHOLD`     | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `services/save-time-candidates.ts` |
+
+The lexical pass has no equivalent absolute threshold: bm25 is unbounded and
+corpus-size dependent, so no fixed floor over it is stable. Admission is by
+rank position within the pool instead (the `ORDER BY rank LIMIT poolSize`
+SQL query already computes this); the reported `similarity` is a separate,
+bounded (`0..1`) token-containment measure — see `fix-retrieval-ranking-math`.
 
 Changing any of these is an architectural change (OpenSpec), not tuning.

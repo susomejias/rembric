@@ -16,8 +16,10 @@ import { scopeCondition, scopeWhere } from './scope-clause.js';
 // BM25 column weights for the interactive search lexical branch, in
 // `memory_fts` declaration order (content, tags, title). A title hit is a
 // strong relevance signal, so title is weighted above content. Save-time
-// candidate detection deliberately keeps default (unweighted) ranking so its
-// calibrated FTS_THRESHOLD is undisturbed.
+// candidate detection deliberately keeps default (unweighted) ranking —
+// admission is by rank position within the pool (see
+// save-time-candidates.ts), so reweighting here would silently change
+// which rows fall inside that pool.
 const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
@@ -84,11 +86,11 @@ export class MemoryRepository {
    *
    * Deliberately ordered by the DEFAULT (unweighted) `rank`, unlike the
    * interactive `searchBm25Ids` (which applies the FTS_WEIGHT_* title boost):
-   * the save-time `FTS_THRESHOLD` was calibrated on unweighted BM25, so
-   * reweighting here would silently de-calibrate candidate surfacing. (The
-   * MATCH does now span the `title` column too, so a saved row's content tokens
-   * can match an existing row's title — a small, intentional recall widening;
-   * the rank/threshold math is unchanged.)
+   * admission here is by rank position within the pool (see
+   * save-time-candidates.ts), so reweighting would silently change which
+   * rows are admitted. (The MATCH does now span the `title` column too, so a
+   * saved row's content tokens can match an existing row's title — a small,
+   * intentional recall widening; the rank ordering itself is unchanged.)
    */
   searchBm25Candidates(opts: {
     matchExpr: string;

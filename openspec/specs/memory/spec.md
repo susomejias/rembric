@@ -178,7 +178,7 @@ The data dir SHALL record the embedding identity, comprising BOTH the compiled-i
 
 When `memory.search` is called with a non-empty text `query`, the system SHALL implement the standard hybrid-search pattern used by mainstream search engines: run an independent **lexical retriever** (FTS5/BM25 ranked ids) and **dense retriever** (vector k-nearest-neighbor ranked ids), then combine their ranked lists using Reciprocal Rank Fusion (RRF): `score(id) = Σ 1/(rank_constant + rank_branch(id))` over the branches in which the id appears. Each child retriever SHALL over-fetch into a bounded **rank window** (at least `limit + offset`, clamped to a fixed ceiling set strictly above the maximum `limit` so an unbounded `offset` cannot force a near-full partition scan) so that fusion is not artificially recall-capped. When `memory.search` is called WITHOUT a text `query`, the system SHALL use the existing chronological listing path unchanged (ordered by `created_at`, with exact `limit`/`offset`). The dense branch SHALL NOT apply a similarity threshold — fusion orders results, it does not filter them. The text query SHALL be sanitized before it is passed to the FTS5 `MATCH` so that an arbitrary natural-language query cannot raise an FTS5 syntax error or be reinterpreted as an FTS5 query expression. The sanitizer SHALL keep whole Unicode word tokens (it SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII — e.g. accented or CJK text), SHALL strip FTS5 metacharacters and balance quotes, and SHALL neutralize FTS5 bareword operators (`AND`, `OR`, `NOT`, `NEAR`) so a phrase like "coffee OR tea" matches literal terms rather than being parsed as a boolean expression. (The FTS tokenizer folds diacritics, so a sanitized accented or ASCII-folded token matches accented stored content either way; the binding requirement is to preserve whole tokens and neutralize operators, not to special-case accents.) A failure of either branch SHALL degrade gracefully to the other branch rather than failing the whole search. Filters SHALL have explicit guarantees: `status` and `type` apply to BOTH branches; `tag` is exact on the lexical branch and post-filters dense candidates inside the bounded rank window (so no wrong-tag rows are returned, but dense+tag recall is bounded by the rank window rather than globally complete). Result rows SHALL carry the same shape as today (including the `relations` array and the `last_seen_at` touch).
 
-After RRF produces the fused, ordered candidate pool for the over-fetched rank window, the system SHALL apply a bounded post-fusion multiplier before truncating to the top `limit` results: `finalScore(id) = rrfScore(id) * boost(id)`, where `boost(id)` is a compile-time-constant function of the candidate row's `confirmationCount`, time since `last_seen_at`, and `type`, clamped to a fixed range (approximately `[0.7, 1.4]`) so it can re-order candidates within the fused pool but SHALL NOT let a boosted weaker match outrank a strongly-fused one by more than that bound. This boost applies ONLY to the text-query (fused hybrid-search) branch; the no-query chronological listing path is UNCHANGED and continues to use exact chronological order with no boost applied. The boost multiplier SHALL NOT be exposed as a per-request tunable — it is a fixed constant, matching the existing style of `RANK_CONSTANT` and the rank-window ceiling.
+After RRF produces the fused, ordered candidate pool for the over-fetched rank window, the system SHALL apply a post-fusion multiplier BEFORE truncating to the top `limit` results: `finalScore(id) = rrfScore(id) * boost(id)`, where `boost(id)` is a compile-time-constant function of the candidate row's `confirmationCount`, time since `last_seen_at`, and `type`, clamped to a fixed range (declared `[0.7, 1.4]`; reachable in practice `[0.9, 1.35]` given the current per-signal weights). Applying the boost before truncation is deliberate: it CAN and is meant to change which rows make the page — a fresh, confirmed memory SHALL be able to outrank a stale unconfirmed one at a close raw RRF score. The clamp bounds the multiplier's magnitude; it does not, and is not meant to, prevent reordering near-ties. This boost applies ONLY to the text-query (fused hybrid-search) branch; the no-query chronological listing path is UNCHANGED and continues to use exact chronological order with no boost applied. The boost multiplier SHALL NOT be exposed as a per-request tunable — it is a fixed constant, matching the existing style of `RANK_CONSTANT` and the rank-window ceiling.
 
 #### Scenario: A cross-lingual query surfaces a memory stored in another language
 
@@ -232,7 +232,7 @@ After RRF produces the fused, ordered candidate pool for the over-fetched rank w
 
 A memory's `title` SHALL contribute to `memory.search` on BOTH branches of hybrid retrieval, not merely as a display label:
 
-- **Lexical**: the FTS5 index (`memory_fts`) SHALL cover `title` in addition to `content` and `tags`, kept in sync by the same INSERT/UPDATE/DELETE triggers. The interactive search lexical branch SHALL rank with a BM25 column weighting that boosts `title` above `content` (`wTitle > wContent`), so a query matching a memory's title ranks it higher. Save-time candidate detection MAY keep default (unweighted) BM25 ranking so its calibrated thresholds are unaffected.
+- **Lexical**: the FTS5 index (`memory_fts`) SHALL cover `title` in addition to `content` and `tags`, kept in sync by the same INSERT/UPDATE/DELETE triggers. The interactive search lexical branch SHALL rank with a BM25 column weighting that boosts `title` above `content` (`wTitle > wContent`), so a query matching a memory's title ranks it higher. Save-time candidate detection MAY keep default (unweighted) BM25 ranking — admission there is by rank position within the pool (not an absolute threshold), so reweighting would silently change which rows are admitted.
 - **Dense**: the per-memory embedding SHALL be computed from the concatenation of `title` and `content` (not `content` alone), so the curated headline shapes the stored vector and the query-vs-memory cosine similarity.
 
 #### Scenario: A title-only term ranks the memory lexically
@@ -688,3 +688,69 @@ SQLite's `length()` terminates at the first NUL byte, so a value whose JavaScrip
 
 - **WHEN** `memory.capture_passive` derives a title from content whose character at the truncation boundary is an astral-plane codepoint
 - **THEN** the derived title SHALL end at the preceding whole codepoint and SHALL NOT contain an unpaired surrogate
+
+### Requirement: Save-time lexical candidate scoring MUST increase with match quality
+
+FTS5's bm25 score is negative and unbounded, and a better match is _more_ negative. Any similarity derived from it SHALL be monotonically **increasing** in match quality, and SHALL be bounded to `[0, 1]` so that the value reported to the agent as `similarity` is truthful against its documented range and comparable with the cosine similarity produced by the dense detector.
+
+Because bm25 magnitudes scale with corpus size and term IDF, the system SHALL NOT gate lexical candidates on an absolute threshold over the raw bm25 value: no such threshold is stable across corpus sizes. Admission SHALL instead be by rank position within the already-correctly-ordered candidate pool, and the reported `similarity` SHALL be computed as a corpus-independent lexical overlap measure between the saved text and the candidate.
+
+#### Scenario: A byte-identical duplicate is surfaced lexically
+
+- **GIVEN** a scope containing at least fifty active memories, and a newly saved memory whose text is byte-identical to one of them, with no embedding available
+- **WHEN** save-time candidate detection runs
+- **THEN** the identical memory SHALL be surfaced as a candidate with `source: 'fts'`
+- **AND** its reported `similarity` SHALL be 1.0
+
+#### Scenario: A near-zero-IDF match is not reported as identical
+
+- **GIVEN** a scope in which a term appears in nearly every memory
+- **WHEN** a save shares only that term with an otherwise unrelated memory
+- **THEN** that memory SHALL NOT be reported with a `similarity` near 1.0
+- **AND** it SHALL NOT displace a genuinely similar candidate from the per-save candidate budget
+
+#### Scenario: Lexical detection does not go silent as the corpus grows
+
+- **GIVEN** the same duplicate-save scenario evaluated at corpus sizes of 50, 150 and 300 active memories
+- **WHEN** save-time candidate detection runs at each size
+- **THEN** the identical memory SHALL be surfaced at every size
+
+### Requirement: The rank window MUST be wide enough for the rank constant it uses
+
+Reciprocal Rank Fusion with rank constant `k` only preserves the intended ordering when the rank window is wide enough that a bottom-of-window row present in both branches cannot outscore a rank-1 row present in one branch. That condition is `2/(k + window) <= 1/(k + 1)`, i.e. the window must be at least `k + 2`. With `k = 60` and the default result limit the window is currently 38, well below the crossover, so the invariant is violated on the default path.
+
+The rank window SHALL be floored at or above the crossover implied by the rank constant, so that a single-branch rank-1 match is never displaced by rows whose only advantage is appearing in both branches' windows. Both retrievers already over-fetch and the dense kNN cost is flat in `k`, so the floor SHALL be implemented by widening the window rather than by lowering the rank constant. This guarantee is bounded by construction: at most `window - (rank_constant + 2)` rows can simultaneously rank below the crossover in both branches. A single-branch match displaced by more genuinely-relevant competitors than fit on a page is not a violation of this requirement — no window floor can or should prevent a page from filling with better matches.
+
+#### Scenario: An exact single-branch match outranks a both-branches pair
+
+- **GIVEN** a query whose exact-token match is returned at rank 1 by the lexical branch and is absent from the dense branch's window
+- **AND** two rows that appear near the bottom of both branches' windows
+- **WHEN** the ranked lists are fused at the default result limit
+- **THEN** the exact match SHALL outrank both of those rows
+
+#### Scenario: An identifier query returns the memory naming it
+
+- **GIVEN** an active memory whose content contains a rare identifier, and no more than `window - (rank_constant + 2)` other memories ranked below the crossover in both branches
+- **WHEN** `memory.search` is called with that identifier at the default limit
+- **THEN** the memory containing the identifier SHALL appear in the returned page
+
+#### Scenario: Large-limit behavior is unchanged
+
+- **WHEN** `memory.search` is called with a limit whose derived window already exceeds the crossover
+- **THEN** the window SHALL be unchanged by the floor
+
+### Requirement: The post-fusion boost's documented guarantee MUST match its behavior
+
+The post-fusion boost is applied before results are truncated to the requested limit, so it can and does change which rows are returned — reordering near-ties is its purpose, not a side effect to be bounded away. Its declared clamp (`[0.7, 1.4]`) MUST NOT be narrower, in its documentation, than what the boost is actually meant to do; and MUST NOT be documented as tighter than its reachable range (`[0.9, 1.35]` given the current per-signal weights), since a bound the implementation cannot reach reads as a guarantee that was never true.
+
+Coverage of this behavior SHALL use test inputs inside the range fusion can actually produce. A guard test whose inputs exceed the maximum achievable fused score is not coverage — it cannot distinguish the boost working from the boost being disabled entirely.
+
+#### Scenario: The boost guarantee is tested within the reachable domain
+
+- **WHEN** the boost's ordering guarantee is tested
+- **THEN** the test inputs SHALL be scores achievable by the fusion function over ranked lists, not values above its arithmetic ceiling
+
+#### Scenario: The documented bound matches the reachable range
+
+- **WHEN** the boost's documented range is compared against the sum of its reachable terms
+- **THEN** the documentation SHALL not claim bounds the implementation cannot reach

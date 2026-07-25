@@ -1,7 +1,7 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
-import { sanitizeFtsQuery } from './hybrid-search.js';
+import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
 
 /**
  * Save-time candidate detector for `memory.save`.
@@ -24,15 +24,19 @@ import { sanitizeFtsQuery } from './hybrid-search.js';
  */
 
 /**
- * Similarity floors are engine constants calibrated for the compiled-in
+ * Vec similarity floor is an engine constant calibrated for the compiled-in
  * embedding model (gte-multilingual-base q8) — not operator configuration.
- * VEC: sandbox-calibrated on a 16-pair battery (positives 0.73–0.97,
- * negatives 0.43–0.68); revisit against backfill distribution logs.
- * FTS: BM25-derived proxy `1/(1+|rank|)` — corpus-size sensitive, same
- * recalibration channel.
+ * Sandbox-calibrated on a 16-pair battery (positives 0.73–0.97, negatives
+ * 0.43–0.68); revisit against backfill distribution logs.
+ *
+ * The lexical side has no equivalent absolute floor: FTS5's raw bm25 is
+ * unbounded and scales with corpus size and term IDF, so no fixed threshold
+ * over it is stable (see fix-retrieval-ranking-math). Lexical admission is
+ * by rank position within the already bm25-ordered pool instead — the SQL
+ * `ORDER BY rank LIMIT poolSize` in `searchBm25Candidates` IS the admission
+ * rule; there is no separate gate.
  */
 export const VEC_THRESHOLD = 0.7;
-export const FTS_THRESHOLD = 0.4;
 
 export interface CandidateOptions {
   perSaveMax: number;
@@ -87,8 +91,11 @@ export function findSaveTimeCandidates(
     }))
     .filter((c) => c.similarity >= VEC_THRESHOLD);
 
-  // BM25 returns lower-is-better; normalize via 1/(1+|rank|) to a [0,1]
-  // proxy, then keep matches above the configured threshold.
+  // Admission is by rank position: the query already orders by bm25 best-
+  // first and LIMITs to poolSize, so every returned row is admitted. The
+  // REPORTED similarity is a separate concern — bounded token containment
+  // over the sanitized token set, truthful against its documented `0..1`
+  // range and comparable enough to cosine for the max(vec, fts) merge below.
   const matchExpr = sanitizeFtsQuery(saved.content, { maxTerms: 16 });
   const ftsPool: SaveCandidate[] = [];
   if (matchExpr.length > 0) {
@@ -100,24 +107,24 @@ export function findSaveTimeCandidates(
       excludeIds,
       limit: poolSize,
     });
+    const queryTokens = tokenSet(saved.content);
     for (const r of ftsRows) {
-      const sim = 1 / (1 + Math.abs(r.rank));
-      if (sim >= FTS_THRESHOLD) {
-        ftsPool.push({
-          targetId: r.id,
-          similarity: sim,
-          source: 'fts',
-          title: r.title,
-          snippet: snippet(r.content, 200),
-          topicKey: r.topicKey,
-        });
-      }
+      ftsPool.push({
+        targetId: r.id,
+        similarity: tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`)),
+        source: 'fts',
+        title: r.title,
+        snippet: snippet(r.content, 200),
+        topicKey: r.topicKey,
+      });
     }
   }
 
   // --- 3. Merge + dedupe ----------------------------------------------
   // For each unique target id, keep the higher-scoring source (vec wins
-  // ties because vec is semantic, fts is lexical).
+  // ties because vec is semantic, fts is lexical). Both similarities are
+  // now bounded [0,1] and corpus-independent, so this comparison is
+  // meaningful — it wasn't while fts reported an inverted, unbounded proxy.
   const byId = new Map<string, SaveCandidate>();
   for (const c of [...vecPool, ...ftsPool]) {
     const prev = byId.get(c.targetId);
@@ -130,4 +137,29 @@ export function findSaveTimeCandidates(
 function snippet(content: string, max: number): string {
   if (content.length <= max) return content;
   return content.slice(0, max - 1) + '…';
+}
+
+/** Lowercased token set, built on `hybrid-search.ts`'s shared word tokenizer. */
+function tokenSet(text: string): Set<string> {
+  return new Set(tokenizeWords(text).map((t) => t.toLowerCase()));
+}
+
+/**
+ * Corpus-independent lexical overlap: the fraction of `queryTokens` also
+ * present in `candidateTokens`. Bounded [0, 1] by construction — a candidate
+ * whose text is byte-identical to the query text scores exactly 1.0, and a
+ * candidate sharing only a near-universal term with a large query scores
+ * near 0, unlike raw bm25 (unbounded, corpus-size dependent, and inverted:
+ * see fix-retrieval-ranking-math). Iterates the smaller of the two sets —
+ * the intersection size doesn't depend on which side you walk.
+ */
+function tokenContainment(queryTokens: Set<string>, candidateTokens: Set<string>): number {
+  if (queryTokens.size === 0) return 0;
+  const [small, large] =
+    queryTokens.size <= candidateTokens.size
+      ? [queryTokens, candidateTokens]
+      : [candidateTokens, queryTokens];
+  let hits = 0;
+  for (const t of small) if (large.has(t)) hits++;
+  return hits / queryTokens.size;
 }
