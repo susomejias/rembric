@@ -41,12 +41,49 @@ export const capturePassiveSchema = {
 
 const counts = z.record(z.string(), z.number());
 
+/**
+ * `consolidation_runs.summary` is free-form JSON with two writer families: the
+ * sweep writes bare counters (`{archives,orphaned}`), maintenance-journal runs
+ * add a `kind` discriminator (`{kind:'agent_memory_archive',archived:1}`).
+ */
+const runSummary = z.object({ kind: z.string().optional() }).catchall(z.number());
+
+export interface ConsolidationRunSummary {
+  kind?: string;
+  [op: string]: string | number | undefined;
+}
+
+/**
+ * Narrow a stored summary to what `doctorOutput` admits, so a shape no writer
+ * is supposed to produce degrades this one field instead of failing the whole
+ * report — `memory.doctor` is the tool an operator reaches for when the DB is
+ * already suspect.
+ */
+export function parseRunSummary(raw: string): ConsolidationRunSummary {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const out: ConsolidationRunSummary = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key === 'kind') {
+      if (typeof value === 'string') out.kind = value;
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export interface DoctorReport {
   db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
   embeddings: { model: string; backlog: number };
   /** Memories not yet scanned for entities — a derived-index drift signal, same shape as `embeddings.backlog`. */
   entities: { backlog: number };
-  consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
+  consolidation: { lastRunAt: string | null; lastRunOps: ConsolidationRunSummary };
   sessions: { active: number };
   /** Server-wide (unscoped) queue-depth signals — same precedent as `sessions.active`; `memory.stats` carries the scoped equivalents. */
   review: { needsReview: number; pendingJudgments: number };
@@ -64,7 +101,7 @@ export const doctorOutput = {
   entities: z.object({ backlog: z.number() }),
   consolidation: z.object({
     lastRunAt: z.string().nullable(),
-    lastRunOps: counts,
+    lastRunOps: runSummary,
   }),
   sessions: z.object({ active: z.number() }),
   review: z.object({ needsReview: z.number(), pendingJudgments: z.number() }),

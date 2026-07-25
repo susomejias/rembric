@@ -14,7 +14,7 @@ import {
 import { ensureVectorModel } from '../embeddings/state.js';
 import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
-import type { DoctorReport } from '../mcp/observability-tools.js';
+import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
@@ -506,14 +506,7 @@ function buildDoctorReportFactory(deps: {
 
     const lastConsolidation = deps.repos.consolidation.adminLatestRun();
 
-    let lastRunOps: Record<string, number> = {};
-    if (lastConsolidation?.summary) {
-      try {
-        lastRunOps = JSON.parse(lastConsolidation.summary) as Record<string, number>;
-      } catch {
-        // ignore malformed JSON; the journal stays the source of truth
-      }
-    }
+    const lastRunOps = lastConsolidation?.summary ? parseRunSummary(lastConsolidation.summary) : {};
 
     const backlog = deps.repos.vectors.adminBacklogCount();
     if (backlog > 100) {

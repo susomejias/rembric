@@ -1073,6 +1073,46 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  // memory.archive journals a `maintenance` run whose summary carries a `kind`
+  // string next to the counters, so a doctor output contract that admits only
+  // numbers makes the tool fail from the first archive onwards.
+  it('memory.doctor passes output validation after an archive has been journaled', async () => {
+    const client = await connect();
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'doctor after archive',
+        content: 'doctor-after-archive-marker',
+      },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+
+    const archived = (await client.callTool({
+      name: 'memory.archive',
+      arguments: { id: (readJson(saved) as { id: string }).id },
+    })) as ToolResult;
+    expect(archived.isError).toBeFalsy();
+
+    const result = (await client.callTool({
+      name: 'memory.doctor',
+      arguments: {},
+    })) as ToolResult;
+    if (result.isError) {
+      throw new Error(`memory.doctor failed after an archive: ${JSON.stringify(readJson(result))}`);
+    }
+    const payload = readJson(result) as {
+      consolidation: { lastRunAt: string | null; lastRunOps: Record<string, unknown> };
+    };
+    expect(payload.consolidation.lastRunOps).toEqual({
+      kind: 'agent_memory_archive',
+      archived: 1,
+    });
+    expect(payload.consolidation.lastRunAt).toBeTruthy();
+    await client.close();
+  });
+
   it('memory.save without session_start succeeds and the row has session_id = null', async () => {
     const client = await connect();
     const saved = (await client.callTool({
