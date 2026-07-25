@@ -9,6 +9,9 @@ coverage/
 # CI prefetch of the embedding model (local-model layout; ephemeral on runners)
 .model-cache/
 
+# Retrieval eval harness report (apps/server/src/test/retrieval) — regenerated every run
+.eval-report/
+
 # Python (Hermes plugin tests run via `python -m unittest`)
 __pycache__/
 *.pyc

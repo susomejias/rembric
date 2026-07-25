@@ -86,6 +86,50 @@ jobs:
       - name: Build (artifact sanity)
         run: pnpm run build
 
+  retrieval-eval:
+    # Separate from `test` (design.md Decision 7): this ingests a corpus
+    # through a real embedding model, which does not belong in the inner-loop
+    # unit suite. Reuses the same model cache key as `test` for a warm cache.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REMBRIC_MODEL_CACHE: ${{ github.workspace }}/.model-cache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache embedding model
+        id: model-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.model-cache
+          key: embedder-${{ hashFiles('apps/server/scripts/fetch-model.mjs', 'apps/server/src/embeddings/embedder.ts') }}
+
+      - name: Prefetch embedding model (retried, offline-resolvable)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        working-directory: apps/server
+        run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
+
+      - name: Retrieval eval
+        run: pnpm run eval
+
   docker-build-check:
     # Safety net that mirrors the release-publish path so a build break is
     # caught at PR time, not at publish. The publish builds the (distroless)

@@ -368,6 +368,9 @@ const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'services/memory.ts',
   'consolidation/',
   'dashboard/',
+  // Eval harness ingest re-reads its own throwaway corpus across scopes
+  // post-ingest — see add-retrieval-eval-harness.
+  'test/retrieval/ingest.ts',
 ];
 
 describe('scope-leak invariant', () => {

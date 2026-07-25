@@ -1,0 +1,29 @@
+{
+  "retriever": "hybrid",
+  "embeddingModelId": "onnx-community/gte-multilingual-base",
+  "discriminatingMetric": "recall@k vs 'grep' — the corpus's honest-control comparison",
+  "ceilings": {
+    "5": {
+      "precisionAtK": 0.25,
+      "recallAtK": 1,
+      "mrr": 1
+    },
+    "8": {
+      "precisionAtK": 0.15625,
+      "recallAtK": 1,
+      "mrr": 1
+    }
+  },
+  "floors": {
+    "5": {
+      "precisionAtK": 0.15000000000000002,
+      "recallAtK": 0.7625,
+      "mrr": 0.60625
+    },
+    "8": {
+      "precisionAtK": 0.10625,
+      "recallAtK": 0.95,
+      "mrr": 0.6255952380952381
+    }
+  }
+}

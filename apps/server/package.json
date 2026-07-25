@@ -16,6 +16,7 @@
     "test": "vitest run --exclude '../../install.test.ts'",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --exclude '../../install.test.ts'",
+    "eval": "tsx src/test/retrieval/run-eval.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check"
   },

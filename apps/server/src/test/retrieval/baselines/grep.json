@@ -1,0 +1,29 @@
+{
+  "retriever": "grep",
+  "embeddingModelId": "onnx-community/gte-multilingual-base",
+  "discriminatingMetric": "recall@k vs 'hybrid' — how far naive substring matching gets alone",
+  "ceilings": {
+    "5": {
+      "precisionAtK": 0.25,
+      "recallAtK": 1,
+      "mrr": 1
+    },
+    "8": {
+      "precisionAtK": 0.15625,
+      "recallAtK": 1,
+      "mrr": 1
+    }
+  },
+  "floors": {
+    "5": {
+      "precisionAtK": 0.16250000000000003,
+      "recallAtK": 0.79375,
+      "mrr": 0.6499999999999999
+    },
+    "8": {
+      "precisionAtK": 0.0984375,
+      "recallAtK": 0.8875,
+      "mrr": 0.6604166666666667
+    }
+  }
+}

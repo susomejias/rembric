@@ -2,7 +2,7 @@
 
 Retrieval quality is governed by roughly a dozen compile-time constants — the RRF rank constant, the rank-window margin and ceiling, the post-fusion boost's type/recency/confirmation weights and its clamp, the save-time FTS and vector thresholds, the per-save candidate cap, the per-type decay windows, the per-type review TTLs — and **not one of them has ever been measured**. There is no `apps/server/src/test/retrieval/`, no labelled query set, no recall or MRR number anywhere in the repo.
 
-That is not merely a missing nice-to-have: it is what makes two confirmed ranking defects unfixable. The audit reproduced an inverted save-time FTS threshold and a rank-window/rank-constant inconsistency, and neither can be corrected with confidence because nobody can demonstrate that a fix improves recall rather than regressing it. Worse, the existing suite gives false assurance: the save-time candidate test passes **only** because its 2-row corpus drives FTS5 IDF to ~1e-6, so the "true match" clears the threshold *by scoring as noise*. A fix validated against that fixture proves nothing.
+That is not merely a missing nice-to-have: it is what makes two confirmed ranking defects unfixable. The audit reproduced an inverted save-time FTS threshold and a rank-window/rank-constant inconsistency, and neither can be corrected with confidence because nobody can demonstrate that a fix improves recall rather than regressing it. Worse, the existing suite gives false assurance: the save-time candidate test passes **only** because its 2-row corpus drives FTS5 IDF to ~1e-6, so the "true match" clears the threshold _by scoring as noise_. A fix validated against that fixture proves nothing.
 
 This change builds the measurement first, so the two ranking fixes that follow can be evidence-based, and so every future tuning change is a number instead of an argument.
 
@@ -30,6 +30,7 @@ This change builds the measurement first, so the two ranking fixes that follow c
 ## Impact
 
 New:
+
 - `apps/server/src/test/retrieval/` — runner, scoring, adapters (`hybrid`, `grep`, `memory-md-dump`)
 - `apps/server/src/test/retrieval/fixtures/` — corpus and query set as committed JSON
 - `apps/server/src/test/retrieval/baselines/` — committed scorecards for the ratchet
@@ -37,6 +38,7 @@ New:
 - a CI job invoking it (separate from the unit-test job)
 
 Touched:
+
 - `.github/workflows/ci.yml` (new job)
 - no `apps/server/src` serving code changes — the harness drives the existing services
 

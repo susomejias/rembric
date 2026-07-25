@@ -43,6 +43,9 @@ export function findStaleEnvVars(env: NodeJS.ProcessEnv = process.env): string[]
   return REMOVED_ENV_VARS.filter((name) => env[name] !== undefined && env[name] !== '');
 }
 
+/** Default for `CANDIDATES_PER_SAVE_MAX` — exported so non-bootstrap callers (e.g. the eval harness) don't hand-copy it. */
+export const CANDIDATES_PER_SAVE_MAX_DEFAULT = 5;
+
 const envSchema = z.object({
   REMBRIC_HOST: z.string().default('127.0.0.1'),
   REMBRIC_PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
@@ -126,7 +129,12 @@ const envSchema = z.object({
   // `memory.save` surfaces to the agent for judgment. 0 disables
   // surfacing; useful for batch/automation paths. Similarity thresholds
   // are engine constants in `save-time-candidates.ts`, not configuration.
-  CANDIDATES_PER_SAVE_MAX: z.coerce.number().int().min(0).max(25).default(5),
+  CANDIDATES_PER_SAVE_MAX: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(25)
+    .default(CANDIDATES_PER_SAVE_MAX_DEFAULT),
 
   // Relations stuck in 'pending' longer than this are re-exposed to
   // agents via memory.context (pendingJudgments[]) for fresh-context

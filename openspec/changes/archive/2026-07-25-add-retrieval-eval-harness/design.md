@@ -20,7 +20,7 @@ This change is a prerequisite, not a feature. Two confirmed ranking defects are 
 ## Decisions
 
 **Decision 1 — Gold units are memory ids, not session ids.**
-Published harnesses in this space label gold at session granularity because their retrieval unit is a session. Rembric returns memory rows, so session-level labels would systematically over-credit: returning any memory from the right session would score as a hit. Memory-id labels also make the `knowledge-update` category meaningful — the gold is the *current* head, and returning its superseded predecessor is a miss, which is precisely the behavior `topic_key` exists to guarantee.
+Published harnesses in this space label gold at session granularity because their retrieval unit is a session. Rembric returns memory rows, so session-level labels would systematically over-credit: returning any memory from the right session would score as a hit. Memory-id labels also make the `knowledge-update` category meaningful — the gold is the _current_ head, and returning its superseded predecessor is a miss, which is precisely the behavior `topic_key` exists to guarantee.
 
 **Decision 2 — Ingest through `MemoryService` into a throwaway file, not by direct SQL.**
 The single-file design makes this nearly free: point the database path at a temp file, no Docker, no port juggling, no `HOME` override. The payoff is that the evaluated corpus has actually been through `topic_key` supersession, inline embedding, and save-time candidate detection — so the harness measures the shipping system rather than a synthetic index. It also means the harness incidentally exercises the write path, which is where the deferred FTS threshold defect lives.
@@ -29,7 +29,7 @@ The single-file design makes this nearly free: point the database path at a temp
 A comparable published harness reports its naive substring baseline at 0.967 recall@5, which is a corpus problem, not a retriever result: with unrelated filler, any retriever looks excellent. Each gold memory therefore gets at least one same-project, vocabulary-sharing near-miss. This is the single highest-leverage corpus decision and it cannot be retrofitted cheaply, because adding distractors later invalidates every committed baseline.
 
 **Decision 4 — Three retrievers, and the `grep` baseline is not decoration.**
-If hybrid search cannot beat naive substring matching on this corpus, one of two things is true and both are worth knowing immediately: the corpus does not discriminate, or the fusion is not earning its complexity. The context-dump baseline answers the product question instead of the engineering one — it is the "just put it in CLAUDE.md" alternative, and the honest comparison reports both recall *and* tokens, because a dump can always win recall by spending unbounded context.
+If hybrid search cannot beat naive substring matching on this corpus, one of two things is true and both are worth knowing immediately: the corpus does not discriminate, or the fusion is not earning its complexity. The context-dump baseline answers the product question instead of the engineering one — it is the "just put it in CLAUDE.md" alternative, and the honest comparison reports both recall _and_ tokens, because a dump can always win recall by spending unbounded context.
 
 **Decision 5 — Deterministic metrics, with tokens as a first-class axis.**
 Precision@k, Recall@k and MRR are arithmetic. Tokens returned is `content.length`-based arithmetic. Latency is a timer. None of it needs a model, which keeps the harness runnable in CI, offline, on every PR, with no key and no cost. An end-to-end QA-accuracy number would need an LLM judge and would grade the reader model as much as the retriever; it is explicitly out of scope, and if it is ever wanted it belongs in a separate opt-in target.
@@ -53,6 +53,16 @@ None. Additive, test-only, no serving code touched, no schema change.
 
 ## Open Questions
 
-- Whether the corpus should be authored in Spanish as well as English. The memory spec already promises cross-lingual retrieval via the multilingual embedder and has a scenario for it, so a bilingual subset would test a real committed guarantee. Leaning yes for a small subset.
-- Whether `k` should be the production default of 8 or something larger. Both, probably: `@5` for comparability with published numbers, `@8` because that is what agents actually receive.
-- Where the abstention metric lives once a score floor exists — it is scored here as a false-positive rate, but the floor itself is tuned in a later change.
+- Whether the corpus should be authored in Spanish as well as English. The memory spec already promises cross-lingual retrieval via the multilingual embedder and has a scenario for it, so a bilingual subset would test a real committed guarantee. Leaning yes for a small subset. **Resolved: yes** — a 6-item bilingual subset (3 gold + 3 distractors) is in the corpus, covering extraction, preference, and knowledge-update query types.
+- Whether `k` should be the production default of 8 or something larger. Both, probably: `@5` for comparability with published numbers, `@8` because that is what agents actually receive. **Resolved: both** — every metric is computed at k=5 and k=8; the floor ratchet gates both.
+- Where the abstention metric lives once a score floor exists — it is scored here as a false-positive rate, but the floor itself is tuned in a later change. **Resolved as scoped**: `abstentionFalsePositiveRate` is reported per retriever, not gated by the floor ratchet (no floor exists yet to tune).
+
+## Measured baseline (40-memory corpus, 18 queries, `gte-multilingual-base` q8)
+
+|                | P@8   | R@8   | MRR@8 | tokens@8 | abstain FP rate |
+| -------------- | ----- | ----- | ----- | -------- | --------------- |
+| hybrid         | 0.156 | 1.000 | 0.676 | 502      | 1.00            |
+| grep           | 0.148 | 0.938 | 0.710 | 493      | 1.00            |
+| memory-md-dump | 0.094 | 0.656 | 0.295 | 522      | 1.00            |
+
+Sanity check 5.1 holds: hybrid beats grep on aggregate recall@8 (1.000 vs 0.938). Notably `grep` wins MRR@8 on several single-answer `extraction` queries where an exact keyword match outranks a semantically-similar-but-wrong neighbor — a real, expected result, not a harness bug (see per-query breakdown in `.eval-report/`). `abstentionFalsePositiveRate = 1.00` for every retriever is also expected: none of the three has a similarity/score floor, so none can currently decline to answer — this is the "before" number `fix-retrieval-ranking-math` and a later abstention-floor change can improve against.

@@ -1,0 +1,29 @@
+{
+  "retriever": "memory-md-dump",
+  "embeddingModelId": "onnx-community/gte-multilingual-base",
+  "discriminatingMetric": "avgTokensReturned vs 'hybrid' at comparable recall — the token cost of the context-dump alternative",
+  "ceilings": {
+    "5": {
+      "precisionAtK": 0.25,
+      "recallAtK": 1,
+      "mrr": 1
+    },
+    "8": {
+      "precisionAtK": 0.15625,
+      "recallAtK": 1,
+      "mrr": 1
+    }
+  },
+  "floors": {
+    "5": {
+      "precisionAtK": 0.062499999999999986,
+      "recallAtK": 0.41875,
+      "mrr": 0.21979166666666666
+    },
+    "8": {
+      "precisionAtK": 0.04375,
+      "recallAtK": 0.60625,
+      "mrr": 0.24546130952380957
+    }
+  }
+}
