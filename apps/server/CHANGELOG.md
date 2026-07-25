@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.24.13](https://github.com/susomejias/rembric/compare/server-v0.24.12...server-v0.24.13) (2026-07-25)
+
+
+### Features
+
+* **dashboard:** compact the entity kind counters and lead with an all-kinds card ([fba6ea7](https://github.com/susomejias/rembric/commit/fba6ea7dcb0899d0d599a2d14a794622a49d2bbb))
+* **entities:** add four kinds, fix two mis-extractions, version the recipe ([48b7c58](https://github.com/susomejias/rembric/commit/48b7c58921248ed4bda7037af4b4758744b36c68))
+* **eval:** add offline retrieval evaluation harness ([65ed3d6](https://github.com/susomejias/rembric/commit/65ed3d65ac2ea50f6934219a95370b44840765a5))
+* **memory-entities:** add deterministic entity index for exact-address retrieval ([3baff49](https://github.com/susomejias/rembric/commit/3baff4992ae98257412ce624fbb5ec8917442d01))
+* **memory:** constrain the verdict domain, index archived rows, unify type lists ([76b1ca3](https://github.com/susomejias/rembric/commit/76b1ca37743483bcd2700a6263f255ea089240f7))
+* **memory:** separate access from usefulness — stop search touching, add refutation ([c6fdde5](https://github.com/susomejias/rembric/commit/c6fdde5d34508352f054acd7de4ccb4e9147937e))
+* **recall:** add relevance channel, abstention, diversity cap, and procedural memory type ([6840d67](https://github.com/susomejias/rembric/commit/6840d6741293aa11cbb0f0380f39653a71456720))
+
+
+### Bug Fixes
+
+* **dashboard:** answer 403 instead of 500 when a post body is not a form ([86374ff](https://github.com/susomejias/rembric/commit/86374ff0d3634479b9a42594100f58f18903c1fc))
+* **dashboard:** clamp the page query param so a huge value cannot 500 a view ([51ef0d1](https://github.com/susomejias/rembric/commit/51ef0d14f57a37c346fe5e423a0577bb69e17a8a))
+* **dashboard:** style the entities filter checkbox and unstick the rebuild button ([323e7c6](https://github.com/susomejias/rembric/commit/323e7c65c384d16e78b8272d434d237f419eed46))
+* **db:** bound the purge, correct the entity-links schema, and stabilise plans ([bb6acc1](https://github.com/susomejias/rembric/commit/bb6acc1f1b8837180db2ac8fbf8b7a9d156c297a))
+* **dev:** override the dev stack healthcheck away from the distroless node path ([d91e65b](https://github.com/susomejias/rembric/commit/d91e65baa75a2bc4aada2d0a4895428db03894c6))
+* **entities:** harden extraction patterns against ReDoS and non-terminal suffixes ([f450f82](https://github.com/susomejias/rembric/commit/f450f8287efa9c0049be2cb940e28e193a40d1a2))
+* **entities:** persist the recipe marker before truncating the index ([fc6e2ff](https://github.com/susomejias/rembric/commit/fc6e2ff63b7efe1b2616e41266ee35b9be4172ce))
+* **entities:** stop one oversized memory wedging the backfill drain forever ([ec29908](https://github.com/susomejias/rembric/commit/ec29908561ed167e98a61f002feb3c5e10f8d179))
+* **mcp:** admit the kind discriminator in memory.doctor's lastRunOps ([3fab747](https://github.com/susomejias/rembric/commit/3fab747ddeb21a181ee9238f6992f17994bd0721))
+* **mcp:** make the entity and topic_key contracts true, and record refutation ([46d5ded](https://github.com/susomejias/rembric/commit/46d5dedce49e147d2d60b6888c356c69974c59c6))
+* **memory:** correct escalation timing and surface refuted rows in the review queue ([921c1ff](https://github.com/susomejias/rembric/commit/921c1ff5666e4d4d86e3a314d142404b0a660ded))
+* **memory:** drop entity rows before purging their memory ([4a345e0](https://github.com/susomejias/rembric/commit/4a345e06c958f479c5d6498f16ab2c261e953b3f))
+* **memory:** honour the documented "any but archived" status default ([1814f7b](https://github.com/susomejias/rembric/commit/1814f7bde1555de16f309bbccab31c983c4fd61c))
+* **memory:** keep escalation out of the decay axis and surface it at read time ([ab7a5f6](https://github.com/susomejias/rembric/commit/ab7a5f6b7dc727e1e8dc692b45e6e6a4097093ac))
+* repair 10 audited defects across sessions, consolidation, and memory retrieval ([cfb5c04](https://github.com/susomejias/rembric/commit/cfb5c047d88335495b5b7e42136dee84cc0cb6f0))
+* **retrieval:** correct inverted FTS similarity and undersized rank window ([6b12ee6](https://github.com/susomejias/rembric/commit/6b12ee61df39f31173aa465e505345476c176426))
+* **retrieval:** ship the diversity cap disabled until the eval can see it ([57b39a2](https://github.com/susomejias/rembric/commit/57b39a20de1b62e075c68ba7c0dec8e0afb2bc40))
+
+
+### Performance
+
+* **db:** index the review-axis confirmation subqueries ([f20b8fa](https://github.com/susomejias/rembric/commit/f20b8fabef6bdd2c6293ba9963297880260b2a8a))
+
 ## [0.24.12](https://github.com/susomejias/rembric/compare/server-v0.24.11...server-v0.24.12) (2026-07-20)
 
 
