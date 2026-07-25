@@ -496,6 +496,48 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     ).toEqual([note.id, pref.id].sort());
   });
 
+  it('defaults to any status but archived, not to active, and an explicit status still filters exactly', async () => {
+    const repos = createRepositories(db.handle.db);
+    const scope = projectScope(projectId);
+    const old = memory.save(
+      { type: 'project', title: 'Old take', content: 'the old take', topicKey: 'decision/take' },
+      scope,
+    );
+    const fresh = memory.save(
+      { type: 'project', title: 'New take', content: 'the new take', topicKey: 'decision/take' },
+      scope,
+    );
+    const retired = memory.save(
+      { type: 'project', title: 'Retired take', content: 'the retired take' },
+      scope,
+    );
+    memory.archive(retired.id, scope);
+    for (const m of [old, fresh, retired]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'src/takes.ts' }],
+        clock.now(),
+      );
+    }
+
+    expect(
+      (await memory.search({ entity: 'src/takes.ts' }, scope)).map((m) => m.id).sort(),
+    ).toEqual([fresh.id, old.id].sort());
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'active' }, scope)).map((m) => m.id),
+    ).toEqual([fresh.id]);
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'superseded' }, scope)).map(
+        (m) => m.id,
+      ),
+    ).toEqual([old.id]);
+    expect(
+      (await memory.search({ entity: 'src/takes.ts', status: 'archived' }, scope)).map((m) => m.id),
+    ).toEqual([retired.id]);
+  });
+
   it('returns every linked memory when no limit is given, past the ranked default page of 8', async () => {
     const repos = createRepositories(db.handle.db);
     const ids: string[] = [];
@@ -587,6 +629,45 @@ describe('memory.search — topic_key history', () => {
       projectScope(projectId),
     );
     expect(activeOnly).toHaveLength(1);
+  });
+
+  it('omits an archived row but keeps the superseded ones, on both the listing and the lexical branch', async () => {
+    const scope = projectScope(projectId);
+    const topicKey = 'decision/deploy-runbook';
+    const retired = memory.save(
+      { type: 'project', title: 'Runbook v0', content: 'deploy runbook revision zero', topicKey },
+      scope,
+    );
+    memory.archive(retired.id, scope);
+    const old = memory.save(
+      { type: 'project', title: 'Runbook v1', content: 'deploy runbook revision one', topicKey },
+      scope,
+    );
+    const fresh = memory.save(
+      { type: 'project', title: 'Runbook v2', content: 'deploy runbook revision two', topicKey },
+      scope,
+    );
+
+    const listing = await memory.search({ topicKey }, scope);
+    expect(listing.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
+    expect(listing.map((m) => m.status).sort()).toEqual(['active', 'superseded']);
+
+    // Same default through the hybrid path, whose lexical branch is the one
+    // that used to drop the status predicate entirely.
+    const lexical = await memory.search({ topicKey, query: 'deploy runbook revision' }, scope);
+    expect(lexical.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
+
+    for (const query of [undefined, 'deploy runbook revision']) {
+      expect(
+        (await memory.search({ topicKey, query, status: 'archived' }, scope)).map((m) => m.id),
+      ).toEqual([retired.id]);
+      expect(
+        (await memory.search({ topicKey, query, status: 'superseded' }, scope)).map((m) => m.id),
+      ).toEqual([old.id]);
+      expect(
+        (await memory.search({ topicKey, query, status: 'active' }, scope)).map((m) => m.id),
+      ).toEqual([fresh.id]);
+    }
   });
 });
 

@@ -1409,7 +1409,7 @@ Any error thrown during request handling that is not a `DomainError` (a recogniz
 
 `memory.search` SHALL additionally accept a `topic_key` filter that returns only rows carrying that exact key. Because a topic slot holds exactly one `active` row and every earlier take on the topic is `superseded`, a `topic_key` filter supplied WITHOUT an explicit `status` SHALL return the topic's whole history rather than defaulting to `active` — otherwise the filter's stated purpose (checking whether a topic already converged before minting a synonym key) is unreachable, because the one row it returns is the only row it could ever return. An explicit `status` alongside `topic_key` SHALL still narrow to that status.
 
-The vector index is partitioned by `status`, so an any-status read enumerates the non-archived statuses in the dense branch; an archived row under a given key is therefore reachable through the lexical and listing branches, matching the existing rule that the dense branch is skipped for `status: 'archived'`.
+"The topic's whole history" means every status but `archived`. An omitted `status` SHALL mean "any but archived" on EVERY branch — listing, lexical and dense alike — rather than dropping the status predicate on the branches that could carry it. The dense branch is partitioned by `status` and enumerates only the non-archived values, so a branch that dropped the predicate would make an archived row reachable through exactly one of the two fused rankings, letting it outrank a row both branches found; and a retired take is the one thing the convergence check (has this topic already been decided?) has no use for. `status: 'archived'` remains an exact filter, served by the listing and lexical branches (the dense branch is skipped for it).
 
 #### Scenario: A search result carries its topic key
 
@@ -1433,6 +1433,13 @@ The vector index is partitioned by `status`, so an any-status read enumerates th
 - **GIVEN** the same four memories
 - **WHEN** `memory.search` is called with that `topic_key` and `status: 'active'`
 - **THEN** exactly the one active row SHALL be returned
+
+#### Scenario: An archived take is not part of the topic's history
+
+- **GIVEN** a memory archived under `topic_key = 'decision/deploy-runbook'`, plus two later takes under the same key leaving one `superseded` and one `active`
+- **WHEN** `memory.search` is called with that `topic_key` and no `status`, with and without a text `query`
+- **THEN** exactly the `superseded` and the `active` row SHALL be returned in both cases
+- **AND** the same call with `status: 'archived'` SHALL return exactly the archived row
 
 ### Requirement: `memory.suggest_topic_key` MUST report whether the suggested key is occupied
 
@@ -1508,7 +1515,7 @@ When `entity` is supplied, the response SHALL be the scoped set of memories link
 
 Completeness is bounded, and the bound SHALL be the same generous over-fetch ceiling the ranked branches use rather than the ranked default page size: an omitted `limit` on the entity path means "every linked memory in scope" up to that ceiling, NOT the small default that is calibrated for a ranked page. Returning eight rows out of twelve under a description promising completeness is a correctness problem, because the agent has no signal that anything was withheld. An explicit `limit` SHALL still bound the page.
 
-`entity` SHALL compose with every other selection filter `memory.search` accepts — `status`, `type`, `tag`, `topic_key` and `include_global` — applying the same predicates with the same meaning as on the ranked path. A filter that is documented as combinable but silently dropped is worse than an unsupported one: an agent that narrows to `type: 'user'` and receives unfiltered rows reads project notes as user preferences. Combining `entity` with a text `query` SHALL narrow within the entity's memories rather than fusing two result sets.
+`entity` SHALL compose with every other selection filter `memory.search` accepts — `status`, `type`, `tag`, `topic_key` and `include_global` — applying the same predicates with the same meaning as on the ranked path. A filter that is documented as combinable but silently dropped is worse than an unsupported one: an agent that narrows to `type: 'user'` and receives unfiltered rows reads project notes as user preferences. An OMITTED `status`, however, SHALL mean "any but archived" here rather than the ranked branches' `active` default — the same reason an omitted `limit` means the generous bound: this path is specified as complete within scope, and inheriting the ranked default would withhold the `superseded` history exactly as the ranked default page withheld the twelfth row. An explicit `status` SHALL filter exactly, `superseded` and `archived` included. Combining `entity` with a text `query` SHALL narrow within the entity's memories rather than fusing two result sets.
 
 An empty entity result SHALL say whether the index has caught up. The tool's own guidance is "empty means it is not there, so retry with `query`" — which is wrong for as long as the extraction drain is still running, and after a recipe change that is the state of the whole corpus. When an `entity` lookup returns nothing AND the scope still holds memories awaiting their first scan, the response SHALL carry a draining flag, and the argument's description SHALL name it so the agent retries the same lookup rather than degrading to text. A non-empty result and a miss over a fully-scanned scope SHALL NOT carry it, so its presence always means something.
 
@@ -1522,6 +1529,13 @@ An empty entity result SHALL say whether the index has caught up. The tool's own
 - **GIVEN** twelve in-scope memories linked to one entity
 - **WHEN** `memory.search` is called with that `entity` and no `limit`
 - **THEN** all twelve SHALL be returned
+
+#### Scenario: An omitted status returns the entity's non-archived history
+
+- **GIVEN** three in-scope memories linked to one entity, one `active`, one `superseded` and one `archived`
+- **WHEN** `memory.search` is called with that `entity` and no `status`
+- **THEN** the `active` and the `superseded` row SHALL be returned and the `archived` row SHALL NOT
+- **AND** each of `status: 'active'`, `'superseded'` and `'archived'` SHALL return exactly its own row
 
 #### Scenario: The response distinguishes the entity path
 

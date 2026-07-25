@@ -37,7 +37,7 @@ export interface ReviewTimestamps {
 export interface SearchMemoryIdsOpts {
   scope: MemoryScope;
   projectId: string | null;
-  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
@@ -54,7 +54,7 @@ export interface SearchBm25IdsOpts {
   matchExpr: string;
   scope: MemoryScope;
   projectId: string | null;
-  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
@@ -261,7 +261,9 @@ export class MemoryRepository {
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
     const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
-    const statusClause = opts.status ? sql`AND m.status = ${opts.status}` : sql``;
+    const statusClause = opts.status
+      ? sql`AND m.status = ${opts.status}`
+      : sql`AND m.status != 'archived'`;
     const rows = this.db.all<{ id: string }>(
       sql`
         SELECT m.id
@@ -290,7 +292,9 @@ export class MemoryRepository {
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
     const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
-    const statusClause = opts.status ? sql`AND m.status = ${opts.status}` : sql``;
+    const statusClause = opts.status
+      ? sql`AND m.status = ${opts.status}`
+      : sql`AND m.status != 'archived'`;
     return this.db.all<{ id: string; rank: number }>(
       sql`
         SELECT m.id AS id, bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE}) AS rank

@@ -123,9 +123,10 @@ export interface SearchMemoriesInput {
    * every memory linked to this value, chronological, no ranking, no
    * fusion. Combined with `query`, narrows to the entity's memories that
    * also match the text query — it never fuses the two into one ranked
-   * set (design.md Decision 5). Combined with `type`/`tag`/`topicKey` is
-   * not supported in this first pass; those filters are ignored when
-   * `entity` is set.
+   * set (design.md Decision 5). `type`/`tag`/`topicKey`/`status` narrow it
+   * with the same meaning they carry on the ranked path, except that an
+   * omitted `status` means "any but archived" rather than "active" — the
+   * branch is specified as complete within scope.
    */
   entity?: string;
   status?: MemoryStatus;
@@ -422,10 +423,12 @@ export class MemoryService {
     viaEntity?: boolean;
     entityIndexDraining?: boolean;
   }> {
-    // A `topic_key` filter addresses a convergent topic's whole history, and
-    // every row in that slot but the newest is `superseded` — so an absent
-    // `status` means "any" there rather than the usual `active` default. An
-    // explicit `status` still narrows.
+    // Ranked-branch default only. A `topic_key` filter addresses a convergent
+    // topic's whole history, and every row in that slot but the newest is
+    // `superseded` — so an absent `status` means "any but archived" there
+    // rather than the usual `active` default. An explicit `status` still
+    // narrows. The entity branch is specified as complete within scope, so it
+    // takes `input.status` directly and never inherits this default.
     const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
@@ -449,7 +452,7 @@ export class MemoryService {
         scope: memScope,
         projectId,
         value: entity,
-        status,
+        status: input.status,
         type: input.type,
         tag: input.tag,
         topicKey: input.topicKey,
@@ -523,7 +526,8 @@ export class MemoryService {
       // The dense branch's candidate ids come from memory_vec.status, which
       // is derived asynchronously — belt-and-suspenders against any future
       // staleness there: re-check the live row's status before returning it.
-      if (m && (status === undefined || m.status === status)) ordered.push(m);
+      if (m && (status === undefined ? m.status !== 'archived' : m.status === status))
+        ordered.push(m);
     }
     return { memories: ordered, abstained, reason };
   }

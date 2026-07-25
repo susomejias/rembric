@@ -239,6 +239,50 @@ describe('MemoryRepository', () => {
     });
   });
 
+  describe('scoped search status default', () => {
+    const base = { scope: 'global', projectId: null, limit: 10, offset: 0 } as const;
+
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '05A', content: 'runbook alpha', createdAt: new Date(3_000) }),
+          row({
+            id: '05B',
+            content: 'runbook bravo',
+            status: 'superseded',
+            createdAt: new Date(2_000),
+          }),
+          row({
+            id: '05C',
+            content: 'runbook charlie',
+            status: 'archived',
+            createdAt: new Date(1_000),
+          }),
+        ])
+        .run();
+    });
+
+    it('searchMemoryIds omits archived without a status and filters exactly with one', () => {
+      expect(repo.searchMemoryIds(base)).toEqual(['05A', '05B']);
+      expect(repo.searchMemoryIds({ ...base, status: 'active' })).toEqual(['05A']);
+      expect(repo.searchMemoryIds({ ...base, status: 'superseded' })).toEqual(['05B']);
+      expect(repo.searchMemoryIds({ ...base, status: 'archived' })).toEqual(['05C']);
+    });
+
+    it('searchBm25Ids omits archived without a status and filters exactly with one', () => {
+      const ids = (status?: 'active' | 'superseded' | 'archived') =>
+        repo
+          .searchBm25Ids({ ...base, matchExpr: 'runbook', status })
+          .map((h) => h.id)
+          .sort();
+      expect(ids()).toEqual(['05A', '05B']);
+      expect(ids('active')).toEqual(['05A']);
+      expect(ids('superseded')).toEqual(['05B']);
+      expect(ids('archived')).toEqual(['05C']);
+    });
+  });
+
   it('adminCountConfirmations counts events for a memory', () => {
     t.handle.db
       .insert(memory)
