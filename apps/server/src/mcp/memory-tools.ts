@@ -178,6 +178,17 @@ export const memoryConfirmSchema = {
     .describe(
       'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
     ),
+  verdict: z
+    .enum(['affirm', 'refute'])
+    .optional()
+    .describe(
+      "Default 'affirm' (still true, re-verified). Set 'refute' ONLY when a memory you just surfaced turned out wrong or stale AND you have concretely verified that — never as routine cleanup, never for a memory you have not actually acted on. Refuting does not archive or edit anything; it marks the memory needs_review immediately (bypassing its normal shelf life) so a human or a later pass re-verifies it. Requires `reason`.",
+    ),
+  reason: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Required when verdict is "refute": concretely what proved it wrong or stale.'),
 };
 
 export const memoryArchiveSchema = {
@@ -416,6 +427,12 @@ export const contextOutput = {
       ageMs: z.number(),
     }),
   ),
+  /**
+   * Total in-scope needs-review count — `needsReview` above is capped at
+   * a handful of the oldest. Lets the agent tell a healthy corpus from a
+   * collapsing one and batch-confirm via `memory.confirm({ids})` when deep.
+   */
+  needsReviewTotal: z.number(),
   clamped: z.boolean(),
 };
 
@@ -1017,7 +1034,13 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
 
 async function handleConfirm(
   deps: MemoryToolDeps,
-  args: { id?: string; ids?: string[]; sessionId?: string },
+  args: {
+    id?: string;
+    ids?: string[];
+    sessionId?: string;
+    verdict?: 'affirm' | 'refute';
+    reason?: string;
+  },
 ) {
   const ctx = getRequestContext();
   const { scope } = await resolveEffectiveScope(deps);
@@ -1041,24 +1064,20 @@ async function handleConfirm(
     } catch (err) {
       return errToMcp(err);
     }
+    const opts = {
+      source: { tokenName: ctx.token.name },
+      sessionId,
+      verdict: args.verdict,
+      reason: args.reason,
+    };
     if (args.ids !== undefined) {
-      const { confirmed, headTruncated } = deps.memory.confirmMany(
-        args.ids,
-        scope,
-        { tokenName: ctx.token.name },
-        sessionId,
-      );
+      const { confirmed, headTruncated } = deps.memory.confirmMany(args.ids, scope, opts);
       return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
     }
     if (args.id === undefined) {
       return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
     }
-    const { headTruncated } = deps.memory.confirm(
-      args.id,
-      scope,
-      { tokenName: ctx.token.name },
-      sessionId,
-    );
+    const { headTruncated } = deps.memory.confirm(args.id, scope, opts);
     return ok({ ok: true, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
     if (err instanceof DomainError && err.code === 'memory_not_found') {
@@ -1203,9 +1222,9 @@ async function handleContext(
   // Relevance channel — separate from recentMemories (which is pure
   // recency) so the model can tell the two apart. An explicit `focus`
   // always wins; otherwise a seed is derived so the improvement doesn't
-  // depend on the agent knowing to ask. touch:false — a context peek must
-  // not itself inflate the memories it surfaces (the exact feedback loop
-  // this change exists to break).
+  // depend on the agent knowing to ask. `memory.search` never touches
+  // `last_seen_at` (separate-access-from-usefulness), so a context peek
+  // cannot inflate the memories it surfaces regardless.
   const focusText = args.focus?.trim() || deriveFocusSeed(deps, scope, recentPrompts);
   let relevantMemories: {
     id: string;
@@ -1247,9 +1266,7 @@ async function handleContext(
       }
     }
     if (byId.size < RELEVANCE_LIMIT) {
-      const ranked = await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope, {
-        touch: false,
-      });
+      const ranked = await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope);
       for (const r of ranked) {
         if (byId.size >= RELEVANCE_LIMIT) break;
         if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'ranked' });
@@ -1302,6 +1319,7 @@ async function handleContext(
     reviewAfter: it.reviewAfter.toISOString(),
     ageMs: now - it.reviewBaseline.getTime(),
   }));
+  const needsReviewTotal = deps.memory.countNeedsReview(scope);
 
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
@@ -1311,6 +1329,7 @@ async function handleContext(
     relevantMemories,
     pendingJudgments,
     needsReview,
+    needsReviewTotal,
     clamped,
   });
 }

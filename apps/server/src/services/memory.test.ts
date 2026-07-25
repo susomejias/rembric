@@ -239,6 +239,21 @@ describe('memory.search', () => {
     ).toBe(3);
     expect((await memory.search({ limit: 12 }, projectScope(projectId))).length).toBe(12);
   });
+
+  it('never touches last_seen_at, in either the query or chronological branch (separate-access-from-usefulness)', async () => {
+    const m = memory.save(
+      { type: 'user', title: 'Prefers tabs over spaces', content: 'prefers tabs over spaces' },
+      projectScope(projectId),
+    );
+    const originalLastSeen = memory.unsafeGetById(m.id)!.lastSeenAt?.getTime();
+
+    clock.advance(1000);
+    await memory.search({ query: 'tabs' }, projectScope(projectId));
+    await memory.search({ query: 'tabs' }, projectScope(projectId));
+    await memory.search({}, projectScope(projectId));
+
+    expect(memory.unsafeGetById(m.id)!.lastSeenAt?.getTime()).toBe(originalLastSeen);
+  });
 });
 
 describe('memory.search — entity filter (add-entity-index)', () => {
@@ -464,6 +479,81 @@ describe('memory.confirm', () => {
 
   it('throws not_found for unknown ids', () => {
     expect(() => memory.confirm('nope', SCOPE_GLOBAL)).toThrow(/not found/);
+  });
+});
+
+describe('memory.confirm — refutation (separate-access-from-usefulness)', () => {
+  it('requires a non-empty reason', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    expect(() => memory.confirm(m.id, projectScope(projectId), { verdict: 'refute' })).toThrow(
+      /reason/,
+    );
+    expect(() =>
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: '   ' }),
+    ).toThrow(/reason/);
+  });
+
+  it('rejects a reason containing a NUL byte', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    expect(() =>
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'bad\0reason' }),
+    ).toThrow(/invalid_input|NUL/i);
+  });
+
+  it('flips derived review state to needs_review immediately, without touching last_seen_at, content, title, or status', () => {
+    const m = memory.save(
+      { type: 'project', title: 'Runbook', content: 'do the thing' },
+      projectScope(projectId),
+    );
+    const before = memory.unsafeGetById(m.id)!;
+    clock.advance(1000); // refutation must postdate createdAt to flip the baseline
+    memory.confirm(m.id, projectScope(projectId), {
+      verdict: 'refute',
+      reason: 'this step is now wrong',
+    });
+    const after = memory.unsafeGetById(m.id)!;
+
+    expect(after.lastSeenAt?.getTime()).toBe(before.lastSeenAt?.getTime());
+    expect(after.content).toBe(before.content);
+    expect(after.title).toBe(before.title);
+    expect(after.status).toBe(before.status);
+
+    const result = memory.get(m.id, projectScope(projectId));
+    expect(result?.reviewState).toBe('needs_review');
+  });
+
+  it('a later affirmation clears a refutation (advances the baseline past it)', () => {
+    const m = memory.save(
+      { type: 'project', title: 'Runbook', content: 'do the thing' },
+      projectScope(projectId),
+    );
+    clock.advance(1000);
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'wrong' });
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('needs_review');
+
+    clock.advance(1000); // affirmation must postdate the refutation to clear it
+    memory.confirm(m.id, projectScope(projectId));
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('fresh');
+  });
+
+  it('does not count toward the affirmation confirmationCount', () => {
+    const m = memory.save({ type: 'project', title: 'X', content: 'x' }, projectScope(projectId));
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'wrong' });
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'still wrong' });
+    memory.confirm(m.id, projectScope(projectId));
+    const result = memory.get(m.id, projectScope(projectId));
+    expect(result?.confirmationCount).toBe(1);
+  });
+
+  it('forces needs_review even for a type with no TTL (reference)', () => {
+    const m = memory.save(
+      { type: 'reference', title: 'Doc link', content: 'https://example.com' },
+      projectScope(projectId),
+    );
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('fresh');
+    clock.advance(1000);
+    memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'link is dead' });
+    expect(memory.get(m.id, projectScope(projectId))?.reviewState).toBe('needs_review');
   });
 });
 
@@ -832,6 +922,47 @@ describe('derived review state', () => {
     const results = await memory.search({ query: 'tabs' }, projectScope(projectId));
     const review = memory.reviewStateForMemories(results);
     expect(review.get(results[0]!.id)?.reviewState).toBe('needs_review');
+  });
+
+  describe('countNeedsReview (separate-access-from-usefulness)', () => {
+    it('counts stale memories in scope, isolated from other scopes', () => {
+      const otherId = projects.create({ slug: 'other-app' }).id;
+      memory.save({ type: 'project', title: 'A goal', content: 'A goal' }, projectScope(projectId));
+      memory.save({ type: 'project', title: 'B goal', content: 'B goal' }, projectScope(otherId));
+
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(0);
+      clock.advance(100 * DAY);
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(1);
+      expect(memory.countNeedsReview(projectScope(otherId))).toBe(1);
+      expect(memory.countNeedsReview(SCOPE_GLOBAL)).toBe(0);
+    });
+
+    it('stays consistent with needsReviewForContext for the same scope (task 5.3)', () => {
+      memory.save(
+        { type: 'project', title: 'Ship v1', content: 'ship v1' },
+        projectScope(projectId),
+      );
+      memory.save(
+        { type: 'project', title: 'Ship v2', content: 'ship v2' },
+        projectScope(projectId),
+      );
+      clock.advance(100 * DAY);
+
+      const total = memory.countNeedsReview(projectScope(projectId));
+      const surfaced = memory.needsReviewForContext(projectScope(projectId), 10);
+      expect(total).toBe(surfaced.length);
+    });
+
+    it('a refuted no-TTL reference memory counts too', () => {
+      const m = memory.save(
+        { type: 'reference', title: 'Doc link', content: 'https://example.com' },
+        projectScope(projectId),
+      );
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(0);
+      clock.advance(1000);
+      memory.confirm(m.id, projectScope(projectId), { verdict: 'refute', reason: 'dead link' });
+      expect(memory.countNeedsReview(projectScope(projectId))).toBe(1);
+    });
   });
 });
 

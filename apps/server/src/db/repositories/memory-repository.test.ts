@@ -297,17 +297,19 @@ describe('MemoryRepository', () => {
     });
 
     it('selects rows past their per-type threshold; longer-lived & fresh rows exempt; missing type uses default', () => {
-      const ids = repo.findDecayCandidateIds(
-        'global',
-        null,
-        NOW,
-        [
+      const ids = repo.findDecayCandidateIds({
+        scope: 'global',
+        projectId: null,
+        nowMs: NOW,
+        thresholdByType: [
           ['project', 100],
           ['user', 10_000],
         ],
-        1_000, // defaultThresholdMs — covers 'feedback' (no explicit entry)
-        1, // confidenceFloor
-      );
+        defaultThresholdMs: 1_000, // covers 'feedback' (no explicit entry)
+        confidenceFloor: 1,
+        reviewTtlByType: [], // escalation disabled for this test — pure recency+confidence rule only
+        escalationMultiplier: 2,
+      });
       // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
       // U_SAME: user age 200 < 10_000 → out (longer threshold than project).
       // F_OLD: feedback age 2_000 > default 1_000 → in.  F_NEW: 500 < 1_000 → out.

@@ -1,7 +1,11 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
-import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
+import {
+  confirmations,
+  type ConfirmationVerdict,
+  type NewConfirmation,
+} from '../schema/confirmations.js';
 import {
   memory,
   type Memory,
@@ -399,11 +403,12 @@ export class MemoryRepository {
       .all();
   }
 
+  /** Affirmation count only — a refutation is evidence against trust, not for it. */
   countConfirmations(memoryId: string): number {
     const row = this.db
       .select({ value: count() })
       .from(confirmations)
-      .where(eq(confirmations.memoryId, memoryId))
+      .where(and(eq(confirmations.memoryId, memoryId), eq(confirmations.verdict, 'affirm')))
       .get();
     return row?.value ?? 0;
   }
@@ -480,41 +485,76 @@ export class MemoryRepository {
       ?.replaces;
   }
 
-  findDecayCandidateIds(
-    scope: MemoryScope,
-    projectId: string | null,
-    nowMs: number,
-    thresholdByType: ReadonlyArray<readonly [MemoryType, number]>,
-    defaultThresholdMs: number,
-    confidenceFloor: number,
-  ): string[] {
-    const scopeFilter = scopeCondition(scope, projectId);
+  findDecayCandidateIds(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    nowMs: number;
+    thresholdByType: ReadonlyArray<readonly [MemoryType, number]>;
+    defaultThresholdMs: number;
+    confidenceFloor: number;
+    /**
+     * Escalation (separate-access-from-usefulness): a memory `needs_review`
+     * for `escalationMultiplier` × its own TTL with no re-affirmation is
+     * decay-eligible regardless of `last_seen_at`/confidence — the fix for
+     * "read regularly, never re-affirmed, un-archivable" limbo. Empty
+     * `reviewTtlByType` disables escalation entirely (falls back to the
+     * pre-existing recency+confidence rule only).
+     */
+    reviewTtlByType: ReadonlyArray<readonly [MemoryType, number]>;
+    escalationMultiplier: number;
+  }): string[] {
+    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
     // Per-type inactivity window: a row decays once last_seen_at predates
     // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
     const thresholdExpr =
-      thresholdByType.length > 0
+      opts.thresholdByType.length > 0
         ? sql`CASE ${sql.join(
-            thresholdByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
+            opts.thresholdByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
             sql` `,
-          )} ELSE ${defaultThresholdMs} END`
-        : sql`${defaultThresholdMs}`;
+          )} ELSE ${opts.defaultThresholdMs} END`
+        : sql`${opts.defaultThresholdMs}`;
+    const recencyRule = and(
+      sql`${memory.lastSeenAt} < (${opts.nowMs} - ${thresholdExpr})`,
+      sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'affirm') < ${opts.confidenceFloor}`,
+    );
+
+    let eligibleRule = recencyRule;
+    if (opts.reviewTtlByType.length > 0) {
+      const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.reviewTtlByType);
+      const escalationRule = and(
+        sql`${ttlExpr} IS NOT NULL`,
+        sql`${baselineExpr} + (${ttlExpr} * ${opts.escalationMultiplier}) <= ${opts.nowMs}`,
+      );
+      // Outer parens are load-bearing: `and(status='active', ..., eligibleRule)`
+      // joins with plain `AND`, and SQL's `AND` binds tighter than `OR` — an
+      // unwrapped `(recency) OR (escalation)` here would parse as
+      // `(status='active' AND recency) OR escalation`, letting an ALREADY
+      // ARCHIVED row match via escalation with no status filter at all.
+      eligibleRule = sql`((${recencyRule}) OR (${escalationRule}))`;
+    }
+
     return this.db
       .select({ id: memory.id })
       .from(memory)
-      .where(
-        and(
-          eq(memory.status, 'active'),
-          sql`${memory.lastSeenAt} < (${nowMs} - ${thresholdExpr})`,
-          scopeFilter,
-          sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}) < ${confidenceFloor}`,
-        ),
-      )
+      .where(and(eq(memory.status, 'active'), scopeFilter, eligibleRule))
       .all()
       .map((r) => r.id);
   }
 
-  /** Latest confirmation `event_ts` per memory id (the affirmation baseline source). */
+  /** Latest AFFIRMING `event_ts` per memory id (the affirmation baseline source). */
   latestConfirmationTsByIds(ids: readonly string[]): Map<string, Date> {
+    return this.latestVerdictTsByIds(ids, 'affirm');
+  }
+
+  /** Latest REFUTING `event_ts` per memory id — forces `needs_review` immediately when newer than the affirmation baseline. */
+  latestRefutationTsByIds(ids: readonly string[]): Map<string, Date> {
+    return this.latestVerdictTsByIds(ids, 'refute');
+  }
+
+  private latestVerdictTsByIds(
+    ids: readonly string[],
+    verdict: ConfirmationVerdict,
+  ): Map<string, Date> {
     const out = new Map<string, Date>();
     if (ids.length === 0) return out;
     const rows = this.db
@@ -523,7 +563,7 @@ export class MemoryRepository {
         latest: sql<number>`MAX(${confirmations.eventTs})`,
       })
       .from(confirmations)
-      .where(inArray(confirmations.memoryId, [...ids]))
+      .where(and(inArray(confirmations.memoryId, [...ids]), eq(confirmations.verdict, verdict)))
       .groupBy(confirmations.memoryId)
       .all();
     for (const r of rows) {
@@ -532,14 +572,14 @@ export class MemoryRepository {
     return out;
   }
 
-  /** Confirmation count per memory id (search ranking boost input). */
+  /** Affirmation count per memory id (search ranking boost input) — refutations never boost. */
   confirmationCountsByIds(ids: readonly string[]): Map<string, number> {
     const out = new Map<string, number>();
     if (ids.length === 0) return out;
     const rows = this.db
       .select({ memoryId: confirmations.memoryId, n: count() })
       .from(confirmations)
-      .where(inArray(confirmations.memoryId, [...ids]))
+      .where(and(inArray(confirmations.memoryId, [...ids]), eq(confirmations.verdict, 'affirm')))
       .groupBy(confirmations.memoryId)
       .all();
     for (const r of rows) out.set(r.memoryId, r.n);
@@ -594,6 +634,35 @@ export class MemoryRepository {
   }
 
   /**
+   * Scoped total needs-review count — the queue-depth signal `memory.context`
+   * and `memory.stats` surface (separate-access-from-usefulness). Same CASE
+   * ladder as `findNeedsReview`/`adminCountNeedsReview`, just count() instead
+   * of row-fetch, and scoped instead of admin-unscoped.
+   */
+  countNeedsReview(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    nowMs: number;
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+  }): number {
+    if (opts.ttlByType.length === 0) return 0;
+    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
+    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(opts.ttlByType);
+    const row = this.db
+      .select({ value: count() })
+      .from(memory)
+      .where(
+        and(
+          eq(memory.status, 'active'),
+          scopeFilter,
+          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}) OR ${refutedExpr})`,
+        ),
+      )
+      .get();
+    return row?.value ?? 0;
+  }
+
+  /**
    * Unscoped sibling of `findNeedsReview` for the operator dashboard. Optional
    * project filter mirrors `adminList`; `undefined` spans all scopes. Paginates
    * with limit/offset so the dashboard `review=needs_review` filter is correct.
@@ -618,14 +687,22 @@ export class MemoryRepository {
   private needsReviewExprs(ttlByType: ReadonlyArray<readonly [MemoryType, number]>): {
     ttlExpr: SQL;
     baselineExpr: SQL;
+    refutedExpr: SQL;
   } {
     const ttlCase = sql.join(
       ttlByType.map(([t, ms]) => sql`WHEN ${memory.type} = ${t} THEN ${ms}`),
       sql` `,
     );
     const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
-    const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id}), ${memory.createdAt}))`;
-    return { ttlExpr, baselineExpr };
+    // Affirmation baseline only — a refutation must not extend it (that
+    // would let "this was wrong" simultaneously read as "this was reaffirmed").
+    const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'affirm'), ${memory.createdAt}))`;
+    // A refutation more recent than the affirmation baseline forces
+    // needs_review immediately regardless of type or TTL — mirrors
+    // `services/review.ts`'s `deriveReviewState` for a single loaded row,
+    // so a `reference` memory (no TTL) still surfaces here once refuted.
+    const refutedExpr = sql`EXISTS (SELECT 1 FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'refute' AND ${confirmations.eventTs} > (${baselineExpr}))`;
+    return { ttlExpr, baselineExpr, refutedExpr };
   }
 
   private runNeedsReview(
@@ -635,7 +712,7 @@ export class MemoryRepository {
     limit: number,
     offset: number,
   ): Memory[] {
-    const { ttlExpr, baselineExpr } = this.needsReviewExprs(ttlByType);
+    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(ttlByType);
 
     return this.db
       .select()
@@ -644,8 +721,7 @@ export class MemoryRepository {
         and(
           eq(memory.status, 'active'),
           scopeFilter,
-          sql`${ttlExpr} IS NOT NULL`,
-          sql`${baselineExpr} + ${ttlExpr} <= ${nowMs}`,
+          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${nowMs}) OR ${refutedExpr})`,
         ),
       )
       .orderBy(sql`${baselineExpr} ASC`)
@@ -810,7 +886,7 @@ export class MemoryRepository {
     } else if (opts.project?.kind === 'project') {
       scopeFilter = scopeCondition('project', opts.project.projectId);
     }
-    const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.ttlByType);
+    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(opts.ttlByType);
     const row = this.db
       .select({ value: count() })
       .from(memory)
@@ -818,8 +894,7 @@ export class MemoryRepository {
         and(
           eq(memory.status, 'active'),
           scopeFilter,
-          sql`${ttlExpr} IS NOT NULL`,
-          sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
+          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}) OR ${refutedExpr})`,
         ),
       )
       .get();

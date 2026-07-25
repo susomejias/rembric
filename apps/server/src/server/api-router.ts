@@ -234,11 +234,10 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
     }
     const limit = Math.min(parsed.data.limit ?? 5, 5);
-    // touch:false — passive per-turn recall must not bump last_seen_at.
+    // memory.search never touches last_seen_at (separate-access-from-usefulness).
     const rows = await deps.memory.search(
       { query: parsed.data.query, limit },
       projectScope(ctx.project.id),
-      { touch: false },
     );
     const memories = rows.map((m) => ({
       id: m.id,

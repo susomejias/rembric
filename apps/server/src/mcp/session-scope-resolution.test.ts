@@ -101,6 +101,7 @@ beforeEach(() => {
       entities: { backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },
+      review: { needsReview: 0, pendingJudgments: 0 },
       warnings: [],
     }),
   };

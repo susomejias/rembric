@@ -534,6 +534,39 @@ describe('memory.confirm — batch (ids)', () => {
   });
 });
 
+describe('memory.confirm — verdict=refute (separate-access-from-usefulness)', () => {
+  it('rejects a refute with no reason', async () => {
+    const m = memory.save({ type: 'user', title: 'r', content: 'r' }, projectScope(projectA.id));
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.confirm({ id: m.id, verdict: 'refute' })),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+  });
+
+  it('records a refutation with a reason and does not bump confirmationCount', async () => {
+    const m = memory.save({ type: 'user', title: 'r', content: 'r' }, projectScope(projectA.id));
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        handlers.confirm({ id: m.id, verdict: 'refute', reason: 'no longer accurate' }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(memory.get(m.id, projectScope(projectA.id))?.confirmationCount).toBe(0);
+  });
+
+  it('batch ids also accept verdict=refute with a shared reason', async () => {
+    const m1 = memory.save({ type: 'user', title: 'r1', content: 'r1' }, projectScope(projectA.id));
+    const m2 = memory.save({ type: 'user', title: 'r2', content: 'r2' }, projectScope(projectA.id));
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        handlers.confirm({ ids: [m1.id, m2.id], verdict: 'refute', reason: 'batch stale' }),
+      ),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(parseText<{ confirmed: number }>(r).confirmed).toBe(2);
+  });
+});
+
 describe('memory.search — projection (snippet / fields)', () => {
   beforeEach(() => {
     memory.save(

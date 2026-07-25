@@ -426,6 +426,14 @@ export class RelationsService {
     });
   }
 
+  /** Scoped pending-judgment total — the queue-depth signal `memory.context`/`memory.stats` surface. */
+  countPendingInScope(scope: Scope): number {
+    return this.repos.relations.countPendingInScope({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+    });
+  }
+
   /** Count rows by status. Used by `memory.stats` and the dashboard. */
   countByStatus(): Record<'pending' | 'judged' | 'orphaned', number> {
     const out: Record<'pending' | 'judged' | 'orphaned', number> = {

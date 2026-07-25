@@ -472,9 +472,9 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     db.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(1_000, older.id);
     db.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(2_000, newer.id);
     // `older` gets every boost signal; the no-query path must still ignore the boost.
-    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
-    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
-    mem.confirm(older.id, projectScope(projectId), { agent: 'test' });
+    mem.confirm(older.id, projectScope(projectId), { source: { agent: 'test' } });
+    mem.confirm(older.id, projectScope(projectId), { source: { agent: 'test' } });
+    mem.confirm(older.id, projectScope(projectId), { source: { agent: 'test' } });
 
     const res = await mem.search({}, projectScope(projectId));
     const ids = res.map((m) => m.id);

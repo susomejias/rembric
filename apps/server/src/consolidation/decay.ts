@@ -1,13 +1,18 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryType } from '../db/schema/memory.js';
+import { ESCALATION_MULTIPLIER, REVIEW_TTL_MS } from '../services/review.js';
 
 import type { ScopeKey } from './candidates.js';
 
 /**
  * Identify memories eligible for deterministic decay (archive).
  *
- * Rule: status='active' AND last_seen_at < (now - per-type threshold) AND
- * confidence (count of confirmations) < confidenceFloor.
+ * Rule: status='active' AND (
+ *   (last_seen_at < now - per-type threshold AND confidence < confidenceFloor)
+ *   OR escalated (see `ESCALATION_MULTIPLIER` — needs_review for that many
+ *      multiples of the type's own review TTL with no re-affirmation,
+ *      regardless of last_seen_at/confidence)
+ * )
  *
  * Returns the ids only; the consolidation runner records the op via
  * `applyDecay`. No LLM call is required for this category.
@@ -54,12 +59,17 @@ export function findDecayCandidates(
   const thresholdByType = Object.entries(thresholds.thresholdByType).filter(
     (e): e is [MemoryType, number] => typeof e[1] === 'number',
   );
-  return repos.memory.findDecayCandidateIds(
-    scope.scope,
-    scope.projectId,
-    now.getTime(),
-    thresholdByType,
-    thresholds.defaultThresholdMs,
-    thresholds.confidenceFloor,
+  const reviewTtlByType = Object.entries(REVIEW_TTL_MS).filter(
+    (e): e is [MemoryType, number] => typeof e[1] === 'number',
   );
+  return repos.memory.findDecayCandidateIds({
+    scope: scope.scope,
+    projectId: scope.projectId,
+    nowMs: now.getTime(),
+    thresholdByType,
+    defaultThresholdMs: thresholds.defaultThresholdMs,
+    confidenceFloor: thresholds.confidenceFloor,
+    reviewTtlByType,
+    escalationMultiplier: ESCALATION_MULTIPLIER,
+  });
 }

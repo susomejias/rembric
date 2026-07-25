@@ -2,6 +2,7 @@ import { ulid } from 'ulid';
 
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
+import type { ConfirmationVerdict } from '../db/schema/confirmations.js';
 import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
@@ -92,6 +93,15 @@ export interface SaveResult {
    * superseded (its status moved active → superseded). Null otherwise.
    */
   supersededByTopicKey: Memory | null;
+}
+
+export interface ConfirmOptions {
+  source?: MemorySource;
+  sessionId?: string | null;
+  /** Default `'affirm'`. `'refute'` requires `reason` and never touches `last_seen_at`. */
+  verdict?: ConfirmationVerdict;
+  /** Required when `verdict: 'refute'`; optional otherwise. */
+  reason?: string;
 }
 
 export interface SearchMemoriesInput {
@@ -246,8 +256,15 @@ export class MemoryService {
     const confirmationCount = this.repos.memory.countConfirmations(head.id);
     const lastConfirmedAt =
       this.repos.memory.latestConfirmationTsByIds([head.id]).get(head.id) ?? null;
+    const lastRefutedAt = this.repos.memory.latestRefutationTsByIds([head.id]).get(head.id) ?? null;
     const { reviewState, reviewAfter } = deriveReviewState(
-      { type: head.type, createdAt: head.createdAt, status: head.status, lastConfirmedAt },
+      {
+        type: head.type,
+        createdAt: head.createdAt,
+        status: head.status,
+        lastConfirmedAt,
+        lastRefutedAt,
+      },
       this.now(),
     );
     this.repos.memory.touchLastSeen(head.id, this.now());
@@ -293,7 +310,9 @@ export class MemoryService {
     const out = new Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }>();
     if (memories.length === 0) return out;
     const now = this.now();
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(memories.map((m) => m.id));
+    const ids = memories.map((m) => m.id);
+    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(ids);
+    const lastRefuted = this.repos.memory.latestRefutationTsByIds(ids);
     for (const m of memories) {
       const { reviewState, reviewAfter } = deriveReviewState(
         {
@@ -301,6 +320,7 @@ export class MemoryService {
           createdAt: m.createdAt,
           status: m.status,
           lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+          lastRefutedAt: lastRefuted.get(m.id) ?? null,
         },
         now,
       );
@@ -327,7 +347,9 @@ export class MemoryService {
       ),
     });
     if (rows.length === 0) return [];
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+    const ids = rows.map((m) => m.id);
+    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(ids);
+    const lastRefuted = this.repos.memory.latestRefutationTsByIds(ids);
     const items: NeedsReviewItem[] = [];
     for (const m of rows) {
       const { reviewAfter, reviewBaseline } = deriveReviewState(
@@ -336,6 +358,7 @@ export class MemoryService {
           createdAt: m.createdAt,
           status: m.status,
           lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+          lastRefutedAt: lastRefuted.get(m.id) ?? null,
         },
         now,
       );
@@ -345,17 +368,40 @@ export class MemoryService {
   }
 
   /**
+   * Total needs-review count in scope — the queue-depth signal
+   * `memory.context` and `memory.stats` surface (separate-access-from-
+   * usefulness). An agent that knows the queue is 800 deep can batch-
+   * confirm with the `ids` form it already has; seeing only the 3 oldest
+   * (`needsReviewForContext`'s cap) can't distinguish a healthy corpus from
+   * a collapsing one.
+   */
+  countNeedsReview(scope: Scope): number {
+    return this.repos.memory.countNeedsReview({
+      scope: scope.kind === 'project' ? 'project' : 'global',
+      projectId: scope.kind === 'project' ? scope.projectId : null,
+      nowMs: this.now().getTime(),
+      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
+        (e): e is [MemoryType, number] => typeof e[1] === 'number',
+      ),
+    });
+  }
+
+  /**
    * Scope-restricted search. With a text query this is hybrid retrieval
    * (dense vec ⊕ lexical FTS, RRF-fused — see `hybrid-search.ts`); without
    * one it is the chronological listing with exact pagination. Scope is
    * enforced at the SQL level; the agent cannot opt out by widening a filter.
+   *
+   * Does NOT advance `last_seen_at` (separate-access-from-usefulness,
+   * Decision 1: "one signal, one purpose"). Being returned in a page of up
+   * to 200 is not evidence a row was useful — dereferencing it via
+   * `memory.get` is the actual proxy for use, and is the only read path
+   * that still touches. Search touching every result was the closed loop
+   * that made ranking high self-perpetuating: it extended lifetime, which
+   * raised future rank, indefinitely.
    */
-  async search(
-    input: SearchMemoriesInput,
-    scope: Scope,
-    opts: { touch?: boolean } = {},
-  ): Promise<Memory[]> {
-    return (await this.searchWithAbstention(input, scope, opts)).memories;
+  async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
+    return (await this.searchWithAbstention(input, scope)).memories;
   }
 
   /**
@@ -368,7 +414,6 @@ export class MemoryService {
   async searchWithAbstention(
     input: SearchMemoriesInput,
     scope: Scope,
-    opts: { touch?: boolean } = {},
   ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string; viaEntity?: boolean }> {
     const status = input.status ?? 'active';
     const limit = clampLimit(input.limit);
@@ -400,12 +445,6 @@ export class MemoryService {
         ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
         : rows;
       const page = filtered.slice(offset, offset + limit);
-      if (page.length > 0 && opts.touch !== false) {
-        this.repos.memory.touchLastSeenBatch(
-          page.map((m) => m.id),
-          this.now(),
-        );
-      }
       return { memories: page, abstained: false, viaEntity: true };
     }
 
@@ -455,8 +494,6 @@ export class MemoryService {
       // staleness there: re-check the live row's status before returning it.
       if (m && m.status === status) ordered.push(m);
     }
-    // Passive callers pass touch:false so per-turn recall doesn't inflate the recency signal.
-    if (opts.touch !== false) this.repos.memory.touchLastSeenBatch(ids, this.now());
     return { memories: ordered, abstained, reason };
   }
 
@@ -467,12 +504,17 @@ export class MemoryService {
    * stopped at its hop cap without finding an active row — an explicit
    * signal rather than silently confirming a non-active row.
    */
-  confirm(
-    id: string,
-    scope: Scope,
-    source?: MemorySource,
-    sessionId?: string | null,
-  ): { headTruncated: boolean } {
+  confirm(id: string, scope: Scope, opts: ConfirmOptions = {}): { headTruncated: boolean } {
+    const verdict = opts.verdict ?? 'affirm';
+    if (verdict === 'refute') {
+      if (!opts.reason || opts.reason.trim().length === 0) {
+        throw new DomainError(
+          'invalid_input',
+          'memory.confirm: verdict=refute requires a non-empty reason',
+        );
+      }
+      assertNoNul('memory.confirm', 'reason', opts.reason);
+    }
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) {
       throw new DomainError('memory_not_found', `memory.confirm: id=${id} not found`);
@@ -483,10 +525,15 @@ export class MemoryService {
       id: ulid(ts.getTime()),
       memoryId: head.id,
       eventTs: ts,
-      source: source ?? null,
-      sessionId: sessionId ?? null,
+      source: opts.source ?? null,
+      sessionId: opts.sessionId ?? null,
+      verdict,
+      reason: opts.reason ?? null,
     });
-    this.repos.memory.touchLastSeen(head.id, ts);
+    // Refutation must NOT advance the access signal (Decision 4) — touching
+    // it here would recreate the loop this change exists to break: proving
+    // a memory wrong would extend its life.
+    if (verdict === 'affirm') this.repos.memory.touchLastSeen(head.id, ts);
     return { headTruncated: truncated };
   }
 
@@ -498,14 +545,13 @@ export class MemoryService {
   confirmMany(
     ids: readonly string[],
     scope: Scope,
-    source?: MemorySource,
-    sessionId?: string | null,
+    opts: ConfirmOptions = {},
   ): { confirmed: number; headTruncated: boolean } {
     const unique = [...new Set(ids)];
     return this.tx.transaction(() => {
       let headTruncated = false;
       for (const id of unique) {
-        const result = this.confirm(id, scope, source, sessionId);
+        const result = this.confirm(id, scope, opts);
         headTruncated = headTruncated || result.headTruncated;
       }
       return { confirmed: unique.length, headTruncated };

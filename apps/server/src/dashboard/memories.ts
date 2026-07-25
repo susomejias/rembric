@@ -132,7 +132,9 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // when the needs_review filter is combined with a text query).
     const reviewById = new Map<string, ReviewState | null>();
     if (rows.length > 0) {
-      const lastConfirmed = deps.repos.memory.latestConfirmationTsByIds(rows.map((m) => m.id));
+      const rowIds = rows.map((m) => m.id);
+      const lastConfirmed = deps.repos.memory.latestConfirmationTsByIds(rowIds);
+      const lastRefuted = deps.repos.memory.latestRefutationTsByIds(rowIds);
       const at = new Date(nowMs);
       for (const m of rows) {
         reviewById.set(
@@ -143,6 +145,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               createdAt: m.createdAt,
               status: m.status,
               lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
+              lastRefutedAt: lastRefuted.get(m.id) ?? null,
             },
             at,
           ).reviewState,
@@ -335,8 +338,15 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
     const lastConfirmedAt =
       deps.repos.memory.latestConfirmationTsByIds([row.id]).get(row.id) ?? null;
+    const lastRefutedAt = deps.repos.memory.latestRefutationTsByIds([row.id]).get(row.id) ?? null;
     const { reviewState, reviewAfter } = deriveReviewState(
-      { type: row.type, createdAt: row.createdAt, status: row.status, lastConfirmedAt },
+      {
+        type: row.type,
+        createdAt: row.createdAt,
+        status: row.status,
+        lastConfirmedAt,
+        lastRefutedAt,
+      },
       new Date(),
     );
     const successor =
@@ -584,7 +594,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const scope =
       row.scope === 'project' && row.projectId ? projectScope(row.projectId) : SCOPE_GLOBAL;
     try {
-      deps.memory.confirm(id, scope, { agent: 'dashboard-operator' });
+      deps.memory.confirm(id, scope, { source: { agent: 'dashboard-operator' } });
     } catch (err) {
       if (err instanceof DomainError) {
         return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });

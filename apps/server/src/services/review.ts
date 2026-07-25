@@ -46,12 +46,24 @@ export function ttlForType(type: MemoryType): number | undefined {
   return REVIEW_TTL_MS[type];
 }
 
+/**
+ * A memory `needs_review` for this many multiples of its own TTL with no
+ * re-affirmation escalates: decay eligibility no longer requires
+ * `last_seen_at` to be stale (see `consolidation/decay.ts`). This is the
+ * fix for the "read regularly, never re-affirmed, un-archivable" limbo the
+ * change exists to close — reachable only for types that carry a TTL at
+ * all (`reference` has none and does not escalate this way).
+ */
+export const ESCALATION_MULTIPLIER = 2;
+
 export interface DeriveReviewInput {
   type: MemoryType;
   createdAt: Date;
   status: MemoryStatus;
-  /** event_ts of the most recent confirmation against the memory, if any. */
+  /** event_ts of the most recent AFFIRMING confirmation, if any. */
   lastConfirmedAt: Date | null;
+  /** event_ts of the most recent REFUTING confirmation, if any. */
+  lastRefutedAt: Date | null;
 }
 
 export interface DerivedReview {
@@ -66,7 +78,11 @@ export interface DerivedReview {
  * `needsReview` context list, so they agree by construction.
  *
  * Non-active memories carry no review state. Types without a TTL are always
- * `fresh` with a null `reviewAfter`.
+ * `fresh` with a null `reviewAfter` — UNLESS refuted more recently than the
+ * last affirmation, which forces `needs_review` immediately regardless of
+ * type or TTL: an explicit "this was wrong" outranks a clock that hasn't
+ * finished counting down, and a `reference` memory (no TTL) is not exempt
+ * from that just because it's never nagged on a schedule.
  */
 export function deriveReviewState(input: DeriveReviewInput, now: Date): DerivedReview {
   if (input.status !== 'active') {
@@ -77,6 +93,12 @@ export function deriveReviewState(input: DeriveReviewInput, now: Date): DerivedR
     input.lastConfirmedAt?.getTime() ?? input.createdAt.getTime(),
   );
   const reviewBaseline = new Date(baselineMs);
+
+  const refutedSinceBaseline =
+    input.lastRefutedAt !== null && input.lastRefutedAt.getTime() > baselineMs;
+  if (refutedSinceBaseline) {
+    return { reviewState: 'needs_review', reviewAfter: input.lastRefutedAt, reviewBaseline };
+  }
 
   const ttl = ttlForType(input.type);
   if (ttl === undefined) {

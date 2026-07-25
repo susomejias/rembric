@@ -48,6 +48,8 @@ export interface DoctorReport {
   entities: { backlog: number };
   consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
   sessions: { active: number };
+  /** Server-wide (unscoped) queue-depth signals — same precedent as `sessions.active`; `memory.stats` carries the scoped equivalents. */
+  review: { needsReview: number; pendingJudgments: number };
   warnings: string[];
 }
 
@@ -65,6 +67,7 @@ export const doctorOutput = {
     lastRunOps: counts,
   }),
   sessions: z.object({ active: z.number() }),
+  review: z.object({ needsReview: z.number(), pendingJudgments: z.number() }),
   warnings: z.array(z.string()),
 };
 
@@ -73,6 +76,9 @@ export const statsOutput = {
   memoriesByStatus: counts,
   memoriesByType: counts,
   sessionsByStatus: counts,
+  /** Queue-depth signals (separate-access-from-usefulness), both scoped to this call's context. */
+  needsReviewTotal: z.number(),
+  pendingJudgmentsTotal: z.number(),
 };
 
 export const capturePassiveOutput = {
@@ -223,11 +229,15 @@ async function handleStats(deps: ObservabilityToolDeps) {
   // Scoped — NOT adminCountByStatus. See openspec/changes/fix-audited-defects
   // ("memory.stats.sessionsByStatus bypasses scope enforcement").
   const sessionsByStatus = deps.agentSessions.countByStatus(scope);
+  const needsReviewTotal = deps.memory.countNeedsReview(scope);
+  const pendingJudgmentsTotal = deps.relations ? deps.relations.countPendingInScope(scope) : 0;
 
   return ok({
     scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
     memoriesByStatus: byStatus,
     memoriesByType: byType,
     sessionsByStatus,
+    needsReviewTotal,
+    pendingJudgmentsTotal,
   });
 }
