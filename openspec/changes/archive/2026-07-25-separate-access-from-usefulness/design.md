@@ -4,7 +4,7 @@
 
 Two measurements bound the problem. Decay windows are 180 / 365 / 730 / 3650 days by type, with a confirmation floor of 1 — so anything retrieved even occasionally is effectively permanently decay-immune. And a default search touches eight rows, so at ordinary usage a few-hundred-memory corpus is fully touched within weeks.
 
-The mirror gap is the absence of any negative verb, which means the one interaction that *proves* a memory wrong is also the one that extends its life.
+The mirror gap is the absence of any negative verb, which means the one interaction that _proves_ a memory wrong is also the one that extends its life.
 
 ## Goals
 
@@ -17,7 +17,7 @@ The mirror gap is the absence of any negative verb, which means the one interact
 
 - Autonomous archival by the agent. Refutation feeds the derived review axis; it does not retire anything.
 - Storing review state. It stays derived at read time; refutation is an input.
-- Changing the deliberate rule that *reading* does not clear `needs_review`.
+- Changing the deliberate rule that _reading_ does not clear `needs_review`.
 - Changing fusion constants — that is `fix-retrieval-ranking-math`.
 
 ## Decisions
