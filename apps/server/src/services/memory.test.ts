@@ -413,6 +413,146 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     expect(result.map((m) => m.id)).toEqual([old.id]);
   });
+
+  it('combines with the status, type, tag and topic_key filters', async () => {
+    const repos = createRepositories(db.handle.db);
+    const pref = memory.save(
+      { type: 'user', title: 'Pref', content: 'prefers tabs', tags: ['editor'] },
+      projectScope(projectId),
+    );
+    const note = memory.save(
+      { type: 'project', title: 'Note', content: 'a project note', topicKey: 'topic/note' },
+      projectScope(projectId),
+    );
+    const retired = memory.save(
+      { type: 'project', title: 'Retired', content: 'retired note' },
+      projectScope(projectId),
+    );
+    memory.archive(retired.id, projectScope(projectId));
+    for (const m of [pref, note, retired]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'src/mixed.ts' }],
+        clock.now(),
+      );
+    }
+    const scope = projectScope(projectId);
+
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', type: 'user' }, scope)).map((m) => m.id),
+    ).toEqual([pref.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', tag: 'editor' }, scope)).map((m) => m.id),
+    ).toEqual([pref.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', topicKey: 'topic/note' }, scope)).map(
+        (m) => m.id,
+      ),
+    ).toEqual([note.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', status: 'archived' }, scope)).map((m) => m.id),
+    ).toEqual([retired.id]);
+    expect(
+      (await memory.search({ entity: 'src/mixed.ts', status: 'active' }, scope))
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual([note.id, pref.id].sort());
+  });
+
+  it('returns every linked memory when no limit is given, past the ranked default page of 8', async () => {
+    const repos = createRepositories(db.handle.db);
+    const ids: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const m = memory.save(
+        { type: 'project', title: `Note ${i}`, content: `note ${i}` },
+        projectScope(projectId),
+      );
+      ids.push(m.id);
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'error_code', value: 'ERR_TWELVE' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search({ entity: 'ERR_TWELVE' }, projectScope(projectId));
+    expect(result.map((m) => m.id).sort()).toEqual([...ids].sort());
+    // An explicit `limit` still bounds the page.
+    const bounded = await memory.search(
+      { entity: 'ERR_TWELVE', limit: 3 },
+      projectScope(projectId),
+    );
+    expect(bounded).toHaveLength(3);
+  });
+
+  it('includeGlobal admits a global memory sharing the entity, and only when asked', async () => {
+    const repos = createRepositories(db.handle.db);
+    const globalMem = memory.save(
+      { type: 'user', title: 'Global', content: 'user-wide convention' },
+      SCOPE_GLOBAL,
+    );
+    const projectMem = memory.save(
+      { type: 'project', title: 'Project', content: 'project convention' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      globalMem.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'src/both.ts' }],
+      clock.now(),
+    );
+    repos.entities.linkMemory(
+      projectMem.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'src/both.ts' }],
+      clock.now(),
+    );
+
+    expect(
+      (await memory.search({ entity: 'src/both.ts' }, projectScope(projectId))).map((m) => m.id),
+    ).toEqual([projectMem.id]);
+    expect(
+      (await memory.search({ entity: 'src/both.ts', includeGlobal: true }, projectScope(projectId)))
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual([globalMem.id, projectMem.id].sort());
+  });
+});
+
+describe('memory.search — topic_key history', () => {
+  it('returns every memory ever saved under a key, and an explicit status still narrows', async () => {
+    for (let i = 0; i < 4; i++) {
+      memory.save(
+        {
+          type: 'project',
+          title: `Runbook v${i}`,
+          content: `deploy runbook revision ${i}`,
+          topicKey: 'decision/deploy-runbook',
+        },
+        projectScope(projectId),
+      );
+    }
+
+    const history = await memory.search(
+      { topicKey: 'decision/deploy-runbook' },
+      projectScope(projectId),
+    );
+    expect(history).toHaveLength(4);
+    expect(history.filter((m) => m.status === 'active')).toHaveLength(1);
+    expect(history.filter((m) => m.status === 'superseded')).toHaveLength(3);
+
+    const activeOnly = await memory.search(
+      { topicKey: 'decision/deploy-runbook', status: 'active' },
+      projectScope(projectId),
+    );
+    expect(activeOnly).toHaveLength(1);
+  });
 });
 
 describe('memory.get', () => {

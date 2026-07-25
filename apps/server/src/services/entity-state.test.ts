@@ -78,7 +78,6 @@ describe('ensureEntityExtractor', () => {
         projectId,
         kind: 'ip_address',
         value: '192.168.1.50',
-        includeArchived: false,
         limit: 10,
       }),
     ).toHaveLength(1);

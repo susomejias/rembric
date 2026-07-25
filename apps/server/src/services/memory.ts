@@ -8,7 +8,12 @@ import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schem
 
 import { DomainError } from './errors.js';
 import { hybridSearch, RANK_WINDOW_CEILING } from './hybrid-search.js';
-import { deriveReviewState, reviewTtlEntries, type ReviewState } from './review.js';
+import {
+  deriveReviewState,
+  REFUTED_PRIORITY_MS,
+  reviewTtlEntries,
+  type ReviewState,
+} from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
@@ -348,6 +353,7 @@ export class MemoryService {
       nowMs: now.getTime(),
       limit,
       ttlByType: reviewTtlEntries(),
+      refutedPriorityMs: REFUTED_PRIORITY_MS,
     });
     if (rows.length === 0) return [];
     const ids = rows.map((m) => m.id);
@@ -410,7 +416,11 @@ export class MemoryService {
     input: SearchMemoriesInput,
     scope: Scope,
   ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string; viaEntity?: boolean }> {
-    const status = input.status ?? 'active';
+    // A `topic_key` filter addresses a convergent topic's whole history, and
+    // every row in that slot but the newest is `superseded` — so an absent
+    // `status` means "any" there rather than the usual `active` default. An
+    // explicit `status` still narrows.
+    const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
     const memScope = scope.kind === 'global' ? 'global' : 'project';
@@ -420,26 +430,30 @@ export class MemoryService {
     const entity = input.entity?.trim();
 
     if (entity) {
-      // Exact-address retrieval: no fusion, no rank window, no threshold,
-      // no boost. Narrows by `query` (Decision 5) rather than fusing with
-      // it — a lexical containment filter over the entity's own memories,
-      // not a second ranked pass. When narrowing, the fetch must cover more
-      // than the final page: the query filter runs AFTER the fetch, so
-      // fetching only `offset + limit` rows would silently miss a match
-      // older than that window whenever the entity has more links than the
-      // page size. `RANK_WINDOW_CEILING` is the existing bounded-but-
-      // generous over-fetch ceiling used elsewhere in this file.
+      // Exact-address retrieval: no fusion, no rank window, no threshold, no
+      // boost. `query` narrows rather than fusing — a containment filter over
+      // the entity's own memories, applied AFTER the fetch, so the fetch must
+      // cover more than the final page or a match older than one page is
+      // silently dropped. `RANK_WINDOW_CEILING` is the over-fetch ceiling used
+      // elsewhere in this file; here it doubles as the page size when the
+      // caller named no `limit`, since the branch is specified as complete
+      // within scope and the 8-row ranked default would truncate that.
+      const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
         scope: memScope,
         projectId,
         value: entity,
-        includeArchived: status !== 'active',
-        limit: query ? Math.max(offset + limit, RANK_WINDOW_CEILING) : offset + limit,
+        status,
+        type: input.type,
+        tag: input.tag,
+        topicKey: input.topicKey,
+        includeGlobal: input.includeGlobal,
+        limit: query ? Math.max(offset + entityLimit, RANK_WINDOW_CEILING) : offset + entityLimit,
       });
       const filtered = query
         ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
         : rows;
-      const page = filtered.slice(offset, offset + limit);
+      const page = filtered.slice(offset, offset + entityLimit);
       return { memories: page, abstained: false, viaEntity: true };
     }
 
@@ -487,7 +501,7 @@ export class MemoryService {
       // The dense branch's candidate ids come from memory_vec.status, which
       // is derived asynchronously — belt-and-suspenders against any future
       // staleness there: re-check the live row's status before returning it.
-      if (m && m.status === status) ordered.push(m);
+      if (m && (status === undefined || m.status === status)) ordered.push(m);
     }
     return { memories: ordered, abstained, reason };
   }

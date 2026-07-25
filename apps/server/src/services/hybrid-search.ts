@@ -67,7 +67,8 @@ export interface HybridSearchOpts {
   query: string;
   scope: MemoryScope;
   projectId: string | null;
-  status: MemoryStatus;
+  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
   /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
@@ -288,7 +289,12 @@ async function denseRetriever(
   rankWindowSize: number,
 ): Promise<{ id: string; score: number }[]> {
   if (!opts.embedQuery || opts.status === 'archived') return [];
-  const status = opts.status;
+  // `memory_vec.status` is an exact-match metadata filter, so an any-status
+  // read enumerates the two non-archived values rather than dropping the
+  // predicate: archived vectors stay out of this branch either way.
+  const statuses: Exclude<MemoryStatus, 'archived'>[] = opts.status
+    ? [opts.status]
+    : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
     // include_global scans the project + global partitions (each with its own
@@ -299,13 +305,15 @@ async function denseRetriever(
         : [partitionKeyFor(opts.scope, opts.projectId)];
     const neighbors = partitionKeys
       .flatMap((partitionKey) =>
-        opts.repos.vectors.knnByQueryVector({
-          queryVector,
-          partitionKey,
-          status,
-          type: opts.type,
-          rankWindowSize,
-        }),
+        statuses.flatMap((status) =>
+          opts.repos.vectors.knnByQueryVector({
+            queryVector,
+            partitionKey,
+            status,
+            type: opts.type,
+            rankWindowSize,
+          }),
+        ),
       )
       .sort((a, b) => a.distance - b.distance);
     // Dedup (nearest wins) before the slice — RRF needs distinct ids.

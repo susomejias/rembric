@@ -9,7 +9,13 @@ import {
   memoryEntityLinks,
   memoryEntityScan,
 } from '../schema/entities.js';
-import { memory, type Memory, type MemoryScope } from '../schema/memory.js';
+import {
+  memory,
+  type Memory,
+  type MemoryScope,
+  type MemoryStatus,
+  type MemoryType,
+} from '../schema/memory.js';
 
 export interface EntityRef {
   kind: EntityKind;
@@ -29,11 +35,22 @@ export interface MemoryEntityView {
   value: string;
 }
 
-function entityScopeCondition(scope: MemoryScope, projectId: string | null) {
-  return and(
+/**
+ * `includeGlobal` widens a `project` scope to also match `global` entities
+ * without ever admitting another `project_id` — the entity-side sibling of
+ * `scopeWhere`'s flag. No-op for `global` scope.
+ */
+function entityScopeCondition(
+  scope: MemoryScope,
+  projectId: string | null,
+  includeGlobal?: boolean,
+) {
+  const own = and(
     eq(memoryEntities.scope, scope),
     projectId === null ? isNull(memoryEntities.projectId) : eq(memoryEntities.projectId, projectId),
   );
+  if (scope !== 'project' || !includeGlobal) return own;
+  return or(own, and(eq(memoryEntities.scope, 'global'), isNull(memoryEntities.projectId)));
 }
 
 /** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
@@ -120,21 +137,39 @@ export class EntitiesRepository {
    * value), chronological, no ranking. `kind` narrows further when the
    * caller knows it; omitted, it matches the value across all kinds (rare
    * in practice since values don't collide across kinds by construction).
+   *
+   * The `status`/`type`/`tag`/`topicKey` filters are the same predicates the
+   * ranked branches apply, so `memory.search`'s documented filters mean the
+   * same thing on both paths. An omitted `status` means "any but archived",
+   * not "active" — the entity path is specified as complete within scope.
    */
   findMemoriesByEntity(opts: {
     scope: MemoryScope;
     projectId: string | null;
     kind?: EntityKind;
     value: string;
-    includeArchived: boolean;
+    status?: MemoryStatus;
+    type?: MemoryType;
+    tag?: string;
+    topicKey?: string;
+    includeGlobal?: boolean;
     limit: number;
   }): Memory[] {
     const conditions = [
-      entityScopeCondition(opts.scope, opts.projectId),
+      entityScopeCondition(opts.scope, opts.projectId, opts.includeGlobal),
       eq(memoryEntities.value, opts.value),
     ];
     if (opts.kind) conditions.push(eq(memoryEntities.kind, opts.kind));
-    if (!opts.includeArchived) conditions.push(sql`${memory.status} != 'archived'`);
+    conditions.push(
+      opts.status ? eq(memory.status, opts.status) : sql`${memory.status} != 'archived'`,
+    );
+    if (opts.type) conditions.push(eq(memory.type, opts.type));
+    if (opts.tag) {
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM json_each(${memory.tags}) je WHERE je.value = ${opts.tag})`,
+      );
+    }
+    if (opts.topicKey) conditions.push(eq(memory.topicKey, opts.topicKey));
 
     return this.db
       .select(getTableColumns(memory))

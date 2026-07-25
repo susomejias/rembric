@@ -165,7 +165,12 @@ export class VectorsRepository {
     `);
   }
 
-  backlogCount(): number {
+  /**
+   * Unscoped — `admin`-prefixed so the confinement gate covers it, matching
+   * `entities.adminBacklogCount()`. Reachable from `memory.doctor`, whose
+   * report is deliberately server-wide.
+   */
+  adminBacklogCount(): number {
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v FROM memory m
       LEFT JOIN memory_vec v ON v.memory_id = m.id

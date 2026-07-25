@@ -5,7 +5,12 @@ import type { Memory, MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
-import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from '../services/review.js';
+import {
+  deriveReviewState,
+  REFUTED_PRIORITY_MS,
+  REVIEW_TTL_MS,
+  type ReviewState,
+} from '../services/review.js';
 import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
@@ -118,6 +123,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         limit: PAGE_SIZE + 1,
         offset,
         ttlByType: TTL_BY_TYPE,
+        refutedPriorityMs: REFUTED_PRIORITY_MS,
       });
     } else {
       rows = deps.repos.memory.adminList({

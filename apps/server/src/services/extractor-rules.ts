@@ -263,6 +263,13 @@ export const EXTRACTOR_RULES: readonly ExtractorRule[] = [
       { text: 'the slug lives in .rembric at the root', values: ['.rembric'] },
       { text: 'run ./scripts/prompt-search.sh to reproduce', values: ['scripts/prompt-search.sh'] },
       { text: 'edit infra/main.tf for the cluster', values: ['infra/main.tf'] },
+      // A unit-like body before the terminal extension: the extension must win,
+      // or the index stores `src/user.service`, an address that does not exist.
+      { text: 'the provider lives in src/user.service.ts', values: ['src/user.service.ts'] },
+      {
+        text: 'the slug lives in .claude/settings.local.json',
+        values: ['.claude/settings.local.json'],
+      },
     ],
     rejects: ['a solution / an idea, or maybe both', 'the version is 3.14 exactly'],
   },
@@ -397,6 +404,8 @@ export const EXTRACTOR_RULES: readonly ExtractorRule[] = [
       'call array.slice(0, 10) before mapping',
       'req.path returns the relative route',
       'the component calls wrapper.mount() in the test',
+      // A unit suffix inside a longer dotted name is not a unit.
+      'the provider lives in src/user.service.ts',
     ],
   },
   {
@@ -417,7 +426,12 @@ export const EXTRACTOR_RULES: readonly ExtractorRule[] = [
       { text: 'ssh into nas.local to grab the logs', values: ['nas.local'] },
       { text: 'reach NAS.LOCAL from any device', values: ['nas.local'] },
     ],
-    rejects: ['the nas local drive is full', 'e.g. or i.e. or etc. are not hosts'],
+    rejects: [
+      'the nas local drive is full',
+      'e.g. or i.e. or etc. are not hosts',
+      // A suffix inside a longer dotted filename is not a host.
+      'the slug lives in .claude/settings.local.json',
+    ],
   },
 ];
 

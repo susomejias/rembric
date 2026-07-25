@@ -60,6 +60,18 @@ export function reviewTtlEntries(): ReadonlyArray<readonly [MemoryType, number]>
  */
 export const ESCALATION_MULTIPLIER = 2;
 
+/**
+ * How long a refutation keeps a memory at the head of the review queue.
+ * Refuted rows lead because refutation deliberately does not advance the
+ * affirmation baseline, so baseline ordering alone would bury a just-refuted
+ * memory. The lead cannot be permanent: `memory.context` shows three rows, so
+ * an unattended handful of refuted memories would otherwise starve every
+ * TTL-expired row for good. Past the window the row still needs review — it
+ * just queues by baseline like the rest. Matches the two weeks a pending
+ * judgment gets before the sweep orphans it.
+ */
+export const REFUTED_PRIORITY_MS = 14 * 24 * 60 * 60 * 1000;
+
 export interface DeriveReviewInput {
   type: MemoryType;
   createdAt: Date;

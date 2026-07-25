@@ -504,7 +504,7 @@ function buildDoctorReportFactory(deps: {
 
     if (integrity !== 'ok') warnings.push(`db integrity: ${integrity}`);
 
-    const lastConsolidation = deps.repos.consolidation.latestRun();
+    const lastConsolidation = deps.repos.consolidation.adminLatestRun();
 
     let lastRunOps: Record<string, number> = {};
     if (lastConsolidation?.summary) {
@@ -515,7 +515,7 @@ function buildDoctorReportFactory(deps: {
       }
     }
 
-    const backlog = deps.repos.vectors.backlogCount();
+    const backlog = deps.repos.vectors.adminBacklogCount();
     if (backlog > 100) {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
@@ -555,7 +555,7 @@ function collectStats(
   agentSessionsSvc: AgentSessionsService,
   relationsSvc: RelationsService,
 ): DashboardStats {
-  const consolidationRow = repos.consolidation.latestRun();
+  const consolidationRow = repos.consolidation.adminLatestRun();
   const sessionsByStatus = agentSessionsSvc.adminCountByStatus();
   const relationsByStatus = relationsSvc.countByStatus();
   const memoriesByStatus = repos.memory.countRowsByStatus();

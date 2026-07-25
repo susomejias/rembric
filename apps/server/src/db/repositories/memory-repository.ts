@@ -37,7 +37,8 @@ export interface ReviewTimestamps {
 export interface SearchMemoryIdsOpts {
   scope: MemoryScope;
   projectId: string | null;
-  status: MemoryStatus;
+  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
   /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
@@ -53,7 +54,8 @@ export interface SearchBm25IdsOpts {
   matchExpr: string;
   scope: MemoryScope;
   projectId: string | null;
-  status: MemoryStatus;
+  /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
+  status?: MemoryStatus;
   type?: MemoryType;
   tag?: string;
   /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
@@ -259,12 +261,13 @@ export class MemoryRepository {
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
     const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
+    const statusClause = opts.status ? sql`AND m.status = ${opts.status}` : sql``;
     const rows = this.db.all<{ id: string }>(
       sql`
         SELECT m.id
         FROM memory m
         WHERE ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
-          AND m.status = ${opts.status}
+          ${statusClause}
           ${typeClause}
           ${tagClause}
           ${topicKeyClause}
@@ -287,6 +290,7 @@ export class MemoryRepository {
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
     const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
+    const statusClause = opts.status ? sql`AND m.status = ${opts.status}` : sql``;
     return this.db.all<{ id: string; rank: number }>(
       sql`
         SELECT m.id AS id, bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE}) AS rank
@@ -294,7 +298,7 @@ export class MemoryRepository {
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
           AND ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
-          AND m.status = ${opts.status}
+          ${statusClause}
           ${typeClause}
           ${tagClause}
           ${topicKeyClause}
@@ -591,10 +595,11 @@ export class MemoryRepository {
   }
 
   /**
-   * Active in-scope memories past their review shelf life, oldest affirmation
-   * baseline first. The per-type TTL ladder is built from `ttlByType` (passed
-   * by the service so the constant lives in exactly one place); a type absent
-   * from `ttlByType` has no TTL and is excluded. Read-only; no transaction.
+   * Active in-scope memories past their review shelf life, recently-refuted
+   * first and then oldest affirmation baseline first. The per-type TTL ladder
+   * is built from `ttlByType` and the refutation lead from `refutedPriorityMs`
+   * (both passed by the service so the constants live in exactly one place); a
+   * type absent from `ttlByType` has no TTL and is excluded. Read-only.
    */
   findNeedsReview(opts: {
     scope: MemoryScope;
@@ -602,6 +607,7 @@ export class MemoryRepository {
     nowMs: number;
     limit: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+    refutedPriorityMs: number;
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
     return this.runNeedsReview(
@@ -610,6 +616,7 @@ export class MemoryRepository {
       opts.nowMs,
       opts.limit,
       0,
+      opts.refutedPriorityMs,
     );
   }
 
@@ -654,6 +661,7 @@ export class MemoryRepository {
     limit: number;
     offset: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+    refutedPriorityMs: number;
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
     let scopeFilter: SQL | undefined;
@@ -662,7 +670,25 @@ export class MemoryRepository {
     } else if (opts.project?.kind === 'project') {
       scopeFilter = scopeCondition('project', opts.project.projectId);
     }
-    return this.runNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs, opts.limit, opts.offset);
+    return this.runNeedsReview(
+      scopeFilter,
+      opts.ttlByType,
+      opts.nowMs,
+      opts.limit,
+      opts.offset,
+      opts.refutedPriorityMs,
+    );
+  }
+
+  /**
+   * A refutation newer than the affirmation baseline (and, when `sinceMs` is
+   * given, newer than that cutoff too). Mirrors `deriveReviewState`: such a
+   * refutation forces needs_review regardless of TTL, so a `reference` still
+   * surfaces.
+   */
+  private refutedSinceExpr(baselineExpr: SQL, sinceMs?: number): SQL {
+    const recency = sinceMs === undefined ? sql`` : sql` AND ${confirmations.eventTs} > ${sinceMs}`;
+    return sql`EXISTS (SELECT 1 FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'refute' AND ${confirmations.eventTs} > (${baselineExpr})${recency})`;
   }
 
   private needsReviewExprs(ttlByType: ReadonlyArray<readonly [MemoryType, number]>): {
@@ -676,10 +702,7 @@ export class MemoryRepository {
     );
     const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
     const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'affirm'), ${memory.createdAt}))`;
-    // Mirrors `deriveReviewState`: a refutation newer than the baseline forces
-    // needs_review regardless of TTL, so a `reference` still surfaces.
-    const refutedExpr = sql`EXISTS (SELECT 1 FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'refute' AND ${confirmations.eventTs} > (${baselineExpr}))`;
-    return { ttlExpr, baselineExpr, refutedExpr };
+    return { ttlExpr, baselineExpr, refutedExpr: this.refutedSinceExpr(baselineExpr) };
   }
 
   /** Composed so the three needs-review call sites cannot drift apart. */
@@ -697,29 +720,27 @@ export class MemoryRepository {
     nowMs: number,
     limit: number,
     offset: number,
+    refutedPriorityMs: number,
   ): Memory[] {
-    const { baselineExpr, refutedExpr } = this.needsReviewExprs(ttlByType);
+    const { baselineExpr } = this.needsReviewExprs(ttlByType);
+    // Refuted rows lead: refutation deliberately does not advance the baseline,
+    // so ordering by it alone sorts a freshly-refuted memory LAST and a capped
+    // page (memory.context takes 3) never shows the agent back the memory it
+    // just called wrong. The lead is time-bounded — an unattended refutation
+    // would otherwise hold the head of the queue forever and starve every
+    // TTL-expired row.
+    const recentlyRefutedExpr = this.refutedSinceExpr(baselineExpr, nowMs - refutedPriorityMs);
 
-    return (
-      this.db
-        .select()
-        .from(memory)
-        .where(
-          and(
-            eq(memory.status, 'active'),
-            scopeFilter,
-            this.needsReviewPredicate(ttlByType, nowMs),
-          ),
-        )
-        // Refuted rows first: refutation deliberately does not advance the
-        // baseline, so ordering by it alone sorts a freshly-refuted memory LAST
-        // and a capped page (memory.context takes 3) never shows the agent back
-        // the memory it just called wrong.
-        .orderBy(sql`${refutedExpr} DESC`, sql`${baselineExpr} ASC`)
-        .limit(limit)
-        .offset(offset)
-        .all()
-    );
+    return this.db
+      .select()
+      .from(memory)
+      .where(
+        and(eq(memory.status, 'active'), scopeFilter, this.needsReviewPredicate(ttlByType, nowMs)),
+      )
+      .orderBy(sql`${recentlyRefutedExpr} DESC`, sql`${baselineExpr} ASC`)
+      .limit(limit)
+      .offset(offset)
+      .all();
   }
 
   markArchived(id: string, lastSeenAt: Date): void {

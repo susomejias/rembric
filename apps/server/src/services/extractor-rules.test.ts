@@ -48,12 +48,16 @@ describe('extractor registry — structural invariants', () => {
   });
 });
 
-describe('extractor registry — declared examples must match', () => {
+const unique = (values: readonly string[]): string[] => [...new Set(values)].sort();
+
+describe('extractor registry — declared examples must match, and match nothing else', () => {
   for (const rule of EXTRACTOR_RULES) {
     for (const ex of rule.examples) {
       it(`${rule.kind}: ${JSON.stringify(ex.text.slice(0, 48))}`, () => {
-        const got = applyRule(rule, ex.text);
-        for (const expected of ex.values) expect(got).toContain(expected);
+        // Set equality, not `toContain`: a containment assertion cannot see
+        // over-extraction, which is how a truncated `path` value shipped green
+        // alongside the correct one.
+        expect(unique(applyRule(rule, ex.text))).toEqual(unique(ex.values));
       });
     }
   }
@@ -79,6 +83,28 @@ describe('extractor registry — cross-rule isolation', () => {
       for (const sibling of siblings) {
         for (const text of rule.rejects) {
           expect(applyRule(sibling, text), `${sibling.kind} resurrected ${text}`).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it("a rule may only match another kind's reject when it claims that value as its own example", () => {
+    // Rejects were previously only run against rules of the same kind, so a
+    // pattern could quietly claim another kind's prose. Some rejects ARE
+    // another kind's identifier — `uuid` rejects a git SHA on purpose — and
+    // those are legitimate exactly when the matching rule declares that value
+    // among its own examples. Anything else is a cross-kind false positive.
+    for (const rule of EXTRACTOR_RULES) {
+      for (const other of EXTRACTOR_RULES) {
+        if (other === rule) continue;
+        const claimed = new Set(other.examples.flatMap((ex) => ex.values));
+        for (const text of rule.rejects) {
+          for (const value of applyRule(other, text)) {
+            expect(
+              claimed,
+              `${other.kind} matched ${JSON.stringify(value)} in ${rule.kind}'s reject ${JSON.stringify(text)} without declaring it as an example`,
+            ).toContain(value);
+          }
         }
       }
     }

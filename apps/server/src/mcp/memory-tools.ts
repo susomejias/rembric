@@ -83,7 +83,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and complete — no ranking, no cutoff. With `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does.',
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does.',
     ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
@@ -93,7 +93,7 @@ export const memorySearchSchema = {
     .max(128)
     .optional()
     .describe(
-      'Return only memories carrying this exact topic_key (any status). Use to check whether a topic already converged before saving a synonym key — pair with memory.suggest_topic_key.',
+      "Return only memories carrying this exact topic_key. On its own it returns the topic's whole history — the active row plus every row it superseded — because that is what tells you whether the topic already converged before you save a synonym key; pass `status` too to narrow to one. Pair with memory.suggest_topic_key.",
     ),
   status: z.enum(MEMORY_STATUSES).optional(),
   include_global: z
@@ -169,7 +169,7 @@ export const memoryConfirmSchema = {
     .max(100)
     .optional()
     .describe(
-      'Batch re-affirm several memories in one call (e.g. all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
+      'Batch: record the same verdict over several memories in one call (e.g. re-affirm all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
     ),
   sessionId: z
     .string()
@@ -1260,7 +1260,6 @@ async function handleContext(
           projectId,
           kind: e.kind,
           value: e.value,
-          includeArchived: false,
           limit: RELEVANCE_LIMIT,
         });
         for (const r of rows) {

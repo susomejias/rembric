@@ -7,59 +7,85 @@
 
 ## 2. Tool descriptions the agent reads every turn (highest severity)
 
-- [ ] 2.1 `memory.search` `entity`: thread `status`/`type`/`tag`/`topic_key` into `findMemoriesByEntity`, or delete the combinability claim. Test both filters against an entity with mixed-type links.
-- [ ] 2.2 Bound the entity branch by `RANK_WINDOW_CEILING` instead of `clampLimit`'s 8, or drop "complete — no ranking, no cutoff". Test: 12 linked memories, no `limit`.
-- [ ] 2.3 `topic_key`: omit the `status='active'` predicate when `topicKey` is set and `status` is absent, so the documented "every memory ever saved under a given key" is reachable. Test: 4 saves under one key.
-- [ ] 2.4 Thread `includeGlobal` into `entityScopeCondition`. Test: a global memory and a project memory sharing one path, project-scoped read with the flag both ways.
-- [ ] 2.5 Re-read every changed `description` string against the amended spec; the runtime contract and the file must agree.
+- [x] 2.1 `memory.search` `entity`: thread `status`/`type`/`tag`/`topic_key` into `findMemoriesByEntity`, or delete the combinability claim. Test both filters against an entity with mixed-type links.
+      Threaded all four plus `includeGlobal`. **Behaviour change to note:** the entity path now applies `status` as an EXACT match like the ranked branches (previously `includeArchived: status !== 'active'`, so a default search returned active **and** superseded rows and `status:'superseded'` filtered nothing). An omitted `status` at the repository layer still means "any but archived", which is what `memory.context`'s entity pre-pass passes.
+- [x] 2.2 Bound the entity branch by `RANK_WINDOW_CEILING` instead of `clampLimit`'s 8, or drop "complete — no ranking, no cutoff". Test: 12 linked memories, no `limit`.
+      Took the former. `input.limit === undefined` on the entity path now pages at `RANK_WINDOW_CEILING` (400) rather than `DEFAULT_SEARCH_LIMIT` (8); an explicit `limit` still bounds. Tested at 12 rows in `memory.test.ts` and live against the dev stack.
+- [x] 2.3 `topic_key`: omit the `status='active'` predicate when `topicKey` is set and `status` is absent, so the documented "every memory ever saved under a given key" is reachable. Test: 4 saves under one key.
+      `status` is now `MemoryStatus | undefined` through `searchMemoryIds`, `searchBm25Ids` and `hybridSearch`. The dense branch cannot express "any status" (`memory_vec.status` is an exact metadata filter), so it enumerates the two non-archived values — archived rows under a key are reachable lexically only, which matches the pre-existing rule that the dense branch is skipped for `status:'archived'`. Recorded in the `mcp-api` delta.
+- [x] 2.4 Thread `includeGlobal` into `entityScopeCondition`. Test: a global memory and a project memory sharing one path, project-scoped read with the flag both ways.
+      Also tested that the widening admits `global` only and never a third project.
+- [x] 2.5 Re-read every changed `description` string against the amended spec; the runtime contract and the file must agree.
+      Changed: `entity`, `topic_key`, `ids` (confirm), `SEARCH_DESCRIPTION`, `CONFIRM_DESCRIPTION`. Verified live over `tools/list` against the dev stack.
 
 ## 3. Record the refutation channel
 
-- [ ] 3.1 Add a `mcp-api` requirement for `memory.confirm`'s `verdict`/`reason`, the `invalid_input` on a reasonless refute, and the response shape.
-- [ ] 3.2 Add the review-queue consequences: refuted rows surface, refutation does not advance the affirmation baseline, and re-affirming clears it.
-- [ ] 3.3 Update `CONFIRM_DESCRIPTION` to mention refutation.
-- [ ] 3.4 Record the read-time escalation signal (`reviewEscalated`) as a requirement, now that `ab7a5f6` made it the only escalation mechanism.
-- [ ] 3.5 Decide the refuted-TTL-less case: a refuted `reference` reports `needs_review` indefinitely with no terminal state — the exact limbo the escalation requirement exists to close. Give refutation its own clock or state the exemption.
-- [ ] 3.6 Time-bound the refuted-first ordering in the review queue. `refutedExpr` is the leading sort key with no age decay, so with `memory.context` capped at 3 a handful of refuted rows starve every TTL-expired row permanently — verified reproducible a year on.
+- [x] 3.1 Add a `mcp-api` requirement for `memory.confirm`'s `verdict`/`reason`, the `invalid_input` on a reasonless refute, and the response shape.
+- [x] 3.2 Add the review-queue consequences: refuted rows surface, refutation does not advance the affirmation baseline, and re-affirming clears it.
+      In the `memory` delta, on the existing negative-affirmation requirement rather than as a new one.
+- [x] 3.3 Update `CONFIRM_DESCRIPTION` to mention refutation.
+- [x] 3.4 Record the read-time escalation signal (`reviewEscalated`) as a requirement, now that `ab7a5f6` made it the only escalation mechanism.
+- [x] 3.5 Decide the refuted-TTL-less case: a refuted `reference` reports `needs_review` indefinitely with no terminal state — the exact limbo the escalation requirement exists to close. Give refutation its own clock or state the exemption.
+      **Took "state the exemption", deliberately not the clock.** This task is design.md's open **Q4**, which the human has not decided, so the branch that changes no behaviour was the only one available to me: the spec now states that a refuted TTL-less memory stays `needs_review` until re-affirmed, superseded or archived, and argues why expiring an explicit reasoned claim on a timer is the wrong closure. Its queue POSITION is time-bounded by 3.6; its STATE is not. Re-open if Q4 is decided the other way.
+- [x] 3.6 Time-bound the refuted-first ordering in the review queue. `refutedExpr` is the leading sort key with no age decay, so with `memory.context` capped at 3 a handful of refuted rows starve every TTL-expired row permanently — verified reproducible a year on.
+      Behavioural fix. New `REFUTED_PRIORITY_MS` (14 days, matching the pending-judgment orphan deadline) in `review.ts`, passed down like `ttlByType`; the ORDER BY leads on a recency-bounded refutation and falls back to baseline. Regression test proven to fail with the bound removed (`expected [ 'r1','r2','r3' ] to include 'ttl-old'`).
 
 ## 4. Record undocumented load-bearing behaviour
 
-- [ ] 4.1 `memory.context`'s entity pre-pass: precedence over hybrid search, and the `via` field.
-- [ ] 4.2 `persistence`: DDL for the three entity tables, 0022 and 0024 — including `memory_entities_identity_idx` as the named cross-project isolation guarantee.
+- [x] 4.1 `memory.context`'s entity pre-pass: precedence over hybrid search, and the `via` field.
+- [x] 4.2 `persistence`: DDL for the three entity tables, 0022 and 0024 — including `memory_entities_identity_idx` as the named cross-project isolation guarantee.
 - [ ] 4.3 Decide on `CHECK (verdict IN ('affirm','refute'))`. 0024 ships without one, so the domain is service-enforced only; needs the table-rebuild dance.
+      Not started — gated on design.md **Q3**. The `persistence` delta records that the domain is service-enforced and points at the open question rather than pre-empting it.
 - [ ] 4.4 Decide the entity-channel similarity units, or normalise them so the `max(vec, fts)` merge compares like with like.
-- [ ] 4.5 Name the constants no requirement mentions: `RANK_WINDOW_MARGIN`, `ENTITY_RARITY_THRESHOLD`, `ENTITIES_PROJECTION_CAP`, `RELEVANCE_LIMIT`, `ESCALATION_MULTIPLIER`, `PREDECESSOR_CAP`, `REBUILD_MAX_BATCHES`. Include the diversity cap and its disabled state.
+      Not started — a design call the human has not made.
+- [x] 4.5 Name the constants no requirement mentions: `RANK_WINDOW_MARGIN`, `ENTITY_RARITY_THRESHOLD`, `ENTITIES_PROJECTION_CAP`, `RELEVANCE_LIMIT`, `ESCALATION_MULTIPLIER`, `PREDECESSOR_CAP`, `REBUILD_MAX_BATCHES`. Include the diversity cap and its disabled state.
 
 ## 5. Strike the self-contradictions
 
-- [ ] 5.1 Grep every spec for `last_seen_at`, "touch", "on every read", "access signal" and reconcile each hit against the three actual touch sites (`memory.get` single-id, `memory.confirm` with `verdict='affirm'`, undo-decay).
-- [ ] 5.2 Fix the passage added by this batch that argues for the relevance channel from the premise the batch deleted.
-- [ ] 5.3 Reconcile batch `memory.get({ids})` deliberately not touching, against the new scenario requiring a fetch-by-id to advance the signal.
-- [ ] 5.4 `sessions`: amend the startup-only retirement requirement to cover both passes and `COALESCE(last_activity_at, started_at)`; the appended periodic requirement contradicts it.
-- [ ] 5.5 `memory`: scope the "rank-1 single-branch outranks bottom-of-window both-branches" claim to _before_ the post-fusion boost — the reachable boost ratio (1.5) exceeds the fusion margin (1.6%), and a sibling requirement blesses that reordering.
-- [ ] 5.6 `memory`: the gap-ratio filter is specified relative to the best score; the code compares consecutive pairs, and the floor and gap are evaluated in different score spaces.
-- [ ] 5.7 `mcp-api`/`memory`: `memory.get` no longer returns the full predecessor chain (capped, projected, no content) and never returned the specified `source` field.
-- [ ] 5.8 `memory-entities`: reconcile "no fusion, no rank window, no similarity threshold" with the 400-row bound and the case-insensitive `includes()` filter; and the "package name" scenario, which a nearby line declares unsupported.
-- [ ] 5.9 `mcp-api`: correct the `memory.stats` and `memory.doctor` response shapes — `stats` lists three fields that do not exist and omits three that do, including the two counters this batch's own requirement added under "no returned counter SHALL be undocumented".
-- [ ] 5.10 `data-access`: carve out the boot-time doctor closure explicitly, and delete the "or be aggregate-count methods" clause that reopens the loophole. Prefix or rescope `vectors.backlogCount()` and `consolidation.latestRun()`.
+- [x] 5.1 Grep every spec for `last_seen_at`, "touch", "on every read", "access signal" and reconcile each hit against the three actual touch sites (`memory.get` single-id, `memory.confirm` with `verdict='affirm'`, undo-decay).
+      Hits reconciled: `memory` derived-review-state ("advances on every read" → the three sites, named); `mcp-api` projection clause (dropped "and the `last_seen_at` touch"); `mcp-api` `recentMemories` ordering (`last_seen_at DESC` → `COALESCE(last_seen_at, created_at) DESC`, which is what the code and the `persistence` index already say). Correct as-is and left alone: `memory`'s hybrid-retrieval requirement, `consolidation`'s decay axis, `memory`'s undo-decay stamp, `persistence`'s state marker (a different field of the same name).
+- [x] 5.2 Fix the passage added by this batch that argues for the relevance channel from the premise the batch deleted.
+      "Because the access timestamp advances on every read, that ordering drifts…" replaced with the argument that survives: recency and relevance answer different questions.
+- [x] 5.3 Reconcile batch `memory.get({ids})` deliberately not touching, against the new scenario requiring a fetch-by-id to advance the signal.
+      Both `mcp-api` and `memory` now state the asymmetry explicitly, each with a scenario.
+- [x] 5.4 `sessions`: amend the startup-only retirement requirement to cover both passes and `COALESCE(last_activity_at, started_at)`; the appended periodic requirement contradicts it.
+- [x] 5.5 `memory`: scope the "rank-1 single-branch outranks bottom-of-window both-branches" claim to _before_ the post-fusion boost — the reachable boost ratio (1.5) exceeds the fusion margin (1.6%), and a sibling requirement blesses that reordering.
+- [x] 5.6 `memory`: the gap-ratio filter is specified relative to the best score; the code compares consecutive pairs, and the floor and gap are evaluated in different score spaces.
+- [x] 5.7 `mcp-api`/`memory`: `memory.get` no longer returns the full predecessor chain (capped, projected, no content) and never returned the specified `source` field.
+      Verified live: `'source' in memory` is false on the MCP response.
+- [x] 5.8 `memory-entities`: reconcile "no fusion, no rank window, no similarity threshold" with the 400-row bound and the case-insensitive `includes()` filter; and the "package name" scenario, which a nearby line declares unsupported.
+      The package-name scenario now uses a path.
+- [x] 5.9 `mcp-api`: correct the `memory.stats` and `memory.doctor` response shapes — `stats` lists three fields that do not exist and omits three that do, including the two counters this batch's own requirement added under "no returned counter SHALL be undocumented".
+      Both shapes asserted live against the running server, key-for-key.
+- [x] 5.10 `data-access`: carve out the boot-time doctor closure explicitly, and delete the "or be aggregate-count methods" clause that reopens the loophole. Prefix or rescope `vectors.backlogCount()` and `consolidation.latestRun()`.
+      Renamed to `adminBacklogCount()` / `adminLatestRun()`; both callers are the already-allow-listed `server/bootstrap.ts`, and the invariants suite stays green.
 
 ## 6. `docs/backup.md` and the restore path
 
-- [ ] 6.1 Document deleting `entity-state.json` and `embedding-state.json` before booting on a restored DB, and why a _surviving matching_ marker is the hazard while absence is safe.
-- [ ] 6.2 Classify all five derived tables (`memory_fts`, `memory_vec`, and the three entity tables) as regenerable from `memory` alone.
-- [ ] 6.3 Fix the `REMBRIC_ALLOW_DATA_SHRINKAGE` instructions — via `.env`, or add the var to the compose `environment:` block.
-- [ ] 6.4 Drop the "admin bearer token from cron" claim for the backup form endpoint; point unattended automation at litestream or the cold copy.
-- [ ] 6.5 State the data-loss guard's real trigger (≥50% drop in a monitored table, previous count > 0).
-- [ ] 6.6 `persistence`: "all three derived tables, including `memory_entity_scan`" — the two-table wording makes a rebuild a silent no-op.
-- [ ] 6.7 Verify every documented command by executing it, per `persistence`'s own "every documented command SHALL succeed" scenario.
+- [x] 6.1 Document deleting `entity-state.json` and `embedding-state.json` before booting on a restored DB, and why a _surviving matching_ marker is the hazard while absence is safe.
+      Also observed live: booting the new code on a restored DB with both markers absent logged "embedding model changed → 772 stale vector(s) wiped" and "entity extractor recipe changed → index reset", i.e. the safe direction re-derives.
+- [x] 6.2 Classify all five derived tables (`memory_fts`, `memory_vec`, and the three entity tables) as regenerable from `memory` alone.
+- [x] 6.3 Fix the `REMBRIC_ALLOW_DATA_SHRINKAGE` instructions — via `.env`, or add the var to the compose `environment:` block.
+      Via `.env` (the prod compose must not carry the var — `persistence` requires that). Verified: `REMBRIC_ALLOW_DATA_SHRINKAGE=1 docker compose config --format json` renders an environment block containing only `REMBRIC_ADMIN_TOKEN`, so the host-shell form provably never reaches the container. `.env.example`'s comment updated too.
+- [x] 6.4 Drop the "admin bearer token from cron" claim for the backup form endpoint; point unattended automation at litestream or the cold copy.
+- [x] 6.5 State the data-loss guard's real trigger (≥50% drop in a monitored table, previous count > 0).
+      Verified live against a database created for the purpose: 50 → 0 memories refused boot naming four shrunk tables, `prompts 0 → 0` correctly did NOT count as a shrink, and the acknowledgement variable let the same boot through with the documented warning.
+- [x] 6.6 `persistence`: "all three derived tables, including `memory_entity_scan`" — the two-table wording makes a rebuild a silent no-op.
+- [x] 6.7 Verify every documented command by executing it, per `persistence`'s own "every documented command SHALL succeed" scenario.
+      **Partial, deliberately.** Executed: `rm -f ./data/{entity-state,embedding-state}.json`, the cold-copy `cp` of `data.db` and its `-wal` sibling, `docker compose … down --remove-orphans`, `docker compose … up --build`, `docker compose config` (for the env-injection claim), and both data-loss-guard boots — all against a stack and databases I created. NOT executed, per the standing instruction not to write to or restore a database I did not create: `litestream restore` (no litestream in this environment either) and the dashboard **Backup now** form (a browser-driven POST against the operator surface). The dashboard claim I did correct (6.4) is a documentation removal, not a command.
 
 ## 7. Meet the evidence bar the spec sets for itself
 
-- [ ] 7.1 Commit the adversarial corpus and a noise-rate script measuring per-kind false-positive rates against the real `sanitizeFtsQuery`, in the shape `retrieval-evaluation` established.
-- [ ] 7.2 Re-measure all 12 kinds and correct the justification table. Known wrong: `error_code` is credited 0% "self-terminating under tokenization", but `unicode61` drops `_` as it drops `.`; measured `PERMISSION_DENIED` 50% noise, `NOT_FOUND` 75%. Split the row — the `ERR_*`/`SQLITE_*`/`E_*`/errno families are 0%; `GRPC_STATUS_NAMES` needs its own figure.
-- [ ] 7.3 Assert the table's figures in a test so a future kind cannot be added on prose alone.
-- [ ] 7.4 Close the two `extractor-rules.test.ts` assertion gaps that let the shipped `path` truncation pass green: examples use `toContain` (over-extraction invisible), and a kind's `rejects` are never run through the _other_ kinds. Both would have caught the defects fixed in `f450f82`.
-- [ ] 7.5 Add a regression test asserting `extractEntities` on 200KB of `a.` completes well under 50ms.
+- [x] 7.1 Commit the adversarial corpus and a noise-rate script measuring per-kind false-positive rates against the real `sanitizeFtsQuery`, in the shape `retrieval-evaluation` established.
+      `src/test/entity-noise/{corpus,measure,report,noise-rate.test}.ts`. **Deviation:** no `package.json` script. The measurement is pure FTS5 and runs in milliseconds, so it lives in the test suite (it runs on every push, which is strictly stronger than an opt-in `pnpm run eval`), plus `npx tsx src/test/entity-noise/report.ts` prints the markdown table for regenerating the spec. Each decoy declares its mechanism (`near-miss-identifier` | `tokenization-collision`) so a figure cannot be inflated by adding prose.
+- [x] 7.2 Re-measure all 12 kinds and correct the justification table. Known wrong: `error_code` is credited 0% "self-terminating under tokenization", but `unicode61` drops `_` as it drops `.`; measured `PERMISSION_DENIED` 50% noise, `NOT_FOUND` 75%. Split the row — the `ERR_*`/`SQLITE_*`/`E_*`/errno families are 0%; `GRPC_STATUS_NAMES` needs its own figure.
+      Row split as instructed: `error_code (ERR_/SQLITE_/E_/errno)` 0%, `error_code (GRPC_STATUS_NAMES)` 50%. Corrections beyond the ones named: `hostname` was published 50%, measures **67%**; `ticket` was "50–75%", measures **50%**; `env_var` and `systemd_unit` had no figure and now carry 67% and 50%. `NOT_FOUND` measures 50%, not 75%: `sanitizeFtsQuery` emits a whitespace-token **phrase**, so only prose containing "not found" contiguously matches — two of the three prose decoys do not. Figures are worst-case per kind, not pooled or averaged; the reasoning is in the corpus header and the spec.
+- [x] 7.3 Assert the table's figures in a test so a future kind cannot be added on prose alone.
+      `PUBLISHED_NOISE` is asserted key-for-key, and a kind without a probe fails the suite.
+- [x] 7.4 Close the two `extractor-rules.test.ts` assertion gaps that let the shipped `path` truncation pass green: examples use `toContain` (over-extraction invisible), and a kind's `rejects` are never run through the _other_ kinds. Both would have caught the defects fixed in `f450f82`.
+      Examples now assert set equality; rejects now run through every OTHER rule, where a match is admissible only if that rule declares the value among its own examples (which is what makes `uuid` rejecting a git SHA legal and a genuine cross-kind false positive fail). Added the two canonical defect cases (`src/user.service.ts`, `.claude/settings.local.json`) to the registry, then **proved all three `f450f82` defects fail** by reverting each pattern in turn.
+- [x] 7.5 Add a regression test asserting `extractEntities` on 200KB of `a.` completes well under 50ms.
+      Measured 17,479ms with the pre-`f450f82` `HOSTNAME_RE` restored, well under 50ms with the shipped one.
 
 ## 8. Decisions carried in from the review, still open
 
@@ -75,6 +101,9 @@
 
 ## 9. Verify
 
-- [ ] 9.1 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` · `pnpm run eval`.
-- [ ] 9.2 Real Docker smoke against pre-existing seeded data for every code change, per the standing constraint.
+- [x] 9.1 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` · `pnpm run eval`.
+      All green: typecheck clean, lint clean, 1493 passed / 10 skipped in 101 files, eval passed (hybrid P@8=0.156 R@8=1.000 MRR@8=0.676, above every committed floor). Note: an earlier full-suite run showed 7 failures in `memory-repository.perf.test.ts` / `schema-drift.test.ts` / `migrations.test.ts` — all from a **concurrently in-flight `index-confirmation-review-reads` migration in the same working tree**, not from this change; they were green at HEAD-minus-that-work and green again once its `0025` migration landed on disk.
+- [x] 9.2 Real Docker smoke against pre-existing seeded data for every code change, per the standing constraint.
+      `dev:docker:up` (dev target, source mounted, port 8788), 14/15 probes green over MCP JSON-RPC — the one FAIL is the probe script's own entity discovery (the seeded corpus extracts zero entities, `entities.backlog: 0`), so the entity path was probed separately and fully: `entity` alone, + `type`, + `tag`, + `status`, + `include_global` (global admitted, third project not), + `query`, and 12-linked-with-no-limit returning **12** where the old code returned 8. Also booted the new code against a **pre-change database file** on a separate port: migrations applied, both derived indexes re-derived from the absent markers, and every probe reproduced.
 - [ ] 9.3 Re-read each amended spec end to end for internal consistency, not just at the edited lines — the contradictions found here were all _between_ requirements, not within one.
+      Partly done and left open deliberately: every requirement I touched was read whole, and reading neighbours that way turned up two further contradictions fixed in passing (`memory.capture_passive` documented as saving `type = 'discovery'`, which is not a valid type — it saves `reference`; and its "no learnings" scenario promising `{saved: 0, ids: []}` with no error, contradicted by the later requirement that mandates an explicit `reason`). A full end-to-end pass over all eleven specs — including the four this change does not touch (`dashboard`, `claude-code-plugin`, `codex-distribution`, `retrieval-evaluation`) — has not been done.

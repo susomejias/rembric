@@ -172,6 +172,18 @@ describe('extractEntities — adversarial input never throws', () => {
     extractEntities('', huge);
     expect(Date.now() - start).toBeLessThan(2000);
   });
+
+  it('stays linear on the hostname/path label shape that was once quadratic', () => {
+    // `a.` repeated is the adversarial input for the label-group patterns: it
+    // is one continuous run of dot-separated labels, which the nested-
+    // quantifier form of HOSTNAME_RE walked in 19s at this size. Budget is
+    // deliberately far below the 2s hang guard above — a regression here is a
+    // complexity change, not a slow machine.
+    const pathological = 'a.'.repeat(100_000);
+    const start = performance.now();
+    extractEntities('', pathological);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
 });
 
 describe('extractEntities — deduplication and normalization', () => {

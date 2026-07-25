@@ -61,7 +61,6 @@ describe('EntitiesRepository', () => {
         scope: 'global',
         projectId: null,
         value: 'apps/server/src/db/migrate.ts',
-        includeArchived: false,
         limit: 10,
       });
       expect(found.map((m) => m.id)).toEqual(['m1']);
@@ -75,7 +74,6 @@ describe('EntitiesRepository', () => {
         scope: 'global',
         projectId: null,
         value: 'src/x.ts',
-        includeArchived: false,
         limit: 10,
       });
       expect(foundGlobal).toEqual([]);
@@ -96,7 +94,6 @@ describe('EntitiesRepository', () => {
         scope: 'global',
         projectId: null,
         value: 'ENOENT',
-        includeArchived: false,
         limit: 100,
       });
       expect(found).toHaveLength(20);
@@ -109,7 +106,6 @@ describe('EntitiesRepository', () => {
         scope: 'global',
         projectId: null,
         value: 'never-linked',
-        includeArchived: false,
         limit: 10,
       });
       expect(found).toEqual([]);
@@ -123,7 +119,6 @@ describe('EntitiesRepository', () => {
           scope: 'global',
           projectId: null,
           value: 'x.ts',
-          includeArchived: false,
           limit: 10,
         }),
       ).toEqual([]);
@@ -132,10 +127,60 @@ describe('EntitiesRepository', () => {
           scope: 'global',
           projectId: null,
           value: 'x.ts',
-          includeArchived: true,
+          status: 'archived',
           limit: 10,
         }),
       ).toHaveLength(1);
+    });
+
+    it('filters by status, type, tag and topic_key like the ranked branches', () => {
+      insertMemory('active-user', { type: 'user', tags: ['ops'], topicKey: 'topic/a' });
+      insertMemory('superseded-project', { type: 'project', tags: [], status: 'superseded' });
+      for (const id of ['active-user', 'superseded-project']) {
+        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      }
+      const base = { scope: 'global', projectId: null, value: 'x.ts', limit: 10 } as const;
+
+      expect(
+        repo
+          .findMemoriesByEntity(base)
+          .map((m) => m.id)
+          .sort(),
+      ).toEqual(['active-user', 'superseded-project']);
+      expect(repo.findMemoriesByEntity({ ...base, status: 'active' }).map((m) => m.id)).toEqual([
+        'active-user',
+      ]);
+      expect(repo.findMemoriesByEntity({ ...base, type: 'project' }).map((m) => m.id)).toEqual([
+        'superseded-project',
+      ]);
+      expect(repo.findMemoriesByEntity({ ...base, tag: 'ops' }).map((m) => m.id)).toEqual([
+        'active-user',
+      ]);
+      expect(repo.findMemoriesByEntity({ ...base, topicKey: 'topic/a' }).map((m) => m.id)).toEqual([
+        'active-user',
+      ]);
+    });
+
+    it('includeGlobal widens a project read to global entities without admitting another project', () => {
+      t.handle.db
+        .insert(projects)
+        .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
+        .run();
+      insertMemory('g1');
+      insertMemory('p1m', { scope: 'project', projectId: 'p1' });
+      insertMemory('p2m', { scope: 'project', projectId: 'p2' });
+      repo.linkMemory('g1', 'global', null, [{ kind: 'path', value: 'shared.ts' }], new Date());
+      repo.linkMemory('p1m', 'project', 'p1', [{ kind: 'path', value: 'shared.ts' }], new Date());
+      repo.linkMemory('p2m', 'project', 'p2', [{ kind: 'path', value: 'shared.ts' }], new Date());
+
+      const scoped = { scope: 'project', projectId: 'p1', value: 'shared.ts', limit: 10 } as const;
+      expect(repo.findMemoriesByEntity(scoped).map((m) => m.id)).toEqual(['p1m']);
+      expect(
+        repo
+          .findMemoriesByEntity({ ...scoped, includeGlobal: true })
+          .map((m) => m.id)
+          .sort(),
+      ).toEqual(['g1', 'p1m']);
     });
 
     it('is idempotent — linking the same memory twice does not duplicate', () => {
@@ -146,7 +191,6 @@ describe('EntitiesRepository', () => {
         scope: 'global',
         projectId: null,
         value: 'x.ts',
-        includeArchived: false,
         limit: 10,
       });
       expect(found).toHaveLength(1);
