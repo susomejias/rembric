@@ -492,6 +492,11 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('DELETE FROM consolidation_ops');
     handle.raw.exec('DELETE FROM consolidation_runs');
     handle.raw.exec('DELETE FROM prompts');
+    // memory_entity_links references both memory_entities and memory;
+    // memory_entity_scan references memory — both must go before memory.
+    handle.raw.exec('DELETE FROM memory_entity_links');
+    handle.raw.exec('DELETE FROM memory_entity_scan');
+    handle.raw.exec('DELETE FROM memory_entities');
     handle.raw.exec('DELETE FROM memory');
     handle.raw.exec('DELETE FROM sessions'); // agent_sessions table is named `sessions`
     handle.raw.exec('DELETE FROM dashboard_sessions'); // dashboard login cookies → tokens

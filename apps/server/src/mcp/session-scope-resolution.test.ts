@@ -98,6 +98,7 @@ beforeEach(() => {
     doctor: () => ({
       db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },
+      entities: { backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },
       warnings: [],
@@ -782,5 +783,31 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
     expect(payload.scope).toBe('global');
     const relevant = payload.relevantMemories as Array<{ snippet: string }>;
     expect(relevant.some((m) => m.snippet.includes('distinctive_relevance_marker'))).toBe(false);
+  });
+
+  it('folds an entity recognized in the seed ahead of the ranked hybrid fallback (add-entity-index)', async () => {
+    const repos = createRepositories(db.handle.db);
+    const known = memory.save(
+      { type: 'project', title: 'Fix', content: 'unrelated wording, no shared vocabulary at all' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(
+      known.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+      new Date(),
+    );
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(
+        handlers.context({ focus: 'need to touch apps/server/src/db/migrate.ts next' }),
+      ),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    const relevant = payload.relevantMemories as Array<{ id: string; via: string }>;
+    const match = relevant.find((m) => m.id === known.id);
+    expect(match?.via).toBe('entity');
   });
 });

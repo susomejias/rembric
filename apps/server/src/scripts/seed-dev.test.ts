@@ -68,6 +68,43 @@ describe('runSeed', () => {
     expect(result.counts!.pendingJudgments).toBe(1);
   });
 
+  it('--reset does not violate FK constraints when entity links/scan rows exist (regression: add-entity-index)', () => {
+    runSeed({ handle: db.handle, reset: false, log: () => {} });
+
+    // Simulate what the boot-time EntityBackfillWorker would have already
+    // done to the seeded memories before an operator resets — memory_entity_
+    // links and memory_entity_scan both reference `memory`, and wipe() must
+    // delete them before deleting `memory` itself.
+    const repos = createRepositories(db.handle.db);
+    const projects = new ProjectsService(repos);
+    const demo = projects.findBySlug('demo');
+    expect(demo).toBeDefined();
+    const someMemory = repos.memory.searchMemoryIds({
+      scope: 'project',
+      projectId: demo!.id,
+      status: 'active',
+      limit: 1,
+      offset: 0,
+    })[0];
+    expect(someMemory).toBeDefined();
+    repos.entities.linkMemory(
+      someMemory!,
+      'project',
+      demo!.id,
+      [{ kind: 'path', value: 'docs/docker.md' }],
+      new Date(),
+    );
+
+    expect(() =>
+      runSeed({
+        handle: db.handle,
+        reset: true,
+        env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+        log: () => {},
+      }),
+    ).not.toThrow();
+  });
+
   it('--reset without REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 refuses and preserves data', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 

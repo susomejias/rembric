@@ -241,6 +241,165 @@ describe('memory.search', () => {
   });
 });
 
+describe('memory.search — entity filter (add-entity-index)', () => {
+  it('returns every memory linked to an entity, bypassing ranking, and reports viaEntity', async () => {
+    const repos = createRepositories(db.handle.db);
+    const a = memory.save(
+      { type: 'project', title: 'Fix', content: 'fixed the migration bug' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+      clock.now(),
+    );
+
+    const result = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(result.memories.map((m) => m.id)).toEqual([a.id]);
+    expect(result.viaEntity).toBe(true);
+    expect(result.abstained).toBe(false);
+  });
+
+  it('finds a rare identifier invisible to a plain text query', async () => {
+    const repos = createRepositories(db.handle.db);
+    const a = memory.save(
+      {
+        type: 'project',
+        title: 'X',
+        content: 'completely unrelated prose with no shared vocabulary',
+      },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'error_code', value: 'ENOENT' }],
+      clock.now(),
+    );
+
+    // The content never mentions "ENOENT" literally, so a text query for
+    // it finds nothing — the entity link is the only way to surface this.
+    const byText = await memory.search({ query: 'ENOENT' }, projectScope(projectId));
+    expect(byText.map((m) => m.id)).not.toContain(a.id);
+
+    const byEntity = await memory.search({ entity: 'ENOENT' }, projectScope(projectId));
+    expect(byEntity.map((m) => m.id)).toEqual([a.id]);
+  });
+
+  it('an unknown entity returns empty and does not degrade into a text query', async () => {
+    memory.save(
+      { type: 'project', title: 'X', content: 'never-linked-anywhere' },
+      projectScope(projectId),
+    );
+    const result = await memory.search(
+      { entity: 'never-linked-anywhere' },
+      projectScope(projectId),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('the same path in two projects does not join them', async () => {
+    const repos = createRepositories(db.handle.db);
+    const otherId = projects.create({ slug: 'other-app' }).id;
+    const a = memory.save(
+      { type: 'project', title: 'A', content: 'in project A' },
+      projectScope(projectId),
+    );
+    const b = memory.save(
+      { type: 'project', title: 'B', content: 'in project B' },
+      projectScope(otherId),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'src/shared.ts' }],
+      clock.now(),
+    );
+    repos.entities.linkMemory(
+      b.id,
+      'project',
+      otherId,
+      [{ kind: 'path', value: 'src/shared.ts' }],
+      clock.now(),
+    );
+
+    const result = await memory.search({ entity: 'src/shared.ts' }, projectScope(projectId));
+    expect(result.map((m) => m.id)).toEqual([a.id]);
+  });
+
+  it('entity plus query narrows rather than fusing — only entity memories matching the query too', async () => {
+    const repos = createRepositories(db.handle.db);
+    const matching = memory.save(
+      { type: 'project', title: 'A', content: 'discusses migration ordering concerns' },
+      projectScope(projectId),
+    );
+    const nonMatching = memory.save(
+      { type: 'project', title: 'B', content: 'discusses something else entirely' },
+      projectScope(projectId),
+    );
+    for (const m of [matching, nonMatching]) {
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search(
+      { entity: 'apps/server/src/db/migrate.ts', query: 'ordering' },
+      projectScope(projectId),
+    );
+    expect(result.map((m) => m.id)).toEqual([matching.id]);
+  });
+
+  it('entity plus query finds a matching memory older than the default page size (regression: narrowing must not window-drop)', async () => {
+    const repos = createRepositories(db.handle.db);
+    const old = memory.save(
+      { type: 'project', title: 'Old', content: 'discusses migration ordering concerns' },
+      projectScope(projectId),
+    );
+    repos.entities.linkMemory(
+      old.id,
+      'project',
+      projectId,
+      [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+      clock.now(),
+    );
+    // 20 newer memories sharing the same entity but not the query text —
+    // more than the default page size, so `old` sits outside a naive
+    // offset+limit fetch window if the query filter is applied afterward
+    // on too small a pool.
+    for (let i = 0; i < 20; i++) {
+      const m = memory.save(
+        { type: 'project', title: `Newer ${i}`, content: `unrelated note ${i}` },
+        projectScope(projectId),
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'project',
+        projectId,
+        [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
+        clock.now(),
+      );
+    }
+
+    const result = await memory.search(
+      { entity: 'apps/server/src/db/migrate.ts', query: 'ordering' },
+      projectScope(projectId),
+    );
+    expect(result.map((m) => m.id)).toEqual([old.id]);
+  });
+});
+
 describe('memory.get', () => {
   it('returns memory + history when in scope', () => {
     const saved = memory.save(

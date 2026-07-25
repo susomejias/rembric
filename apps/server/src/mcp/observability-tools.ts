@@ -44,6 +44,8 @@ const counts = z.record(z.string(), z.number());
 export interface DoctorReport {
   db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
   embeddings: { model: string; backlog: number };
+  /** Memories not yet scanned for entities — a derived-index drift signal, same shape as `embeddings.backlog`. */
+  entities: { backlog: number };
   consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
   sessions: { active: number };
   warnings: string[];
@@ -57,6 +59,7 @@ export const doctorOutput = {
     sizeBytes: z.number(),
   }),
   embeddings: z.object({ model: z.string(), backlog: z.number() }),
+  entities: z.object({ backlog: z.number() }),
   consolidation: z.object({
     lastRunAt: z.string().nullable(),
     lastRunOps: counts,
@@ -83,7 +86,7 @@ export const capturePassiveOutput = {
 export interface ObservabilityToolDeps {
   memory: MemoryService;
   agentSessions: AgentSessionsService;
-  repos: Pick<Repositories, 'memory' | 'relations' | 'vectors'>;
+  repos: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
   router: SessionRouter;
   projects: ProjectsService;
   doctor: () => DoctorReport;

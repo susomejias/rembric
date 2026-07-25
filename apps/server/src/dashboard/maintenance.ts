@@ -126,9 +126,14 @@ function createOnDemandBackup(deps: MaintenanceDeps): OnDemandBackup {
  * maintenance page is destructive enough to warrant defense-in-depth in
  * case the auth contract is ever relaxed.
  */
-function requireAdmin(
+/** Shared by other admin-gated dashboard actions (e.g. the entities rebuild). */
+export function requireAdmin(
   c: Context,
-  deps: MaintenanceDeps,
+  deps: { tokens: TokensService; sessions: SessionsService },
+  page: { title: string; activeNav: 'maintenance' | 'entities' } = {
+    title: 'Maintenance',
+    activeNav: 'maintenance',
+  },
 ): { session: ResolvedSession; forbidden: null } | { session: null; forbidden: Response } {
   const session = getSession(c);
   if (!session) {
@@ -141,9 +146,9 @@ function requireAdmin(
       forbidden: flashErrorPage(
         c,
         deps.sessions,
-        html`Maintenance requires an admin-scoped (<code>*</code>) token. Your session token is
+        html`This action requires an admin-scoped (<code>*</code>) token. Your session token is
           scoped to <code>${token?.scope ?? '(unknown)'}</code>.`,
-        { title: 'Maintenance', activeNav: 'maintenance' },
+        page,
         403,
       ),
     };

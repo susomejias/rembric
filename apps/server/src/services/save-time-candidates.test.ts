@@ -397,6 +397,114 @@ describe('findSaveTimeCandidates', () => {
   });
 });
 
+describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)', () => {
+  it('surfaces a low-vocabulary-overlap contradiction about the same rare file', () => {
+    const repos = createRepositories(db.handle.db);
+    // Dilute the scope so the entity's single existing link stays well
+    // under the 15% rarity gate (1 link / 12 memories ≈ 8%).
+    for (let i = 0; i < 10; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    const chown = memorySvc.save(
+      { type: 'project', title: 'Use chown 10001', content: 'use chown 10001 for the data dir' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(
+      chown.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'docs/docker.md' }],
+      new Date(),
+    );
+    const root = memorySvc.save(
+      { type: 'project', title: 'Run as root', content: 'run as root instead' },
+      SCOPE_GLOBAL,
+    );
+
+    const cands = findSaveTimeCandidates(repos, root, { perSaveMax: 5 }, [
+      { kind: 'path', value: 'docs/docker.md' },
+    ]);
+    const match = cands.find((c) => c.targetId === chown.id);
+    expect(match).toBeDefined();
+    expect(match!.source).toBe('entity');
+    expect(match!.entityValue).toBe('docs/docker.md');
+  });
+
+  it('a very common entity surfaces nothing', () => {
+    const repos = createRepositories(db.handle.db);
+    // 5 of 6 scope memories link the same entity — well over the 15% rarity
+    // gate, so it must generate zero candidates despite being an exact match.
+    for (let i = 0; i < 5; i++) {
+      const m = memorySvc.save(
+        { type: 'project', title: `Note ${i}`, content: `note number ${i}` },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'global',
+        null,
+        [{ kind: 'ticket', value: 'PROJ-1' }],
+        new Date(),
+      );
+    }
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Note last', content: 'note number last' },
+      SCOPE_GLOBAL,
+    );
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'ticket', value: 'PROJ-1' },
+    ]);
+    expect(cands.some((c) => c.source === 'entity')).toBe(false);
+  });
+
+  it('the per-save cap holds across vec/fts/entity channels combined', () => {
+    const repos = createRepositories(db.handle.db);
+    // Dilute the scope so 3 entity links stay under the 15% rarity gate
+    // (3 / 24 = 12.5%) while still producing more raw matches than the cap.
+    for (let i = 0; i < 20; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    for (let i = 0; i < 3; i++) {
+      const m = memorySvc.save(
+        {
+          type: 'project',
+          title: `Distinct note ${i}`,
+          content: `distinct note ${i} about topic ${i}`,
+        },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'global',
+        null,
+        [{ kind: 'error_code', value: 'ENOENT' }],
+        new Date(),
+      );
+    }
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Distinct note last',
+        content: 'distinct note last about topic last',
+      },
+      SCOPE_GLOBAL,
+    );
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 2 }, [
+      { kind: 'error_code', value: 'ENOENT' },
+    ]);
+    expect(cands.some((c) => c.source === 'entity')).toBe(true);
+    expect(cands.length).toBeLessThanOrEqual(2);
+  });
+});
+
 describe('9.7 property: at most one active row per (scope, project_id, topic_key)', () => {
   it('random save sequences never violate the uniqueness invariant', () => {
     fc.assert(

@@ -1,6 +1,7 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
+import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
 
 /**
@@ -38,6 +39,18 @@ import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
  */
 export const VEC_THRESHOLD = 0.7;
 
+/**
+ * Rarity gate for the entity candidate channel (design.md Decision 6): an
+ * entity linked to more than this proportion of the scope's active
+ * memories carries no signal — every memory in a small project might
+ * mention the project's own package name — and would otherwise flood the
+ * per-save budget with noise, starving the lexical/dense channels. A
+ * proportion, not an absolute count, so it adapts to corpus size (the same
+ * lesson the inverted BM25 threshold taught: absolute thresholds over
+ * corpus-relative quantities don't hold).
+ */
+export const ENTITY_RARITY_THRESHOLD = 0.15;
+
 export interface CandidateOptions {
   perSaveMax: number;
   /** Internal candidate pool size before the cap is applied; default 20. */
@@ -49,16 +62,19 @@ export interface SaveCandidate {
   /** 0..1, normalized */
   similarity: number;
   /** Which detector surfaced this match. */
-  source: 'vec' | 'fts';
+  source: 'vec' | 'fts' | 'entity';
   title: string;
   snippet: string;
   topicKey: string | null;
+  /** Set only for `source: 'entity'` — the value both memories share. */
+  entityValue?: string;
 }
 
 export function findSaveTimeCandidates(
-  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations'>,
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities'>,
   saved: Memory,
   opts: CandidateOptions,
+  extractedEntities: ExtractedEntity[] = [],
 ): SaveCandidate[] {
   const poolSize = opts.poolSize ?? 20;
 
@@ -120,13 +136,68 @@ export function findSaveTimeCandidates(
     }
   }
 
+  // Entity overlap: a candidate source neither text nor vector similarity
+  // can reach — two memories about the same file/error code can share
+  // almost no vocabulary and sit far apart in embedding space. Gated by
+  // rarity (see `ENTITY_RARITY_THRESHOLD`): a common entity generates no
+  // candidates at all, never a low-scoring one.
+  const entityPool: SaveCandidate[] = [];
+  if (extractedEntities.length > 0) {
+    const excludeIdSet = new Set(excludeIds);
+    // Depends only on (scope, projectId) — computed once per save, not once
+    // per extracted entity. `excludeMemoryId` guards against self-inflation
+    // structurally even though the caller already sequences linking after
+    // candidate detection (see `saveMemoryWithCandidates`).
+    const scopeMemoryCount = repos.entities.scopeActiveMemoryCount({
+      scope: saved.scope,
+      projectId: saved.projectId,
+      excludeMemoryId: saved.id,
+    });
+
+    for (const e of extractedEntities) {
+      if (scopeMemoryCount === 0) continue;
+      const linkCount = repos.entities.entityLinkCount({
+        scope: saved.scope,
+        projectId: saved.projectId,
+        kind: e.kind,
+        value: e.value,
+        excludeMemoryId: saved.id,
+      });
+      if (linkCount / scopeMemoryCount > ENTITY_RARITY_THRESHOLD) continue;
+
+      const rows = repos.entities.findOtherMemoriesForEntity({
+        scope: saved.scope,
+        projectId: saved.projectId,
+        kind: e.kind,
+        value: e.value,
+        excludeMemoryId: saved.id,
+        excludeIds,
+        limit: poolSize,
+      });
+      for (const r of rows) {
+        if (excludeIdSet.has(r.id)) continue;
+        entityPool.push({
+          targetId: r.id,
+          similarity: 1 - linkCount / scopeMemoryCount,
+          source: 'entity',
+          title: r.title,
+          snippet: snippet(r.content, 200),
+          topicKey: r.topicKey,
+          entityValue: e.value,
+        });
+      }
+    }
+  }
+
   // --- 3. Merge + dedupe ----------------------------------------------
   // For each unique target id, keep the higher-scoring source (vec wins
-  // ties because vec is semantic, fts is lexical). Both similarities are
-  // now bounded [0,1] and corpus-independent, so this comparison is
-  // meaningful — it wasn't while fts reported an inverted, unbounded proxy.
+  // ties because vec is semantic, fts is lexical; entity is checked last so
+  // it only wins on a strictly higher score, never on a tie against a real
+  // similarity signal). Both similarities are now bounded [0,1] and
+  // corpus-independent, so this comparison is meaningful — it wasn't while
+  // fts reported an inverted, unbounded proxy.
   const byId = new Map<string, SaveCandidate>();
-  for (const c of [...vecPool, ...ftsPool]) {
+  for (const c of [...vecPool, ...ftsPool, ...entityPool]) {
     const prev = byId.get(c.targetId);
     if (!prev || c.similarity > prev.similarity) byId.set(c.targetId, c);
   }

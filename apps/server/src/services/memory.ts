@@ -6,7 +6,7 @@ import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
-import { hybridSearch } from './hybrid-search.js';
+import { hybridSearch, RANK_WINDOW_CEILING } from './hybrid-search.js';
 import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
@@ -100,6 +100,16 @@ export interface SearchMemoriesInput {
   tag?: string;
   /** Exact topic_key filter — see openspec/changes/fix-audited-defects. */
   topicKey?: string;
+  /**
+   * Exact-address retrieval by entity value (see `add-entity-index`):
+   * every memory linked to this value, chronological, no ranking, no
+   * fusion. Combined with `query`, narrows to the entity's memories that
+   * also match the text query — it never fuses the two into one ranked
+   * set (design.md Decision 5). Combined with `type`/`tag`/`topicKey` is
+   * not supported in this first pass; those filters are ignored when
+   * `entity` is set.
+   */
+  entity?: string;
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
@@ -134,7 +144,7 @@ export interface NeedsReviewItem {
 
 export class MemoryService {
   constructor(
-    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors'>,
+    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors' | 'entities'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     /**
@@ -359,7 +369,7 @@ export class MemoryService {
     input: SearchMemoriesInput,
     scope: Scope,
     opts: { touch?: boolean } = {},
-  ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string }> {
+  ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string; viaEntity?: boolean }> {
     const status = input.status ?? 'active';
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
@@ -367,6 +377,38 @@ export class MemoryService {
     const projectId = scope.kind === 'project' ? scope.projectId : null;
 
     const query = input.query?.trim();
+    const entity = input.entity?.trim();
+
+    if (entity) {
+      // Exact-address retrieval: no fusion, no rank window, no threshold,
+      // no boost. Narrows by `query` (Decision 5) rather than fusing with
+      // it — a lexical containment filter over the entity's own memories,
+      // not a second ranked pass. When narrowing, the fetch must cover more
+      // than the final page: the query filter runs AFTER the fetch, so
+      // fetching only `offset + limit` rows would silently miss a match
+      // older than that window whenever the entity has more links than the
+      // page size. `RANK_WINDOW_CEILING` is the existing bounded-but-
+      // generous over-fetch ceiling used elsewhere in this file.
+      const rows = this.repos.entities.findMemoriesByEntity({
+        scope: memScope,
+        projectId,
+        value: entity,
+        includeArchived: status !== 'active',
+        limit: query ? Math.max(offset + limit, RANK_WINDOW_CEILING) : offset + limit,
+      });
+      const filtered = query
+        ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
+        : rows;
+      const page = filtered.slice(offset, offset + limit);
+      if (page.length > 0 && opts.touch !== false) {
+        this.repos.memory.touchLastSeenBatch(
+          page.map((m) => m.id),
+          this.now(),
+        );
+      }
+      return { memories: page, abstained: false, viaEntity: true };
+    }
+
     let ids: string[];
     let abstained = false;
     let reason: string | undefined;

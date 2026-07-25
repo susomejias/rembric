@@ -26,6 +26,7 @@ import {
 } from '../dashboard/components.js';
 import { createConsolidationRouter } from '../dashboard/consolidation.js';
 import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
+import { createEntitiesRouter } from '../dashboard/entities.js';
 import { createJudgmentsRouter } from '../dashboard/judgments.js';
 import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
@@ -50,6 +51,7 @@ import { createUpdateRouter } from '../dashboard/update.js';
 import type { DbDiagnostics } from '../db/diagnostics.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import type { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { OAuthService } from '../services/oauth.js';
@@ -85,6 +87,14 @@ export interface DashboardDeps {
   selfUpdate: SelfUpdateOrchestrator;
   /** Forced sweep across all scopes (same lambda as the admin endpoint). */
   triggerSweep: () => ConsolidationRunSummary;
+  /**
+   * The live, boot-time singleton — NOT a fresh instance — so a manual
+   * rebuild's leftover backlog (beyond `REBUILD_MAX_BATCHES`) stays visible
+   * to this same worker's own `possiblyPending` state, and the regular
+   * periodic tick picks it back up within seconds instead of waiting for
+   * the hourly forced fallback.
+   */
+  entityBackfillWorker: EntityBackfillWorker;
   /** Bound consolidation undo lambdas (wired in bootstrap). */
   undoRun: (runId: string) => { reverted: string[]; skipped: SkippedRow[] };
   undoOp: (opId: string) => { reverted: string; skipped: SkippedRow[] };
@@ -566,6 +576,15 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
       triggerSweep: deps.triggerSweep,
       undoRun: deps.undoRun,
       undoOp: deps.undoOp,
+    }),
+  );
+  app.route(
+    '/entities',
+    createEntitiesRouter({
+      repos: deps.repos,
+      sessions: deps.sessions,
+      tokens: deps.tokens,
+      entityBackfillWorker: deps.entityBackfillWorker,
     }),
   );
   app.route(

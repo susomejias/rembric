@@ -603,3 +603,51 @@ describe('hybrid search cross-lingual recall (real embedder)', () => {
     expect(res.some((m) => m.content.includes('black coffee'))).toBe(true);
   }, 30_000);
 });
+
+describe('confirm the exclusion holds (add-entity-index Decision 1 / task 8.1)', () => {
+  let db: TestDb;
+  let repos: Repositories;
+  let mem: MemoryService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    repos = createRepositories(db.handle.db);
+    mem = new MemoryService(repos, db.handle.db);
+  });
+
+  afterEach(() => db.cleanup());
+
+  it('a plain text query returns identical ordered ids whether or not the memories are entity-linked', async () => {
+    const rows = [];
+    for (let i = 0; i < 20; i++) {
+      rows.push(
+        mem.save(
+          {
+            type: 'feedback',
+            title: `Rollout note ${i}`,
+            content: `rollout note ${i} covers timezone rotation and on-call handoff for cycle ${i}`,
+          },
+          SCOPE_GLOBAL,
+        ),
+      );
+    }
+
+    const before = await mem.search({ query: 'rollout timezone rotation' }, SCOPE_GLOBAL);
+
+    // Link every row to entities — the entity index now exists, fully
+    // populated — but no fusion stream reads it, so a plain text query
+    // must be untouched by its presence.
+    for (const r of rows) {
+      repos.entities.linkMemory(
+        r.id,
+        'global',
+        null,
+        [{ kind: 'ticket', value: 'PROJ-1' }],
+        new Date(),
+      );
+    }
+
+    const after = await mem.search({ query: 'rollout timezone rotation' }, SCOPE_GLOBAL);
+    expect(after.map((m) => m.id)).toEqual(before.map((m) => m.id));
+  });
+});

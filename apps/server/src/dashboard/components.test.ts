@@ -423,9 +423,9 @@ describe('flashErrorPage + domainErrorPage', () => {
 });
 
 describe('NAV', () => {
-  it('exposes 9 entries in MAIN + ADMIN groups', () => {
-    expect(NAV).toHaveLength(9);
-    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(6);
+  it('exposes 10 entries in MAIN + ADMIN groups', () => {
+    expect(NAV).toHaveLength(10);
+    expect(NAV.filter((n) => n.group === 'MAIN')).toHaveLength(7);
     expect(NAV.filter((n) => n.group === 'ADMIN')).toHaveLength(3);
   });
 

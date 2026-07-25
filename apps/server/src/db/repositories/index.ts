@@ -3,6 +3,7 @@ import type { Db } from '../client.js';
 import { AgentSessionsRepository } from './agent-sessions-repository.js';
 import { ConsolidationRepository } from './consolidation-repository.js';
 import { DashboardSessionsRepository } from './dashboard-sessions-repository.js';
+import { EntitiesRepository } from './entities-repository.js';
 import { MemoryRepository } from './memory-repository.js';
 import { OAuthRepository } from './oauth-repository.js';
 import { ProjectsRepository } from './projects-repository.js';
@@ -24,6 +25,12 @@ export {
   DashboardSessionsRepository,
   type ResolvedDashboardSession,
 } from './dashboard-sessions-repository.js';
+export {
+  EntitiesRepository,
+  type EntityRef,
+  type MemoryEntityView,
+  type PendingEntityScan,
+} from './entities-repository.js';
 export { MemoryRepository, type AdminListMemoriesOpts } from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
 export { ProjectsRepository } from './projects-repository.js';
@@ -51,6 +58,7 @@ export interface Repositories {
   consolidation: ConsolidationRepository;
   vectors: VectorsRepository;
   dashboardSessions: DashboardSessionsRepository;
+  entities: EntitiesRepository;
 }
 
 export function createRepositories(db: Db): Repositories {
@@ -65,5 +73,6 @@ export function createRepositories(db: Db): Repositories {
     consolidation: new ConsolidationRepository(db),
     vectors: new VectorsRepository(db),
     dashboardSessions: new DashboardSessionsRepository(db),
+    entities: new EntitiesRepository(db),
   };
 }

@@ -17,6 +17,7 @@ import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
+import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
@@ -191,6 +192,25 @@ export async function bootstrap(
   const embedFallbackTimer = setInterval(() => embedTick(true), 60 * 60_000);
   embedFallbackTimer.unref?.();
 
+  // Resumable entity-extraction backfill (add-entity-index) — same
+  // in-process tick+timer shape as the embedding worker, but synchronous
+  // (no model, no network) so the tick itself never needs a `.catch()`.
+  const entityBackfillWorker = new EntityBackfillWorker({ repos });
+  const entityBackfillTick = (force = false): void => {
+    try {
+      entityBackfillWorker.processBatch({ force });
+    } catch (err) {
+      logger.error('entity backfill worker error', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  entityBackfillTick(true);
+  const entityBackfillTimer = setInterval(() => entityBackfillTick(), 30_000);
+  entityBackfillTimer.unref?.();
+  const entityBackfillFallbackTimer = setInterval(() => entityBackfillTick(true), 60 * 60_000);
+  entityBackfillFallbackTimer.unref?.();
+
   // Periodic stale-session reaper — the boot-time sweep above only catches
   // rows leaked by a PRIOR process run; a client killed mid-session (SIGKILL,
   // OOM, closed terminal) while THIS process keeps running would otherwise
@@ -358,6 +378,7 @@ export async function bootstrap(
       updates,
       selfUpdate,
       triggerSweep: () => runner.runAll({ force: true }),
+      entityBackfillWorker,
       undoRun: (runId) => undoRun(repos, dbHandle.db, runId),
       undoOp: (opId) => undoOp(repos, dbHandle.db, opId),
       orphanAfterMs: config.judgments.orphanAfterMs,
@@ -386,6 +407,8 @@ export async function bootstrap(
       }
       clearInterval(embedTimer);
       clearInterval(embedFallbackTimer);
+      clearInterval(entityBackfillTimer);
+      clearInterval(entityBackfillFallbackTimer);
       clearInterval(sessionReapTimer);
       await http.close();
       dbHandle.close();
@@ -470,6 +493,11 @@ function buildDoctorReportFactory(deps: {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
 
+    const entitiesBacklog = deps.repos.entities.adminBacklogCount();
+    if (entitiesBacklog > 100) {
+      warnings.push(`entities backlog: ${entitiesBacklog}`);
+    }
+
     // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session
     // count is server-wide, unlike memory.stats's scoped one.
     const sessionsByStatus = deps.agentSessions.adminCountByStatus();
@@ -477,6 +505,7 @@ function buildDoctorReportFactory(deps: {
     return {
       db: { open: true, journalMode, integrity, sizeBytes },
       embeddings: { model: EMBEDDING_MODEL_ID, backlog },
+      entities: { backlog: entitiesBacklog },
       consolidation: {
         lastRunAt: lastConsolidation?.startedAt ? lastConsolidation.startedAt.toISOString() : null,
         lastRunOps,

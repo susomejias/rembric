@@ -164,6 +164,77 @@ describe('memory.save — strict path scoping', () => {
   });
 });
 
+describe('memory.save — entity extraction and linking (add-entity-index)', () => {
+  it('extracts and links entities from title+content on save, independent of candidate detection', async () => {
+    const repos = createRepositories(db.handle.db);
+    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        entityHandlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 'Fix migration bug',
+          content: 'fixed apps/server/src/db/migrate.ts, was throwing ENOENT',
+        }),
+      ),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const linked = repos.entities.findEntitiesForMemory(id);
+    expect(linked.map((e) => e.value).sort()).toEqual(['ENOENT', 'apps/server/src/db/migrate.ts']);
+  });
+
+  it('surfaces an entity-sourced candidate with its shared entityValue', async () => {
+    const repos = createRepositories(db.handle.db);
+    const relations = new RelationsService(repos, db.handle.db);
+    const entityHandlers = buildMemoryHandlers({
+      memory,
+      repos,
+      relations,
+      candidates: { perSaveMax: 5 },
+    });
+    // Dilute the scope so a single existing link stays under the rarity gate.
+    for (let i = 0; i < 10; i++) {
+      await runWithContext(fakeContext(projectA), () =>
+        Promise.resolve(
+          entityHandlers.save({
+            scope: 'project',
+            type: 'project',
+            title: `Filler ${i}`,
+            content: `filler note ${i}`,
+          }),
+        ),
+      );
+    }
+    const first = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        entityHandlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 'Use chown 10001',
+          content: 'use chown 10001 for the data dir, see docs/docker.md',
+        }),
+      ),
+    );
+    const firstId = parseText<{ id: string }>(first).id;
+
+    const second = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        entityHandlers.save({
+          scope: 'project',
+          type: 'project',
+          title: 'Run as root',
+          content: 'run as root instead, see docs/docker.md',
+        }),
+      ),
+    );
+    const payload = parseText<{
+      candidates: { targetId: string; source: string; entityValue?: string }[];
+    }>(second);
+    const match = payload.candidates.find((c) => c.targetId === firstId && c.source === 'entity');
+    expect(match?.entityValue).toBe('docs/docker.md');
+  });
+});
+
 describe('memory.title — read payloads expose the saved title', () => {
   it('memory.search returns rows whose title equals what was saved', async () => {
     memory.save(
@@ -231,6 +302,63 @@ describe('memory.search — strict path scoping', () => {
     const { memories } = parseText<{ memories: { scope: string }[] }>(r);
     expect(memories.length).toBeGreaterThan(0);
     expect(memories.every((m) => m.scope === 'global')).toBe(true);
+  });
+});
+
+describe('memory.search — entity filter (add-entity-index)', () => {
+  it('exact-address retrieval finds a memory a text query cannot, and reports viaEntity', async () => {
+    const repos = createRepositories(db.handle.db);
+    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    const saved = memory.save(
+      { type: 'project', title: 'X', content: 'entirely unrelated wording, no shared terms' },
+      projectScope(projectA.id),
+    );
+    repos.entities.linkMemory(
+      saved.id,
+      'project',
+      projectA.id,
+      [{ kind: 'error_code', value: 'ENOENT' }],
+      new Date(),
+    );
+
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(entityHandlers.search({ entity: 'ENOENT' })),
+    );
+    const payload = parseText<{
+      memories: { id: string; entities?: { kind: string; value: string }[] }[];
+      viaEntity?: boolean;
+    }>(r);
+    expect(payload.memories.map((m) => m.id)).toEqual([saved.id]);
+    expect(payload.viaEntity).toBe(true);
+    expect(payload.memories[0]!.entities).toEqual([{ kind: 'error_code', value: 'ENOENT' }]);
+  });
+
+  it('an unknown entity returns empty, not a degraded text search', async () => {
+    const repos = createRepositories(db.handle.db);
+    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    memory.save(
+      { type: 'project', title: 'X', content: 'never linked' },
+      projectScope(projectA.id),
+    );
+
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(entityHandlers.search({ entity: 'never-linked-anywhere' })),
+    );
+    const payload = parseText<{ memories: unknown[] }>(r);
+    expect(payload.memories).toEqual([]);
+  });
+
+  it('without repos wired, search still works and entities[] is simply empty', async () => {
+    const saved = memory.save(
+      { type: 'project', title: 'Y', content: 'no repos wired for this handler' },
+      projectScope(projectA.id),
+    );
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(handlers.search({})),
+    );
+    const payload = parseText<{ memories: { id: string; entities?: unknown[] }[] }>(r);
+    const row = payload.memories.find((m) => m.id === saved.id);
+    expect(row?.entities).toEqual([]);
   });
 });
 
