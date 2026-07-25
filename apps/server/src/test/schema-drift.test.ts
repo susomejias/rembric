@@ -96,6 +96,10 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX confirmations_memory_id_idx ON confirmations (memory_id)',
   },
   {
+    name: 'confirmations_memory_verdict_ts_idx',
+    sql: 'CREATE INDEX confirmations_memory_verdict_ts_idx ON confirmations (memory_id, verdict, event_ts)',
+  },
+  {
     name: 'confirmations_session_idx',
     sql: 'CREATE INDEX confirmations_session_idx ON confirmations (session_id)',
   },

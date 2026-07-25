@@ -582,6 +582,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0022_session_last_activity.sql',
       '0023_memory_entities.sql',
       '0024_confirmation_verdict.sql',
+      '0025_confirmation_review_index.sql',
     ]);
 
     // FK integrity after the rebuild.
