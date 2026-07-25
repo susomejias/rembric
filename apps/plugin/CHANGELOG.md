@@ -4,6 +4,18 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.22.0](https://github.com/susomejias/rembric/compare/plugin-v0.21.0...plugin-v0.22.0) (2026-07-25)
+
+
+### Features
+
+* **recall:** add relevance channel, abstention, diversity cap, and procedural memory type ([6840d67](https://github.com/susomejias/rembric/commit/6840d6741293aa11cbb0f0380f39653a71456720))
+
+
+### Bug Fixes
+
+* repair 10 audited defects across sessions, consolidation, and memory retrieval ([cfb5c04](https://github.com/susomejias/rembric/commit/cfb5c047d88335495b5b7e42136dee84cc0cb6f0))
+
 ## [0.21.0](https://github.com/susomejias/rembric/compare/plugin-v0.20.1...plugin-v0.21.0) (2026-07-17)
 
 
