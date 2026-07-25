@@ -794,6 +794,9 @@ export class MemoryRepository {
       sql.raw(', '),
     );
     this.db.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
+    // No ON DELETE CASCADE on these, so they must precede the memory DELETE.
+    this.db.run(sql`DELETE FROM memory_entity_links WHERE memory_id IN (${placeholders})`);
+    this.db.run(sql`DELETE FROM memory_entity_scan WHERE memory_id IN (${placeholders})`);
     this.db.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
   }
 
