@@ -13,6 +13,7 @@ import {
   kv,
   kvGrid,
   PAGE_SIZE,
+  pageParam,
   pager,
   mdBody,
   sel,
@@ -43,7 +44,7 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const url = new URL(c.req.url);
     const statusFilter = url.searchParams.get('status') ?? '';
     const kindFilter = url.searchParams.get('kind') ?? '';
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
 
     const filters: AdminRelationFilters = {};

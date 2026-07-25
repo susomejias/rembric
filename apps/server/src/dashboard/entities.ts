@@ -11,6 +11,7 @@ import {
   filtersBar,
   getSession,
   PAGE_SIZE,
+  pageParam,
   pager,
   sel,
   statCard,
@@ -51,7 +52,7 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
     const url = new URL(c.req.url);
     const kindFilter = (url.searchParams.get('kind') ?? '') as EntityKind | '';
     const singleReferenceOnly = url.searchParams.get('single_ref') === '1';
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
     const rebuilt = url.searchParams.get('rebuilt');
 

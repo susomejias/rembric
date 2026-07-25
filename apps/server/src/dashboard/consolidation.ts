@@ -18,6 +18,7 @@ import {
   kv,
   kvGrid,
   PAGE_SIZE,
+  pageParam,
   pager,
   tblEmpty,
   urlWithPage,
@@ -73,7 +74,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
 
     const url = new URL(c.req.url);
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
     const purgedSessions = url.searchParams.get('purged-sessions');
 

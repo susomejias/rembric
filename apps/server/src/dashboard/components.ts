@@ -619,6 +619,12 @@ export function pager(opts: PagerOpts): SafeHtml {
 /** Standard page size for all paginated dashboard listings. */
 export const PAGE_SIZE = 50;
 
+/** Clamped so `page * PAGE_SIZE` stays a safe integer — SQLite rejects a non-integer OFFSET. */
+export function pageParam(url: URL): number {
+  const raw = parseInt(url.searchParams.get('page') ?? '0', 10) || 0;
+  return Math.min(Math.max(0, raw), Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE));
+}
+
 /**
  * Build a URL that preserves every search param of `currentUrl` except
  * `page`, which is replaced with the given index. Use it to make

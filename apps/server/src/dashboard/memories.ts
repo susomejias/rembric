@@ -19,6 +19,7 @@ import {
   kv,
   kvGrid,
   PAGE_SIZE,
+  pageParam,
   pager,
   mdBody,
   backLink,
@@ -77,7 +78,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // FTS5 syntax error and 500s the page. `rawQuery` is still what's
     // redisplayed in the search box.
     const query = sanitizeFtsQuery(rawQuery);
-    const page = Math.max(0, parseInt(url.searchParams.get('page') ?? '0', 10) || 0);
+    const page = pageParam(url);
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();
