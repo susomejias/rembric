@@ -31,6 +31,18 @@ Two properties of this repo shape every decision below:
 
 **Q5 — Can the abstention floor be calibrated at all in its current form?** With bm25 ≤ 0 the logistic normalisation yields ≥ 0.5 always, and saturation is steep: measured 0.980 at 3/200 rows against 0.5000002 at 150/200. Any floor ≤ 0.5 can never fire, and anything above it is an IDF cliff rather than a relevance gate. This may need a rank-invariant quantity instead, which is a design change rather than a tuning exercise.
 
+## Resolved (operator decision, 2026-07-25)
+
+**Q1 → cross-scope with labels, for now.** Amend the `dashboard` requirement; do not add a project filter. The view is one operator behind one admin token and `/dashboard/memories` already works this way, so the requirement was mis-written rather than the feature missing. `add-entity-index/tasks.md` 7.3 was therefore correctly implemented and wrongly specified. "For now" is on the record: a project filter stays a legitimate later request.
+
+**Q2 → index archived memories.** Drop the `status != 'archived'` filter from `findMissingScans`. Extraction is pure and cheap, `includeArchived` stops lying, and a recipe bump stops permanently dropping archived links. Accept that the first drain after upgrade is longer on corpora with many archived rows. This also settles `tune-hot-query-paths` Q3: once archived rows are scanned, `count(memory) - count(scan)` is **exact**, not approximate, so that change can take the 12× arithmetic with no accuracy caveat.
+
+**Q3 → add `CHECK (verdict IN ('affirm','refute'))`.** Worth the table-rebuild dance on a populated `confirmations`: it makes the domain unrepresentable rather than service-enforced, and would have made the JS/SQL divergence fixed in `ab7a5f6` impossible by construction. Follow `CLAUDE.md § Table-rebuild migrations`; the runner already owns the pragmas.
+
+**Q4 → state the exemption, no new clock.** Confirms the branch the apply phase already took. A refuted TTL-less type stays `needs_review` and the spec says so explicitly, rather than inventing a second escalation mechanism.
+
+**Q5 → out of scope here; own change.** It is a redesign, not a tuning task: the floor must be scored on a rank-invariant quantity, which also moves the gap-ratio filter's evaluation point. Tracked separately so this change does not grow a design problem.
+
 ## Risks
 
 - **Scope.** This touches eleven specs. The temptation is to transcribe rather than decide; task 1.1 exists to force a recorded verdict per finding first.

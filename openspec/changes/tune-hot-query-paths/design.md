@@ -35,6 +35,16 @@ Every query method in the thirteen repositories plus `db/diagnostics.ts` was aud
 
 **Q4 — Do we accept the dense-branch floor?** `knnByQueryVector` is 42ms at 50k and there is no index fix: sqlite-vec brute-forces the partition, scope/status/type _are_ pushed into the vec0 index before distance, and `k` is not the lever (k=64 → 34.6ms, k=400 → 40.5ms). Cost is linear in partition size (14.8k → 37k vectors = 2.5× rows, 2.56× time). This is the per-turn latency floor for `memory.search` and it should be recorded as such in the spec, so it is not rediscovered as a defect. Reducing it means partitioning differently or a different vector index — a much larger change.
 
+## Resolved (operator decision, 2026-07-25)
+
+**Q1 → middle way.** Take `adminCountEntities`' free win (the join and GROUP BY are pure waste when `singleReferenceOnly` is false — 4000×, verified identical) and **defer the denormalised `link_count` and its triggers** until an operator actually complains about the page. A counter that drifts is worse than a slow query, and this is the tier where cost matters least.
+
+**Q2 → `findActiveForTransport` only.** It runs on every MCP call, so its expression index ships now. The remaining `sessions` indexes are deferred: every one of them is inconsequential below ~5k sessions, and nobody is near 50k. Task 5.4 (`abandonInactiveSince`) shares the expression and was gated on shipping alongside it — re-measure before including it, since the planner reverted to the status index at 50k.
+
+**Q3 → take the arithmetic, and it is now exact.** `reconcile-specs-with-shipped-behaviour` Q2 resolved to indexing archived memories, which removes `findMissingScans`' archived filter — so `count(memory) - count(scan)` no longer over-counts and the 12× win carries no accuracy caveat. Sequence after that change lands.
+
+**Q4 → accept the floor and record it.** ~42ms at 50k for `knnByQueryVector`, `k` is not the lever (k=64 → 34.6ms, k=400 → 40.5ms), cost linear in partition size. Writing it into the spec is the deliverable, so it is not rediscovered as a defect. Lowering it means partitioning differently or another vector index — a much larger change than this one.
+
 ## Risks
 
 - **Behaviour change disguised as an optimisation.** Every rewrite here must be proven result-identical, not just faster. Two are already verified byte-identical (`searchBm25Ids`'s rank ordering, the `backlogCount` arithmetic); the rest need the same treatment. A pure index addition that changes a result set means the query was relying on scan order, which is a latent defect either way.
