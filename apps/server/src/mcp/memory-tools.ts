@@ -83,7 +83,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      "Exact-address retrieval: return every memory linked to this entity value (a file path, git SHA, URL, error code, or ticket id), chronological, no ranking. Combined with `query`, narrows to that entity's memories that also match the text — never fused into one ranked set. An unknown entity returns an empty result, never a degraded text search.",
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and complete — no ranking, no cutoff. With `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does.',
     ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),

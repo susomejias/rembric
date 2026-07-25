@@ -72,6 +72,37 @@ describe('extractEntities — positive matches', () => {
     expect(values('', 'fixed in #282 last week', 'ticket')).toContain('#282');
   });
 
+  it('recognizes a CVE id and normalizes to uppercase', () => {
+    expect(values('', 'affected by cve-2024-3094 in xz-utils', 'cve_id')).toContain(
+      'CVE-2024-3094',
+    );
+  });
+
+  it('does not also extract a CVE id as a JIRA-style ticket', () => {
+    expect(values('', 'affected by CVE-2024-3094 in xz-utils', 'ticket')).toEqual([]);
+  });
+
+  it('recognizes an IPv4 address', () => {
+    expect(values('', 'the NAS is reachable at 192.168.1.50 on the LAN', 'ip_address')).toContain(
+      '192.168.1.50',
+    );
+  });
+
+  it('recognizes an IPv4 address with a CIDR suffix', () => {
+    expect(values('', 'the docker bridge uses 172.18.0.0/16', 'ip_address')).toContain(
+      '172.18.0.0/16',
+    );
+  });
+
+  it('recognizes a homelab hostname', () => {
+    expect(values('', 'check plex.home for the new library', 'hostname')).toContain('plex.home');
+    expect(values('', 'ssh into nas.local to grab the logs', 'hostname')).toContain('nas.local');
+  });
+
+  it('normalizes a hostname to lowercase', () => {
+    expect(values('', 'reach NAS.LOCAL from any device', 'hostname')).toContain('nas.local');
+  });
+
   it('is reproducible: same input always yields the same output', () => {
     const title = 'apps/server/src/db/migrate.ts and ENOENT and PROJ-99';
     const content = 'see https://example.com/x and cfb5c042';
@@ -89,7 +120,7 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
   const PROSE_RESEMBLING_ENTITIES = [
     'e.g. this is not a path, and neither is i.e. or etc.',
     'a solution / an idea, or maybe both',
-    'the version is 3.14 and the ratio is 10.0.0.5',
+    'the version is 3.14 and the ratio is 10 to 1',
     'v1.2.3 shipped yesterday',
     'An ERROR occurred while EITHER retrying or aborting; EXTRA context helped, ENOUGH said',
     'UTF-8 encoding broke the parser, per ISO-8601 and RFC-822',
@@ -100,6 +131,10 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     'a decimal like 1234567 is not a hash, nor is 42',
     'HTML and IEEE and ECMA are just acronyms',
     'the cabbage recipe needs a dash - not a ticket',
+    'e.g. or i.e. or etc. are not hostnames',
+    'see fig. 2 in the appendix, or ch. 4 for background',
+    'a public domain like example.com is not extracted bare (no scheme)',
+    'the value 999.1.1.1 is not a valid IP (out of octet range)',
   ];
 
   it.each(PROSE_RESEMBLING_ENTITIES)('yields zero entities for: %s', (text) => {

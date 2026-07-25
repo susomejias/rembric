@@ -22,8 +22,14 @@ export class EntityBackfillWorker {
   private possiblyPending = true;
 
   constructor(private readonly opts: EntityBackfillWorkerOptions) {
-    this.batchSize = opts.batchSize ?? 50;
+    // ~1.7ms/memory, so a batch costs ~170ms — no model inference to pace for.
+    this.batchSize = opts.batchSize ?? 100;
     this.now = opts.now ?? (() => new Date());
+  }
+
+  /** True while `findMissingScans` last returned work — drives drain cadence. */
+  get hasPendingWork(): boolean {
+    return this.possiblyPending;
   }
 
   processBatch(opts: { force?: boolean } = {}): { processed: number; failed: number } {

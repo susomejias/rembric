@@ -16,7 +16,20 @@ import { projects } from './projects.js';
  * resumable backfill never rescans it forever.
  */
 
-export const ENTITY_KINDS = ['path', 'git_ref', 'url', 'error_code', 'ticket'] as const;
+export const ENTITY_KINDS = [
+  'path',
+  'git_ref',
+  'url',
+  'error_code',
+  'ticket',
+  'cve_id',
+  'ip_address',
+  'hostname',
+  'env_var',
+  'uuid',
+  'systemd_unit',
+  'mac_address',
+] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
 export const memoryEntities = sqliteTable(

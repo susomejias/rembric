@@ -19,6 +19,7 @@ import type { DoctorReport } from '../mcp/observability-tools.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
+import { ensureEntityExtractor } from '../services/entity-state.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
@@ -197,6 +198,9 @@ export async function bootstrap(
   // Resumable entity-extraction backfill (add-entity-index) — same
   // in-process tick+timer shape as the embedding worker, but synchronous
   // (no model, no network) so the tick itself never needs a `.catch()`.
+  if (ensureEntityExtractor(repos, config.dataDir).reset) {
+    logger.warn('entity extractor recipe changed → index reset; re-scanning in background');
+  }
   const entityBackfillWorker = new EntityBackfillWorker({ repos });
   const entityBackfillTick = (force = false): void => {
     try {
@@ -207,9 +211,26 @@ export async function bootstrap(
       });
     }
   };
+  // Self-scheduling: a recipe-change rebuild drains a whole corpus, and a fixed
+  // 30s tick left `entity` lookups incomplete for ~100min on 10k memories.
+  const ENTITY_DRAIN_DELAY_MS = 500;
+  const ENTITY_IDLE_DELAY_MS = 30_000;
+  let entityBackfillTimer: NodeJS.Timeout | undefined;
+  let entityBackfillStopped = false;
+  const scheduleEntityBackfill = (delayMs: number): void => {
+    if (entityBackfillStopped) return;
+    entityBackfillTimer = setTimeout(() => {
+      entityBackfillTick();
+      scheduleEntityBackfill(
+        entityBackfillWorker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS,
+      );
+    }, delayMs);
+    entityBackfillTimer.unref?.();
+  };
   entityBackfillTick(true);
-  const entityBackfillTimer = setInterval(() => entityBackfillTick(), 30_000);
-  entityBackfillTimer.unref?.();
+  scheduleEntityBackfill(
+    entityBackfillWorker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS,
+  );
   const entityBackfillFallbackTimer = setInterval(() => entityBackfillTick(true), 60 * 60_000);
   entityBackfillFallbackTimer.unref?.();
 
@@ -409,7 +430,8 @@ export async function bootstrap(
       }
       clearInterval(embedTimer);
       clearInterval(embedFallbackTimer);
-      clearInterval(entityBackfillTimer);
+      entityBackfillStopped = true;
+      if (entityBackfillTimer) clearTimeout(entityBackfillTimer);
       clearInterval(entityBackfillFallbackTimer);
       clearInterval(sessionReapTimer);
       await http.close();
