@@ -22,7 +22,7 @@ import { EXTRACTOR_RULES } from './extractor-rules.js';
  * so the backfill drain re-scans — same contract as `EMBEDDING_INPUT_VERSION`.
  * Bump whenever a pattern, a normalization rule, or `ENTITY_KINDS` changes.
  */
-export const EXTRACTOR_VERSION = 'v4-systemd-and-mac';
+export const EXTRACTOR_VERSION = 'v5-terminal-extensions';
 
 export interface ExtractedEntity {
   kind: EntityKind;
@@ -33,6 +33,8 @@ export interface ExtractedEntity {
 /** Sliced BEFORE any regex runs, which is what bounds ReDoS exposure. */
 const MAX_INPUT_CHARS = 200_000;
 const MAX_TOKEN_CHARS = 300;
+/** A `find` / lockfile dump yields thousands of paths, none of them addresses worth indexing. */
+const MAX_ENTITIES = 250;
 
 export function extractEntities(title: string, content: string): ExtractedEntity[] {
   const text = `${title}\n\n${content}`.slice(0, MAX_INPUT_CHARS);
@@ -50,6 +52,7 @@ export function extractEntities(title: string, content: string): ExtractedEntity
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ kind: rule.kind, value });
+      if (out.length >= MAX_ENTITIES) return out;
     }
   }
 

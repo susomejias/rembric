@@ -37,8 +37,9 @@ const PATH_EXT =
   // Infra-as-code and unit files: the vocabulary a homelab operator writes
   // most, absent from the original code-only list.
   'tf|tfvars|hcl|tpl|service|socket|timer|rules|nix|dockerfile|containerfile';
+// Extension must be terminal, else `src/user.service.ts` stores `src/user.service`.
 const PATH_RE = new RegExp(
-  `(?:^|[\\s"'(\`])((?:\\.{1,2}\\/)?(?:[A-Za-z0-9_.-]+\\/)+[A-Za-z0-9_-]+\\.(?:${PATH_EXT})|\\.[A-Za-z][A-Za-z0-9_.-]{2,40})(?=[\\s"'),.:;!?\`]|$)`,
+  `(?:^|[\\s"'(\`])((?:\\.{1,2}\\/)?(?:[A-Za-z0-9_.-]+\\/)+[A-Za-z0-9_.-]+\\.(?:${PATH_EXT})|\\.[A-Za-z][A-Za-z0-9_.-]{2,40})(?=[\\s"'),:;!?\`]|\\.(?![A-Za-z0-9])|$)`,
   'g',
 );
 
@@ -179,7 +180,7 @@ const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 // `wrapper.mount`), which measured 8 false positives in 9 lines of ordinary
 // code prose against 1 with this list.
 const SYSTEMD_UNIT_RE =
-  /\b[a-z0-9][a-z0-9:_.-]{0,64}\.(?:service|socket|timer|automount|device|swap)\b/gi;
+  /(?<![a-z0-9._/-])[a-z0-9][a-z0-9:_.-]{0,64}\.(?:service|socket|timer|automount|device|swap)\b(?!\.[a-z0-9])/gi;
 
 // Six hex pairs separated consistently by `:` or `-`. A clock time has three
 // groups, so there is no prose shape to collide with.
@@ -218,8 +219,9 @@ const IP_ADDRESS_RE = new RegExp(
 // Labels ending in a CLOSED suffix list, not general public-domain matching
 // (which would need a public-suffix list to stay precise). These suffixes
 // never appear as sentence-ending abbreviations, unlike a generic short TLD.
+// Capped, unambiguous label group: the nested-quantifier form was quadratic (19s at 200KB).
 const HOSTNAME_RE = new RegExp(
-  `\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:local|lan|home|internal|localdomain|arpa)\\b`,
+  `(?<![a-z0-9.-])(?:[a-z0-9][a-z0-9-]{0,62}\\.){1,10}(?:local|lan|home|internal|localdomain|arpa)\\b(?!\\.[a-z0-9])`,
   'gi',
 );
 
