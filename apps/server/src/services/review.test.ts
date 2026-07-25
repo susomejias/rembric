@@ -194,9 +194,48 @@ describe('deriveReviewState', () => {
     });
   });
 
-  describe('ESCALATION_MULTIPLIER', () => {
+  describe('escalation', () => {
+    const PROJECT_TTL = REVIEW_TTL_MS.project!;
+    const derive = (agedMs: number) =>
+      deriveReviewState(
+        {
+          type: 'project',
+          createdAt: new Date(NOW.getTime() - agedMs),
+          status: 'active',
+          lastConfirmedAt: null,
+          lastRefutedAt: null,
+        },
+        NOW,
+      );
+
     it('is greater than 1 (escalation threshold must exceed the base TTL)', () => {
       expect(ESCALATION_MULTIPLIER).toBeGreaterThan(1);
+    });
+
+    it('is not escalated while merely needs_review', () => {
+      const r = derive(PROJECT_TTL + 1);
+      expect(r.reviewState).toBe('needs_review');
+      expect(r.reviewEscalated).toBe(false);
+    });
+
+    // needs_review starts at 1x TTL, so N further multiples land at 1 + N.
+    it('escalates only after ESCALATION_MULTIPLIER further multiples in the queue', () => {
+      expect(derive(PROJECT_TTL * (1 + ESCALATION_MULTIPLIER) - 1).reviewEscalated).toBe(false);
+      expect(derive(PROJECT_TTL * (1 + ESCALATION_MULTIPLIER) + 1).reviewEscalated).toBe(true);
+    });
+
+    it('a no-TTL type never escalates', () => {
+      const r = deriveReviewState(
+        {
+          type: 'reference',
+          createdAt: new Date(0),
+          status: 'active',
+          lastConfirmedAt: null,
+          lastRefutedAt: null,
+        },
+        NOW,
+      );
+      expect(r.reviewEscalated).toBe(false);
     });
   });
 });

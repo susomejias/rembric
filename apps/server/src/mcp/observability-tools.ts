@@ -76,7 +76,7 @@ export const statsOutput = {
   memoriesByStatus: counts,
   memoriesByType: counts,
   sessionsByStatus: counts,
-  /** Queue-depth signals (separate-access-from-usefulness), both scoped to this call's context. */
+  /** Queue-depth signals, both scoped to this call's context. */
   needsReviewTotal: z.number(),
   pendingJudgmentsTotal: z.number(),
 };

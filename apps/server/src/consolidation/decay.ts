@@ -1,6 +1,6 @@
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryType } from '../db/schema/memory.js';
-import { ESCALATION_MULTIPLIER, REVIEW_TTL_MS } from '../services/review.js';
+import { ESCALATION_MULTIPLIER, reviewTtlEntries } from '../services/review.js';
 
 import type { ScopeKey } from './candidates.js';
 
@@ -9,9 +9,7 @@ import type { ScopeKey } from './candidates.js';
  *
  * Rule: status='active' AND (
  *   (last_seen_at < now - per-type threshold AND confidence < confidenceFloor)
- *   OR escalated (see `ESCALATION_MULTIPLIER` — needs_review for that many
- *      multiples of the type's own review TTL with no re-affirmation,
- *      regardless of last_seen_at/confidence)
+ *   OR escalated (see `ESCALATION_MULTIPLIER`)
  * )
  *
  * Returns the ids only; the consolidation runner records the op via
@@ -59,8 +57,10 @@ export function findDecayCandidates(
   const thresholdByType = Object.entries(thresholds.thresholdByType).filter(
     (e): e is [MemoryType, number] => typeof e[1] === 'number',
   );
-  const reviewTtlByType = Object.entries(REVIEW_TTL_MS).filter(
-    (e): e is [MemoryType, number] => typeof e[1] === 'number',
+  // `needs_review` starts at baseline + 1×TTL, so escalating after
+  // ESCALATION_MULTIPLIER further multiples IN that state lands at 1 + N.
+  const escalationTtlByType = reviewTtlEntries().map(
+    ([type, ttl]) => [type, ttl * (1 + ESCALATION_MULTIPLIER)] as const,
   );
   return repos.memory.findDecayCandidateIds({
     scope: scope.scope,
@@ -69,7 +69,6 @@ export function findDecayCandidates(
     thresholdByType,
     defaultThresholdMs: thresholds.defaultThresholdMs,
     confidenceFloor: thresholds.confidenceFloor,
-    reviewTtlByType,
-    escalationMultiplier: ESCALATION_MULTIPLIER,
+    escalationTtlByType,
   });
 }

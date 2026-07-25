@@ -307,8 +307,7 @@ describe('MemoryRepository', () => {
         ],
         defaultThresholdMs: 1_000, // covers 'feedback' (no explicit entry)
         confidenceFloor: 1,
-        reviewTtlByType: [], // escalation disabled for this test — pure recency+confidence rule only
-        escalationMultiplier: 2,
+        escalationTtlByType: [], // escalation disabled: pure recency+confidence rule
       });
       // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
       // U_SAME: user age 200 < 10_000 → out (longer threshold than project).
@@ -323,7 +322,7 @@ describe('MemoryRepository', () => {
       (e): e is [NonNullable<NewMemory['type']>, number] => typeof e[1] === 'number',
     );
 
-    it('latestConfirmationTsByIds returns the max event_ts per id; empty for no input', () => {
+    it('reviewTimestampsByIds returns the max event_ts per id per verdict; empty for no input', () => {
       t.handle.db
         .insert(memory)
         .values([row({ id: 'm1', content: 'x' })])
@@ -333,12 +332,14 @@ describe('MemoryRepository', () => {
         .values([
           { id: 'k1', memoryId: 'm1', eventTs: new Date(5_000) },
           { id: 'k2', memoryId: 'm1', eventTs: new Date(9_000) },
+          { id: 'k3', memoryId: 'm1', eventTs: new Date(7_000), verdict: 'refute' },
         ])
         .run();
-      const map = repo.latestConfirmationTsByIds(['m1', 'absent']);
-      expect(map.get('m1')?.getTime()).toBe(9_000);
+      const map = repo.reviewTimestampsByIds(['m1', 'absent']);
+      expect(map.get('m1')?.affirmedAt?.getTime()).toBe(9_000);
+      expect(map.get('m1')?.refutedAt?.getTime()).toBe(7_000);
       expect(map.has('absent')).toBe(false);
-      expect(repo.latestConfirmationTsByIds([]).size).toBe(0);
+      expect(repo.reviewTimestampsByIds([]).size).toBe(0);
     });
 
     it('findNeedsReview returns active in-scope rows past their TTL, oldest baseline first', () => {
@@ -362,6 +363,39 @@ describe('MemoryRepository', () => {
         ttlByType,
       });
       expect(found.map((m) => m.id)).toEqual(['old1', 'old2']); // oldest baseline first; ref/arch/fresh excluded
+    });
+
+    it('sorts refuted rows ahead of TTL-expired ones so a capped page still shows them', () => {
+      // Refutation does not advance the baseline, so a freshly-created refuted
+      // row has the NEWEST baseline and would sort last under baseline-only
+      // ordering — invisible behind memory.context's 3-row cap.
+      const old = new Date(1_000);
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'o1', content: 'expired one', createdAt: old }),
+          row({ id: 'o2', content: 'expired two', createdAt: old }),
+          row({ id: 'o3', content: 'expired three', createdAt: old }),
+          row({ id: 'refuted', content: 'just refuted', type: 'reference', createdAt: old }),
+        ])
+        .run();
+      const nowMs = old.getTime() + PROJECT_TTL + 1;
+      t.handle.db
+        .insert(confirmations)
+        .values([
+          { id: 'r1', memoryId: 'refuted', eventTs: new Date(nowMs - 1), verdict: 'refute' },
+        ])
+        .run();
+
+      const page = repo.findNeedsReview({
+        scope: 'global',
+        projectId: null,
+        nowMs,
+        limit: 3,
+        ttlByType,
+      });
+      expect(page.map((m) => m.id)).toContain('refuted');
+      expect(page[0]?.id).toBe('refuted');
     });
 
     it('findNeedsReview uses the latest confirmation as the baseline', () => {

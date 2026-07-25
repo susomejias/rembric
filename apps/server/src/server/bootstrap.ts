@@ -5,7 +5,6 @@ import { ConsolidationRunner } from '../consolidation/index.js';
 import { undoOp, undoRun } from '../consolidation/operations.js';
 import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
 import { createDb, createRepositories, type DbHandle, type Repositories } from '../db/index.js';
-import type { MemoryType } from '../db/schema/memory.js';
 import {
   EMBEDDING_MODEL_ID,
   embeddingQueryInput,
@@ -26,7 +25,7 @@ import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { REVIEW_TTL_MS } from '../services/review.js';
+import { reviewTtlEntries } from '../services/review.js';
 import { CapabilityDetector } from '../services/self-update/capability.js';
 import { DockerEngineApi } from '../services/self-update/engine-api.js';
 import {
@@ -528,9 +527,7 @@ function buildDoctorReportFactory(deps: {
     const sessionsByStatus = deps.agentSessions.adminCountByStatus();
     const needsReview = deps.repos.memory.adminCountNeedsReview({
       nowMs: Date.now(),
-      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
-        (e): e is [MemoryType, number] => typeof e[1] === 'number',
-      ),
+      ttlByType: reviewTtlEntries(),
     });
     const pendingJudgments = deps.repos.relations.adminCountByStatus('pending');
 

@@ -8,7 +8,7 @@ import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schem
 
 import { DomainError } from './errors.js';
 import { hybridSearch, RANK_WINDOW_CEILING } from './hybrid-search.js';
-import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
+import { deriveReviewState, reviewTtlEntries, type ReviewState } from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
@@ -254,9 +254,9 @@ export class MemoryService {
     const { rows: predecessors, truncated } = this.collectPredecessors(found);
     const { head, truncated: headTruncated } = this.findHead(found);
     const confirmationCount = this.repos.memory.countConfirmations(head.id);
-    const lastConfirmedAt =
-      this.repos.memory.latestConfirmationTsByIds([head.id]).get(head.id) ?? null;
-    const lastRefutedAt = this.repos.memory.latestRefutationTsByIds([head.id]).get(head.id) ?? null;
+    const ts = this.repos.memory.reviewTimestampsByIds([head.id]).get(head.id);
+    const lastConfirmedAt = ts?.affirmedAt ?? null;
+    const lastRefutedAt = ts?.refutedAt ?? null;
     const { reviewState, reviewAfter } = deriveReviewState(
       {
         type: head.type,
@@ -311,16 +311,15 @@ export class MemoryService {
     if (memories.length === 0) return out;
     const now = this.now();
     const ids = memories.map((m) => m.id);
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(ids);
-    const lastRefuted = this.repos.memory.latestRefutationTsByIds(ids);
+    const reviewTs = this.repos.memory.reviewTimestampsByIds(ids);
     for (const m of memories) {
       const { reviewState, reviewAfter } = deriveReviewState(
         {
           type: m.type,
           createdAt: m.createdAt,
           status: m.status,
-          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
-          lastRefutedAt: lastRefuted.get(m.id) ?? null,
+          lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+          lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
         },
         now,
       );
@@ -342,14 +341,11 @@ export class MemoryService {
       projectId: scope.kind === 'project' ? scope.projectId : null,
       nowMs: now.getTime(),
       limit,
-      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
-        (e): e is [MemoryType, number] => typeof e[1] === 'number',
-      ),
+      ttlByType: reviewTtlEntries(),
     });
     if (rows.length === 0) return [];
     const ids = rows.map((m) => m.id);
-    const lastConfirmed = this.repos.memory.latestConfirmationTsByIds(ids);
-    const lastRefuted = this.repos.memory.latestRefutationTsByIds(ids);
+    const reviewTs = this.repos.memory.reviewTimestampsByIds(ids);
     const items: NeedsReviewItem[] = [];
     for (const m of rows) {
       const { reviewAfter, reviewBaseline } = deriveReviewState(
@@ -357,8 +353,8 @@ export class MemoryService {
           type: m.type,
           createdAt: m.createdAt,
           status: m.status,
-          lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
-          lastRefutedAt: lastRefuted.get(m.id) ?? null,
+          lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+          lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
         },
         now,
       );
@@ -380,9 +376,7 @@ export class MemoryService {
       scope: scope.kind === 'project' ? 'project' : 'global',
       projectId: scope.kind === 'project' ? scope.projectId : null,
       nowMs: this.now().getTime(),
-      ttlByType: Object.entries(REVIEW_TTL_MS).filter(
-        (e): e is [MemoryType, number] => typeof e[1] === 'number',
-      ),
+      ttlByType: reviewTtlEntries(),
     });
   }
 
@@ -392,13 +386,8 @@ export class MemoryService {
    * one it is the chronological listing with exact pagination. Scope is
    * enforced at the SQL level; the agent cannot opt out by widening a filter.
    *
-   * Does NOT advance `last_seen_at` (separate-access-from-usefulness,
-   * Decision 1: "one signal, one purpose"). Being returned in a page of up
-   * to 200 is not evidence a row was useful — dereferencing it via
-   * `memory.get` is the actual proxy for use, and is the only read path
-   * that still touches. Search touching every result was the closed loop
-   * that made ranking high self-perpetuating: it extended lifetime, which
-   * raised future rank, indefinitely.
+   * Does NOT advance `last_seen_at`: being returned in a page is not evidence
+   * a row was useful. Only `memory.get` touches.
    */
   async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
     return (await this.searchWithAbstention(input, scope)).memories;
@@ -530,9 +519,7 @@ export class MemoryService {
       verdict,
       reason: opts.reason ?? null,
     });
-    // Refutation must NOT advance the access signal (Decision 4) — touching
-    // it here would recreate the loop this change exists to break: proving
-    // a memory wrong would extend its life.
+    // Refuting must not extend a memory's life.
     if (verdict === 'affirm') this.repos.memory.touchLastSeen(head.id, ts);
     return { headTruncated: truncated };
   }

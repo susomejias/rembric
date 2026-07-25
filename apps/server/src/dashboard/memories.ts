@@ -133,8 +133,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const reviewById = new Map<string, ReviewState | null>();
     if (rows.length > 0) {
       const rowIds = rows.map((m) => m.id);
-      const lastConfirmed = deps.repos.memory.latestConfirmationTsByIds(rowIds);
-      const lastRefuted = deps.repos.memory.latestRefutationTsByIds(rowIds);
+      const reviewTs = deps.repos.memory.reviewTimestampsByIds(rowIds);
       const at = new Date(nowMs);
       for (const m of rows) {
         reviewById.set(
@@ -144,8 +143,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
               type: m.type,
               createdAt: m.createdAt,
               status: m.status,
-              lastConfirmedAt: lastConfirmed.get(m.id) ?? null,
-              lastRefutedAt: lastRefuted.get(m.id) ?? null,
+              lastConfirmedAt: reviewTs.get(m.id)?.affirmedAt ?? null,
+              lastRefutedAt: reviewTs.get(m.id)?.refutedAt ?? null,
             },
             at,
           ).reviewState,
@@ -337,8 +336,9 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const confirmCount = deps.repos.memory.adminCountConfirmations(row.id);
     const lastConfirmedAt =
-      deps.repos.memory.latestConfirmationTsByIds([row.id]).get(row.id) ?? null;
-    const lastRefutedAt = deps.repos.memory.latestRefutationTsByIds([row.id]).get(row.id) ?? null;
+      deps.repos.memory.reviewTimestampsByIds([row.id]).get(row.id)?.affirmedAt ?? null;
+    const lastRefutedAt =
+      deps.repos.memory.reviewTimestampsByIds([row.id]).get(row.id)?.refutedAt ?? null;
     const { reviewState, reviewAfter } = deriveReviewState(
       {
         type: row.type,

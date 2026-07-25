@@ -234,7 +234,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
     }
     const limit = Math.min(parsed.data.limit ?? 5, 5);
-    // memory.search never touches last_seen_at (separate-access-from-usefulness).
+    // memory.search never touches last_seen_at.
     const rows = await deps.memory.search(
       { query: parsed.data.query, limit },
       projectScope(ctx.project.id),

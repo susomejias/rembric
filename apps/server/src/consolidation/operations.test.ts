@@ -457,7 +457,7 @@ describe('reactivation durability (fix-audited-defects)', () => {
   });
 });
 
-describe('escalation (separate-access-from-usefulness)', () => {
+describe('escalation', () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   it('a frequently-read memory (last_seen_at always fresh) still becomes decay-eligible once it is long-unaffirmed (task 4.3)', () => {
@@ -466,11 +466,10 @@ describe('escalation (separate-access-from-usefulness)', () => {
       projectScope(projectId),
     );
 
-    // Simulate frequent reads: every `get()` touches last_seen_at, so the
-    // recency-based decay rule (last_seen_at < now - threshold) can never
-    // fire for this memory. project's review TTL is 3 months; escalation
-    // fires at ESCALATION_MULTIPLIER (2x) with no confirmation ever recorded.
-    for (let i = 0; i < 6; i++) {
+    // Frequent reads keep last_seen_at fresh, so the recency rule can never
+    // fire. project's TTL is 3 months: needs_review at 1x, escalation after
+    // ESCALATION_MULTIPLIER further multiples, i.e. 3x ≈ 270 days.
+    for (let i = 0; i < 10; i++) {
       clock.advance(35 * DAY_MS);
       memoryService.get(m.id, projectScope(projectId));
     }
@@ -484,13 +483,13 @@ describe('escalation (separate-access-from-usefulness)', () => {
     expect(candidates).toContain(m.id);
   });
 
-  it('the same read cadence does NOT trip escalation before the multiplier threshold is reached', () => {
+  it('does NOT trip escalation before the multiplier threshold is reached', () => {
     const m = memoryService.save(
       { type: 'project', title: 'Plan', content: 'plan' },
       projectScope(projectId),
     );
 
-    clock.advance(60 * DAY_MS); // well under 2x the 3-month TTL
+    clock.advance(60 * DAY_MS); // inside the first TTL: not even needs_review
     memoryService.get(m.id, projectScope(projectId));
 
     const candidates = findDecayCandidates(
@@ -510,7 +509,7 @@ describe('escalation (separate-access-from-usefulness)', () => {
 
     clock.advance(200 * DAY_MS);
     memoryService.confirm(m.id, projectScope(projectId));
-    clock.advance(60 * DAY_MS); // well under 2x the 3-month TTL from the new baseline
+    clock.advance(60 * DAY_MS); // baseline moved: well inside the window again
     memoryService.get(m.id, projectScope(projectId));
 
     const candidates = findDecayCandidates(

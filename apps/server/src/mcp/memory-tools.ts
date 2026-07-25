@@ -1222,9 +1222,7 @@ async function handleContext(
   // Relevance channel — separate from recentMemories (which is pure
   // recency) so the model can tell the two apart. An explicit `focus`
   // always wins; otherwise a seed is derived so the improvement doesn't
-  // depend on the agent knowing to ask. `memory.search` never touches
-  // `last_seen_at` (separate-access-from-usefulness), so a context peek
-  // cannot inflate the memories it surfaces regardless.
+  // depend on the agent knowing to ask.
   const focusText = args.focus?.trim() || deriveFocusSeed(deps, scope, recentPrompts);
   let relevantMemories: {
     id: string;

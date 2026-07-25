@@ -5,8 +5,8 @@ import { memory, type MemorySource } from './memory.js';
 export type ConfirmationVerdict = 'affirm' | 'refute';
 
 /**
- * Append-only event table backing the "confidence" counter and (see
- * `separate-access-from-usefulness`) its negative mirror.
+ * Append-only event table backing the "confidence" counter and its negative
+ * mirror.
  *
  * Confidence on a given memory is computed as
  *   SELECT COUNT(*) FROM confirmations WHERE memory_id = ? AND verdict = 'affirm'

@@ -1,11 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
-import {
-  confirmations,
-  type ConfirmationVerdict,
-  type NewConfirmation,
-} from '../schema/confirmations.js';
+import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
   memory,
   type Memory,
@@ -27,6 +23,11 @@ import { scopeCondition, scopeWhere } from './scope-clause.js';
 const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
+
+export interface ReviewTimestamps {
+  affirmedAt: Date | null;
+  refutedAt: Date | null;
+}
 
 export interface SearchMemoryIdsOpts {
   scope: MemoryScope;
@@ -492,16 +493,8 @@ export class MemoryRepository {
     thresholdByType: ReadonlyArray<readonly [MemoryType, number]>;
     defaultThresholdMs: number;
     confidenceFloor: number;
-    /**
-     * Escalation (separate-access-from-usefulness): a memory `needs_review`
-     * for `escalationMultiplier` × its own TTL with no re-affirmation is
-     * decay-eligible regardless of `last_seen_at`/confidence — the fix for
-     * "read regularly, never re-affirmed, un-archivable" limbo. Empty
-     * `reviewTtlByType` disables escalation entirely (falls back to the
-     * pre-existing recency+confidence rule only).
-     */
-    reviewTtlByType: ReadonlyArray<readonly [MemoryType, number]>;
-    escalationMultiplier: number;
+    /** Per-type escalation window; empty disables escalation. */
+    escalationTtlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): string[] {
     const scopeFilter = scopeCondition(opts.scope, opts.projectId);
     // Per-type inactivity window: a row decays once last_seen_at predates
@@ -519,17 +512,15 @@ export class MemoryRepository {
     );
 
     let eligibleRule = recencyRule;
-    if (opts.reviewTtlByType.length > 0) {
-      const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.reviewTtlByType);
+    if (opts.escalationTtlByType.length > 0) {
+      const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.escalationTtlByType);
       const escalationRule = and(
         sql`${ttlExpr} IS NOT NULL`,
-        sql`${baselineExpr} + (${ttlExpr} * ${opts.escalationMultiplier}) <= ${opts.nowMs}`,
+        sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
       );
-      // Outer parens are load-bearing: `and(status='active', ..., eligibleRule)`
-      // joins with plain `AND`, and SQL's `AND` binds tighter than `OR` — an
-      // unwrapped `(recency) OR (escalation)` here would parse as
-      // `(status='active' AND recency) OR escalation`, letting an ALREADY
-      // ARCHIVED row match via escalation with no status filter at all.
+      // Outer parens are load-bearing: the caller joins this with plain `AND`,
+      // which binds tighter than `OR` — unwrapped, an archived row would match
+      // via escalation with no status filter at all.
       eligibleRule = sql`((${recencyRule}) OR (${escalationRule}))`;
     }
 
@@ -541,33 +532,30 @@ export class MemoryRepository {
       .map((r) => r.id);
   }
 
-  /** Latest AFFIRMING `event_ts` per memory id (the affirmation baseline source). */
-  latestConfirmationTsByIds(ids: readonly string[]): Map<string, Date> {
-    return this.latestVerdictTsByIds(ids, 'affirm');
-  }
-
-  /** Latest REFUTING `event_ts` per memory id — forces `needs_review` immediately when newer than the affirmation baseline. */
-  latestRefutationTsByIds(ids: readonly string[]): Map<string, Date> {
-    return this.latestVerdictTsByIds(ids, 'refute');
-  }
-
-  private latestVerdictTsByIds(
-    ids: readonly string[],
-    verdict: ConfirmationVerdict,
-  ): Map<string, Date> {
-    const out = new Map<string, Date>();
+  /**
+   * Latest `event_ts` per memory id for BOTH verdicts in one pass — callers
+   * always need the pair (`deriveReviewState` takes both), so splitting this
+   * would double the query count on every review-state read.
+   */
+  reviewTimestampsByIds(ids: readonly string[]): Map<string, ReviewTimestamps> {
+    const out = new Map<string, ReviewTimestamps>();
     if (ids.length === 0) return out;
     const rows = this.db
       .select({
         memoryId: confirmations.memoryId,
+        verdict: confirmations.verdict,
         latest: sql<number>`MAX(${confirmations.eventTs})`,
       })
       .from(confirmations)
-      .where(and(inArray(confirmations.memoryId, [...ids]), eq(confirmations.verdict, verdict)))
-      .groupBy(confirmations.memoryId)
+      .where(inArray(confirmations.memoryId, [...ids]))
+      .groupBy(confirmations.memoryId, confirmations.verdict)
       .all();
     for (const r of rows) {
-      if (r.latest != null) out.set(r.memoryId, new Date(Number(r.latest)));
+      if (r.latest == null) continue;
+      const entry = out.get(r.memoryId) ?? { affirmedAt: null, refutedAt: null };
+      if (r.verdict === 'refute') entry.refutedAt = new Date(Number(r.latest));
+      else entry.affirmedAt = new Date(Number(r.latest));
+      out.set(r.memoryId, entry);
     }
     return out;
   }
@@ -633,12 +621,7 @@ export class MemoryRepository {
     );
   }
 
-  /**
-   * Scoped total needs-review count — the queue-depth signal `memory.context`
-   * and `memory.stats` surface (separate-access-from-usefulness). Same CASE
-   * ladder as `findNeedsReview`/`adminCountNeedsReview`, just count() instead
-   * of row-fetch, and scoped instead of admin-unscoped.
-   */
+  /** Scoped needs-review total; `adminCountNeedsReview` is the unscoped twin. */
   countNeedsReview(opts: {
     scope: MemoryScope;
     projectId: string | null;
@@ -646,17 +629,23 @@ export class MemoryRepository {
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): number {
     if (opts.ttlByType.length === 0) return 0;
-    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
-    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(opts.ttlByType);
+    return this.runCountNeedsReview(
+      scopeCondition(opts.scope, opts.projectId),
+      opts.ttlByType,
+      opts.nowMs,
+    );
+  }
+
+  private runCountNeedsReview(
+    scopeFilter: SQL | undefined,
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>,
+    nowMs: number,
+  ): number {
     const row = this.db
       .select({ value: count() })
       .from(memory)
       .where(
-        and(
-          eq(memory.status, 'active'),
-          scopeFilter,
-          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}) OR ${refutedExpr})`,
-        ),
+        and(eq(memory.status, 'active'), scopeFilter, this.needsReviewPredicate(ttlByType, nowMs)),
       )
       .get();
     return row?.value ?? 0;
@@ -694,15 +683,20 @@ export class MemoryRepository {
       sql` `,
     );
     const ttlExpr = sql`CASE ${ttlCase} ELSE NULL END`;
-    // Affirmation baseline only — a refutation must not extend it (that
-    // would let "this was wrong" simultaneously read as "this was reaffirmed").
     const baselineExpr = sql`MAX(${memory.createdAt}, COALESCE((SELECT MAX(${confirmations.eventTs}) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'affirm'), ${memory.createdAt}))`;
-    // A refutation more recent than the affirmation baseline forces
-    // needs_review immediately regardless of type or TTL — mirrors
-    // `services/review.ts`'s `deriveReviewState` for a single loaded row,
-    // so a `reference` memory (no TTL) still surfaces here once refuted.
+    // Mirrors `deriveReviewState`: a refutation newer than the baseline forces
+    // needs_review regardless of TTL, so a `reference` still surfaces.
     const refutedExpr = sql`EXISTS (SELECT 1 FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'refute' AND ${confirmations.eventTs} > (${baselineExpr}))`;
     return { ttlExpr, baselineExpr, refutedExpr };
+  }
+
+  /** Composed so the three needs-review call sites cannot drift apart. */
+  private needsReviewPredicate(
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>,
+    nowMs: number,
+  ): SQL {
+    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(ttlByType);
+    return sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${nowMs}) OR ${refutedExpr})`;
   }
 
   private runNeedsReview(
@@ -712,22 +706,28 @@ export class MemoryRepository {
     limit: number,
     offset: number,
   ): Memory[] {
-    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(ttlByType);
+    const { baselineExpr, refutedExpr } = this.needsReviewExprs(ttlByType);
 
-    return this.db
-      .select()
-      .from(memory)
-      .where(
-        and(
-          eq(memory.status, 'active'),
-          scopeFilter,
-          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${nowMs}) OR ${refutedExpr})`,
-        ),
-      )
-      .orderBy(sql`${baselineExpr} ASC`)
-      .limit(limit)
-      .offset(offset)
-      .all();
+    return (
+      this.db
+        .select()
+        .from(memory)
+        .where(
+          and(
+            eq(memory.status, 'active'),
+            scopeFilter,
+            this.needsReviewPredicate(ttlByType, nowMs),
+          ),
+        )
+        // Refuted rows first: refutation deliberately does not advance the
+        // baseline, so ordering by it alone sorts a freshly-refuted memory LAST
+        // and a capped page (memory.context takes 3) never shows the agent back
+        // the memory it just called wrong.
+        .orderBy(sql`${refutedExpr} DESC`, sql`${baselineExpr} ASC`)
+        .limit(limit)
+        .offset(offset)
+        .all()
+    );
   }
 
   markArchived(id: string, lastSeenAt: Date): void {
@@ -886,19 +886,7 @@ export class MemoryRepository {
     } else if (opts.project?.kind === 'project') {
       scopeFilter = scopeCondition('project', opts.project.projectId);
     }
-    const { ttlExpr, baselineExpr, refutedExpr } = this.needsReviewExprs(opts.ttlByType);
-    const row = this.db
-      .select({ value: count() })
-      .from(memory)
-      .where(
-        and(
-          eq(memory.status, 'active'),
-          scopeFilter,
-          sql`((${ttlExpr} IS NOT NULL AND ${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}) OR ${refutedExpr})`,
-        ),
-      )
-      .get();
-    return row?.value ?? 0;
+    return this.runCountNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs);
   }
 
   adminGetByIds(ids: readonly string[]): Memory[] {

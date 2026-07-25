@@ -396,7 +396,7 @@ export class RelationsRepository {
       .all();
   }
 
-  /** Scoped total pending-judgment count (separate-access-from-usefulness queue-depth signal). */
+  /** Scoped total pending-judgment count. */
   countPendingInScope(opts: { scope: MemoryScope; projectId: string | null }): number {
     const row = this.db
       .select({ value: count() })
