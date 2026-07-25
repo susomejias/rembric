@@ -10,6 +10,7 @@ export interface VecNeighbor {
   distance: number;
   title: string;
   content: string;
+  topicKey: string | null;
 }
 
 export interface KnnOpts {
@@ -81,7 +82,8 @@ export class VectorsRepository {
         SELECT m.id AS id,
                vec_distance_cosine(${embedding}, v.embedding) AS distance,
                m.title AS title,
-               m.content AS content
+               m.content AS content,
+               m.topic_key AS topicKey
         FROM json_each(${JSON.stringify(ids)}) je
           JOIN memory_vec v ON v.memory_id = je.value
           JOIN memory m ON m.id = je.value
@@ -174,30 +176,5 @@ export class VectorsRepository {
 
   deleteAll(): void {
     this.db.run(sql`DELETE FROM memory_vec`);
-  }
-
-  /**
-   * Nearest-neighbor cosine similarity sample for calibration telemetry.
-   * Scoped to `active` memories so the VEC_THRESHOLD reference is not skewed
-   * by retained superseded/archived (or post-model-change stale-space) vectors.
-   * The anchor side is bounded to the newest `sample` active vectors up front
-   * (LIMIT alone bounds output rows, not the pairwise join work).
-   */
-  similaritySample(sample: number): { memoryId: string; sim: number }[] {
-    return this.db.all<{ memoryId: string; sim: number }>(sql`
-      SELECT v_self.memory_id AS memoryId,
-             1 - MIN(vec_distance_cosine(v_self.embedding, v_other.embedding)) AS sim
-      FROM memory_vec v_self
-        JOIN memory m_self ON m_self.id = v_self.memory_id AND m_self.status = 'active'
-        JOIN memory_vec v_other ON v_other.memory_id != v_self.memory_id
-        JOIN memory m_other ON m_other.id = v_other.memory_id AND m_other.status = 'active'
-      WHERE v_self.memory_id IN (
-        SELECT memory_id FROM memory_vec WHERE status = 'active'
-        ORDER BY memory_id DESC LIMIT ${sample}
-      )
-      GROUP BY v_self.memory_id
-      ORDER BY v_self.memory_id DESC
-      LIMIT ${sample}
-    `);
   }
 }

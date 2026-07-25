@@ -96,6 +96,56 @@ describe('memory.save', () => {
     const refetched = memory.unsafeGetById(m.id);
     expect(refetched?.title).toBe('Use pnpm workspaces');
   });
+
+  // fix-audited-defects: SQLite's length() (and the CHECK built on it) stops
+  // at the first NUL, so a value whose JS .length satisfies a bound can still
+  // trip the DB constraint and surface as an opaque internal_error with the
+  // row never written. These must be rejected before the DB sees them.
+  it('rejects a title containing a NUL byte with invalid_input, never writing a row', () => {
+    try {
+      memory.save({ type: 'user', title: '\0abc', content: 'has content' }, SCOPE_GLOBAL);
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
+
+  it('rejects content containing an embedded NUL byte with invalid_input', () => {
+    try {
+      memory.save({ type: 'user', title: 'ok title', content: 'ab\0c' }, SCOPE_GLOBAL);
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
+
+  it('rejects a tag containing a NUL byte with invalid_input', () => {
+    try {
+      memory.save(
+        { type: 'user', title: 'ok title', content: 'ok content', tags: ['fine', 'ba\0d'] },
+        SCOPE_GLOBAL,
+      );
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
+
+  it('rejects a topic_key containing a NUL byte with invalid_input', () => {
+    try {
+      memory.saveWithTopicKey(
+        { type: 'user', title: 'ok title', content: 'ok content', topicKey: 'topic\0key' },
+        SCOPE_GLOBAL,
+      );
+      expect.unreachable('save should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainError);
+      expect((err as DomainError).code).toBe('invalid_input');
+    }
+  });
 });
 
 describe('memory.search', () => {
@@ -639,5 +689,17 @@ describe('deriveTitle', () => {
     // the title never contains an embedded newline.
     expect(deriveTitle('### \nreal second line')).toBe('### real second line');
     expect(deriveTitle('   \nReal title')).toBe('Real title');
+  });
+
+  it('does not split a surrogate pair at the 100-char truncation boundary', () => {
+    // 99 ASCII chars + one astral emoji (2 UTF-16 units) = 101 units; a raw
+    // slice(0,100) would cut the emoji in half, leaving a lone high surrogate
+    // that decodes to U+FFFD when read back.
+    const content = 'x'.repeat(99) + '😀' + 'trailing text';
+    const title = deriveTitle(content);
+    expect(title.length).toBeLessThanOrEqual(100);
+    const lastCode = title.charCodeAt(title.length - 1);
+    const isLoneHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
+    expect(isLoneHighSurrogate).toBe(false);
   });
 });

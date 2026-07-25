@@ -29,6 +29,8 @@ export interface HybridSearchOpts {
   status: MemoryStatus;
   type?: MemoryType;
   tag?: string;
+  /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
+  topicKey?: string;
   limit: number;
   offset: number;
   /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
@@ -108,6 +110,7 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
       status: opts.status,
       type: opts.type,
       tag: opts.tag,
+      topicKey: opts.topicKey,
       limit: rankWindowSize,
       includeGlobal: opts.includeGlobal,
     });
@@ -156,6 +159,10 @@ async function denseRetriever(opts: HybridSearchOpts, rankWindowSize: number): P
     if (opts.tag && ids.length > 0) {
       const tagged = opts.repos.memory.idsWithTag(ids, opts.tag);
       ids = ids.filter((id) => tagged.has(id));
+    }
+    if (opts.topicKey && ids.length > 0) {
+      const matching = opts.repos.memory.idsWithTopicKey(ids, opts.topicKey);
+      ids = ids.filter((id) => matching.has(id));
     }
     return ids;
   } catch {

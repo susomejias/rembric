@@ -894,3 +894,94 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     expect(persisted?.sessionId).toBe('sess-router-explicit');
   });
 });
+
+describe('memory.confirm — session attachment (fix-audited-defects)', () => {
+  let agentSessions: AgentSessionsService;
+  let confirmHandlers: ReturnType<typeof buildMemoryHandlers>;
+  let realTokenId: string;
+  let ctxWithRealToken: (project: Project | null) => RequestContext;
+  let confirmationSessionIdFor: (memoryId: string) => string | null;
+
+  beforeEach(async () => {
+    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { TokensService } = await import('../services/tokens.js');
+    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { confirmations } = await import('../db/schema/confirmations.js');
+    const { eq } = await import('drizzle-orm');
+
+    agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+    const tokens = new TokensService(createRepositories(db.handle.db));
+    tokens.bootstrapAdmin('confirm-attachment-test-token-with-enough-entropy');
+    const admin = db.handle.db
+      .select()
+      .from(tokensSchema)
+      .where(eq(tokensSchema.name, 'admin'))
+      .get();
+    realTokenId = admin!.id;
+    ctxWithRealToken = (project) => ({
+      ...fakeContext(project),
+      token: { ...fakeContext(project).token, id: realTokenId },
+    });
+    confirmHandlers = buildMemoryHandlers({ memory, projects, agentSessions });
+
+    confirmationSessionIdFor = (memoryId: string) => {
+      const row = db.handle.db
+        .select({ sessionId: confirmations.sessionId })
+        .from(confirmations)
+        .where(eq(confirmations.memoryId, memoryId))
+        .get();
+      return row?.sessionId ?? null;
+    };
+  });
+
+  it('an explicit sessionId is attached to the confirmation event', async () => {
+    agentSessions.ensure({
+      id: 'sess-confirm-explicit',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'plugin-hook',
+    });
+    const m = memory.save(
+      { type: 'user', title: 'confirm session attach', content: 'confirm session attach' },
+      projectScope(projectA.id),
+    );
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      confirmHandlers.confirm({ id: m.id, sessionId: 'sess-confirm-explicit' }),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(confirmationSessionIdFor(m.id)).toBe('sess-confirm-explicit');
+  });
+
+  it('falls back to the unambiguous active session when no explicit sessionId is passed', async () => {
+    agentSessions.ensure({
+      id: 'sess-confirm-fallback',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'plugin-hook',
+    });
+    const m = memory.save(
+      { type: 'user', title: 'confirm session fallback', content: 'confirm session fallback' },
+      projectScope(projectA.id),
+    );
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      confirmHandlers.confirm({ id: m.id }),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(confirmationSessionIdFor(m.id)).toBe('sess-confirm-fallback');
+  });
+
+  it('records session_id=null when no session resolves', async () => {
+    const m = memory.save(
+      { type: 'user', title: 'confirm no session', content: 'confirm no session' },
+      projectScope(projectA.id),
+    );
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      confirmHandlers.confirm({ id: m.id }),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(confirmationSessionIdFor(m.id)).toBeNull();
+  });
+});

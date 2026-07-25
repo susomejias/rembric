@@ -140,23 +140,6 @@ describe('VectorsRepository', () => {
     });
   });
 
-  describe('similaritySample', () => {
-    it('bounds the anchor set to exactly the newest `sample` active ids', () => {
-      insertWithEmbedding('V1', unit(1, 0));
-      insertWithEmbedding('V2', unit(1, 0.2));
-      insertWithEmbedding('V3', unit(1, 0.5));
-      insertWithEmbedding('V4', unit(0, 1));
-      insertWithEmbedding('V5', unit(0, 1));
-      insertWithEmbedding('V9', unit(1, 0.1), { status: 'superseded' });
-
-      const out = repo.similaritySample(3);
-      expect(out.map((r) => r.memoryId)).toEqual(['V5', 'V4', 'V3']);
-      // V4 and V5 are identical vectors: nearest-neighbor similarity 1.
-      expect(out[0]!.sim).toBeCloseTo(1, 5);
-      expect(out[1]!.sim).toBeCloseTo(1, 5);
-    });
-  });
-
   describe('insertEmbedding status/type derivation (#257)', () => {
     it('derives status from the live memory row, not whatever was true earlier', () => {
       // Insert as 'active', then flip status BEFORE insertEmbedding runs —

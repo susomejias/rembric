@@ -78,6 +78,14 @@ export const memorySearchSchema = {
   query: z.string().optional(),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
+  topic_key: z
+    .string()
+    .min(1)
+    .max(128)
+    .optional()
+    .describe(
+      'Return only memories carrying this exact topic_key (any status). Use to check whether a topic already converged before saving a synonym key — pair with memory.suggest_topic_key.',
+    ),
   status: z.enum(MEMORY_STATUSES).optional(),
   include_global: z
     .boolean()
@@ -154,6 +162,13 @@ export const memoryConfirmSchema = {
     .describe(
       'Batch re-affirm several memories in one call (e.g. all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
     ),
+  sessionId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.',
+    ),
 };
 
 export const memoryArchiveSchema = {
@@ -185,13 +200,14 @@ const relationView = z.object({
   confidence: z.number().nullable().optional(),
 });
 
-const candidate = z.object({
+export const candidate = z.object({
   judgmentId: z.string(),
   targetId: z.string(),
   title: z.string(),
   snippet: z.string(),
   similarity: z.number(),
   source: z.string(),
+  topicKey: z.string().nullable(),
 });
 
 const memoryRow = z.object({
@@ -207,6 +223,7 @@ const memoryRow = z.object({
   status: z.string().optional(),
   createdAt: z.string().optional(),
   lastSeenAt: z.string().nullable().optional(),
+  topicKey: z.string().nullable().optional(),
   relations: z.array(relationView).optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
@@ -256,22 +273,30 @@ export const memoryGetOutput = {
       status: z.string(),
       replaces: z.array(z.string()),
       createdAt: z.string(),
+      topicKey: z.string().nullable(),
     })
     .optional(),
   head: z
     .object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() })
     .optional(),
+  // Bounded to the nearest predecessors (see PREDECESSOR_CAP); content is
+  // intentionally omitted — titles are immutable-by-construction labels for
+  // the omitted content. `truncated` is true when the reachable `replaces`
+  // graph holds more predecessors than were returned.
   predecessors: z
     .array(
       z.object({
         id: z.string(),
         title: z.string(),
-        content: z.string(),
         status: z.string(),
         createdAt: z.string(),
       }),
     )
     .optional(),
+  predecessorCount: z.number().optional(),
+  truncated: z.boolean().optional(),
+  /** True when head resolution stopped at its hop cap without reaching an active row. */
+  headTruncated: z.boolean().optional(),
   confirmationCount: z.number().optional(),
   relations: z.array(relationView).optional(),
   reviewState: z.string().optional(),
@@ -284,6 +309,8 @@ export const memoryGetOutput = {
 export const memoryConfirmOutput = {
   ok: z.literal(true),
   confirmed: z.number().optional(),
+  /** True when resolving the supersedes-chain head stopped at its hop cap. */
+  headTruncated: z.boolean().optional(),
 };
 
 export const memoryArchiveOutput = {
@@ -321,6 +348,7 @@ export const contextOutput = {
       snippet: z.string(),
       status: z.string(),
       createdAt: z.string(),
+      topicKey: z.string().nullable(),
     }),
   ),
   pendingJudgments: z.array(
@@ -418,13 +446,16 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
  *   0. An explicit `sessionId` passed by the caller.
  *   1. The `SessionRouter` entry for `(tokenId, mcpSessionId)` — set by
  *      an explicit `memory.session_start` call over MCP.
- *   2. The most recently-started `status='active'` row for `(tokenId,
- *      projectId)` — captures sessions created out-of-band by the plugin's
- *      HTTP hooks (`POST /api/<slug>/sessions`).
+ *   2. The UNAMBIGUOUS `status='active'` row for `(tokenId, projectId)` —
+ *      captures sessions created out-of-band by the plugin's HTTP hooks
+ *      (`POST /api/<slug>/sessions`); returns nothing (never guesses by
+ *      recency) when more than one is live — see
+ *      `AgentSessionsService.findActiveForTransport`.
  *
  * Returns null when no active session can be resolved (the memory is
  * saved with `session_id = NULL`, the back-compat path for clients that
- * neither run the plugin nor call `memory.session_start`).
+ * neither run the plugin nor call `memory.session_start`). Whenever a
+ * session id resolves, its activity clock is bumped.
  */
 function resolveActiveSessionId(
   deps: MemoryToolDeps,
@@ -432,22 +463,134 @@ function resolveActiveSessionId(
   explicit?: string,
 ): string | null {
   if (explicit) {
-    if (deps.agentSessions) assertExplicitSessionOwned(deps.agentSessions, explicit, projectId);
+    if (deps.agentSessions) {
+      assertExplicitSessionOwned(deps.agentSessions, explicit, projectId);
+      deps.agentSessions.touchActivity(explicit);
+    }
     return explicit;
   }
   const ctx = getRequestContext();
   if (ctx.mcpSessionId && deps.router) {
     const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
-    if (entry?.rembricSessionId) return entry.rembricSessionId;
+    if (entry?.rembricSessionId) {
+      deps.agentSessions?.touchActivity(entry.rembricSessionId);
+      return entry.rembricSessionId;
+    }
   }
   if (deps.agentSessions) {
     const row = deps.agentSessions.findActiveForTransport({
       tokenId: ctx.token.id,
       projectId,
     });
-    if (row) return row.id;
+    if (row) {
+      deps.agentSessions.touchActivity(row.id);
+      return row.id;
+    }
   }
   return null;
+}
+
+export interface SaveTimeCandidateView {
+  judgmentId: string;
+  targetId: string;
+  title: string;
+  snippet: string;
+  similarity: number;
+  source: 'vec' | 'fts';
+  topicKey: string | null;
+}
+
+export interface SaveWithCandidatesDeps {
+  memory: MemoryService;
+  relations?: RelationsService;
+  candidates?: CandidateOptions;
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors'>;
+  embedNow?: (
+    memoryId: string,
+    title: string,
+    content: string,
+    scope: MemoryScope,
+    projectId: string | null,
+  ) => Promise<boolean>;
+}
+
+/**
+ * The one save-time curation path: topic_key upsert bookkeeping, inline
+ * embedding, and candidate detection + pending-relation creation. Shared by
+ * `memory.save` and `memory.capture_passive` so bulk-captured rows go
+ * through the identical pipeline instead of a bare insert — see
+ * `openspec/changes/fix-audited-defects`.
+ */
+export async function saveMemoryWithCandidates(
+  deps: SaveWithCandidatesDeps,
+  input: SaveMemoryInput,
+  scope: Scope,
+  tokenName: string,
+): Promise<{
+  memory: Awaited<ReturnType<MemoryService['save']>>;
+  supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
+  candidates: SaveTimeCandidateView[];
+}> {
+  const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
+
+  // If the topic_key upsert path fired, record the auto-judged
+  // 'supersedes' relation so the search annotations and the dashboard
+  // can show provenance.
+  if (supersededByTopicKey && deps.relations) {
+    try {
+      deps.relations.compare({
+        sourceId: m.id,
+        targetId: supersededByTopicKey.id,
+        relation: 'supersedes',
+        reason: `topic_key='${input.topicKey}' upsert`,
+        confidence: 1.0,
+        actor: tokenName,
+        kind: 'agent_topic_key',
+      });
+    } catch {
+      // Topic-key relation logging is best-effort. The supersede side
+      // effect on the memory row already happened atomically in
+      // saveWithTopicKey; failing to record the audit row should not
+      // fail the save itself.
+    }
+  }
+
+  // Save-time candidate detection: surface up to N similar active
+  // memories so the agent can judge them while the context is fresh.
+  let candidates: SaveTimeCandidateView[] = [];
+  if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
+    try {
+      // Give the new row its vector before detection runs, so the vec
+      // pass has a self-vector to kNN from (model is warm by boot
+      // contract; on failure detection degrades to FTS5 for this save).
+      if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
+      const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
+      for (const c of detected) {
+        // Skip the topic_key supersede target — we already wrote that relation.
+        if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;
+        const row = deps.relations.createPending({
+          sourceId: m.id,
+          targetId: c.targetId,
+        });
+        candidates.push({
+          judgmentId: row.judgmentId,
+          targetId: c.targetId,
+          title: c.title,
+          snippet: c.snippet,
+          similarity: c.similarity,
+          source: c.source,
+          topicKey: c.topicKey,
+        });
+      }
+    } catch {
+      // Candidate detection is best-effort. A failure here (e.g. the
+      // FTS5 query rejects an unusual token) must not prevent the
+      // save from returning a usable response.
+      candidates = [];
+    }
+  }
+
+  return { memory: m, supersededByTopicKey, candidates };
 }
 
 async function handleSave(
@@ -549,70 +692,12 @@ async function handleSave(
     // read paths (search/get) keep returning an archived project's memories.
     if (activeProject) deps.projects?.assertWritable(activeProject.id);
 
-    const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
-
-    // If the topic_key upsert path fired, record the auto-judged
-    // 'supersedes' relation so the search annotations and the dashboard
-    // can show provenance.
-    if (supersededByTopicKey && deps.relations) {
-      try {
-        deps.relations.compare({
-          sourceId: m.id,
-          targetId: supersededByTopicKey.id,
-          relation: 'supersedes',
-          reason: `topic_key='${args.topic_key}' upsert`,
-          confidence: 1.0,
-          actor: ctx.token.name,
-          kind: 'agent_topic_key',
-        });
-      } catch {
-        // Topic-key relation logging is best-effort. The supersede side
-        // effect on the memory row already happened atomically in
-        // saveWithTopicKey; failing to record the audit row should not
-        // fail the save itself.
-      }
-    }
-
-    // Save-time candidate detection: surface up to N similar active
-    // memories so the agent can judge them while the context is fresh.
-    let candidates: {
-      judgmentId: string;
-      targetId: string;
-      title: string;
-      snippet: string;
-      similarity: number;
-      source: 'vec' | 'fts';
-    }[] = [];
-    if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
-      try {
-        // Give the new row its vector before detection runs, so the vec
-        // pass has a self-vector to kNN from (model is warm by boot
-        // contract; on failure detection degrades to FTS5 for this save).
-        if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
-        const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates);
-        for (const c of detected) {
-          // Skip the topic_key supersede target — we already wrote that relation.
-          if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;
-          const row = deps.relations.createPending({
-            sourceId: m.id,
-            targetId: c.targetId,
-          });
-          candidates.push({
-            judgmentId: row.judgmentId,
-            targetId: c.targetId,
-            title: c.title,
-            snippet: c.snippet,
-            similarity: c.similarity,
-            source: c.source,
-          });
-        }
-      } catch {
-        // Candidate detection is best-effort. A failure here (e.g. the
-        // FTS5 query rejects an unusual token) must not prevent the
-        // save from returning a usable response.
-        candidates = [];
-      }
-    }
+    const { memory: m, candidates } = await saveMemoryWithCandidates(
+      deps,
+      input,
+      scope,
+      ctx.token.name,
+    );
 
     return ok({
       id: m.id,
@@ -635,6 +720,7 @@ async function handleSearch(
     query?: string;
     type?: (typeof MEMORY_TYPES)[number];
     tag?: string;
+    topic_key?: string;
     status?: (typeof MEMORY_STATUSES)[number];
     include_global?: boolean;
     include_relations?: boolean;
@@ -655,6 +741,7 @@ async function handleSearch(
     query: args.query,
     type: args.type,
     tag: args.tag,
+    topicKey: args.topic_key,
     status: args.status,
     limit: args.limit,
     offset: args.offset,
@@ -691,6 +778,7 @@ async function handleSearch(
       status: m.status,
       createdAt: m.createdAt,
       lastSeenAt: m.lastSeenAt,
+      topicKey: m.topicKey,
     });
 
     // One-hop expansion is a capped, un-ranked appendix — never blended into `memories` nor counted against `limit`.
@@ -779,6 +867,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
           status: m.status,
           createdAt: m.createdAt,
           lastSeenAt: m.lastSeenAt,
+          topicKey: m.topicKey,
           relations: relations?.get(m.id) ?? [],
         })),
         notFound: args.ids.filter((id) => !found.has(id)),
@@ -804,6 +893,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
         status: result.memory.status,
         replaces: result.memory.replaces,
         createdAt: result.memory.createdAt,
+        topicKey: result.memory.topicKey,
       },
       head: {
         id: result.head.id,
@@ -814,10 +904,12 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
       predecessors: result.predecessors.map((p) => ({
         id: p.id,
         title: p.title,
-        content: p.content,
         status: p.status,
         createdAt: p.createdAt,
       })),
+      predecessorCount: result.predecessorCount,
+      truncated: result.truncated,
+      headTruncated: result.headTruncated,
       confirmationCount: result.confirmationCount,
       relations: deps.relations ? deps.relations.listForMemory(result.memory.id, 50) : [],
       ...(result.reviewState !== null
@@ -829,7 +921,10 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
   }
 }
 
-async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
+async function handleConfirm(
+  deps: MemoryToolDeps,
+  args: { id?: string; ids?: string[]; sessionId?: string },
+) {
   const ctx = getRequestContext();
   const { scope } = await resolveEffectiveScope(deps);
 
@@ -841,15 +936,36 @@ async function handleConfirm(deps: MemoryToolDeps, args: { id?: string; ids?: st
 
   try {
     assertAuthorized('write', scope);
+    // An explicit sessionId wins; otherwise fall back to the unambiguous
+    // active session for (token, project) — either way
+    // confirmations.session_id stops being permanently NULL. See
+    // openspec/changes/fix-audited-defects.
+    const confirmProjectId = scope.kind === 'project' ? scope.projectId : null;
+    let sessionId: string | undefined;
+    try {
+      sessionId = resolveActiveSessionId(deps, confirmProjectId, args.sessionId) ?? undefined;
+    } catch (err) {
+      return errToMcp(err);
+    }
     if (args.ids !== undefined) {
-      const { confirmed } = deps.memory.confirmMany(args.ids, scope, { tokenName: ctx.token.name });
-      return ok({ ok: true, confirmed });
+      const { confirmed, headTruncated } = deps.memory.confirmMany(
+        args.ids,
+        scope,
+        { tokenName: ctx.token.name },
+        sessionId,
+      );
+      return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
     }
     if (args.id === undefined) {
       return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
     }
-    deps.memory.confirm(args.id, scope, { tokenName: ctx.token.name });
-    return ok({ ok: true });
+    const { headTruncated } = deps.memory.confirm(
+      args.id,
+      scope,
+      { tokenName: ctx.token.name },
+      sessionId,
+    );
+    return ok({ ok: true, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
     if (err instanceof DomainError && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
@@ -931,6 +1047,7 @@ async function handleContext(
       snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
       status: m.status,
       createdAt: m.createdAt.toISOString(),
+      topicKey: m.topicKey,
     }));
 
   const promptsLimit = clamp(args.prompts ?? 5, 0, 50);

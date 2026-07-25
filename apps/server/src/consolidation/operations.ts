@@ -23,12 +23,25 @@ export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'con
 // Op types whose undo reactivates the affected memory rows (archived/superseded
 // → active). `merge` additionally re-archives its created row; the others are
 // plain reactivations. Kept in one place so `undoOp`'s guard and reactivate
-// branches can't drift.
-const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
+// branches can't drift. Exported so the exhaustiveness invariant test can
+// assert every CONSOLIDATION_OP_TYPES member lands in exactly one category.
+export const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
   'merge',
   'supersede',
   'decay',
   'agent_memory_archive',
+]);
+
+// Op types whose effect physically removed rows, so undo cannot reconstruct
+// them — undo throws NotUndoableError rather than silently marking the op
+// reverted while the rows stay gone. Exported so every consumer (undoOp's
+// guard, the dashboard's undo-button gate) reads from this single set instead
+// of repeating the literal comparison — see the invariant test asserting
+// every CONSOLIDATION_OP_TYPES member falls into exactly one category.
+export const TERMINAL_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
+  'session_purge',
+  'archived_memory_purge',
+  'prompt_purge',
 ]);
 
 export interface SkippedRow {
@@ -160,7 +173,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
   if (!op) throw new Error(`undoOp: ${opId} not found`);
   if (op.revertedAt) throw new Error(`undoOp: ${opId} already reverted`);
 
-  if (op.opType === 'session_purge' || op.opType === 'archived_memory_purge') {
+  if (TERMINAL_OP_TYPES.has(op.opType)) {
     throw new NotUndoableError(
       `undoOp: ${op.opType} ops are terminal — purged rows cannot be reconstructed`,
     );
@@ -193,6 +206,14 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
         }
       }
       repos.memory.reactivate(reactivatable);
+      // An operator reviving a memory IS an access event: without this
+      // stamp, decay's own predicate (status='active' AND last_seen_at <
+      // now - threshold) still holds on the just-restored rows, so the very
+      // next sweep re-archives them and undo silently reverts itself. This
+      // deliberately does NOT record a confirmation — that would advance
+      // the orthogonal review-affirmation baseline, which reactivation must
+      // not touch. See openspec/changes/fix-audited-defects.
+      if (reactivatable.length > 0) repos.memory.touchLastSeenBatch(reactivatable, now);
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
       }

@@ -59,6 +59,17 @@ export const agentSessions = sqliteTable(
     startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
     endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
     /**
+     * Last time this session produced a lifecycle write or an attached
+     * memory write — NOT bumped by reads. Backfilled from `started_at` at
+     * migration. Distinct from `started_at`: a session can run for hours,
+     * and a session killed without SessionEnd stops advancing this while
+     * `started_at` recedes into the past — that gap is what lets
+     * findActiveForTransport and the periodic retirement pass tell a
+     * zombie active row from a genuinely live one. See
+     * openspec/changes/fix-audited-defects.
+     */
+    lastActivityAt: integer('last_activity_at', { mode: 'timestamp_ms' }),
+    /**
      * Structured summary populated by memory.session_summary (final:true)
      * or by hook fallbacks (final:false). Mutable subject to the
      * `summary_final` precedence flag. Bounded to `SUMMARY_MAX_CHARS`

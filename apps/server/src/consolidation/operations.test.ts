@@ -2,16 +2,23 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
+import {
+  CONSOLIDATION_OP_TYPES,
+  consolidationOps,
+  consolidationRuns,
+} from '../db/schema/consolidation.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { projectScope } from '../services/scope.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
+import { DEFAULT_DECAY, findDecayCandidates } from './decay.js';
 import {
   applyDecay,
   NotUndoableError,
   PurgedRowMissingError,
+  REACTIVATE_UNDO_OP_TYPES,
+  TERMINAL_OP_TYPES,
   undoOp,
   undoRun,
 } from './operations.js';
@@ -347,5 +354,101 @@ describe('undoOp with purged rows', () => {
       .run();
 
     expect(() => undoOp(repos, db.handle.db, 'purge-op-2')).toThrow(NotUndoableError);
+  });
+
+  it('rejects undo of a prompt_purge op as NotUndoableError (fix-audited-defects)', () => {
+    db.handle.db
+      .insert(consolidationOps)
+      .values({
+        id: 'purge-op-3',
+        runId,
+        opType: 'prompt_purge',
+        affectedIds: ['some-prompt'],
+        createdId: null,
+        reasoning: 'test',
+        appliedAt: clock.value,
+      })
+      .run();
+
+    let thrown: unknown;
+    try {
+      undoOp(repos, db.handle.db, 'purge-op-3');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(NotUndoableError);
+    // The op must NOT be silently marked reverted while its rows stay gone.
+    const op = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.id, 'purge-op-3'))
+      .get();
+    expect(op?.revertedAt).toBeNull();
+  });
+});
+
+describe('op-type classification is exhaustive (fix-audited-defects)', () => {
+  it('every CONSOLIDATION_OP_TYPES member falls into exactly one category', () => {
+    const ORPHAN_PROMOTE = new Set(['orphan_promote']);
+    const INERT = new Set(['noop', 'failed']);
+    for (const t of CONSOLIDATION_OP_TYPES) {
+      const memberships = [
+        REACTIVATE_UNDO_OP_TYPES.has(t),
+        TERMINAL_OP_TYPES.has(t),
+        ORPHAN_PROMOTE.has(t),
+        INERT.has(t),
+      ].filter(Boolean).length;
+      expect(memberships, `op type '${t}' must classify into exactly one category`).toBe(1);
+    }
+  });
+});
+
+describe('reactivation durability (fix-audited-defects)', () => {
+  it('stamps last_seen_at on reactivate so the next sweep does not re-archive the row', () => {
+    // Save the memory with a last_seen_at far past its type's decay window
+    // (user = 730 days) so the ORIGINAL timestamp alone would make it
+    // decay-eligible again after undo — that is exactly the bug: reactivate()
+    // used to leave last_seen_at untouched.
+    clock.set(new Date('2020-01-01T00:00:00Z'));
+    const m = memoryService.save(
+      { type: 'user', title: 'm', content: 'm' },
+      projectScope(projectId),
+    );
+
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: [m.id],
+      reasoning: 'stale',
+    });
+    expect(memoryService.unsafeGetById(m.id)!.status).toBe('archived');
+
+    undoOp(repos, db.handle.db, opId);
+    expect(memoryService.unsafeGetById(m.id)!.status).toBe('active');
+
+    const candidates = findDecayCandidates(
+      repos,
+      { scope: 'project', projectId },
+      DEFAULT_DECAY,
+      new Date(),
+    );
+    expect(candidates).not.toContain(m.id);
+  });
+
+  it('does not record a confirmation, so the review baseline is unchanged', () => {
+    clock.set(new Date('2020-01-01T00:00:00Z'));
+    const m = memoryService.save(
+      { type: 'user', title: 'm', content: 'm' },
+      projectScope(projectId),
+    );
+    const beforeConfirmations = repos.memory.countConfirmations(m.id);
+
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: [m.id],
+      reasoning: 'stale',
+    });
+    undoOp(repos, db.handle.db, opId);
+
+    expect(repos.memory.countConfirmations(m.id)).toBe(beforeConfirmations);
   });
 });

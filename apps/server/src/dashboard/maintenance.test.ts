@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { Hono, type Context, type Next } from 'hono';
@@ -128,6 +128,54 @@ describe('maintenance — on-demand backup', () => {
     expect(download.headers.get('content-disposition')).toContain('on-demand-');
     const buf = Buffer.from(await download.arrayBuffer());
     expect(buf.length).toBeGreaterThan(0);
+  });
+
+  it('GET /backup/download/:file downloads a specific on-demand snapshot by name (fix-audited-defects)', async () => {
+    const app = appWithSession(sessionFor('*'));
+    const html = await (await app.request('/')).text();
+    const csrf = extractCsrf(html, '/dashboard/maintenance/backup');
+    await app.request('/backup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ csrf }).toString(),
+    });
+
+    const backupsDir = join(t.dataDir, 'backups');
+    const [file] = readdirSync(backupsDir).filter((f) => f.startsWith('on-demand-'));
+    const download = await app.request(`/backup/download/${file}`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get('content-disposition')).toContain(file!);
+  });
+
+  it('lists and serves a pre-update snapshot, previously undownloadable (fix-audited-defects)', async () => {
+    const app = appWithSession(sessionFor('*'));
+    const backupsDir = join(t.dataDir, 'backups');
+    mkdirSync(backupsDir, { recursive: true });
+    const preUpdateFile = 'pre-update-v0.24.0-1700000000000.sqlite';
+    writeFileSync(join(backupsDir, preUpdateFile), 'not a real sqlite file, just bytes');
+
+    const listPage = await (await app.request('/')).text();
+    expect(listPage).toContain(`/dashboard/maintenance/backup/download/${preUpdateFile}`);
+    expect(listPage).toContain('pre-update');
+
+    const download = await app.request(`/backup/download/${preUpdateFile}`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get('content-disposition')).toContain(preUpdateFile);
+  });
+
+  it('rejects a filename outside the producer-generated shape (path traversal)', async () => {
+    const app = appWithSession(sessionFor('*'));
+    const download = await app.request(
+      `/backup/download/${encodeURIComponent('../../../../etc/passwd')}`,
+    );
+    expect(download.status).not.toBe(200);
+    expect(download.headers.get('content-disposition')).toBeNull();
+  });
+
+  it('rejects a filename that does not exist even if shaped correctly', async () => {
+    const app = appWithSession(sessionFor('*'));
+    const download = await app.request('/backup/download/on-demand-9999999999999.sqlite');
+    expect(download.status).not.toBe(200);
   });
 
   it('a non-admin (read:*) token cannot see or trigger a backup', async () => {

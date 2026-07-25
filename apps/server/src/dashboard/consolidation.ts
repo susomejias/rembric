@@ -1,7 +1,12 @@
 import { Hono, type Context } from 'hono';
 
 import type { ConsolidationRunSummary, SkippedRow } from '../consolidation/index.js';
-import { NotUndoableError, PurgedRowMissingError } from '../consolidation/operations.js';
+import {
+  NotUndoableError,
+  PurgedRowMissingError,
+  TERMINAL_OP_TYPES,
+  type ConsolidationOpType,
+} from '../consolidation/operations.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { SessionsService } from '../services/sessions.js';
 
@@ -202,7 +207,7 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
 
     const ops = deps.repos.consolidation.adminListOps(id);
 
-    const isPurgeOp = (t: string) => t === 'session_purge' || t === 'archived_memory_purge';
+    const isPurgeOp = (t: ConsolidationOpType) => TERMINAL_OP_TYPES.has(t);
 
     const opsHtml = ops.map((op) => {
       const isReverted = op.revertedAt !== null;

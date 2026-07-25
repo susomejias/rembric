@@ -48,6 +48,7 @@ export interface SaveCandidate {
   source: 'vec' | 'fts';
   title: string;
   snippet: string;
+  topicKey: string | null;
 }
 
 export function findSaveTimeCandidates(
@@ -82,6 +83,7 @@ export function findSaveTimeCandidates(
       source: 'vec' as const,
       title: r.title,
       snippet: snippet(r.content, 200),
+      topicKey: r.topicKey,
     }))
     .filter((c) => c.similarity >= VEC_THRESHOLD);
 
@@ -107,6 +109,7 @@ export function findSaveTimeCandidates(
           source: 'fts',
           title: r.title,
           snippet: snippet(r.content, 200),
+          topicKey: r.topicKey,
         });
       }
     }

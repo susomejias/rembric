@@ -9,6 +9,7 @@ import { type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type MemoryService } from '../services/memory.js';
 import type { PromptsService } from '../services/prompts.js';
+import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '../services/self-update/orchestrator.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
 
@@ -31,6 +32,10 @@ export interface MaintenanceDeps {
 
 const ON_DEMAND_BACKUP_PREFIX = 'on-demand-';
 const ON_DEMAND_BACKUP_KEEP = 3;
+/** Exact shape a downloadable backup filename must have — no path traversal. */
+const BACKUP_FILENAME_RE = new RegExp(
+  `^(?:${ON_DEMAND_BACKUP_PREFIX}|${PRE_UPDATE_BACKUP_PREFIX})[A-Za-z0-9._-]+\\.sqlite$`,
+);
 
 function backupsDir(dataDir: string): string {
   return join(dataDir, 'backups');
@@ -41,6 +46,10 @@ interface OnDemandBackup {
   path: string;
   createdAt: Date;
   sizeBytes: number;
+}
+
+interface AnyBackup extends OnDemandBackup {
+  kind: 'on-demand' | 'pre-update';
 }
 
 /** Backup filenames newest-first (the `on-demand-<ms>` name sorts chronologically). */
@@ -58,12 +67,37 @@ function listOnDemandBackupsDesc(dir: string): string[] {
 }
 
 function latestOnDemandBackup(dataDir: string): OnDemandBackup | null {
+  return listAllBackupsDesc(dataDir).find((b) => b.kind === 'on-demand') ?? null;
+}
+
+/**
+ * Every downloadable snapshot in `backups/` — on-demand AND pre-update —
+ * newest first. The mandatory pre-update snapshot the self-update flow
+ * takes before every upgrade was previously undownloadable (only the latest
+ * on-demand file had a download link).
+ */
+function listAllBackupsDesc(dataDir: string): AnyBackup[] {
   const dir = backupsDir(dataDir);
-  const file = listOnDemandBackupsDesc(dir).at(0);
-  if (!file) return null;
-  const path = join(dir, file);
-  const stat = statSync(path);
-  return { file, path, createdAt: stat.mtime, sizeBytes: stat.size };
+  let files: string[];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const rows = files
+    .filter((f) => BACKUP_FILENAME_RE.test(f))
+    .map((f): AnyBackup => {
+      const path = join(dir, f);
+      const stat = statSync(path);
+      return {
+        file: f,
+        path,
+        createdAt: stat.mtime,
+        sizeBytes: stat.size,
+        kind: f.startsWith(PRE_UPDATE_BACKUP_PREFIX) ? 'pre-update' : 'on-demand',
+      };
+    });
+  return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 /** Snapshot the live DB via `VACUUM INTO` and prune older on-demand backups. */
@@ -194,6 +228,7 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     const deletedPromptsCount = deps.prompts.countPurgeableDeleted();
     const breakdown = readBreakdown(deps.diagnostics);
     const latestBackup = latestOnDemandBackup(deps.dataDir);
+    const allBackups = listAllBackupsDesc(deps.dataDir);
 
     const flashBanner =
       purgedSessions !== null
@@ -401,9 +436,27 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
               ? html`<p class="small muted">
                   Last backup: ${formatTs(latestBackup.createdAt)} ·
                   ${formatBytes(latestBackup.sizeBytes)} ·
-                  <a href="/dashboard/maintenance/backup/download">Download</a>
+                  <a href="/dashboard/maintenance/backup/download">Download latest</a>
                 </p>`
               : html`<p class="small muted">No on-demand backup yet.</p>`}
+            ${allBackups.length > 0
+              ? html`
+                  <p class="small muted">
+                    Every snapshot in <code>backups/</code> is individually downloadable, including
+                    the pre-update snapshot the self-update flow takes before every upgrade:
+                  </p>
+                  <ul class="small">
+                    ${allBackups.map(
+                      (b) => html`
+                        <li>
+                          <a href="/dashboard/maintenance/backup/download/${b.file}">${b.kind}</a>
+                          · ${formatTs(b.createdAt)} · ${formatBytes(b.sizeBytes)}
+                        </li>
+                      `,
+                    )}
+                  </ul>
+                `
+              : raw('')}
           </div>
           <div class="actions">
             <form
@@ -544,15 +597,48 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
         activeNav: 'maintenance',
       });
     }
-    // Stream rather than readFileSync — the snapshot scales with the whole
-    // memory corpus, so a full read would spike memory on large installs.
-    const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream;
-    return c.body(body, 200, {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': String(backup.sizeBytes),
-      'Content-Disposition': `attachment; filename="${backup.file}"`,
-    });
+    return streamBackup(c, backup);
+  });
+
+  // Download any snapshot in backups/ by filename — including pre-update
+  // snapshots, previously undownloadable. `BACKUP_FILENAME_RE` is the only
+  // gate: it pins the exact producer-generated shape (no `/`, no `..`), so
+  // there is no path-traversal surface even though the filename comes from
+  // the URL.
+  app.get('/backup/download/:file', (c) => {
+    const guard = requireAdmin(c, deps);
+    if (guard.forbidden) return guard.forbidden;
+
+    const file = c.req.param('file');
+    if (!BACKUP_FILENAME_RE.test(file)) {
+      return flashErrorPage(c, deps.sessions, 'Not a valid backup filename.', {
+        title: 'Maintenance',
+        activeNav: 'maintenance',
+      });
+    }
+    const path = join(backupsDir(deps.dataDir), file);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(path);
+    } catch {
+      return flashErrorPage(c, deps.sessions, 'That backup no longer exists.', {
+        title: 'Maintenance',
+        activeNav: 'maintenance',
+      });
+    }
+    return streamBackup(c, { file, path, createdAt: stat.mtime, sizeBytes: stat.size });
   });
 
   return app;
+}
+
+function streamBackup(c: Context, backup: OnDemandBackup): Response {
+  // Stream rather than readFileSync — the snapshot scales with the whole
+  // memory corpus, so a full read would spike memory on large installs.
+  const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream;
+  return c.body(body, 200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': String(backup.sizeBytes),
+    'Content-Disposition': `attachment; filename="${backup.file}"`,
+  });
 }

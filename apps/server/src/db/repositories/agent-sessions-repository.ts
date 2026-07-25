@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -65,6 +65,12 @@ const listSelection = {
   tokenRevokedAt: tokens.revokedAt,
   projectSlug: projects.slug,
 };
+
+// Single source of truth for "when was this session last touched" — a
+// zombie active row (killed without SessionEnd) never advances
+// last_activity_at again, so falling back to started_at only matters for
+// rows from before this column existed.
+const EFFECTIVE_LAST_ACTIVITY = sql`COALESCE(${agentSessions.lastActivityAt}, ${agentSessions.startedAt})`;
 
 // "Session has something worth surfacing" — adding a new table that anchors
 // to a session id (e.g. a future `tool_calls`) MUST update only this helper.
@@ -133,13 +139,25 @@ export class AgentSessionsRepository {
    * is the whole point of this method's contract — see
    * `sessions/spec.md`'s "findActiveForTransport MUST NOT guess under
    * concurrent ambiguity".
+   *
+   * `activeSinceMs` additionally excludes rows whose last activity predates
+   * that instant — a session killed without SessionEnd (SIGKILL/OOM/closed
+   * terminal) never advances `last_activity_at` again, so it stops
+   * contributing false ambiguity once stale, WITHOUT introducing a
+   * recency tiebreak among genuinely concurrent live sessions (both must
+   * still be within the window to be considered "live" at all).
    */
-  findActiveForTransport(tokenId: string, projectId: string | null): AgentSession | undefined {
+  findActiveForTransport(
+    tokenId: string,
+    projectId: string | null,
+    activeSinceMs: number,
+  ): AgentSession | undefined {
     const conditions = [
       eq(agentSessions.tokenId, tokenId),
       eq(agentSessions.status, 'active'),
       isNull(agentSessions.deletedAt),
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
+      sql`${EFFECTIVE_LAST_ACTIVITY} >= ${activeSinceMs}`,
     ];
     const rows = this.db
       .select()
@@ -149,6 +167,11 @@ export class AgentSessionsRepository {
       .limit(2)
       .all();
     return rows.length === 1 ? rows[0] : undefined;
+  }
+
+  /** Bump `last_activity_at` — called by every write that resolves to this session. */
+  touchActivity(id: string, at: Date): void {
+    this.db.update(agentSessions).set({ lastActivityAt: at }).where(eq(agentSessions.id, id)).run();
   }
 
   recentForContext(projectId: string | null, limit: number): AgentSession[] {
@@ -182,23 +205,62 @@ export class AgentSessionsRepository {
     return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
   }
 
-  /** Bulk-abandon active rows started before `cutoff`. Returns rows changed. */
-  abandonActiveOlderThan(cutoff: Date, endedAt: Date): number {
+  /**
+   * Bulk-abandon active rows whose last activity predates `cutoff`. Keyed
+   * on `COALESCE(last_activity_at, started_at)` rather than `started_at`
+   * alone, so a session that is genuinely still being written to (long-
+   * running work, not a zombie) is never abandoned out from under it — only
+   * `fix-audited-defects: zombie sessions block auto-attach` changes it from
+   * a boot-only sweep to one also runnable on an interval.
+   */
+  abandonInactiveSince(cutoff: Date, endedAt: Date): number {
     const result = this.db
       .update(agentSessions)
       .set({ status: 'abandoned', endedAt })
-      .where(and(eq(agentSessions.status, 'active'), lt(agentSessions.startedAt, cutoff)))
+      .where(
+        and(
+          eq(agentSessions.status, 'active'),
+          sql`${EFFECTIVE_LAST_ACTIVITY} < ${cutoff.getTime()}`,
+        ),
+      )
       .run();
     return result.changes;
   }
 
-  countByStatus(): { status: AgentSessionStatus; count: number }[] {
+  private countByStatusWhere(
+    scopeCondition?: SQL,
+  ): { status: AgentSessionStatus; count: number }[] {
+    const where = scopeCondition
+      ? and(scopeCondition, isNull(agentSessions.deletedAt))
+      : isNull(agentSessions.deletedAt);
     return this.db
       .select({ status: agentSessions.status, count: count() })
       .from(agentSessions)
-      .where(isNull(agentSessions.deletedAt))
+      .where(where)
       .groupBy(agentSessions.status)
       .all();
+  }
+
+  /**
+   * Session counts scoped to `(projectId === null ? global : that project)`.
+   * The MCP-facing `memory.stats` handler MUST use this, not
+   * `adminCountByStatus` — see openspec/changes/fix-audited-defects
+   * ("memory.stats.sessionsByStatus bypasses scope enforcement").
+   */
+  countByStatusInScope(projectId: string | null): { status: AgentSessionStatus; count: number }[] {
+    const scopeCondition =
+      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId);
+    return this.countByStatusWhere(scopeCondition);
+  }
+
+  /**
+   * Unscoped, server-wide session counts. `admin`-prefixed so the data-
+   * access confinement grep gate (`src/test/invariants.test.ts`) confines it
+   * to the dashboard layer and `memory.doctor` (whose global `sessions.active`
+   * is spec-blessed) — never to a per-request MCP tool.
+   */
+  adminCountByStatus(): { status: AgentSessionStatus; count: number }[] {
+    return this.countByStatusWhere();
   }
 
   memoryCount(sessionId: string): number {

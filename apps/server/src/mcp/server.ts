@@ -120,13 +120,13 @@ const SAVE_DESCRIPTION =
   'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 
 const SEARCH_DESCRIPTION =
-  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters. Returns a small default page (8); if every result looks relevant and you need more, prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (results are ranked by relevance over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory).';
+  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter (bypasses ranking) to see every memory ever saved under a given key — use it to check whether a topic already converged before saving with a new key. Returns a small default page (8); if every result looks relevant and you need more, prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (results are ranked by relevance over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory).';
 
 const GET_DESCRIPTION =
-  'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
+  'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. `predecessors[]` is bounded (id/title/status/createdAt only, no content) — `truncated:true` means more predecessor history exists than was returned; `headTruncated:true` means the supersedes-chain head could not be fully resolved. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
 
 const CONFIRM_DESCRIPTION =
-  'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it. Pass `ids: string[]` to re-affirm several memories in one call — e.g. close out all of memory.context.needsReview when they are all still true.';
+  'Record a confirmation event for the head of the supersedes chain reachable from this id. Call this when the user explicitly endorses a memory ("yes, that\'s right", "still true") so future retrievals can prioritise it. Pass `ids: string[]` to re-affirm several memories in one call — e.g. close out all of memory.context.needsReview when they are all still true. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).';
 
 const ARCHIVE_DESCRIPTION =
   'Retire a memory: flip one active memory in this scope to `archived` so it stops surfacing in recall. Call this ONLY when the user explicitly asks to retire, remove, or forget a specific memory — never as autonomous cleanup or housekeeping while recalling or saving, and never on your own judgement that a memory looks stale. If a replacement exists, do NOT archive: prefer a supersede (memory.save with the same `topic_key`, or memory.judge) which keeps a successor link — archive is the no-successor path for genuine retirement. Also use it as the second half of a user-requested cross-project move: memory.save the memory into the destination project, then memory.archive the original here. Args: { id }. Errors: `not_found` if the id is missing or in another scope, `conflict` if it is not active. Reversible: an operator can undo the archive from the dashboard.';
@@ -260,6 +260,9 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     router: opts.router,
     projects: opts.projects,
     doctor: opts.doctor,
+    relations: opts.relations,
+    candidates: opts.candidates,
+    embedNow: opts.embedNow,
     getServer: () => server,
   });
 
@@ -332,7 +335,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.capture_passive',
     {
       description:
-        'Bulk-save learnings: extract numbered/bulleted items from a `## Key Learnings:` section in the given text and save each as a separate memory (type=reference). No-op when no learnings block is found. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
+        'Bulk-save learnings: extract numbered/bulleted items from a "## Key Learnings" (or "### Key Learnings", colon optional, case-insensitive) section in the given text and save each as a separate memory (type=reference) through the same curation pipeline as memory.save — topic_key handling, inline embedding, save-time candidate detection. When no such section is found, `saved` is 0 and `reason` explains why; this is NOT the same as success. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. The response may include `candidates[]` if any captured learning conflicts with an existing memory — judge them with memory.judge. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
       inputSchema: capturePassiveSchema,
       outputSchema: capturePassiveOutput,
       annotations: WRITE_ANNOTATIONS('Capture learnings'),
@@ -445,13 +448,14 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     relations: opts.relations,
     router: opts.router,
     projects: opts.projects,
+    repos: opts.repos,
     getServer: () => server,
   });
   server.registerTool(
     'memory.suggest_topic_key',
     {
       description:
-        'Suggest a stable topic_key for an evolving memory based on type + title/content. Deterministic — no LLM. Call before memory.save when updating a topic you have saved before, so the new row supersedes the previous one atomically instead of fragmenting the result set.',
+        'Suggest a stable topic_key for an evolving memory based on type + title/content. Deterministic — no LLM. Call before memory.save when updating a topic you have saved before, so the new row supersedes the previous one atomically instead of fragmenting the result set. The response is scope-aware: `occupied:true` means an active memory already holds the exact suggested key (`occupantId`/`occupantTitle` name it — pass that same key to converge onto it rather than minting a synonym); `nearby[]` lists active keys sharing a prefix, in case one of those is the topic you meant. Also check via memory.search({topic_key}) if you want the full history under a key.',
       inputSchema: suggestTopicKeySchema,
       outputSchema: suggestTopicKeyOutput,
       annotations: READ_ANNOTATIONS('Suggest topic key'),

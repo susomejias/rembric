@@ -24,12 +24,14 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   summary: string;
   sessionIdCoreTemplate: string;
   sessionIdTemplate: string;
+  postCompact: string;
 };
 
 function sessionIdLine(sessionId: string): string {
   return fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', sessionId);
 }
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
+const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
 
@@ -192,6 +194,60 @@ describe('nudge cadence numbers lock-step across bash and TS', () => {
 
   it('SUMMARY_NUDGE_EVERY matches', () => {
     expect(tsCadence('SUMMARY_NUDGE_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
+  });
+});
+
+/**
+ * post-compact.sh's PROTOCOL block fires at SessionStart(matcher:"compact")
+ * on Claude Code AND Codex CLI — both run this exact script, so it is
+ * byte-identical across the two by construction. It was previously emitted
+ * in Spanish (the only non-English agent-facing text in the product); see
+ * openspec/changes/fix-audited-defects. opencode has an independently-
+ * authored post-compaction message (`experimental.session.compacting` in
+ * .opencode-plugin/plugin.ts) that predates this fixture and is not forced
+ * into byte-identity here — only Claude Code and Codex CLI actually share
+ * this script's output today.
+ */
+describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-defects)', () => {
+  function runPostCompact(cwd: string): string {
+    return execFileSync('bash', [postCompactSh], {
+      input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
+      encoding: 'utf8',
+    }).trimEnd();
+  }
+
+  it('emits the exact fixture text (English, not the prior Spanish)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rembric-postcompact-'));
+    try {
+      expect(runPostCompact(cwd)).toBe(fixtures.postCompact);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('is byte-identical whether invoked as Claude Code or as Codex CLI', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rembric-postcompact-'));
+    try {
+      const claudeOut = execFileSync('bash', [postCompactSh, 'claude-code'], {
+        input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
+        encoding: 'utf8',
+      }).trimEnd();
+      const codexOut = execFileSync('bash', [postCompactSh, 'codex-cli'], {
+        input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
+        encoding: 'utf8',
+      }).trimEnd();
+      expect(claudeOut).toBe(codexOut);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('contains no non-ASCII Spanish-only characters (¿ ¡ é í ó ú ñ)', () => {
+    expect(fixtures.postCompact).not.toMatch(/[¿¡éíóúñÑ]/);
+  });
+
+  it('stays within its character budget', () => {
+    expect(fixtures.postCompact.length).toBeLessThanOrEqual(1000);
   });
 });
 

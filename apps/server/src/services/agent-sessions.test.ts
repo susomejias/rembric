@@ -7,6 +7,7 @@ import { createTestDb, type TestDb } from '../test/index.js';
 
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import { ProjectsService } from './projects.js';
+import { projectScope, SCOPE_GLOBAL } from './scope.js';
 import { TokensService } from './tokens.js';
 
 let db: TestDb;
@@ -213,21 +214,39 @@ describe('AgentSessionsService', () => {
 
   it('abandonStale flips old active rows to abandoned', () => {
     const old = sessions.start({ tokenId, projectId, agent: 'old' });
-    // Backdate started_at by 48h via raw SQL so abandonStale picks it up.
+    // Backdate BOTH started_at and last_activity_at by 48h via raw SQL so
+    // abandonStale (keyed on COALESCE(last_activity_at, started_at) since
+    // fix-audited-defects) picks it up — a stale started_at alone no longer
+    // qualifies a row whose last_activity_at is recent.
+    const oldTs = Date.now() - 2 * 24 * 3600 * 1000;
     db.handle.raw
-      .prepare(`UPDATE sessions SET started_at = ? WHERE id = ?`)
-      .run(Date.now() - 2 * 24 * 3600 * 1000, old.id);
+      .prepare(`UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?`)
+      .run(oldTs, oldTs, old.id);
 
     const result = sessions.abandonStale({ olderThanMs: 24 * 3600 * 1000 });
     expect(result.abandoned).toBe(1);
     expect(sessions.getById(old.id)?.status).toBe('abandoned');
   });
 
-  it('countByStatus returns counts grouped by status', () => {
+  it('abandonStale does NOT reap a session with a stale started_at but recent activity (fix-audited-defects)', () => {
+    const longRunning = sessions.start({ tokenId, projectId, agent: 'long-running' });
+    // started_at is old (48h ago) but last_activity_at is recent — this is a
+    // genuinely still-live session (long-running work), not a zombie, and
+    // must survive the reap.
+    db.handle.raw
+      .prepare(`UPDATE sessions SET started_at = ? WHERE id = ?`)
+      .run(Date.now() - 2 * 24 * 3600 * 1000, longRunning.id);
+
+    const result = sessions.abandonStale({ olderThanMs: 24 * 3600 * 1000 });
+    expect(result.abandoned).toBe(0);
+    expect(sessions.getById(longRunning.id)?.status).toBe('active');
+  });
+
+  it('countByStatus returns counts grouped by status, scoped to the given project', () => {
     const a = sessions.start({ tokenId, projectId, agent: 'a' });
     sessions.start({ tokenId, projectId, agent: 'b' });
     sessions.end(a.id, { tokenId });
-    const counts = sessions.countByStatus();
+    const counts = sessions.countByStatus(projectScope(projectId));
     expect(counts.active).toBe(1);
     expect(counts.ended).toBe(1);
     expect(counts.abandoned).toBe(0);
@@ -238,11 +257,37 @@ describe('AgentSessionsService', () => {
     const hidden = sessions.start({ tokenId, projectId, agent: 'hidden' });
     sessions.softDelete(hidden.id, { adminBypass: true });
 
-    const counts = sessions.countByStatus();
+    const counts = sessions.countByStatus(projectScope(projectId));
     expect(counts.active).toBe(1);
     expect(counts.ended).toBe(0);
     expect(counts.abandoned).toBe(0);
     expect(visible.id).toBeDefined();
+  });
+
+  it("countByStatus does not count another project's sessions (fix-audited-defects)", () => {
+    const otherProjectId = projects.create({ slug: 'other-project' }).id;
+    sessions.start({ tokenId, projectId, agent: 'a' });
+    sessions.start({ tokenId, projectId: otherProjectId, agent: 'b' });
+
+    const counts = sessions.countByStatus(projectScope(projectId));
+    expect(counts.active).toBe(1);
+  });
+
+  it('countByStatus(SCOPE_GLOBAL) does not count project-scoped sessions', () => {
+    sessions.start({ tokenId, projectId: null, agent: 'global-agent' });
+    sessions.start({ tokenId, projectId, agent: 'project-agent' });
+
+    const counts = sessions.countByStatus(SCOPE_GLOBAL);
+    expect(counts.active).toBe(1);
+  });
+
+  it('adminCountByStatus is server-wide, unlike the scoped countByStatus', () => {
+    sessions.start({ tokenId, projectId, agent: 'a' });
+    const otherProjectId = projects.create({ slug: 'yet-another-project' }).id;
+    sessions.start({ tokenId, projectId: otherProjectId, agent: 'b' });
+
+    expect(sessions.countByStatus(projectScope(projectId)).active).toBe(1);
+    expect(sessions.adminCountByStatus().active).toBe(2);
   });
 
   describe('soft-delete', () => {

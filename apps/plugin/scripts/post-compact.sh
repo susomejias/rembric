@@ -31,12 +31,12 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
 fi
 
 cat <<'PROTOCOL'
-rembric: Esta sesión resume desde una compaction. ANTES de continuar:
-1. Llamá memory.session_summary({title, summary}) con el compact summary que ves arriba.
-   - title: ≤100 chars, descriptivo del trabajo real (no genérico, no el cwd).
+rembric: This session resumes from a compaction. BEFORE continuing:
+1. Call memory.session_summary({title, summary}) with the compact summary shown above.
+   - title: ≤100 chars, descriptive of the actual work (not generic, not the cwd).
    - summary: ≤10000 chars. Goal · Discoveries · Accomplished · Next Steps · Files.
-2. Si el summary arriba no contiene el detalle que necesitás (file paths exactos, decisiones técnicas concretas, errores específicos previos), llamá memory.context o memory.search ANTES de responder.
-3. Recién después, continuá con la petición del usuario.
+2. If the summary above lacks detail you need (exact file paths, concrete technical decisions, specific prior errors), call memory.context or memory.search BEFORE responding.
+3. Only then, continue with the user's request.
 PROTOCOL
 
 exit 0

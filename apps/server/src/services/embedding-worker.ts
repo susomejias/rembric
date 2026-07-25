@@ -26,12 +26,18 @@ export interface EmbeddingWorkerOptions {
 export class EmbeddingWorker {
   private readonly batchSize: number;
   private hadWork = false;
-  // The only inserter into `memory` (memory.save) always calls embedNow
-  // inline right after its transaction commits, so in steady state the
-  // backlog is empty. True by default (covers first-boot backfill and
-  // crash recovery); flipped false once a scan confirms zero pending, and
-  // back to true by embedNow's own failure path. Lets processBatch skip
-  // the full-table scan once drained, instead of re-running it every tick.
+  // memory.save and memory.capture_passive both call embedNow inline via
+  // the shared save-time curation path (saveMemoryWithCandidates) — but
+  // ONLY when candidates.perSaveMax > 0 (the gate at
+  // mcp/memory-tools.ts:saveMemoryWithCandidates); with perSaveMax=0 (a
+  // documented setting for batch/automation paths) no save calls embedNow
+  // at all, and newly-inserted rows sit unembedded until this worker's
+  // periodic scan picks them up. So the backlog is NOT guaranteed empty in
+  // steady state. True by default (covers first-boot backfill, crash
+  // recovery, and the perSaveMax=0 case); flipped false once a scan
+  // confirms zero pending, and back to true by embedNow's own failure path.
+  // Lets processBatch skip the full-table scan once drained, instead of
+  // re-running it every tick.
   private possiblyPending = true;
 
   constructor(private readonly opts: EmbeddingWorkerOptions) {

@@ -73,22 +73,3 @@ export function ensureVectorModel(
   );
   return { wiped: stale };
 }
-
-/**
- * Calibration telemetry: nearest-neighbor cosine similarity percentiles
- * over a sample of recent vectors. Logged when the drain completes so the
- * shipped `VEC_THRESHOLD` constant can be sanity-checked against real
- * corpora (see `save-time-candidates.ts`).
- */
-export function logSimilarityDistribution(
-  repos: Pick<Repositories, 'vectors'>,
-  sample = 200,
-): void {
-  const rows = repos.vectors.similaritySample(sample);
-  if (rows.length < 5) return;
-  const sims = rows.map((r) => r.sim).sort((a, b) => a - b);
-  const pct = (p: number): string => sims[Math.floor((sims.length - 1) * p)]!.toFixed(3);
-  console.error(
-    `  ◆ embedding drain complete — nearest-neighbor similarity over ${sims.length} rows: p50=${pct(0.5)} p90=${pct(0.9)} max=${pct(1)} (VEC_THRESHOLD reference)`,
-  );
-}

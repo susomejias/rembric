@@ -191,18 +191,22 @@ See [docs/docker.md](./docs/docker.md) for the full operator guide (private GHCR
 
 ### Backups
 
-```bash
-# while the container is running (WAL-safe online backup):
-docker compose exec rembric sqlite3 /data/data.db ".backup /data/backup-$(date +%Y%m%d).db"
-mv ./data/backup-*.db ./backups/
+The runtime image is [distroless](./docs/docker.md) — there is no shell and no `sqlite3` binary inside the container, so `docker compose exec rembric sqlite3 ...` does not work. Use one of:
 
-# or stop + copy for a cold backup:
+```bash
+# while the container is running (WAL-safe online backup, no shell needed):
+# open the dashboard → Maintenance → "Backup now", then download the
+# resulting snapshot from the same page.
+
+# or stop + copy for a cold backup (works against any image):
 docker compose down
 cp ./data/data.db ./backups/data-$(date +%Y%m%d).db
 docker compose up -d
 ```
 
 **Do not bind-mount `./data/` onto NFS / SMB / network filesystems** — SQLite's POSIX locking guarantees don't hold there, and you'll eventually corrupt the DB.
+
+See [docs/backup.md](./docs/backup.md) for the full restore procedure, including the data-loss guard an older snapshot will trip.
 
 </details>
 

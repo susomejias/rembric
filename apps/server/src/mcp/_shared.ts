@@ -105,27 +105,45 @@ export function routerKey(): { tokenId: string; mcpSessionId: string } | null {
  * Resolve the active Rembric session id for a write, in precedence order:
  *   1. an explicit `sessionId` arg,
  *   2. the `SessionRouter` entry for this transport (set by `memory.session_start`),
- *   3. the most recently-active session for `(tokenId, projectId)` — captures
- *      sessions created out-of-band by the plugin's HTTP hooks.
+ *   3. the UNAMBIGUOUS active session for `(tokenId, projectId)` — captures
+ *      sessions created out-of-band by the plugin's HTTP hooks; returns
+ *      nothing (never guesses by recency) when more than one is live — see
+ *      `AgentSessionsService.findActiveForTransport`.
  * Returns null when none resolve. Shared by session_end/summary, save_prompt,
  * and capture_passive; `projectId` is the caller's already-resolved scope.
+ *
+ * By default, a resolved session id gets its activity clock bumped — for
+ * save_prompt/capture_passive this is the ONLY write that touches the
+ * session row. Pass `touch: false` when the caller is about to write to the
+ * session row itself (session_end/session_summary both stamp
+ * `last_activity_at` as part of their own update), so the row isn't
+ * UPDATEd twice for one request.
  */
 export function resolveSessionId(
   deps: { router: SessionRouter; agentSessions: AgentSessionsService },
   explicit: string | undefined,
   projectId: string | null,
+  opts: { touch?: boolean } = {},
 ): string | null {
-  if (explicit) return explicit;
+  const touch = opts.touch ?? true;
+  if (explicit) {
+    if (touch) deps.agentSessions.touchActivity(explicit);
+    return explicit;
+  }
   const ctx = getRequestContext();
   const key = routerKey();
   if (key) {
     const routerHit = deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId;
-    if (routerHit) return routerHit;
+    if (routerHit) {
+      if (touch) deps.agentSessions.touchActivity(routerHit);
+      return routerHit;
+    }
   }
   const active = deps.agentSessions.findActiveForTransport({
     tokenId: ctx.token.id,
     projectId,
   });
+  if (active && touch) deps.agentSessions.touchActivity(active.id);
   return active?.id ?? null;
 }
 

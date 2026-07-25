@@ -170,6 +170,11 @@ async function handleSessionStart(
   let reused = false;
   if (session) {
     reused = true;
+    // findActiveForTransport now excludes rows idle past TRANSPORT_STALENESS_MS
+    // (fix-audited-defects); a session whose only activity is repeated
+    // session_start calls must still count as touched, or it goes stale and
+    // this reuse branch stops firing on its own next call.
+    deps.agentSessions.touchActivity(session.id);
   } else {
     try {
       session = deps.agentSessions.start({
@@ -218,10 +223,13 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   } catch (err) {
     return errToMcp(err);
   }
+  // touch:false — end() stamps last_activity_at itself; touching here too
+  // would be a second UPDATE of the same row for one request.
   const sessionId = resolveSessionId(
     deps,
     args.sessionId,
     scope.kind === 'project' ? scope.projectId : null,
+    { touch: false },
   );
   if (!sessionId) {
     return mcpError(
@@ -252,10 +260,12 @@ async function handleSessionSummary(
   } catch (err) {
     return errToMcp(err);
   }
+  // touch:false — writeSummary() stamps last_activity_at itself.
   const sessionId = resolveSessionId(
     deps,
     args.sessionId,
     scope.kind === 'project' ? scope.projectId : null,
+    { touch: false },
   );
   if (!sessionId) {
     return mcpError(

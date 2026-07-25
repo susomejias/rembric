@@ -5,9 +5,22 @@ import type { Repositories } from '../db/repositories/index.js';
 import { type AgentSession, type NewAgentSession } from '../db/schema/agent-sessions.js';
 
 import { DomainError } from './errors.js';
+import type { Scope } from './scope.js';
+import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
+
+/**
+ * How stale `last_activity_at` (falling back to `started_at`) must be
+ * before `findActiveForTransport` stops considering a row "live". A killed
+ * client (SIGKILL/OOM/closed terminal) never advances this again, so once
+ * past the window it stops creating false ambiguity for a fresh session on
+ * the same (tokenId, projectId) — WITHOUT introducing a recency tiebreak
+ * among rows that are both still within the window. See
+ * openspec/changes/fix-audited-defects.
+ */
+export const TRANSPORT_STALENESS_MS = 30 * 60_000;
 
 /**
  * Single source of truth for the maximum length (UTF-16 code units) of
@@ -36,13 +49,6 @@ export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';
  * silently bring oversized bodies under the cap before calling the service.
  * The service itself rejects oversized inputs unconditionally.
  */
-function sliceWithoutSplittingSurrogatePair(s: string, maxLen: number): string {
-  let end = maxLen;
-  const code = s.charCodeAt(end - 1);
-  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
-  return s.slice(0, end);
-}
-
 export function truncateSummary(s: string): string {
   if (s.length <= SUMMARY_MAX_CHARS) return s;
   return (
@@ -164,6 +170,7 @@ export class AgentSessionsService {
       title: computePlaceholderTitle(input.cwd ?? null, ts),
       startedAt: ts,
       endedAt: null,
+      lastActivityAt: ts,
       summary: null,
       summaryFinal: false,
       titleFinal: false,
@@ -197,6 +204,10 @@ export class AgentSessionsService {
           `sessions.ensure: id '${input.id}' is already in use by a different token`,
         );
       }
+      // The plugin POSTs this on every turn (session-start/post-compact
+      // hooks), so a hit here IS activity — bump it rather than leaving the
+      // row's staleness clock stuck at its original insert time.
+      this.repos.agentSessions.touchActivity(existing.id, this.now());
       return { session: existing, created: false };
     }
     const ts = this.now();
@@ -209,6 +220,7 @@ export class AgentSessionsService {
       title: computePlaceholderTitle(input.cwd ?? null, ts),
       startedAt: ts,
       endedAt: null,
+      lastActivityAt: ts,
       summary: null,
       summaryFinal: false,
       titleFinal: false,
@@ -216,6 +228,21 @@ export class AgentSessionsService {
     });
     if (!row) throw new DomainError('conflict', 'sessions.ensure: insert returned no row');
     return { session: row, created: true };
+  }
+
+  /**
+   * Explicit activity touch for MCP writes that resolve to a session
+   * without going through `writeSummary`/`end` (memory.save,
+   * memory.confirm, memory.save_prompt, memory.capture_passive). Best-
+   * effort: never throws, so a stale/mid-transition row can't fail the
+   * caller's real write.
+   */
+  touchActivity(sessionId: string): void {
+    try {
+      this.repos.agentSessions.touchActivity(sessionId, this.now());
+    } catch {
+      // best-effort — the caller's actual write must not fail over this
+    }
   }
 
   /**
@@ -233,6 +260,7 @@ export class AgentSessionsService {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.writeSummary: summary must be non-empty');
     }
+    if (input.summary !== undefined) assertNoNul('sessions.writeSummary', 'summary', input.summary);
     assertSummaryWithinCap('sessions.writeSummary', input.summary);
     if (input.title !== undefined) {
       if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
@@ -241,6 +269,7 @@ export class AgentSessionsService {
           `sessions.writeSummary: title must be 1..${TITLE_MAX_LENGTH} chars`,
         );
       }
+      assertNoNul('sessions.writeSummary', 'title', input.title);
     }
     const existing = this.getById(sessionId);
     if (!existing) {
@@ -268,7 +297,9 @@ export class AgentSessionsService {
       input.title,
       incomingFinal,
     );
-    const set: Partial<NewAgentSession> = {};
+    // This write path IS activity even when precedence blocks the
+    // summary/title change — a per-turn sync hit means the session is live.
+    const set: Partial<NewAgentSession> = { lastActivityAt: this.now() };
     if (summaryUpdate.changed) {
       set.summary = summaryUpdate.value;
       set.summaryFinal = summaryUpdate.final;
@@ -276,9 +307,6 @@ export class AgentSessionsService {
     if (titleUpdate.changed) {
       set.title = titleUpdate.value;
       set.titleFinal = titleUpdate.final;
-    }
-    if (Object.keys(set).length === 0) {
-      return existing;
     }
     const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
@@ -294,6 +322,7 @@ export class AgentSessionsService {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.end: summary must be non-empty');
     }
+    if (input.summary !== undefined) assertNoNul('sessions.end', 'summary', input.summary);
     assertSummaryWithinCap('sessions.end', input.summary);
     if (input.title !== undefined) {
       if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
@@ -302,6 +331,7 @@ export class AgentSessionsService {
           `sessions.end: title must be 1..${TITLE_MAX_LENGTH} chars`,
         );
       }
+      assertNoNul('sessions.end', 'title', input.title);
     }
     const existing = this.getById(sessionId);
     if (!existing) {
@@ -346,6 +376,7 @@ export class AgentSessionsService {
     const set: Partial<NewAgentSession> = {
       status: 'ended',
       endedAt: ts,
+      lastActivityAt: ts,
     };
     if (summaryUpdate.changed) {
       set.summary = summaryUpdate.value;
@@ -388,9 +419,16 @@ export class AgentSessionsService {
   }
 
   /**
-   * Find the most recently-started active session for the given
-   * `(tokenId, projectId)` pair. Used by the in-process SessionRouter to
+   * Resolve the active session for `(tokenId, projectId)` when exactly one
+   * unambiguous candidate exists. Used by the in-process SessionRouter to
    * resolve `(token, project, mcp-session)` → active session.
+   *
+   * Excludes rows whose last activity is older than `TRANSPORT_STALENESS_MS`
+   * — a session killed without SessionEnd never advances that clock again,
+   * so it stops creating false ambiguity for a fresh session on the same
+   * transport once stale, while two genuinely concurrent LIVE sessions
+   * still correctly refuse to resolve (see `sessions/spec.md`'s
+   * "findActiveForTransport MUST NOT guess under concurrent ambiguity").
    */
   findActiveForTransport(input: {
     tokenId: string;
@@ -398,7 +436,14 @@ export class AgentSessionsService {
   }): AgentSession | null {
     // Soft-deleted sessions must NOT surface here — auto-resolution would
     // otherwise stamp memories onto a deleted row.
-    return this.repos.agentSessions.findActiveForTransport(input.tokenId, input.projectId) ?? null;
+    const activeSinceMs = this.now().getTime() - TRANSPORT_STALENESS_MS;
+    return (
+      this.repos.agentSessions.findActiveForTransport(
+        input.tokenId,
+        input.projectId,
+        activeSinceMs,
+      ) ?? null
+    );
   }
 
   /**
@@ -493,13 +538,15 @@ export class AgentSessionsService {
   }
 
   /**
-   * Mark any `status='active'` row older than `olderThanMs` as abandoned.
-   * Called at startup so a crashed/restarted server doesn't leak
-   * eternally-active rows.
+   * Mark any `status='active'` row whose last activity predates
+   * `olderThanMs` as abandoned. Called at startup (so a crashed/restarted
+   * server doesn't leak eternally-active rows) AND periodically on an
+   * interval (so a zombie session doesn't have to wait for a restart to be
+   * reclaimed) — see openspec/changes/fix-audited-defects.
    */
   abandonStale(input: { olderThanMs: number }): { abandoned: number } {
     const cutoff = new Date(this.now().getTime() - input.olderThanMs);
-    const abandoned = this.repos.agentSessions.abandonActiveOlderThan(cutoff, this.now());
+    const abandoned = this.repos.agentSessions.abandonInactiveSince(cutoff, this.now());
     return { abandoned };
   }
 
@@ -546,24 +593,28 @@ export class AgentSessionsService {
   }
 
   /**
-   * Count sessions by status for `memory.stats` / dashboard cards.
+   * Count sessions by status, scoped to the caller's `Scope` — REQUIRED so a
+   * scope-less call is a compile error, not a naming-convention oversight
+   * (see openspec/changes/fix-audited-defects). This is what `memory.stats`
+   * MUST call.
    *
    * Excludes soft-deleted rows (`deleted_at IS NOT NULL`) so the overview
    * counters stay in lock-step with `list()`, which hides them by default.
-   * Without this filter, an operator who soft-deletes an `active` session
-   * still sees it counted in `ACTIVE SESSIONS` even though it no longer
-   * appears in `/dashboard/sessions`.
    */
-  countByStatus(): Record<'active' | 'ended' | 'abandoned', number> {
-    const out: Record<'active' | 'ended' | 'abandoned', number> = {
-      active: 0,
-      ended: 0,
-      abandoned: 0,
-    };
-    for (const row of this.repos.agentSessions.countByStatus()) {
-      out[row.status] = Number(row.count);
-    }
-    return out;
+  countByStatus(scope: Scope): Record<'active' | 'ended' | 'abandoned', number> {
+    const projectId = scope.kind === 'project' ? scope.projectId : null;
+    return toStatusRecord(this.repos.agentSessions.countByStatusInScope(projectId));
+  }
+
+  /**
+   * Unscoped, server-wide session counts. Callable ONLY from the dashboard
+   * layer and `memory.doctor` (whose global `sessions.active` is a
+   * deliberate spec exception — `mcp-api/spec.md`) — never from a per-
+   * request MCP tool. Naming the boundary in the method name is not the
+   * enforcement mechanism here; `countByStatus` requiring a `Scope` is.
+   */
+  adminCountByStatus(): Record<'active' | 'ended' | 'abandoned', number> {
+    return toStatusRecord(this.repos.agentSessions.adminCountByStatus());
   }
 
   memoryCount(sessionId: string): number {
@@ -696,4 +747,16 @@ function clamp(value: number, min: number, max: number): number {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+function toStatusRecord(
+  rows: { status: 'active' | 'ended' | 'abandoned'; count: number }[],
+): Record<'active' | 'ended' | 'abandoned', number> {
+  const out: Record<'active' | 'ended' | 'abandoned', number> = {
+    active: 0,
+    ended: 0,
+    abandoned: 0,
+  };
+  for (const row of rows) out[row.status] = Number(row.count);
+  return out;
 }

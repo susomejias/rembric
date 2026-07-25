@@ -9,6 +9,7 @@ import { DomainError } from './errors.js';
 import { hybridSearch } from './hybrid-search.js';
 import { deriveReviewState, REVIEW_TTL_MS, type ReviewState } from './review.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
+import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
 const AGENT_MEMORY_ARCHIVE_REASONING = 'agent archived memory at explicit user request';
@@ -48,8 +49,11 @@ export function deriveTitle(content: string): string {
   const firstLine = content.split('\n', 1)[0] ?? '';
   const stripped = firstLine.replace(/^[\s*#`]+/, '').trim();
   // Collapse all whitespace (incl. the newlines kept by the full-content
-  // fallback) so a derived title is always a single scannable line.
-  return (stripped || content.trim()).replace(/\s+/g, ' ').slice(0, TITLE_MAX_CHARS);
+  // fallback) so a derived title is always a single scannable line. Slice
+  // without splitting a surrogate pair — a raw index cut can leave a lone
+  // high surrogate that decodes to U+FFFD wherever the title is read back.
+  const collapsed = (stripped || content.trim()).replace(/\s+/g, ' ');
+  return sliceWithoutSplittingSurrogatePair(collapsed, TITLE_MAX_CHARS);
 }
 
 export interface SaveMemoryInput {
@@ -94,6 +98,8 @@ export interface SearchMemoriesInput {
   query?: string;
   type?: MemoryType;
   tag?: string;
+  /** Exact topic_key filter — see openspec/changes/fix-audited-defects. */
+  topicKey?: string;
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
@@ -103,8 +109,15 @@ export interface SearchMemoriesInput {
 
 export interface MemoryWithHistory {
   memory: Memory;
+  /** Bounded to PREDECESSOR_CAP nearest predecessors, breadth-first. */
   predecessors: Memory[];
+  /** Number of predecessors actually returned (== predecessors.length). */
+  predecessorCount: number;
+  /** True when the reachable `replaces` graph has more predecessors than the cap. */
+  truncated: boolean;
   head: Memory;
+  /** True when head resolution stopped at its hop cap without finding an active row. */
+  headTruncated: boolean;
   confirmationCount: number;
   /** Derived review state of the active head; null when the head is not active. */
   reviewState: ReviewState | null;
@@ -149,6 +162,7 @@ export class MemoryService {
     if (input.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
     }
+    assertNoNul('memory.save', 'content', input.content);
     const { title } = input;
     if (title.trim().length === 0 || title.length > TITLE_MAX_CHARS) {
       throw new DomainError(
@@ -156,6 +170,8 @@ export class MemoryService {
         `memory.save: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
       );
     }
+    assertNoNul('memory.save', 'title', title);
+    for (const tag of input.tags ?? []) assertNoNul('memory.save', 'tags', tag);
     const topicKey = normalizeTopicKey(input.topicKey);
 
     const ts = this.now();
@@ -215,8 +231,8 @@ export class MemoryService {
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) return null;
 
-    const predecessors = this.collectPredecessors(found);
-    const head = this.findHead(found);
+    const { rows: predecessors, truncated } = this.collectPredecessors(found);
+    const { head, truncated: headTruncated } = this.findHead(found);
     const confirmationCount = this.repos.memory.countConfirmations(head.id);
     const lastConfirmedAt =
       this.repos.memory.latestConfirmationTsByIds([head.id]).get(head.id) ?? null;
@@ -225,7 +241,17 @@ export class MemoryService {
       this.now(),
     );
     this.repos.memory.touchLastSeen(head.id, this.now());
-    return { memory: found, predecessors, head, confirmationCount, reviewState, reviewAfter };
+    return {
+      memory: found,
+      predecessors,
+      predecessorCount: predecessors.length,
+      truncated,
+      head,
+      headTruncated,
+      confirmationCount,
+      reviewState,
+      reviewAfter,
+    };
   }
 
   /**
@@ -336,6 +362,7 @@ export class MemoryService {
           status,
           type: input.type,
           tag: input.tag,
+          topicKey: input.topicKey,
           limit,
           offset,
           includeGlobal: input.includeGlobal,
@@ -346,6 +373,7 @@ export class MemoryService {
           status,
           type: input.type,
           tag: input.tag,
+          topicKey: input.topicKey,
           limit,
           offset,
           includeGlobal: input.includeGlobal,
@@ -370,22 +398,31 @@ export class MemoryService {
   /**
    * Record a confirmation event for the head of the supersedes chain
    * reachable from `id`. No-op (throws `memory_not_found`) if the
-   * memory is missing or outside scope.
+   * memory is missing or outside scope. Returns whether head resolution
+   * stopped at its hop cap without finding an active row — an explicit
+   * signal rather than silently confirming a non-active row.
    */
-  confirm(id: string, scope: Scope, source?: MemorySource): void {
+  confirm(
+    id: string,
+    scope: Scope,
+    source?: MemorySource,
+    sessionId?: string | null,
+  ): { headTruncated: boolean } {
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) {
       throw new DomainError('memory_not_found', `memory.confirm: id=${id} not found`);
     }
-    const head = this.findHead(found);
+    const { head, truncated } = this.findHead(found);
     const ts = this.now();
     this.repos.memory.insertConfirmation({
       id: ulid(ts.getTime()),
       memoryId: head.id,
       eventTs: ts,
       source: source ?? null,
+      sessionId: sessionId ?? null,
     });
     this.repos.memory.touchLastSeen(head.id, ts);
+    return { headTruncated: truncated };
   }
 
   /**
@@ -393,11 +430,20 @@ export class MemoryService {
    * distinct id inside ONE transaction. Atomic — a missing/out-of-scope id
    * aborts the whole batch via `confirm`'s `memory_not_found`.
    */
-  confirmMany(ids: readonly string[], scope: Scope, source?: MemorySource): { confirmed: number } {
+  confirmMany(
+    ids: readonly string[],
+    scope: Scope,
+    source?: MemorySource,
+    sessionId?: string | null,
+  ): { confirmed: number; headTruncated: boolean } {
     const unique = [...new Set(ids)];
     return this.tx.transaction(() => {
-      for (const id of unique) this.confirm(id, scope, source);
-      return { confirmed: unique.length };
+      let headTruncated = false;
+      for (const id of unique) {
+        const result = this.confirm(id, scope, source, sessionId);
+        headTruncated = headTruncated || result.headTruncated;
+      }
+      return { confirmed: unique.length, headTruncated };
     });
   }
 
@@ -512,41 +558,68 @@ export class MemoryService {
     return this.repos.memory.unsafeGetByIds(ids);
   }
 
-  private collectPredecessors(start: Memory): Memory[] {
+  /**
+   * Breadth-first walk of the `replaces` DAG, bounded to PREDECESSOR_CAP
+   * rows so a well-maintained topic_key chain (which can reach thousands of
+   * predecessors) cannot make a single `memory.get` fetch an unbounded
+   * number of rows. `truncated` is true whenever the reachable graph holds
+   * more predecessors than the cap.
+   */
+  private collectPredecessors(start: Memory): { rows: Memory[]; truncated: boolean } {
     const visited = new Set<string>([start.id]);
-    const out: Memory[] = [];
+    const rows: Memory[] = [];
     const queue = [...start.replaces];
+    let truncated = false;
     while (queue.length > 0) {
       const id = queue.shift();
       if (!id || visited.has(id)) continue;
       visited.add(id);
-      const row = this.unsafeGetById(id);
-      if (row) {
-        out.push(row);
-        for (const r of row.replaces) queue.push(r);
+      if (rows.length >= PREDECESSOR_CAP) {
+        truncated = true;
+        break;
       }
+      const row = this.unsafeGetById(id);
+      if (!row) continue;
+      rows.push(row);
+      for (const r of row.replaces) if (!visited.has(r)) queue.push(r);
     }
-    return out;
+    return { rows, truncated };
   }
 
-  private findHead(start: Memory): Memory {
-    if (start.status === 'active') return start;
+  /**
+   * `truncated` is true ONLY when the 64-hop cap is exhausted without
+   * reaching an active row — a genuine dead end (no successor, or a missing
+   * row) is not truncation, it is the correct terminal state.
+   */
+  private findHead(start: Memory): { head: Memory; truncated: boolean } {
+    if (start.status === 'active') return { head: start, truncated: false };
     let current = start;
     const visited = new Set<string>([start.id]);
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < HEAD_RESOLUTION_HOP_CAP; i++) {
       const successorId = this.repos.memory.findSuccessorId(current.id);
-      if (!successorId || visited.has(successorId)) break;
+      if (!successorId || visited.has(successorId)) return { head: current, truncated: false };
       const next = this.unsafeGetById(successorId);
-      if (!next) break;
+      if (!next) return { head: current, truncated: false };
       visited.add(next.id);
       current = next;
-      if (current.status === 'active') return current;
+      if (current.status === 'active') return { head: current, truncated: false };
     }
-    return current;
+    return { head: current, truncated: true };
   }
 }
 
 const DEFAULT_SEARCH_LIMIT = 8;
+
+/**
+ * Max predecessors `memory.get` returns. A daily-updated topic_key chain
+ * reaches this depth in ~10 days; the cap plus the id/title/status/createdAt
+ * projection (applied at the MCP layer) is what keeps a single call bounded
+ * in tokens — see openspec/changes/fix-audited-defects.
+ */
+const PREDECESSOR_CAP = 10;
+
+/** Bound on forward-successor hops when resolving a supersedes-chain head. */
+const HEAD_RESOLUTION_HOP_CAP = 64;
 
 function clampLimit(limit: number | undefined): number {
   if (limit === undefined) return DEFAULT_SEARCH_LIMIT;
@@ -570,8 +643,6 @@ function normalizeTopicKey(input: string | null | undefined): string | null {
   if (trimmed.length > 128) {
     throw new DomainError('invalid_input', 'memory.save: topic_key exceeds 128 characters');
   }
-  if (trimmed.includes('\0')) {
-    throw new DomainError('invalid_input', 'memory.save: topic_key contains NUL byte');
-  }
+  assertNoNul('memory.save', 'topic_key', trimmed);
   return trimmed;
 }

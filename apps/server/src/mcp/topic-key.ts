@@ -85,3 +85,22 @@ function slugify(text: string): string {
   if (s.length > MAX_SLUG_CHARS) s = s.slice(0, MAX_SLUG_CHARS).replace(/-+$/, '');
   return s;
 }
+
+const NEARBY_PREFIX_TOKENS = 2;
+
+/**
+ * A short prefix from a topic_key (own output of `suggestTopicKey`), used to
+ * find "nearby" active keys the agent might have meant instead of minting a
+ * synonym — e.g. `decision/dev-stack-chown` → `decision/dev-stack`, which
+ * matches `decision/dev-stack-permissions`.
+ */
+export function topicKeyPrefix(topicKey: string): string {
+  const slashIdx = topicKey.indexOf('/');
+  if (slashIdx === -1) return topicKey;
+  const family = topicKey.slice(0, slashIdx + 1);
+  const slugTokens = topicKey
+    .slice(slashIdx + 1)
+    .split('-')
+    .filter(Boolean);
+  return family + slugTokens.slice(0, NEARBY_PREFIX_TOKENS).join('-');
+}

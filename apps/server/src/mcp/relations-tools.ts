@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import type { Repositories } from '../db/repositories/index.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { DomainError } from '../services/errors.js';
@@ -11,7 +12,7 @@ import type { Scope } from '../services/scope.js';
 import { requireScope } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { ok } from './result.js';
-import { suggestTopicKey } from './topic-key.js';
+import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
 
 /**
  * MCP tool handlers for the relations layer introduced in change
@@ -85,6 +86,12 @@ export const compareSchema = {
 
 export const suggestTopicKeyOutput = {
   topic_key: z.string(),
+  /** Whether an active memory in scope already holds this exact key. */
+  occupied: z.boolean(),
+  occupantId: z.string().optional(),
+  occupantTitle: z.string().optional(),
+  /** Active in-scope keys sharing a prefix with the suggestion — adopt one instead of minting a synonym. */
+  nearby: z.array(z.object({ topicKey: z.string(), title: z.string() })),
 };
 
 export const judgeOutput = {
@@ -119,6 +126,8 @@ export interface RelationsToolDeps {
   relations: RelationsService;
   router: SessionRouter;
   projects: ProjectsService;
+  /** Required for memory.suggest_topic_key's occupied/nearby scoped reads. */
+  repos?: Pick<Repositories, 'memory'>;
   /** Set by `createMcpServer` after construction to enable roots discovery. */
   getServer?: () => McpServer;
 }
@@ -139,12 +148,40 @@ async function handleSuggestTopicKey(
     content?: string;
   },
 ) {
+  let scope: Scope;
   try {
-    await requireScope(deps, 'read');
+    scope = await requireScope(deps, 'read');
   } catch (err) {
     return errToMcp(err);
   }
-  return ok({ topic_key: suggestTopicKey(args) });
+  const topicKey = suggestTopicKey(args);
+  if (!deps.repos) {
+    // Not wired with the memory repository — fall back to the pure
+    // suggestion with no scope awareness (should not happen in production).
+    return ok({ topic_key: topicKey, occupied: false, nearby: [] });
+  }
+  const memScope = scope.kind === 'project' ? ('project' as const) : ('global' as const);
+  const projectId = scope.kind === 'project' ? scope.projectId : null;
+
+  const occupant = deps.repos.memory.findActiveByTopicKey({
+    scope: memScope,
+    projectId,
+    topicKey,
+  });
+  const nearbyRows = deps.repos.memory.listNearbyTopicKeys({
+    scope: memScope,
+    projectId,
+    prefix: topicKeyPrefix(topicKey),
+    excludeExact: topicKey,
+    limit: 5,
+  });
+
+  return ok({
+    topic_key: topicKey,
+    occupied: occupant !== undefined,
+    ...(occupant ? { occupantId: occupant.id, occupantTitle: occupant.title } : {}),
+    nearby: nearbyRows.map((r) => ({ topicKey: r.topicKey, title: r.title })),
+  });
 }
 
 // A missing judgment/memory and an out-of-scope one must be indistinguishable

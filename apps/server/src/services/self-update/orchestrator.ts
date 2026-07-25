@@ -32,7 +32,7 @@ export type StartResult =
   | { ok: true }
   | { ok: false; code: 'not_available' | 'already_running' | 'backup_failed' };
 
-const BACKUP_PREFIX = 'pre-update-';
+export const BACKUP_PREFIX = 'pre-update-';
 const BACKUP_KEEP = 3;
 
 // The exact values are load-bearing against on-host history: upgraders and

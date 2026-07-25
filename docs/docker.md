@@ -107,18 +107,13 @@ On macOS via Docker Desktop, this is usually transparent (the bind-mount layer h
 
 ## Backups
 
-The DB is one file: `./data/data.db` (plus `.data/data.db-shm` and `./data/data.db-wal` if you grab the backup while the server is running). Two recipes:
+The DB is one file: `./data/data.db` (plus `.data/data.db-shm` and `./data/data.db-wal` if you grab the backup while the server is running). The runtime image is [distroless](#the-container-has-no-shell) — there is no shell and no `sqlite3` binary inside it, so `docker compose exec rembric sqlite3 ...` cannot work against the published image. Two recipes that do:
 
-**Online backup** (server stays up):
+**Online backup** (server stays up, no shell needed):
 
-```bash
-docker compose exec rembric sqlite3 /data/data.db ".backup /data/backup-$(date +%Y%m%d).db"
-mkdir -p ./backups && mv ./data/backup-*.db ./backups/
-```
+Open the dashboard → **Maintenance** → **Backup now**. This runs SQLite's online backup API (`VACUUM INTO`) in-process — safe against concurrent writes, WAL checkpointed atomically — and writes the snapshot to `./data/backups/` on the same bind mount. Download it from the same page (see [backup.md](./backup.md) for the full flow and the restore procedure).
 
-Uses SQLite's online backup API. Safe against concurrent writes (WAL is checkpointed atomically).
-
-**Cold backup** (a few seconds of downtime):
+**Cold backup** (a few seconds of downtime, works against any image):
 
 ```bash
 docker compose down
@@ -128,6 +123,10 @@ docker compose up -d
 ```
 
 Always copy the `-shm` and `-wal` siblings — they hold transactions not yet checkpointed into the main file.
+
+### The container has no shell
+
+`FROM gcr.io/distroless/nodejs22-debian12` (see `apps/server/Dockerfile`) ships only the Node runtime and the compiled app — no `/bin/sh`, no package manager, no `sqlite3`. `docker compose exec rembric <anything>` will fail with "executable file not found". Anything you need to run against the database goes through the dashboard (backup/restore, diagnostics) or the host-side `cp` recipe above, never `exec`.
 
 ## Upgrade & rollback
 

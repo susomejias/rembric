@@ -28,6 +28,8 @@ export interface SearchMemoryIdsOpts {
   status: MemoryStatus;
   type?: MemoryType;
   tag?: string;
+  /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
+  topicKey?: string;
   limit: number;
   offset: number;
   /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
@@ -42,6 +44,8 @@ export interface SearchBm25IdsOpts {
   status: MemoryStatus;
   type?: MemoryType;
   tag?: string;
+  /** Exact topic_key filter (see openspec/changes/fix-audited-defects). */
+  topicKey?: string;
   /** Bounded rank window depth (no OFFSET — fusion paginates in memory). */
   limit: number;
   /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
@@ -93,10 +97,17 @@ export class MemoryRepository {
     projectId: string | null;
     excludeIds: string[];
     limit: number;
-  }): { id: string; rank: number; title: string; content: string }[] {
-    return this.db.all<{ id: string; rank: number; title: string; content: string }>(
+  }): { id: string; rank: number; title: string; content: string; topicKey: string | null }[] {
+    return this.db.all<{
+      id: string;
+      rank: number;
+      title: string;
+      content: string;
+      topicKey: string | null;
+    }>(
       sql`
-        SELECT m.id AS id, memory_fts.rank AS rank, m.title AS title, m.content AS content
+        SELECT m.id AS id, memory_fts.rank AS rank, m.title AS title, m.content AS content,
+               m.topic_key AS topicKey
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
@@ -235,6 +246,7 @@ export class MemoryRepository {
     const tagClause = opts.tag
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
+    const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
     const rows = this.db.all<{ id: string }>(
       sql`
         SELECT m.id
@@ -243,6 +255,7 @@ export class MemoryRepository {
           AND m.status = ${opts.status}
           ${typeClause}
           ${tagClause}
+          ${topicKeyClause}
         ORDER BY m.created_at DESC
         LIMIT ${opts.limit} OFFSET ${opts.offset}
       `,
@@ -261,6 +274,7 @@ export class MemoryRepository {
     const tagClause = opts.tag
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
+    const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
     const rows = this.db.all<{ id: string }>(
       sql`
         SELECT m.id
@@ -271,6 +285,7 @@ export class MemoryRepository {
           AND m.status = ${opts.status}
           ${typeClause}
           ${tagClause}
+          ${topicKeyClause}
         ORDER BY bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE})
         LIMIT ${opts.limit}
       `,
@@ -288,6 +303,44 @@ export class MemoryRepository {
         AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${tag})
     `);
     return new Set(rows.map((r) => r.id));
+  }
+
+  /** Subset of `ids` whose memory carries `topicKey` (dense-branch topic_key post-filter). */
+  idsWithTopicKey(ids: readonly string[], topicKey: string): Set<string> {
+    if (ids.length === 0) return new Set();
+    const rows = this.db.all<{ id: string }>(sql`
+      SELECT m.id AS id
+      FROM memory m
+      WHERE m.id IN (SELECT value FROM json_each(${JSON.stringify([...ids])}))
+        AND m.topic_key = ${topicKey}
+    `);
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /**
+   * Active in-scope topic_keys sharing a prefix with `prefix`, for
+   * `memory.suggest_topic_key`'s `nearby` hint. Excludes an exact match
+   * (surfaced separately as `occupied`). Bounded, alphabetical.
+   */
+  listNearbyTopicKeys(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    prefix: string;
+    excludeExact: string;
+    limit: number;
+  }): { topicKey: string; title: string }[] {
+    const likePattern = `${opts.prefix.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+    return this.db.all<{ topicKey: string; title: string }>(sql`
+      SELECT m.topic_key AS topicKey, m.title AS title
+      FROM memory m
+      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+        AND m.status = 'active'
+        AND m.topic_key IS NOT NULL
+        AND m.topic_key != ${opts.excludeExact}
+        AND m.topic_key LIKE ${likePattern} ESCAPE '\\'
+      ORDER BY m.topic_key
+      LIMIT ${opts.limit}
+    `);
   }
 
   /** @internal */

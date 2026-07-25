@@ -469,6 +469,10 @@ describe('admin-method confinement invariant', () => {
       if (rel.startsWith('dashboard/')) continue;
       // The dashboard router renders the operator overview page directly.
       if (rel === 'server/dashboard-router.ts') continue;
+      // Doctor report + dashboard stats card — same class of operator-facing aggregation.
+      if (rel === 'server/bootstrap.ts') continue;
+      // Service-layer admin wrapper; its own callers are confined above.
+      if (rel === 'services/agent-sessions.ts') continue;
       if (rel.startsWith('db/repositories/')) continue;
       const lines = readFileSync(file, 'utf8').split('\n');
       for (let i = 0; i < lines.length; i++) {

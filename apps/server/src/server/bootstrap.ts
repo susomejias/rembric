@@ -11,7 +11,7 @@ import {
   loadEmbedder,
   type Embedder,
 } from '../embeddings/embedder.js';
-import { ensureVectorModel, logSimilarityDistribution } from '../embeddings/state.js';
+import { ensureVectorModel } from '../embeddings/state.js';
 import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import type { DoctorReport } from '../mcp/observability-tools.js';
@@ -173,11 +173,7 @@ export async function bootstrap(
   const memorySvc = new MemoryService(repos, dbHandle.db, undefined, (text) =>
     embedder.embed(embeddingQueryInput(text)),
   );
-  const embeddingWorker = new EmbeddingWorker({
-    repos,
-    embedder,
-    onDrained: () => logSimilarityDistribution(repos),
-  });
+  const embeddingWorker = new EmbeddingWorker({ repos, embedder });
 
   const embedTick = (force = false): void => {
     embeddingWorker.processBatch({ force }).catch((err: unknown) => {
@@ -194,6 +190,26 @@ export async function bootstrap(
   // future insert path forgets to signal the worker's possiblyPending flag.
   const embedFallbackTimer = setInterval(() => embedTick(true), 60 * 60_000);
   embedFallbackTimer.unref?.();
+
+  // Periodic stale-session reaper — the boot-time sweep above only catches
+  // rows leaked by a PRIOR process run; a client killed mid-session (SIGKILL,
+  // OOM, closed terminal) while THIS process keeps running would otherwise
+  // block `findActiveForTransport` for every subsequent session on the same
+  // (token, project) for as long as the server stays up. See
+  // openspec/changes/fix-audited-defects.
+  const sessionReapTimer = setInterval(() => {
+    try {
+      const result = agentSessionsSvc.abandonStale({ olderThanMs: config.sessions.abandonAfterMs });
+      if (result.abandoned > 0) {
+        logger.info(`${result.abandoned} stale session(s) marked abandoned (periodic reap)`);
+      }
+    } catch (err) {
+      logger.error('periodic session reap failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, 30 * 60_000);
+  sessionReapTimer.unref?.();
 
   // Doctor report builder — captures live services for `memory.doctor`.
   const buildDoctorReport = buildDoctorReportFactory({
@@ -369,6 +385,8 @@ export async function bootstrap(
         });
       }
       clearInterval(embedTimer);
+      clearInterval(embedFallbackTimer);
+      clearInterval(sessionReapTimer);
       await http.close();
       dbHandle.close();
     },
@@ -452,7 +470,9 @@ function buildDoctorReportFactory(deps: {
       warnings.push(`embeddings backlog: ${backlog}`);
     }
 
-    const sessionsByStatus = deps.agentSessions.countByStatus();
+    // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session
+    // count is server-wide, unlike memory.stats's scoped one.
+    const sessionsByStatus = deps.agentSessions.adminCountByStatus();
 
     return {
       db: { open: true, journalMode, integrity, sizeBytes },
@@ -473,7 +493,7 @@ function collectStats(
   relationsSvc: RelationsService,
 ): DashboardStats {
   const consolidationRow = repos.consolidation.latestRun();
-  const sessionsByStatus = agentSessionsSvc.countByStatus();
+  const sessionsByStatus = agentSessionsSvc.adminCountByStatus();
   const relationsByStatus = relationsSvc.countByStatus();
   const memoriesByStatus = repos.memory.countRowsByStatus();
 

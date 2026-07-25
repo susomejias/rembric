@@ -12,6 +12,7 @@ import { RelationsService } from '../services/relations.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { buildRelationsHandlers } from './relations-tools.js';
+import { suggestTopicKey } from './topic-key.js';
 
 let db: TestDb;
 let repos: Repositories;
@@ -73,6 +74,7 @@ beforeEach(() => {
     relations,
     router: new SessionRouter(),
     projects: new ProjectsService(repos),
+    repos,
   });
 });
 
@@ -221,6 +223,102 @@ describe('memory.judge — cross-scope targets never leak existence', () => {
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.code).toBe('not_found');
     expect(repos.relations.findByJudgmentId(pending.judgmentId)?.status).toBe('pending');
+  });
+});
+
+describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-defects)', () => {
+  it('reports occupied:true with the occupant when the exact suggested key is already active', async () => {
+    const title = 'Dev stack data dir needs chown 10001';
+    const suggestion = suggestTopicKey({ type: 'project', title });
+    const held = memorySvc.saveWithTopicKey(
+      { type: 'project', title, content: 'x', topicKey: suggestion },
+      { kind: 'global' },
+    ).memory;
+
+    const r = await runWithContext(fakeContext(), () =>
+      Promise.resolve(
+        handlers.suggestTopicKey({
+          type: 'project',
+          title: 'Dev stack data dir needs chown 10001',
+        }),
+      ),
+    );
+    const out = parse<{
+      topic_key: string;
+      occupied: boolean;
+      occupantId?: string;
+      occupantTitle?: string;
+      nearby: { topicKey: string; title: string }[];
+    }>(r);
+    expect(out.topic_key).toBe(suggestion);
+    expect(out.occupied).toBe(true);
+    expect(out.occupantId).toBe(held.id);
+    expect(out.occupantTitle).toBe(held.title);
+  });
+
+  it('reports occupied:false and no occupant fields when the exact key is free', async () => {
+    const r = await runWithContext(fakeContext(), () =>
+      Promise.resolve(
+        handlers.suggestTopicKey({ type: 'project', title: 'Genuinely novel topic' }),
+      ),
+    );
+    const out = parse<{ occupied: boolean; occupantId?: string }>(r);
+    expect(out.occupied).toBe(false);
+    expect(out.occupantId).toBeUndefined();
+  });
+
+  it('surfaces a near-miss active key sharing a prefix in nearby[]', async () => {
+    const heldTitle = 'Dev stack data dir needs chown permissions';
+    const heldKey = suggestTopicKey({ type: 'project', title: heldTitle });
+    const held = memorySvc.saveWithTopicKey(
+      { type: 'project', title: heldTitle, content: 'x', topicKey: heldKey },
+      { kind: 'global' },
+    ).memory;
+
+    const r = await runWithContext(fakeContext(), () =>
+      Promise.resolve(
+        handlers.suggestTopicKey({ type: 'project', title: 'Dev stack data dir chown fix' }),
+      ),
+    );
+    const out = parse<{
+      occupied: boolean;
+      nearby: { topicKey: string; title: string }[];
+    }>(r);
+    expect(out.occupied).toBe(false);
+    expect(out.nearby.map((n) => n.topicKey)).toContain(held.topicKey);
+  });
+
+  it('does not leak a key held only in another project into nearby or occupied', async () => {
+    const projects = new ProjectsService(repos);
+    const projectA = projects.create({ slug: 'suggest-proj-a' });
+    const projectB = projects.create({ slug: 'suggest-proj-b' });
+    const title = 'Dev stack data dir needs chown 10001';
+    memorySvc.saveWithTopicKey(
+      {
+        type: 'project',
+        title,
+        content: 'x',
+        topicKey: suggestTopicKey({ type: 'project', title }),
+      },
+      { kind: 'project', projectId: projectB.id },
+    );
+
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(
+        handlers.suggestTopicKey({
+          type: 'project',
+          title: 'Dev stack data dir needs chown 10001',
+        }),
+      ),
+    );
+    const out = parse<{
+      occupied: boolean;
+      occupantId?: string;
+      nearby: { topicKey: string; title: string }[];
+    }>(r);
+    expect(out.occupied).toBe(false);
+    expect(out.occupantId).toBeUndefined();
+    expect(out.nearby).toEqual([]);
   });
 });
 

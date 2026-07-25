@@ -579,6 +579,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0019_memory_scope_seen_index.sql',
       '0020_fix_fts_delete_triggers.sql',
       '0021_memory_replaces_table.sql',
+      '0022_session_last_activity.sql',
     ]);
 
     // FK integrity after the rebuild.
