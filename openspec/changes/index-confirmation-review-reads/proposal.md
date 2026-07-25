@@ -24,6 +24,8 @@ These are session-start and dashboard paths, not per-turn ones, so this is not u
 - **Decide whether `confirmations_memory_id_idx` is now redundant.** The composite has `memory_id` as its leftmost column, so it serves every lookup the single-column index served. Dropping it saves write amplification on an append-only table that only grows; keeping it is the conservative choice. Measure both before deciding — a `memory_id`-only seek may still prefer the narrower index.
 - **Record the measurement in the `data-access` spec** as the reason the correlated-subquery form stays: a requirement stating that these reads are indexed rather than joined, with the figures, so the rewrite is not re-proposed as an optimisation.
 
+The audit that produced these figures also found that this index pays beyond the needs-review reads: it makes `reviewTimestampsByIds` covering and removes its `USE TEMP B-TREE FOR GROUP BY`, 1.86 → 0.86ms at 400 ids — on the per-turn search path, not just the session-start one. The rest of that audit is `tune-hot-query-paths`; this change stays scoped to `confirmations`.
+
 ## Impact
 
 Affected specs: `data-access` (the indexed-not-joined requirement), `persistence` (the DDL, which already pins index names down to individual triggers for other tables).
