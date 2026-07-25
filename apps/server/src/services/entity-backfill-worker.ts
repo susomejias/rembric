@@ -50,6 +50,12 @@ export class EntityBackfillWorker {
         processed++;
       } catch {
         failed++;
+        // Without this the row never leaves the queue and the drain hot-loops forever.
+        try {
+          this.opts.repos.entities.markScanned(row.id, this.now());
+        } catch {
+          /* the row will be retried next drain — better than a hot loop */
+        }
       }
     }
     return { processed, failed };

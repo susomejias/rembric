@@ -36,6 +36,9 @@ function entityScopeCondition(scope: MemoryScope, projectId: string | null) {
   );
 }
 
+/** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
+const LOOKUP_CHUNK = 200;
+
 export class EntitiesRepository {
   constructor(private readonly db: Db) {}
 
@@ -58,21 +61,25 @@ export class EntitiesRepository {
     scannedAt: Date,
   ): void {
     if (entities.length > 0) {
-      const existing = this.db
-        .select({ id: memoryEntities.id, kind: memoryEntities.kind, value: memoryEntities.value })
-        .from(memoryEntities)
-        .where(
-          and(
-            entityScopeCondition(scope, projectId),
-            or(
-              ...entities.map((e) =>
-                and(eq(memoryEntities.kind, e.kind), eq(memoryEntities.value, e.value)),
+      const idByKey = new Map<string, string>();
+      for (let i = 0; i < entities.length; i += LOOKUP_CHUNK) {
+        const chunk = entities.slice(i, i + LOOKUP_CHUNK);
+        const existing = this.db
+          .select({ id: memoryEntities.id, kind: memoryEntities.kind, value: memoryEntities.value })
+          .from(memoryEntities)
+          .where(
+            and(
+              entityScopeCondition(scope, projectId),
+              or(
+                ...chunk.map((e) =>
+                  and(eq(memoryEntities.kind, e.kind), eq(memoryEntities.value, e.value)),
+                ),
               ),
             ),
-          ),
-        )
-        .all();
-      const idByKey = new Map(existing.map((r) => [`${r.kind}:${r.value}`, r.id]));
+          )
+          .all();
+        for (const r of existing) idByKey.set(`${r.kind}:${r.value}`, r.id);
+      }
 
       const toInsert: NewMemoryEntity[] = [];
       const entityIds: string[] = [];
@@ -100,6 +107,11 @@ export class EntitiesRepository {
         .onConflictDoNothing()
         .run();
     }
+    this.markScanned(memoryId, scannedAt);
+  }
+
+  /** Records scan coverage without linking — used to retire a row whose extraction threw. */
+  markScanned(memoryId: string, scannedAt: Date): void {
     this.db.insert(memoryEntityScan).values({ memoryId, scannedAt }).onConflictDoNothing().run();
   }
 
