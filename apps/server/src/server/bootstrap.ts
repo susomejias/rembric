@@ -197,8 +197,12 @@ export async function bootstrap(
   // Resumable entity-extraction backfill (add-entity-index) — same
   // in-process tick+timer shape as the embedding worker, but synchronous
   // (no model, no network) so the tick itself never needs a `.catch()`.
-  if (ensureEntityExtractor(repos, config.dataDir).reset) {
-    logger.warn('entity extractor recipe changed → index reset; re-scanning in background');
+  try {
+    if (ensureEntityExtractor(repos, config.dataDir).reset) {
+      logger.warn('entity extractor recipe changed → index reset; re-scanning in background');
+    }
+  } catch (err) {
+    logger.warn(`entity extractor identity check failed; leaving index as-is: ${String(err)}`);
   }
   const entityBackfillWorker = new EntityBackfillWorker({ repos });
   const entityBackfillTick = (force = false): void => {

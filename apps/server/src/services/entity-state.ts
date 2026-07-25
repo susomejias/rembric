@@ -37,12 +37,13 @@ export function ensureEntityExtractor(
 ): { reset: boolean } {
   if (readMarker(dataDir)?.extractorVersion === EXTRACTOR_VERSION) return { reset: false };
 
-  // Unconditional: a corpus scanned under the old recipe may hold zero
-  // entities yet still have scan rows, which alone would block the re-scan.
-  repos.entities.truncateAll();
+  // Marker first: truncating before it persists re-wipes the index on every boot attempt.
   writeFileSync(
     join(dataDir, MARKER_FILE),
     JSON.stringify({ extractorVersion: EXTRACTOR_VERSION } satisfies EntityState, null, 2) + '\n',
   );
+  // Unconditional: a corpus scanned under the old recipe may hold zero
+  // entities yet still have scan rows, which alone would block the re-scan.
+  repos.entities.truncateAll();
   return { reset: true };
 }
