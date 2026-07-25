@@ -43,6 +43,53 @@ Two properties of this repo shape every decision below:
 
 **Q5 → out of scope here; own change.** It is a redesign, not a tuning task: the floor must be scored on a rank-invariant quantity, which also moves the gap-ratio filter's evaluation point. Tracked separately so this change does not grow a design problem.
 
+## Verdict per finding
+
+One row per finding in `proposal.md`, with the side judged right and where it lands. **Amend spec** means the code is the deliberate improvement (D1); **change code** means the spec described the better behaviour and the code moves (D2). Rows marked _not carried_ have a recorded verdict but no task in `tasks.md` and no delta spec — they are named here so the gap is visible rather than lost.
+
+| Finding                                                         | Verdict                          | Lands in                                   |
+| --------------------------------------------------------------- | -------------------------------- | ------------------------------------------ |
+| `consolidation` orthogonality invariant / read-time escalation  | amend spec (code fixed already)  | `memory` delta, task 3.4                   |
+| `entity` "MAY be combined with `status`/`type`"                 | change code                      | task 2.1                                   |
+| entity path promises completeness, returns 8                    | change code                      | task 2.2                                   |
+| `topic_key` documented as any-status, defaults to `active`      | change code                      | task 2.3                                   |
+| global entities invisible to a project-scoped read              | change code                      | task 2.4                                   |
+| extraction "SHALL run inside the same transaction as the save"  | amend spec                       | `memory-entities` delta                    |
+| `dashboard` "the view is scope-isolated"                        | amend spec (Q1)                  | `dashboard` delta, task 1.2                |
+| `dashboard` entity drill-down is an FTS query                   | change code (D3)                 | **not carried** — no task, no delta        |
+| `claude-code-plugin` "first-prompt relevance prefetch"          | amend spec or call the endpoint  | **not carried**                            |
+| four specs describe the recall hook as matcher-gated            | amend specs                      | **not carried**                            |
+| `claude-code-plugin` "hook output ≤30 tokens" (measured ~135)   | amend spec                       | **not carried**                            |
+| `retrieval-evaluation` "a floor per metric" gates three of five | gate the two, or narrow the line | **not carried**                            |
+| `data-access` aggregate-count loophole + two unprefixed reads   | amend spec **and** change code   | task 5.10                                  |
+| the refutation channel is unrecorded                            | amend spec (add)                 | `mcp-api` + `memory` deltas, tasks 3.1–3.3 |
+| `memory.context`'s entity pre-pass is unrecorded                | amend spec (add)                 | `mcp-api` delta, task 4.1                  |
+| entity-table DDL and the identity index are unrecorded          | amend spec (add)                 | `persistence` delta, task 4.2              |
+| `verdict` has no DB `CHECK`                                     | change code (Q3)                 | task 4.3                                   |
+| entity-channel candidate similarity is unit-incompatible        | change code (normalise)          | task 4.4                                   |
+| seven ranking/lifecycle constants no requirement names          | amend spec (add)                 | `memory` delta, task 4.5                   |
+| surviving `last_seen_at` claims (three sites)                   | amend spec                       | tasks 5.1–5.3                              |
+| `sessions` startup-only vs periodic retirement                  | amend spec                       | task 5.4                                   |
+| rank-window claim vs the post-fusion boost                      | amend spec                       | task 5.5                                   |
+| gap-ratio filter specified per-best, implemented per-pair       | amend spec                       | task 5.6                                   |
+| `memory.get` predecessor chain and the phantom `source` field   | amend spec                       | task 5.7                                   |
+| entity retrieval "no cutoff" vs the 400-row bound               | amend spec                       | task 5.8                                   |
+| `memory.stats` / `memory.doctor` response shapes                | amend spec                       | task 5.9                                   |
+| `docs/backup.md` restore trap, shrinkage var, cron claim, guard | change docs                      | tasks 6.1–6.7                              |
+| `persistence` "both tables" for the entity rebuild              | amend spec                       | task 6.6                                   |
+| the kind-justification table has no measurement apparatus       | change code **and** amend spec   | tasks 7.1–7.5                              |
+| archived memories are never indexed                             | change code (Q2)                 | task 8.1                                   |
+| a drain is indistinguishable from an unknown entity             | change code                      | task 8.2                                   |
+| `truncateAll` is three DELETEs outside a transaction            | change code                      | task 8.3                                   |
+| `findMemoriesByEntity` has no ordering tiebreaker               | change code                      | task 8.4                                   |
+| the entity-links composite PK is absent from Drizzle            | change code                      | task 8.5                                   |
+| the three entity tables are absent from the drift snapshot      | change code                      | task 8.6                                   |
+| `ABSTENTION_FLOOR` has no usable dynamic range                  | redesign (Q5)                    | owned by `rescore-relevance-abstention`    |
+| `writeBaseline` sets floors with no ratchet                     | change code                      | task 8.8                                   |
+| `MEMORY_TYPES` is hand-copied at four sites                     | change code                      | task 8.9                                   |
+
+**D6 — The entity candidate channel's score is a similarity, its rarity is a gate (Q-less, decided here for 4.4).** `1 - linkCount/scopeMemoryCount` is a rarity proportion, so a once-linked entity in a 1000-memory scope reports 0.999 and outranks any realistic cosine in a `max()` merge that claims to compare one quantity. Scoring it on rarity is also corpus-size-dependent, which is the exact defect `fix-retrieval-ranking-math` removed from the lexical side. The channel therefore reports the SAME bounded token-containment quantity the lexical channel reports, and `ENTITY_RARITY_THRESHOLD` stays what it already was — an admission gate. Precedence becomes explicit instead: entity candidates lead the merged list, because that is the same principle `memory.context`'s entity pre-pass already rests on ("an exact identifier match is stronger evidence than any ranked score"). Scoring on containment alone without the explicit lead would have silently disabled the channel — a shared rare identifier with no shared vocabulary is exactly the case it exists for, and five vec/fts candidates would crowd it out of `perSaveMax`.
+
 ## Risks
 
 - **Scope.** This touches eleven specs. The temptation is to transcribe rather than decide; task 1.1 exists to force a recorded verdict per finding first.

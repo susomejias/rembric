@@ -1,4 +1,5 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 import { memory, type MemorySource } from './memory.js';
 
@@ -49,6 +50,10 @@ export const confirmations = sqliteTable(
       table.memoryId,
       table.verdict,
       table.eventTs,
+    ),
+    verdictCheck: check(
+      'confirmations_verdict_check',
+      sql`${table.verdict} IN ('affirm', 'refute')`,
     ),
   }),
 );

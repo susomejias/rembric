@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { Memory, MemoryScope } from '../db/schema/memory.js';
+import { MEMORY_TYPES, type Memory, type MemoryScope } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -56,7 +56,6 @@ import { ok } from './result.js';
  *     - memory.get / .confirm        →  project ids are 'not_found' (idem)
  */
 
-const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 const MEMORY_SCOPES = ['global', 'project'] as const;
 const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 
@@ -83,7 +82,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does.',
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
     ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
@@ -293,6 +292,13 @@ export const memorySearchOutput = {
   abstainReason: z.string().optional(),
   /** True when `entity` drove retrieval (exact-address, not ranked). */
   viaEntity: z.boolean().optional(),
+  /**
+   * Present only on an EMPTY entity lookup whose scope still has unscanned
+   * memories: "not in the index" and "not indexed yet" are otherwise the same
+   * empty response, and after an extractor recipe change the second one lasts
+   * as long as the drain does.
+   */
+  entityIndexDraining: z.boolean().optional(),
 };
 
 export const memoryGetOutput = {
@@ -835,10 +841,8 @@ async function handleSearch(
   };
 
   try {
-    const { memories, abstained, reason, viaEntity } = await deps.memory.searchWithAbstention(
-      input,
-      scope,
-    );
+    const { memories, abstained, reason, viaEntity, entityIndexDraining } =
+      await deps.memory.searchWithAbstention(input, scope);
     const entitiesByMemory = deps.repos
       ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
       : new Map<string, { kind: string; value: string }[]>();
@@ -925,6 +929,7 @@ async function handleSearch(
       abstained,
       ...(reason ? { abstainReason: reason } : {}),
       ...(viaEntity ? { viaEntity } : {}),
+      ...(entityIndexDraining ? { entityIndexDraining } : {}),
     });
   } catch (err) {
     return errToMcp(err);

@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
+import { MEMORY_TYPES } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { DomainError } from '../services/errors.js';
@@ -25,8 +26,6 @@ import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
  * `memory.save` itself is extended in the existing tools.ts so the
  * legacy entry point still works.
  */
-
-const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 
 export const suggestTopicKeySchema = {
   type: z.enum(MEMORY_TYPES),

@@ -503,6 +503,56 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     expect(cands.some((c) => c.source === 'entity')).toBe(true);
     expect(cands.length).toBeLessThanOrEqual(2);
   });
+
+  it('reports containment, not rarity, and still leads the merged list', () => {
+    const repos = createRepositories(db.handle.db);
+    // A near-duplicate the lexical pass scores ~1.0, plus an entity match that
+    // shares the path and no vocabulary at all. Under the old rarity score the
+    // entity row reported ~0.95 purely because the scope was large; it must now
+    // report its (near-zero) containment and lead on precedence instead.
+    for (let i = 0; i < 18; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    const nearDuplicate = memorySvc.save(
+      { type: 'project', title: 'Deploy runbook', content: 'the deploy runbook lives here' },
+      SCOPE_GLOBAL,
+    );
+    const entityOnly = memorySvc.save(
+      { type: 'project', title: 'Ownership', content: 'chown ten thousand and one' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(
+      entityOnly.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'docs/docker.md' }],
+      new Date(),
+    );
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Deploy runbook', content: 'the deploy runbook lives here' },
+      SCOPE_GLOBAL,
+    );
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 1 }, [
+      { kind: 'path', value: 'docs/docker.md' },
+    ]);
+
+    // perSaveMax of 1 is the whole point: the entity row must occupy it even
+    // though the near-duplicate scores far higher on the shared quantity.
+    expect(cands.map((c) => c.targetId)).toEqual([entityOnly.id]);
+    expect(cands[0]!.similarity).toBeLessThan(0.2);
+
+    const wide = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'path', value: 'docs/docker.md' },
+    ]);
+    expect(wide[0]!.targetId).toBe(entityOnly.id);
+    expect(wide.find((c) => c.targetId === nearDuplicate.id)!.similarity).toBeGreaterThan(
+      wide[0]!.similarity,
+    );
+  });
 });
 
 describe('9.7 property: at most one active row per (scope, project_id, topic_key)', () => {

@@ -583,6 +583,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0023_memory_entities.sql',
       '0024_confirmation_verdict.sql',
       '0025_confirmation_review_index.sql',
+      '0026_confirmation_verdict_check.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -690,6 +691,177 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
     expect(titles.get('crlf')).toBe('first line');
     expect(titles.get('normal')).toBe('Bold lead** then body');
     expect(titles.get('long')).toBe('x'.repeat(100));
+  });
+});
+
+// Prod-safety for 0026: the CHECK is added by rebuilding a POPULATED
+// `confirmations` table, so every historical affirmation and refutation must
+// survive byte-for-byte, all four indexes must come back (a DROP TABLE takes
+// every index with it), and the domain must be closed afterwards.
+describe('migration 0026_confirmation_verdict_check over populated data', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig26-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig26-slice-'));
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const f of all) {
+      if (f.startsWith('0026_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('synchronous = NORMAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    migrate(raw, { migrationsDir: slicedDir });
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  function seed(): void {
+    raw
+      .prepare(
+        "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO sessions (id, token_id, agent, started_at, status) VALUES ('sess1', 'tok1', 'claude', 0, 'active')",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at) VALUES ('m1', 'global', NULL, 'user', 'm1', 'body', 'active', 0)",
+      )
+      .run();
+  }
+
+  it('preserves every affirmation and refutation and recreates all four indexes', () => {
+    seed();
+    raw
+      .prepare(
+        "INSERT INTO confirmations (id, memory_id, event_ts, source, session_id, verdict, reason) VALUES ('c-affirm', 'm1', 10, '{\"agent\":\"claude\"}', 'sess1', 'affirm', NULL)",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO confirmations (id, memory_id, event_ts, verdict, reason) VALUES ('c-refute', 'm1', 20, 'refute', 'the path moved')",
+      )
+      .run();
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toContain('0026_confirmation_verdict_check.sql');
+    expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(
+      raw.prepare("SELECT name FROM sqlite_master WHERE name = 'confirmations_new'").all(),
+    ).toEqual([]);
+
+    expect(
+      raw
+        .prepare<
+          [],
+          {
+            id: string;
+            memory_id: string;
+            event_ts: number;
+            source: string | null;
+            session_id: string | null;
+            verdict: string;
+            reason: string | null;
+          }
+        >(
+          'SELECT id, memory_id, event_ts, source, session_id, verdict, reason FROM confirmations ORDER BY id',
+        )
+        .all(),
+    ).toEqual([
+      {
+        id: 'c-affirm',
+        memory_id: 'm1',
+        event_ts: 10,
+        source: '{"agent":"claude"}',
+        session_id: 'sess1',
+        verdict: 'affirm',
+        reason: null,
+      },
+      {
+        id: 'c-refute',
+        memory_id: 'm1',
+        event_ts: 20,
+        source: null,
+        session_id: null,
+        verdict: 'refute',
+        reason: 'the path moved',
+      },
+    ]);
+
+    expect(
+      raw
+        .prepare<[], { name: string }>(
+          "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='confirmations' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .all()
+        .map((r) => r.name),
+    ).toEqual([
+      'confirmations_event_ts_idx',
+      'confirmations_memory_id_idx',
+      'confirmations_memory_verdict_ts_idx',
+      'confirmations_session_idx',
+    ]);
+  });
+
+  it('closes the verdict domain against a direct INSERT and UPDATE', () => {
+    seed();
+    migrate(raw, { migrationsDir: fullMigrationsDir });
+
+    expect(() =>
+      raw
+        .prepare(
+          "INSERT INTO confirmations (id, memory_id, event_ts, verdict) VALUES ('c-bad', 'm1', 30, 'affirmed')",
+        )
+        .run(),
+    ).toThrow(/CHECK constraint failed/);
+
+    raw
+      .prepare(
+        "INSERT INTO confirmations (id, memory_id, event_ts, verdict) VALUES ('c-ok', 'm1', 30, 'affirm')",
+      )
+      .run();
+    expect(() =>
+      raw.prepare("UPDATE confirmations SET verdict = 'AFFIRM' WHERE id = 'c-ok'").run(),
+    ).toThrow(/CHECK constraint failed/);
+  });
+
+  it('normalizes an out-of-domain legacy verdict instead of aborting the upgrade', () => {
+    seed();
+    // Only reachable by a hand-edited database: 0024 shipped the column without
+    // a CHECK, so this is the case that would otherwise brick the boot.
+    raw
+      .prepare(
+        "INSERT INTO confirmations (id, memory_id, event_ts, verdict) VALUES ('c-legacy', 'm1', 40, 'yes')",
+      )
+      .run();
+
+    expect(() => migrate(raw, { migrationsDir: fullMigrationsDir })).not.toThrow();
+    expect(
+      raw
+        .prepare<[], { verdict: string }>("SELECT verdict FROM confirmations WHERE id = 'c-legacy'")
+        .get()!.verdict,
+    ).toBe('affirm');
   });
 });
 

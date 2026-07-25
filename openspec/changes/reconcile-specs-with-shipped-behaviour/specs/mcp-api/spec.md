@@ -280,10 +280,20 @@ Completeness is bounded, and the bound SHALL be the same generous over-fetch cei
 - **WHEN** `memory.search` returns results for an `entity` lookup
 - **THEN** the response SHALL indicate that exact-address retrieval was used
 
+An empty entity result SHALL say whether the index has caught up. The tool's own guidance is "empty means it is not there, so retry with `query`" — which is wrong for as long as the extraction drain is still running, and after a recipe change that is the state of the whole corpus. When an `entity` lookup returns nothing AND the scope still holds memories awaiting their first scan, the response SHALL carry a draining flag, and the argument's description SHALL name it so the agent retries the same lookup rather than degrading to text. A non-empty result and a miss over a fully-scanned scope SHALL NOT carry it, so its presence always means something.
+
 #### Scenario: An unknown entity returns empty rather than falling back to text search
 
 - **WHEN** `memory.search` is called with an `entity` that exists nowhere in scope
 - **THEN** the response SHALL be empty and SHALL NOT silently degrade into a text query over that string
+- **AND** when the scope is fully scanned the response SHALL NOT carry the draining flag
+
+#### Scenario: An empty lookup during a drain is marked as such
+
+- **GIVEN** an in-scope memory referencing an identifier, saved but not yet scanned for entities
+- **WHEN** `memory.search` is called with that `entity`
+- **THEN** the response SHALL be empty AND SHALL carry the draining flag
+- **AND** after the drain completes, the same call SHALL return the memory and SHALL NOT carry the flag
 
 #### Scenario: Entity plus text query narrows rather than fuses
 

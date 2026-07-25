@@ -148,7 +148,7 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
       <form
         action="/dashboard/entities/rebuild"
         method="post"
-        data-confirm="Truncate and re-scan the entity index from every non-archived memory? Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
+        data-confirm="Truncate and re-scan the entity index from every memory, archived included? Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
         data-confirm-label="REBUILD ENTITY INDEX"
         data-confirm-tone="warn"
         style="margin-bottom:var(--s-4)"
@@ -208,7 +208,7 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
     );
     if (form instanceof Response) return form;
 
-    deps.repos.entities.truncateAll();
+    deps.entityBackfillWorker.resetIndex();
     let processed = 0;
     for (let i = 0; i < REBUILD_MAX_BATCHES; i++) {
       const result = deps.entityBackfillWorker.processBatch({ force: true });

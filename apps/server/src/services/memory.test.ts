@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
+import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { DomainError } from './errors.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
@@ -317,6 +318,40 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       projectScope(projectId),
     );
     expect(result).toEqual([]);
+  });
+
+  it('distinguishes an unscanned index from an unknown entity', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Fix', content: 'fixed apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+
+    // The row exists but has never been scanned — exactly the state a recipe
+    // bump leaves the whole corpus in. Empty alone would read as "unknown".
+    const draining = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(draining.memories).toEqual([]);
+    expect(draining.entityIndexDraining).toBe(true);
+
+    new EntityBackfillWorker({ repos, tx: db.handle.db }).processBatch({ force: true });
+
+    const hit = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/migrate.ts' },
+      projectScope(projectId),
+    );
+    expect(hit.memories.map((r) => r.id)).toEqual([m.id]);
+    expect(hit.entityIndexDraining).toBeUndefined();
+
+    // A genuine miss over a fully-drained scope says nothing about the index.
+    const miss = await memory.searchWithAbstention(
+      { entity: 'apps/server/src/db/never.ts' },
+      projectScope(projectId),
+    );
+    expect(miss.memories).toEqual([]);
+    expect(miss.entityIndexDraining).toBeUndefined();
   });
 
   it('the same path in two projects does not join them', async () => {

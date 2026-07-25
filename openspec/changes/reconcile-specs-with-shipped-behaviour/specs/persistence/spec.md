@@ -80,6 +80,13 @@ The entity tables are the only derived tables whose DDL no requirement records, 
 
 The `WITHOUT ROWID` declarations on the two child tables cannot be expressed in Drizzle; the schema-drift test asserts them against `sqlite_master` instead. No trigger on `memory` maintains these tables — extraction needs the JS regex extractor, which SQL cannot run — so this migration adds no trigger and needs no table rebuild.
 
+All three tables SHALL appear in the schema-drift snapshot's expected table set. That assertion tolerates EXTRA tables, because FTS5 and vec0 shadow tables vary by extension version — so a table absent from the expected set is invisible to it, and a future rebuild that dropped one would go unnoticed until an entity read returned nothing.
+
+#### Scenario: A dropped entity table fails the drift snapshot
+
+- **WHEN** the schema-drift snapshot runs against a database missing any of the three entity tables
+- **THEN** it SHALL fail, naming the missing table
+
 #### Scenario: The identity index rejects a duplicate referent
 
 - **GIVEN** an entity row for `(project:'A', 'path', 'src/index.ts')`
@@ -102,7 +109,7 @@ Both columns were added to populated tables in shipped installs, so their migrat
 
 `0022_session_last_activity.sql` SHALL add `last_activity_at INTEGER` (nullable) to `sessions` and SHALL backfill it from `started_at` for every existing row, so a row saved before the column existed is retired on the same rule as a new one. The column stays nullable rather than NOT NULL: readers use `COALESCE(last_activity_at, started_at)`, which keeps a row written by an older binary correct instead of merely non-null.
 
-`0024_confirmation_verdict.sql` SHALL add `verdict TEXT NOT NULL DEFAULT 'affirm'` and `reason TEXT` (nullable) to `confirmations`. The default is what makes the migration additive: every pre-existing confirmation IS an affirmation, so the backfill is free and no historical row is reinterpreted. `reason` is nullable at the DB level and required only for a refutation, which is enforced at the service layer — the domain of `verdict` is likewise service-enforced, with no DB `CHECK` (see the open question recorded in this change's design).
+`0024_confirmation_verdict.sql` SHALL add `verdict TEXT NOT NULL DEFAULT 'affirm'` and `reason TEXT` (nullable) to `confirmations`. The default is what makes the migration additive: every pre-existing confirmation IS an affirmation, so the backfill is free and no historical row is reinterpreted. `reason` is nullable at the DB level and required only for a refutation, which is enforced at the service layer. The domain of `verdict` is NOT service-enforced — see the requirement below.
 
 #### Scenario: An existing session row is classifiable immediately after upgrade
 
@@ -120,3 +127,28 @@ Both columns were added to populated tables in shipped installs, so their migrat
 
 - **WHEN** `0022` and `0024` are inspected
 - **THEN** each SHALL consist of `ALTER TABLE … ADD COLUMN` (plus, for `0022`, one backfill `UPDATE`), with no `CREATE TABLE … _new`, no `DROP TABLE`, and no index or trigger recreation
+
+### Requirement: The confirmation verdict domain MUST be closed at the database level
+
+`verdict` carries the sign of an append-only judgement, and every read path that computes an affirmation baseline, a confidence floor, or a refutation lead filters on the literal `'affirm'` or `'refute'`. A value outside that pair is therefore not merely unusual — it silently vanishes from every one of those reads while still occupying a row, which is the shape of the JS/SQL divergence that shipped once already. The domain SHALL be unrepresentable rather than service-enforced: `confirmations.verdict` SHALL carry `CHECK (verdict IN ('affirm', 'refute'))`, declared in the Drizzle schema as well as the migration.
+
+Adding it costs a table rebuild, because SQLite cannot add a `CHECK` to an existing column and the column shipped without one in `0024`. The rebuild SHALL preserve every historical row verbatim and SHALL recreate all four indexes on the table — a `DROP TABLE` takes every index with it, and the drift snapshot's exact-set index assertion is the guard that none was lost. The migration SHALL add no `foreign_keys` pragma of its own; the runner owns them.
+
+The rebuild SHALL be total rather than abortable: a value outside the domain, reachable only in a hand-edited database, SHALL be normalised to `'affirm'` — the value `0024` already backfilled every historical row with — instead of failing the `CHECK` mid-migration and leaving an operator with a server that will not boot and no way forward. On every database this system wrote, that normalisation is the identity function.
+
+#### Scenario: An out-of-domain verdict is rejected after the migration
+
+- **WHEN** a row is inserted or updated with a `verdict` other than `'affirm'` or `'refute'`
+- **THEN** the write SHALL be rejected by the `CHECK` constraint
+
+#### Scenario: The rebuild preserves history and indexes
+
+- **GIVEN** a populated `confirmations` table holding both an affirmation and a refutation with a reason
+- **WHEN** the migration runs
+- **THEN** every column of every row SHALL be unchanged, and all four indexes on the table SHALL be present afterwards
+
+#### Scenario: A hand-edited legacy verdict does not brick the upgrade
+
+- **GIVEN** a `confirmations` row whose `verdict` is outside the domain
+- **WHEN** the migration runs
+- **THEN** it SHALL succeed and that row SHALL read `verdict = 'affirm'`

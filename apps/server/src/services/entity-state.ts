@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
@@ -31,9 +32,25 @@ function readMarker(dataDir: string): EntityState | null {
   return null;
 }
 
+/**
+ * Atomic wipe of the derived entity index — the only sanctioned path to
+ * `truncateAll`. The marker is written before the wipe, so a truncate that
+ * failed part-way would leave the index inconsistent with a marker claiming
+ * it was rebuilt, and nothing would ever notice.
+ */
+export function resetEntityIndex(
+  repos: Pick<Repositories, 'entities'>,
+  tx: TransactionRunner,
+): void {
+  tx.transaction(() => {
+    repos.entities.truncateAll();
+  });
+}
+
 export function ensureEntityExtractor(
   repos: Pick<Repositories, 'entities'>,
   dataDir: string,
+  tx: TransactionRunner,
 ): { reset: boolean } {
   if (readMarker(dataDir)?.extractorVersion === EXTRACTOR_VERSION) return { reset: false };
 
@@ -44,6 +61,6 @@ export function ensureEntityExtractor(
   );
   // Unconditional: a corpus scanned under the old recipe may hold zero
   // entities yet still have scan rows, which alone would block the re-scan.
-  repos.entities.truncateAll();
+  resetEntityIndex(repos, tx);
   return { reset: true };
 }

@@ -17,7 +17,7 @@ beforeEach(() => {
   const repos = createRepositories(db.handle.db);
   mem = new MemoryService(repos, db.handle.db);
   entities = repos.entities;
-  worker = new EntityBackfillWorker({ repos, batchSize: 50 });
+  worker = new EntityBackfillWorker({ repos, tx: db.handle.db, batchSize: 50 });
 });
 
 afterEach(() => db.cleanup());
@@ -46,12 +46,16 @@ describe('EntityBackfillWorker', () => {
     mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
     mem.save({ type: 'project', title: 'B', content: 'apps/b.ts' }, SCOPE_GLOBAL);
     const repos = createRepositories(db.handle.db);
-    new EntityBackfillWorker({ repos, batchSize: 1 }).processBatch();
+    new EntityBackfillWorker({ repos, tx: db.handle.db, batchSize: 1 }).processBatch();
     expect(repos.entities.adminBacklogCount()).toBe(1);
 
     // A brand-new worker instance (simulating a process restart) picks up
     // exactly where the backlog left off — no separate cursor to lose.
-    const resumed = new EntityBackfillWorker({ repos, batchSize: 50 }).processBatch();
+    const resumed = new EntityBackfillWorker({
+      repos,
+      tx: db.handle.db,
+      batchSize: 50,
+    }).processBatch();
     expect(resumed.processed).toBe(1);
     expect(repos.entities.adminBacklogCount()).toBe(0);
   });
@@ -63,12 +67,23 @@ describe('EntityBackfillWorker', () => {
     expect(second).toEqual({ processed: 0, failed: 0 });
   });
 
-  it('does not backfill archived memories', () => {
+  it('backfills archived memories too, so status-archived entity lookups can resolve', () => {
     const m = mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
     mem.archive(m.id, SCOPE_GLOBAL);
     const result = worker.processBatch();
-    expect(result.processed).toBe(0);
-    expect(entities.findEntitiesForMemory(m.id)).toEqual([]);
+    expect(result.processed).toBe(1);
+    expect(entities.findEntitiesForMemory(m.id)).toEqual([{ kind: 'path', value: 'apps/a.ts' }]);
+    expect(
+      entities
+        .findMemoriesByEntity({
+          scope: 'global',
+          projectId: null,
+          value: 'apps/a.ts',
+          status: 'archived',
+          limit: 10,
+        })
+        .map((r) => r.id),
+    ).toEqual([m.id]);
   });
 
   it('skips work when nothing is pending and force is not set', () => {

@@ -1,9 +1,12 @@
+import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 
 import { extractEntities } from './entities.js';
+import { resetEntityIndex } from './entity-state.js';
 
 export interface EntityBackfillWorkerOptions {
   repos: Pick<Repositories, 'entities'>;
+  tx: TransactionRunner;
   batchSize?: number;
   now?: () => Date;
 }
@@ -30,6 +33,16 @@ export class EntityBackfillWorker {
   /** True while `findMissingScans` last returned work — drives drain cadence. */
   get hasPendingWork(): boolean {
     return this.possiblyPending;
+  }
+
+  /**
+   * Atomically empty the derived index so the drain re-scans the whole corpus.
+   * Resets `possiblyPending` too, so a caller that forgets `force` on the next
+   * batch still drains rather than trusting a flag from before the wipe.
+   */
+  resetIndex(): void {
+    resetEntityIndex(this.opts.repos, this.opts.tx);
+    this.possiblyPending = true;
   }
 
   processBatch(opts: { force?: boolean } = {}): { processed: number; failed: number } {

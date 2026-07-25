@@ -16,7 +16,16 @@ import { projects } from './projects.js';
  */
 
 export type MemoryScope = 'global' | 'project';
-export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'procedural';
+
+/**
+ * The single declaration of the type domain, in the shape `ENTITY_KINDS` uses.
+ * Adding a type is one edit here plus a migration: the Drizzle enum, the union,
+ * the two MCP zod enums and the dashboard filter all derive from this array, so
+ * the compiler carries the change instead of a grep.
+ */
+export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
+
 export type MemoryStatus = 'active' | 'superseded' | 'archived';
 
 export interface MemorySource {
@@ -36,9 +45,7 @@ export const memory = sqliteTable(
     id: text('id').primaryKey(),
     scope: text('scope', { enum: ['global', 'project'] }).notNull(),
     projectId: text('project_id').references(() => projects.id),
-    type: text('type', {
-      enum: ['user', 'feedback', 'project', 'reference', 'procedural'],
-    }).notNull(),
+    type: text('type', { enum: [...MEMORY_TYPES] }).notNull(),
     /**
      * Short human-readable label (1..100 chars). Required at save; the DB
      * enforces `NOT NULL` + `CHECK(length(title) BETWEEN 1 AND 100)` (the

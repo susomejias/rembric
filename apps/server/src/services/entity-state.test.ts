@@ -3,12 +3,13 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { TransactionRunner } from '../db/client.js';
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
 import { EntityBackfillWorker } from './entity-backfill-worker.js';
-import { ensureEntityExtractor } from './entity-state.js';
+import { ensureEntityExtractor, resetEntityIndex } from './entity-state.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { projectScope } from './scope.js';
@@ -38,7 +39,7 @@ function scanCount(): number {
 
 describe('ensureEntityExtractor', () => {
   it('resets on a first boot with no marker and writes the current version', () => {
-    expect(ensureEntityExtractor(repos, db.dataDir).reset).toBe(true);
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
     const marker = JSON.parse(readFileSync(join(db.dataDir, MARKER), 'utf8')) as {
       extractorVersion: string;
     };
@@ -46,8 +47,8 @@ describe('ensureEntityExtractor', () => {
   });
 
   it('is a no-op once the marker matches', () => {
-    ensureEntityExtractor(repos, db.dataDir);
-    expect(ensureEntityExtractor(repos, db.dataDir).reset).toBe(false);
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(false);
   });
 
   it('re-scans an already-scanned corpus after a recipe change (upgrade path)', () => {
@@ -55,17 +56,17 @@ describe('ensureEntityExtractor', () => {
       { type: 'project', title: 'NAS note', content: 'the NAS lives at 192.168.1.50' },
       projectScope(projectId),
     );
-    const worker = new EntityBackfillWorker({ repos });
+    const worker = new EntityBackfillWorker({ repos, tx: db.handle.db });
 
     // Boot 1: pre-existing install, fully scanned under the stored recipe.
-    ensureEntityExtractor(repos, db.dataDir);
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
     worker.processBatch({ force: true });
     expect(scanCount()).toBe(1);
     expect(repos.entities.adminCountEntities({})).toBeGreaterThan(0);
 
     // Boot 2: recipe changed under the same data dir.
     writeFileSync(join(db.dataDir, MARKER), JSON.stringify({ extractorVersion: 'v0-stale' }));
-    expect(ensureEntityExtractor(repos, db.dataDir).reset).toBe(true);
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
     expect(scanCount()).toBe(0);
     expect(repos.entities.adminCountEntities({})).toBe(0);
 
@@ -88,19 +89,62 @@ describe('ensureEntityExtractor', () => {
       { type: 'project', title: 'Plain prose', content: 'no identifiers here at all' },
       projectScope(projectId),
     );
-    const worker = new EntityBackfillWorker({ repos });
-    ensureEntityExtractor(repos, db.dataDir);
+    const worker = new EntityBackfillWorker({ repos, tx: db.handle.db });
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
     worker.processBatch({ force: true });
     expect(scanCount()).toBe(1);
     expect(repos.entities.adminCountEntities({})).toBe(0);
 
     writeFileSync(join(db.dataDir, MARKER), JSON.stringify({ extractorVersion: 'v0-stale' }));
-    ensureEntityExtractor(repos, db.dataDir);
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
     expect(scanCount()).toBe(0);
   });
 
   it('treats an unreadable marker as unknown identity', () => {
     writeFileSync(join(db.dataDir, MARKER), 'not json at all');
-    expect(ensureEntityExtractor(repos, db.dataDir).reset).toBe(true);
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
+  });
+});
+
+describe('resetEntityIndex', () => {
+  it('opens one transaction, so a partial wipe cannot survive', () => {
+    memory.save(
+      { type: 'project', title: 'NAS note', content: 'the NAS lives at 192.168.1.50' },
+      projectScope(projectId),
+    );
+    new EntityBackfillWorker({ repos, tx: db.handle.db }).processBatch({ force: true });
+    expect(scanCount()).toBe(1);
+
+    let opened = 0;
+    const counting: TransactionRunner = {
+      transaction: (cb) => {
+        opened++;
+        return db.handle.db.transaction(cb);
+      },
+    };
+
+    resetEntityIndex(repos, counting);
+
+    expect(opened).toBe(1);
+    expect(scanCount()).toBe(0);
+    expect(repos.entities.adminCountEntities({})).toBe(0);
+    expect(repos.entities.adminBacklogCount()).toBe(1);
+  });
+
+  it('leaves the worker believing there is work again', () => {
+    memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, projectScope(projectId));
+    const worker = new EntityBackfillWorker({ repos, tx: db.handle.db });
+    worker.processBatch({ force: true });
+    // A second pass is what clears the flag: it goes false only when
+    // `findMissingScans` comes back empty.
+    worker.processBatch({ force: true });
+    expect(worker.hasPendingWork).toBe(false);
+
+    worker.resetIndex();
+
+    expect(worker.hasPendingWork).toBe(true);
+    // No `force`: the flag alone has to be enough, or a rebuild silently
+    // leaves the index empty until the hourly forced fallback.
+    expect(worker.processBatch().processed).toBe(1);
   });
 });

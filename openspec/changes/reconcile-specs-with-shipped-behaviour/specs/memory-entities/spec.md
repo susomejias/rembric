@@ -145,6 +145,10 @@ Exact-address retrieval is not a relevance problem: the caller has supplied an e
 
 The same selection filters the ranked path accepts (`status`, `type`, `tag`, `topic_key`, and the global widening above) SHALL apply here with the same meaning. Filtering is not ranking: narrowing to what the caller asked for does not reintroduce relevance ordering, whereas silently ignoring a filter returns rows the caller explicitly excluded.
 
+`status` composes only if the index covers every status, so **archived memories SHALL be indexed**. Excluding them made `status: 'archived'` a filter that could never match anything, and made every extractor recipe change drop the archived corpus's links permanently — a row archived before the bump is re-scanned by nothing, ever. Extraction is a pure synchronous function of `title + content`, so the only cost is a longer first drain on a corpus with many archived rows, paid once. The drain's queue and the operator-visible backlog count SHALL agree on that population, or the backlog never reaches zero.
+
+Chronological ordering SHALL be a TOTAL order. `created_at` has millisecond resolution and a batch capture writes several memories inside one millisecond, so it alone is a partial order; the result is paged by the caller, and an unstable tie makes page 2 repeat or skip a row page 1 already showed. The ordering SHALL therefore carry a deterministic tiebreaker that is itself chronological.
+
 A text `query` supplied alongside an entity SHALL narrow, not rank: the entity's memories are filtered by case-insensitive substring containment over `title + content`, and the fetch SHALL cover more than the requested page so a match older than one page is not window-dropped. Substring containment, not the lexical branch, is deliberate — routing the narrowing through FTS5 would reintroduce exactly the tokenizer imprecision this index exists to remove.
 
 This is deliberately the opposite of the text-query branch, and it exists because the identifier query class is the one where ranked retrieval performs worst.
@@ -166,15 +170,65 @@ This is deliberately the opposite of the text-query branch, and it exists becaus
 - **WHEN** entity retrieval returns results
 - **THEN** the ordering SHALL be chronological and SHALL NOT be modified by confirmation count, recency, or type
 
+#### Scenario: An archived memory is reachable by entity
+
+- **GIVEN** a memory linked to an entity and subsequently archived
+- **WHEN** entity retrieval is performed for that entity with `status: 'archived'`
+- **THEN** that memory SHALL be returned
+
+#### Scenario: Same-millisecond rows page without repeating
+
+- **GIVEN** four in-scope memories linked to one entity and all carrying the same `created_at`
+- **WHEN** two consecutive pages of two are read
+- **THEN** the four rows SHALL be partitioned across the pages, with none repeated and none dropped
+
 #### Scenario: Narrowing by query is substring containment, not a second ranked pass
 
 - **GIVEN** an entity linked to more memories than one page holds, one of them the oldest and the only one containing the query text
 - **WHEN** entity retrieval is performed with that query
 - **THEN** that memory SHALL be returned, matched case-insensitively, and the result SHALL NOT be ordered by any relevance score
 
+### Requirement: Entity overlap MUST be a save-time conflict-detection channel
+
+Two memories can contradict each other while sharing almost no vocabulary and sitting far apart in embedding space — a fix and its reversal, stated in different words about the same file. Lexical and dense similarity both miss that case. A newly saved memory sharing a sufficiently rare entity with an existing active memory in the same scope SHALL therefore be eligible as a save-time candidate, alongside the existing lexical and dense channels.
+
+Candidates surfaced this way SHALL carry a source identifying the entity channel, so the agent judging them knows why they were proposed. Common entities SHALL NOT generate candidates: an entity linked to a large share of the scope's memories carries no signal and would flood the per-save candidate budget.
+
+The three channels are merged into one list by a reported `similarity`, so that number SHALL be ONE quantity in every channel. Entity rarity SHALL NOT be that quantity. Rarity is the channel's ADMISSION gate — it decides whether the entity proposes anything at all — and reporting `1 - linkCount / scopeMemoryCount` as the similarity made a once-linked entity in a large scope report a near-1 score purely because the scope was large, outranking any realistic cosine and re-introducing the corpus-size dependence that was already removed from the lexical side. Every channel SHALL therefore report the same bounded `[0,1]` measure of how alike the two memories' text is: cosine where the dense branch found the pair, query-token containment otherwise.
+
+Because that measure is near zero for exactly the pairs this channel exists to find, the channel's precedence SHALL be explicit rather than expressed through its score: entity-sourced candidates SHALL lead the merged list, and a target found by both the entity channel and another SHALL be reported as the entity one, because only that form carries the shared identifier. Ranking the channel on the shared measure alone would push its whole reason for existing past the per-save cap, behind candidates the other two channels would have surfaced anyway.
+
+#### Scenario: A contradiction about the same file is surfaced
+
+- **GIVEN** an active memory stating one approach for a specific file, and a new memory stating an incompatible approach for the same file, with little shared vocabulary
+- **WHEN** the new memory is saved
+- **THEN** the existing memory SHALL be surfaced as a candidate with the entity channel as its source
+
+#### Scenario: A very common entity generates no candidates
+
+- **GIVEN** an entity linked to a large share of the scope's active memories
+- **WHEN** a new memory linked to that entity is saved
+- **THEN** that entity alone SHALL NOT generate candidates
+
+#### Scenario: The per-save candidate budget is respected
+
+- **WHEN** the entity channel would surface more candidates than the per-save maximum permits
+- **THEN** the total number of candidates SHALL still respect that maximum
+
+#### Scenario: The reported similarity is text likeness, not entity rarity
+
+- **GIVEN** a near-duplicate of the saved memory and an entity match sharing the identifier but almost no vocabulary
+- **WHEN** candidates are detected
+- **THEN** the entity candidate's reported `similarity` SHALL be the low text-likeness value and the near-duplicate's SHALL be higher
+- **AND** the entity candidate SHALL still be first in the list, and SHALL survive a per-save maximum of one
+
 ### Requirement: The entity index MUST be rebuildable and its drift MUST be observable
 
 All THREE entity tables are derived data, reconstructible from the append-only memory rows alone — the same class as the search and vector indexes. A rebuild path SHALL exist that recomputes them from `memory`, and it SHALL clear the scan bookkeeping table (`memory_entity_scan`) as well as the entity and link tables: the bookkeeping records THAT a memory was scanned, so a rebuild that empties only the knowledge tables leaves every row marked done and the drain finds nothing to do. Following a two-table procedure literally makes the rebuild a silent no-op, which is worse than no rebuild path at all because the operator believes the index was repaired.
+
+The wipe SHALL be atomic, and the scan table SHALL be cleared FIRST. Three statements are three failure points, and the recipe marker is already on disk by the time the wipe runs, so a partial wipe leaves the index inconsistent with a marker asserting it was rebuilt and nothing ever notices. Ordering is the second half of the guarantee: clearing bookkeeping first means the worst reachable partial state is "bookkeeping gone, links intact", which the drain repairs idempotently, whereas the reverse leaves scan rows without links — a backlog reporting zero over a permanently empty index. After a wipe the drain SHALL consider work pending again without needing to be forced.
+
+An entity lookup issued while the drain is still running SHALL be distinguishable from a lookup of an unknown entity. Both return no rows, and after a recipe change the whole corpus is in that state for as long as the drain takes, so an agent told "empty means it is not there" concludes the identifier is unknown and falls back to a text query. An empty entity result over a scope that still has unscanned memories SHALL therefore carry a signal saying so.
 
 The diagnostics surface SHALL report a link-count delta so drift caused by a missed backfill, a failed extraction, or a future table-rebuild migration is visible rather than silent.
 
@@ -189,6 +243,18 @@ The diagnostics surface SHALL report a link-count delta so drift caused by a mis
 - **GIVEN** a populated entity index
 - **WHEN** the entity and link tables are emptied but `memory_entity_scan` is left populated
 - **THEN** the drain SHALL find no work, and the documented rebuild procedure SHALL therefore clear all three
+
+#### Scenario: An interrupted wipe cannot leave the index unrecoverable
+
+- **WHEN** the wipe fails part-way through
+- **THEN** no partial state SHALL be visible, and the drain SHALL still see the corpus as unscanned
+
+#### Scenario: A lookup during a drain is not reported as an unknown entity
+
+- **GIVEN** a memory referencing an identifier, saved but not yet scanned
+- **WHEN** entity retrieval is performed for that identifier
+- **THEN** the result SHALL be empty AND SHALL carry the draining signal
+- **AND** once the scope is fully scanned, a genuine miss SHALL NOT carry it
 
 #### Scenario: Drift is reported
 

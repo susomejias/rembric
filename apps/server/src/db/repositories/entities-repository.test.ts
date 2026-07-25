@@ -1,3 +1,4 @@
+import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
@@ -279,12 +280,12 @@ describe('EntitiesRepository', () => {
   });
 
   describe('findMissingScans', () => {
-    it('lists non-archived memories never scanned, oldest first', () => {
+    it('lists every never-scanned memory oldest first, archived included', () => {
       insertMemory('m2', { createdAt: new Date(2000) });
       insertMemory('m1', { createdAt: new Date(1000) });
       insertMemory('m3', { createdAt: new Date(3000), status: 'archived' });
       const pending = repo.findMissingScans(10);
-      expect(pending.map((p) => p.id)).toEqual(['m1', 'm2']);
+      expect(pending.map((p) => p.id)).toEqual(['m1', 'm2', 'm3']);
     });
 
     it('excludes a memory once it has been scanned, even with zero entities found', () => {
@@ -295,11 +296,38 @@ describe('EntitiesRepository', () => {
   });
 
   describe('adminBacklogCount', () => {
-    it('counts unscanned non-archived memories', () => {
+    it('counts every unscanned memory, and agrees with findMissingScans on archived rows', () => {
       insertMemory('m1');
       insertMemory('m2');
+      insertMemory('m3', { status: 'archived' });
       repo.linkMemory('m1', 'global', null, [], new Date());
-      expect(repo.adminBacklogCount()).toBe(1);
+      expect(repo.adminBacklogCount()).toBe(2);
+      expect(repo.adminBacklogCount()).toBe(repo.findMissingScans(100).length);
+    });
+  });
+
+  describe('countPendingScans', () => {
+    it('is scoped, and widens to globals only when asked', () => {
+      t.handle.db
+        .insert(projects)
+        .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
+        .run();
+      insertMemory('g1');
+      insertMemory('m-p1', { scope: 'project', projectId: 'p1' });
+      insertMemory('m-p2', { scope: 'project', projectId: 'p2' });
+
+      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(1);
+      expect(repo.countPendingScans({ scope: 'project', projectId: 'p1' })).toBe(1);
+      expect(
+        repo.countPendingScans({ scope: 'project', projectId: 'p1', includeGlobal: true }),
+      ).toBe(2);
+    });
+
+    it('reaches zero once the scope is drained', () => {
+      insertMemory('g1');
+      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(1);
+      repo.linkMemory('g1', 'global', null, [], new Date());
+      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(0);
     });
   });
 
@@ -337,6 +365,53 @@ describe('EntitiesRepository', () => {
       expect(repo.adminBacklogCount()).toBe(1);
       const stillThere = t.handle.db.select().from(memory).all();
       expect(stillThere).toHaveLength(1);
+    });
+
+    it('clears the scan bookkeeping before the links', () => {
+      const order: string[] = [];
+      // A `Db` stub is the only way to observe statement ORDER, and order is
+      // the guarantee: scan-first means an interrupted wipe leaves links the
+      // drain re-writes idempotently, where links-first leaves scan rows that
+      // read as a drained backlog over a permanently empty index.
+      const recording = {
+        delete: (table: SQLiteTable) => {
+          order.push(getTableConfig(table).name);
+          return { run: () => undefined };
+        },
+      } as unknown as ConstructorParameters<typeof EntitiesRepository>[0];
+
+      new EntitiesRepository(recording).truncateAll();
+
+      expect(order).toEqual(['memory_entity_scan', 'memory_entity_links', 'memory_entities']);
+    });
+  });
+
+  describe('findMemoriesByEntity ordering', () => {
+    it('breaks a same-millisecond tie deterministically so paging cannot repeat a row', () => {
+      // A batch capture writes several memories inside one millisecond, which
+      // makes `created_at DESC` a partial order. Without a tiebreaker SQLite may
+      // return tied rows in any order, and the caller pages by slicing the
+      // result — so page 2 can repeat or skip what page 1 showed.
+      const tied = new Date(5_000);
+      for (const id of ['m-a', 'm-b', 'm-c', 'm-d']) {
+        insertMemory(id, { createdAt: tied, content: 'apps/tied.ts' });
+        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'apps/tied.ts' }], tied);
+      }
+
+      const base = { scope: 'global' as const, projectId: null, value: 'apps/tied.ts' };
+      const all = repo.findMemoriesByEntity({ ...base, limit: 10 }).map((m) => m.id);
+      expect(all).toEqual(['m-d', 'm-c', 'm-b', 'm-a']);
+
+      // Two pages of two must partition the set, not overlap it.
+      const page1 = repo
+        .findMemoriesByEntity({ ...base, limit: 2 })
+        .map((m) => m.id)
+        .slice(0, 2);
+      const page2 = repo
+        .findMemoriesByEntity({ ...base, limit: 4 })
+        .map((m) => m.id)
+        .slice(2, 4);
+      expect(new Set([...page1, ...page2]).size).toBe(4);
     });
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
 
 import { CORPUS } from './corpus.js';
+import { FLOOR_METRICS, ratchetFloors, type MetricFloors } from './floor-ratchet.js';
 import { ingestCorpus, type Ingested } from './ingest.js';
 import { QUERIES } from './queries.js';
 import { writeReport, type RetrieverReport } from './report.js';
@@ -191,8 +192,8 @@ interface Baseline {
   embeddingModelId: string;
   /** design.md Decision 5 — states its own ceiling so a saturated metric is never reported as a triumph. */
   discriminatingMetric: string;
-  ceilings: Record<number, { precisionAtK: number; recallAtK: number; mrr: number }>;
-  floors: Record<number, { precisionAtK: number; recallAtK: number; mrr: number }>;
+  ceilings: Record<number, MetricFloors>;
+  floors: Record<number, MetricFloors>;
 }
 
 function loadBaseline(name: string): Baseline | null {
@@ -201,22 +202,25 @@ function loadBaseline(name: string): Baseline | null {
   return JSON.parse(readFileSync(path, 'utf8')) as Baseline;
 }
 
-function writeBaseline(report: RetrieverReport): void {
-  const floors: Baseline['floors'] = {};
+function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }): string[] {
+  const measuredByK: Record<number, MetricFloors> = {};
   const ceilings: Baseline['ceilings'] = {};
   for (const k of K_VALUES) {
     const a = report.aggregateByK[k]!;
-    floors[k] = {
-      precisionAtK: Math.max(0, a.precisionAtK - FLOOR_TOLERANCE),
-      recallAtK: Math.max(0, a.recallAtK - FLOOR_TOLERANCE),
-      mrr: Math.max(0, a.mrr - FLOOR_TOLERANCE),
-    };
+    measuredByK[k] = { precisionAtK: a.precisionAtK, recallAtK: a.recallAtK, mrr: a.mrr };
     ceilings[k] = {
       precisionAtK: a.ceilingPrecisionAtK,
       recallAtK: a.ceilingRecallAtK,
       mrr: 1,
     };
   }
+  const { floors, notes } = ratchetFloors({
+    label: report.retriever,
+    measuredByK,
+    previousByK: loadBaseline(report.retriever)?.floors,
+    tolerance: FLOOR_TOLERANCE,
+    allowLowering: opts.allowLowering,
+  });
   const baseline: Baseline = {
     retriever: report.retriever,
     embeddingModelId: report.embeddingModelId,
@@ -228,6 +232,7 @@ function writeBaseline(report: RetrieverReport): void {
     join(BASELINES_DIR, `${report.retriever}.json`),
     JSON.stringify(baseline, null, 2) + '\n',
   );
+  return notes;
 }
 
 function checkFloors(reports: RetrieverReport[]): string[] {
@@ -244,7 +249,7 @@ function checkFloors(reports: RetrieverReport[]): string[] {
       const measured = report.aggregateByK[k]!;
       const floor = baseline.floors[k];
       if (!floor) continue;
-      for (const metric of ['precisionAtK', 'recallAtK', 'mrr'] as const) {
+      for (const metric of FLOOR_METRICS) {
         if (measured[metric] < floor[metric]) {
           failures.push(
             `${report.retriever}@${k} ${metric} regressed: ${measured[metric].toFixed(3)} < committed floor ${floor[metric].toFixed(3)}`,
@@ -258,6 +263,7 @@ function checkFloors(reports: RetrieverReport[]): string[] {
 
 async function main(): Promise<void> {
   const writeBaselines = process.argv.includes('--write-baselines');
+  const allowLowering = process.argv.includes('--lower-floors');
   const skipDeterminism = process.argv.includes('--skip-determinism-check');
 
   console.log('rembric retrieval eval — loading embedder...');
@@ -288,8 +294,9 @@ async function main(): Promise<void> {
   }
 
   if (writeBaselines) {
-    for (const report of reports) writeBaseline(report);
+    const notes = reports.flatMap((report) => writeBaseline(report, { allowLowering }));
     console.log(`wrote baselines to ${BASELINES_DIR}`);
+    for (const n of notes) console.log(`  ${n}`);
     return;
   }
 

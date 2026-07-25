@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
-import type { Memory, MemoryType } from '../db/schema/memory.js';
+import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
@@ -221,7 +221,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     }));
     const typeOptions = [
       { value: '', label: 'all types', selected: typeFilter === '' },
-      ...(['user', 'feedback', 'project', 'reference', 'procedural'] as const).map((t) => ({
+      ...MEMORY_TYPES.map((t) => ({
         value: t,
         label: t,
         selected: typeFilter === t,

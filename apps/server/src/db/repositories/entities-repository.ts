@@ -171,15 +171,23 @@ export class EntitiesRepository {
     }
     if (opts.topicKey) conditions.push(eq(memory.topicKey, opts.topicKey));
 
-    return this.db
-      .select(getTableColumns(memory))
-      .from(memoryEntityLinks)
-      .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
-      .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
-      .where(and(...conditions))
-      .orderBy(sql`${memory.createdAt} desc`)
-      .limit(opts.limit)
-      .all();
+    return (
+      this.db
+        .select(getTableColumns(memory))
+        .from(memoryEntityLinks)
+        .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
+        .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
+        .where(and(...conditions))
+        // `created_at` is millisecond-resolution, so a batch save ties. Without a
+        // tiebreaker SQLite is free to return tied rows in any order, and the
+        // caller pages this result by slicing — so page 2 could repeat or skip a
+        // row page 1 already showed. `id` is a ULID: same-millisecond rows sort
+        // by their monotonic suffix, which makes the total order deterministic
+        // AND still chronological.
+        .orderBy(sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
+        .limit(opts.limit)
+        .all()
+    );
   }
 
   /** The `entities[]` projection for a single memory's read/search result. */
@@ -304,7 +312,15 @@ export class EntitiesRepository {
       .all();
   }
 
-  /** Resumable backfill: non-archived memories never scanned for entities. */
+  /**
+   * Resumable backfill: memories never scanned for entities, whatever their
+   * status. Archived rows are indexed deliberately — excluding them made
+   * `memory.search({entity, status:'archived'})` structurally always empty
+   * while the filter advertised otherwise, and made every recipe bump drop
+   * archived links permanently, since a row archived before the bump would
+   * never be re-scanned. Extraction is pure and synchronous, so the only cost
+   * is a longer first drain on a corpus with many archived rows.
+   */
   findMissingScans(limit: number): PendingEntityScan[] {
     return this.db
       .select({
@@ -316,7 +332,7 @@ export class EntitiesRepository {
       })
       .from(memory)
       .leftJoin(memoryEntityScan, eq(memoryEntityScan.memoryId, memory.id))
-      .where(and(sql`${memory.status} != 'archived'`, isNull(memoryEntityScan.memoryId)))
+      .where(isNull(memoryEntityScan.memoryId))
       .orderBy(memory.createdAt)
       .limit(limit)
       .all();
@@ -325,6 +341,8 @@ export class EntitiesRepository {
   /**
    * Unscoped — `admin`-prefixed so the data-access confinement grep gate
    * confines it to the dashboard and doctor, never a per-request MCP tool.
+   * Must filter exactly as `findMissingScans` does, or the operator watches a
+   * backlog that never reaches zero.
    */
   adminBacklogCount(): number {
     return (
@@ -332,7 +350,36 @@ export class EntitiesRepository {
         .select({ n: sql<number>`count(*)` })
         .from(memory)
         .leftJoin(memoryEntityScan, eq(memoryEntityScan.memoryId, memory.id))
-        .where(and(sql`${memory.status} != 'archived'`, isNull(memoryEntityScan.memoryId)))
+        .where(isNull(memoryEntityScan.memoryId))
+        .get()?.n ?? 0
+    );
+  }
+
+  /**
+   * In-scope memories still awaiting their first entity scan. Distinguishes
+   * "this entity is not in the index" from "the index has not caught up",
+   * which an empty entity lookup cannot do on its own. Scoped, so it is safe
+   * on an agent-facing read; `includeGlobal` widens exactly as the lookup does.
+   */
+  countPendingScans(opts: {
+    scope: MemoryScope;
+    projectId: string | null;
+    includeGlobal?: boolean;
+  }): number {
+    const own = and(
+      eq(memory.scope, opts.scope),
+      opts.projectId === null ? isNull(memory.projectId) : eq(memory.projectId, opts.projectId),
+    );
+    const scoped =
+      opts.scope === 'project' && opts.includeGlobal
+        ? or(own, and(eq(memory.scope, 'global'), isNull(memory.projectId)))
+        : own;
+    return (
+      this.db
+        .select({ n: sql<number>`count(*)` })
+        .from(memory)
+        .leftJoin(memoryEntityScan, eq(memoryEntityScan.memoryId, memory.id))
+        .where(and(scoped, isNull(memoryEntityScan.memoryId)))
         .get()?.n ?? 0
     );
   }
@@ -422,10 +469,19 @@ export class EntitiesRepository {
     );
   }
 
-  /** Truncate-and-rebuild support: wipe all three derived tables. */
+  /**
+   * Truncate-and-rebuild support: wipe all three derived tables. Callers MUST
+   * wrap this in a transaction (`resetEntityIndex` is the one that does) —
+   * three statements are three failure points, and the marker is already on
+   * disk by the time this runs. The scan table goes FIRST so that the only
+   * partial state a failure can leave is "bookkeeping cleared, links intact":
+   * the drain then re-scans everything and `linkMemory`'s `onConflictDoNothing`
+   * makes the relinking idempotent. The reverse order leaves scan rows without
+   * links, which reads as a drained backlog over a permanently empty index.
+   */
   truncateAll(): void {
-    this.db.delete(memoryEntityLinks).run();
     this.db.delete(memoryEntityScan).run();
+    this.db.delete(memoryEntityLinks).run();
     this.db.delete(memoryEntities).run();
   }
 }

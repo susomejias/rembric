@@ -415,7 +415,13 @@ export class MemoryService {
   async searchWithAbstention(
     input: SearchMemoriesInput,
     scope: Scope,
-  ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string; viaEntity?: boolean }> {
+  ): Promise<{
+    memories: Memory[];
+    abstained: boolean;
+    reason?: string;
+    viaEntity?: boolean;
+    entityIndexDraining?: boolean;
+  }> {
     // A `topic_key` filter addresses a convergent topic's whole history, and
     // every row in that slot but the newest is `superseded` — so an absent
     // `status` means "any" there rather than the usual `active` default. An
@@ -454,7 +460,23 @@ export class MemoryService {
         ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
         : rows;
       const page = filtered.slice(offset, offset + entityLimit);
-      return { memories: page, abstained: false, viaEntity: true };
+      // "Unknown entity" and "the index has not reached those memories yet"
+      // are the same empty response, and a recipe bump makes the second one
+      // last minutes over a large corpus. Only computed on a miss, so the hit
+      // path pays nothing for it.
+      const draining =
+        rows.length === 0 &&
+        this.repos.entities.countPendingScans({
+          scope: memScope,
+          projectId,
+          includeGlobal: input.includeGlobal,
+        }) > 0;
+      return {
+        memories: page,
+        abstained: false,
+        viaEntity: true,
+        ...(draining ? { entityIndexDraining: true } : {}),
+      };
     }
 
     let ids: string[];
