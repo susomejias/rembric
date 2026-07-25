@@ -22,7 +22,6 @@
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "remember|recall|acuérdate|qué hicimos|what did we do",
         "hooks": [
           {
             "type": "command",

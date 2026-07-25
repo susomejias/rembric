@@ -58,6 +58,23 @@ describe('deriveReviewState', () => {
     expect(r.reviewBaseline?.getTime()).toBe(created.getTime());
   });
 
+  it('procedural needs review on its own (shortest) schedule, distinct from project', () => {
+    expect(REVIEW_TTL_MS.procedural!).toBeLessThan(REVIEW_TTL_MS.project!);
+    const created = new Date(NOW.getTime() - REVIEW_TTL_MS.procedural! - 1);
+    const r = deriveReviewState(
+      { type: 'procedural', createdAt: created, status: 'active', lastConfirmedAt: null },
+      NOW,
+    );
+    expect(r.reviewState).toBe('needs_review');
+
+    // The same age would still be fresh under project's longer TTL.
+    const stillFresh = deriveReviewState(
+      { type: 'project', createdAt: created, status: 'active', lastConfirmedAt: null },
+      NOW,
+    );
+    expect(stillFresh.reviewState).toBe('fresh');
+  });
+
   it('non-active memories carry no review state', () => {
     const created = new Date(NOW.getTime() - 100 * MONTH_MS);
     for (const status of ['superseded', 'archived'] as const) {

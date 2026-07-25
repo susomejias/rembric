@@ -345,6 +345,21 @@ export class MemoryService {
     scope: Scope,
     opts: { touch?: boolean } = {},
   ): Promise<Memory[]> {
+    return (await this.searchWithAbstention(input, scope, opts)).memories;
+  }
+
+  /**
+   * Same as `search`, plus whether the text-query branch abstained (the
+   * gates behind it — `ABSTENTION_FLOOR`/`GAP_RATIO_THRESHOLD` in
+   * hybrid-search.ts — ship disabled, so `abstained` is always `false`
+   * until they're calibrated and enabled). Only `memory.search`'s MCP
+   * response surfaces this; other callers use the plain `search` above.
+   */
+  async searchWithAbstention(
+    input: SearchMemoriesInput,
+    scope: Scope,
+    opts: { touch?: boolean } = {},
+  ): Promise<{ memories: Memory[]; abstained: boolean; reason?: string }> {
     const status = input.status ?? 'active';
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
@@ -352,33 +367,41 @@ export class MemoryService {
     const projectId = scope.kind === 'project' ? scope.projectId : null;
 
     const query = input.query?.trim();
-    const ids = query
-      ? await hybridSearch({
-          repos: this.repos,
-          embedQuery: this.embedQuery,
-          query,
-          scope: memScope,
-          projectId,
-          status,
-          type: input.type,
-          tag: input.tag,
-          topicKey: input.topicKey,
-          limit,
-          offset,
-          includeGlobal: input.includeGlobal,
-        })
-      : this.repos.memory.searchMemoryIds({
-          scope: memScope,
-          projectId,
-          status,
-          type: input.type,
-          tag: input.tag,
-          topicKey: input.topicKey,
-          limit,
-          offset,
-          includeGlobal: input.includeGlobal,
-        });
-    if (ids.length === 0) return [];
+    let ids: string[];
+    let abstained = false;
+    let reason: string | undefined;
+    if (query) {
+      const result = await hybridSearch({
+        repos: this.repos,
+        embedQuery: this.embedQuery,
+        query,
+        scope: memScope,
+        projectId,
+        status,
+        type: input.type,
+        tag: input.tag,
+        topicKey: input.topicKey,
+        limit,
+        offset,
+        includeGlobal: input.includeGlobal,
+      });
+      ids = result.ids;
+      abstained = result.abstained;
+      reason = result.reason;
+    } else {
+      ids = this.repos.memory.searchMemoryIds({
+        scope: memScope,
+        projectId,
+        status,
+        type: input.type,
+        tag: input.tag,
+        topicKey: input.topicKey,
+        limit,
+        offset,
+        includeGlobal: input.includeGlobal,
+      });
+    }
+    if (ids.length === 0) return { memories: [], abstained, reason };
 
     const raw = this.repos.memory.unsafeGetByIds(ids);
     const byId = new Map(raw.map((m) => [m.id, m]));
@@ -392,7 +415,7 @@ export class MemoryService {
     }
     // Passive callers pass touch:false so per-turn recall doesn't inflate the recency signal.
     if (opts.touch !== false) this.repos.memory.touchLastSeenBatch(ids, this.now());
-    return ordered;
+    return { memories: ordered, abstained, reason };
   }
 
   /**

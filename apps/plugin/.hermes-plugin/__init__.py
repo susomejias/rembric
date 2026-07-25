@@ -132,6 +132,10 @@ _SESSION_ID_HINT_TEMPLATE = (
     "memory.save/memory.session_summary/memory.save_prompt now, to "
     "guarantee correct attachment; never guess a different one.</memory-hint>"
 )
+_RELEVANCE_HINT = (
+    "<memory-hint>New session — call memory.context with focus set to this "
+    "prompt before responding, to surface relevant prior work.</memory-hint>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +427,9 @@ class RembricMemoryProvider(MemoryProvider):
         recalled = self._prefetch_cache.get(session_id or "", "")
         hints: list[str] = []
         hint_tags: list[str] = []
+        if self._turn_number == 1:
+            hints.append(_RELEVANCE_HINT)
+            hint_tags.append("relevance")
         if self._compaction_imminent:
             self._compaction_imminent = False
             self._compaction_warned = True

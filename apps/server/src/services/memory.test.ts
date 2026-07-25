@@ -61,6 +61,16 @@ describe('memory.save', () => {
     expect(m.projectId).toBeNull();
   });
 
+  it('accepts the procedural type and round-trips it through get (improve-recall-relevance)', () => {
+    const m = memory.save(
+      { type: 'procedural', title: 'Deploy runbook', content: 'how deploys work here' },
+      SCOPE_GLOBAL,
+    );
+    expect(m.type).toBe('procedural');
+    const fetched = memory.get(m.id, SCOPE_GLOBAL);
+    expect(fetched?.memory.type).toBe('procedural');
+  });
+
   it('rejects empty content', () => {
     expect(() =>
       memory.save({ type: 'user', title: 'Blank content', content: '   ' }, SCOPE_GLOBAL),

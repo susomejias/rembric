@@ -703,3 +703,84 @@ describe('memory.timeline neighbors are scope-filtered', () => {
     expect(ids).not.toContain('tl-global-neighbor');
   });
 });
+
+describe('memory.context — relevance channel (improve-recall-relevance)', () => {
+  it('explicit focus populates relevantMemories and leaves recentMemories unchanged', async () => {
+    memory.save(
+      { type: 'project', title: 'db migration runbook', content: 'db migration runbook steps' },
+      SCOPE_GLOBAL,
+    );
+    memory.save(
+      { type: 'user', title: 'unrelated widget note', content: 'unrelated widget note' },
+      SCOPE_GLOBAL,
+    );
+
+    const withoutFocus = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const baseline = decode(withoutFocus).payload;
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({ focus: 'db migration runbook' })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    const relevant = payload.relevantMemories as Array<{ snippet: string }>;
+    expect(relevant.length).toBeGreaterThan(0);
+    expect(relevant[0]?.snippet).toContain('db migration runbook');
+    expect(payload.recentMemories).toEqual(baseline.recentMemories);
+  });
+
+  it('a derived seed (from recent prompts) populates relevantMemories when focus is omitted', async () => {
+    memory.save(
+      {
+        type: 'reference',
+        title: 'auth token rotation policy',
+        content: 'auth token rotation policy details',
+      },
+      SCOPE_GLOBAL,
+    );
+    prompts.save({ content: 'auth token rotation policy', title: 'auth token rotation policy' });
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    const relevant = payload.relevantMemories as Array<{ snippet: string }>;
+    expect(relevant.some((m) => m.snippet.includes('auth token rotation policy'))).toBe(true);
+  });
+
+  it('no derivable seed yields empty relevantMemories plus normal recentMemories', async () => {
+    memory.save({ type: 'user', title: 'a lone memory', content: 'a lone memory' }, SCOPE_GLOBAL);
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({})),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    expect(payload.relevantMemories).toEqual([]);
+    expect((payload.recentMemories as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('a strongly-matching memory in another project never appears in relevantMemories', async () => {
+    const projectA = projects.create({ slug: 'proj-a-relevance', displayName: null });
+    memory.save(
+      {
+        type: 'project',
+        title: 'distinctive_relevance_marker',
+        content: 'distinctive_relevance_marker only exists in project A',
+      },
+      projectScope(projectA.id),
+    );
+
+    const r = await runWithContext(makeContext(adminToken), () =>
+      Promise.resolve(handlers.context({ focus: 'distinctive_relevance_marker' })),
+    );
+    const { isError, payload } = decode(r);
+    expect(isError).toBeFalsy();
+    expect(payload.scope).toBe('global');
+    const relevant = payload.relevantMemories as Array<{ snippet: string }>;
+    expect(relevant.some((m) => m.snippet.includes('distinctive_relevance_marker'))).toBe(false);
+  });
+});

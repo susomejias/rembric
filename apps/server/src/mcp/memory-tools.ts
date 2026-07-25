@@ -20,6 +20,7 @@ import {
   clamp,
   requireScope,
   resolveEffectiveScope,
+  routerKey,
   serializeMemory,
   snippet,
 } from './_shared.js';
@@ -54,7 +55,7 @@ import { ok } from './result.js';
  *     - memory.get / .confirm        →  project ids are 'not_found' (idem)
  */
 
-const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const;
+const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 const MEMORY_SCOPES = ['global', 'project'] as const;
 const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 
@@ -183,6 +184,12 @@ export const contextSchema = {
   prompts: z.number().int().min(0).max(50).optional(),
   memories: z.number().int().min(0).max(100).optional(),
   includeArchived: z.boolean().optional(),
+  focus: z
+    .string()
+    .optional()
+    .describe(
+      'What the agent is about to work on, to rank relevantMemories[] by. When omitted, the server derives a seed from the active session and recent prompts.',
+    ),
 };
 
 export const timelineSchema = {
@@ -256,6 +263,8 @@ export const memorySearchOutput = {
   count: z.number(),
   memories: z.array(memoryRow),
   expanded: z.array(expandedMemoryRow).optional(),
+  abstained: z.boolean(),
+  abstainReason: z.string().optional(),
 };
 
 export const memoryGetOutput = {
@@ -341,6 +350,17 @@ export const contextOutput = {
     }),
   ),
   recentMemories: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      title: z.string(),
+      snippet: z.string(),
+      status: z.string(),
+      createdAt: z.string(),
+      topicKey: z.string().nullable(),
+    }),
+  ),
+  relevantMemories: z.array(
     z.object({
       id: z.string(),
       type: z.string(),
@@ -749,7 +769,7 @@ async function handleSearch(
   };
 
   try {
-    const memories = await deps.memory.search(input, scope);
+    const { memories, abstained, reason } = await deps.memory.searchWithAbstention(input, scope);
     // Single JOIN against memory_relations — no N+1.
     const relations = deps.relations
       ? deps.relations.listForMemories(
@@ -827,6 +847,8 @@ async function handleSearch(
         return Object.fromEntries(Object.entries(full).filter(([k]) => fieldSet.has(k)));
       }),
       ...(expanded ? { expanded } : {}),
+      abstained,
+      ...(reason ? { abstainReason: reason } : {}),
     });
   } catch (err) {
     return errToMcp(err);
@@ -994,6 +1016,48 @@ const CONTEXT_SNIPPET_CHARS = 350;
 // CONTEXT_SNIPPET_CHARS cap as the other lists for a homogeneous payload.
 const NEEDS_REVIEW_MAX = 3;
 
+/** Small and separate from `memoriesLimit` so enabling relevance never halves the recency channel (design.md Open Questions). */
+const RELEVANCE_LIMIT = 5;
+
+/**
+ * When `focus` is absent, derive a seed from signals the server already
+ * holds: the active project's label, the current (in-progress, unsummarized
+ * — so not in `recentSessions`) session's placeholder title (carries the
+ * cwd basename), and the most recent curated prompt. Returns undefined when
+ * nothing usable is derivable, so the caller can leave `relevantMemories`
+ * empty rather than running a query on empty text.
+ */
+function deriveFocusSeed(
+  deps: MemoryToolDeps,
+  scope: Scope,
+  recentPrompts: { content: string }[],
+): string | undefined {
+  const parts: string[] = [];
+  const projectId = scope.kind === 'project' ? scope.projectId : null;
+  const project = projectId ? deps.projects?.getById(projectId) : undefined;
+  if (project) parts.push(project.displayName ?? project.slug);
+
+  if (deps.router && deps.agentSessions) {
+    // Same precedence as `resolveSessionId`, but inlined to reuse the row
+    // `findActiveForTransport` already fetches instead of re-fetching it by
+    // id — this runs on every unfocused memory.context call.
+    const key = routerKey();
+    const routerHit = key ? deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId : null;
+    const session = routerHit
+      ? deps.agentSessions.getById(routerHit)
+      : deps.agentSessions.findActiveForTransport({
+          tokenId: getRequestContext().token.id,
+          projectId,
+        });
+    if (session?.title) parts.push(session.title);
+  }
+
+  if (recentPrompts[0]) parts.push(recentPrompts[0].content);
+
+  const seed = parts.join(' ').trim();
+  return seed.length > 0 ? seed : undefined;
+}
+
 async function handleContext(
   deps: MemoryToolDeps,
   args: {
@@ -1001,6 +1065,7 @@ async function handleContext(
     prompts?: number;
     memories?: number;
     includeArchived?: boolean;
+    focus?: string;
   },
 ) {
   if (!deps.repos || !deps.agentSessions || !deps.prompts || !deps.router) {
@@ -1063,6 +1128,29 @@ async function handleContext(
       createdAt: p.createdAt,
     }));
 
+  // Relevance channel — separate from recentMemories (which is pure
+  // recency) so the model can tell the two apart. An explicit `focus`
+  // always wins; otherwise a seed is derived so the improvement doesn't
+  // depend on the agent knowing to ask. touch:false — a context peek must
+  // not itself inflate the memories it surfaces (the exact feedback loop
+  // this change exists to break).
+  const focusText = args.focus?.trim() || deriveFocusSeed(deps, scope, recentPrompts);
+  const relevantMemories = focusText
+    ? (
+        await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope, {
+          touch: false,
+        })
+      ).map((m) => ({
+        id: m.id,
+        type: m.type,
+        title: m.title,
+        snippet: snippet(m.content, CONTEXT_SNIPPET_CHARS),
+        status: m.status,
+        createdAt: m.createdAt.toISOString(),
+        topicKey: m.topicKey,
+      }))
+    : [];
+
   // Aged pending relations (older than the orphan threshold) the agent
   // should close with memory.judge while context is fresh. Unjudged rows
   // are deterministically orphaned by the sweep after the deadline.
@@ -1104,6 +1192,7 @@ async function handleContext(
     recentSessions,
     recentPrompts,
     recentMemories,
+    relevantMemories,
     pendingJudgments,
     needsReview,
     clamped,

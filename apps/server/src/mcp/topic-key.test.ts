@@ -14,6 +14,7 @@ describe('suggestTopicKey — deterministic family + slug', () => {
     expect(suggestTopicKey({ type: 'user', title: 'x' })).toMatch(/^preference\//);
     expect(suggestTopicKey({ type: 'feedback', title: 'x' })).toMatch(/^feedback\//);
     expect(suggestTopicKey({ type: 'reference', title: 'x' })).toMatch(/^reference\//);
+    expect(suggestTopicKey({ type: 'procedural', title: 'x' })).toMatch(/^runbook\//);
   });
 
   it('drops stopwords and joins surviving tokens', () => {

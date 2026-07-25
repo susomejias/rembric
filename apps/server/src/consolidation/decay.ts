@@ -35,6 +35,7 @@ export const DEFAULT_DECAY: DecayThresholds = {
   // absence from `REVIEW_TTL_MS`. Any type without an entry falls back to
   // `defaultThresholdMs` (the historical global 90-day behaviour).
   thresholdByType: {
+    procedural: 120 * DAY_MS,
     project: 180 * DAY_MS,
     feedback: 365 * DAY_MS,
     user: 730 * DAY_MS,

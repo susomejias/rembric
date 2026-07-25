@@ -227,6 +227,31 @@ describe('RembricPlugin handlers', () => {
     expect(pushed).toEqual([5, 10]);
   });
 
+  it('chat.message appends the first-prompt relevance nudge on turn 1 only', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const pushed: number[] = [];
+    for (let turn = 1; turn <= 2; turn++) {
+      const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
+      await handlers['chat.message']!({ sessionID: 's-relevance' } as never, output as never);
+      if (output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance))
+        pushed.push(turn);
+    }
+    expect(pushed).toEqual([1]);
+  });
+
+  it('chat.message does not append the first-prompt relevance nudge for a sub-agent session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'sub-relevance', parentID: 'parent', title: 'sub work' } },
+      },
+    } as never);
+    const output = { parts: [{ type: 'text', text: 'first message' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 'sub-relevance' } as never, output as never);
+    expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(false);
+  });
+
   it('chat.message appends the exact fixture summary nudge on turn 1 and every 10th turn, not before', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     const pushed: number[] = [];

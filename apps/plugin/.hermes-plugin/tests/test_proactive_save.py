@@ -69,8 +69,25 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
         provider.on_turn_start(1, None)
-        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SUMMARY_HINT}"
+        expected = (
+            f"{self._session_id_hint('01XYZ')}\n"
+            f"{self.mod._RELEVANCE_HINT}\n{self.mod._SUMMARY_HINT}"
+        )
         self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_relevance_hint_fires_only_on_turn_1_not_on_later_turns(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+
+        provider.on_turn_start(1, None)
+        self.assertIn(self.mod._RELEVANCE_HINT, provider.prefetch("q", session_id="01XYZ"))
+
+        provider.on_turn_start(2, None)
+        self.assertNotIn(self.mod._RELEVANCE_HINT, provider.prefetch("q", session_id="01XYZ"))
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_summary_hint_every_10th_turn(self, mock_urlopen: MagicMock) -> None:

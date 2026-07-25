@@ -36,6 +36,28 @@ export function computeRankWindowSize(limit: number, offset: number): number {
   );
 }
 
+/**
+ * Absolute floor on the best normalized branch score (see
+ * `normalizeLexicalScore` / the dense branch's `1 - distance`). `null` ships
+ * this disabled — an untuned floor silently destroys recall, which is
+ * exactly the failure improve-recall-relevance must not introduce. Set to a
+ * harness-calibrated value in a follow-up commit (design.md Decision 3).
+ */
+export const ABSTENTION_FLOOR: number | null = null;
+/**
+ * Gap-ratio tail filter over the final (fused + boosted) score list: once
+ * `next/current` drops below this ratio, everything after is truncated as
+ * noise. `null` ships this disabled, same reasoning as `ABSTENTION_FLOOR`.
+ */
+export const GAP_RATIO_THRESHOLD: number | null = null;
+/**
+ * At most this many results per originating session (design.md Decision 5)
+ * — ships enabled, unlike abstention: it only ever reorders/backfills, it
+ * cannot reduce recall. 3 is the figure comparable systems use; with the
+ * default limit of 8 that still permits nearly three sessions' worth.
+ */
+export const DIVERSITY_CAP = 3;
+
 export interface HybridSearchOpts {
   repos: Pick<Repositories, 'memory' | 'vectors'>;
   embedQuery?: (text: string) => Promise<Float32Array>;
@@ -53,17 +75,52 @@ export interface HybridSearchOpts {
   includeGlobal?: boolean;
   /** Injectable clock for the recency term of the ranking boost; defaults to `new Date()`. */
   now?: () => Date;
+  /** Overrides the module `ABSTENTION_FLOOR` constant — for tests; production callers omit this. */
+  abstentionFloor?: number | null;
+  /** Overrides the module `GAP_RATIO_THRESHOLD` constant — for tests; production callers omit this. */
+  gapRatioThreshold?: number | null;
+  /** Overrides the module `DIVERSITY_CAP` constant — for tests; production callers omit this. */
+  diversityCap?: number;
 }
 
-export async function hybridSearch(opts: HybridSearchOpts): Promise<string[]> {
+export interface HybridSearchResult {
+  ids: string[];
+  abstained: boolean;
+  reason?: string;
+}
+
+export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearchResult> {
   const rankWindowSize = computeRankWindowSize(opts.limit, opts.offset);
+  const abstentionFloor =
+    opts.abstentionFloor !== undefined ? opts.abstentionFloor : ABSTENTION_FLOOR;
+  const gapRatioThreshold =
+    opts.gapRatioThreshold !== undefined ? opts.gapRatioThreshold : GAP_RATIO_THRESHOLD;
+  const diversityCap = opts.diversityCap ?? DIVERSITY_CAP;
 
   const lexical = lexicalRetriever(opts, rankWindowSize);
   const dense = await denseRetriever(opts, rankWindowSize);
 
-  const fused = fuseRRFWithScores([dense, lexical], RANK_CONSTANT);
+  if (abstentionFloor !== null) {
+    // An empty candidate set abstains regardless of the floor's value — a
+    // `Math.max(..., 0)` default would otherwise clear a floor of exactly 0.
+    const hasCandidates = lexical.length > 0 || dense.length > 0;
+    const bestScore = Math.max(lexical[0]?.score ?? 0, dense[0]?.score ?? 0);
+    if (!hasCandidates || bestScore < abstentionFloor) {
+      return { ids: [], abstained: true, reason: 'no candidate cleared the relevance floor' };
+    }
+  }
+
+  const fused = fuseRRFWithScores(
+    [dense.map((d) => d.id), lexical.map((l) => l.id)],
+    RANK_CONSTANT,
+  );
   const boosted = applyRankingBoost(fused, opts);
-  return boosted.slice(opts.offset, opts.offset + opts.limit);
+  const gapFiltered =
+    gapRatioThreshold !== null ? applyGapRatioFilter(boosted, gapRatioThreshold) : boosted;
+  const diversified = applyDiversityCap(gapFiltered, diversityCap);
+
+  const ids = diversified.map((r) => r.id);
+  return { ids: ids.slice(opts.offset, opts.offset + opts.limit), abstained: false };
 }
 
 // Declared clamp bounds; the per-signal weights below only ever reach
@@ -77,8 +134,15 @@ const TYPE_WEIGHT: Record<MemoryType, number> = {
   feedback: 0.1,
   project: 0,
   reference: 0,
+  procedural: 0,
 };
 const DAY_MS = 86_400_000;
+
+export interface BoostedResult {
+  id: string;
+  score: number;
+  sessionId: string | null;
+}
 
 /**
  * Re-weights the fused pool by a multiplier clamped to `[BOOST_MIN,
@@ -87,12 +151,13 @@ const DAY_MS = 86_400_000;
  * to change page membership: a fresh, confirmed memory should outrank a
  * stale unconfirmed one at a close raw RRF score. The clamp bounds the
  * multiplier's magnitude; it does not, and is not meant to, prevent
- * reordering near-ties.
+ * reordering near-ties. Carries `sessionId` through from the same metadata
+ * lookup so the diversity cap doesn't need a second query.
  */
 export function applyRankingBoost(
   fused: { id: string; score: number }[],
   opts: HybridSearchOpts,
-): string[] {
+): BoostedResult[] {
   if (fused.length === 0) return [];
   const ids = fused.map((f) => f.id);
   const meta = opts.repos.memory.rankingMetadataByIds(ids);
@@ -114,18 +179,82 @@ export function applyRankingBoost(
       else if (confirmationCount >= 1) boost += 0.05;
     }
     boost = Math.min(BOOST_MAX, Math.max(BOOST_MIN, boost));
-    return { id, score: score * boost };
+    return { id, score: score * boost, sessionId: m?.sessionId ?? null };
   });
   boosted.sort((a, b) => b.score - a.score);
-  return boosted.map((b) => b.id);
+  return boosted;
 }
 
-/** FTS5/BM25 branch — fault-isolated (a parse error degrades to empty). */
-function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): string[] {
+/**
+ * Truncates the ranked pool once the score falls off a cliff relative to
+ * its predecessor: the first index where `next/current < gapRatio` ends
+ * the page. Always keeps at least one row (abstention — "nothing at all"
+ * — is `ABSTENTION_FLOOR`'s job, not this one's).
+ */
+export function applyGapRatioFilter<T extends { score: number }>(
+  ranked: T[],
+  gapRatio: number,
+): T[] {
+  for (let i = 0; i < ranked.length - 1; i++) {
+    const current = ranked[i]!.score;
+    const next = ranked[i + 1]!.score;
+    if (current <= 0 || next / current < gapRatio) return ranked.slice(0, i + 1);
+  }
+  return ranked;
+}
+
+/**
+ * Walks the ranked pool in order, admitting at most `cap` rows per
+ * originating session; a row over its session's cap is held back and
+ * appended (in its original relative order) once the walk ends, so the
+ * cap only ever reorders — it never shrinks the result count. Null-session
+ * rows (pre-session or HTTP-written memories) are never grouped with each
+ * other — treating "no session" as one session would cap all of them
+ * together, the opposite of the intent.
+ */
+export function applyDiversityCap<T extends { sessionId: string | null }>(
+  ranked: T[],
+  cap: number,
+): T[] {
+  const perSessionCount = new Map<string, number>();
+  const admitted: T[] = [];
+  const backfill: T[] = [];
+  for (const row of ranked) {
+    if (row.sessionId === null) {
+      admitted.push(row);
+      continue;
+    }
+    const count = perSessionCount.get(row.sessionId) ?? 0;
+    if (count < cap) {
+      perSessionCount.set(row.sessionId, count + 1);
+      admitted.push(row);
+    } else {
+      backfill.push(row);
+    }
+  }
+  return [...admitted, ...backfill];
+}
+
+/**
+ * Maps FTS5's raw bm25 (negative, more-negative-is-better, unbounded and
+ * corpus-size dependent) to a bounded, monotonically-increasing (0, 1)
+ * value via a logistic curve — the same normalize-before-comparing
+ * discipline as `fix-retrieval-ranking-math`'s token-containment fix, so an
+ * absolute floor over it means the same thing across corpus sizes.
+ */
+function normalizeLexicalScore(bm25Rank: number): number {
+  return 1 / (1 + Math.exp(bm25Rank));
+}
+
+/** FTS5/BM25 branch — fault-isolated (a parse error degrades to empty). Best match first. */
+function lexicalRetriever(
+  opts: HybridSearchOpts,
+  rankWindowSize: number,
+): { id: string; score: number }[] {
   const matchExpr = sanitizeFtsQuery(opts.query);
   if (!matchExpr) return [];
   try {
-    return opts.repos.memory.searchBm25Ids({
+    const rows = opts.repos.memory.searchBm25Ids({
       matchExpr,
       scope: opts.scope,
       projectId: opts.projectId,
@@ -136,6 +265,7 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
       limit: rankWindowSize,
       includeGlobal: opts.includeGlobal,
     });
+    return rows.map((r) => ({ id: r.id, score: normalizeLexicalScore(r.rank) }));
   } catch {
     return [];
   }
@@ -146,8 +276,13 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
  * or when searching `archived` (archived vectors are outside the
  * post-model-change semantic guarantee). `tag` is a bounded post-filter over
  * the rank window because tags are not duplicated into the vector index.
+ * Best match first; `score` is cosine similarity (`1 - distance`), already
+ * bounded and comparable to the normalized lexical score.
  */
-async function denseRetriever(opts: HybridSearchOpts, rankWindowSize: number): Promise<string[]> {
+async function denseRetriever(
+  opts: HybridSearchOpts,
+  rankWindowSize: number,
+): Promise<{ id: string; score: number }[]> {
   if (!opts.embedQuery || opts.status === 'archived') return [];
   const status = opts.status;
   try {
@@ -171,22 +306,28 @@ async function denseRetriever(opts: HybridSearchOpts, rankWindowSize: number): P
       .sort((a, b) => a.distance - b.distance);
     // Dedup (nearest wins) before the slice — RRF needs distinct ids.
     const seen = new Set<string>();
-    let ids: string[] = [];
+    let scored: { id: string; score: number }[] = [];
     for (const n of neighbors) {
       if (seen.has(n.id)) continue;
       seen.add(n.id);
-      ids.push(n.id);
-      if (ids.length >= rankWindowSize) break;
+      scored.push({ id: n.id, score: 1 - Math.max(0, Math.min(1, n.distance)) });
+      if (scored.length >= rankWindowSize) break;
     }
-    if (opts.tag && ids.length > 0) {
-      const tagged = opts.repos.memory.idsWithTag(ids, opts.tag);
-      ids = ids.filter((id) => tagged.has(id));
+    if (opts.tag && scored.length > 0) {
+      const tagged = opts.repos.memory.idsWithTag(
+        scored.map((s) => s.id),
+        opts.tag,
+      );
+      scored = scored.filter((s) => tagged.has(s.id));
     }
-    if (opts.topicKey && ids.length > 0) {
-      const matching = opts.repos.memory.idsWithTopicKey(ids, opts.topicKey);
-      ids = ids.filter((id) => matching.has(id));
+    if (opts.topicKey && scored.length > 0) {
+      const matching = opts.repos.memory.idsWithTopicKey(
+        scored.map((s) => s.id),
+        opts.topicKey,
+      );
+      scored = scored.filter((s) => matching.has(s.id));
     }
-    return ids;
+    return scored;
   } catch {
     return [];
   }

@@ -29,6 +29,26 @@ interface SqliteMasterRow {
   tbl_name: string;
 }
 
+/**
+ * Every trigger a table-rebuild migration must recreate. A dropped trigger
+ * is silent — new rows stop being FTS/vec-indexed with no error anywhere —
+ * so this is the guard the `procedural`-type table-rebuild migration
+ * (improve-recall-relevance) depends on: run this test before and after
+ * writing that migration and confirm the set is unchanged.
+ */
+const EXPECTED_TRIGGERS: Record<string, string[]> = {
+  memory: [
+    'memory_ai',
+    'memory_ad',
+    'memory_au',
+    'memory_vec_status_sync',
+    'memory_replaces_ai',
+    'memory_replaces_au',
+    'memory_replaces_ad',
+  ],
+  prompts: ['prompts_ai', 'prompts_ad', 'prompts_au'],
+};
+
 const EXPECTED_TABLES = [
   '_migrations',
   'confirmations',
@@ -172,6 +192,21 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
       expect(actual.sort(sortByName), `schema drift on table '${table}'`).toEqual(
         expected.sort(sortByName),
       );
+    }
+  });
+
+  it('every expected trigger on memory and prompts survives migration', () => {
+    const rows = testDb.handle.raw
+      .prepare<
+        [],
+        SqliteMasterRow
+      >(`SELECT name, type, tbl_name FROM sqlite_master WHERE type = 'trigger'`)
+      .all();
+    for (const [table, expected] of Object.entries(EXPECTED_TRIGGERS)) {
+      const actual = rows.filter((r) => r.tbl_name === table).map((r) => r.name);
+      for (const name of expected) {
+        expect(actual, `trigger '${name}' missing on '${table}' after migrations`).toContain(name);
+      }
     }
   });
 

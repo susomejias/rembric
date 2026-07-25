@@ -14,6 +14,7 @@
  *   feedback       feedback
  *   project        decision
  *   reference      reference
+ *   procedural     runbook
  *
  * The slug-from-text logic:
  *   1. lowercase
@@ -59,6 +60,7 @@ const FAMILY_BY_TYPE: Record<string, string> = {
   feedback: 'feedback',
   project: 'decision',
   reference: 'reference',
+  procedural: 'runbook',
 };
 
 const MAX_SLUG_CHARS = 48;

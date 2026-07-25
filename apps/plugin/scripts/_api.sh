@@ -6,6 +6,7 @@
 #   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
 #                                       with Authorization: Bearer ${REMBRIC_API_TOKEN}
+#   - rembric_turn_count <name> <id>  → echoes the atomic per-session turn count
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -85,6 +86,33 @@ rembric_post() {
     printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
   fi
   return 0
+}
+
+# Atomic per-session turn counter, shared by prompt-nudge.sh and
+# prompt-search.sh so each keeps its own cadence without duplicating the
+# counting mechanics. `counter_name` picks the counter's directory (each
+# caller uses a distinct one so their cadences never double-increment each
+# other). Append-and-count-bytes instead of read-increment-write: a single
+# O_APPEND write is atomic even across concurrent invocations, so turns can
+# never be lost to a race the way a read-modify-write counter could. Echoes
+# the new count, or nothing if the counter is unreadable — callers MUST
+# treat empty as fail-closed (defaulting to 0 would satisfy every modulo/
+# equality check at once, spamming nudges for the rest of the session).
+rembric_turn_count() {
+  local counter_name="${1:-}" session_id="${2:-}"
+  [ -z "$counter_name" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "${session_id:-nosession}" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/${counter_name}"
+  mkdir -p "$dir" 2>/dev/null || true
+  local file="${dir}/${safe_id}"
+  printf '.' >>"$file" 2>/dev/null || true
+  local count
+  count="$(wc -c <"$file" 2>/dev/null | tr -d '[:space:]')"
+  case "$count" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  printf '%s' "$count"
 }
 
 # Best-effort extraction of a session id from the hook stdin JSON. Prefers

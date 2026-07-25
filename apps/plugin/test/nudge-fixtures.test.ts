@@ -25,12 +25,15 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   sessionIdCoreTemplate: string;
   sessionIdTemplate: string;
   postCompact: string;
+  firstPromptRelevanceCore: string;
+  firstPromptRelevance: string;
 };
 
 function sessionIdLine(sessionId: string): string {
   return fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', sessionId);
 }
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
+const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
@@ -63,8 +66,29 @@ function tsSessionIdTemplate(): string {
   return match[1];
 }
 
+function tsFirstPromptNudge(): string {
+  const src = readFileSync(opencodePluginTs, 'utf8');
+  const match = src.match(/const FIRST_PROMPT_NUDGE =\s*\n?\s*'((?:[^'\\]|\\.)*)';/);
+  if (!match) throw new Error('FIRST_PROMPT_NUDGE not found in plugin.ts');
+  return match[1];
+}
+
+function bashFirstPromptNudge(sessionId: string, counterDir: string): string[] {
+  const out = execFileSync('bash', [promptSearchSh], {
+    input: JSON.stringify({ session_id: sessionId, prompt: 'anything without a keyword' }),
+    encoding: 'utf8',
+    env: { ...process.env, TMPDIR: counterDir },
+  });
+  return out.split('\n').filter((l) => l.length > 0);
+}
+
 function pythonHintConstant(
-  name: '_SAVE_HINT' | '_SAVE_HINT_URGENT' | '_SUMMARY_HINT' | '_SESSION_ID_HINT_TEMPLATE',
+  name:
+    | '_SAVE_HINT'
+    | '_SAVE_HINT_URGENT'
+    | '_SUMMARY_HINT'
+    | '_SESSION_ID_HINT_TEMPLATE'
+    | '_RELEVANCE_HINT',
 ): string {
   const program = [
     'import importlib.util, sys',
@@ -185,6 +209,45 @@ describe('sessionId nudge template lock-step across bash, TS, and Python', () =>
     const expected = fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', testId);
     expect(tsSessionIdTemplate().replace('{{SESSION_ID}}', testId)).toBe(expected);
   });
+});
+
+describe('first-prompt relevance nudge lock-step across bash, TS, and Python', () => {
+  it('the fixture text is the rembric:-prefixed shared core', () => {
+    expect(fixtures.firstPromptRelevance).toBe(`rembric: ${fixtures.firstPromptRelevanceCore}`);
+  });
+
+  it('bash prompt-search.sh emits the exact fixture text on the first prompt of a session', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
+    try {
+      const lines = bashFirstPromptNudge('s-fixture-relevance', counterDir);
+      expect(lines).toContain(fixtures.firstPromptRelevance);
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
+  });
+
+  it('bash prompt-search.sh does not re-fire it on the second prompt of the same session', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
+    try {
+      bashFirstPromptNudge('s-fixture-relevance-2', counterDir);
+      const lines = bashFirstPromptNudge('s-fixture-relevance-2', counterDir);
+      expect(lines).not.toContain(fixtures.firstPromptRelevance);
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
+  });
+
+  it('TS matches the exact fixture text', () => {
+    expect(tsFirstPromptNudge()).toBe(fixtures.firstPromptRelevance);
+  });
+
+  it.runIf(hasPython3)(
+    "Python's _RELEVANCE_HINT wraps the exact shared core text in <memory-hint> tags",
+    () => {
+      const hint = pythonHintConstant('_RELEVANCE_HINT');
+      expect(hint).toBe(`<memory-hint>${fixtures.firstPromptRelevanceCore}</memory-hint>`);
+    },
+  );
 });
 
 describe('nudge cadence numbers lock-step across bash and TS', () => {

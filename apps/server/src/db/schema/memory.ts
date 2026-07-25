@@ -16,7 +16,7 @@ import { projects } from './projects.js';
  */
 
 export type MemoryScope = 'global' | 'project';
-export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'procedural';
 export type MemoryStatus = 'active' | 'superseded' | 'archived';
 
 export interface MemorySource {
@@ -36,7 +36,9 @@ export const memory = sqliteTable(
     id: text('id').primaryKey(),
     scope: text('scope', { enum: ['global', 'project'] }).notNull(),
     projectId: text('project_id').references(() => projects.id),
-    type: text('type', { enum: ['user', 'feedback', 'project', 'reference'] }).notNull(),
+    type: text('type', {
+      enum: ['user', 'feedback', 'project', 'reference', 'procedural'],
+    }).notNull(),
     /**
      * Short human-readable label (1..100 chars). Required at save; the DB
      * enforces `NOT NULL` + `CHECK(length(title) BETWEEN 1 AND 100)` (the

@@ -271,15 +271,15 @@ export class MemoryRepository {
    * rank window (no OFFSET — RRF fusion paginates in memory). Distinct from
    * the unscoped `adminSearchFts` and the save-time `searchBm25Candidates`.
    */
-  searchBm25Ids(opts: SearchBm25IdsOpts): string[] {
+  searchBm25Ids(opts: SearchBm25IdsOpts): { id: string; rank: number }[] {
     const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
     const tagClause = opts.tag
       ? sql`AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${opts.tag})`
       : sql``;
     const topicKeyClause = opts.topicKey ? sql`AND m.topic_key = ${opts.topicKey}` : sql``;
-    const rows = this.db.all<{ id: string }>(
+    return this.db.all<{ id: string; rank: number }>(
       sql`
-        SELECT m.id
+        SELECT m.id AS id, bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE}) AS rank
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
@@ -288,11 +288,10 @@ export class MemoryRepository {
           ${typeClause}
           ${tagClause}
           ${topicKeyClause}
-        ORDER BY bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE})
+        ORDER BY rank
         LIMIT ${opts.limit}
       `,
     );
-    return rows.map((r) => r.id);
   }
 
   /** Subset of `ids` whose memory carries `tag` (dense-branch tag post-filter). */
@@ -550,15 +549,24 @@ export class MemoryRepository {
   /** Lightweight `(type, last_seen_at)` projection per id (search ranking boost input). */
   rankingMetadataByIds(
     ids: readonly string[],
-  ): Map<string, { type: MemoryType; lastSeenAt: Date | null }> {
-    const out = new Map<string, { type: MemoryType; lastSeenAt: Date | null }>();
+  ): Map<string, { type: MemoryType; lastSeenAt: Date | null; sessionId: string | null }> {
+    const out = new Map<
+      string,
+      { type: MemoryType; lastSeenAt: Date | null; sessionId: string | null }
+    >();
     if (ids.length === 0) return out;
     const rows = this.db
-      .select({ id: memory.id, type: memory.type, lastSeenAt: memory.lastSeenAt })
+      .select({
+        id: memory.id,
+        type: memory.type,
+        lastSeenAt: memory.lastSeenAt,
+        sessionId: memory.sessionId,
+      })
       .from(memory)
       .where(inArray(memory.id, [...ids]))
       .all();
-    for (const r of rows) out.set(r.id, { type: r.type, lastSeenAt: r.lastSeenAt });
+    for (const r of rows)
+      out.set(r.id, { type: r.type, lastSeenAt: r.lastSeenAt, sessionId: r.sessionId });
     return out;
   }
 

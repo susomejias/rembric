@@ -23,18 +23,8 @@ if [ ! -t 0 ]; then
 fi
 
 RAW_SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
-SESSION_ID="$RAW_SESSION_ID"
-[ -z "$SESSION_ID" ] && SESSION_ID="nosession"
-SAFE_ID="$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.-' '_')"
 
-DIR="${TMPDIR:-/tmp}/rembric-turnnudge"
-mkdir -p "$DIR" 2>/dev/null || true
-FILE="${DIR}/${SAFE_ID}"
-# Append-and-count-bytes instead of read-increment-write: a single O_APPEND
-# write is atomic even across concurrent invocations, so turns can never be
-# lost to a race the way a read-modify-write counter could.
-printf '.' >>"$FILE" 2>/dev/null || true
-COUNT="$(wc -c <"$FILE" 2>/dev/null | tr -d '[:space:]')"
+COUNT="$(rembric_turn_count rembric-turnnudge "$RAW_SESSION_ID")"
 case "$COUNT" in
   # Counter unreadable (unwritable TMPDIR, squatted counter dir, etc.) —
   # fail CLOSED: emit nothing. Defaulting to 0 here would satisfy BOTH

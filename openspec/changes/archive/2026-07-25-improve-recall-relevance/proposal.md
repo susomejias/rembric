@@ -1,14 +1,14 @@
 ## Why
 
-Rembric has good hybrid retrieval and **does not use it at the moment it matters most**. `memory.context` — the tool the protocol tells agents to call when starting or resuming work — accepts only counts (`sessions`, `prompts`, `memories`, `includeArchived`) and returns `recentMemories` ordered purely by `last_seen_at`. Nothing about the work at hand influences what comes back. The session-start hook does not inject anything either; it prints a nudge. The one path that *does* run a relevance query is gated behind a keyword matcher (`remember|recall|acuérdate|qué hicimos|what did we do`), so relevant recall only happens if the user says a magic word.
+Rembric has good hybrid retrieval and **does not use it at the moment it matters most**. `memory.context` — the tool the protocol tells agents to call when starting or resuming work — accepts only counts (`sessions`, `prompts`, `memories`, `includeArchived`) and returns `recentMemories` ordered purely by `last_seen_at`. Nothing about the work at hand influences what comes back. The session-start hook does not inject anything either; it prints a nudge. The one path that _does_ run a relevance query is gated behind a keyword matcher (`remember|recall|acuérdate|qué hicimos|what did we do`), so relevant recall only happens if the user says a magic word.
 
-The result: at session start the agent gets the N most recently *touched* memories, not the ones bearing on what it is about to do — and because `last_seen_at` advances on every read, "recent" increasingly means "recently retrieved" rather than "recently learned".
+The result: at session start the agent gets the N most recently _touched_ memories, not the ones bearing on what it is about to do — and because `last_seen_at` advances on every read, "recent" increasingly means "recently retrieved" rather than "recently learned".
 
 Three smaller gaps compound it, and all four live on the same code path, so they are worth landing together and measuring together:
 
 - **The system cannot abstain.** Search always returns the top-k least-bad rows. A confidently-wrong memory is worse for an agent than no memory, because the agent has no signal to distrust it.
 - **One verbose session can monopolise the page.** Nothing caps how many results come from the same session, so a chatty afternoon can crowd out the single memory from three months ago that answers the question.
-- **`procedural` knowledge has no home.** The runbook — "how deploys work here", "the dev stack needs this permission fix" — is the highest-value memory class for a coding agent, and it currently shares the `reference` bucket, which has *no* review TTL and a ten-year decay window. Its shelf life is nothing like a bookmark's.
+- **`procedural` knowledge has no home.** The runbook — "how deploys work here", "the dev stack needs this permission fix" — is the highest-value memory class for a coding agent, and it currently shares the `reference` bucket, which has _no_ review TTL and a ten-year decay window. Its shelf life is nothing like a bookmark's.
 
 ## What Changes
 

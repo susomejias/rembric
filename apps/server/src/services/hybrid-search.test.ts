@@ -6,10 +6,13 @@ import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
 import {
+  applyDiversityCap,
+  applyGapRatioFilter,
   applyRankingBoost,
   computeRankWindowSize,
   fuseRRF,
   fuseRRFWithScores,
+  hybridSearch,
   RANK_CONSTANT,
   RANK_WINDOW_CEILING,
   sanitizeFtsQuery,
@@ -152,14 +155,14 @@ describe('applyRankingBoost', () => {
       { id: 'fresh', score: 0.0195 },
     ];
     const result = applyRankingBoost(fused, fakeOpts(meta, confirmations));
-    expect(result[0]).toBe('fresh');
+    expect(result[0]?.id).toBe('fresh');
   });
 
   it('never introduces an id absent from the fused pool', () => {
     const meta = new Map([['a', { type: 'user' as const, lastSeenAt: NOW }]]);
     const fused = [{ id: 'a', score: 0.05 }];
     const result = applyRankingBoost(fused, fakeOpts(meta, new Map()));
-    expect(result).toEqual(['a']);
+    expect(result.map((r) => r.id)).toEqual(['a']);
   });
 
   it('returns an empty array for an empty fused pool without querying metadata', () => {
@@ -190,7 +193,54 @@ describe('applyRankingBoost', () => {
       { id: 'weak', score: 0.005 },
     ];
     const result = applyRankingBoost(fused, fakeOpts(meta, confirmations));
-    expect(result[0]).toBe('strong'); // 0.03·0.9 = 0.027 still beats 0.005·1.35 = 0.00675
+    expect(result[0]?.id).toBe('strong'); // 0.03·0.9 = 0.027 still beats 0.005·1.35 = 0.00675
+  });
+});
+
+describe('applyGapRatioFilter', () => {
+  it('truncates once a score falls below the gap ratio relative to its predecessor', () => {
+    const ranked = [{ score: 1.0 }, { score: 0.9 }, { score: 0.2 }, { score: 0.15 }];
+    expect(applyGapRatioFilter(ranked, 0.5)).toEqual([{ score: 1.0 }, { score: 0.9 }]);
+  });
+
+  it('keeps the full list when no gap crosses the threshold', () => {
+    const ranked = [{ score: 1.0 }, { score: 0.9 }, { score: 0.85 }];
+    expect(applyGapRatioFilter(ranked, 0.5)).toEqual(ranked);
+  });
+
+  it('keeps a single-row pool unchanged', () => {
+    expect(applyGapRatioFilter([{ score: 1 }], 0.9)).toEqual([{ score: 1 }]);
+  });
+});
+
+describe('applyDiversityCap', () => {
+  it('caps at most `cap` rows per session, backfilling from the skipped remainder in order', () => {
+    const ranked = [
+      { id: 'a1', sessionId: 's1' },
+      { id: 'a2', sessionId: 's1' },
+      { id: 'a3', sessionId: 's1' },
+      { id: 'a4', sessionId: 's1' },
+      { id: 'b1', sessionId: 's2' },
+    ];
+    const result = applyDiversityCap(ranked, 3);
+    expect(result.map((r) => r.id)).toEqual(['a1', 'a2', 'a3', 'b1', 'a4']);
+  });
+
+  it('never shrinks the result count even when one session dominates the whole pool', () => {
+    const ranked = Array.from({ length: 8 }, (_, i) => ({ id: `x${i}`, sessionId: 'only' }));
+    const result = applyDiversityCap(ranked, 3);
+    expect(result.length).toBe(8);
+  });
+
+  it('does not group null-session rows together', () => {
+    const ranked = [
+      { id: 'n1', sessionId: null },
+      { id: 'n2', sessionId: null },
+      { id: 'n3', sessionId: null },
+      { id: 'n4', sessionId: null },
+    ];
+    const result = applyDiversityCap(ranked, 3);
+    expect(result.map((r) => r.id)).toEqual(['n1', 'n2', 'n3', 'n4']);
   });
 });
 
@@ -440,6 +490,70 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     await embedAll();
     const res = await ftsOnly.search({ query: 'lexical only' }, projectScope(projectId));
     expect(res.map((m) => m.content)).toContain('lexical only lookup');
+  });
+
+  it('with the gates disabled (the default), hybridSearch never abstains', async () => {
+    mem.save(
+      { type: 'user', title: 'gate default check', content: 'gate default check' },
+      projectScope(projectId),
+    );
+    await embedAll();
+    const result = await hybridSearch({
+      repos,
+      embedQuery: (t) => fake.embed(t),
+      query: 'completely unrelated zzz query',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    expect(result.abstained).toBe(false);
+  });
+
+  it('an unrelated query abstains once a floor is enabled (no lexical or dense candidate at all)', async () => {
+    // No embedder wired — dense contributes nothing, isolating the lexical
+    // branch's own "found literally nothing" signal.
+    const ftsOnly = new MemoryService(repos, db.handle.db);
+    ftsOnly.save(
+      {
+        type: 'user',
+        title: 'kubernetes autoscaling threshold',
+        content: 'kubernetes autoscaling threshold',
+      },
+      projectScope(projectId),
+    );
+    const result = await hybridSearch({
+      repos,
+      query: 'completely unrelated topic never mentioned anywhere',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      abstentionFloor: 0.5,
+    });
+    expect(result.abstained).toBe(true);
+    expect(result.ids).toEqual([]);
+  });
+
+  it('a sharp exact-phrase query does not abstain once a floor is enabled', async () => {
+    mem.save(
+      { type: 'user', title: 'exact phrase match probe', content: 'exact phrase match probe' },
+      projectScope(projectId),
+    );
+    const result = await hybridSearch({
+      repos,
+      query: 'exact phrase match probe',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      abstentionFloor: 0.5,
+    });
+    expect(result.abstained).toBe(false);
+    expect(result.ids.length).toBeGreaterThan(0);
   });
 });
 

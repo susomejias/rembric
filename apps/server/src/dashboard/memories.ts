@@ -212,7 +212,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     }));
     const typeOptions = [
       { value: '', label: 'all types', selected: typeFilter === '' },
-      ...(['user', 'feedback', 'project', 'reference'] as const).map((t) => ({
+      ...(['user', 'feedback', 'project', 'reference', 'procedural'] as const).map((t) => ({
         value: t,
         label: t,
         selected: typeFilter === t,

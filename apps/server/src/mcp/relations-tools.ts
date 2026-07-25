@@ -26,7 +26,7 @@ import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
  * legacy entry point still works.
  */
 
-const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const;
+const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 
 export const suggestTopicKeySchema = {
   type: z.enum(MEMORY_TYPES),

@@ -29,6 +29,10 @@ const months = (n: number): number => n * MONTH_MS;
  * is generated from this map so the numbers live in exactly one place.
  */
 export const REVIEW_TTL_MS: Partial<Record<MemoryType, number>> = {
+  // Shortest TTL of any type: a runbook describes a process that changes on
+  // its own schedule, not the agent's, and a stale one silently gives wrong
+  // operational steps in a way a stale decision record does not.
+  procedural: months(2),
   project: months(3),
   feedback: months(6),
   user: months(12),
