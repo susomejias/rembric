@@ -235,7 +235,7 @@
   color: var(--fg-faint);
 }
 .filters .group select,
-.filters .group input {
+.filters .group input:not([type='checkbox']) {
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--fg-faint);
@@ -249,6 +249,24 @@
   caret-color: var(--lime);
   cursor: pointer;
   min-width: 90px;
+}
+.filters .group input[type='checkbox'] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--fg-faint);
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.filters .group input[type='checkbox']:checked {
+  border-color: var(--lime);
+  background: var(--lime);
+}
+.filters .group input[type='checkbox']:focus-visible {
+  outline: 1px solid var(--lime);
+  outline-offset: 2px;
 }
 .filters .group select {
   appearance: none;

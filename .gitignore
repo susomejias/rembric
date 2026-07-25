@@ -24,6 +24,7 @@ __pycache__/
 
 # Local-only personal notes (not for the repo)
 *.local.*
+docker-compose.override.yml
 
 # Local SQLite (dev / testing)
 *.db

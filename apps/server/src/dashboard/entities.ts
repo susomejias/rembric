@@ -140,7 +140,6 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
       <form
         action="/dashboard/entities/rebuild"
         method="post"
-        class="inline"
         data-confirm="Truncate and re-scan the entity index from every non-archived memory? Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
         data-confirm-label="REBUILD ENTITY INDEX"
         data-confirm-tone="warn"
