@@ -307,7 +307,6 @@ describe('MemoryRepository', () => {
         ],
         defaultThresholdMs: 1_000, // covers 'feedback' (no explicit entry)
         confidenceFloor: 1,
-        escalationTtlByType: [], // escalation disabled: pure recency+confidence rule
       });
       // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
       // U_SAME: user age 200 < 10_000 → out (longer threshold than project).

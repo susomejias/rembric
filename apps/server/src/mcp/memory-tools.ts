@@ -342,6 +342,8 @@ export const memoryGetOutput = {
   entitiesTruncated: z.boolean().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+  /** True once the memory has sat in `needs_review` past its escalation window. */
+  reviewEscalated: z.boolean().optional(),
   // Batch response (when `ids` is provided).
   memories: z.array(memoryRow).optional(),
   notFound: z.array(z.string()).optional(),
@@ -1024,7 +1026,11 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
         };
       })(),
       ...(result.reviewState !== null
-        ? { reviewState: result.reviewState, reviewAfter: result.reviewAfter ?? null }
+        ? {
+            reviewState: result.reviewState,
+            reviewAfter: result.reviewAfter ?? null,
+            reviewEscalated: result.reviewEscalated,
+          }
         : {}),
     });
   } catch (err) {

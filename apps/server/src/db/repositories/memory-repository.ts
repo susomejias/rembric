@@ -493,8 +493,6 @@ export class MemoryRepository {
     thresholdByType: ReadonlyArray<readonly [MemoryType, number]>;
     defaultThresholdMs: number;
     confidenceFloor: number;
-    /** Per-type escalation window; empty disables escalation. */
-    escalationTtlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): string[] {
     const scopeFilter = scopeCondition(opts.scope, opts.projectId);
     // Per-type inactivity window: a row decays once last_seen_at predates
@@ -511,23 +509,10 @@ export class MemoryRepository {
       sql`(SELECT count(*) FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'affirm') < ${opts.confidenceFloor}`,
     );
 
-    let eligibleRule = recencyRule;
-    if (opts.escalationTtlByType.length > 0) {
-      const { ttlExpr, baselineExpr } = this.needsReviewExprs(opts.escalationTtlByType);
-      const escalationRule = and(
-        sql`${ttlExpr} IS NOT NULL`,
-        sql`${baselineExpr} + ${ttlExpr} <= ${opts.nowMs}`,
-      );
-      // Outer parens are load-bearing: the caller joins this with plain `AND`,
-      // which binds tighter than `OR` — unwrapped, an archived row would match
-      // via escalation with no status filter at all.
-      eligibleRule = sql`((${recencyRule}) OR (${escalationRule}))`;
-    }
-
     return this.db
       .select({ id: memory.id })
       .from(memory)
-      .where(and(eq(memory.status, 'active'), scopeFilter, eligibleRule))
+      .where(and(eq(memory.status, 'active'), scopeFilter, recencyRule))
       .all()
       .map((r) => r.id);
   }
@@ -553,8 +538,10 @@ export class MemoryRepository {
     for (const r of rows) {
       if (r.latest == null) continue;
       const entry = out.get(r.memoryId) ?? { affirmedAt: null, refutedAt: null };
-      if (r.verdict === 'refute') entry.refutedAt = new Date(Number(r.latest));
-      else entry.affirmedAt = new Date(Number(r.latest));
+      // Matched positively: the SQL baseline counts only 'affirm'.
+      if (r.verdict === 'affirm') entry.affirmedAt = new Date(Number(r.latest));
+      else if (r.verdict === 'refute') entry.refutedAt = new Date(Number(r.latest));
+      else continue;
       out.set(r.memoryId, entry);
     }
     return out;

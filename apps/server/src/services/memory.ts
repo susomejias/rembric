@@ -143,6 +143,8 @@ export interface MemoryWithHistory {
   reviewState: ReviewState | null;
   /** Derived re-verification deadline of the head; null when no TTL applies. */
   reviewAfter: Date | null;
+  /** Review queue's terminal state: derived, never stored, never a decay input. */
+  reviewEscalated: boolean;
 }
 
 /** A single `needsReview` context entry: the stale memory plus its derived timing. */
@@ -257,7 +259,7 @@ export class MemoryService {
     const ts = this.repos.memory.reviewTimestampsByIds([head.id]).get(head.id);
     const lastConfirmedAt = ts?.affirmedAt ?? null;
     const lastRefutedAt = ts?.refutedAt ?? null;
-    const { reviewState, reviewAfter } = deriveReviewState(
+    const { reviewState, reviewAfter, reviewEscalated } = deriveReviewState(
       {
         type: head.type,
         createdAt: head.createdAt,
@@ -278,6 +280,7 @@ export class MemoryService {
       confirmationCount,
       reviewState,
       reviewAfter,
+      reviewEscalated,
     };
   }
 

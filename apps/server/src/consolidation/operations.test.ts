@@ -460,15 +460,14 @@ describe('reactivation durability (fix-audited-defects)', () => {
 describe('escalation', () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
 
-  it('a frequently-read memory (last_seen_at always fresh) still becomes decay-eligible once it is long-unaffirmed (task 4.3)', () => {
+  it('escalation is derived at read time and never archives: a long-unaffirmed but frequently-read memory stays out of the decay candidates', () => {
     const m = memoryService.save(
       { type: 'project', title: 'Plan', content: 'plan' },
       projectScope(projectId),
     );
 
-    // Frequent reads keep last_seen_at fresh, so the recency rule can never
-    // fire. project's TTL is 3 months: needs_review at 1x, escalation after
-    // ESCALATION_MULTIPLIER further multiples, i.e. 3x ≈ 270 days.
+    // Frequent reads keep last_seen_at fresh, so the recency rule cannot fire.
+    // project's TTL is 3 months, so 350 days is well past escalation.
     for (let i = 0; i < 10; i++) {
       clock.advance(35 * DAY_MS);
       memoryService.get(m.id, projectScope(projectId));
@@ -480,7 +479,11 @@ describe('escalation', () => {
       DEFAULT_DECAY,
       clock.value,
     );
-    expect(candidates).toContain(m.id);
+    expect(candidates).not.toContain(m.id);
+
+    const seen = memoryService.get(m.id, projectScope(projectId));
+    expect(seen?.reviewState).toBe('needs_review');
+    expect(seen?.reviewEscalated).toBe(true);
   });
 
   it('does NOT trip escalation before the multiplier threshold is reached', () => {
