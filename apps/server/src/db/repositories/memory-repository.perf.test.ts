@@ -178,6 +178,59 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
+  describe('purgeByIds — SQLite bind-variable ceiling', () => {
+    // Above SQLITE_MAX_VARIABLE_NUMBER (32 766).
+    const OVER_BIND_CEILING = 40_000;
+
+    it('purges an id list larger than the 32 766 bind-variable ceiling', () => {
+      const insert = t.handle.raw.prepare(
+        `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at, last_seen_at)
+         VALUES (?, 'global', NULL, 'project', 't', 'c', '[]', 'archived', '[]', 1000, 1000)`,
+      );
+      t.handle.raw.transaction(() => {
+        for (let i = 0; i < OVER_BIND_CEILING; i++) insert.run(`m-${i}`);
+      })();
+
+      // Derived rows on a subset, so the entity DELETEs (which must precede the
+      // memory DELETE — no ON DELETE CASCADE) are actually exercised.
+      t.handle.raw
+        .prepare(
+          `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at) VALUES ('e1','global',NULL,'path','/tmp/x',1000)`,
+        )
+        .run();
+      const link = t.handle.raw.prepare(
+        `INSERT INTO memory_entity_links (entity_id, memory_id) VALUES ('e1', ?)`,
+      );
+      const scan = t.handle.raw.prepare(
+        `INSERT INTO memory_entity_scan (memory_id, scanned_at) VALUES (?, 1000)`,
+      );
+      const vec = t.handle.raw.prepare(
+        `INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, '__global__', 'archived', 'project', ?)`,
+      );
+      const embedding = Buffer.from(new Float32Array(768).buffer);
+      t.handle.raw.transaction(() => {
+        for (let i = 0; i < 10; i++) {
+          link.run(`m-${i}`);
+          scan.run(`m-${i}`);
+          vec.run(`m-${i}`, embedding);
+        }
+      })();
+
+      const ids = repo.findPurgeableDisconnectedArchivedIds();
+      expect(ids).toHaveLength(OVER_BIND_CEILING);
+
+      repo.purgeByIds(ids);
+
+      const countOf = (table: string) =>
+        (t.handle.raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+      expect(countOf('memory')).toBe(0);
+      expect(countOf('memory_entity_links')).toBe(0);
+      expect(countOf('memory_entity_scan')).toBe(0);
+      expect(countOf('memory_vec')).toBe(0);
+      expect(countOf('memory_fts'), 'memory_ad must keep the FTS mirror in step').toBe(0);
+    });
+  });
+
   describe('findSuccessorId — memory_replaces join', () => {
     // The pre-rewrite json_each scan, kept verbatim as the equivalence oracle.
     function legacyFindSuccessorId(id: string): string | undefined {

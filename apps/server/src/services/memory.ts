@@ -15,6 +15,9 @@ import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
 const AGENT_MEMORY_ARCHIVE_REASONING = 'agent archived memory at explicit user request';
 
+// The candidate query has no LIMIT, so keep the per-statement payload bounded.
+const PURGE_DELETE_SLICE = 5_000;
+
 /**
  * Domain service for the memory lifecycle.
  *
@@ -634,7 +637,9 @@ export class MemoryService {
         return { deletedIds: [] };
       }
 
-      this.repos.memory.purgeByIds(deletedIds);
+      for (let i = 0; i < deletedIds.length; i += PURGE_DELETE_SLICE) {
+        this.repos.memory.purgeByIds(deletedIds.slice(i, i + PURGE_DELETE_SLICE));
+      }
 
       this.journalMaintenanceOp(ts, {
         opType: 'archived_memory_purge',

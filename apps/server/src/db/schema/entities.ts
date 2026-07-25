@@ -1,4 +1,11 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 import { memory } from './memory.js';
 import { projects } from './projects.js';
@@ -55,6 +62,8 @@ export const memoryEntities = sqliteTable(
   }),
 );
 
+// Both tables below are WITHOUT ROWID in 0023, which Drizzle cannot express;
+// test/schema-drift.test.ts asserts it against sqlite_master instead.
 export const memoryEntityLinks = sqliteTable(
   'memory_entity_links',
   {
@@ -70,6 +79,7 @@ export const memoryEntityLinks = sqliteTable(
     // "every memory linked to this entity" (exact-address retrieval), so
     // that's the leftmost, index-native lookup. `memory_entity_links_memory_idx`
     // below serves the opposite direction (a memory's own entities[]).
+    pk: primaryKey({ columns: [table.entityId, table.memoryId] }),
     memoryIdx: index('memory_entity_links_memory_idx').on(table.memoryId),
   }),
 );

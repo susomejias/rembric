@@ -70,9 +70,12 @@ export function createDb(opts: CreateDbOptions): DbHandle {
       migrationsDir: opts.migrationsDir ?? defaultMigrationsDir(),
     });
 
-    // Refresh sqlite_stat1 so the planner has statistics from the first query.
-    // Only valid on a writable connection (it writes the stat table).
-    sqlite.pragma('optimize');
+    // ANALYZE, not `PRAGMA optimize`: optimize re-analyzes only on a ~10x row-count
+    // change, so a database that grew and was then SIGKILLed (close-time optimize
+    // never runs) boots with statistics frozen at its old size. analysis_limit caps
+    // the sample, keeping this a few ms at 50k rows. Needs a writable connection.
+    sqlite.pragma('analysis_limit = 1000');
+    sqlite.exec('ANALYZE');
   }
 
   const db = drizzle(sqlite, { schema });

@@ -756,3 +756,80 @@ describe('migration 0017_oauth_project_binding', () => {
     expect(row?.revoked_at).not.toBeNull();
   });
 });
+
+describe('fresh install vs staged upgrade', () => {
+  const dirs: string[] = [];
+  const conns: Database.Database[] = [];
+
+  function open(dataDir: string): Database.Database {
+    const raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('journal_mode = WAL');
+    raw.pragma('synchronous = NORMAL');
+    raw.pragma('foreign_keys = ON');
+    raw.pragma('busy_timeout = 5000');
+    conns.push(raw);
+    return raw;
+  }
+
+  function tempDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  }
+
+  function schemaObjects(raw: Database.Database): { type: string; name: string; sql: string }[] {
+    return raw
+      .prepare<[], { type: string; name: string; sql: string | null }>(
+        `SELECT type, name, sql FROM sqlite_master
+          WHERE name NOT LIKE 'sqlite_stat%' ORDER BY type, name`,
+      )
+      .all()
+      .map((r) => ({
+        type: r.type,
+        name: r.name,
+        sql: (r.sql ?? '').replace(/`/g, '').replace(/\s+/g, ' ').trim(),
+      }));
+  }
+
+  afterEach(() => {
+    for (const c of conns.splice(0)) {
+      try {
+        c.close();
+      } catch {
+        // ignore
+      }
+    }
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('reaches an identical sqlite_master, indexes included, from every migration cut-point', () => {
+    const fresh = schemaObjects(
+      (() => {
+        const raw = open(tempDir('rembric-fresh-'));
+        migrate(raw, { migrationsDir: fullMigrationsDir });
+        return raw;
+      })(),
+    );
+
+    const all = readdirSync(fullMigrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+
+    for (const cut of all.slice(1)) {
+      const slicedDir = tempDir('rembric-slice-');
+      for (const f of all) {
+        if (f === cut) break;
+        copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+      }
+      const raw = open(tempDir('rembric-upgraded-'));
+      migrate(raw, { migrationsDir: slicedDir });
+      migrate(raw, { migrationsDir: fullMigrationsDir });
+
+      expect(
+        schemaObjects(raw),
+        `upgrade stopping before ${cut} diverges from a fresh install`,
+      ).toEqual(fresh);
+    }
+  });
+});

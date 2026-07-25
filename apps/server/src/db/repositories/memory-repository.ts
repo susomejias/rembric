@@ -24,6 +24,11 @@ const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
 
+/** One JSON bind, not one placeholder per id: SQLite throws above 32 766 binds. */
+function idJsonSet(ids: readonly string[]): SQL {
+  return sql`(SELECT value FROM json_each(${JSON.stringify([...ids])}))`;
+}
+
 export interface ReviewTimestamps {
   affirmedAt: Date | null;
   refutedAt: Date | null;
@@ -360,7 +365,7 @@ export class MemoryRepository {
     return this.db
       .select()
       .from(memory)
-      .where(inArray(memory.id, [...ids]))
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
       .all();
   }
 
@@ -431,7 +436,7 @@ export class MemoryRepository {
     this.db
       .update(memory)
       .set({ status: 'superseded' as const })
-      .where(inArray(memory.id, [...ids]))
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
       .run();
   }
 
@@ -441,7 +446,7 @@ export class MemoryRepository {
     this.db
       .update(memory)
       .set({ status: 'archived' as const })
-      .where(and(inArray(memory.id, [...ids]), eq(memory.status, 'active')))
+      .where(and(sql`${memory.id} IN ${idJsonSet(ids)}`, eq(memory.status, 'active')))
       .run();
   }
 
@@ -458,7 +463,7 @@ export class MemoryRepository {
     this.db
       .update(memory)
       .set({ status: 'active' as const })
-      .where(inArray(memory.id, [...ids]))
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
       .run();
   }
 
@@ -476,7 +481,7 @@ export class MemoryRepository {
     const rows = this.db
       .select({ id: memory.id })
       .from(memory)
-      .where(inArray(memory.id, [...ids]))
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
       .all();
     return new Set(rows.map((r) => r.id));
   }
@@ -734,7 +739,7 @@ export class MemoryRepository {
     this.db
       .update(memory)
       .set({ lastSeenAt })
-      .where(inArray(memory.id, [...ids]))
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
       .run();
   }
 
@@ -776,15 +781,12 @@ export class MemoryRepository {
    */
   purgeByIds(ids: readonly string[]): void {
     if (ids.length === 0) return;
-    const placeholders = sql.join(
-      ids.map((id) => sql`${id}`),
-      sql.raw(', '),
-    );
-    this.db.run(sql`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`);
+    const idSet = idJsonSet(ids);
+    this.db.run(sql`DELETE FROM memory_vec WHERE memory_id IN ${idSet}`);
     // No ON DELETE CASCADE on these, so they must precede the memory DELETE.
-    this.db.run(sql`DELETE FROM memory_entity_links WHERE memory_id IN (${placeholders})`);
-    this.db.run(sql`DELETE FROM memory_entity_scan WHERE memory_id IN (${placeholders})`);
-    this.db.run(sql`DELETE FROM memory WHERE id IN (${placeholders})`);
+    this.db.run(sql`DELETE FROM memory_entity_links WHERE memory_id IN ${idSet}`);
+    this.db.run(sql`DELETE FROM memory_entity_scan WHERE memory_id IN ${idSet}`);
+    this.db.run(sql`DELETE FROM memory WHERE id IN ${idSet}`);
   }
 
   /** Shared by `adminSearchFts` + `adminCountFts` so the list and its total filter the same set. */

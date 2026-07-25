@@ -839,6 +839,26 @@ describe('memory.purgeDisconnectedArchived', () => {
     expect(result.deletedIds).toEqual([]);
   });
 
+  it('purges a backlog larger than the 32 766 bind-variable ceiling', () => {
+    const backlog = 40_000;
+    const insert = db.handle.raw.prepare(
+      `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces, created_at, last_seen_at)
+       VALUES (?, 'global', NULL, 'project', 't', 'c', '[]', 'archived', '[]', 1000, 1000)`,
+    );
+    db.handle.raw.transaction(() => {
+      for (let i = 0; i < backlog; i++) insert.run(`backlog-${i}`);
+    })();
+
+    const result = memory.purgeDisconnectedArchived({ adminBypass: true });
+
+    expect(result.deletedIds).toHaveLength(backlog);
+    expect(memory.countPurgeableDisconnectedArchived()).toBe(0);
+    const remaining = db.handle.raw.prepare(`SELECT count(*) AS n FROM memory`).get() as {
+      n: number;
+    };
+    expect(remaining.n).toBe(0);
+  });
+
   it('throws forbidden when adminBypass is not strictly true', () => {
     expect(() =>
       memory.purgeDisconnectedArchived({ adminBypass: false as unknown as true }),
