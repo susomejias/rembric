@@ -135,6 +135,13 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     'see fig. 2 in the appendix, or ch. 4 for background',
     'a public domain like example.com is not extracted bare (no scheme)',
     'the value 999.1.1.1 is not a valid IP (out of octet range)',
+    // Observed in a production index as `path` entities: a property access, a
+    // file type, an identifier fragment, and this product's own placeholder
+    // session title. None is an address, and none has a `/`.
+    'the .length property is undefined',
+    'run the .sql migrations by hand',
+    'spawn returns a .child handle',
+    'the .HERMES marker is written',
   ];
 
   it.each(PROSE_RESEMBLING_ENTITIES)('yields zero entities for: %s', (text) => {
@@ -145,6 +152,116 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     expect(values('', 'bumped to v3.14.159 in package.json release notes', 'path')).not.toContain(
       '3.14.159',
     );
+  });
+
+  it('admits a bare dotfile name only in the case it is listed in', () => {
+    expect(values('', 'the slug lives in .rembric at the root', 'path')).toEqual(['.rembric']);
+    expect(values('', 'the slug lives in .Rembric at the root', 'path')).toEqual([]);
+  });
+
+  it('still extracts a dotfile-led path whose bare form is unlisted', () => {
+    expect(values('', 'wrote to .hermes/config.yaml last night', 'path')).toContain(
+      '.hermes/config.yaml',
+    );
+  });
+
+  // Membership is on the first segment, so a listed name may carry more. Both
+  // of these appear in this repo's own README and specs, so admitting only the
+  // bare form was a recall loss on exactly the identifiers the index is for.
+  it('admits further segments on a listed dotfile name', () => {
+    expect(values('', 'use .env.example as a template', 'path')).toEqual(['.env.example']);
+    expect(values('', 'see .mcp.json for the server config', 'path')).toEqual(['.mcp.json']);
+  });
+
+  it('does not admit a longer word that merely starts with a listed name', () => {
+    expect(values('', 'a .envelope of data arrived', 'path')).toEqual([]);
+  });
+
+  it('does not admit a doubled dot', () => {
+    expect(values('', 'a .env..example typo', 'path')).toEqual([]);
+  });
+
+  // The narrowing's own spec forbids silencing prose by also dropping real
+  // addresses. These are every dotfile `git ls-files` reports for this repo, so
+  // the suite fails if a future trim of the list loses one. CLAUDE.md names
+  // several of them bare, which is how they reach a memory in the first place.
+  it.each([
+    '.agents',
+    '.claude',
+    '.claude-plugin',
+    '.codegraph',
+    '.codex',
+    '.codex-plugin',
+    '.devcontainer',
+    '.dockerignore',
+    '.editorconfig',
+    '.env.example',
+    '.github',
+    '.gitignore',
+    '.gitkeep',
+    '.hermes-plugin',
+    '.husky',
+    '.mcp.json',
+    '.npmignore',
+    '.npmrc',
+    '.nvmrc',
+    '.opencode',
+    '.opencode-plugin',
+    '.openspec.yaml',
+    '.prettierignore',
+    '.prettierrc',
+    '.release-please-manifest.json',
+    '.rembric',
+  ])('still extracts the tracked dotfile %s', (name) => {
+    expect(values('', `the carrier lives in ${name} at the root`, 'path')).toEqual([name]);
+  });
+});
+
+describe('extractEntities — per-memory budget', () => {
+  /** `MAX_ENTITIES`, hardcoded: the bound is contract, not an implementation detail. */
+  const BOUND = 250;
+  const paths = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `node_modules/pkg${i}/dist/index.js`).join('\n');
+  const FIVE_KIND_TAIL =
+    'fixed in #4242, failed with ENOENT, set $DEPLOY_TOKEN, commit cfb5c04, host nas.local';
+  const OTHER_KINDS = ['ticket', 'error_code', 'env_var', 'git_ref', 'hostname'];
+
+  it('does not let a dominant kind starve the others', () => {
+    const found = extractEntities('', `${paths(400)}\n${FIVE_KIND_TAIL}`);
+    expect(found.length).toBeLessThanOrEqual(BOUND);
+    const kinds = new Set(found.map((e) => e.kind));
+    for (const kind of OTHER_KINDS) expect(kinds).toContain(kind);
+    // Fair share, not an equal one: the paths still take all but the five slots.
+    expect(found.filter((e) => e.kind === 'path')).toHaveLength(BOUND - OTHER_KINDS.length);
+  });
+
+  it('lets a single-kind memory consume the whole bound', () => {
+    const found = extractEntities('', paths(BOUND + 50));
+    expect(found).toHaveLength(BOUND);
+    expect(new Set(found.map((e) => e.kind))).toEqual(new Set(['path']));
+  });
+
+  it('respects the bound on a dump of thousands of identifiers across many kinds', () => {
+    const dump = Array.from(
+      { length: 2000 },
+      (_, i) => `apps/f${i}.ts PROJ-${i} 10.0.0.${i % 256} $VAR_${i} host${i}.local`,
+    ).join('\n');
+    expect(extractEntities('', dump).length).toBeLessThanOrEqual(BOUND);
+  });
+
+  // Exactly, not at-most. Three kinds of 300 give a fair share of 83 and a total
+  // of 249, so the last slot only lands if the remainder is redistributed —
+  // mutation testing showed every set-equality test passes without that pass,
+  // because dropping it under-fills uniformly and permutations still agree.
+  it('fills the bound exactly when the fair share leaves a remainder', () => {
+    const contested = [
+      Array.from({ length: 300 }, (_, i) => `src/mod${i}/index.ts`).join('\n'),
+      Array.from({ length: 300 }, (_, i) => `#${1000 + i}`).join(' '),
+      Array.from({ length: 300 }, (_, i) => `$DEPLOY_TOKEN_${1000 + i}`).join(' '),
+    ].join('\n');
+    const found = extractEntities('', contested);
+    expect(found).toHaveLength(BOUND);
+    expect(new Set(found.map((e) => e.kind))).toEqual(new Set(['path', 'ticket', 'env_var']));
   });
 });
 

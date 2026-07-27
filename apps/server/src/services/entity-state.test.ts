@@ -1,5 +1,4 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,10 +8,15 @@ import { createTestDb, type TestDb } from '../test/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
 import { EntityBackfillWorker } from './entity-backfill-worker.js';
-import { ensureEntityExtractor, resetEntityIndex } from './entity-state.js';
+import {
+  ensureEntityExtractor,
+  entityIndexResetWarning,
+  entityMarkerPath,
+  resetEntityIndex,
+} from './entity-state.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
+import { projectScope, SCOPE_GLOBAL } from './scope.js';
 
 let db: TestDb;
 let repos: Repositories;
@@ -28,8 +32,6 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
-const MARKER = 'entity-state.json';
-
 function scanCount(): number {
   const row = db.handle.raw.prepare('SELECT COUNT(*) c FROM memory_entity_scan').get() as {
     c: number;
@@ -40,7 +42,7 @@ function scanCount(): number {
 describe('ensureEntityExtractor', () => {
   it('resets on a first boot with no marker and writes the current version', () => {
     expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
-    const marker = JSON.parse(readFileSync(join(db.dataDir, MARKER), 'utf8')) as {
+    const marker = JSON.parse(readFileSync(entityMarkerPath(db.dataDir), 'utf8')) as {
       extractorVersion: string;
     };
     expect(marker.extractorVersion).toBe(EXTRACTOR_VERSION);
@@ -65,7 +67,7 @@ describe('ensureEntityExtractor', () => {
     expect(repos.entities.adminCountEntities({})).toBeGreaterThan(0);
 
     // Boot 2: recipe changed under the same data dir.
-    writeFileSync(join(db.dataDir, MARKER), JSON.stringify({ extractorVersion: 'v0-stale' }));
+    writeFileSync(entityMarkerPath(db.dataDir), JSON.stringify({ extractorVersion: 'v0-stale' }));
     expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
     expect(scanCount()).toBe(0);
     expect(repos.entities.adminCountEntities({})).toBe(0);
@@ -95,14 +97,71 @@ describe('ensureEntityExtractor', () => {
     expect(scanCount()).toBe(1);
     expect(repos.entities.adminCountEntities({})).toBe(0);
 
-    writeFileSync(join(db.dataDir, MARKER), JSON.stringify({ extractorVersion: 'v0-stale' }));
+    writeFileSync(entityMarkerPath(db.dataDir), JSON.stringify({ extractorVersion: 'v0-stale' }));
     ensureEntityExtractor(repos, db.dataDir, db.handle.db);
     expect(scanCount()).toBe(0);
   });
 
   it('treats an unreadable marker as unknown identity', () => {
-    writeFileSync(join(db.dataDir, MARKER), 'not json at all');
+    writeFileSync(entityMarkerPath(db.dataDir), 'not json at all');
     expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
+  });
+
+  it('does not reset over a matching marker that predates the pending protocol', () => {
+    const legacy = JSON.stringify({ extractorVersion: EXTRACTOR_VERSION }) + '\n';
+    writeFileSync(entityMarkerPath(db.dataDir), legacy);
+
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(false);
+    expect(readFileSync(entityMarkerPath(db.dataDir), 'utf8')).toBe(legacy);
+  });
+
+  it.each([
+    ['true', 'true'],
+    ['"false"', '"false"'],
+    ['0', '0'],
+    ['null', 'null'],
+  ])('treats a %s pending flag as unsettled rather than settled', (_label, raw) => {
+    writeFileSync(
+      entityMarkerPath(db.dataDir),
+      `{"extractorVersion":${JSON.stringify(EXTRACTOR_VERSION)},"pending":${raw}}\n`,
+    );
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
+  });
+
+  it('leaves the marker unsettled when the wipe rolls back, so the retry resets', () => {
+    memory.save(
+      { type: 'project', title: 'NAS note', content: 'the NAS lives at 192.168.1.50' },
+      projectScope(projectId),
+    );
+    const worker = new EntityBackfillWorker({ repos, tx: db.handle.db });
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
+    worker.processBatch({ force: true });
+    expect(scanCount()).toBe(1);
+    expect(repos.entities.adminBacklogCount()).toBe(0);
+
+    writeFileSync(entityMarkerPath(db.dataDir), JSON.stringify({ extractorVersion: 'v0-stale' }));
+    const rollingBack: TransactionRunner = {
+      transaction: (cb) =>
+        db.handle.db.transaction((tx) => {
+          cb(tx);
+          throw new Error('disk I/O error');
+        }),
+    };
+    expect(() => ensureEntityExtractor(repos, db.dataDir, rollingBack)).toThrow(/disk I\/O error/);
+
+    const unsettled = JSON.parse(readFileSync(entityMarkerPath(db.dataDir), 'utf8')) as {
+      extractorVersion: string;
+      pending?: boolean;
+    };
+    expect(unsettled.pending).toBe(true);
+    // The rollback restored the scan rows, so the backlog alone reads drained:
+    // the unsettled marker is the only thing left that knows a reset is owed.
+    expect(scanCount()).toBe(1);
+    expect(repos.entities.adminBacklogCount()).toBe(0);
+
+    expect(ensureEntityExtractor(repos, db.dataDir, db.handle.db).reset).toBe(true);
+    expect(repos.entities.adminBacklogCount()).toBe(1);
+    expect(worker.processBatch({ force: true }).processed).toBe(1);
   });
 });
 
@@ -146,5 +205,32 @@ describe('resetEntityIndex', () => {
     // No `force`: the flag alone has to be enough, or a rebuild silently
     // leaves the index empty until the hourly forced fallback.
     expect(worker.processBatch().processed).toBe(1);
+  });
+});
+
+describe('entityIndexResetWarning', () => {
+  it('warns while a reset is owed and links exist, and stays silent otherwise', () => {
+    let counted = 0;
+    const count = (): number => {
+      counted += 1;
+      return repos.entities.adminCountEntities({});
+    };
+
+    memory.save({ type: 'project', title: 'note', content: 'host nas.local is up' }, SCOPE_GLOBAL);
+    ensureEntityExtractor(repos, db.dataDir, db.handle.db);
+    new EntityBackfillWorker({ repos, tx: db.handle.db }).processBatch({ force: true });
+    expect(repos.entities.adminCountEntities({})).toBeGreaterThan(0);
+
+    // Settled and matching: silent, and the count is never paid.
+    expect(entityIndexResetWarning(db.dataDir, count)).toBeNull();
+    expect(counted).toBe(0);
+
+    // Owed with links present: this is the state whose backlog reads zero.
+    writeFileSync(entityMarkerPath(db.dataDir), JSON.stringify({ extractorVersion: 'v0-stale' }));
+    expect(entityIndexResetWarning(db.dataDir, count)).toMatch(/owes a reset: \d+ link\(s\)/);
+
+    // Owed but empty: nothing to distrust.
+    resetEntityIndex(repos, db.handle.db);
+    expect(entityIndexResetWarning(db.dataDir, count)).toBeNull();
   });
 });

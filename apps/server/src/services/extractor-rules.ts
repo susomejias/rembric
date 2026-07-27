@@ -37,6 +37,51 @@ const PATH_EXT =
   // Infra-as-code and unit files: the vocabulary a homelab operator writes
   // most, absent from the original code-only list.
   'tf|tfvars|hcl|tpl|service|socket|timer|rules|nix|dockerfile|containerfile';
+// Gating on PATH_EXT instead would be a trap: `sql` is already there, and `.sql`
+// is a file type rather than a file. Case-sensitive, because `normalize` does not
+// fold case. Seeded from `git ls-files` so a narrowing meant to drop prose cannot
+// also drop an address this repo writes bare — `entities.test.ts` asserts the
+// tracked ones, and the suite fails if a future trim loses one.
+const DOTFILE_NAMES = new Set([
+  'agents',
+  'bashrc',
+  'browserslistrc',
+  'claude',
+  'claude-plugin',
+  'codegraph',
+  'codex',
+  'codex-plugin',
+  'devcontainer',
+  'dockerignore',
+  'editorconfig',
+  'env',
+  'eslintignore',
+  'eslintrc',
+  'gitattributes',
+  'github',
+  'gitignore',
+  'gitkeep',
+  'gitlab-ci',
+  'gitmodules',
+  'hermes',
+  'hermes-plugin',
+  'husky',
+  'mcp',
+  'node-version',
+  'npmignore',
+  'npmrc',
+  'nvmrc',
+  'opencode',
+  'opencode-plugin',
+  'openspec',
+  'prettierignore',
+  'prettierrc',
+  'release-please-manifest',
+  'rembric',
+  'ssh',
+  'tool-versions',
+  'zshrc',
+]);
 // Extension must be terminal, else `src/user.service.ts` stores `src/user.service`.
 const PATH_RE = new RegExp(
   `(?:^|[\\s"'(\`])((?:\\.{1,2}\\/)?(?:[A-Za-z0-9_.-]+\\/)+[A-Za-z0-9_.-]+\\.(?:${PATH_EXT})|\\.[A-Za-z][A-Za-z0-9_.-]{2,40})(?=[\\s"'),:;!?\`]|\\.(?![A-Za-z0-9])|$)`,
@@ -226,8 +271,10 @@ const HOSTNAME_RE = new RegExp(
 );
 
 /**
- * Order is presentation-only: dedup is keyed `kind:value`, so no rule masks
- * another. Kinds sharing a shape are separated by `accept`, never by order.
+ * Order fixes only the sequence entities are reported in: collection is
+ * per-rule and the budget is allocated per kind, so no rule masks another —
+ * which the shipped budget, spent in this order, made untrue. Kinds sharing a
+ * shape are separated by `accept`, never by order.
  */
 export const EXTRACTOR_RULES: readonly ExtractorRule[] = [
   {
@@ -246,6 +293,16 @@ export const EXTRACTOR_RULES: readonly ExtractorRule[] = [
     kind: 'path',
     pattern: PATH_RE,
     capture: 1,
+    accept: (m) => {
+      const v = stripTrailingPunct(m[1] ?? '');
+      if (v.includes('/')) return true;
+      // Membership is on the FIRST segment, so a listed dotfile may carry
+      // further ones (`.env.example`) while `.length` and `.envelope` miss.
+      const segments = v.slice(1).split('.');
+      // An empty later segment means a doubled dot, which no filename has.
+      if (segments.some((s) => s.length === 0)) return false;
+      return DOTFILE_NAMES.has(segments[0] ?? '');
+    },
     normalize: (raw) => {
       const v = stripTrailingPunct(
         raw

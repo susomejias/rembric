@@ -22,7 +22,11 @@ import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.j
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
-import { ensureEntityExtractor } from '../services/entity-state.js';
+import {
+  ensureEntityExtractor,
+  entityIndexResetWarning,
+  entityMarkerPath,
+} from '../services/entity-state.js';
 import { DomainError } from '../services/errors.js';
 import { MemoryService } from '../services/memory.js';
 import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
@@ -219,7 +223,9 @@ export async function bootstrap(
       logger.warn('entity extractor recipe changed → index reset; re-scanning in background');
     }
   } catch (err) {
-    logger.warn(`entity extractor identity check failed; leaving index as-is: ${String(err)}`);
+    logger.warn(
+      `entity extractor identity check failed; re-checking next boot (${entityMarkerPath(config.dataDir)}): ${String(err)}`,
+    );
   }
   const entityBackfillWorker = new EntityBackfillWorker({ repos, tx: dbHandle.db });
   const entityBackfillTick = (force = false): void => {
@@ -537,9 +543,14 @@ function buildDoctorReportFactory(deps: {
       warnings.push(`entities backlog: ${entitiesBacklog}`);
     }
 
-    // `backlog` reads 0 in this state — every row has a vector, just the wrong one.
-    const resetOwed = vectorIndexResetWarning(deps.dataDir, () => deps.repos.vectors.count());
-    if (resetOwed) warnings.push(resetOwed);
+    // Both backlogs read 0 in these states: every memory has a vector and a scan
+    // row, just from the previous recipe. Nothing else distinguishes them.
+    const vectorResetOwed = vectorIndexResetWarning(deps.dataDir, () => deps.repos.vectors.count());
+    if (vectorResetOwed) warnings.push(vectorResetOwed);
+    const entityResetOwed = entityIndexResetWarning(deps.dataDir, () =>
+      deps.repos.entities.adminCountEntities({}),
+    );
+    if (entityResetOwed) warnings.push(entityResetOwed);
 
     // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session,
     // needsReview, and pendingJudgments counts are all server-wide, unlike
