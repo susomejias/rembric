@@ -92,7 +92,8 @@ The server SHALL apply pending migrations on every startup. Re-running a migrati
 
 - **GIVEN** the data dir records an embedding-model identity different from the compiled-in model
 - **WHEN** the server starts
-- **THEN** every non-archived memory SHALL be re-embedded in resumable batches and the recorded identity updated on completion
+- **THEN** every non-archived memory SHALL be re-embedded in resumable batches
+- **AND** the recorded identity SHALL be settled when the stale-vector wipe commits, NOT when the backfill finishes — a marker asserting the compiled-in identity means "no pre-change vectors remain in the index", not "every row has been re-embedded"
 
 ### Requirement: The schema MUST encode the append-only contract
 

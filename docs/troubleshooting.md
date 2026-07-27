@@ -35,7 +35,9 @@ The embedding model is required: a missing, corrupt, or incompatible model abort
 
 ### Vectors missing right after an upgrade
 
-A model change wipes stale vectors and re-embeds the corpus in background batches (`↻ embedding model changed → N stale vector(s) wiped` in the logs, then a `◆ embedding drain complete` line with similarity percentiles). FTS-based detection works throughout; vec-sourced candidates for OLD rows resume when the drain completes. New saves embed inline and are unaffected.
+A model change wipes stale vectors and re-embeds the corpus in background batches (`↻ embedding identity reset → N stale vector(s) wiped` in the logs, then a `◆ embedding drain complete` line with similarity percentiles). FTS-based detection works throughout; vec-sourced candidates for OLD rows resume when the drain completes. New saves embed inline and are unaffected.
+
+A second warning naming `embedding-state.json` means the identity marker could not be written. The boot proceeds either way. If it appears **without** a wipe line, nothing was removed and the index still holds vectors from the previous recipe — `memory.doctor` reports that as an owed reset while the rows are still there, and dense search stays unreliable until a boot with a writable data dir succeeds. If it appears **after** a wipe line, the rebuild is already under way but may be repeated on the next boot. Both cases are usually a full or read-only `REMBRIC_DATA_DIR`.
 
 ## Database
 

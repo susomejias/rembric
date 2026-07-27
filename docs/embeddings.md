@@ -40,9 +40,13 @@ bootstrap.ts
    │
    ├─ ensureVectorModel(db, dataDir)        ← embeddings/state.ts
    │     reads embedding-state.json (model-identity marker)
-   │     ├─ matches the compiled-in model → no-op
-   │     └─ differs/absent → wipe memory_vec (derived data)
-   │                          + write new marker
+   │     ├─ matches the compiled-in model, settled → no-op
+   │     └─ differs/absent/pending → mark pending
+   │                                 → wipe memory_vec (derived data)
+   │                                 → settle the marker
+   │        «marker trouble never aborts the boot. Fails before the
+   │         wipe → index untouched. Fails after → index already
+   │         emptied; either way the reset is re-checked next boot»
    │        «a pre-upgrade DB self-migrates; flow 3 refills it»
    │
    ├─ new EmbeddingWorker({ db, embedder })
@@ -97,14 +101,17 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Failure modes, summarized
 
-| Failure                         | Behavior                                                       |
-| ------------------------------- | -------------------------------------------------------------- |
-| Model missing/corrupt at boot   | Boot aborts, non-zero exit, healthcheck never goes green       |
-| Single inference error at save  | Save succeeds, FTS-only detection for that save, drain retries |
-| Single inference error in drain | Row skipped, retried next tick                                 |
-| Model artifact drift at build   | Image build fails (phase-3 validation)                         |
-| HF rate limit (429) at build    | Retried with backoff; `hf_token` build secret authenticates    |
-| Model changed between versions  | Marker mismatch → vectors wiped once → drain re-embeds         |
+| Failure                         | Behavior                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| Model missing/corrupt at boot   | Boot aborts, non-zero exit, healthcheck never goes green                  |
+| Single inference error at save  | Save succeeds, FTS-only detection for that save, drain retries            |
+| Single inference error in drain | Row skipped, retried next tick                                            |
+| Model artifact drift at build   | Image build fails (phase-3 validation)                                    |
+| HF rate limit (429) at build    | Retried with backoff; `hf_token` build secret authenticates               |
+| Model changed between versions  | Marker mismatch → vectors wiped → drain re-embeds                         |
+| Data dir unwritable at reset    | Boot proceeds, index untouched, reset retried next boot                   |
+| Reset interrupted after wipe    | Marker stays `pending`, index empty, drain refills; next boot may re-wipe |
+| Reset owed but not done         | `memory.doctor` warns; dense results unreliable until a boot settles it   |
 
 ## Engine constants (not configuration)
 

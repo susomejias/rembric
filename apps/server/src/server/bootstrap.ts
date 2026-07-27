@@ -11,7 +11,11 @@ import {
   loadEmbedder,
   type Embedder,
 } from '../embeddings/embedder.js';
-import { ensureVectorModel } from '../embeddings/state.js';
+import {
+  embeddingMarkerPath,
+  ensureVectorModel,
+  vectorIndexResetWarning,
+} from '../embeddings/state.js';
 import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.js';
@@ -164,10 +168,23 @@ export async function bootstrap(
   if (!overrides.embedder) {
     logger.info(`embedding model loaded in ${Date.now() - embedStart}ms (${embedder.modelId})`);
   }
-  const vectorReset = ensureVectorModel(repos, config.dataDir);
-  if (vectorReset.wiped > 0) {
+  try {
+    const vectorReset = ensureVectorModel(repos, config.dataDir);
+    if (vectorReset.wiped > 0) {
+      // Neutral wording: a retry after an unsettled marker wipes a valid index
+      // too, and "model changed" would name the wrong cause on that boot.
+      logger.warn(
+        `embedding identity reset → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
+      );
+    }
+    if (!vectorReset.markerWritten) {
+      logger.warn(
+        `could not persist ${embeddingMarkerPath(config.dataDir)}; the reset may repeat on the next boot`,
+      );
+    }
+  } catch (err) {
     logger.warn(
-      `embedding model changed → ${vectorReset.wiped} stale vector(s) wiped; re-embedding in background`,
+      `embedding identity check failed; leaving vector index as-is and re-checking next boot (${embeddingMarkerPath(config.dataDir)}): ${String(err)}`,
     );
   }
 
@@ -262,6 +279,7 @@ export async function bootstrap(
     diagnostics: dbDiagnostics,
     repos,
     agentSessions: agentSessionsSvc,
+    dataDir: config.dataDir,
   });
 
   // Deterministic consolidation sweep — decay + deadline orphaning, no
@@ -487,6 +505,7 @@ function buildDoctorReportFactory(deps: {
   diagnostics: DbDiagnostics;
   repos: Repositories;
   agentSessions: AgentSessionsService;
+  dataDir: string;
 }): () => DoctorReport {
   return () => {
     const warnings: string[] = [];
@@ -517,6 +536,10 @@ function buildDoctorReportFactory(deps: {
     if (entitiesBacklog > 100) {
       warnings.push(`entities backlog: ${entitiesBacklog}`);
     }
+
+    // `backlog` reads 0 in this state — every row has a vector, just the wrong one.
+    const resetOwed = vectorIndexResetWarning(deps.dataDir, () => deps.repos.vectors.count());
+    if (resetOwed) warnings.push(resetOwed);
 
     // Deliberate spec exception (mcp-api/spec.md): memory.doctor's session,
     // needsReview, and pendingJudgments counts are all server-wide, unlike
