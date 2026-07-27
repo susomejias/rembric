@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the repo's parallel development stack: a Docker-based dev instance with hot-reload that coexists with a canonical prod instance on the same host, an idempotent seed script that produces a predictable thematic baseline on every boot, a single `pnpm` entry point that brings the stack up with data loaded, and CI gates that protect both Dockerfile stages from regression. The dev stack is isolated from prod by compose project name, container name, host port, and bind-mount directory; every `up` produces a fresh canvas with the same baseline counts (fresh plaintext tokens emitted to stderr per boot) so operators iterate against a known-good state without preserving cruft from previous sessions.
+Defines the repo's parallel development stack: a Docker-based dev instance with hot-reload that coexists with a canonical prod instance on the same host, an idempotent seed script that produces a predictable thematic baseline on every boot, a single `pnpm` entry point that brings the stack up with data loaded, and CI gates that protect both Dockerfile stages from regression. The dev stack is isolated from prod by compose project name, container name, host port, bind-mount directory, and image tag; every `up` produces a fresh canvas with the same baseline counts (fresh plaintext tokens emitted to stderr per boot) so operators iterate against a known-good state without preserving cruft from previous sessions.
 
 ## Requirements
 
@@ -13,6 +13,7 @@ The repo SHALL ship a `docker-compose.dev.yml` at the root that, when combined w
 - Declare `name: rembric-dev` (distinct compose project name).
 - Override `container_name` to `rembric-dev`.
 - Build the image from local source via `build: { context: ., dockerfile: apps/server/Dockerfile, target: dev }` — targeting the dev stage defined in the server's Dockerfile.
+- Override `image:` to a name outside the published repository (`rembric-dev:local`). The canonical compose must keep an `image:` for its pull-based path, and a service declaring both `image:` and `build:` tags the build with that name — so inheriting it makes `up --build` replace the published production tag on the developer's host with the dev artifact. The image tag is therefore an isolation axis alongside the project name, container name, port and bind mount, and its omission from this list is what let that collision ship.
 - Use a distinct bind-mount: `./data-dev:/data` (not `./data:/data`).
 - Bind-mount `./apps/server/src:/app/src` so the container's `tsx watch` sees host-side edits and restarts the Node child sub-second.
 - Bind the host port at `127.0.0.1:8788:8787` (loopback-only, distinct from the canonical 8787).

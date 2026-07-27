@@ -392,6 +392,20 @@ describe('distroless runtime node-path invariants', () => {
     expect(dev).not.toContain(NODE);
   });
 
+  // `image:` is the last environment-specific key the dev override has to
+  // restate. Inheriting it makes `up --build` tag the 4.9 GB dev artifact as
+  // the published production tag, replacing it on the developer's host — the
+  // local-blast-radius twin of the 2026-05-17 dev-as-latest incident.
+  it('dev compose does not tag its build with the published image name', () => {
+    const dev = readFileSync(join(repoRoot, 'docker-compose.dev.yml'), 'utf8').replace(
+      /^\s*#.*$/gm,
+      '',
+    );
+    const image = /^\s*image:\s*(\S+)\s*$/m.exec(dev)?.[1];
+    expect(image).toBeDefined();
+    expect(image).not.toContain('ghcr.io/');
+  });
+
   it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
     const orch = readFileSync(join(srcRoot, 'services/self-update/orchestrator.ts'), 'utf8');
     expect(orch).toContain(`'${NODE}'`);

@@ -241,15 +241,16 @@ This emits a one-line stderr warning and then deletes from `memory_relations`, `
 
 Compose v2 generates container / network names from the project name. The canonical compose hardcodes `container_name: rembric` and uses project `rembric`. The dev compose sets `name: rembric-dev` at the top level and `container_name: rembric-dev`. The two stacks never see each other:
 
-| Resource        | Prod                    | Dev                   |
-| --------------- | ----------------------- | --------------------- |
-| Container       | `rembric`               | `rembric-dev`         |
-| Compose project | `rembric`               | `rembric-dev`         |
-| Network         | `rembric_default`       | `rembric-dev_default` |
-| Volume          | `./data`                | `./data-dev`          |
-| Published port  | `<all interfaces>:8787` | `127.0.0.1:8788`      |
+| Resource        | Prod                               | Dev                   |
+| --------------- | ---------------------------------- | --------------------- |
+| Container       | `rembric`                          | `rembric-dev`         |
+| Compose project | `rembric`                          | `rembric-dev`         |
+| Network         | `rembric_default`                  | `rembric-dev_default` |
+| Volume          | `./data`                           | `./data-dev`          |
+| Published port  | `<all interfaces>:8787`            | `127.0.0.1:8788`      |
+| Image tag       | `ghcr.io/susomejias/rembric:<ver>` | `rembric-dev:local`   |
 
-`docker compose ls` shows both as distinct entries; `docker ps` shows both containers. `pnpm run dev:docker:down` only affects the dev stack.
+`docker compose ls` shows both as distinct entries; `docker ps` shows both containers. To stop only the dev stack, pass both files so compose resolves the same project: `docker compose -f docker-compose.yml -f docker-compose.dev.yml down`.
 
 ### When NOT to use the dev stack
 

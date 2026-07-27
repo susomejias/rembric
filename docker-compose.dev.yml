@@ -6,6 +6,10 @@ services:
   rembric:
     container_name: rembric-dev
 
+    # Without this the dev build inherits the base file's `image:` and tags
+    # itself as the published production tag, replacing it on this host.
+    image: rembric-dev:local
+
     build:
       context: .
       dockerfile: apps/server/Dockerfile
