@@ -117,6 +117,7 @@ What the plugin registers for Codex:
 
 - The `rembric` MCP server (declared by `apps/plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `apps/plugin/.claude-plugin/mcp.json`), invoking the bundled bridge at `plugin_root/bin/rembric-bridge.mjs` (resolved via the manifest's `cwd: "."` + relative args).
 - A five-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `PostCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact (pre + post), and end-on-stop.
+- **No slash commands.** `/rembric:remember`, `/rembric:recall`, `/rembric:context` and `/rembric:summary` are Claude-Code-only: Claude Code auto-discovers them from `apps/plugin/commands/*.md`, and `.codex-plugin/plugin.json` declares only `mcpServers` and `hooks`. Under Codex, ask the agent in plain language instead ("remember that…", "what did we do last time") — it has the same MCP tools, and the protocol guidance arrives server-side via the `initialize.instructions` handshake.
 
 After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
 
@@ -141,7 +142,7 @@ export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token minted from /
 Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
 
 - The **MCP bridge** — `apps/plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The same manifest also uses `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` to anchor the bridge path to the plugin root — `${CLAUDE_PLUGIN_ROOT}` substitution does NOT work in MCP args under Codex (only in hook commands), so future contributors should not "simplify" the path back to the Claude Code form.
-- The **lifecycle hooks** (`SessionStart`, `PreCompact`, `PostCompact`, `Stop`) so sessions appear in `/dashboard/sessions` and PreCompact/PostCompact persist a summary across compaction without depending on the model calling `memory.session_summary` post-compact.
+- The **lifecycle hooks** — five event types under Codex (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`) across seven handler entries, since `SessionStart` and `UserPromptSubmit` each declare two — so sessions appear in `/dashboard/sessions` and PreCompact/PostCompact persist a summary across compaction without depending on the model calling `memory.session_summary` post-compact. Codex records trust per handler, so the `/hooks` panel may list more entries than event types.
 
 Symptoms of missing envs:
 
@@ -163,7 +164,7 @@ After trusting the hooks, the `/plugins` panel for `rembric` shows the hook coun
 | `/dashboard/sessions` stays empty after Codex sessions                                                                          | Hooks have not been approved via `/hooks` yet. MCP can still work while hooks silently no-op.                                                       |
 | `/plugins` panel shows `Hooks: No plugin hooks`                                                                                 | You're on a `codex-cli` release old enough to still gate hooks behind a feature flag — run `codex features list` to check, and upgrade Codex if so.                                                             |
 | Startup banner _"N hooks need review"_ keeps appearing across launches                                                          | Not all hooks approved yet. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                  |
-| Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`) | Known plugin bug, separate change. Codex requires hook stdout to be JSON `{ hookSpecificOutput: { additionalContext: "..." } }`; plugin scripts currently emit plain text. Tracked for plugin `0.2.3`. |
+| Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`) | Codex applies a `looks_like_json` heuristic to hook stdout and rejects anything it reads as malformed JSON. The scripts emit plain text prefixed `rembric:` precisely so the heuristic does not fire, so this points at a nudge whose prefix was dropped, not at a missing JSON wrapper. |
 
 #### Using both Claude Code and Codex on the same machine
 

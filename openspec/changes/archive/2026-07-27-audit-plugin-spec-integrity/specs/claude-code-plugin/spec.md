@@ -1,56 +1,10 @@
-# claude-code-plugin
-
-## Purpose
-
-Distribution and configuration of Rembric's Claude Code plugin. Defines the manifest contract, the HTTP MCP server entry with path-scoped URL, the hook output discipline, and the token budget envelope.
-
-## Plugin manifest
-
-- The plugin SHALL be packaged in this monorepo at `apps/plugin/` with the manifest at `apps/plugin/.claude-plugin/plugin.json`.
-- The manifest SHALL declare `name: "rembric"` for namespacing of commands (`/rembric:*`) and agent listings.
-- The manifest SHALL declare exactly two `userConfig` fields:
-  - `server_url`: `type: "string"`, `required: true`. Base URL of the user's Rembric deployment WITHOUT the `/mcp` suffix. The plugin appends `/mcp` itself.
-  - `api_token`: `type: "string"`, `required: true`, `sensitive: true`. Stored in the system keychain, never in `settings.json`.
-- The manifest SHALL NOT declare a `project_slug` userConfig field. The active project is signalled per directory via a `.rembric` config file (see [Project slug selection](#project-slug-selection)).
-- The manifest SHALL declare `mcpServers: "./.claude-plugin/mcp.json"` and SHALL NOT inline server configuration in `plugin.json`.
-
-## Marketplace declaration
-
-- A `.claude-plugin/marketplace.json` SHALL exist at the repository root.
-- The marketplace SHALL declare exactly one plugin entry whose `source` is a relative path string (`"./apps/plugin"`).
-- The marketplace SHALL be installable via `claude plugin marketplace add <repo>` using each user's existing git credentials (SSH key or PAT) when fetched from git, or directly from a local path during development.
-
-## MCP server declaration
-
-- `apps/plugin/.claude-plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
-- The server entry SHALL use `command: "node"` with `args: ["${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs"]`, spawning the local bridge as a stdio MCP server.
-- The bridge SHALL receive `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` via `env`, sourced from `${user_config.server_url}` and `${user_config.api_token}` respectively.
-- The plugin SHALL NOT use a direct `type: "http"` MCP server entry; the bridge mediates traffic so that the URL can be path-scoped with the slug read from `.rembric` at session start.
-
-## MCP bridge contract
-
-- The plugin SHALL ship `apps/plugin/bin/rembric-bridge.mjs`, a Node ≥18 script that acts as a stdio MCP server for Claude Code while forwarding to Rembric over HTTP.
-- The bridge SHALL resolve the project directory from a precedence chain of environment variables, in this order: `CLAUDE_PROJECT_DIR`, then `PWD`, then `process.cwd()`. The chain SHALL skip empty-string values (use `||` not `??` semantics) so that an explicitly-set-to-empty env var falls through cleanly. This makes the bridge reusable from non-Claude-Code clients (notably Codex) that propagate the user's shell working directory via `PWD` rather than Claude's `CLAUDE_PROJECT_DIR` convention.
-- The bridge SHALL look for `${projectDir}/.rembric`. If the file exists, the bridge SHALL parse it as dotenv-style `KEY=VALUE` lines (with `#` line comments and optional matched-quote stripping) and read `PROJECT_SLUG`. If `PROJECT_SLUG` is defined and matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`, the bridge SHALL construct the URL `${REMBRIC_SERVER_URL}/mcp/<slug>` (path-scoped).
-- If `.rembric` is missing, unparseable, lacks `PROJECT_SLUG`, or `PROJECT_SLUG` does not match the slug regex, the bridge SHALL write a one-line stderr diagnostic and fall back to path-less `${REMBRIC_SERVER_URL}/mcp`. The bridge SHALL NOT abort in this case — the session continues with global scope (or whatever pinning the agent later does).
-- The bridge SHALL delegate the actual stdio↔Streamable-HTTP-MCP transport to `npx -y mcp-remote` at a pinned exact version (see "The bridge MUST pin the `mcp-remote` version" below), injecting `Authorization: Bearer ${REMBRIC_API_TOKEN}` on every request and passing the `--allow-http` flag so that plain-HTTP LAN deployments (e.g. `http://192.168.x.y:8787`) are accepted. For HTTPS deployments the flag is a no-op.
-- The bridge SHALL NOT parse, rewrite, or inspect MCP frames beyond what `mcp-remote` itself does. It is purely a URL-building entrypoint.
-- The bridge SHALL write one diagnostic line to stderr at startup of the form `[rembric-bridge] projectDir=<dir> (from <source>) url=<url>`, where `<source>` is exactly one of `CLAUDE_PROJECT_DIR`, `PWD`, or `process.cwd()` — naming which step of the precedence chain produced the resolved directory. This aids debugging via `claude --debug` and `codex` log inspection.
-- If `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` are missing, the bridge SHALL exit non-zero with a clear stderr message instructing the user to configure the plugin.
-- The bridge SHALL forward the child process's exit code; if the child terminates from a signal, the bridge SHALL re-raise that signal in its own process.
-
-## Skill catalog
-
-- The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
-- An earlier iteration shipped a `rembric-memory` skill with the same content; it was removed once `initialize.instructions` was verified to carry equivalent guidance under the 800-character hard limit enforced by `instructions.test.ts`.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: The plugin SHALL ship six hook event types across eight handler entries at `apps/plugin/hooks/hooks.json`
 
 The plugin's hook catalog SHALL declare exactly six event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit` (TWO entries, NEITHER carrying a `matcher` key — the recall/first-prompt entry and the unified per-turn save+summary nudge), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop`. That is **eight handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` unified nudge in the `proactive-save-nudges` change).
 
-Both counts SHALL be asserted as an exact set, not a containment check: a `toContain`-style assertion cannot catch a spec or manifest that wrongly claims an event type is _absent_, which is the defect class this requirement replaces. The handler count is stated separately from the event-type count because Codex's per-hook trust prompt counts handlers while its documentation counts event types (see `codex-distribution`).
+Both counts SHALL be asserted as an exact set, not a containment check: a `toContain`-style assertion cannot catch a spec or manifest that wrongly claims an event type is *absent*, which is the defect class this requirement replaces. The handler count is stated separately from the event-type count because Codex's per-hook trust prompt counts handlers while its documentation counts event types (see `codex-distribution`).
 
 `PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit throttled plain-stdout reminders. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
 
@@ -65,7 +19,7 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
 - The script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout.
-- Output cap: ≤30 tokens (measured 22.25 — 89 bytes newline-exclusive, the convention pinned below; the one budget in this capability that held as originally written).
+- Output cap: ≤30 tokens (measured 22.5 — the one budget in this capability that held as originally written).
 
 #### SessionStart (matcher: compact)
 
@@ -168,7 +122,7 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 
 - **WHEN** the first prompt of a session also contains a recall keyword
 - **THEN** `prompt-search.sh` SHALL emit both lines, first-prompt line first
-- **AND** this is the worst case `prompt-search.sh` alone can reach; it is NOT the worst-case `UserPromptSubmit` turn, which is the counter-divergence case the token-budget requirement's per-firing-turn ceiling is set against
+- **AND** this is the worst-case `UserPromptSubmit` turn for budget purposes (see the token-budget requirement)
 
 #### Scenario: SessionEnd hook captures the transcript and POSTs /end with summary
 
@@ -266,16 +220,16 @@ The plugin ships no skills, so there is no skill description and no skill body i
 
 **On-invoke cost**, per hook:
 
-| Surface                                     | Cap             |
-| ------------------------------------------- | --------------- |
-| `SessionStart` (`startup\|resume\|clear`)   | ≤30 tokens      |
-| `SessionStart` (`compact`)                  | ≤150 tokens     |
-| `UserPromptSubmit`, per FIRING turn         | ≤210 tokens     |
-| `UserPromptSubmit`, amortised over 10 turns | ≤45 tokens/turn |
-| `SessionEnd`                                | 0 tokens        |
-| `PreCompact`                                | 0 tokens        |
-| `PostCompact`                               | 0 tokens        |
-| `Stop`                                      | 0 tokens        |
+| Surface                                       | Cap        |
+| --------------------------------------------- | ---------- |
+| `SessionStart` (`startup\|resume\|clear`)     | ≤30 tokens |
+| `SessionStart` (`compact`)                    | ≤150 tokens |
+| `UserPromptSubmit`, per FIRING turn           | ≤210 tokens |
+| `UserPromptSubmit`, amortised over 10 turns   | ≤45 tokens/turn |
+| `SessionEnd`                                  | 0 tokens   |
+| `PreCompact`                                  | 0 tokens   |
+| `PostCompact`                                 | 0 tokens   |
+| `Stop`                                        | 0 tokens   |
 
 `UserPromptSubmit` SHALL be governed by the pair — a per-firing-turn ceiling plus an amortised budget — and not by a flat per-turn figure. A flat figure is structurally impossible under this hook's cadence design: the two matcher-less entries fire on **turn 1**, on `count % 5 == 0` (save), on `count == 1 || count % 10 == 0` (summary), and on any turn whose prompt matches a recall keyword, each on its own counter. Turns matching neither cadence nor the keyword emit **zero** tokens, which is what makes the amortised figure the honest one. The previously-published flat `≤30 tokens` was never satisfiable and therefore never tested; measured firing turns are 142.3 (turn 1), 81.3 (turn 5) and 140.8 (turn 10), and 36.4 tokens/turn amortised across a 10-turn window. Turn 1 with a recall keyword measures 165.0, but it is NOT the worst case: the two scripts keep independent counters (`rembric-relevance-prefetch` and `rembric-turnnudge`) with nothing coupling them, so one may sit at turn 1 while the other is at turn 10 and all five lines fire together — measured **195.0**. That is reachable rather than theoretical, because Codex records hook trust per handler entry, so an operator who trusts one script before the other lands in exactly that state. The ceiling is set against the divergent case, not against turn 1.
 
@@ -299,11 +253,11 @@ The `sessionIdTemplate` line is the largest single per-turn contributor (51.0 to
 - **THEN** each of `save`, `summary`, `sessionIdTemplate` (rendered with a 36-character id), `firstPromptRelevance`, the recall nudge, the `SessionStart` nudge and `postCompact` SHALL be within its cap in the table above
 - **AND** each SHALL be a separate assertion, so one violation is attributable to one line
 
-#### Scenario: The turn-1 firing turn stays under its tighter sub-budget
+#### Scenario: A firing turn stays under the per-turn ceiling
 
 - **GIVEN** a session driven through real per-session counter files
-- **WHEN** turn 1 fires with a recall keyword in the prompt (first-prompt line, recall line, sessionId line, summary line)
-- **THEN** the total emitted output SHALL be ≤720 bytes (≤180 tokens) — a tighter sub-budget on the aligned-counter case, NOT the per-firing-turn ceiling
+- **WHEN** the worst-case `UserPromptSubmit` turn fires (turn 1 with a recall keyword in the prompt: first-prompt line, recall line, sessionId line, summary line)
+- **THEN** the total emitted output SHALL be ≤720 bytes (≤180 tokens)
 
 #### Scenario: The two prompt counters diverge and every line fires at once
 
@@ -327,6 +281,55 @@ The `sessionIdTemplate` line is the largest single per-turn contributor (51.0 to
 - **WHEN** a contributor raises any cap in this requirement
 - **THEN** the change SHALL record the new measured value alongside the new cap
 - **AND** the corresponding fixture assertion SHALL be updated in the same commit
+
+### Requirement: The first prompt of a session MUST receive a relevance instruction
+
+The recall hook fires a keyword-gated instruction only when the user's prompt matches a recall-intent keyword list. Without a second trigger, every other session would begin with no relevance signal at all, so whether the agent goes looking for prior knowledge would depend on the user's phrasing rather than on whether prior knowledge exists.
+
+On the first user prompt of a session the plugin SHALL therefore emit a bounded, fixed instruction directing the model to call `memory.context` with `focus` set to that prompt before responding. The trigger SHALL fire at most once per session, tracked by its own per-session counter distinct from the per-turn nudge counter. The existing keyword trigger SHALL be retained for explicit recall requests at any point in the session, and both MAY fire on the same turn.
+
+This is an **instruction to the model, not a server-side prefetch**. The hook SHALL make no HTTP request: the emitted text is fixed and byte-identical whether or not the scope contains any relevant memory, and the plugin performs no relevance query of its own. The consequence SHALL be recorded rather than implied — relevance injection depends on the model acting on the instruction, which a prefetch would not. A prefetch was considered and rejected FOR THIS HOOK: it would put an HTTP call on the first prompt of every session, on the latency-critical path, implemented in bash, to replace an instruction that works. Because this hook makes no request, there is no unreachable-server failure mode on this path.
+
+Both statements are scoped to this capability's bash hooks and SHALL NOT be read as a four-client claim. The Hermes provider does implement a real prefetch — `queue_prefetch` in `apps/plugin/.hermes-plugin/__init__.py` POSTs `/memory/recall` and prepends the recalled text to the hint — so on that client the emitted block is corpus-dependent and does have a silent unreachable-server path. That divergence is deliberate: Hermes is an in-process Python provider with no bash latency budget and no per-client duplication cost. It is specified by `hermes-agent-plugin`, which this change does not audit; the two capabilities SHALL NOT be conflated, and a future four-client parity claim about relevance injection has to reconcile them first.
+
+The emitted line SHALL be represented in the shared nudge fixtures with a byte budget asserted in lock-step against the equivalent line in every other client, so the four implementations cannot drift.
+
+#### Scenario: A session with no recall keyword still receives a relevance instruction
+
+- **GIVEN** a project with memories relevant to the user's first prompt
+- **WHEN** the first prompt of a session contains no recall-intent keyword
+- **THEN** the plugin SHALL emit the fixed first-prompt relevance line directing the model to call `memory.context` with `focus` set to the prompt
+
+#### Scenario: The trigger does not repeat
+
+- **WHEN** the second and subsequent prompts of the same session are submitted
+- **THEN** the first-prompt line SHALL NOT be emitted again
+
+#### Scenario: The emitted text does not depend on the corpus
+
+- **GIVEN** two projects, one with many relevant memories and one with none
+- **WHEN** the first prompt of a session is submitted in each, through this capability's `prompt-search.sh` hook
+- **THEN** the emitted line SHALL be byte-identical in both cases
+- **AND** this SHALL NOT be asserted of the Hermes provider, whose prefetch makes the block corpus-dependent by design
+
+#### Scenario: The hook makes no network request
+
+- **WHEN** `apps/plugin/scripts/prompt-search.sh` is inspected
+- **THEN** it SHALL contain no call to `rembric_post` and no `curl` invocation
+- **AND** it SHALL require neither `REMBRIC_SERVER_URL` nor `REMBRIC_API_TOKEN` to emit either line
+
+#### Scenario: A broken counter does not fabricate a first turn
+
+- **GIVEN** the first-prompt counter directory cannot be created or read back
+- **WHEN** `UserPromptSubmit` fires
+- **THEN** the first-prompt line SHALL NOT be emitted (fail closed), while the keyword trigger SHALL still be evaluated
+
+#### Scenario: The injected line is fixture-covered
+
+- **WHEN** the first-prompt line diverges from the equivalent line in another client, or exceeds its byte budget
+- **THEN** the lock-step fixture test SHALL fail and the build SHALL be rejected
+
+## MODIFIED Requirements
 
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
@@ -428,141 +431,6 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 - **THEN** the operator guidance about parallel-tool drift SHALL state that this plugin is the sole memory layer and SHALL warn against having another memory tool installed
 - **AND** the guidance SHALL NOT name any specific third-party memory tool by name
 
-### Requirement: The bridge MUST pin the `mcp-remote` version
-
-The bridge (`apps/plugin/bin/rembric-bridge.mjs`) SHALL spawn `mcp-remote` at an exact pinned version (`mcp-remote@<x.y.z>`), never a floating tag such as `@latest`. The pinned version SHALL be bumped deliberately as part of plugin releases.
-
-Before spawning `mcp-remote`, the bridge SHALL perform one `GET ${REMBRIC_SERVER_URL}/healthz` request (reusing the same bearer token it holds for the MCP connection) with a short timeout (2 seconds). On success, the bridge SHALL compare the response's `version` field against a `MIN_SERVER_VERSION` constant bumped alongside the plugin's own version. When the server's version is older than `MIN_SERVER_VERSION` (semver comparison), the bridge SHALL print exactly one line to stderr naming both versions and pointing at the dashboard self-update flow / `docs/updates.md`, then proceed to spawn `mcp-remote` unchanged — the check is advisory only and SHALL NOT block or delay the connection. When the `/healthz` request fails for any reason (network error, timeout, non-200, malformed body), the bridge SHALL silently skip the check and proceed exactly as if no check existed — this MUST NOT introduce a new failure mode for environments where `/healthz` is unreachable but `/mcp` is fine (e.g. transient DNS blips, a reverse proxy exposing only `/mcp`).
-
-This bridge is shared unmodified by the Codex CLI plugin (`.codex-plugin/mcp.json` spawns the same `rembric-bridge.mjs`) and by the opencode plugin's stdio-transport reuse (`opencode-plugin/spec.md`'s "MCP transport reuses the existing stdio bridge" requirement); both clients inherit this version-handshake behavior with no client-specific spec text needed, since the check is entirely internal to the shared bridge script.
-
-#### Scenario: Session start does not re-resolve `latest`
-
-- **WHEN** the bridge spawns the transport
-- **THEN** the npx argument SHALL name an exact `mcp-remote@<x.y.z>` version, so a newly published upstream release cannot change behavior without a Rembric plugin release
-
-#### Scenario: Upstream publishes a broken release
-
-- **WHEN** a broken `mcp-remote` version is published to npm
-- **THEN** existing Rembric installations SHALL be unaffected (they keep spawning the pinned version)
-
-#### Scenario: Bridge warns on an outdated server
-
-- **GIVEN** `/healthz` responds successfully with a `version` older than the bridge's `MIN_SERVER_VERSION`
-- **WHEN** the bridge starts
-- **THEN** it SHALL print exactly one stderr line naming both the server's version and the expected minimum, and pointing at the update flow
-- **AND** it SHALL still spawn `mcp-remote` and connect normally
-
-#### Scenario: Bridge is silent when the server meets the minimum version
-
-- **GIVEN** `/healthz` responds successfully with a `version` at or above `MIN_SERVER_VERSION`
-- **WHEN** the bridge starts
-- **THEN** no version-related stderr line SHALL be printed
-
-#### Scenario: A healthz failure does not block or warn
-
-- **GIVEN** the `/healthz` request times out, errors, or returns a non-200 status
-- **WHEN** the bridge starts
-- **THEN** no version-related stderr line SHALL be printed
-- **AND** the bridge SHALL proceed to spawn `mcp-remote` exactly as it would without this requirement
-
-### Requirement: The plugin SHALL ship a unified `UserPromptSubmit` per-turn nudge hook
-
-The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a matcher-less `UserPromptSubmit` entry — distinct from the existing keyword-gated recall entry (`prompt-search.sh`) — invoking a new shared script `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-nudge.sh` that carries BOTH the save and the session-summary reminders on a per-turn cadence. The plugin SHALL NOT ship a `PostToolUse` save-nudge hook (the prior `post-tool.sh` approach is removed; `hooks.json` SHALL contain no `PostToolUse` entry emitting a `memory.save` reminder).
-
-- The entry SHALL declare NO matcher, so it fires on every user prompt. Claude Code supports multiple entries per hook event (`SessionStart` already declares two), so this coexists with the recall entry.
-- The script SHALL read `session_id` from hook stdin and maintain a per-session turn counter file under `${TMPDIR:-/tmp}/rembric-turnnudge/<sanitized-session-id>`, incrementing once per invocation.
-- On each turn the script SHALL emit, as PLAIN text on stdout (NOT a `hookSpecificOutput` JSON object — plain stdout is the documented `UserPromptSubmit` injection shape):
-  - the **save** nudge line when `count % 5 == 0`;
-  - the **summary** nudge line when `count == 1` OR `count % 10 == 0`.
-  - Both lines MAY be emitted on the same turn (their cadences coincide every 10th turn); zero lines are emitted on turns matching neither.
-- Both nudge texts SHALL be `rembric:`-prefixed (so the shared Codex path's `looks_like_json` heuristic does not flag them). The save text directs `memory.save` (title ≤100 + content); the summary text directs `memory.session_summary({title≤100, summary})` with the `Goal · Discoveries · Accomplished · Next Steps · Files` structure. Both SHALL be byte-identical to the opencode and Hermes copies.
-- The script SHALL make NO network call and needs no `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN`.
-- The script SHALL fail safe: unreadable/empty stdin, an unreadable OR unwritable counter file, or any other error SHALL exit `0` AND emit NOTHING (no save or summary line). A broken counter mechanism SHALL NOT be treated as an implicit `count=0` — that value satisfies BOTH firing thresholds (`0 % 5 == 0` and `0 % 10 == 0`) and would fire every nudge on every single turn instead of none.
-
-#### Scenario: Save nudge fires every 5th turn
-
-- **GIVEN** the plugin is installed and a Claude Code session
-- **WHEN** `UserPromptSubmit` fires for the 5th time with stdin `{"session_id":"claude-sess-abc"}`
-- **THEN** `prompt-nudge.sh` SHALL emit the plain `rembric:` save nudge on stdout
-- **AND** SHALL NOT emit the save nudge on turns 1–4
-
-#### Scenario: Summary nudge fires on turn 1 and every 10th turn
-
-- **WHEN** `UserPromptSubmit` fires for the 1st time in a session
-- **THEN** `prompt-nudge.sh` SHALL emit the plain `rembric:` summary nudge
-- **AND** SHALL emit it again on turn 10 (`count % 10 == 0`) and not on turns 2–9
-
-#### Scenario: Both nudges emit on a coinciding turn
-
-- **WHEN** the turn count is a multiple of 10 (both `%5` and `%10` match)
-- **THEN** `prompt-nudge.sh` SHALL emit BOTH the save line and the summary line as plain stdout (two lines), neither replacing the other
-
-#### Scenario: No PostToolUse save-nudge hook exists
-
-- **WHEN** `apps/plugin/hooks/hooks.json` is inspected
-- **THEN** it SHALL contain no `PostToolUse` entry emitting a `memory.save` reminder
-- **AND** `apps/plugin/scripts/post-tool.sh` SHALL NOT exist
-
-#### Scenario: Fail-safe on unreadable stdin
-
-- **WHEN** `UserPromptSubmit` fires and stdin is empty or unparseable
-- **THEN** `prompt-nudge.sh` SHALL exit 0 and emit nothing that breaks the host
-
-#### Scenario: Fail-closed when the counter file is unwritable
-
-- **GIVEN** `${TMPDIR:-/tmp}/rembric-turnnudge` cannot be created or the per-session counter file cannot be read back (e.g. a path component exists as a regular file, or the directory is not writable)
-- **WHEN** `UserPromptSubmit` fires
-- **THEN** `prompt-nudge.sh` SHALL exit `0` and emit NEITHER the save nor the summary nudge
-- **AND** it SHALL NOT default the turn count to `0` and fire both nudges as a result
-
-### Requirement: The first prompt of a session MUST receive a relevance instruction
-
-The recall hook fires a keyword-gated instruction only when the user's prompt matches a recall-intent keyword list. Without a second trigger, every other session would begin with no relevance signal at all, so whether the agent goes looking for prior knowledge would depend on the user's phrasing rather than on whether prior knowledge exists.
-
-On the first user prompt of a session the plugin SHALL therefore emit a bounded, fixed instruction directing the model to call `memory.context` with `focus` set to that prompt before responding. The trigger SHALL fire at most once per session, tracked by its own per-session counter distinct from the per-turn nudge counter. The existing keyword trigger SHALL be retained for explicit recall requests at any point in the session, and both MAY fire on the same turn.
-
-This is an **instruction to the model, not a server-side prefetch**. The hook SHALL make no HTTP request: the emitted text is fixed and byte-identical whether or not the scope contains any relevant memory, and the plugin performs no relevance query of its own. The consequence SHALL be recorded rather than implied — relevance injection depends on the model acting on the instruction, which a prefetch would not. A prefetch was considered and rejected FOR THIS HOOK: it would put an HTTP call on the first prompt of every session, on the latency-critical path, implemented in bash, to replace an instruction that works. Because this hook makes no request, there is no unreachable-server failure mode on this path.
-
-Both statements are scoped to this capability's bash hooks and SHALL NOT be read as a four-client claim. The Hermes provider does implement a real prefetch — `queue_prefetch` in `apps/plugin/.hermes-plugin/__init__.py` POSTs `/memory/recall` and prepends the recalled text to the hint — so on that client the emitted block is corpus-dependent and does have a silent unreachable-server path. That divergence is deliberate: Hermes is an in-process Python provider with no bash latency budget and no per-client duplication cost. It is specified by `hermes-agent-plugin`, which this change does not audit; the two capabilities SHALL NOT be conflated, and a future four-client parity claim about relevance injection has to reconcile them first.
-
-The emitted line SHALL be represented in the shared nudge fixtures with a byte budget asserted in lock-step against the equivalent line in every other client, so the four implementations cannot drift.
-
-#### Scenario: A session with no recall keyword still receives a relevance instruction
-
-- **GIVEN** a project with memories relevant to the user's first prompt
-- **WHEN** the first prompt of a session contains no recall-intent keyword
-- **THEN** the plugin SHALL emit the fixed first-prompt relevance line directing the model to call `memory.context` with `focus` set to the prompt
-
-#### Scenario: The trigger does not repeat
-
-- **WHEN** the second and subsequent prompts of the same session are submitted
-- **THEN** the first-prompt line SHALL NOT be emitted again
-
-#### Scenario: The emitted text does not depend on the corpus
-
-- **GIVEN** two projects, one with many relevant memories and one with none
-- **WHEN** the first prompt of a session is submitted in each, through this capability's `prompt-search.sh` hook
-- **THEN** the emitted line SHALL be byte-identical in both cases
-- **AND** this SHALL NOT be asserted of the Hermes provider, whose prefetch makes the block corpus-dependent by design
-
-#### Scenario: The hook makes no network request
-
-- **WHEN** `apps/plugin/scripts/prompt-search.sh` is inspected
-- **THEN** it SHALL contain no call to `rembric_post` and no `curl` invocation
-- **AND** it SHALL require neither `REMBRIC_SERVER_URL` nor `REMBRIC_API_TOKEN` to emit either line
-
-#### Scenario: A broken counter does not fabricate a first turn
-
-- **GIVEN** the first-prompt counter directory cannot be created or read back
-- **WHEN** `UserPromptSubmit` fires
-- **THEN** the first-prompt line SHALL NOT be emitted (fail closed), while the keyword trigger SHALL still be evaluated
-
-#### Scenario: The injected line is fixture-covered
-
-- **WHEN** the first-prompt line diverges from the equivalent line in another client, or exceeds its byte budget
-- **THEN** the lock-step fixture test SHALL fail and the build SHALL be rejected
-
 ### Requirement: All agent-facing text MUST be English and lock-step tested
 
 Agent-facing instruction text is a protocol surface, not user copy. It fires at the moment of highest consequence — for the post-compaction block, the model has just lost its context and this text is the only instruction telling it what to persist before continuing. A mid-conversation language switch degrades instruction-following and reliably causes the model to continue answering in that language, which is user-visible.
@@ -585,46 +453,16 @@ Every string emitted to a model by the plugin SHALL be English. Each such string
 - **THEN** each agent-facing fixture SHALL carry its own byte-budget assertion matching the token-budget requirement's per-line table
 - **AND** no fixture with an entry in that table SHALL be left without an assertion
 
-## Hook script invariants
+## REMOVED Requirements
 
-- Every hook script SHALL use `#!/usr/bin/env bash` and `set -u`.
-- Every script SHALL trap errors (`trap 'exit 0' ERR`) and ensure `exit 0` with empty stdout on any failure. Plugin-side failure SHALL NOT break a Claude Code session.
-- Every script SHALL be executable (mode 755).
-- The first non-whitespace character of a hook script's stdout SHALL NOT be `{` or `[`, UNLESS the script intentionally emits a well-formed JSON object matching the relevant Codex hook event schema (`codex-rs/hooks/src/engine/output_parser.rs::parse_session_start` and siblings). Codex's `looks_like_json` heuristic treats stdout starting with those characters as a JSON attempt; a malformed leading character (e.g. the former `[rembric]` badge prefix) fails the hook with `invalid ... JSON output`. Today every Rembric hook emits either empty stdout or a plain-text nudge prefixed with `rembric:` — neither triggers the heuristic.
+### Requirement: The plugin SHALL ship exactly four hooks at `apps/plugin/hooks/hooks.json`
 
-## Project slug selection
+**Reason**: The requirement's name asserted a fact its own body immediately contradicted — the body correctly enumerated six event types while the title said four. `hooks.json` ships six event types across eight handler entries. The name is the line a reader skims and a search hits, so it could not be left in place. Its `Stop`-cadence subsection also published an unresolved conditional ("IF validated … IF validation shows `async` does not decouple … per-session counter file") whose counter-file scenario describes behaviour that does not ship, and its `UserPromptSubmit` subsection claimed a matcher the manifest deliberately omits.
 
-The active Rembric project is signalled per directory by a `.rembric` config file containing `PROJECT_SLUG=<slug>`. The plugin's bridge (`bin/rembric-bridge.mjs`) reads this file at MCP session startup and path-scopes the URL accordingly.
+**Migration**: Replaced by "The plugin SHALL ship six hook event types across eight handler entries at `apps/plugin/hooks/hooks.json`", which carries every accurate scenario forward unchanged, states the shipped counts as exact sets, resolves the `Stop` conditional to the shipped `"async": true` **plus** self-daemonization (deleting the counter-file scenario, which never shipped), documents the `>/dev/null 2>&1` redirect as load-bearing, and records both `UserPromptSubmit` entries as matcher-less. No behavioural change: the shipped tree already satisfies the replacement.
 
-**Format requirements:**
+### Requirement: Relevance MUST be prefetched once per session, not only on a keyword
 
-- The slug MUST match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`.
-- Lowercase letters, digits, hyphens only. Maximum 64 characters.
-- The `.rembric` file uses dotenv syntax: one `KEY=VALUE` per line, `#` for line comments, blank lines ignored. Matched surrounding single or double quotes around the value are stripped. Only `PROJECT_SLUG` is interpreted today; the namespace is reserved for future fields (`DEFAULT_SCOPE`, `AUTO_SAVE`, etc.) so the filename and parser stay stable as scope grows.
+**Reason**: The requirement specified a first-prompt HTTP prefetch that "injects a bounded relevance block", plus a scenario for an unreachable server. No such request exists or is wanted: `prompt-search.sh` sources `_api.sh` but never calls `rembric_post`, and emits one fixed instruction byte-identical whether or not the scope holds any relevant memory — so the unreachable-server scenario specified an unreachable code path. Building the prefetch was considered and rejected: it puts an HTTP call on the first prompt of every session, on the latency-critical path, in bash, across four clients, to replace an instruction that works. This is the same verdict recorded but not carried in `archive/2026-07-25-reconcile-specs-with-shipped-behaviour/design.md`.
 
-**Lookup location:**
-
-- The bridge SHALL look for `.rembric` in the project directory resolved by the precedence chain specified once under "MCP bridge contract" above — including its `PWD` step, which is what makes the bridge work under Codex, whose MCP launcher forwards the shell working directory rather than `CLAUDE_PROJECT_DIR` (`codex-distribution`'s `env_vars` requirement depends on it). The chain SHALL NOT be restated here; a second copy is how this line came to contradict it.
-- File absence, parse failure, missing `PROJECT_SLUG`, or invalid slug are all permitted; the bridge falls back to path-less `/mcp` with a stderr diagnostic. The session continues to operate, possibly in global scope.
-
-**Authority and precedence:**
-
-- When the bridge succeeds in path-scoping, the URL is `${server_url}/mcp/<slug>`. The Rembric server populates `ctx.project` from the URL slug during auth. All tool handlers honor `ctx.project` as the first source of truth, so the project is pinned deterministically without any agent-side `project.use` call.
-- When the bridge falls back to path-less `/mcp`, behavior reverts to the standard path-less codepath: roots discovery (if the client advertises `roots`), `project.use` writing to `SessionRouter`, and `scopeFromContext` consulting the router. This makes the plugin a strict superset of the path-less protocol — it works either way.
-
-**Bootstrap for new slugs:**
-
-- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the protocol text the server delivers through the MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`) — can call `project.use({slug, autocreate: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
-
-**Manual override during a session:**
-
-- The agent can call `project.use({slug: 'something-else', confirmSwitch: true})` to switch scope (allowed only when no session is active — close it first via `memory.session_summary`; add `autocreate: true` if the target project does not exist yet). This is independent of the bridge's URL path.
-
-## Out-of-scope behaviors
-
-This capability does not specify:
-
-- A stdio→HTTP bridge for filesystem-side slug resolution. Considered and rejected for v1; possible opt-in in a future change.
-- A local stdio mode for Rembric. The plugin is a configuration layer for the existing HTTP server.
-- A standalone public plugin marketplace listing (e.g., a curated Anthropic-hosted directory). The plugin is shipped from this repository's public marketplace manifest; a future change may extract it via `git subtree split` to distribute as a separate package.
-- Server-side changes to `deriveSlugFromUri` or other Rembric internals. The plugin sits entirely on the client side.
+**Migration**: Replaced by "The first prompt of a session MUST receive a relevance instruction", which specifies the shipped nudge, its own per-session counter (distinct from the per-turn nudge counter), its fail-closed behaviour, the explicit no-network guarantee, and the fixture budget — and records the resulting dependency on model cooperation as a stated limitation rather than an implied one. No code change: the shipped tree already satisfies the replacement.

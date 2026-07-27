@@ -1,11 +1,13 @@
 {
-  "saveCore": "if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
-  "save": "rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).",
-  "summaryCore": "did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.",
-  "summary": "rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.",
-  "sessionIdCoreTemplate": "sessionId=\"{{SESSION_ID}}\" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.",
-  "sessionIdTemplate": "rembric: sessionId=\"{{SESSION_ID}}\" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.",
-  "firstPromptRelevanceCore": "New session — call memory.context with focus set to this prompt before responding, to surface relevant prior work.",
-  "firstPromptRelevance": "rembric: New session — call memory.context with focus set to this prompt before responding, to surface relevant prior work.",
-  "postCompact": "rembric: This session resumes from a compaction. BEFORE continuing:\n1. Call memory.session_summary({title, summary}) with the compact summary shown above.\n   - title: ≤100 chars, descriptive of the actual work (not generic, not the cwd).\n   - summary: ≤10000 chars. Goal · Discoveries · Accomplished · Next Steps · Files.\n2. If the summary above lacks detail you need (exact file paths, concrete technical decisions, specific prior errors), call memory.context or memory.search BEFORE responding.\n3. Only then, continue with the user's request."
+  "saveCore": "if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title \u2264100 + content).",
+  "save": "rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title \u2264100 + content).",
+  "summaryCore": "did real work happen this turn? You MUST call memory.session_summary({title, summary}) now \u2014 title \u2264100 chars (the work, not cwd); summary: Goal \u00b7 Discoveries \u00b7 Accomplished \u00b7 Next Steps \u00b7 Files. Nothing memorable? Skip.",
+  "summary": "rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now \u2014 title \u2264100 chars (the work, not cwd); summary: Goal \u00b7 Discoveries \u00b7 Accomplished \u00b7 Next Steps \u00b7 Files. Nothing memorable? Skip.",
+  "sessionIdCoreTemplate": "sessionId=\"{{SESSION_ID}}\" \u2014 pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.",
+  "sessionIdTemplate": "rembric: sessionId=\"{{SESSION_ID}}\" \u2014 pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.",
+  "firstPromptRelevanceCore": "New session \u2014 call memory.context with focus set to this prompt before responding, to surface relevant prior work.",
+  "firstPromptRelevance": "rembric: New session \u2014 call memory.context with focus set to this prompt before responding, to surface relevant prior work.",
+  "postCompact": "rembric: This session resumes from a compaction. BEFORE continuing:\n1. Call memory.session_summary({title, summary}) with the compact summary shown above.\n   - title: \u2264100 chars, descriptive of the actual work (not generic, not the cwd).\n   - summary: \u226410000 chars. Goal \u00b7 Discoveries \u00b7 Accomplished \u00b7 Next Steps \u00b7 Files.\n2. If the summary above lacks detail you need (exact file paths, concrete technical decisions, specific prior errors), call memory.context or memory.search BEFORE responding.\n3. Only then, continue with the user's request.",
+  "recall": "rembric: User intent: recall. Call memory.search with the user keywords before responding.",
+  "sessionStart": "rembric: If this is a continuation of recent work, call memory.context before responding."
 }

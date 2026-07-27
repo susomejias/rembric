@@ -32,9 +32,21 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
 function sessionIdLine(sessionId: string): string {
   return fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', sessionId);
 }
+
+/**
+ * The budget unit is pinned by claude-code-plugin's token-budget requirement as
+ * UTF-8 bytes ÷ 4. `.length` undercounts because `≤ · —` are multi-byte, which
+ * is why the same post-compact block has two published token figures.
+ */
+const BYTES_PER_TOKEN = 4;
+const bytes = (s: string): number => Buffer.byteLength(s, 'utf8');
+/** 36 chars: the sessionId line's cap is stated for a rendered UUID. */
+const UUID_SESSION_ID = '0189d5f2-6c3a-7b4e-9f21-8c7d6e5a4b30';
+
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
+const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
 
@@ -309,8 +321,100 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-d
     expect(fixtures.postCompact).not.toMatch(/[¿¡éíóúñÑ]/);
   });
 
-  it('stays within its character budget', () => {
-    expect(fixtures.postCompact.length).toBeLessThanOrEqual(1000);
+  it('stays within its byte budget (≤600 bytes / 150 tokens)', () => {
+    expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(600);
+  });
+});
+
+/**
+ * One assertion per row of the token-budget requirement's per-line table. Each
+ * is its own `it` so a violation names exactly one line.
+ */
+describe('per-line byte budgets', () => {
+  it('SessionStart nudge ≤100 bytes (25 tokens)', () => {
+    expect(bytes(fixtures.sessionStart)).toBeLessThanOrEqual(100);
+  });
+
+  it('recall nudge ≤100 bytes (25 tokens)', () => {
+    expect(bytes(fixtures.recall)).toBeLessThanOrEqual(100);
+  });
+
+  it('firstPromptRelevance ≤140 bytes (35 tokens)', () => {
+    expect(bytes(fixtures.firstPromptRelevance)).toBeLessThanOrEqual(140);
+  });
+
+  it('save ≤132 bytes (33 tokens)', () => {
+    expect(bytes(fixtures.save)).toBeLessThanOrEqual(132);
+  });
+
+  it('sessionIdTemplate rendered with a 36-char id ≤224 bytes (56 tokens)', () => {
+    expect(bytes(sessionIdLine(UUID_SESSION_ID))).toBeLessThanOrEqual(224);
+  });
+
+  it('summary ≤260 bytes (65 tokens)', () => {
+    expect(bytes(fixtures.summary)).toBeLessThanOrEqual(260);
+  });
+});
+
+/**
+ * The `UserPromptSubmit` cap is a per-firing-turn ceiling plus an amortised
+ * budget, because the two matcher-less entries fire on cadences (turn 1,
+ * every 5th, every 10th) — a flat per-turn figure is unsatisfiable by design.
+ */
+describe('UserPromptSubmit emitted-output budgets', () => {
+  function turnBytes(counterDir: string, prompt: string): number {
+    const env = { ...process.env, TMPDIR: counterDir };
+    const input = JSON.stringify({ session_id: UUID_SESSION_ID, prompt });
+    const search = execFileSync('bash', [promptSearchSh], { input, encoding: 'utf8', env });
+    const nudge = execFileSync('bash', [promptNudgeSh], { input, encoding: 'utf8', env });
+    return bytes(search) + bytes(nudge);
+  }
+
+  it('turn 1 with a recall keyword stays ≤720 bytes (180 tokens)', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-turn1-'));
+    try {
+      // Four lines at once: firstPrompt + recall + save + summary.
+      expect(turnBytes(counterDir, 'what did we do yesterday')).toBeLessThanOrEqual(720);
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
+  });
+
+  // The two scripts keep INDEPENDENT counters (`rembric-relevance-prefetch` vs
+  // `rembric-turnnudge`) with nothing coupling them, so one can be at turn 1
+  // while the other is at turn 10 and all five lines fire together. Reachable
+  // for real: Codex records hook trust per handler, so trusting one script
+  // before the other lands exactly here. Turn 1 is NOT the worst case.
+  it('a turn where the two counters diverge stays ≤840 bytes (210 tokens)', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-diverged-'));
+    try {
+      for (let turn = 1; turn <= 9; turn += 1) turnBytes(counterDir, 'keep going');
+      // Only the first-prompt counter is reset, so turn 10 of the nudge
+      // cadence coincides with turn 1 of the relevance one.
+      rmSync(join(counterDir, 'rembric-relevance-prefetch'), { recursive: true, force: true });
+      const diverged = turnBytes(counterDir, 'what did we do yesterday');
+      expect(diverged).toBeGreaterThan(720);
+      expect(diverged).toBeLessThanOrEqual(840);
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ten consecutive turns average ≤180 bytes/turn (45 tokens), seven emitting nothing', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-amortised-'));
+    try {
+      const perTurn = Array.from({ length: 10 }, () =>
+        turnBytes(counterDir, 'continue with the refactor'),
+      );
+      const total = perTurn.reduce((sum, n) => sum + n, 0);
+      expect(total / perTurn.length).toBeLessThanOrEqual(180);
+      // The zero turns are what make the mean honest.
+      for (const turn of [2, 3, 4, 6, 7, 8, 9]) {
+        expect(perTurn[turn - 1]).toBe(0);
+      }
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -322,4 +426,54 @@ describe.runIf(hasPython3)('nudge cadence numbers lock-step with Python', () => 
   it('SUMMARY_NUDGE_EVERY matches', () => {
     expect(pythonNumberConstant('_SUMMARY_HINT_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
   });
+});
+
+/**
+ * These two were emitted to a model from bash and from opencode's TS with no
+ * fixture behind them, so nothing asserted the two copies agreed — the drift
+ * surface the shared-fixture requirement exists to close.
+ */
+describe('the two script-emitted nudges are in lock-step with their clients', () => {
+  const shellLiteral = (file: string, marker: string): string => {
+    const line = readFileSync(join(here, '..', 'scripts', file), 'utf8')
+      .split('\n')
+      .find((l) => l.includes(marker));
+    return line!.slice(line!.indexOf("'") + 1, line!.lastIndexOf("'"));
+  };
+
+  it('session-start.sh emits the sessionStart fixture verbatim', () => {
+    expect(shellLiteral('session-start.sh', 'memory.context before responding')).toBe(
+      fixtures.sessionStart,
+    );
+  });
+
+  it('prompt-search.sh emits the recall fixture verbatim', () => {
+    expect(shellLiteral('prompt-search.sh', 'User intent: recall')).toBe(fixtures.recall);
+  });
+
+  it("opencode's plugin emits the same recall line as bash", () => {
+    const ts = readFileSync(join(here, '..', '.opencode-plugin', 'plugin.ts'), 'utf8');
+    expect(ts).toContain(fixtures.recall);
+  });
+});
+
+/**
+ * The caps below live in two places by necessity — a prose contract and an
+ * executing assertion — and nothing coupled them, so amending one silently left
+ * the other. This asserts every cap this file enforces appears verbatim in the
+ * published requirement, which is what makes a spec edit and a test edit fail
+ * together instead of drifting apart.
+ */
+describe('every enforced cap is published in the capability that owns it', () => {
+  const spec = readFileSync(
+    join(here, '..', '..', '..', 'openspec', 'specs', 'claude-code-plugin', 'spec.md'),
+    'utf8',
+  );
+
+  it.each([100, 140, 132, 224, 260, 600, 840, 210, 180])(
+    'the %s cap is stated in claude-code-plugin/spec.md',
+    (cap) => {
+      expect(spec).toMatch(new RegExp(`\\b${cap}\\b`));
+    },
+  );
 });
