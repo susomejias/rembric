@@ -12,6 +12,7 @@ export default defineConfig({
       '../plugin/.opencode-plugin/*.test.ts',
       '../plugin/test/*.test.ts',
       '../../install.test.ts',
+      '../../scripts/*.test.ts',
     ],
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,

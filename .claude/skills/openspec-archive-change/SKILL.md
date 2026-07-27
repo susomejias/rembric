@@ -5,8 +5,8 @@ license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
-  version: "1.0"
-  generatedBy: "1.3.1"
+  version: '1.0'
+  generatedBy: '1.3.1'
 ---
 
 Archive a completed change in the experimental workflow.
@@ -68,6 +68,7 @@ Archive a completed change in the experimental workflow.
 5. **Perform the archive**
 
    Create the archive directory if it doesn't exist:
+
    ```bash
    mkdir -p openspec/changes/archive
    ```
@@ -81,6 +82,13 @@ Archive a completed change in the experimental workflow.
    ```bash
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
+
+   **The step-4 sync and this move MUST land in a SINGLE commit.** The
+   `spec-provenance` CI job treats that co-occurrence as the only evidence that
+   new text in `openspec/specs/<cap>/spec.md` came through a change folder: a
+   diff touching a published spec must also add or rename
+   `openspec/changes/archive/*/specs/<cap>/spec.md`. Committing the sync on its
+   own fails the gate, and rightly — at that moment the edit has no provenance.
 
 6. **Display summary**
 
@@ -105,10 +113,12 @@ All artifacts complete. All tasks complete.
 ```
 
 **Guardrails**
+
 - Always prompt for change selection if not provided
 - Use artifact graph (openspec status --json) for completion checking
 - Don't block archive on warnings - just inform and confirm
 - Preserve .openspec.yaml when moving to archive (it moves with the directory)
+- Commit the step-4 sync and the step-5 move together; a split commit fails the `spec-provenance` CI gate
 - Show clear summary of what happened
 - If sync is requested, use openspec-sync-specs approach (agent-driven)
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting

@@ -112,6 +112,21 @@ Before changing a requirement, read the existing spec and the design
 document. If you're proposing a behavior change, open a new change with
 `openspec new change <name>` and follow the spec-driven workflow.
 
+**`openspec/specs/` is edit-gated in CI.** A diff that changes a published
+`openspec/specs/<capability>/spec.md` must also add the archived change folder
+that carries the delta for that same capability — which is what archiving does,
+so following the workflow satisfies it automatically. Check before pushing:
+
+```bash
+pnpm run check:spec-provenance
+```
+
+To record a deliberate exception (correcting spec text that was merely wrong or
+incomplete, or renaming a capability), add a `Spec-Provenance-Exempt: <reason>`
+trailer to a commit in the range. The reason has to say something — `n/a` and
+`-` are rejected. The gate proves provenance, not correctness: it says nothing
+about whether the spec text is true.
+
 ## Running locally
 
 ```bash

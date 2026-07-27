@@ -34,6 +34,7 @@ export default tseslint.config(
             'apps/server/drizzle.config.ts',
             'apps/server/vitest.config.ts',
             'install.test.ts',
+            'scripts/check-spec-provenance.test.ts',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -70,13 +71,18 @@ export default tseslint.config(
     // type-checked rule set doesn't have full type info for them after the
     // monorepo restructure (tsconfig.json moved to apps/server/). Disable
     // type-checked rules for these files.
-    files: ['eslint.config.js', 'commitlint.config.js', 'install.test.ts'],
+    files: [
+      'eslint.config.js',
+      'commitlint.config.js',
+      'install.test.ts',
+      'scripts/check-spec-provenance.test.ts',
+    ],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
     // Shipped runtime bridges. They live outside the TS projectService, so
     // lint them with recommended (non-type-checked) rules only.
-    files: ['apps/plugin/bin/**/*.mjs', 'apps/landing/build.mjs'],
+    files: ['apps/plugin/bin/**/*.mjs', 'apps/landing/build.mjs', 'scripts/*.mjs'],
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {

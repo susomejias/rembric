@@ -21,6 +21,7 @@
     "test:hermes-plugin": "command -v python3 >/dev/null && python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -v || echo '[skip] python3 not available; Hermes plugin tests skipped'",
     "eval": "pnpm --filter @rembric/server run eval",
     "e2e:installer": "for f in install.sh apps/plugin/install.sh apps/plugin/.hermes-plugin/install.sh apps/plugin/.hermes-plugin/uninstall.sh apps/plugin/.opencode-plugin/install.sh apps/plugin/.opencode-plugin/uninstall.sh; do sh -n \"$f\" || exit 1; done && pnpm --filter @rembric/server exec vitest run ../../install.test.ts",
+    "check:spec-provenance": "node scripts/check-spec-provenance.mjs --base main --head HEAD",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

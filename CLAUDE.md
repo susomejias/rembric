@@ -11,6 +11,7 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 | Tests            | `pnpm test` (single file: `pnpm vitest run path/to/file.test.ts`)      |
 | Dev stack        | `pnpm run dev:docker:up` (foreground, wipes+reseeds; `docs/docker.md`) |
 | OpenSpec         | `/opsx:propose` · `/opsx:explore` · `/opsx:apply` · `/opsx:archive`    |
+| Spec provenance  | `pnpm run check:spec-provenance` (CI-gated; see below)                 |
 
 Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --noEmit --incremental`. Pre-push = `pnpm test`. Never bypass git hooks with `--no-verify`.
 
