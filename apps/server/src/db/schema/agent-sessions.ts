@@ -28,6 +28,9 @@ import { tokens } from './tokens.js';
  *   ended     -> (terminal)
  *   abandoned -> (terminal)
  *
+ * Terminal is terminal for `status`/`ended_at` only: both terminal states
+ * still accept `summary`/`title` writes under the `final` precedence.
+ *
  * `memory.session_id` and `confirmations.session_id` reference this
  * table. Both columns are nullable for backwards-compat with pre-v0.5
  * rows and clients that never call `memory.session_start`.

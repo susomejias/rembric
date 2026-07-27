@@ -323,7 +323,7 @@ describe('createApiRouter', () => {
       expect(row?.summaryFinal).toBe(true);
     });
 
-    it('409 session_already_ended on summary write to an ended session', async () => {
+    it('200 on summary write to an ended session, with status and ended_at unchanged', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -332,12 +332,86 @@ describe('createApiRouter', () => {
       await call(app, 'POST', `/${projectSlug}/sessions/sess-already-ended/end`, {
         token: adminToken.plaintext,
       });
+      const before = agentSessions.getById('sess-already-ended');
       const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-already-ended/summary`, {
         token: adminToken.plaintext,
         body: { summary: 'after-end' },
       });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.summary).toBe('after-end');
+      const row = agentSessions.getById('sess-already-ended');
+      expect(row?.summary).toBe('after-end');
+      expect(row?.status).toBe('ended');
+      expect(row?.status).toBe(before?.status);
+      expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+      expect(row?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
+    });
+
+    it('200 on summary write to an abandoned session, with lifecycle columns unchanged', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-swept-abandoned' },
+      });
+      agentSessions.markAbandoned('sess-swept-abandoned', { adminBypass: true });
+      const before = agentSessions.getById('sess-swept-abandoned');
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-swept-abandoned/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'curated handoff', title: 'Fix the reaper', final: true },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.summary).toBe('curated handoff');
+      expect(r.body.summaryFinal).toBe(true);
+      const row = agentSessions.getById('sess-swept-abandoned');
+      expect(row?.summary).toBe('curated handoff');
+      expect(row?.title).toBe('Fix the reaper');
+      expect(row?.status).toBe('abandoned');
+      expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+      expect(row?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
+    });
+
+    it('a repeated non-final transcript sync on an abandoned session never clobbers the curated summary', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-abandoned-sync' },
+      });
+      await call(app, 'POST', `/${projectSlug}/sessions/sess-abandoned-sync/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'curated handoff', final: true },
+      });
+      agentSessions.markAbandoned('sess-abandoned-sync', { adminBypass: true });
+      for (const _turn of [1, 2]) {
+        const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-abandoned-sync/summary`, {
+          token: adminToken.plaintext,
+          body: { summary: 'raw transcript dump', final: false },
+        });
+        expect(r.status).toBe(200);
+        expect(r.body.summary).toBe('curated handoff');
+      }
+      const row = agentSessions.getById('sess-abandoned-sync');
+      expect(row?.summary).toBe('curated handoff');
+      expect(row?.summaryFinal).toBe(true);
+      expect(row?.status).toBe('abandoned');
+    });
+
+    it('409 session_deleted on a soft-deleted abandoned session', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-abandoned-deleted' },
+      });
+      agentSessions.markAbandoned('sess-abandoned-deleted', { adminBypass: true });
+      agentSessions.softDelete('sess-abandoned-deleted', { adminBypass: true });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-abandoned-deleted/summary`, {
+        token: adminToken.plaintext,
+        body: { summary: 'late write on a purged-intent row' },
+      });
       expect(r.status).toBe(409);
-      expect(r.body.code).toBe('session_already_ended');
+      expect(r.body.code).toBe('session_deleted');
+      expect(agentSessions.getById('sess-abandoned-deleted')?.summary).toBeNull();
     });
 
     it('409 session_deleted when soft-deleted', async () => {
@@ -592,6 +666,29 @@ describe('createApiRouter', () => {
       expect(row?.status).toBe('ended');
       expect(row?.summary).toBe('model wrote');
       expect(row?.title).toBe('Real title');
+    });
+
+    it('end on an abandoned session applies the summary without promoting the status', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-end-abandoned' },
+      });
+      agentSessions.markAbandoned('sess-end-abandoned', { adminBypass: true });
+      const before = agentSessions.getById('sess-end-abandoned');
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-end-abandoned/end`, {
+        token: adminToken.plaintext,
+        body: { summary: 'transcript', title: 'Fix the reaper', final: false },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.endedAt).toBe(before?.endedAt?.toISOString());
+      const row = agentSessions.getById('sess-end-abandoned');
+      expect(row?.summary).toBe('transcript');
+      expect(row?.title).toBe('Fix the reaper');
+      expect(row?.status).toBe('abandoned');
+      expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+      expect(row?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
     });
   });
 

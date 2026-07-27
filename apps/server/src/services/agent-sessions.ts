@@ -246,6 +246,37 @@ export class AgentSessionsService {
   }
 
   /**
+   * The one late-write path for a row that is already `ended` or
+   * `abandoned`. */
+  private writeTerminalFields(existing: AgentSession, input: PrecedenceInput): AgentSession {
+    // The `status !== 'active'` throw used to backstop the callers' gates. It is
+    // gone, so this path owns the check for the rows it newly reaches.
+    if (existing.deletedAt) {
+      throw new DomainError('session_deleted', `session '${existing.id}' was soft-deleted`);
+    }
+    // No lastActivityAt stamp, unlike the active path: it only drives
+    // stale-active retirement and transport resolution, both status='active'.
+    const set = precedenceSet(existing, input);
+    // Deviation from the active path's last-final-wins: on a closed row the
+    // owning process is dead, so a second final write is a resumed or zombie
+    // client, and losing a curated handoff is unrecoverable (no `replaces`
+    // chain for sessions). First curated value stands.
+    if (existing.summaryFinal) {
+      delete set.summary;
+      delete set.summaryFinal;
+    }
+    if (existing.titleFinal) {
+      delete set.title;
+      delete set.titleFinal;
+    }
+    if (Object.keys(set).length === 0) {
+      return existing;
+    }
+    const updated = this.repos.agentSessions.updateById(existing.id, set, { requireActive: false });
+    return updated ?? existing;
+  }
+
+  /**
    * Write summary/title without transitioning status. Called by two
    * classes of HTTP writer: the curated path (MCP `memory.session_summary`,
    * always final:true) and the raw per-turn sync path shared by every
@@ -279,35 +310,14 @@ export class AgentSessionsService {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
     if (existing.status !== 'active') {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' is already ${existing.status}`,
-      );
+      return this.writeTerminalFields(existing, input);
     }
-    const incomingFinal = input.final ?? false;
-    const summaryUpdate = applyPrecedence(
-      existing.summary,
-      existing.summaryFinal,
-      input.summary,
-      incomingFinal,
-    );
-    const titleUpdate = applyPrecedence(
-      existing.title,
-      existing.titleFinal,
-      input.title,
-      incomingFinal,
-    );
     // This write path IS activity even when precedence blocks the
     // summary/title change — a per-turn sync hit means the session is live.
-    const set: Partial<NewAgentSession> = { lastActivityAt: this.now() };
-    if (summaryUpdate.changed) {
-      set.summary = summaryUpdate.value;
-      set.summaryFinal = summaryUpdate.final;
-    }
-    if (titleUpdate.changed) {
-      set.title = titleUpdate.value;
-      set.titleFinal = titleUpdate.final;
-    }
+    const set: Partial<NewAgentSession> = {
+      lastActivityAt: this.now(),
+      ...precedenceSet(existing, input),
+    };
     const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
@@ -340,52 +350,16 @@ export class AgentSessionsService {
     if (existing.tokenId !== input.tokenId) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
-    if (existing.status === 'abandoned') {
-      throw new DomainError('session_already_ended', `session '${sessionId}' is already abandoned`);
-    }
-    const incomingFinal = input.final ?? false;
-    const summaryUpdate = applyPrecedence(
-      existing.summary,
-      existing.summaryFinal,
-      input.summary,
-      incomingFinal,
-    );
-    const titleUpdate = applyPrecedence(
-      existing.title,
-      existing.titleFinal,
-      input.title,
-      incomingFinal,
-    );
-    if (existing.status === 'ended') {
-      const set: Partial<NewAgentSession> = {};
-      if (summaryUpdate.changed) {
-        set.summary = summaryUpdate.value;
-        set.summaryFinal = summaryUpdate.final;
-      }
-      if (titleUpdate.changed) {
-        set.title = titleUpdate.value;
-        set.titleFinal = titleUpdate.final;
-      }
-      if (Object.keys(set).length === 0) {
-        return existing;
-      }
-      const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: false });
-      return updated ?? existing;
+    if (existing.status !== 'active') {
+      return this.writeTerminalFields(existing, input);
     }
     const ts = this.now();
     const set: Partial<NewAgentSession> = {
       status: 'ended',
       endedAt: ts,
       lastActivityAt: ts,
+      ...precedenceSet(existing, input),
     };
-    if (summaryUpdate.changed) {
-      set.summary = summaryUpdate.value;
-      set.summaryFinal = summaryUpdate.final;
-    }
-    if (titleUpdate.changed) {
-      set.title = titleUpdate.value;
-      set.titleFinal = titleUpdate.final;
-    }
     const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
@@ -720,6 +694,24 @@ function applyPrecedence(
     return { changed: false, value: currentValue, final: currentFinal };
   }
   return { changed: true, value: incomingValue, final: incomingFinal };
+}
+
+type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'>;
+
+/** The only place per-field `final` precedence is folded into an update `set`. */
+function precedenceSet(existing: AgentSession, input: PrecedenceInput): Partial<NewAgentSession> {
+  const incomingFinal = input.final ?? false;
+  const summary = applyPrecedence(
+    existing.summary,
+    existing.summaryFinal,
+    input.summary,
+    incomingFinal,
+  );
+  const title = applyPrecedence(existing.title, existing.titleFinal, input.title, incomingFinal);
+  return {
+    ...(summary.changed && { summary: summary.value, summaryFinal: summary.final }),
+    ...(title.changed && { title: title.value, titleFinal: title.final }),
+  };
 }
 
 /**

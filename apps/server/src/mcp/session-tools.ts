@@ -223,8 +223,9 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   } catch (err) {
     return errToMcp(err);
   }
-  // touch:false — end() stamps last_activity_at itself; touching here too
-  // would be a second UPDATE of the same row for one request.
+  // touch:false — end() stamps last_activity_at on an active row (and
+  // deliberately not on a terminal one); touching here too would be a second
+  // UPDATE of the same row for one request.
   const sessionId = resolveSessionId(
     deps,
     args.sessionId,
@@ -237,12 +238,21 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
-  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+  const blocked = rejectIfDeleted(
+    deps,
+    sessionId,
+    ctx.token.id,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   if (blocked) return blocked;
   try {
     const ended = deps.agentSessions.end(sessionId, { tokenId: ctx.token.id });
     const key = routerKey();
-    if (key) deps.router.clearSession(key.tokenId, key.mcpSessionId);
+    // Not on an abandoned row: `end()` used to throw there, so the binding
+    // survived. Clearing it now would drop auto-attach to `session_id = NULL`.
+    if (key && ended.status !== 'abandoned') {
+      deps.router.clearSession(key.tokenId, key.mcpSessionId);
+    }
     return ok({ ok: true, sessionId: ended.id, endedAt: ended.endedAt });
   } catch (err) {
     return errToMcp(err);
@@ -260,7 +270,8 @@ async function handleSessionSummary(
   } catch (err) {
     return errToMcp(err);
   }
-  // touch:false — writeSummary() stamps last_activity_at itself.
+  // touch:false — writeSummary() stamps last_activity_at on an active row, and
+  // deliberately does not on a terminal one.
   const sessionId = resolveSessionId(
     deps,
     args.sessionId,
@@ -273,7 +284,12 @@ async function handleSessionSummary(
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
-  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id);
+  const blocked = rejectIfDeleted(
+    deps,
+    sessionId,
+    ctx.token.id,
+    scope.kind === 'project' ? scope.projectId : null,
+  );
   if (blocked) return blocked;
   try {
     const updated = deps.agentSessions.writeSummary(sessionId, {
@@ -305,12 +321,19 @@ function rejectIfDeleted(
   deps: SessionToolDeps,
   sessionId: string,
   callerTokenId: string,
+  projectId: string | null,
 ): ReturnType<typeof mcpError> | null {
   const row = deps.agentSessions.getById(sessionId);
   if (!row) {
     return mcpError('session_not_found', `session '${sessionId}' not found`);
   }
   if (row.tokenId !== callerTokenId) {
+    return mcpError('session_not_found', `session '${sessionId}' not found`);
+  }
+  // Matches the HTTP handler's mask. Without it a terminal row from any other
+  // project this token ever touched is writable, which the late-write path
+  // widened from "my one live session" to "every session ever".
+  if (row.projectId !== projectId) {
     return mcpError('session_not_found', `session '${sessionId}' not found`);
   }
   if (row.deletedAt) {

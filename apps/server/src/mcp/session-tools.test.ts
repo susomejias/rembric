@@ -93,3 +93,96 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     expect(out.sessionId).not.toBe(b.id);
   });
 });
+
+describe('memory.session_summary on a session the sweep already abandoned', () => {
+  it('succeeds with an explicit sessionId and leaves the lifecycle columns alone', async () => {
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+    const before = agentSessions.getById(s.id);
+
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({
+        sessionId: s.id,
+        summary: '## Goal\ncurated handoff',
+        title: 'Fix the reaper',
+      }),
+    );
+    const out = parseText<{ ok: boolean; summary: string; summaryFinal: boolean }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.summary).toBe('## Goal\ncurated handoff');
+    expect(out.summaryFinal).toBe(true);
+
+    const after = agentSessions.getById(s.id);
+    expect(after?.status).toBe('abandoned');
+    expect(after?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+    expect(after?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
+  });
+
+  // `end()` used to throw on an abandoned row, so `clearSession` was
+  // unreachable and the binding survived. Widening `end()` made it reachable;
+  // clearing it would drop every later save on this transport to session_id NULL.
+  it('session_end on an abandoned row keeps the transport binding', async () => {
+    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-1' };
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    router.setActiveSession(adminToken.id, 'transport-1', s.id);
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+
+    const r = await runWithContext(ctx, () => handlers.sessionEnd({ sessionId: s.id }));
+    expect(parseText<{ ok: boolean }>(r).ok).toBe(true);
+    expect(router.get(adminToken.id, 'transport-1')?.rembricSessionId).toBe(s.id);
+    expect(agentSessions.getById(s.id)?.status).toBe('abandoned');
+  });
+
+  it('session_end on an active row still clears the binding', async () => {
+    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-2' };
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    router.setActiveSession(adminToken.id, 'transport-2', s.id);
+
+    await runWithContext(ctx, () => handlers.sessionEnd({ sessionId: s.id }));
+    expect(router.get(adminToken.id, 'transport-2')?.rembricSessionId).toBeNull();
+    expect(agentSessions.getById(s.id)?.status).toBe('ended');
+  });
+
+  // The rest of this file runs on a global-scope context, so the project mask
+  // is never exercised there. Late writes widened the reachable set from "my one
+  // live session" to "every terminal session this token created", which is what
+  // makes the mask load-bearing rather than decorative.
+  it('masks a terminal session belonging to another project as session_not_found', async () => {
+    const mine = projects.create({ slug: 'mine' });
+    const theirs = projects.create({ slug: 'theirs' });
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: theirs.id, agent: 'x' });
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+
+    const ctx: RequestContext = { ...makeContext(), project: mine, requestedSlug: 'mine' };
+    const r = await runWithContext(ctx, () =>
+      handlers.sessionSummary({ sessionId: s.id, summary: 'cross-project write' }),
+    );
+    expect(parseText<{ code: string }>(r).code).toBe('session_not_found');
+    expect(agentSessions.getById(s.id)?.summary).toBeNull();
+  });
+
+  it('still writes when the terminal session belongs to the scoped project', async () => {
+    const mine = projects.findBySlug('mine') ?? projects.create({ slug: 'mine' });
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: mine.id, agent: 'x' });
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+
+    const ctx: RequestContext = { ...makeContext(), project: mine, requestedSlug: 'mine' };
+    const r = await runWithContext(ctx, () =>
+      handlers.sessionSummary({ sessionId: s.id, summary: 'same-project late write' }),
+    );
+    expect(parseText<{ ok: boolean }>(r).ok).toBe(true);
+    expect(agentSessions.getById(s.id)?.summary).toBe('same-project late write');
+  });
+
+  it('still reports session_not_found (never attaches) when the only candidate is abandoned and no id was passed', async () => {
+    const s = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({ summary: 'no id, no router entry' }),
+    );
+    const out = parseText<{ ok: boolean; code: string }>(r);
+    expect(out.code).toBe('session_not_found');
+    expect(agentSessions.getById(s.id)?.summary).toBeNull();
+  });
+});

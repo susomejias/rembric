@@ -236,6 +236,44 @@ describe('append-only invariants (static grep)', () => {
   });
 });
 
+/**
+ * Two files suffice: the data-access invariant above already confines every
+ * session `UPDATE` to `db/`, and the service is the only composer of a
+ * `Partial<NewAgentSession>`. Asserted on line TEXT, not line numbers, so an
+ * edit elsewhere in the file cannot break it — only a new write site can.
+ */
+describe('session lifecycle-column invariants', () => {
+  const SESSION_WRITERS = [
+    'services/agent-sessions.ts',
+    'db/repositories/agent-sessions-repository.ts',
+  ] as const;
+
+  const sources = SESSION_WRITERS.map((rel) => readFileSync(join(srcRoot, rel), 'utf8'));
+
+  // The one property grep can actually carry: the terminal write path derives
+  // its `set` wholly from `precedenceSet` and never appends to it. Everything
+  // about which COLUMNS may move is enforced at runtime instead — see
+  // agent-sessions.test.ts "terminal rows are terminal" — because a mutation
+  // test proved a counting invariant here passes on `set.endedAt = …`.
+  it('the terminal write path adds nothing to the precedence fields', () => {
+    const svc = sources[0]!;
+    const start = svc.indexOf('private writeTerminalFields');
+    expect(start).toBeGreaterThan(-1);
+    const body = svc.slice(start, svc.indexOf('\n  }', start));
+    expect(body).toMatch(/const set = precedenceSet\(existing, input\);/);
+    expect(body).not.toMatch(/\bset\.\w+\s*=/);
+    expect(body).not.toMatch(/\bset\[/);
+  });
+
+  it('precedenceSet can only ever produce summary and title fields', () => {
+    const svc = sources[0]!;
+    const start = svc.indexOf('function precedenceSet');
+    const body = svc.slice(start, svc.indexOf('\n}', start));
+    const keys = [...body.matchAll(/(\w+):\s*(?:summary|title)\./g)].map((m) => m[1]).sort();
+    expect(keys).toEqual(['summary', 'summaryFinal', 'title', 'titleFinal']);
+  });
+});
+
 // repoRoot points to the monorepo root (../../../ from apps/server/src/test).
 // srcRoot resolves to apps/server/src; the actual repo root is two levels up
 // from apps/server (one extra `..` for apps, one for the repo).

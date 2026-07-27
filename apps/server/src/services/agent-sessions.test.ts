@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
@@ -389,6 +389,130 @@ describe('AgentSessionsService', () => {
     });
   });
 
+  describe('late summary/title writes on terminal rows', () => {
+    const START = new Date('2026-01-01T00:00:00.000Z');
+    const LATE = new Date('2026-01-03T12:00:00.000Z');
+
+    let repos: ReturnType<typeof createRepositories>;
+    let clock: Date;
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      repos = createRepositories(db.handle.db);
+      clock = START;
+      svc = new AgentSessionsService(repos, db.handle.db, () => clock);
+    });
+
+    /** Terminal row at START, clock advanced to LATE so a stray activity stamp shows up. */
+    function terminalSession(
+      status: 'ended' | 'abandoned',
+      opts: { curatedSummary?: boolean } = {},
+    ) {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      if (opts.curatedSummary) {
+        svc.writeSummary(s.id, { tokenId, summary: 'curated', final: true });
+      }
+      const row =
+        status === 'ended'
+          ? svc.end(s.id, { tokenId })
+          : svc.markAbandoned(s.id, { tokenId, adminBypass: true });
+      clock = LATE;
+      return row;
+    }
+
+    for (const status of ['abandoned', 'ended'] as const) {
+      it(`writeSummary on a ${status} row writes summary and title, leaving lifecycle columns untouched`, () => {
+        const before = terminalSession(status);
+        const updated = svc.writeSummary(before.id, {
+          tokenId,
+          summary: 'late but curated',
+          title: 'Fix the reaper',
+          final: true,
+        });
+        expect(updated.summary).toBe('late but curated');
+        expect(updated.summaryFinal).toBe(true);
+        expect(updated.title).toBe('Fix the reaper');
+        expect(updated.titleFinal).toBe(true);
+        expect(updated.status).toBe(status);
+        expect(updated.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+        expect(updated.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+
+        const stored = svc.getById(before.id);
+        expect(stored?.summary).toBe('late but curated');
+        expect(stored?.status).toBe(status);
+        expect(stored?.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+        expect(stored?.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+      });
+
+      it(`writeSummary on a ${status} row applies per-field precedence: the curated summary survives a final:false sync, the title still lands`, () => {
+        const before = terminalSession(status, { curatedSummary: true });
+        const updated = svc.writeSummary(before.id, {
+          tokenId,
+          summary: 'raw transcript dump',
+          title: 'hook fallback title',
+          final: false,
+        });
+        expect(updated.summary).toBe('curated');
+        expect(updated.summaryFinal).toBe(true);
+        expect(updated.title).toBe('hook fallback title');
+        expect(updated.titleFinal).toBe(false);
+        expect(updated.status).toBe(status);
+        expect(updated.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+        expect(updated.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+      });
+
+      it(`writeSummary on a ${status} row emits no UPDATE when precedence blocks every field`, () => {
+        const before = terminalSession(status, { curatedSummary: true });
+        const spy = vi.spyOn(repos.agentSessions, 'updateById');
+        const updated = svc.writeSummary(before.id, {
+          tokenId,
+          summary: 'raw transcript dump',
+          final: false,
+        });
+        expect(spy).not.toHaveBeenCalled();
+        expect(updated).toEqual(before);
+        spy.mockRestore();
+      });
+    }
+
+    it('end on an abandoned row writes the summary without promoting the status', () => {
+      const before = terminalSession('abandoned');
+      const updated = svc.end(before.id, { tokenId, summary: 'closing notes', final: true });
+      expect(updated.summary).toBe('closing notes');
+      expect(updated.summaryFinal).toBe(true);
+      expect(updated.status).toBe('abandoned');
+      expect(updated.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+      expect(updated.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+    });
+
+    it('writeSummary rejects an oversized summary on a terminal row (cap is checked before status)', () => {
+      const before = terminalSession('abandoned');
+      expect(() =>
+        svc.writeSummary(before.id, {
+          tokenId,
+          summary: 'a'.repeat(SUMMARY_MAX_CHARS + 1),
+          final: true,
+        }),
+      ).toThrow(String(SUMMARY_MAX_CHARS));
+      expect(svc.getById(before.id)).toEqual(before);
+    });
+
+    it('writeSummary on a terminal row owned by another token is still masked as session_not_found', () => {
+      const before = terminalSession('abandoned');
+      expect(() =>
+        svc.writeSummary(before.id, { tokenId: otherTokenId, summary: 'not mine', final: true }),
+      ).toThrow(/not found/i);
+      expect(svc.getById(before.id)).toEqual(before);
+    });
+
+    it('a late curated summary on an abandoned row reaches recentForContext', () => {
+      const before = terminalSession('abandoned');
+      expect(svc.recentForContext({ projectId })).toEqual([]);
+      svc.writeSummary(before.id, { tokenId, summary: 'late but curated', final: true });
+      expect(svc.recentForContext({ projectId }).map((r) => r.id)).toEqual([before.id]);
+    });
+  });
+
   describe('ensure (client-provided id)', () => {
     it('inserts a new row with the provided id and returns created: true', () => {
       const { session, created } = sessions.ensure({
@@ -725,5 +849,76 @@ describe('AgentSessionsService', () => {
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(false);
     });
+  });
+
+  describe('a closed row does not lose its curated handoff', () => {
+    it('a second final write cannot replace a final summary on a terminal row', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'handoff' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'the real handoff', final: true });
+      sessions.end(s.id, { tokenId });
+
+      // A resumed or zombie client re-summarising the same host session id.
+      sessions.writeSummary(s.id, { tokenId, summary: 'clobbered by a resume', final: true });
+      expect(sessions.getById(s.id)?.summary).toBe('the real handoff');
+    });
+
+    it('but an active row still takes last-final-wins', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'live' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'first', final: true });
+      sessions.writeSummary(s.id, { tokenId, summary: 'second', final: true });
+      expect(sessions.getById(s.id)?.summary).toBe('second');
+    });
+
+    it('a soft-deleted terminal row rejects the write instead of mutating', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'gone' });
+      sessions.markAbandoned(s.id, { adminBypass: true });
+      sessions.softDelete(s.id, { adminBypass: true });
+
+      expect(() => sessions.writeSummary(s.id, { tokenId, summary: 'late', final: true })).toThrow(
+        /soft-deleted/,
+      );
+      expect(sessions.getById(s.id)?.summary).toBeNull();
+    });
+  });
+
+  // Runtime rather than grep: a mutation test showed a counting invariant over
+  // `requireActive: false` passes when a revival is added inside the terminal
+  // write path itself. Driving every mutating verb is the only form that fails.
+  describe('terminal rows are terminal', () => {
+    function terminal(status: 'ended' | 'abandoned'): string {
+      const s = sessions.start({ tokenId, projectId, agent: `t-${status}` });
+      if (status === 'ended') sessions.end(s.id, { tokenId });
+      else sessions.markAbandoned(s.id, { adminBypass: true });
+      return s.id;
+    }
+
+    for (const status of ['ended', 'abandoned'] as const) {
+      it(`no verb moves a ${status} row back to active or rewrites ended_at`, () => {
+        const id = terminal(status);
+        const before = sessions.getById(id)!;
+
+        const verbs: (() => unknown)[] = [
+          () => sessions.writeSummary(id, { tokenId, summary: 'late raw', final: false }),
+          () => sessions.writeSummary(id, { tokenId, summary: 'late curated', final: true }),
+          () => sessions.writeSummary(id, { tokenId, title: 'late title', final: true }),
+          () => sessions.end(id, { tokenId }),
+          () => sessions.end(id, { tokenId, summary: 'late via end', final: true }),
+          () => sessions.summarize(id, { tokenId, summary: 'late via summarize' }),
+          () => sessions.markAbandoned(id, { adminBypass: true }),
+          () => sessions.touchActivity(id),
+          () => sessions.abandonStale({ olderThanMs: 0 }),
+        ];
+        for (const verb of verbs) {
+          try {
+            verb();
+          } catch {
+            /* a refusal is fine; a mutation is not */
+          }
+          const row = sessions.getById(id)!;
+          expect(row.status).toBe(before.status);
+          expect(row.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+        }
+      });
+    }
   });
 });

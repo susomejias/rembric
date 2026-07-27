@@ -386,6 +386,12 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 
 `memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
 
+`memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the four clients) before the agent gets there.
+
+`memory.session_end` clears the `SessionRouter` transport binding for `(tokenId, mcpSessionId)` ONLY when the row it resolved is not `abandoned`. Before terminal writes were admitted, `end()` threw on an `abandoned` row and the clear was unreachable, so the binding survived; clearing it now would drop every later `memory.save` on that transport to `session_id = NULL`. That prior behaviour SHALL be preserved: ending an `abandoned` row SHALL leave the binding intact, ending an `active` or `ended` row SHALL clear it.
+
+Session resolution is unchanged and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the transport's `SessionRouter` entry, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The third source SHALL continue to consider only `active` rows, so an agent that supplies neither an explicit id nor a router-mapped session SHALL receive `session_not_found` rather than having its write attached to a closed session picked by recency.
+
 #### Scenario: `memory.session_start` opens a new session
 
 - **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
@@ -401,10 +407,41 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 - **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is already `'ended'`
 - **THEN** the server SHALL return `{ ok: true, endedAt }` with the existing `ended_at` and SHALL NOT mutate the row
 
+#### Scenario: `memory.session_end` is idempotent on abandoned sessions
+
+- **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is `'abandoned'` with `ended_at = E`
+- **THEN** the server SHALL return `{ ok: true, endedAt: E }`, SHALL leave `status = 'abandoned'` and `ended_at = E` untouched, and SHALL NOT return `session_already_ended`
+- **AND** the `SessionRouter` binding for the calling transport SHALL remain pointing at that session, so a subsequent `memory.save` on the same transport still auto-attaches its `session_id`
+
+#### Scenario: `memory.session_end` on an active session clears the transport binding
+
+- **WHEN** an MCP client calls `memory.session_end` on an `active` row and the call transitions it to `ended`
+- **THEN** the `SessionRouter` entry for `(tokenId, mcpSessionId)` SHALL be cleared, as before this requirement's revision
+
 #### Scenario: `memory.session_summary` writes summary and title without ending the session
 
 - **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= SUMMARY_MAX_CHARS`
 - **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false> }`
+
+#### Scenario: `memory.session_summary` succeeds on a session the sweep already abandoned
+
+- **GIVEN** the agent's session was flipped to `status = 'abandoned'` with `ended_at = E` and `last_activity_at = L` by stale-active retirement while the conversation was still open, and the agent knows its `sessionId` (the plugin's nudge injects it)
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary, title })`
+- **THEN** the call SHALL succeed and return `{ ok: true, sessionId, summary, title, summaryFinal: true, … }`
+- **AND** the row SHALL retain `status = 'abandoned'`, `ended_at = E` and `last_activity_at = L`
+- **AND** the call SHALL NOT return `session_already_ended`
+
+#### Scenario: `memory.session_summary` succeeds on an ended session
+
+- **GIVEN** a row whose `status = 'ended'` with `ended_at = E`
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary })`
+- **THEN** the call SHALL succeed with `summaryFinal: true`, and `status`/`ended_at` SHALL be unchanged
+
+#### Scenario: `memory.session_summary` with no resolvable session still reports `session_not_found`
+
+- **GIVEN** the agent passes no explicit `sessionId`, the transport has no `SessionRouter` entry, and the only candidate row for its `(token_id, project_id)` is `abandoned`
+- **WHEN** the agent calls `memory.session_summary({ summary })`
+- **THEN** the call SHALL be rejected with code `session_not_found` (NOT `session_already_ended`, and NOT silently attached to the abandoned row)
 
 #### Scenario: `memory.session_summary` may be called multiple times; the latest call wins
 
@@ -963,7 +1000,7 @@ The gate SHALL be a no-op (the call proceeds with the previous behavior) when AN
 
 - **GIVEN** a Rembric session `<S>` owned by token `<T1>`, soft-deleted
 - **WHEN** an MCP client authenticated as a different token `<T2>` calls `memory.session_end` on `<S>`
-- **THEN** the response SHALL be an MCP error with the existing cross-token `forbidden` code, NOT `session_deleted`
+- **THEN** the response SHALL be an MCP error with the cross-token mask `session_not_found`, NOT `session_deleted` — the mask never reveals that a session with that id exists under another token, matching "A session-lifecycle tool targets a session owned by a different token" above
 
 ### Requirement: The MCP server MUST expose `memory.save_prompt` with optional metadata and refine semantics
 

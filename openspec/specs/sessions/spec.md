@@ -14,7 +14,7 @@ The `deleted_at` column is exempt from immutability: it SHALL transition from NU
 
 The `id` column is set exactly once at insert time. It MAY originate from a client (via `POST /api/<slug>/sessions` or `start({id})`) or be server-minted (via `memory.session_start` without an explicit id). Once written it SHALL NOT be UPDATEd.
 
-The `summary` and `title` columns are exempt from one-write-per-lifetime immutability: they MAY be written multiple times subject to the `final` precedence rules (a `final:true` write locks against `final:false` writes; non-final writes can overwrite each other).
+The `summary` and `title` columns are exempt from one-write-per-lifetime immutability: they MAY be written multiple times subject to the `final` precedence rules (a `final:true` write locks against `final:false` writes; non-final writes can overwrite each other). This exemption SHALL apply irrespective of `status`, with one narrowing on terminal rows where an already-`final` column becomes immutable — see "Terminal session rows MUST accept late summary and title writes".
 
 #### Scenario: Code path attempts to physically delete a session
 
@@ -31,6 +31,14 @@ The `summary` and `title` columns are exempt from one-write-per-lifetime immutab
 - **WHEN** `memory.session_end` (MCP) or `POST /api/<slug>/sessions/:id/end` (HTTP) is called twice on the same `(token_id, id)`
 - **THEN** the second call SHALL succeed as an idempotent no-op (status already `ended`, returns the current row) and SHALL NOT mutate `ended_at`. Summary/title write attempts in the second call SHALL be honoured only if they pass the `final` precedence check.
 
+#### Scenario: `memory.session_end` (or `/api/.../end`) on a row the sweep already abandoned
+
+- **GIVEN** session `<S>` was flipped to `status='abandoned'` with `ended_at = E` by stale-active retirement while its client was still running
+- **WHEN** that client calls `memory.session_end` (MCP) or `POST /api/<slug>/sessions/:id/end` (HTTP), with or without summary/title fields
+- **THEN** the call SHALL succeed as an idempotent no-op with respect to lifecycle: `status` SHALL remain `'abandoned'` and `ended_at` SHALL remain `E`
+- **AND** any summary/title fields in the body SHALL be applied subject to the `final` precedence check
+- **AND** the call SHALL NOT be rejected with `session_already_ended`
+
 #### Scenario: deleted_at transitions are tracked
 
 - **WHEN** an operator soft-deletes a session and later undeletes it
@@ -42,6 +50,90 @@ The `summary` and `title` columns are exempt from one-write-per-lifetime immutab
 - **WHEN** another write lands with `final:false`
 - **THEN** the second write SHALL overwrite `summary`
 - **AND** `summary_final` SHALL remain `false`
+
+### Requirement: Terminal session rows MUST accept late summary and title writes
+
+A session row whose `status` is `ended` or `abandoned` SHALL accept `summary` and `title` writes for the remainder of its life, with no time limit relative to `ended_at`. This SHALL hold for every write path that mutates those columns — `AgentSessionsService.writeSummary`, `AgentSessionsService.end`, and therefore `POST /api/<slug>/sessions/:id/summary`, `POST /api/<slug>/sessions/:id/end`, `memory.session_summary` and `memory.session_end` — so that no two of them disagree about the same row. (`memory.session_end` carries no summary/title arguments of its own, so on a terminal row it is a pure no-op rather than a write; it is listed because it must not reject either.)
+
+Late writes SHALL be subject to the existing `summary_final` / `title_final` precedence rules with ONE deviation: on a terminal row an already-`final` column SHALL NOT be replaced, not even by a `final:true` write. On an `active` row last-final-wins is unchanged. The deviation exists because unbounded lateness makes the alternative lossy in a way sessions cannot recover from: a resumed host session reuses its id, its agent's obligatory `memory.session_summary` sends `final:true`, and sessions have no `replaces` chain or `consolidation_ops` journal, so the displaced handoff is gone with no audit trail. Before late writes were permitted the same call was rejected and the text survived; the first curated value therefore stands. A `final:false` write against an already-`final` column remains a silent no-op and is NOT an error.
+
+The cap precondition (`SUMMARY_MAX_CHARS`), the `NUL`-byte rejection, the `title` length bound and the cross-token mask (`session_not_found`) SHALL be evaluated in the service exactly as on an `active` row and BEFORE any column is written. The project-mismatch mask (`session_not_found`) SHALL be evaluated at the HTTP-handler and MCP-tool boundary. The soft-delete rejection (`session_deleted`) SHALL be evaluated at that boundary AND in the service: the boundary check is the one that produces the operator-facing message, and the service check exists because removing the `status !== 'active'` rejection also removed the backstop that incidentally protected a soft-deleted terminal row from a caller that forgot the gate.
+
+A late write SHALL NOT mutate `status`, `ended_at`, or `last_activity_at`. In particular `end()` on an `abandoned` row SHALL apply the summary/title writes and SHALL NOT flip `status` to `'ended'` and SHALL NOT write `ended_at`: `ended_at` remains write-once and the retirement sweep's classification of how the session died stands. `last_activity_at` is deliberately excluded because it exists solely to drive stale-active retirement and transport resolution, both of which filter `status = 'active'`.
+
+Per-field precedence SHALL be folded into an update `set` in exactly ONE place, shared by all three write paths (the terminal write, `writeSummary`'s active path, `end`'s active path), so the three cannot drift.
+
+The status FSM SHALL remain `active → ended | abandoned` with both non-`active` states terminal. No path SHALL transition a session back to `active`, and no path SHALL write `ended_at` on a row that already has one. `ended_at`'s write-once property is structural: every path that writes it (`end`'s active branch, `markAbandoned`, `abandonInactiveSince`) matches on `status = 'active'`, and the late-write path never places `status` or `ended_at` in its update `set`. Two CI invariant tests bound that structure — see the scenarios below — so widening it is a build failure rather than a review oversight.
+
+When a late write leaves every field unchanged (because precedence skipped all of them), the call SHALL return the existing row as a success and SHALL NOT emit an `UPDATE`.
+
+#### Scenario: Late curated summary on an abandoned session
+
+- **GIVEN** session `<S>` with `status='abandoned'`, `ended_at = E`, `last_activity_at = L`, `summary_final = false`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'Goal · Discoveries · …', title: 'Fix the reaper', final: true })` is called
+- **THEN** the row SHALL have the new `summary` with `summary_final = true` and the new `title` with `title_final = true`
+- **AND** `status` SHALL still be `'abandoned'`, `ended_at` SHALL still be `E`, and `last_activity_at` SHALL still be `L`
+- **AND** the call SHALL return the updated row rather than throwing `session_already_ended`
+
+#### Scenario: Late curated summary on an ended session
+
+- **GIVEN** session `<S>` with `status='ended'`, `ended_at = E`, `last_activity_at = L`, `summary_final = false`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'late but curated', final: true })` is called
+- **THEN** the row SHALL have `summary = 'late but curated'` and `summary_final = true`
+- **AND** `status`, `ended_at` and `last_activity_at` SHALL be unchanged
+
+#### Scenario: A per-turn raw transcript sync cannot clobber a curated summary on a terminal row
+
+- **GIVEN** session `<S>` with `status='abandoned'` (or `'ended'`), `summary = 'curated'` and `summary_final = true`
+- **WHEN** `writeSummary(<S>, { tokenId: 'T', summary: '<raw transcript>', final: false })` is called (the `Stop`-hook transcript sync)
+- **THEN** the call SHALL succeed and the row's `summary` SHALL remain `'curated'` with `summary_final = true`
+- **AND** no `UPDATE` SHALL be emitted for the row
+- **AND** `status`, `ended_at` and `last_activity_at` SHALL be unchanged
+
+#### Scenario: `end()` on an abandoned row writes the summary without changing the status
+
+- **GIVEN** session `<S>` with `status='abandoned'` and `ended_at = E` set by the retirement sweep
+- **WHEN** `agentSessions.end(<S>, { tokenId: 'T', summary: 'closing notes', final: true })` is called
+- **THEN** the row SHALL have `summary = 'closing notes'` with `summary_final = true`
+- **AND** `status` SHALL remain `'abandoned'` (NOT `'ended'`) and `ended_at` SHALL remain `E`
+- **AND** the call SHALL NOT throw `session_already_ended`
+
+#### Scenario: A late write is unbounded in time
+
+- **GIVEN** session `<S>` with `status='abandoned'` whose `ended_at` is 30 days in the past
+- **WHEN** a `summary` write arrives with `final:true`
+- **THEN** it SHALL be applied — there SHALL be no lateness window, and no configuration value SHALL exist that can reject a write for being too late
+
+#### Scenario: A late curated summary reaches the next session's context
+
+- **GIVEN** session `<S>` with `status='abandoned'`, `deleted_at IS NULL`, and no curated summary
+- **WHEN** a `summary` write lands with `final:true`, and a subsequent `memory.context` call resolves the same scope
+- **THEN** `<S>` SHALL appear among the recent sessions, because the context-surfacing predicate keys on `summary IS NOT NULL AND summary_final = 1` and applies no `status` filter
+
+#### Scenario: A late write on a soft-deleted terminal row is still rejected
+
+- **GIVEN** session `<S>` with `status='abandoned'` and `deleted_at IS NOT NULL`
+- **WHEN** a `summary` write arrives on any of the four request paths (`/summary`, `/end`, `memory.session_summary`, `memory.session_end`)
+- **THEN** it SHALL be rejected with `session_deleted` and the row SHALL NOT be mutated
+
+#### Scenario: A late write for a different token is still masked
+
+- **GIVEN** session `<S>` with `status='abandoned'` owned by token `T1`
+- **WHEN** token `T2` attempts a `summary` write on `<S>`
+- **THEN** it SHALL be rejected with `session_not_found` (never `forbidden`, never `session_already_ended`) and the row SHALL NOT be mutated
+
+#### Scenario: No path revives a terminal session
+
+- **WHEN** a session update that is not one of the three permitted to run against a non-`active` row (the late summary/title write, `softDelete`, `undelete`) is added, or `status: 'active'` is written in `services/agent-sessions.ts` or `db/repositories/agent-sessions-repository.ts` anywhere other than the two row inserts
+- **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
+- **AND** those two files SHALL suffice as the scanned surface, because the data-access invariant already confines every session `UPDATE` to `db/` and the service is the only composer of a session update `set`
+
+#### Scenario: `ended_at` cannot be rewritten by a late write
+
+- **GIVEN** every path that writes `ended_at` (`end`'s active branch, `markAbandoned`, `abandonInactiveSince`) matches on `status = 'active'`
+- **WHEN** a late summary/title write lands on a row whose `ended_at` is already set
+- **THEN** `ended_at` SHALL NOT appear in the update `set` and the stored value SHALL be unchanged
+- **AND** a fourth update site able to run against a non-`active` row SHALL fail the CI invariant test above
 
 ### Requirement: `AgentSessionsService.start()` MUST accept a client-provided id and be idempotent on that id
 
@@ -595,15 +687,13 @@ The `AgentSessionsService` SHALL expose a single canonical constant `SUMMARY_MAX
 
 `SUMMARY_MAX_CHARS` SHALL be set high enough to carry a rich handoff summary (the design records the chosen value). The constant SHALL remain the single source of truth, exported and imported by the MCP zod schema (`apps/server/src/mcp/session-tools.ts`) and by the HTTP-layer truncation helper, so no layer can drift from the service-level cap.
 
-The cap precondition SHALL be enforced before the `summary_final` precedence rule is evaluated, by every write path that mutates `sessions.summary`:
+The cap precondition SHALL be enforced before the `summary_final` precedence rule is evaluated, and before the row's `status` is consulted, by every write path that mutates `sessions.summary`:
 
 - `writeSummary({ summary, ... })`
 - `end({ summary, ... })`
 - `summarize({ summary })` (back-compat wrapper)
 
-When `summary.length > SUMMARY_MAX_CHARS`, the service SHALL throw `DomainError('invalid_input', message)` where `message` SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so callers (including the MCP tool envelope and HTTP handler) can surface the cap to the client without re-encoding it. The row SHALL NOT be mutated and `summary_final` SHALL NOT be lifted by a rejected call.
-
-The auto-curate path (`composeDerivedSummary` invoked for sessions with anchored content but no curated summary) SHALL produce output well under `SUMMARY_MAX_CHARS` (the existing template `[auto] N memorias[, P prompts[, C confirmaciones]][ — última: '<80-char snippet>']` already fits in ~120 chars) and SHALL NOT be modified by this requirement.
+When `summary.length > SUMMARY_MAX_CHARS`, the service SHALL throw `DomainError('invalid_input', message)` where `message` SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so callers (including the MCP tool envelope and HTTP handler) can surface the cap to the client without re-encoding it. The row SHALL NOT be mutated and `summary_final` SHALL NOT be lifted by a rejected call. This SHALL hold identically for `active` and terminal rows.
 
 #### Scenario: `writeSummary` rejects a summary of `SUMMARY_MAX_CHARS + 1`
 
@@ -611,6 +701,13 @@ The auto-curate path (`composeDerivedSummary` invoked for sessions with anchored
 - **WHEN** `agentSessions.writeSummary(sessionId, { tokenId: 'T', summary: 'a'.repeat(SUMMARY_MAX_CHARS + 1) })` is called
 - **THEN** the call SHALL throw `DomainError('invalid_input', <message>)` whose message contains the decimal string of `SUMMARY_MAX_CHARS`
 - **AND** the row in `sessions` SHALL remain unchanged (no summary written, `summary_final` unchanged)
+
+#### Scenario: `writeSummary` rejects an oversized summary on a terminal row too
+
+- **GIVEN** a session row owned by token `T` with `status='abandoned'`
+- **WHEN** `agentSessions.writeSummary(sessionId, { tokenId: 'T', summary: 'a'.repeat(SUMMARY_MAX_CHARS + 1) })` is called
+- **THEN** the call SHALL throw `DomainError('invalid_input', <message>)` containing the cap value — the cap is checked before `status`, so admitting late writes SHALL NOT create an uncapped path
+- **AND** the row SHALL remain unchanged
 
 #### Scenario: `end` rejects an oversized summary atomically with the transition
 
