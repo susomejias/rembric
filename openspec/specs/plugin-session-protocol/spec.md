@@ -169,7 +169,7 @@ When `cwd` is missing or fails to parse, the placeholder SHALL be `"session · H
 The MCP server's `initialize.instructions` string (loaded into the model's system prompt on connect) SHALL include a directive flow instructing the model to call `memory.session_summary` with `{title, summary}` at the end of every turn in which real work happened — never ending a working turn silent. The flow SHALL:
 
 - Be present in both the path-scoped and path-less variants of `initialize.instructions`.
-- Stay within the 1000-character cap enforced by `instructions.test.ts` (raised from 800; the cap is a self-imposed token budget, not a client or protocol limit).
+- Stay within the 1000-character cap enforced by `instructions.test.ts` (raised from 800; the cap is a self-imposed token budget chosen for token cost rather than the binding limit — Claude Code truncates `instructions` at 2048 characters, so the self-imposed cap binds first; the `mcp-api` capability holds the authoritative statement).
 - Be phrased as a **calibrated imperative**: a directive to curate (not a passive suggestion), **conditioned on real memorable work having happened** (a decision, fix, discovery, or files changed). It SHALL preserve the model's discretion to skip trivial turns with nothing worth persisting (so the imperative does not induce vacuous summaries), and SHALL NOT bind the trigger solely to the literal word "done".
 - Describe the title constraint (≤100 chars, descriptive of what was worked on) and the summary structure (Goal · Discoveries · Accomplished · Next Steps · Files).
 

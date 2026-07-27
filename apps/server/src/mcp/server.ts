@@ -116,6 +116,12 @@ export interface CreateMcpServerOptions {
   version?: string;
 }
 
+// Claude Code 2.1.220 tail-cuts any tool description over 2048 chars (`LB`);
+// 1900 keeps an early-warning margin. Unlike INSTRUCTIONS_MAX_LENGTH this is a
+// verified client ceiling, not a token budget — see the mcp-api requirement
+// "Tool descriptions MUST stay below the client truncation ceiling".
+export const DESCRIPTION_MAX_LENGTH = 1900;
+
 const SAVE_DESCRIPTION =
   'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
 

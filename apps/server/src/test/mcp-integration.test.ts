@@ -1,5 +1,8 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -9,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
+import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ProjectsService } from '../services/projects.js';
@@ -220,6 +224,38 @@ describe('MCP protocol conformance', () => {
     expect(desc).not.toContain('2000');
 
     await client.close();
+  });
+
+  it('keeps every tool description under the client truncation ceiling', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    await client.close();
+
+    // Derived from the whole response, so a newly registered tool inherits the
+    // guard; the floor stops an empty listing passing vacuously.
+    const measured = tools.map((t) => ({ name: t.name, length: (t.description ?? '').length }));
+    expect(measured.length, 'tools/list returned fewer tools than expected').toBeGreaterThanOrEqual(
+      23,
+    );
+
+    const over = measured.filter((m) => m.length > DESCRIPTION_MAX_LENGTH);
+    expect(
+      over,
+      `description(s) over DESCRIPTION_MAX_LENGTH=${DESCRIPTION_MAX_LENGTH}: ` +
+        `${over.map((m) => `${m.name} is ${m.length} chars`).join(', ')}. ` +
+        'Claude Code tail-cuts at 2048 chars, dropping the END of the description first. ' +
+        'Reword to fit, or raise the cap deliberately keeping a margin below the ' +
+        're-verified client ceiling (mcp-api: "Tool descriptions MUST stay below the ' +
+        'client truncation ceiling").',
+    ).toEqual([]);
+
+    // Pins the GUARD's unit, not the string's: `memory.save`'s description holds
+    // `∈`, `·` and `≤`, so measuring bytes would report a different number, and
+    // an earlier exploration did exactly that while labelling it characters.
+    const save = tools.find((t) => t.name === 'memory.save')?.description ?? '';
+    const savesMeasured = measured.find((m) => m.name === 'memory.save')?.length;
+    expect(savesMeasured).toBe(save.length);
+    expect(savesMeasured).not.toBe(Buffer.byteLength(save, 'utf8'));
   });
 
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
@@ -1557,5 +1593,48 @@ describe('HTTP hardening (real server)', () => {
     expect(invalid.status).toBe(401);
     // No validity oracle: the two responses are byte-identical.
     expect(validNonAdmin.text).toBe(invalid.text);
+  });
+});
+
+/**
+ * The cap lives twice — as the assertion above and as the mcp-api requirement
+ * that publishes it — and nothing couples them. Either location counts, so this
+ * holds before and after the delta is merged at archive time.
+ */
+describe('the enforced description cap is published in mcp-api', () => {
+  it(`states ${DESCRIPTION_MAX_LENGTH} in the live spec or a pending delta`, () => {
+    const openspecDir = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      '..',
+      'openspec',
+    );
+    const changesDir = join(openspecDir, 'changes');
+    const candidates = [join(openspecDir, 'specs', 'mcp-api', 'spec.md')];
+    for (const entry of readdirSync(changesDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name !== 'archive') {
+        candidates.push(join(changesDir, entry.name, 'specs', 'mcp-api', 'spec.md'));
+      }
+    }
+
+    // The constant NAME and the value on one line. A bare digit search was
+    // satisfied by 22 numbers already in these files — including 2048 and 1000,
+    // so bumping the cap to the ceiling passed green — and by a stray `1900` in
+    // unrelated prose after the requirement was deleted. The separator is
+    // optional because the sibling documents write `1,900`.
+    const digits = String(DESCRIPTION_MAX_LENGTH);
+    const withSeparator =
+      digits.length > 3 ? `${digits.slice(0, -3)},?${digits.slice(-3)}` : digits;
+    const pattern = new RegExp(`DESCRIPTION_MAX_LENGTH[^\\n]*?\\b${withSeparator}\\b`);
+    const published = candidates
+      .filter((p) => existsSync(p))
+      .some((p) => pattern.test(readFileSync(p, 'utf8')));
+
+    expect(
+      published,
+      `no mcp-api requirement names DESCRIPTION_MAX_LENGTH with the value ${DESCRIPTION_MAX_LENGTH}`,
+    ).toBe(true);
   });
 });

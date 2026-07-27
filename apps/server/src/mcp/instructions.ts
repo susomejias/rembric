@@ -37,10 +37,11 @@ export function buildInstructions(ctx: InstructionsContext): string {
 }
 
 /**
- * Self-imposed token budget, NOT a client or protocol limit: the MCP spec
- * defines `InitializeResult.instructions` as a free-form string with no max
- * length, and none of the four clients truncates it. The cap exists only to
- * keep the system-prompt cost bounded and guard against doc-creep. CI test
- * (`instructions.test.ts`) enforces it against both variants.
+ * Self-imposed token budget, not the binding limit: the MCP spec defines
+ * `InitializeResult.instructions` as a free-form string with no max length, and
+ * Claude Code truncates it at 2048 — the same `LB` it applies to tool
+ * descriptions (see DESCRIPTION_MAX_LENGTH) — so this cap binds first. It
+ * exists to keep the system-prompt cost bounded and guard against doc-creep.
+ * CI test (`instructions.test.ts`) enforces it against both variants.
  */
 export const INSTRUCTIONS_MAX_LENGTH = 1000;
