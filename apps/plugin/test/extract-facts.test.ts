@@ -103,6 +103,27 @@ describe('deterministic session facts (claude-code)', () => {
     expect(extract(junk).trim()).toBe('');
   });
 
+  it('returns empty rather than erroring when jq is unavailable', () => {
+    // Absolute bash: emptying PATH must remove `jq` from the script's view
+    // WITHOUT removing the interpreter from node's, or this fails to spawn
+    // rather than exercising the degrade.
+    const out = execFileSync(
+      '/bin/bash',
+      ['-c', `. "${transcriptSh}"; rembric_extract_facts_claude_code "${fixture}"`],
+      { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent-bin' } },
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('the dispatcher returns empty for a parser with no extraction', () => {
+    const out = execFileSync(
+      'bash',
+      ['-c', `. "${transcriptSh}"; rembric_session_facts codex_cli "${fixture}"`],
+      { encoding: 'utf8' },
+    );
+    expect(out.trim()).toBe('');
+  });
+
   it('exits successfully for a missing or empty transcript', () => {
     expect(extract('/nonexistent/path.jsonl').trim()).toBe('');
     const empty = tmpFile('t.jsonl', '');

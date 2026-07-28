@@ -251,13 +251,59 @@ _rembric_render_facts() {
   fi
 }
 
+# The last user turn and the last assistant turn, so the fact list carries what
+# the session was ABOUT and can stand alone instead of prefixing a conversation
+# slice. Bounded: a final turn can be arbitrarily long.
+RBR_FACTS_MAX_EXCHANGE_CHARS=800
+
+_rembric_facts_exchange_claude_code() {
+  local path="$1" last_user last_asst
+  last_user="$(
+    jq -r --argjson max "$RBR_FACTS_MAX_EXCHANGE_CHARS" '
+      select(.type == "user")
+      | (.message.content // []) 
+      | if type == "array" then [ .[] | select(.type? == "text") | .text ] | join(" ") else tostring end
+      | select(. != "")
+      | gsub("\\s+"; " ") | .[0:$max]
+    ' "$path" 2>/dev/null | tail -n 1
+  )" || true
+  last_asst="$(
+    jq -r --argjson max "$RBR_FACTS_MAX_EXCHANGE_CHARS" '
+      select(.type == "assistant")
+      | (.message.content // [])
+      | if type == "array" then [ .[] | select(.type? == "text") | .text ] | join(" ") else tostring end
+      | select(. != "")
+      | gsub("\\s+"; " ") | .[0:$max]
+    ' "$path" 2>/dev/null | tail -n 1
+  )" || true
+  [ -n "$last_user" ] && printf 'last request: %s\n' "$last_user"
+  [ -n "$last_asst" ] && printf 'last reply: %s\n' "$last_asst"
+  return 0
+}
+
 rembric_extract_facts_claude_code() {
   local path="${1:-}"
   if [ -z "$path" ] || [ ! -f "$path" ] || [ ! -s "$path" ]; then
     return 0
   fi
   command -v jq >/dev/null 2>&1 || return 0
-  _rembric_render_facts "$(_rembric_facts_raw_claude_code "$path")"
+  local facts exchange
+  facts="$(_rembric_render_facts "$(_rembric_facts_raw_claude_code "$path")")"
+  exchange="$(_rembric_facts_exchange_claude_code "$path")"
+  [ -z "$facts" ] && [ -z "$exchange" ] && return 0
+  [ -n "$facts" ] && printf '%s\n' "$facts"
+  [ -n "$exchange" ] && printf '%s' "$exchange"
+  return 0
+}
+
+# Dispatcher, so a host without an extraction degrades to the conversation slice
+# rather than erroring. Codex CLI has none yet.
+rembric_session_facts() {
+  local parser="${1:-}" path="${2:-}"
+  case "$parser" in
+    claude_code) rembric_extract_facts_claude_code "$path" ;;
+    *) return 0 ;;
+  esac
 }
 
 _rembric_format_transcript_claude_code_jq() {

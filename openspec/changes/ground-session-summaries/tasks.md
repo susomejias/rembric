@@ -34,9 +34,15 @@
   - Also asserts a file that was only READ is not reported as touched — the distinction between reading and changing is the whole point of the list.
 - [x] 2.4 Prove the traceability property is real, not asserted: every emitted line must correspond to a transcript event. Test it by feeding a transcript and asserting the output contains no path and no command absent from the input.
   - Asserted by exclusion: every emitted path must appear in the input transcript.
-- [ ] 2.5 Prove the truncation-degradation property: take an extraction longer than the cap, truncate it through the real helper, and assert the surviving text is still a well-formed fact list — not a fragment beginning mid-record.
+- [x] 2.5 Prove the truncation-degradation property: take an extraction longer than the cap, truncate it through the real helper, and assert the surviving text is still a well-formed fact list — not a fragment beginning mid-record.
+  - Asserted through the WIRING rather than the helper: a 400-tool-call transcript posts a body ≤ 10 000 chars that still reads `files touched (400 distinct)` and still names what it dropped. Aggregation is what makes this hold — the pre-aggregation form was 34× the cap.
 - [x] 2.6 Unparseable transcript → previous behaviour, exit 0, no malformed body. Test the failure path explicitly; a fallback that throws is worse than no fallback.
   - Unparseable, missing and empty transcripts all exit 0 with no output. Also covered: no `jq` on PATH returns empty rather than erroring.
+
+- [x] 2.7 **Wire it.** Task 2.1 as written stopped at "add the extraction", which would have left a tested function nothing called. `stop-sync.sh` now sends the facts as the fallback body and degrades to the conversation slice when the parser has no extraction or `jq` is absent.
+  - **The facts REPLACE the slice rather than prefixing it**, and that follows from D1: truncation keeps the TAIL, so anything prefixed is what gets cut first. Prefixing the facts would have put the highest-value content in the position most likely to be discarded. Replacing also required the extraction to carry the final exchange, so it can stand alone — added as `last request:` / `last reply:`, bounded at 800 chars each.
+  - Five wiring tests in `stop-sync.test.ts`, driving the real script against the existing fake server. **Mutation-checked**: blanking the facts call fails three of them. The pre-existing 10 tests still pass unchanged, because their fixture is conversation-only and therefore exercises the degrade path — which is the regression guarantee, not a coincidence.
+  - **Two of my own new tests were vacuous and are recorded as such.** One asserted the no-jq degrade through the wiring, but emptying `PATH` removes `curl` too, so no request ever arrived and the loop asserted nothing. The other asserted the codex-cli degrade with a Claude-shaped transcript, which that parser cannot read — the absence of a POST proved nothing about the degrade. Both moved to the helper level where the condition can be created in isolation; the no-jq one additionally needs an ABSOLUTE `/bin/bash`, or an emptied `PATH` stops node finding the interpreter and the test fails to spawn rather than exercising anything.
 
 ## 3. The end-of-turn reminder
 

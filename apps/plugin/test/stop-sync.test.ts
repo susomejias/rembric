@@ -232,6 +232,135 @@ describe('stop-sync.sh (Claude Code Stop hook, pure side effect)', () => {
   });
 });
 
+// The wiring, not the helper. `_transcript.sh`'s extraction is unit-tested in
+// extract-facts.test.ts; these assert that stop-sync.sh actually SENDS it, and
+// that a host or environment without an extraction still sends what it sent
+// before. The `async: true` defect this change fixed lived in the wiring, and no
+// helper test would have seen it.
+describe('stop-sync.sh sends extracted facts, not a conversation slice', () => {
+  function writeToolTranscript(target: string): string {
+    const lines = [
+      { type: 'user', message: { content: [{ type: 'text', text: 'please fix the bug' }] } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: '/repo/src/bug.ts' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'e1', is_error: false, content: 'ok' }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'pnpm test' } }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'b1', is_error: true, content: 'boom' }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Fixed it, running tests now.' }] },
+      },
+    ];
+    const path = join(dir, target);
+    writeFileSync(path, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+    return path;
+  }
+
+  it('posts the facts: the edited path and the FAILED command', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = writeToolTranscript('tools.jsonl');
+
+    await runStopSync(
+      JSON.stringify({ session_id: 'sess-facts', cwd: dir, transcript_path: transcriptPath }),
+    );
+    await waitForRequest();
+    const body = JSON.parse(requests[0]!.body) as Record<string, string>;
+    expect(body.summary).toContain('SESSION FACTS');
+    expect(body.summary).toContain('/repo/src/bug.ts');
+    expect(body.summary).toContain('failed commands:');
+    expect(body.summary).toContain('pnpm test');
+    // The conversation-slice shape must be gone: the old body was `user: …` /
+    // `assistant: …` lines, and sending both would double the payload.
+    expect(body.summary).not.toContain('user: please fix the bug');
+  });
+
+  it('still carries what the session was about, so the facts stand alone', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = writeToolTranscript('tools2.jsonl');
+
+    await runStopSync(
+      JSON.stringify({ session_id: 'sess-ex', cwd: dir, transcript_path: transcriptPath }),
+    );
+    await waitForRequest();
+    const body = JSON.parse(requests[0]!.body) as Record<string, string>;
+    expect(body.summary).toContain('last request: please fix the bug');
+    expect(body.summary).toContain('last reply: Fixed it, running tests now.');
+  });
+
+  it('stays under the server cap even on a transcript with many tool calls', async () => {
+    writeRembricFile(dir, 'demo');
+    const lines: string[] = [];
+    for (let i = 0; i < 400; i++) {
+      lines.push(
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: `w${i}`,
+                name: 'Write',
+                input: { file_path: `/repo/gen/f${i}.ts` },
+              },
+            ],
+          },
+        }),
+      );
+    }
+    const path = join(dir, 'many.jsonl');
+    writeFileSync(path, `${lines.join('\n')}\n`);
+
+    await runStopSync(JSON.stringify({ session_id: 'sess-big', cwd: dir, transcript_path: path }));
+    await waitForRequest();
+    const body = JSON.parse(requests[0]!.body) as Record<string, string>;
+    expect(body.summary.length).toBeLessThanOrEqual(10_000);
+    expect(body.summary).toContain('files touched (400 distinct)');
+    expect(body.summary).toContain('more not listed');
+  });
+
+  // Regression guard for the degrade path: a conversation-only transcript has no
+  // facts to extract, and MUST still post exactly what it posted before.
+  it('degrades to the conversation slice when there are no tool calls', async () => {
+    writeRembricFile(dir, 'demo');
+    const transcriptPath = writeTranscript(dir, 'plain.jsonl');
+
+    await runStopSync(
+      JSON.stringify({ session_id: 'sess-plain', cwd: dir, transcript_path: transcriptPath }),
+    );
+    await waitForRequest();
+    const body = JSON.parse(requests[0]!.body) as Record<string, string>;
+    expect(body.summary).toContain('please fix the bug');
+    expect(body.summary).not.toContain('SESSION FACTS');
+  });
+
+  // The two degrade paths that do NOT post through this wiring — no `jq`, and a
+  // parser with no extraction — are asserted in extract-facts.test.ts, where the
+  // condition can be created without also removing `curl` or feeding a parser a
+  // transcript in another host's format. An assertion here would pass because
+  // nothing arrived, which proves nothing.
+});
+
 describe('stop-sync.sh codex-cli (Codex Stop hook)', () => {
   it('POSTs summary+title+final:false to /summary, and emits {} on stdout', async () => {
     writeRembricFile(dir, 'demo');
