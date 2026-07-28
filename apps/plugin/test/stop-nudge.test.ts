@@ -22,11 +22,22 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The two config vars are set EXPLICITLY. Inheriting them from the ambient
+// environment made these tests pass locally (where a shell had exported them) and
+// fail in CI (where nothing had) the moment stop-nudge.sh started gating on
+// configuration — a test that reads its premise from the environment is not
+// testing what it claims.
 function run(script: string, stdin: string, agent?: string, env: NodeJS.ProcessEnv = {}): string {
   return execFileSync('bash', agent ? [script, agent] : [script], {
     input: stdin,
     encoding: 'utf8',
-    env: { ...process.env, TMPDIR: counterDir, ...env },
+    env: {
+      ...process.env,
+      TMPDIR: counterDir,
+      REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+      REMBRIC_API_TOKEN: 'test-token',
+      ...env,
+    },
   });
 }
 
