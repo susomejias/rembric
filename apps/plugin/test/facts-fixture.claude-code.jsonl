@@ -1,0 +1,16 @@
+{"type":"user","message":{"content":[{"type":"text","text":"fix the truncation"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/repo/src/a.ts"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_2","name":"Edit","input":{"file_path":"/repo/src/a.ts","old_string":"x","new_string":"y"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_2","is_error":false,"content":"edited"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_3","name":"Write","input":{"file_path":"/repo/src/b.ts","content":"new"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_3","is_error":false,"content":"written"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_4","name":"Edit","input":{"file_path":"/repo/src/a.ts","old_string":"y","new_string":"z"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_4","is_error":false,"content":"edited again"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_5","name":"Bash","input":{"command":"pnpm run typecheck"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_5","is_error":false,"content":"Done"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_6","name":"Bash","input":{"command":"pnpm vitest run\nsrc/a.test.ts"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_6","is_error":true,"content":"1 failed"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_7","name":"Bash","input":{"command":"git status --short"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_7","content":"clean"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"typecheck passed, one test failed"}]}}

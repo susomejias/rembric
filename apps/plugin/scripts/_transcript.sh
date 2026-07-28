@@ -153,6 +153,113 @@ rembric_extract_first_assistant_claude_code() {
   _rembric_finalize_title "$title"
 }
 
+# Deterministic facts, for the fallback summary written when the agent never
+# curated one. Only what is checkable without a model: paths, commands, and
+# which commands failed. NO diffs — the summary cap cannot hold them and git
+# already has them.
+#
+# AGGREGATED, not listed. A per-call listing of one real session measured 343 KB
+# against a 10 KB cap, with 837 file lines covering 206 distinct paths: as
+# bloated as the transcript it replaces. Grouping is what makes the fact list
+# denser than prose rather than merely different from it.
+#
+# Every bound below reports what it dropped. A cap that silently truncates reads
+# as "this is everything" when it is not.
+RBR_FACTS_MAX_FAILED=20
+RBR_FACTS_MAX_FILES=60
+RBR_FACTS_MAX_CMD_CHARS=160
+RBR_FACTS_MAX_TOOLS=15
+
+# Two jq passes rather than one slurp: a tool_result arrives AFTER the tool_use
+# it reports on, so a single streaming pass cannot mark a command failed at the
+# moment it sees it, and slurping a large transcript into memory inside a hook is
+# not worth avoiding a second read.
+_rembric_facts_raw_claude_code() {
+  local path="$1" failed
+  failed="$(
+    jq -r '
+      select(.type == "user")
+      | .message.content[]?
+      | select(.type == "tool_result" and .is_error == true)
+      | .tool_use_id
+    ' "$path" 2>/dev/null | jq -R -s 'split("\n") | map(select(. != ""))'
+  )" || return 0
+  [ -z "$failed" ] && failed='[]'
+  jq -r --argjson failed "$failed" --argjson cmdmax "$RBR_FACTS_MAX_CMD_CHARS" '
+    select(.type == "assistant")
+    | .message.content[]?
+    | select(.type == "tool_use")
+    | . as $t
+    | if (.name | test("^(Write|Edit|NotebookEdit)$")) and (.input.file_path // "") != "" then
+        "F\t\(.input.file_path)"
+      elif .name == "Bash" and (.input.command // "") != "" then
+        (if ($failed | index($t.id)) then "X\t" else "C\t" end)
+          + (.input.command | gsub("\\s+"; " ") | .[0:$cmdmax])
+      else
+        "T\t\(.name)"
+      end
+  ' "$path" 2>/dev/null
+}
+
+# Renders the aggregate. Kept separate from the parser so a second host only has
+# to produce the same `KIND<TAB>VALUE` stream.
+_rembric_render_facts() {
+  local raw="$1"
+  [ -z "$raw" ] && return 0
+  local tools ntools files failed ncmd nfailed nfiles shown_failed
+  # `paste -sd', '` cycles through the delimiter LIST, alternating comma and
+  # space, which produced 'Agent,AskUserQuestion Edit,Monitor'. Join with commas
+  # and space them afterwards.
+  tools="$(
+    printf '%s\n' "$raw" | sed -n 's/^T\t//p' | sort -u | head -n "$RBR_FACTS_MAX_TOOLS" |
+      paste -sd, - | sed 's/,/, /g'
+  )"
+  ntools="$(printf '%s\n' "$raw" | sed -n 's/^T\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
+  ncmd="$(printf '%s\n' "$raw" | grep -c '^[CX]	' || true)"
+  nfailed="$(printf '%s\n' "$raw" | grep -c '^X	' || true)"
+  files="$(printf '%s\n' "$raw" | sed -n 's/^F\t//p' | sort -u)"
+  nfiles="$(printf '%s\n' "$files" | sed '/^$/d' | wc -l | tr -d ' ')"
+  failed="$(printf '%s\n' "$raw" | sed -n 's/^X\t//p' | sort -u)"
+
+  printf 'SESSION FACTS (extracted, not written by the agent)\n'
+  if [ -n "$tools" ]; then
+    if [ "$ntools" -gt "$RBR_FACTS_MAX_TOOLS" ]; then
+      printf 'tools (%s distinct): %s, +%s more\n' \
+        "$ntools" "$tools" "$((ntools - RBR_FACTS_MAX_TOOLS))"
+    else
+      printf 'tools: %s\n' "$tools"
+    fi
+  fi
+  printf 'commands: %s run, %s failed\n' "$ncmd" "$nfailed"
+
+  if [ "$nfailed" -gt 0 ]; then
+    printf 'failed commands:\n'
+    printf '%s\n' "$failed" | head -n "$RBR_FACTS_MAX_FAILED" | sed 's/^/  - /'
+    shown_failed="$(printf '%s\n' "$failed" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [ "$shown_failed" -gt "$RBR_FACTS_MAX_FAILED" ]; then
+      printf '  (+%s more distinct failures not listed)\n' \
+        "$((shown_failed - RBR_FACTS_MAX_FAILED))"
+    fi
+  fi
+
+  if [ "$nfiles" -gt 0 ]; then
+    printf 'files touched (%s distinct):\n' "$nfiles"
+    printf '%s\n' "$files" | head -n "$RBR_FACTS_MAX_FILES" | sed 's/^/  - /'
+    if [ "$nfiles" -gt "$RBR_FACTS_MAX_FILES" ]; then
+      printf '  (+%s more not listed)\n' "$((nfiles - RBR_FACTS_MAX_FILES))"
+    fi
+  fi
+}
+
+rembric_extract_facts_claude_code() {
+  local path="${1:-}"
+  if [ -z "$path" ] || [ ! -f "$path" ] || [ ! -s "$path" ]; then
+    return 0
+  fi
+  command -v jq >/dev/null 2>&1 || return 0
+  _rembric_render_facts "$(_rembric_facts_raw_claude_code "$path")"
+}
+
 _rembric_format_transcript_claude_code_jq() {
   local path="$1"
   jq -r '

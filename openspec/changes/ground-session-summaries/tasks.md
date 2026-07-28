@@ -23,12 +23,20 @@
 
 ## 2. The fallback carries facts, not a slice
 
-- [ ] 2.1 Add the deterministic extraction beside the existing per-parser transcript seam (`rembric_format_transcript_<parser>`), NOT as a new parallel seam. Emit: files created/written/edited, commands run with failures identified, tools used, final exchange.
-- [ ] 2.2 Do not include diffs. Record the reason in the task rather than only in the design, so a later reader does not re-add them: the cap cannot hold them and git already has them.
-- [ ] 2.3 Fixture-test the extraction against a committed transcript sample per parser. Assert the failed command is identified AS failed — an extraction that lists commands without their status is the version of this that looks right and is useless.
-- [ ] 2.4 Prove the traceability property is real, not asserted: every emitted line must correspond to a transcript event. Test it by feeding a transcript and asserting the output contains no path and no command absent from the input.
+- [x] 2.1 Add the deterministic extraction beside the existing per-parser transcript seam (`rembric_format_transcript_<parser>`), NOT as a new parallel seam. Emit: files created/written/edited, commands run with failures identified, tools used, final exchange.
+  - **Claude Code done** (`rembric_extract_facts_claude_code`, beside the existing `_jq`/`_fallback` seam). Verified against a real 3610-tool-call transcript. Codex CLI, and the no-jq bash fallback, are NOT done — the extraction returns empty without `jq`, which degrades to today's behaviour rather than failing.
+  - **Discovery that shaped it: the current formatter DISCARDS exactly the material the facts come from.** `_rembric_format_transcript_claude_code_jq` selects only `user`/`assistant` text, so every `tool_use` and `tool_result` — the paths, the commands, the exit statuses — is thrown away. The raw path was never a lossy summary of the session; it was a summary of the conversation about the session.
+  - Two jq passes, not one slurp: a `tool_result` arrives AFTER the `tool_use` it reports on, so a single streaming pass cannot mark a command failed when it sees it, and slurping a large transcript into memory inside a hook is worse than a second read.
+- [x] 2.2 Do not include diffs. Record the reason in the task rather than only in the design, so a later reader does not re-add them: the cap cannot hold them and git already has them.
+  - Held. Beyond diffs, a second bound had to be added that the task did not anticipate: a per-call LISTING of one real session measured **343 KB against a 10 KB cap**, with 837 file lines covering 206 distinct paths — as bloated as the transcript it replaces. The output is now aggregated (distinct files, distinct failures, counts), which took the same session to **6.8 KB**. Every bound reports what it dropped, because a cap that truncates silently reads as "this is everything".
+- [x] 2.3 Fixture-test the extraction against a committed transcript sample per parser. Assert the failed command is identified AS failed — an extraction that lists commands without their status is the version of this that looks right and is useless.
+  - `test/facts-fixture.claude-code.jsonl` + `test/extract-facts.test.ts`, 9 assertions. **Mutation-checked**: collapsing the failed/succeeded branch to one marker fails two of them.
+  - Also asserts a file that was only READ is not reported as touched — the distinction between reading and changing is the whole point of the list.
+- [x] 2.4 Prove the traceability property is real, not asserted: every emitted line must correspond to a transcript event. Test it by feeding a transcript and asserting the output contains no path and no command absent from the input.
+  - Asserted by exclusion: every emitted path must appear in the input transcript.
 - [ ] 2.5 Prove the truncation-degradation property: take an extraction longer than the cap, truncate it through the real helper, and assert the surviving text is still a well-formed fact list — not a fragment beginning mid-record.
-- [ ] 2.6 Unparseable transcript → previous behaviour, exit 0, no malformed body. Test the failure path explicitly; a fallback that throws is worse than no fallback.
+- [x] 2.6 Unparseable transcript → previous behaviour, exit 0, no malformed body. Test the failure path explicitly; a fallback that throws is worse than no fallback.
+  - Unparseable, missing and empty transcripts all exit 0 with no output. Also covered: no `jq` on PATH returns empty rather than erroring.
 
 ## 3. The end-of-turn reminder
 
