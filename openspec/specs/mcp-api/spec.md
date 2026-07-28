@@ -480,16 +480,37 @@ Session resolution is unchanged and SHALL remain status-aware where it already i
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.timeline`, and `memory.capture_passive` with the following contracts. Note that `memory.save_prompt` (write side) and `memory.search_prompts` (read side) are registered in their own dedicated requirements; this requirement scopes the research/context tools only.
 
+Both of `memory.context`'s queue channels SHALL be returned with the scoped TOTAL of the queue they page, because a page whose depth is invisible cannot be told from an exhausted queue. `needsReview` has carried `needsReviewTotal` since it was introduced; `pendingJudgments` SHALL carry `pendingJudgmentsTotal` on the same terms.
+
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
-- **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments, needsReview }`, with each list scoped to the request context (global vs path-scoped project)
-- **AND** when a size argument is omitted the default SHALL be `sessions = 3`, `memories = 10`, `prompts = 5` (kept small because the snapshot is read every session start; callers needing more pass explicit args, still bounded by the maxima below)
+- **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, judgments?: number, includeArchived?: boolean }`
+- **THEN** the server SHALL return `{ recentSessions, recentPrompts, recentMemories, pendingJudgments, pendingJudgmentsTotal, needsReview, needsReviewTotal }`, with each list scoped to the request context (global vs path-scoped project)
+- **AND** when a size argument is omitted the default SHALL be `sessions = 3`, `memories = 10`, `prompts = 5`, `judgments = 5` (kept small because the snapshot is read every session start; callers needing more pass explicit args, still bounded by the maxima below)
 - **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 3`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
 - **AND** `recentMemories` SHALL be ordered by `COALESCE(last_seen_at, created_at) DESC` — activity recency, falling back to creation for a row never dereferenced, which is most rows given that search does not touch — with `includeArchived = false` (default) filtering out `status = 'archived'` rows
-- **AND** `pendingJudgments` SHALL contain at most 5 pending relations in scope with `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)`, oldest first, each entry carrying `{ judgmentId, sourceId, targetId, sourceSnippet, targetSnippet, ageMs }` so the agent can close them with `memory.judge` without further reads
+- **AND** `pendingJudgments` SHALL contain at most `judgments ?? 5` pending relations in scope, oldest first, each entry carrying `{ judgmentId, sourceId, targetId, sourceSnippet, targetSnippet, ageMs }` so the agent can close them with `memory.judge` without further reads; when `judgments` is OMITTED the list SHALL be further filtered to `created_at < (now - JUDGMENT_ORPHAN_AFTER_MS)`, and when `judgments` is PRESENT that age filter SHALL NOT be applied
+- **AND** `pendingJudgmentsTotal` SHALL be the count of ALL pending relations in scope — un-aged ones included, and independent of `judgments` — never the returned list's length, which is the page size and therefore exactly the misleading number the field exists to correct
 - **AND** `needsReview` SHALL contain at most 3 `active` in-scope memories whose derived `reviewState = 'needs_review'` (see the `memory` capability), ordered recently-refuted first and then oldest `reviewBaseline` first (see the `memory` capability, "A refutation MUST lead the review queue only while it is recent"), each entry carrying `{ id, type, snippet, reviewAfter, ageMs }` (where `snippet` uses the same per-row cap as the other context lists, `ageMs = now - reviewBaseline` the time since last affirmation) so the agent can re-affirm with `memory.confirm`, supersede with `memory.save` + `topic_key`, or — when it contradicts another memory — fall through to the existing `memory.judge` flow. The list is kept small by COUNT (only the 3 oldest) because it is recurring (every `memory.context`) and usually populated
+
+#### Scenario: `pendingJudgmentsTotal` reports the queue, not the page
+
+- **GIVEN** a scope holding more aged pending relations than the default page size
+- **WHEN** an MCP client calls `memory.context` with no `judgments` argument
+- **THEN** `pendingJudgments` SHALL hold 5 entries and `pendingJudgmentsTotal` SHALL be the full in-scope pending count, strictly greater than 5
+
+#### Scenario: `pendingJudgmentsTotal` counts the un-aged pairs the default list hides
+
+- **GIVEN** one aged pending relation and two pending relations younger than `JUDGMENT_ORPHAN_AFTER_MS`, all in scope
+- **WHEN** an MCP client calls `memory.context` with no `judgments` argument
+- **THEN** `pendingJudgments` SHALL hold only the aged entry and `pendingJudgmentsTotal` SHALL be 3 — the total is a queue depth, not a description of the list beside it
+
+#### Scenario: `pendingJudgmentsTotal` respects scope
+
+- **GIVEN** a pending relation whose memories belong to project B
+- **WHEN** an MCP client scoped to project A (or the global endpoint) calls `memory.context`
+- **THEN** `pendingJudgmentsTotal` SHALL NOT count it
 
 #### Scenario: `needsReview` is unary and disjoint from `pendingJudgments`
 
@@ -530,8 +551,10 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 
 #### Scenario: `memory.context` arguments exceed clamps
 
-- **WHEN** the caller passes `sessions > 25`, `prompts > 50`, or `memories > 100`
+- **WHEN** the caller passes `sessions > 25`, `prompts > 50`, `memories > 100`, or `judgments > 50`
 - **THEN** the server SHALL silently clamp to the maximum and SHALL include a `clamped: true` field in the response
+- **AND** `judgments` SHALL be bounded on the same terms as its three siblings — including the declared input-schema maximum, which over the MCP transport rejects an out-of-range value with `invalid_input` BEFORE the handler's clamp is reached, so the `clamped` flag is the in-process defence rather than the wire behaviour. This layering is pre-existing and identical for all four arguments; `judgments` SHALL NOT introduce a different one
+- **AND** a `judgments` value at or below 50 that exceeds the number of pending relations in scope SHALL return every one that exists, with `clamped` false — asking for more than the queue holds is not an error
 
 #### Scenario: `memory.context` excludes soft-deleted prompts
 
@@ -539,17 +562,37 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.
 - **WHEN** an MCP client calls `memory.context`
 - **THEN** `recentPrompts` SHALL include `P1` and SHALL NOT include `P2`
 
-#### Scenario: `memory.context` exposes only aged pendings, never fresh ones
+#### Scenario: `memory.context` exposes only aged pendings by default, never fresh ones
 
 - **GIVEN** a pending relation younger than `JUDGMENT_ORPHAN_AFTER_MS` and another older than it, both in scope
-- **WHEN** an MCP client calls `memory.context`
-- **THEN** `pendingJudgments` SHALL include only the aged one — fresh pendings belong to the session that created them
+- **WHEN** an MCP client calls `memory.context` with no `judgments` argument
+- **THEN** `pendingJudgments` SHALL include only the aged one — fresh pendings belong to the session that created them, and the default channel is a queue-depth warning rather than an inventory
+
+#### Scenario: An explicit `judgments` size lifts the age filter
+
+- **GIVEN** the same pair of pending relations, one aged and one fresh
+- **WHEN** an MCP client calls `memory.context` with `{ judgments: 10 }`
+- **THEN** `pendingJudgments` SHALL include BOTH, oldest first — asking for a size is the caller asking for inventory, and inventory that hides most of itself is not inventory
+- **AND** the un-aged entry SHALL carry the same `{ judgmentId, sourceId, targetId, sourceTitle, targetTitle, sourceSnippet, targetSnippet, ageMs }` shape as an aged one, so it can be judged straight from the response
+- **AND** no separate `includeUnaged` argument SHALL exist: a size present or absent is the only knob, so the fourth combination (unaged without a bound) is unreachable by construction
+
+#### Scenario: An un-aged pending pair is reachable at all
+
+- **GIVEN** a pending relation created moments ago, whose originating `memory.save` response is no longer available to the caller
+- **WHEN** an MCP client calls `memory.context` with a `judgments` size
+- **THEN** the pair's `judgmentId` SHALL be returned, so `memory.judge` can close it — without this the pair is unreachable from every MCP surface until `JUDGMENT_ORPHAN_AFTER_MS` elapses, since `memory.judge` accepts only a `judgmentId` and `memory.compare` requires both memory ids up front and so cannot discover a pair
 
 #### Scenario: `memory.context.pendingJudgments` respects scope
 
 - **GIVEN** an aged pending relation whose memories belong to project B
 - **WHEN** an MCP client scoped to project A calls `memory.context`
-- **THEN** `pendingJudgments` SHALL NOT include it
+- **THEN** `pendingJudgments` SHALL NOT include it, with or without a `judgments` size
+
+#### Scenario: `memory.context`'s description advertises the total and the size
+
+- **WHEN** an MCP client retrieves the tool description for `memory.context` via `tools/list`
+- **THEN** the description SHALL name `pendingJudgmentsTotal` and the `judgments` argument, and SHALL state that passing a size lifts the age filter — a caller cannot guess that a size argument changes which rows qualify
+- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"); if the clause does not fit, prose SHALL be cut from the description rather than the constant raised
 
 #### Scenario: `memory.timeline` returns chronological neighbors within a session
 
