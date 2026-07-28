@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { SUMMARY_SECTIONS } from '../../server/src/mcp/summary-rubric.js';
 
 /**
  * The save/summary nudge texts are the lock-step contract shared with the
@@ -25,6 +26,7 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   sessionIdCoreTemplate: string;
   sessionIdTemplate: string;
   postCompact: string;
+  endOfTurnRubric: string;
   firstPromptRelevanceCore: string;
   firstPromptRelevance: string;
 };
@@ -47,6 +49,7 @@ const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const stopNudgeSh = join(here, '..', 'scripts', 'stop-nudge.sh');
 const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
+const stopNudgeShPath = join(here, '..', 'scripts', 'stop-nudge.sh');
 const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
@@ -486,4 +489,20 @@ describe('every enforced cap is published in the capability that owns it', () =>
       expect(spec).toMatch(new RegExp(`\\b${cap}\\b`));
     },
   );
+});
+
+// The long-form rubric has no TypeScript consumer — the end-of-turn hook is bash
+// — so the fixture is its source, the same way the short nudges work. The first
+// version put it in a TS constant nothing read, while the text that actually
+// shipped was written a second time in the hook with nothing comparing them.
+describe('end-of-turn rubric lock-step', () => {
+  it('stop-nudge.sh carries the exact fixture rubric', () => {
+    expect(readFileSync(stopNudgeShPath, 'utf8')).toContain(fixtures.endOfTurnRubric);
+  });
+
+  it('the rubric names every canonical section', () => {
+    for (const section of SUMMARY_SECTIONS.split(' · ')) {
+      expect(fixtures.endOfTurnRubric, `rubric omits '${section}'`).toContain(section);
+    }
+  });
 });

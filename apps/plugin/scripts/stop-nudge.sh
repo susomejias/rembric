@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
 # End-of-turn summary reminder — Claude Code + Codex CLI.
 #
-# This is the reminder that used to live on UserPromptSubmit. It MOVED rather
-# than being added: the start of a turn is the one moment the reminder cannot be
-# acted on, because there is always more work coming. The end of the turn is when
-# the work is finished and the model can still write the summary.
-#
-# It reads the SAME per-session counter `prompt-nudge.sh` advances, at the same
-# cadence, via `rembric_turn_count_peek` — reading rather than advancing, because
-# two increments per turn would silently halve the cadence.
-#
-# NON-INTERRUPTING. `hookSpecificOutput.additionalContext` only: this never
-# returns the host's blocking decision. A memory server is an optional accessory
-# to its host and must not be able to hold a turn open.
-#
-# Separate from stop-sync.sh, which stays async: an async hook is fire-and-forget
-# by the host's contract and cannot contribute feedback to the turn at all.
+# Rationale in design.md D4. Separate from stop-sync.sh, which stays async: an
+# async hook is fire-and-forget by the host's contract and so cannot contribute
+# feedback to the turn at all.
 set -u
 trap 'exit 0' ERR
 
 SUMMARY_NUDGE_EVERY=10
-# The reminder's facts are INJECTED context, not stored content, so they get a
-# much tighter bound than the stored fallback body's 10 000. Enough to ground a
-# summary, not the whole ledger. Tail-kept, consistently with the server's
-# truncation direction: the later facts are the ones the turn just produced.
+# Injected context, not stored content, so a much tighter bound than the stored
+# body's 10 000. Tail-kept like every other layer — the later facts are the ones
+# this turn produced. Guarded by invariants.test.ts.
 RBR_NUDGE_MAX_FACTS_CHARS=1800
 
 AGENT="${1:-claude-code}"
@@ -56,22 +43,32 @@ fi
 RAW_SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 COUNT="$(rembric_turn_count_peek rembric-turnnudge "$RAW_SESSION_ID")"
 case "$COUNT" in
-  # Unreadable counter fails CLOSED, matching prompt-nudge.sh: defaulting to 0
-  # would satisfy the modulo below and remind on every single turn.
+  # Fails CLOSED, matching prompt-nudge.sh: 0 would satisfy the modulo below.
   '' | *[!0-9]*) _emit_nothing ;;
 esac
-{ [ "$COUNT" -eq 1 ] || [ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ]; } || _emit_nothing
+# NOT `COUNT -eq 1`: prompt-nudge.sh already fires on turn 1 as protocol, so
+# including it here reminded twice on the one turn with the least to extract.
+[ $((COUNT % SUMMARY_NUDGE_EVERY)) -eq 0 ] || _emit_nothing
 
 TRANSCRIPT_PATH="$(rembric_transcript_path_from_stdin_json "$INPUT")"
-FACTS=""
-if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  FACTS="$(rembric_session_facts "$PARSER" "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-fi
 
-# A turn that only talked has nothing worth summarising. Gated on WORK rather
-# than on the payload being empty: the extraction also emits the final exchange,
-# which is present on every turn and would make this condition never fire.
-rembric_session_has_work "$PARSER" "$TRANSCRIPT_PATH" || _emit_nothing
+# Parse ONCE, then answer both questions from the stream. Asking them separately
+# re-read the transcript and put ~0.5s of jq on this synchronous path.
+RAW="$(rembric_session_facts_raw "$PARSER" "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+
+# An empty stream means the turn only read or only talked: nothing worth
+# summarising, so nothing to remind about.
+[ -z "$RAW" ] && _emit_nothing
+
+# Already curated this session — say nothing rather than tell the model something
+# untrue about its own work.
+rembric_facts_show_summary_written "$RAW" && _emit_nothing
+
+FACTS="$(rembric_facts_from_raw "$PARSER" "$TRANSCRIPT_PATH" "$RAW" 2>/dev/null || true)"
+# Redact the WHOLE payload: commands and file paths carry <private> spans as
+# readily as the exchange does, and this path bypasses _rembric_truncate_transcript
+# (the stored path's redaction point) because it uses its own tighter bound.
+FACTS="$(rembric_redact_private "$FACTS")"
 [ -z "$FACTS" ] && _emit_nothing
 
 read -r -d '' RUBRIC <<'EOF' || true

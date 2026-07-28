@@ -35,10 +35,8 @@ esac
 SAVE_FIRES=0
 SUMMARY_FIRES=0
 [ $((COUNT % SAVE_NUDGE_EVERY)) -eq 0 ] && SAVE_FIRES=1
-# The summary reminder MOVED to stop-nudge.sh, which fires at the end of the turn
-# on this same counter and cadence. Kept here only for the first turn, where it
-# is protocol (call session_summary at least once) rather than a reminder about
-# work already done.
+# Turn 1 only: that firing is protocol (call session_summary at least once), not
+# a reminder about work already done. stop-nudge.sh owns the every-N firing.
 [ "$COUNT" -eq 1 ] && SUMMARY_FIRES=1
 
 if [ -n "$RAW_SESSION_ID" ] && { [ "$SAVE_FIRES" -eq 1 ] || [ "$SUMMARY_FIRES" -eq 1 ]; }; then

@@ -348,7 +348,7 @@ The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a match
 
 - **WHEN** `prompt-nudge.sh` runs on a turn where `count % SUMMARY_NUDGE_EVERY == 0` and `count != 1`
 - **THEN** it SHALL NOT emit the summary nudge line
-- **AND** `SUMMARY_NUDGE_EVERY` SHALL NOT be declared in `prompt-nudge.sh`, so the cadence has exactly one owner
+- **AND** `SUMMARY_NUDGE_EVERY` SHALL NOT be declared in `prompt-nudge.sh` — the bash cadence has exactly one owner. The in-process clients keep their own copies of the NUMBER (they have no end-of-turn event and fire the reminder themselves), pinned equal by `nudge-fixtures.test.ts`
 
 ### Requirement: The first prompt of a session MUST receive a relevance instruction
 

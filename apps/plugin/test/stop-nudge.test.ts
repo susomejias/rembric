@@ -46,6 +46,15 @@ function advanceTurn(sessionId: string): void {
   run(promptNudgeSh, JSON.stringify({ session_id: sessionId }));
 }
 
+/**
+ * Walks the counter to the first turn the reminder fires on. Deliberately NOT
+ * turn 1: `prompt-nudge.sh` owns that one as protocol, and firing here too
+ * reminded twice on the turn with the least to extract.
+ */
+function advanceToFiringTurn(sessionId: string): void {
+  for (let i = 0; i < 10; i += 1) advanceTurn(sessionId);
+}
+
 function toolTranscript(name = 'tx.jsonl'): string {
   const lines = [
     { type: 'user', message: { content: [{ type: 'text', text: 'fix the parser' }] } },
@@ -87,9 +96,9 @@ function stdin(sessionId: string, transcriptPath?: string): string {
 }
 
 describe('stop-nudge.sh — end-of-turn summary reminder', () => {
-  it('fires on turn 1 and carries the rubric plus the extracted facts', () => {
+  it('fires at the cadence and carries the rubric plus the extracted facts', () => {
     const tx = toolTranscript();
-    advanceTurn('s1');
+    advanceToFiringTurn('s1');
     const out = run(stopNudgeSh, stdin('s1', tx));
     const parsed = JSON.parse(out) as {
       hookSpecificOutput: { hookEventName: string; additionalContext: string };
@@ -105,7 +114,7 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
   // The load-bearing assertion: this must never be able to hold a turn open.
   it('never emits an interrupting decision', () => {
     const tx = toolTranscript();
-    advanceTurn('s2');
+    advanceToFiringTurn('s2');
     const out = run(stopNudgeSh, stdin('s2', tx));
     expect(out).not.toContain('"decision"');
     expect(out).not.toContain('block');
@@ -114,21 +123,21 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
 
   it('is silent on turns between cadence points, and fires again at 10', () => {
     const tx = toolTranscript();
-    advanceTurn('s3');
-    expect(run(stopNudgeSh, stdin('s3', tx))).not.toBe('');
-    for (let turn = 2; turn <= 9; turn += 1) {
+    for (let turn = 1; turn <= 9; turn += 1) {
       advanceTurn('s3');
       expect(run(stopNudgeSh, stdin('s3', tx)), `turn ${turn}`).toBe('');
     }
     advanceTurn('s3');
-    expect(run(stopNudgeSh, stdin('s3', tx))).not.toBe('');
+    expect(run(stopNudgeSh, stdin('s3', tx)), 'turn 10').not.toBe('');
+    advanceTurn('s3');
+    expect(run(stopNudgeSh, stdin('s3', tx)), 'turn 11').toBe('');
   });
 
   // If this hook advanced the counter instead of peeking, every cadence keyed on
   // it would silently halve: two increments per turn.
   it('does not advance the shared counter', () => {
     const tx = toolTranscript();
-    advanceTurn('s4');
+    advanceToFiringTurn('s4');
     const counterFile = join(counterDir, 'rembric-turnnudge', 's4');
     const before = readFileSync(counterFile, 'utf8').length;
     run(stopNudgeSh, stdin('s4', tx));
@@ -137,7 +146,7 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
   });
 
   it('is silent when the session has nothing extractable', () => {
-    advanceTurn('s5');
+    advanceToFiringTurn('s5');
     const plain = join(dir, 'plain.jsonl');
     writeFileSync(
       plain,
@@ -146,8 +155,51 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
     expect(run(stopNudgeSh, stdin('s5', plain))).toBe('');
   });
 
+  // The payload leads with "the session has no curated summary". Before this it
+  // said that unconditionally, so a session that summarised at turn 12 was told
+  // otherwise at 20, 30, 40 — the one unfounded claim in a payload whose whole
+  // point is being grounded in the transcript. The signal was already there: the
+  // MCP call appears as an ordinary tool_use.
+  it('is silent once the session has already called memory.session_summary', () => {
+    advanceToFiringTurn('sum1');
+    const withSummary = join(dir, 'summarised.jsonl');
+    writeFileSync(
+      withSummary,
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: '/repo/x.ts' } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 's1',
+                name: 'mcp__plugin_rembric_rembric__memory_session_summary',
+                input: { title: 't', summary: 's' },
+              },
+            ],
+          },
+        }),
+      ].join('\n') + '\n',
+    );
+    expect(run(stopNudgeSh, stdin('sum1', withSummary))).toBe('');
+  });
+
+  it('still fires when the session did work but never called it', () => {
+    const tx = toolTranscript('nosum.jsonl');
+    advanceToFiringTurn('sum2');
+    expect(run(stopNudgeSh, stdin('sum2', tx))).not.toBe('');
+  });
+
   it('is silent when no transcript path is supplied', () => {
-    advanceTurn('s6');
+    advanceToFiringTurn('s6');
     expect(run(stopNudgeSh, stdin('s6'))).toBe('');
   });
 
@@ -186,7 +238,7 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
     }
     const big = join(dir, 'big.jsonl');
     writeFileSync(big, `${lines.join('\n')}\n`);
-    advanceTurn('s8');
+    advanceToFiringTurn('s8');
     const out = run(stopNudgeSh, stdin('s8', big));
     const ctx = (JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } })
       .hookSpecificOutput.additionalContext;
@@ -201,7 +253,7 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
   // reachable. The spec required this and the code did not do it.
   it('is silent when no server is configured', () => {
     const tx = toolTranscript('unconf.jsonl');
-    advanceTurn('s9');
+    advanceToFiringTurn('s9');
     const bare = { ...process.env, TMPDIR: counterDir };
     delete bare.REMBRIC_SERVER_URL;
     delete bare.REMBRIC_API_TOKEN;
@@ -215,6 +267,12 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
 
   it('emits a JSON object rather than nothing for codex-cli when silent', () => {
     expect(run(stopNudgeSh, stdin('s7'), 'codex-cli')).toBe('{}');
+  });
+
+  it('does NOT fire on turn 1 — prompt-nudge.sh owns that one', () => {
+    const tx = toolTranscript('t1.jsonl');
+    advanceTurn('t1');
+    expect(run(stopNudgeSh, stdin('t1', tx))).toBe('');
   });
 });
 

@@ -64,10 +64,8 @@ _sync() {
   [ -z "$transcript_path" ] && return 0
   [ -f "$transcript_path" ] || return 0
 
-  # Extracted facts are the fallback body, not a slice of the conversation: the
-  # formatter below keeps only user/assistant TEXT, so it discards the paths,
-  # commands and exit statuses a handoff actually needs. Degrades to the slice
-  # when no extraction exists for this parser, or when `jq` is absent.
+  # The formatter below keeps only user/assistant TEXT, so it discards the paths,
+  # commands and exit statuses a handoff needs. Facts replace it where available.
   summary="$(rembric_session_facts "$PARSER" "$transcript_path" 2>/dev/null || true)"
   if [ -n "$summary" ]; then
     summary="$(_rembric_truncate_transcript "$summary")"

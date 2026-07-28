@@ -860,6 +860,14 @@ describe('summary truncation keeps the same side in every layer', () => {
       tail: /transcript\[-_SUMMARY_MAX_CHARS:\]/,
       head: /transcript\[:_SUMMARY_MAX_CHARS\]/,
     },
+    // Added after this guard shipped with a hole in it: `stop-nudge.sh` bounds the
+    // INJECTED payload and was a fourth trimmer the enumeration did not know
+    // about, so flipping it to a head-cut would have passed CI on day one.
+    {
+      file: 'apps/plugin/scripts/stop-nudge.sh',
+      tail: /\$\{FACTS: -\$RBR_NUDGE_MAX_FACTS_CHARS\}/,
+      head: /\$\{FACTS:0:\$RBR_NUDGE_MAX_FACTS_CHARS\}/,
+    },
   ];
 
   it('the server keeps the tail and marks the front', () => {
@@ -884,12 +892,9 @@ describe('summary truncation keeps the same side in every layer', () => {
   });
 });
 
-// The rubric was restated at EIGHT surfaces and seven agreed while the tool
-// description named two sections the others did not. This asserts every surface
-// carries the one definition, AND that the enumeration below is complete — a
-// fixture that only checked the constant exists would have passed against all
-// eight divergent copies. `design.md` said six sites; enumerating them found
-// eight, which is why the count is asserted rather than trusted.
+// Asserts every surface carries the one definition AND that the enumeration is
+// complete. `design.md` said six sites; enumerating them found eight, which is
+// why the count is asserted rather than trusted.
 describe('the session-summary rubric has one source', () => {
   const surfaces = [
     'apps/server/src/mcp/instructions.ts',

@@ -181,7 +181,7 @@ _rembric_facts_raw_claude_code() {
       select(.type == "user")
       | .message.content[]?
       | select(.type == "tool_result" and .is_error == true)
-      | .tool_use_id
+      | (.tool_use_id | tostring | gsub("[\n\r\t]"; ""))
     ' "$path" 2>/dev/null | jq -R -s 'split("\n") | map(select(. != ""))'
   )" || return 0
   [ -z "$failed" ] && failed='[]'
@@ -190,13 +190,17 @@ _rembric_facts_raw_claude_code() {
     | .message.content[]?
     | select(.type == "tool_use")
     | . as $t
-    | if (.name | test("^(Write|Edit|NotebookEdit)$")) and (.input.file_path // "") != "" then
-        "F\t\(.input.file_path)"
+    # flat strips the delimiters the render layer parses on. Without it a
+    # file_path carrying a newline plus a tab fabricates a failed command that
+    # never ran, and the stored summary and the injected context both believe it.
+    | def flat: tostring | gsub("[\n\r\t]"; " ");
+      if (.name | test("^(Write|Edit|NotebookEdit)$")) and (.input.file_path // "") != "" then
+        "F\t" + (.input.file_path | flat)
       elif .name == "Bash" and (.input.command // "") != "" then
         (if ($failed | index($t.id)) then "X\t" else "C\t" end)
-          + (.input.command | gsub("\\s+"; " ") | .[0:$cmdmax])
+          + (.input.command | flat | .[0:$cmdmax])
       else
-        "T\t\(.name)"
+        "T\t" + ((.name // "") | flat)
       end
   ' "$path" 2>/dev/null
 }
@@ -206,20 +210,23 @@ _rembric_facts_raw_claude_code() {
 _rembric_render_facts() {
   local raw="$1"
   [ -z "$raw" ] && return 0
-  local tools ntools files failed ncmd nfailed nfiles shown_failed
+  local tools ntools files failed ncmd nfailed nfiles
   # `paste -sd', '` cycles through the delimiter LIST, alternating comma and
   # space, which produced 'Agent,AskUserQuestion Edit,Monitor'. Join with commas
   # and space them afterwards.
   tools="$(
-    printf '%s\n' "$raw" | sed -n 's/^T\t//p' | sort -u | head -n "$RBR_FACTS_MAX_TOOLS" |
+    printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sort -u | head -n "$RBR_FACTS_MAX_TOOLS" |
       paste -sd, - | sed 's/,/, /g'
   )"
-  ntools="$(printf '%s\n' "$raw" | sed -n 's/^T\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
-  ncmd="$(printf '%s\n' "$raw" | grep -c '^[CX]	' || true)"
-  nfailed="$(printf '%s\n' "$raw" | grep -c '^X	' || true)"
-  files="$(printf '%s\n' "$raw" | sed -n 's/^F\t//p' | sort -u)"
+  ntools="$(printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
+  ncmd="$(printf '%s\n' "$raw" | grep -c $'^[CX]\t' || true)"
+  # Distinct, matching the list printed below it. A non-distinct count above a
+  # deduplicated list reads as "12 failures" over one entry when one command was
+  # retried twelve times.
+  nfailed="$(printf '%s\n' "$raw" | sed -n $'s/^X\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
+  files="$(printf '%s\n' "$raw" | sed -n $'s/^F\t//p' | sort -u)"
   nfiles="$(printf '%s\n' "$files" | sed '/^$/d' | wc -l | tr -d ' ')"
-  failed="$(printf '%s\n' "$raw" | sed -n 's/^X\t//p' | sort -u)"
+  failed="$(printf '%s\n' "$raw" | sed -n $'s/^X\t//p' | sort -u)"
 
   printf 'SESSION FACTS (extracted, not written by the agent)\n'
   if [ -n "$tools" ]; then
@@ -230,15 +237,13 @@ _rembric_render_facts() {
       printf 'tools: %s\n' "$tools"
     fi
   fi
-  printf 'commands: %s run, %s failed\n' "$ncmd" "$nfailed"
+  printf 'commands: %s run, %s distinct failed\n' "$ncmd" "$nfailed"
 
   if [ "$nfailed" -gt 0 ]; then
     printf 'failed commands:\n'
     printf '%s\n' "$failed" | head -n "$RBR_FACTS_MAX_FAILED" | sed 's/^/  - /'
-    shown_failed="$(printf '%s\n' "$failed" | sed '/^$/d' | wc -l | tr -d ' ')"
-    if [ "$shown_failed" -gt "$RBR_FACTS_MAX_FAILED" ]; then
-      printf '  (+%s more distinct failures not listed)\n' \
-        "$((shown_failed - RBR_FACTS_MAX_FAILED))"
+    if [ "$nfailed" -gt "$RBR_FACTS_MAX_FAILED" ]; then
+      printf '  (+%s more distinct failures not listed)\n' "$((nfailed - RBR_FACTS_MAX_FAILED))"
     fi
   fi
 
@@ -276,48 +281,62 @@ _rembric_facts_exchange_claude_code() {
       | gsub("\\s+"; " ") | .[0:$max]
     ' "$path" 2>/dev/null | tail -n 1
   )" || true
-  [ -n "$last_user" ] && printf 'last request: %s\n' "$last_user"
-  [ -n "$last_asst" ] && printf 'last reply: %s\n' "$last_asst"
+  # Redacted here, not by the caller: this is the only fact material carrying
+  # user/assistant TEXT, so it is the only place a <private> span can reach a
+  # payload. This file's contract (see the header) requires it of every
+  # payload-bound string.
+  [ -n "$last_user" ] && printf 'last request: %s\n' "$(rembric_redact_private "$last_user")"
+  [ -n "$last_asst" ] && printf 'last reply: %s\n' "$(rembric_redact_private "$last_asst")"
   return 0
 }
 
 rembric_extract_facts_claude_code() {
-  local path="${1:-}"
-  if [ -z "$path" ] || [ ! -f "$path" ] || [ ! -s "$path" ]; then
-    return 0
-  fi
+  rembric_session_facts claude_code "${1:-}"
+}
+
+# The tagged `KIND<TAB>VALUE` stream, exported. Callers that need to ASK something
+# about the session (is there work? was a summary already written?) read it once
+# and answer from it, instead of re-parsing the transcript per question — the
+# earlier shape hid it inside the extraction and cost four extra jq passes on the
+# synchronous end-of-turn path.
+#
+# Dispatch by indirect call, the seam the rest of this file already uses, so a new
+# host needs only to define `_rembric_facts_raw_<parser>`.
+rembric_session_facts_raw() {
+  local parser="${1:-}" path="${2:-}"
+  [ -z "$path" ] || [ ! -f "$path" ] && return 0
   command -v jq >/dev/null 2>&1 || return 0
-  local facts exchange
-  facts="$(_rembric_render_facts "$(_rembric_facts_raw_claude_code "$path")")"
-  exchange="$(_rembric_facts_exchange_claude_code "$path")"
+  declare -F "_rembric_facts_raw_${parser}" >/dev/null 2>&1 || return 0
+  "_rembric_facts_raw_${parser}" "$path"
+}
+
+# True when the session already called the summary tool. The stream carries every
+# tool name, so this costs nothing — and without it the reminder tells a model
+# that DID summarise that it has not, which is the one unfounded claim in a
+# payload whose whole point is being grounded.
+rembric_facts_show_summary_written() {
+  printf '%s\n' "${1:-}" | grep -q $'^T\t.*memory_session_summary'
+}
+
+rembric_session_facts() {
+  local parser="${1:-}" path="${2:-}" raw
+  raw="$(rembric_session_facts_raw "$parser" "$path")" || return 0
+  rembric_facts_from_raw "$parser" "$path" "$raw"
+}
+
+# Renders a stream the caller already has, so a caller that inspected it first
+# does not pay for a second parse.
+rembric_facts_from_raw() {
+  local parser="${1:-}" path="${2:-}" raw="${3:-}" facts exchange
+  facts="$(_rembric_render_facts "$raw")"
+  case "$parser" in
+    claude_code) exchange="$(_rembric_facts_exchange_claude_code "$path")" ;;
+    *) exchange="" ;;
+  esac
   [ -z "$facts" ] && [ -z "$exchange" ] && return 0
   [ -n "$facts" ] && printf '%s\n' "$facts"
   [ -n "$exchange" ] && printf '%s' "$exchange"
   return 0
-}
-
-# "Did this session DO anything", as opposed to "is there anything to say about
-# it". Deliberately separate from the extraction: the fallback body wants the
-# final exchange even when no tool ran, while the end-of-turn reminder must stay
-# silent on a turn that only talked.
-rembric_session_has_work() {
-  local parser="${1:-}" path="${2:-}"
-  [ -z "$path" ] || [ ! -f "$path" ] && return 1
-  command -v jq >/dev/null 2>&1 || return 1
-  case "$parser" in
-    claude_code) [ -n "$(_rembric_facts_raw_claude_code "$path" 2>/dev/null)" ] ;;
-    *) return 1 ;;
-  esac
-}
-
-# Dispatcher, so a host without an extraction degrades to the conversation slice
-# rather than erroring. Codex CLI has none yet.
-rembric_session_facts() {
-  local parser="${1:-}" path="${2:-}"
-  case "$parser" in
-    claude_code) rembric_extract_facts_claude_code "$path" ;;
-    *) return 0 ;;
-  esac
 }
 
 _rembric_format_transcript_claude_code_jq() {
