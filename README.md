@@ -456,47 +456,64 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
 <br>
 
 ```
-                  ┌─────────────────────────────────────────────────┐
-                  │              Agents (MCP clients)               │
-                  │     Claude Code · Codex CLI · Cursor · …        │
-                  └────────────────────────┬────────────────────────┘
-                                           │
-                                           │  HTTP(S) + Bearer token
-                                           │  URL path: /mcp/<slug>  (or /mcp + project.use)
-                                           ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │  4 PLUGIN clients — tools AND session lifecycle              │
+        │    Claude Code · Codex CLI · Hermes Agent · opencode          │
+        │  Any other MCP client — tools only, no lifecycle             │
+        │    Cursor · Windsurf · Claude Desktop · Cline · Goose · …     │
+        └───────────┬──────────────────────────────────┬───────────────┘
+                    │                                  │
+     MCP: HTTP(S) + Bearer                Session lifecycle: HTTP(S)
+     /mcp/<slug>  or  /mcp + project.use  POST /api/<slug>/sessions{,/:id/end,/:id/summary}
+                    │                     (hooks + in-process providers; never MCP)
+                    ▼                                  ▼
    ┌───────────────────────────────────────────────────────────────────────┐
    │                       rembric  (single Node process)                  │
    │                                                                       │
-   │   ┌────────────────────────────┐   ┌───────────────────────────────┐  │
-   │   │  /mcp       /mcp/<slug>    │   │  /dashboard                   │  │
-   │   │  Streamable HTTP transport │   │  SSR HTML + HTMX              │  │
-   │   │  + initialize.instructions │   │                               │  │
-   │   │  memory.{save,search,…}    │   │  /memories /sessions          │  │
-   │   │  memory.session_*          │   │  /prompts /judgments          │  │
-   │   │  memory.*_prompt(s)        │   │  /consolidation /projects     │  │
-   │   │  memory.judge / compare    │   │  /tokens /maintenance         │  │
-   │   │  project.{use,list,current}│   │                               │  │
-   │   └─────────────┬──────────────┘   └─────────────┬─────────────────┘  │
-   │                 ▼                                ▼                    │
-   │   ┌───────────────────────────────────────────────────────────────┐   │
-   │   │  Service layer                                                │   │
-   │   │   MemoryService · PromptsService · RelationsService           │   │
-   │   │   ProjectsService · TokensService · AgentSessionsService      │   │
-   │   │   SessionRouter                                               │   │
-   │   └───────────────────────────────┬───────────────────────────────┘   │
-   │                                   ▼                                   │
-   │   ┌───────────────────────────────────────────────────────────────┐   │
-   │   │  SQLite (Drizzle, append-only + tombstones)                   │   │
-   │   │   memory · projects · tokens · sessions · prompts             │   │
-   │   │   memory_relations · consolidation_{runs,ops}                 │   │
-   │   │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)│   │
-   │   └───────────────────────────────▲───────────────────────────────┘   │
-   │   ┌───────────────────────────────┴───────────────────────────────┐   │
-   │   │  In-process background work (no external services)            │   │
-   │   │   embedder: gte-multilingual-base, ONNX q8, loaded at boot    │   │
-   │   │   drain worker (every 30s) fills memory_vec                   │   │
-   │   │   deterministic sweep: decay + deadline orphaning             │   │
-   │   └───────────────────────────────────────────────────────────────┘   │
+   │  ┌──────────────────────────┐ ┌──────────────┐ ┌──────────────────┐   │
+   │  │  /mcp     /mcp/<slug>    │ │ /api/<slug>  │ │ /dashboard       │   │
+   │  │  Streamable HTTP         │ │ session      │ │ SSR HTML + HTMX  │   │
+   │  │  + initialize.instructions│ │ lifecycle   │ │                  │   │
+   │  │                          │ └──────┬───────┘ │ /memories        │   │
+   │  │  memory.{save,search,get,│        │         │ /sessions        │   │
+   │  │    context,timeline,     │        │         │ /prompts         │   │
+   │  │    confirm,archive,      │        │         │ /judgments       │   │
+   │  │    judge,compare,        │        │         │ /entities        │   │
+   │  │    stats,doctor,about,   │        │         │ /consolidation   │   │
+   │  │    suggest_topic_key,    │        │         │ /projects        │   │
+   │  │    capture_passive}      │        │         │ /tokens          │   │
+   │  │  memory.session_*        │        │         │ /maintenance     │   │
+   │  │  memory.*_prompt(s)      │        │         │ /oauth  /update  │   │
+   │  │  project.{use,list,      │        │         │                  │   │
+   │  │    current}              │        │         │                  │   │
+   │  └────────────┬─────────────┘        │         └────────┬─────────┘   │
+   │               ▼                      ▼                  ▼             │
+   │  ┌─────────────────────────────────────────────────────────────────┐  │
+   │  │  Service layer  (owns scope resolution + transactions)          │  │
+   │  │   MemoryService · PromptsService · RelationsService             │  │
+   │  │   ProjectsService · TokensService · AgentSessionsService         │  │
+   │  │   EntitiesService · OAuthService · SessionRouter                │  │
+   │  │   hybrid-search · review (derived) · save-time-candidates       │  │
+   │  └──────────────────────────────┬──────────────────────────────────┘  │
+   │                                 ▼                                     │
+   │  ┌─────────────────────────────────────────────────────────────────┐  │
+   │  │  Repositories — the ONLY place SQL lives (src/db/)              │  │
+   │  └──────────────────────────────┬──────────────────────────────────┘  │
+   │                                 ▼                                     │
+   │  ┌─────────────────────────────────────────────────────────────────┐  │
+   │  │  SQLite (Drizzle, append-only + tombstones)                     │  │
+   │  │   memory · projects · tokens · sessions · prompts                │  │
+   │  │   confirmations · memory_relations · entities · memory_entities  │  │
+   │  │   consolidation_{runs,ops} · dashboard_sessions · oauth_*        │  │
+   │  │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)   │  │
+   │  └──────────────────────────────▲──────────────────────────────────┘  │
+   │  ┌──────────────────────────────┴──────────────────────────────────┐  │
+   │  │  In-process background work (no external services)              │  │
+   │  │   embedder: gte-multilingual-base, ONNX q8, loaded at boot       │  │
+   │  │   embedding drain worker      → fills memory_vec                 │  │
+   │  │   entity backfill worker      → fills entities/memory_entities   │  │
+   │  │   deterministic sweep: decay + deadline orphaning (no LLM/cron)  │  │
+   │  └─────────────────────────────────────────────────────────────────┘  │
    └───────────────────────────────────────────────────────────────────────┘
 ```
 
