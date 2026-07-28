@@ -39,6 +39,20 @@ jobs:
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/check-spec-provenance.mjs --base "$BASE" --head "$HEAD"
 
+      # The historical replay lives here rather than in `test`, which checks out
+      # at depth 1: this measurement is the gate's central evidence and it cannot
+      # run without history. Excluded from the default vitest include so it fails
+      # loudly here instead of silently skipping there.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Replay the measured violation window
+        working-directory: apps/server
+        run: pnpm exec vitest run ../../scripts/check-spec-provenance.history.test.ts
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
