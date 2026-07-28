@@ -33,9 +33,9 @@ _emit_nothing() {
   exit 0
 }
 
-# Unconfigured means the MCP tools are not reachable either, so a reminder to
-# call one is noise. Every other hook skips on this; this one never made a request
-# and so never checked.
+# Unconfigured means the MCP tools are not reachable either, so a reminder to call
+# one is noise. (prompt-nudge.sh has no such guard — an earlier version of this
+# comment claimed every other hook did.)
 if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
   _emit_nothing
 fi

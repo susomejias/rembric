@@ -910,13 +910,27 @@ describe('the session-summary rubric has one source', () => {
   it('every surface carries the canonical section list', () => {
     for (const rel of surfaces) {
       const src = readFileSync(join(repoRoot, rel), 'utf8');
-      const carriesIt =
-        src.includes(SUMMARY_SECTIONS) ||
-        // TypeScript surfaces interpolate the constant instead of restating it.
-        src.includes('${SUMMARY_SECTIONS}') ||
-        // Python wraps it across adjacent string literals.
-        SUMMARY_SECTIONS.split(' · ').every((section) => src.includes(section));
-      expect(carriesIt, `${rel} does not carry the canonical section list`).toBe(true);
+      // Adjacent-string-literal concatenation, so Python's wrapped copy is compared
+      // as the ONE string it becomes rather than as six independent substrings.
+      // The membership form this replaces accepted reverse order, sections
+      // scattered through unrelated prose, EXTRA sections appended, and a wrong
+      // separator — i.e. it accepted the exact drift its own reason for existing
+      // cites, and would not have caught the bug it was written for.
+      const joined = src.replace(/"\s*\n\s*"/g, '').replace(/'\s*\n\s*'/g, '');
+      const interpolated = joined.includes('${SUMMARY_SECTIONS}');
+      expect(
+        interpolated || joined.includes(SUMMARY_SECTIONS),
+        `${rel} does not carry the canonical section list VERBATIM`,
+      ).toBe(true);
+      // A contiguous match alone still accepts APPENDED sections, because the
+      // canonical list survives as a prefix — and "extra sections added" is the
+      // very drift the tool description had. So the list must also END there.
+      if (!interpolated) {
+        const after = joined.slice(joined.indexOf(SUMMARY_SECTIONS) + SUMMARY_SECTIONS.length);
+        expect(after.startsWith(' · '), `${rel} appends a section to the canonical list`).toBe(
+          false,
+        );
+      }
     }
   });
 

@@ -169,6 +169,10 @@ RBR_FACTS_MAX_FAILED=20
 RBR_FACTS_MAX_FILES=60
 RBR_FACTS_MAX_CMD_CHARS=160
 RBR_FACTS_MAX_TOOLS=15
+# Ceiling on the transcript this will parse. The end-of-turn reminder is a
+# SYNCHRONOUS hook, and jq over a 213 MB transcript measured 22.6s — a stall the
+# user sees. Above this, say nothing rather than hold the turn open.
+RBR_FACTS_MAX_TRANSCRIPT_BYTES=$((32 * 1024 * 1024))
 
 # Two jq passes rather than one slurp: a tool_result arrives AFTER the tool_use
 # it reports on, so a single streaming pass cannot mark a command failed at the
@@ -215,18 +219,25 @@ _rembric_render_facts() {
   # space, which produced 'Agent,AskUserQuestion Edit,Monitor'. Join with commas
   # and space them afterwards.
   tools="$(
-    printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sort -u | head -n "$RBR_FACTS_MAX_TOOLS" |
-      paste -sd, - | sed 's/,/, /g'
+    printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sed '/^$/d' | sort -u |
+      head -n "$RBR_FACTS_MAX_TOOLS" | paste -sd, - | sed 's/,/, /g'
   )"
-  ntools="$(printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
+  ntools="$(printf '%s\n' "$raw" | sed -n $'s/^T\t//p' | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
   ncmd="$(printf '%s\n' "$raw" | grep -c $'^[CX]\t' || true)"
   # Distinct, matching the list printed below it. A non-distinct count above a
   # deduplicated list reads as "12 failures" over one entry when one command was
   # retried twelve times.
-  nfailed="$(printf '%s\n' "$raw" | sed -n $'s/^X\t//p' | sort -u | sed '/^$/d' | wc -l | tr -d ' ')"
+  # Only failures with NO later success for the same command. A command that
+  # failed and was then fixed reported as failed, which is the opposite of the
+  # session's final state — the one fact a "Verified+how" handoff turns on.
+  failed="$(
+    comm -23 \
+      <(printf '%s\n' "$raw" | sed -n $'s/^X\t//p' | sort -u) \
+      <(printf '%s\n' "$raw" | sed -n $'s/^C\t//p' | sort -u)
+  )"
+  nfailed="$(printf '%s\n' "$failed" | sed '/^$/d' | wc -l | tr -d ' ')"
   files="$(printf '%s\n' "$raw" | sed -n $'s/^F\t//p' | sort -u)"
   nfiles="$(printf '%s\n' "$files" | sed '/^$/d' | wc -l | tr -d ' ')"
-  failed="$(printf '%s\n' "$raw" | sed -n $'s/^X\t//p' | sort -u)"
 
   printf 'SESSION FACTS (extracted, not written by the agent)\n'
   if [ -n "$tools" ]; then
@@ -303,9 +314,12 @@ rembric_extract_facts_claude_code() {
 # Dispatch by indirect call, the seam the rest of this file already uses, so a new
 # host needs only to define `_rembric_facts_raw_<parser>`.
 rembric_session_facts_raw() {
-  local parser="${1:-}" path="${2:-}"
+  local parser="${1:-}" path="${2:-}" bytes
   [ -z "$path" ] || [ ! -f "$path" ] && return 0
   command -v jq >/dev/null 2>&1 || return 0
+  bytes="$(wc -c <"$path" 2>/dev/null | tr -d '[:space:]')"
+  case "$bytes" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$bytes" -gt "$RBR_FACTS_MAX_TRANSCRIPT_BYTES" ] && return 0
   declare -F "_rembric_facts_raw_${parser}" >/dev/null 2>&1 || return 0
   "_rembric_facts_raw_${parser}" "$path"
 }

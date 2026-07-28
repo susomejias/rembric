@@ -242,6 +242,71 @@ describe('deterministic session facts (claude-code)', () => {
     expect(out).toContain('commands: 2 run, 0 distinct failed');
   });
 
+  // A command that failed and was then fixed used to read as failed — the opposite
+  // of the session's final state, and the one fact a "Verified+how" handoff turns
+  // on. The later success is in the stream, so use it.
+  it('does not report a command that failed and was later fixed', () => {
+    const rows = [
+      { id: 'b1', cmd: 'pnpm test', err: true },
+      { id: 'b2', cmd: 'pnpm lint', err: true },
+      { id: 'b3', cmd: 'pnpm test', err: false },
+    ].flatMap((r) => [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: r.id, name: 'Bash', input: { command: r.cmd } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: r.id, is_error: r.err, content: 'x' }],
+        },
+      }),
+    ]);
+    const out = extract(tmpFile('t.jsonl', `${rows.join('\n')}\n`));
+    expect(out).toContain('commands: 3 run, 1 distinct failed');
+    const block = out.slice(out.indexOf('failed commands:'));
+    expect(block).toContain('pnpm lint');
+    expect(block).not.toContain('pnpm test');
+  });
+
+  it('does not let an unnamed tool take a slot it is not counted in', () => {
+    const rows = [
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'n0', name: '' }] },
+      }),
+    ];
+    for (let i = 0; i < 16; i++) {
+      rows.push(
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [{ type: 'tool_use', id: `t${i}`, name: `Tool${String(i).padStart(2, '0')}` }],
+          },
+        }),
+      );
+    }
+    const out = extract(tmpFile('t.jsonl', `${rows.join('\n')}\n`));
+    expect(out).toContain('tools (16 distinct)');
+    expect(out).toContain('+1 more');
+    // The stray leading ', ' the blank name used to render.
+    expect(out).not.toMatch(/tools \([^)]*\): ,/);
+  });
+
+  it('says nothing rather than stall on a transcript above the size ceiling', () => {
+    const line = `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'echo hi' } }],
+      },
+    })}\n`;
+    // Just over 32 MiB.
+    const big = line.repeat(Math.ceil((32 * 1024 * 1024) / line.length) + 1);
+    expect(extract(tmpFile('t.jsonl', big)).trim()).toBe('');
+  });
+
   it('exits successfully and writes nothing for an unparseable transcript', () => {
     const junk = tmpFile('t.jsonl', 'not json at all\n{{{\n');
     expect(extract(junk).trim()).toBe('');
