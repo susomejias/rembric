@@ -153,22 +153,35 @@ describe('AgentSessionsService', () => {
       expect(truncateSummary('a'.repeat(SUMMARY_MAX_CHARS))).toHaveLength(SUMMARY_MAX_CHARS);
     });
 
-    it('truncates oversize input with the …[truncated] suffix and lands at exactly the cap', async () => {
+    it('marks the front and lands at exactly the cap', async () => {
       const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
       const out = truncateSummary('a'.repeat(SUMMARY_MAX_CHARS + 1000));
       expect(out.length).toBe(SUMMARY_MAX_CHARS);
-      expect(out.endsWith('…[truncated]')).toBe(true);
+      expect(out.startsWith('…[truncated]')).toBe(true);
     });
 
-    it('never leaves a lone high surrogate when the cut lands inside an emoji', async () => {
+    // The discriminating assertion: length and marker presence pass under BOTH
+    // truncation directions, so only the surviving content distinguishes them.
+    it('keeps the END of the text and discards the beginning', async () => {
       const { truncateSummary, SUMMARY_MAX_CHARS } = await import('./agent-sessions.js');
-      const cutPoint = SUMMARY_MAX_CHARS - '…[truncated]'.length;
-      const s = 'a'.repeat(cutPoint - 1) + '😀' + 'a'.repeat(2000);
+      const s = 'HEAD-MARKER' + 'a'.repeat(SUMMARY_MAX_CHARS) + 'TAIL-MARKER';
       const out = truncateSummary(s);
-      const content = out.slice(0, out.length - '…[truncated]'.length);
-      const lastCode = content.charCodeAt(content.length - 1);
-      const isHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
-      expect(isHighSurrogate).toBe(false);
+      expect(out.endsWith('TAIL-MARKER')).toBe(true);
+      expect(out).not.toContain('HEAD-MARKER');
+    });
+
+    it('never leaves a lone low surrogate when the cut lands inside an emoji', async () => {
+      const { truncateSummary, SUMMARY_MAX_CHARS, SUMMARY_TRUNCATE_MARKER } =
+        await import('./agent-sessions.js');
+      // Place the emoji so the tail slice would start between its two units.
+      const keep = SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_MARKER.length;
+      const s = 'a'.repeat(2000) + '😀' + 'a'.repeat(keep - 1);
+      const out = truncateSummary(s);
+      const content = out.slice(SUMMARY_TRUNCATE_MARKER.length);
+      const firstCode = content.charCodeAt(0);
+      const isLowSurrogate = firstCode >= 0xdc00 && firstCode <= 0xdfff;
+      expect(isLowSurrogate).toBe(false);
+      expect(out.length).toBeLessThanOrEqual(SUMMARY_MAX_CHARS);
     });
   });
 

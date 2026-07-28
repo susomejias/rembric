@@ -6,7 +6,11 @@ import { type AgentSession, type NewAgentSession } from '../db/schema/agent-sess
 
 import { DomainError } from './errors.js';
 import type { Scope } from './scope.js';
-import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
+import {
+  assertNoNul,
+  sliceTailWithoutSplittingSurrogatePair,
+  sliceWithoutSplittingSurrogatePair,
+} from './strings.js';
 
 const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
@@ -37,13 +41,19 @@ export const TRANSPORT_STALENESS_MS = 30 * 60_000;
  */
 export const SUMMARY_MAX_CHARS = 10000;
 
-/** Suffix appended by `truncateSummary` when overflow trims content. */
-export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';
+/**
+ * Marker PREFIXED by `truncateSummary`. It leads rather than trails because the
+ * kept half is the tail: text that begins mid-session is indistinguishable from
+ * a whole summary without a signal at the point the reader starts reading.
+ */
+export const SUMMARY_TRUNCATE_MARKER = '…[truncated]';
 
 /**
- * Returns `s` unchanged when its length fits in `SUMMARY_MAX_CHARS`; otherwise
- * returns `s.slice(0, SUMMARY_MAX_CHARS - SUFFIX.length) + SUFFIX`. The
- * returned string is always at most `SUMMARY_MAX_CHARS` chars long.
+ * Returns `s` unchanged when it fits `SUMMARY_MAX_CHARS`; otherwise the MARKER
+ * followed by the LAST `SUMMARY_MAX_CHARS - marker.length` chars. Keeping the
+ * tail is the load-bearing part: a session's conclusions, final state and
+ * unfinished items are at its end, and the plugin already selects the tail
+ * before sending — a head-keeping server discarded exactly what it chose.
  *
  * Used by the HTTP layer (where hook scripts cannot retry on rejection) to
  * silently bring oversized bodies under the cap before calling the service.
@@ -52,12 +62,12 @@ export const SUMMARY_TRUNCATE_SUFFIX = '…[truncated]';
 export function truncateSummary(s: string): string {
   if (s.length <= SUMMARY_MAX_CHARS) return s;
   return (
-    sliceWithoutSplittingSurrogatePair(s, SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_SUFFIX.length) +
-    SUMMARY_TRUNCATE_SUFFIX
+    SUMMARY_TRUNCATE_MARKER +
+    sliceTailWithoutSplittingSurrogatePair(s, SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_MARKER.length)
   );
 }
 
-/** HTTP-layer counterpart to `truncateSummary`; hard-cut, no suffix. */
+/** Head-keeping, unlike `truncateSummary`: a label's meaning is at its start. */
 export function truncateTitle(s: string): string {
   return s.length <= TITLE_MAX_LENGTH ? s : sliceWithoutSplittingSurrogatePair(s, TITLE_MAX_LENGTH);
 }

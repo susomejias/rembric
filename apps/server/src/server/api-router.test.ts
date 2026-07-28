@@ -429,7 +429,7 @@ describe('createApiRouter', () => {
       expect(r.body.code).toBe('session_deleted');
     });
 
-    it('truncates summary > SUMMARY_MAX_CHARS server-side with the …[truncated] suffix', async () => {
+    it('truncates summary > SUMMARY_MAX_CHARS server-side, marking the front', async () => {
       const app = makeApp();
       await call(app, 'POST', `/${projectSlug}/sessions`, {
         token: adminToken.plaintext,
@@ -443,7 +443,7 @@ describe('createApiRouter', () => {
       expect(r.body.ok).toBe(true);
       const row = agentSessions.getById('sess-trunc-summary');
       expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
-      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+      expect(row?.summary?.startsWith('…[truncated]')).toBe(true);
       // Response body echoes the truncated value.
       expect((r.body.summary as string).length).toBe(SUMMARY_MAX_CHARS);
     });
@@ -461,7 +461,7 @@ describe('createApiRouter', () => {
       expect(r.status).toBe(200);
       const row = agentSessions.getById('sess-old-boundary');
       expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
-      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+      expect(row?.summary?.startsWith('…[truncated]')).toBe(true);
     });
 
     it('a summary at the plugin code-point cap containing emoji truncates instead of rejecting', async () => {
@@ -613,7 +613,7 @@ describe('createApiRouter', () => {
       expect(row?.status).toBe('ended');
       expect(row?.endedAt).not.toBeNull();
       expect(row?.summary?.length).toBe(SUMMARY_MAX_CHARS);
-      expect(row?.summary?.endsWith('…[truncated]')).toBe(true);
+      expect(row?.summary?.startsWith('…[truncated]')).toBe(true);
     });
 
     it('404 when the session belongs to a different project than the URL slug (archived-project bypass)', async () => {

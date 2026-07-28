@@ -32,3 +32,11 @@ export function sliceWithoutSplittingSurrogatePair(s: string, maxLen: number): s
   if (code >= 0xd800 && code <= 0xdbff) end -= 1;
   return s.slice(0, end);
 }
+
+/** The tail counterpart: the orphan risk is a LOW surrogate first, not a high one last. */
+export function sliceTailWithoutSplittingSurrogatePair(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  const tail = s.slice(-maxLen);
+  const code = tail.charCodeAt(0);
+  return code >= 0xdc00 && code <= 0xdfff ? tail.slice(1) : tail;
+}
