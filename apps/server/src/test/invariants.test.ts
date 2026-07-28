@@ -831,3 +831,54 @@ describe('MCP tool-handler module layout invariant', () => {
     }
   });
 });
+
+// A summary payload is trimmed twice: once by the client that sends it, once by
+// the server that stores it. Two tail-cuts are idempotent — the result is the
+// last min(bounds) characters — so the bounds are free to disagree. The SIDES
+// are not: a client tail-cut followed by a server head-cut yields a middle
+// window, which is what shipped until 2026-07-28. Asserting the two numbers
+// agreed would have been the wrong guard; it would fail on a correct tree and
+// pass on the broken one.
+describe('summary truncation keeps the same side in every layer', () => {
+  // One entry per language, each pinned to that language's actual tail idiom.
+  // Deliberately NOT a generic "contains a minus sign" match: the point is that
+  // switching any of these to a head-cut fails here.
+  const clientTrimmers = [
+    {
+      file: 'apps/plugin/scripts/_transcript.sh',
+      tail: /\$\{out: -\$RBR_TRANSCRIPT_MAX_CHARS\}/,
+      head: /\$\{out:0:\$RBR_TRANSCRIPT_MAX_CHARS\}/,
+    },
+    {
+      file: 'apps/plugin/.opencode-plugin/plugin.ts',
+      tail: /body\.slice\(body\.length - MAX_TRANSCRIPT_CHARS\)/,
+      head: /body\.slice\(0, MAX_TRANSCRIPT_CHARS\)/,
+    },
+    {
+      file: 'apps/plugin/.hermes-plugin/__init__.py',
+      tail: /transcript\[-_SUMMARY_MAX_CHARS:\]/,
+      head: /transcript\[:_SUMMARY_MAX_CHARS\]/,
+    },
+  ];
+
+  it('the server keeps the tail and marks the front', () => {
+    const src = readFileSync(join(srcRoot, 'services', 'agent-sessions.ts'), 'utf8');
+    const body = src.slice(src.indexOf('export function truncateSummary'));
+    const fn = body.slice(0, body.indexOf('\n}'));
+    expect(fn).toContain('sliceTailWithoutSplittingSurrogatePair');
+    expect(fn).not.toContain('sliceWithoutSplittingSurrogatePair(');
+    expect(fn.indexOf('SUMMARY_TRUNCATE_MARKER +')).toBeGreaterThan(-1);
+  });
+
+  it.each(clientTrimmers)('$file keeps the tail', ({ file, tail, head }) => {
+    const src = readFileSync(join(repoRoot, file), 'utf8');
+    expect(src).toMatch(tail);
+    expect(src).not.toMatch(head);
+  });
+
+  it('titles deliberately keep the HEAD, and that difference is intentional', () => {
+    const src = readFileSync(join(srcRoot, 'services', 'agent-sessions.ts'), 'utf8');
+    const body = src.slice(src.indexOf('export function truncateTitle'));
+    expect(body.slice(0, body.indexOf('\n}'))).toContain('sliceWithoutSplittingSurrogatePair');
+  });
+});

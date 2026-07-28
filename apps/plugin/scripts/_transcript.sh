@@ -31,13 +31,17 @@
 set -u
 trap 'exit 0' ERR
 
-# Conservative tail size — kept as a wire upper bound, NOT the effective cap.
-# The server's effective summary cap is SUMMARY_MAX_CHARS=10000 (enforced by
-# zod + service-layer guard). For HTTP writers (this script, opencode plugin,
-# Hermes provider) the server truncates anything longer with a '…[truncated]'
-# suffix. We keep 19500 here so a generous transcript window reaches the
-# server even if a future change raises the cap; the server is the only
-# authoritative trimmer.
+# Wire upper bound, deliberately ABOVE the server's effective cap
+# (SUMMARY_MAX_CHARS=10000): a client cannot know a given server's cap at
+# runtime, so bounding to one version's value would silently under-deliver
+# against a server whose cap is higher. The server stays the only authoritative
+# trimmer and the only writer of the '…[truncated]' marker.
+#
+# What matters is that this cut and the server's keep the SAME SIDE. Both keep
+# the tail. Two successive tail-cuts are idempotent — the result is the last
+# min(bounds) chars — whereas this tail-cut followed by a head-cut on the server
+# yielded a middle window, which is what it used to do. Guarded by
+# apps/server/src/test/invariants.test.ts.
 RBR_TRANSCRIPT_MAX_CHARS=19500
 RBR_TITLE_MAX_CHARS=100
 
