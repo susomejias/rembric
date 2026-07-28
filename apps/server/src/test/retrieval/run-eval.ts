@@ -2,12 +2,20 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
+import type { GateLeader } from '../../services/hybrid-search.js';
 
 import { CORPUS } from './corpus.js';
-import { FLOOR_METRICS, ratchetFloors, type MetricFloors } from './floor-ratchet.js';
+import {
+  checkBounds,
+  ratchetCaps,
+  ratchetFloors,
+  type MetricCaps,
+  type MetricFloors,
+} from './floor-ratchet.js';
 import { ingestCorpus, type Ingested } from './ingest.js';
 import { QUERIES } from './queries.js';
 import { writeReport, type RetrieverReport } from './report.js';
+import { resolveGold, resolveScope } from './resolve.js';
 import { RETRIEVERS } from './retrievers/index.js';
 import {
   aggregate,
@@ -17,7 +25,7 @@ import {
   tokensReturned,
   type QueryMetrics,
 } from './scoring.js';
-import type { IngestedCorpus, QueryItem, QueryScope, Retriever } from './types.js';
+import type { GateSetting, IngestedCorpus, QueryItem, Retriever } from './types.js';
 
 const K_VALUES = [5, 8] as const;
 const MAX_K = 8;
@@ -25,40 +33,55 @@ const BASELINES_DIR = join(import.meta.dirname, 'baselines');
 /** Absolute tolerance subtracted from a measured metric to set its committed floor. */
 const FLOOR_TOLERANCE = 0.05;
 
-function resolveScope(corpus: IngestedCorpus, fixture: QueryItem['scope']): QueryScope {
-  if (fixture.scope === 'global') return { scope: 'global', projectId: null };
-  const projectId = fixture.project ? corpus.projectIdBySlug.get(fixture.project) : undefined;
-  if (!projectId) throw new Error(`queries.ts: unknown project slug '${fixture.project}'`);
-  return { scope: 'project', projectId, includeGlobal: fixture.includeGlobal };
-}
-
-function resolveGold(corpus: IngestedCorpus, stableIds: string[]): string[] {
-  return stableIds.map((sid) => {
-    const id = corpus.idByStableId.get(sid);
-    if (!id) throw new Error(`queries.ts: unknown gold stableId '${sid}'`);
-    return id;
-  });
-}
-
 interface RawOutcome {
   query: QueryItem;
   retrieved: string[];
+  /** Undefined for a retriever with no explicit flag (`grep`, `memory-md-dump`). */
+  reportedAbstained: boolean | undefined;
   latencyMs: number;
   goldIds: string[];
 }
 
-async function runRetriever(retriever: Retriever, corpus: IngestedCorpus): Promise<RawOutcome[]> {
+async function runRetriever(
+  retriever: Retriever,
+  corpus: IngestedCorpus,
+  gates?: GateSetting,
+): Promise<RawOutcome[]> {
   const state = await retriever.init(corpus);
   const outcomes: RawOutcome[] = [];
   for (const q of QUERIES) {
     const scope = resolveScope(corpus, q.scope);
     const goldIds = resolveGold(corpus, q.goldStableIds);
     const start = performance.now();
-    const retrieved = await retriever.query(q.text, state, MAX_K, scope);
-    outcomes.push({ query: q, retrieved, latencyMs: performance.now() - start, goldIds });
+    const outcome = await retriever.query(q.text, state, MAX_K, scope, gates);
+    outcomes.push({
+      query: q,
+      retrieved: outcome.ids,
+      reportedAbstained: outcome.abstained,
+      latencyMs: performance.now() - start,
+      goldIds,
+    });
   }
   await retriever.teardown?.(state);
   return outcomes;
+}
+
+/**
+ * An explicit abstention flag that disagrees with emptiness fails the run.
+ * Checked at MAX_K, the k the retriever was actually called with — a truncated
+ * page at a smaller k is not the retriever's verdict.
+ */
+function checkAbstentionFlags(retriever: string, outcomes: RawOutcome[]): string[] {
+  const failures: string[] = [];
+  for (const o of outcomes) {
+    if (o.reportedAbstained === undefined) continue;
+    if (o.reportedAbstained !== (o.retrieved.length === 0)) {
+      failures.push(
+        `${retriever} '${o.query.id}' reported abstained=${o.reportedAbstained} while returning ${o.retrieved.length} result(s) — the flag disagrees with the behaviour it describes`,
+      );
+    }
+  }
+  return failures;
 }
 
 function scoreOutcomes(
@@ -89,10 +112,14 @@ function scoreOutcomes(
   return { metricsByK, ceilingsByK };
 }
 
-async function evaluateAll(corpus: IngestedCorpus): Promise<RetrieverReport[]> {
+async function evaluateAll(
+  corpus: IngestedCorpus,
+  flagFailures?: string[],
+): Promise<RetrieverReport[]> {
   const reports: RetrieverReport[] = [];
   for (const retriever of RETRIEVERS) {
     const outcomes = await runRetriever(retriever, corpus);
+    flagFailures?.push(...checkAbstentionFlags(retriever.name, outcomes));
     const { metricsByK, ceilingsByK } = scoreOutcomes(outcomes, corpus);
     const aggregateByK: Record<number, ReturnType<typeof aggregate>> = {};
     const aggregateByTypeByK: Record<number, Record<string, ReturnType<typeof aggregate>>> = {};
@@ -194,6 +221,12 @@ interface Baseline {
   discriminatingMetric: string;
   ceilings: Record<number, MetricFloors>;
   floors: Record<number, MetricFloors>;
+  /**
+   * Lower-is-better metrics, stored apart from `floors` so the two can never be
+   * compared in the wrong direction. A run fails when a measured value rises
+   * ABOVE its cap.
+   */
+  caps: Record<number, MetricCaps>;
 }
 
 function loadBaseline(name: string): Baseline | null {
@@ -204,29 +237,50 @@ function loadBaseline(name: string): Baseline | null {
 
 function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }): string[] {
   const measuredByK: Record<number, MetricFloors> = {};
+  const measuredCapsByK: Record<number, MetricCaps> = {};
   const ceilings: Baseline['ceilings'] = {};
   for (const k of K_VALUES) {
     const a = report.aggregateByK[k]!;
     measuredByK[k] = { precisionAtK: a.precisionAtK, recallAtK: a.recallAtK, mrr: a.mrr };
+    measuredCapsByK[k] = {
+      abstentionFalsePositiveRate: a.abstentionFalsePositiveRate ?? 0,
+      overAbstentionRate: a.overAbstentionRate ?? 0,
+    };
     ceilings[k] = {
       precisionAtK: a.ceilingPrecisionAtK,
       recallAtK: a.ceilingRecallAtK,
       mrr: 1,
     };
   }
+  const previous = loadBaseline(report.retriever);
   const { floors, notes } = ratchetFloors({
     label: report.retriever,
     measuredByK,
-    previousByK: loadBaseline(report.retriever)?.floors,
+    previousByK: previous?.floors,
     tolerance: FLOOR_TOLERANCE,
     allowLowering: opts.allowLowering,
   });
+  // One query's worth of headroom on each axis, from the committed query set's
+  // own denominators, so the caps stay one-query-tight as the set grows.
+  const anyK = report.aggregateByK[MAX_K]!;
+  const { caps, notes: capNotes } = ratchetCaps({
+    label: report.retriever,
+    measuredByK: measuredCapsByK,
+    previousByK: previous?.caps,
+    headroomByMetric: {
+      abstentionFalsePositiveRate: anyK.nAbstention > 0 ? 1 / anyK.nAbstention : 0,
+      overAbstentionRate: anyK.n > 0 ? 1 / anyK.n : 0,
+    },
+    allowLoosening: opts.allowLowering,
+  });
+  notes.push(...capNotes);
   const baseline: Baseline = {
     retriever: report.retriever,
     embeddingModelId: report.embeddingModelId,
     discriminatingMetric: report.discriminatingMetric,
     ceilings,
     floors,
+    caps,
   };
   writeFileSync(
     join(BASELINES_DIR, `${report.retriever}.json`),
@@ -245,26 +299,175 @@ function checkFloors(reports: RetrieverReport[]): string[] {
       );
       continue;
     }
-    for (const k of K_VALUES) {
-      const measured = report.aggregateByK[k]!;
-      const floor = baseline.floors[k];
-      if (!floor) continue;
-      for (const metric of FLOOR_METRICS) {
-        if (measured[metric] < floor[metric]) {
-          failures.push(
-            `${report.retriever}@${k} ${metric} regressed: ${measured[metric].toFixed(3)} < committed floor ${floor[metric].toFixed(3)}`,
-          );
-        }
-      }
-    }
+    failures.push(
+      ...checkBounds({
+        label: report.retriever,
+        ks: K_VALUES,
+        measuredByK: Object.fromEntries(K_VALUES.map((k) => [k, report.aggregateByK[k]!] as const)),
+        floorsByK: baseline.floors,
+        capsByK: baseline.caps,
+      }),
+    );
   }
   return failures;
+}
+
+/**
+ * The committed calibration grid. `null` on either axis is the shipped
+ * (disabled) value and is included so the grid always contains its own control.
+ * Steps are uniform so "two grid steps wide" in the acceptance bar
+ * (memory/spec.md) is a well-defined distance.
+ */
+const SWEEP_FLOORS: (number | null)[] = [null, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6];
+/**
+ * `0` is not a degenerate duplicate of `null`: it keeps every row the filter
+ * sees, so it isolates the OTHER effect of enabling the ratio — the pool the
+ * ranking boost sorts narrows from the rank window to the gate window.
+ */
+const SWEEP_RATIOS: (number | null)[] = [null, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+
+const fmt = (v: number | null, digits = 3) => (v === null ? 'n/a' : v.toFixed(digits));
+
+/**
+ * Runs the production hybrid retriever over the committed grid. Deterministic:
+ * no latency is printed and every value is a function of corpus, query set and
+ * grid point alone.
+ */
+async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
+  const hybrid = RETRIEVERS.find((r) => r.name === 'hybrid');
+  if (!hybrid) throw new Error('the sweep needs the hybrid retriever');
+
+  console.log('\n=== pool leader components, per query (gates disabled) ===');
+  console.log('query'.padEnd(38), 'gold', ' pool', 'level', 'coverage', 'cosine');
+  const state = await hybrid.init(corpus);
+  const leaders: { id: string; hasGold: boolean; level: number; poolSize: number }[] = [];
+  for (const q of QUERIES) {
+    const scope = resolveScope(corpus, q.scope);
+    let leader: GateLeader | undefined;
+    await hybrid.query(q.text, state, MAX_K, scope, {
+      abstentionFloor: null,
+      relativeLevelRatio: null,
+      onGateWindow: (l) => {
+        leader = l;
+      },
+    });
+    const hasGold = q.goldStableIds.length > 0;
+    leaders.push({ id: q.id, hasGold, level: leader?.level ?? 0, poolSize: leader?.poolSize ?? 0 });
+    console.log(
+      q.id.padEnd(38),
+      hasGold ? ' yes' : '  no',
+      String(leader?.poolSize ?? 0).padStart(5),
+      fmt(leader?.level ?? 0),
+      fmt(leader?.coverage ?? 0).padStart(8),
+      fmt(leader?.cosine ?? 0).padStart(6),
+    );
+  }
+  // The gate covers the whole fused pool, so every query observes both
+  // mechanisms regardless of page size — the grid below is evidence for all of
+  // them, not just for the ones whose pool outgrew a prefix.
+  const pools = leaders.map((l) => l.poolSize);
+  console.log(
+    `fused pool per query: min ${Math.min(...pools)}, max ${Math.max(...pools)} — ` +
+      'gated in full, so no query is a no-op for the ratio',
+  );
+  await hybrid.teardown?.(state);
+
+  // Whether ANY floor can work is a separability question, and it is decided by
+  // these two ordered lists rather than by the grid: a floor exists iff the
+  // highest abstention level is below the lowest gold-bearing one.
+  const goldLevels = leaders
+    .filter((l) => l.hasGold)
+    .map((l) => l.level)
+    .sort((a, b) => a - b);
+  const abstainLevels = leaders
+    .filter((l) => !l.hasGold)
+    .map((l) => l.level)
+    .sort((a, b) => b - a);
+  console.log('\n=== level separability ===');
+  console.log(`gold-bearing, ascending : ${goldLevels.map((v) => fmt(v)).join(' ')}`);
+  console.log(`abstention,  descending : ${abstainLevels.map((v) => fmt(v)).join(' ')}`);
+  const lowestGold = goldLevels[0] ?? 0;
+  const highestAbstain = abstainLevels[0] ?? 0;
+  console.log(
+    `lowest gold-bearing = ${fmt(lowestGold)}, highest abstention = ${fmt(highestAbstain)} -> ` +
+      (highestAbstain < lowestGold
+        ? `separable, admissible floors are (${fmt(highestAbstain)}, ${fmt(lowestGold)}], width ${fmt(lowestGold - highestAbstain)}`
+        : `NOT separable: the classes overlap on [${fmt(lowestGold)}, ${fmt(highestAbstain)}], so no floor abstains on every empty-gold query without rejecting a gold-bearing one`),
+  );
+  console.log(
+    `overlapping abstention queries: ${leaders
+      .filter((l) => !l.hasGold && l.level >= lowestGold)
+      .map((l) => `${l.id}=${fmt(l.level)}`)
+      .join(', ')}`,
+  );
+
+  console.log('\n=== (floor, ratio) grid ===');
+  const header = [
+    'floor',
+    'ratio',
+    'k',
+    'recall',
+    'precision',
+    'mrr',
+    'abstainFP',
+    'overAbstain',
+    'tokens',
+  ];
+  console.log(header.map((h) => h.padStart(12)).join(''));
+  for (const floor of SWEEP_FLOORS) {
+    for (const ratio of SWEEP_RATIOS) {
+      const outcomes = await runRetriever(hybrid, corpus, {
+        abstentionFloor: floor,
+        relativeLevelRatio: ratio,
+      });
+      const flagFailures = checkAbstentionFlags('hybrid', outcomes);
+      const { metricsByK, ceilingsByK } = scoreOutcomes(outcomes, corpus);
+      for (const k of K_VALUES) {
+        const a = aggregate(metricsByK[k]!, ceilingsByK[k]!, k);
+        console.log(
+          [
+            fmt(floor, 2),
+            fmt(ratio, 2),
+            String(k),
+            fmt(a.recallAtK),
+            fmt(a.precisionAtK),
+            fmt(a.mrr),
+            fmt(a.abstentionFalsePositiveRate),
+            fmt(a.overAbstentionRate),
+            String(Math.round(a.avgTokensReturned)),
+          ]
+            .map((c) => c.padStart(11))
+            .join(''),
+        );
+      }
+      for (const f of flagFailures) console.log(`  FLAG DISAGREEMENT: ${f}`);
+    }
+  }
+
+  console.log(`\ncorpus: ${corpus.items.length} active memories, ${QUERIES.length} queries`);
+  console.log(
+    `abstention queries: ${QUERIES.filter((q) => q.goldStableIds.length === 0).length} (metric step ${(1 / QUERIES.filter((q) => q.goldStableIds.length === 0).length).toFixed(3)})`,
+  );
 }
 
 async function main(): Promise<void> {
   const writeBaselines = process.argv.includes('--write-baselines');
   const allowLowering = process.argv.includes('--lower-floors');
   const skipDeterminism = process.argv.includes('--skip-determinism-check');
+  const sweep = process.argv.includes('--sweep-abstention');
+
+  if (sweep) {
+    console.log('rembric abstention calibration sweep — loading embedder...');
+    const embedder = await loadEmbedder();
+    console.log(`ingesting ${CORPUS.length} corpus memories through MemoryService...`);
+    const corpus: Ingested = await ingestCorpus(CORPUS, embedder);
+    try {
+      await sweepAbstention(corpus);
+    } finally {
+      corpus.cleanup();
+    }
+    return;
+  }
 
   console.log('rembric retrieval eval — loading embedder...');
   const embedder = await loadEmbedder();
@@ -275,7 +478,7 @@ async function main(): Promise<void> {
   let failures: string[] = [];
   let reports: RetrieverReport[];
   try {
-    reports = await evaluateAll(corpus);
+    reports = await evaluateAll(corpus, failures);
     failures = failures.concat(checkSanity(corpus, reports));
   } finally {
     const dataDir = corpus.dataDir;
@@ -289,7 +492,7 @@ async function main(): Promise<void> {
   for (const report of reports) {
     const p8 = report.aggregateByK[MAX_K]!;
     console.log(
-      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'}`,
+      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'} overAbstain=${p8.overAbstentionRate?.toFixed(2) ?? 'n/a'}`,
     );
   }
 

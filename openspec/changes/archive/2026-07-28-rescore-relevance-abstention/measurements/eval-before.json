@@ -1,0 +1,98 @@
+[
+  {
+    "retriever": "hybrid",
+    "generatedAt": "2026-07-28T06:23:56.135Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "precisionAtK": 0.20000000000000004,
+        "recallAtK": 0.8125,
+        "mrr": 0.65625,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 315.55555555555554,
+        "p50LatencyMs": 14.292136000000028,
+        "p95LatencyMs": 37.81393500000013
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "precisionAtK": 0.15625,
+        "recallAtK": 1,
+        "mrr": 0.6755952380952381,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 502.1111111111111,
+        "p50LatencyMs": 14.292136000000028,
+        "p95LatencyMs": 37.81393500000013
+      }
+    }
+  },
+  {
+    "retriever": "grep",
+    "generatedAt": "2026-07-28T06:23:56.137Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "precisionAtK": 0.21250000000000002,
+        "recallAtK": 0.84375,
+        "mrr": 0.7,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 306.55555555555554,
+        "p50LatencyMs": 0.030486999999993714,
+        "p95LatencyMs": 0.8296439999999166
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "precisionAtK": 0.1484375,
+        "recallAtK": 0.9375,
+        "mrr": 0.7104166666666667,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 492.94444444444446,
+        "p50LatencyMs": 0.030486999999993714,
+        "p95LatencyMs": 0.8296439999999166
+      }
+    }
+  },
+  {
+    "retriever": "memory-md-dump",
+    "generatedAt": "2026-07-28T06:23:56.137Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "precisionAtK": 0.11249999999999999,
+        "recallAtK": 0.46875,
+        "mrr": 0.26979166666666665,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 335.77777777777777,
+        "p50LatencyMs": 0.002484999999978754,
+        "p95LatencyMs": 0.0487209999996594
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "precisionAtK": 0.09375,
+        "recallAtK": 0.65625,
+        "mrr": 0.29546130952380956,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "avgTokensReturned": 522.2222222222222,
+        "p50LatencyMs": 0.002484999999978754,
+        "p95LatencyMs": 0.0487209999996594
+      }
+    }
+  }
+]

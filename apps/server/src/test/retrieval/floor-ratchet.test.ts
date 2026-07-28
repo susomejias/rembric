@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ratchetFloors } from './floor-ratchet.js';
+import { checkBounds, ratchetCaps, ratchetFloors } from './floor-ratchet.js';
 
 const TOLERANCE = 0.05;
 
@@ -71,5 +71,157 @@ describe('ratchetFloors', () => {
       floor = run(0.4, floor).floors[8]!.precisionAtK;
     }
     expect(floor).toBeCloseTo(0.35, 10);
+  });
+});
+
+const HEADROOM = { abstentionFalsePositiveRate: 0.125, overAbstentionRate: 0.0625 };
+
+function runCaps(measured: number, previous: number | undefined, allowLoosening = false) {
+  return ratchetCaps({
+    label: 'hybrid',
+    measuredByK: { 8: { abstentionFalsePositiveRate: measured, overAbstentionRate: 0 } },
+    previousByK:
+      previous === undefined
+        ? undefined
+        : { 8: { abstentionFalsePositiveRate: previous, overAbstentionRate: 0.125 } },
+    headroomByMetric: HEADROOM,
+    allowLoosening,
+  });
+}
+
+describe('ratchetCaps', () => {
+  it('seeds a cap at measured plus one query of headroom', () => {
+    const { caps, notes } = runCaps(0.25, undefined);
+    expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.375, 10);
+    expect(notes).toEqual([]);
+  });
+
+  it('clamps a cap at 1, since both metrics are rates', () => {
+    expect(runCaps(0.95, undefined).caps[8]!.abstentionFalsePositiveRate).toBe(1);
+  });
+
+  it('tightens the cap when the metric improved', () => {
+    const { caps, notes } = runCaps(0.125, 0.375);
+    expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.25, 10);
+    expect(notes).toEqual([]);
+  });
+
+  it('holds the cap when a rewrite would loosen it, and says so', () => {
+    // The mirror image of the floor hazard: a regression must not be able to
+    // raise the cap above itself on the next --write-baselines.
+    const { caps, notes } = runCaps(0.375, 0.375);
+    expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.375, 10);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('held at 0.375');
+  });
+
+  it('loosens the cap only when explicitly permitted, and reports it', () => {
+    const { caps, notes } = runCaps(0.375, 0.375, true);
+    expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.5, 10);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('LOOSENED');
+  });
+
+  it('repeated rewrites at a flat measurement cannot drift the cap up', () => {
+    let cap = runCaps(0.25, undefined).caps[8]!.abstentionFalsePositiveRate;
+    for (let i = 0; i < 5; i++) {
+      cap = ratchetCaps({
+        label: 'hybrid',
+        measuredByK: { 8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0 } },
+        previousByK: { 8: { abstentionFalsePositiveRate: cap, overAbstentionRate: 0.125 } },
+        headroomByMetric: HEADROOM,
+        allowLoosening: false,
+      }).caps[8]!.abstentionFalsePositiveRate;
+    }
+    expect(cap).toBeCloseTo(0.375, 10);
+  });
+
+  it('ratchets each cap metric independently', () => {
+    const { caps, notes } = ratchetCaps({
+      label: 'hybrid',
+      measuredByK: { 8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0.25 } },
+      previousByK: { 8: { abstentionFalsePositiveRate: 0.5, overAbstentionRate: 0.125 } },
+      headroomByMetric: HEADROOM,
+      allowLoosening: false,
+    });
+    expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.375, 10);
+    expect(caps[8]!.overAbstentionRate).toBeCloseTo(0.125, 10);
+    expect(notes.map((n) => n.split(' ')[1])).toEqual(['overAbstentionRate']);
+  });
+});
+
+describe('checkBounds', () => {
+  const FLOORS = { 8: { precisionAtK: 0.1, recallAtK: 0.95, mrr: 0.6 } };
+  const CAPS = { 8: { abstentionFalsePositiveRate: 0.375, overAbstentionRate: 0.0625 } };
+
+  function check(over: Partial<Record<string, number | null>>) {
+    return checkBounds({
+      label: 'hybrid',
+      ks: [8],
+      measuredByK: {
+        8: {
+          precisionAtK: 0.15,
+          recallAtK: 1,
+          mrr: 0.7,
+          abstentionFalsePositiveRate: 0.25,
+          overAbstentionRate: 0,
+          ...over,
+        },
+      },
+      floorsByK: FLOORS,
+      capsByK: CAPS,
+    });
+  }
+
+  it('passes a measurement inside every bound', () => {
+    expect(check({})).toEqual([]);
+  });
+
+  it('fails a floor metric BELOW its floor and not above it', () => {
+    expect(check({ recallAtK: 0.9 })).toHaveLength(1);
+    expect(check({ recallAtK: 0.9 })[0]).toContain('recallAtK regressed: 0.900 < committed floor');
+    // The opposite direction is an improvement and must not fail.
+    expect(check({ recallAtK: 1 })).toEqual([]);
+  });
+
+  it('fails a cap metric ABOVE its cap and not below it', () => {
+    expect(check({ overAbstentionRate: 0.125 })).toHaveLength(1);
+    expect(check({ overAbstentionRate: 0.125 })[0]).toContain(
+      'overAbstentionRate regressed: 0.125 > committed cap 0.063',
+    );
+    // A lower rate is an improvement; comparing a cap like a floor would fail here.
+    expect(check({ overAbstentionRate: 0 })).toEqual([]);
+    expect(check({ abstentionFalsePositiveRate: 0 })).toEqual([]);
+  });
+
+  it('names the metric and both values, so a failure is actionable', () => {
+    const [failure] = check({ abstentionFalsePositiveRate: 0.5 });
+    expect(failure).toContain('hybrid@8');
+    expect(failure).toContain('0.500');
+    expect(failure).toContain('0.375');
+  });
+
+  it('skips a cap metric whose axis had no queries', () => {
+    expect(check({ overAbstentionRate: null, abstentionFalsePositiveRate: null })).toEqual([]);
+  });
+
+  it('gates nothing when the baseline carries no caps block, rather than throwing', () => {
+    expect(
+      checkBounds({
+        label: 'hybrid',
+        ks: [8],
+        measuredByK: {
+          8: {
+            precisionAtK: 0.15,
+            recallAtK: 1,
+            mrr: 0.7,
+            abstentionFalsePositiveRate: 1,
+            overAbstentionRate: 1,
+          },
+        },
+        floorsByK: FLOORS,
+        capsByK: undefined,
+      }),
+    ).toEqual([]);
   });
 });

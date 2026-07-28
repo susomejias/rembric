@@ -38,6 +38,6 @@ export const grepRetriever: Retriever<GrepState> = {
       }))
       .filter((s) => s.score > 0);
     scored.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
-    return scored.slice(0, k).map((s) => s.id);
+    return { ids: scored.slice(0, k).map((s) => s.id) };
   },
 };

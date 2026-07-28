@@ -1,5 +1,6 @@
 import { CANDIDATES_PER_SAVE_MAX_DEFAULT } from '../../config.js';
 import { createRepositories } from '../../db/index.js';
+import type { Repositories } from '../../db/repositories/index.js';
 import { type Embedder, embeddingQueryInput } from '../../embeddings/embedder.js';
 import { saveMemoryWithCandidates } from '../../mcp/memory-tools.js';
 import { EmbeddingWorker } from '../../services/embedding-worker.js';
@@ -18,6 +19,8 @@ const DAY_MS = 86_400_000;
 export interface Ingested extends IngestedCorpus {
   dataDir: string;
   cleanup: () => void;
+  /** Exposed so a test can drive one retrieval branch in isolation. */
+  repos: Repositories;
 }
 
 /**
@@ -116,6 +119,7 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
     projectIdBySlug,
     dataDir,
     cleanup,
+    repos,
   };
 }
 

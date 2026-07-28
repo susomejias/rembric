@@ -16,8 +16,8 @@ The evaluation point is **after fusion and before the ranking boost**. After fus
 
 At that point the two gates are:
 
-- The **floor** is absolute and is compared against the highest relevance level in a bounded gate window over the fused pool. When no row in that window reaches the floor, the response SHALL contain no results and SHALL carry an explicit abstention flag and a reason.
-- The **relative filter** keeps a row only while its level is at or above `ratio × leaderLevel`, where `leaderLevel` is the same window maximum the floor used, and preserves fused order. It is a per-row test **relative to the best level**, not a truncation at the first consecutive-pair drop: a gradually decaying tail passes every consecutive test and so returns rows far below the leader, and over a level sequence that is not monotone in fused order, truncating at the first offender discards strictly better rows behind it.
+- The **floor** is absolute and is compared against the highest relevance level in the **whole fused pool**, not a `limit + offset` prefix of it. When no row in the pool reaches the floor, the response SHALL contain no results and SHALL carry an explicit abstention flag and a reason. Levelling a prefix would make both gates a function of the page requested and of the order the branches happened to fuse in: a deeper page widens the prefix and can only raise the leader, so the same query against the same corpus could abstain at one offset and not at the next, and a row the filter judged relevant could be cut from the pool the page is then sliced out of.
+- The **relative filter** keeps a row only while its level is at or above `ratio × leaderLevel`, where `leaderLevel` is the same pool maximum the floor used, and preserves fused order. It is a per-row test **relative to the best level**, not a truncation at the first consecutive-pair drop: a gradually decaying tail passes every consecutive test and so returns rows far below the leader, and over a level sequence that is not monotone in fused order, truncating at the first offender discards strictly better rows behind it.
 
 A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant".
 
@@ -32,8 +32,14 @@ Both gates SHALL be disabled by default. While both are disabled the branch SHAL
 #### Scenario: A gate decision does not change when the corpus grows
 
 - **GIVEN** the floor and the relative filter are enabled, and a query whose decision is recorded against a corpus
-- **WHEN** the corpus is enlarged with rows unrelated to that query and the same query is re-run
-- **THEN** both gates SHALL reach the same decision, because the level of a row depends only on that row and the query
+- **WHEN** the corpus is enlarged with rows that share the query's vocabulary without answering it, so they sort ahead of the answering row
+- **THEN** both gates SHALL reach the same decision, because the level of a row depends only on that row and the query AND every fused candidate is levelled
+
+#### Scenario: A gate decision does not change with the page requested
+
+- **GIVEN** the floor is enabled and a query whose pool contains more candidates than one page
+- **WHEN** the same query is issued at several offsets
+- **THEN** every page SHALL report the same abstention verdict
 
 #### Scenario: A gradually decaying tail is cut
 
@@ -41,16 +47,22 @@ Both gates SHALL be disabled by default. While both are disabled the branch SHAL
 - **WHEN** `memory.search` is called with a limit of 8
 - **THEN** the rows at 0.4 and 0.3 SHALL be omitted, because each is below `0.5 × 0.9`
 
+#### Scenario: A sharp query returns a short result set
+
+- **GIVEN** the relative filter is enabled, and a scope containing one strongly-matching memory and several weak ones
+- **WHEN** `memory.search` is called with a limit larger than one
+- **THEN** the weak results below `ratio × leaderLevel` SHALL be omitted, and the response SHALL NOT be padded to the requested limit
+
 #### Scenario: A short page is distinguishable from an abstention
 
 - **GIVEN** the relative filter is enabled and it drops every row but two, while the leader clears the floor
 - **WHEN** `memory.search` is called with a limit of 8
 - **THEN** the response SHALL contain two results and SHALL report `abstained: false`
 
-#### Scenario: Abstention is off by default and costs nothing
+#### Scenario: Abstention is off by default
 
 - **WHEN** the system runs without calibrated abstention values configured
-- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, and SHALL issue no additional database read on their behalf
+- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf
 
 ### Requirement: Retrieval and lifecycle constants MUST be named and bounded in one place
 
@@ -58,8 +70,7 @@ Ranking, projection and lifecycle behaviour is governed by a set of compile-time
 
 - `RANK_WINDOW_MARGIN` — the over-fetch added to `limit + offset` before the floor and ceiling are applied, so a page near a window edge still fuses over more candidates than it returns.
 - `RANK_WINDOW_CEILING` — the hard cap on that window, set strictly above the maximum `limit`. It doubles as the entity path's page size when no `limit` is given (see `mcp-api`), so exact-address retrieval is complete-within-a-bound rather than truncated to a ranked default.
-- `GATE_WINDOW_MARGIN` — the over-fetch added to `limit + offset` to form the gate window over which relevance levels are computed. Strictly smaller than the rank window, because the gate window's rows are read with their text and the rank window's are not.
-- `RELATIVE_LEVEL_RATIO` — the relative-filter ratio applied against the gate window's highest relevance level. Named for what it measures; it is not a consecutive-pair gap ratio and SHALL NOT be described as one.
+- `RELATIVE_LEVEL_RATIO` — the relative-filter ratio applied against the fused pool's highest relevance level. Named for what it measures; it is not a consecutive-pair gap ratio and SHALL NOT be described as one.
 - `RELEVANCE_LIMIT` — the cap on `memory.context`'s relevance channel, shared by its entity pre-pass and its ranked pass.
 - `ENTITY_RARITY_THRESHOLD` — the maximum share of a scope's active memories an entity may be linked to before it stops proposing save-time candidates. A proportion, not an absolute count, so it does not become inert as a corpus grows.
 - `ENTITIES_PROJECTION_CAP` — the per-memory bound on the `entities[]` projection, whose exhaustion is reported to the caller.
@@ -83,6 +94,11 @@ Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluatio
 
 - **WHEN** any MCP tool input schema is inspected
 - **THEN** none of the constants above SHALL be settable per request
+
+#### Scenario: A disabled gate stays disabled without a calibration
+
+- **WHEN** the abstention floor, `RELATIVE_LEVEL_RATIO`, or the diversity cap is enabled
+- **THEN** the change SHALL be accompanied by a measurement on the evaluation harness, and for the diversity cap by a session-labelled fixture the harness can see the regression through
 
 #### Scenario: A gate is enabled without a committed sweep
 

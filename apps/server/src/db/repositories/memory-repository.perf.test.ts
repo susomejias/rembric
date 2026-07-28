@@ -44,6 +44,51 @@ const LEGACY_NOT_EXISTS = `m.status = 'archived'
          AND NOT EXISTS (
              SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)`;
 
+/**
+ * Explains the SQL a repository call actually executes. Reconstructing the
+ * query in the test instead would let an assertion pass against a query the
+ * production path no longer runs.
+ */
+function explainWhileRunning(t: TestDb, run: () => void): string[] {
+  const raw = t.handle.raw;
+  const bound = raw.prepare.bind(raw);
+  const seen: string[] = [];
+  const wrap = (stmt: object, text: string): object =>
+    new Proxy(stmt, {
+      get(target, prop) {
+        const value: unknown = Reflect.get(target, prop);
+        if (typeof value !== 'function') return value;
+        const method = value as (...a: unknown[]) => unknown;
+        if (prop === 'all' || prop === 'get' || prop === 'run') {
+          return (...params: unknown[]) => {
+            seen.push(
+              ...bound<unknown[], { detail: string }>(`EXPLAIN QUERY PLAN ${text}`)
+                .all(...params)
+                .map((r) => r.detail),
+            );
+            return method.apply(target, params);
+          };
+        }
+        return (...args: unknown[]) => {
+          const result = method.apply(target, args);
+          // `raw()` / `pluck()` return the statement itself, and drizzle
+          // reaches the terminal all/get/run through them.
+          return result === target ? wrap(target, text) : result;
+        };
+      },
+    });
+  // better-sqlite3 types `prepare` as generic over its row and parameter
+  // tuples; the interceptor observes only SQL text and bound values, so the
+  // generics are erased across this assignment.
+  raw.prepare = ((text: string) => wrap(bound(text), text)) as typeof raw.prepare;
+  try {
+    run();
+  } finally {
+    Reflect.deleteProperty(raw, 'prepare');
+  }
+  return seen;
+}
+
 describe('MemoryRepository — read-path performance (optimize-db-read-path)', () => {
   let t: TestDb;
   let repo: MemoryRepository;
@@ -350,51 +395,70 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
-  describe('confirmations composite index on the review axis', () => {
-    /**
-     * Explains the SQL the repository actually executes. The needs-review
-     * predicate is built by a private method, so reconstructing it here would
-     * let the assertion pass against a query the production path no longer runs.
-     */
-    function planLines(run: () => void): string[] {
-      const raw = t.handle.raw;
-      const bound = raw.prepare.bind(raw);
-      const seen: string[] = [];
-      const wrap = (stmt: object, text: string): object =>
-        new Proxy(stmt, {
-          get(target, prop) {
-            const value: unknown = Reflect.get(target, prop);
-            if (typeof value !== 'function') return value;
-            const method = value as (...a: unknown[]) => unknown;
-            if (prop === 'all' || prop === 'get' || prop === 'run') {
-              return (...params: unknown[]) => {
-                seen.push(
-                  ...bound<unknown[], { detail: string }>(`EXPLAIN QUERY PLAN ${text}`)
-                    .all(...params)
-                    .map((r) => r.detail),
-                );
-                return method.apply(target, params);
-              };
-            }
-            return (...args: unknown[]) => {
-              const result = method.apply(target, args);
-              // `raw()` / `pluck()` return the statement itself, and drizzle
-              // reaches the terminal all/get/run through them.
-              return result === target ? wrap(target, text) : result;
-            };
-          },
-        });
-      // better-sqlite3 types `prepare` as generic over its row and parameter
-      // tuples; the interceptor observes only SQL text and bound values, so the
-      // generics are erased across this assignment.
-      raw.prepare = ((text: string) => wrap(bound(text), text)) as typeof raw.prepare;
-      try {
-        run();
-      } finally {
-        Reflect.deleteProperty(raw, 'prepare');
+  describe('textByIds — the search gate window text read', () => {
+    it('resolves each id by primary key, and never drives from a scope index', () => {
+      const detail = explainWhileRunning(t, () =>
+        repo.textByIds({ ids: ['a', 'b', 'c'], scope: 'global', projectId: null }),
+      ).join(' | ');
+      // One seek per id against `memory`'s TEXT primary-key autoindex. The
+      // rejected plan drove from memory_scope_seen_idx and bloom-filtered the
+      // whole scope, whose cost grows with the corpus rather than the id list.
+      expect(detail).toContain('SEARCH m USING INDEX sqlite_autoindex_memory_1 (id=?)');
+      expect(detail).not.toContain('memory_scope_seen_idx');
+      expect(detail).not.toContain('SCAN m ');
+      expect(detail).not.toContain('BLOOM FILTER');
+    });
+
+    it('keeps that plan for a project scope and for the include_global widening', () => {
+      for (const opts of [
+        { ids: ['a'], scope: 'project' as const, projectId: 'p' },
+        { ids: ['a'], scope: 'project' as const, projectId: 'p', includeGlobal: true },
+      ]) {
+        const detail = explainWhileRunning(t, () => repo.textByIds(opts)).join(' | ');
+        expect(detail).toContain('SEARCH m USING INDEX sqlite_autoindex_memory_1 (id=?)');
+        expect(detail).not.toContain('memory_scope_seen_idx');
       }
-      return seen;
-    }
+    });
+
+    // Asserted as a GROWTH RATIO, not an absolute budget. An absolute budget does
+    // not discriminate here: the rejected corpus-proportional plan still runs in
+    // ~0.16 ms at this scale, so any budget loose enough not to be flaky also
+    // passes the plan this test exists to reject. Cost tracking the id list
+    // rather than the corpus is the actual property, and quadrupling the table
+    // is what measures it.
+    it('does not get more expensive as the table grows', () => {
+      const insertRange = (from: number, to: number) => {
+        const rows = Array.from({ length: to - from }, (_, i) =>
+          mem({ id: `bulk-${from + i}`, title: `Title ${from + i}`, content: `body ${from + i}` }),
+        );
+        for (let i = 0; i < rows.length; i += 500) {
+          t.handle.db
+            .insert(memory)
+            .values(rows.slice(i, i + 500))
+            .run();
+        }
+      };
+      const ids = Array.from({ length: 16 }, (_, i) => `bulk-${i * 100}`);
+      const perCallMs = () => {
+        for (let i = 0; i < 50; i++) repo.textByIds({ ids, scope: 'global', projectId: null });
+        const start = performance.now();
+        for (let i = 0; i < 200; i++) repo.textByIds({ ids, scope: 'global', projectId: null });
+        return (performance.now() - start) / 200;
+      };
+
+      insertRange(0, 2_000);
+      expect(repo.textByIds({ ids, scope: 'global', projectId: null })).toHaveLength(16);
+      const small = perCallMs();
+
+      insertRange(2_000, 8_000);
+      const large = perCallMs();
+
+      expect(large / small).toBeLessThan(2.5);
+    });
+  });
+
+  describe('confirmations composite index on the review axis', () => {
+    const planLines = (run: () => void) => explainWhileRunning(t, run);
 
     const ttlByType = reviewTtlEntries();
     const decayThresholds = Object.entries(DEFAULT_DECAY.thresholdByType).filter(

@@ -34,7 +34,7 @@ Also cross-referenced, not duplicated: `retrieval-evaluation/spec.md` claims a f
 
 ## Impact
 
-- `apps/server/src/services/hybrid-search.ts` — `computeRelevanceLevel`; the single post-fusion, pre-boost gate point; `applyGapRatioFilter` replaced by a leader-relative filter; `GAP_RATIO_THRESHOLD` renamed; new `GATE_WINDOW_MARGIN`; `normalizeLexicalScore` deleted (nothing else reads it)
+- `apps/server/src/services/hybrid-search.ts` — `computeRelevanceLevel`; the single post-fusion, pre-boost gate point; `applyGapRatioFilter` replaced by a leader-relative filter; `GAP_RATIO_THRESHOLD` renamed; `normalizeLexicalScore` deleted (nothing else reads it)
 - `apps/server/src/services/save-time-candidates.ts` — `tokenSet` / `tokenContainment` moved to `hybrid-search.ts` beside `tokenizeWords` and imported back, so the lexical level has exactly one implementation
 - `apps/server/src/db/repositories/memory-repository.ts` — a bounded by-ids `title`/`content` read for the gate window (SQL stays in `db/`)
 - `apps/server/src/services/memory.ts` — `searchWithAbstention`'s docstring, which currently states `abstained` is always `false`

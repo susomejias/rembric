@@ -30,6 +30,6 @@ export const memoryMdDumpRetriever: Retriever<DumpState> = {
       budget -= cost;
       ids.push(item.id);
     }
-    return ids;
+    return { ids };
   },
 };

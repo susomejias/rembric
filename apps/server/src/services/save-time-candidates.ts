@@ -2,7 +2,7 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { Memory } from '../db/schema/memory.js';
 
 import type { ExtractedEntity } from './entities.js';
-import { sanitizeFtsQuery, tokenizeWords } from './hybrid-search.js';
+import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
 
 /**
  * Save-time candidate detector for `memory.save`.
@@ -235,29 +235,4 @@ export function findSaveTimeCandidates(
 function snippet(content: string, max: number): string {
   if (content.length <= max) return content;
   return content.slice(0, max - 1) + '…';
-}
-
-/** Lowercased token set, built on `hybrid-search.ts`'s shared word tokenizer. */
-function tokenSet(text: string): Set<string> {
-  return new Set(tokenizeWords(text).map((t) => t.toLowerCase()));
-}
-
-/**
- * Corpus-independent lexical overlap: the fraction of `queryTokens` also
- * present in `candidateTokens`. Bounded [0, 1] by construction — a candidate
- * whose text is byte-identical to the query text scores exactly 1.0, and a
- * candidate sharing only a near-universal term with a large query scores
- * near 0, unlike raw bm25 (unbounded, corpus-size dependent, and inverted:
- * see fix-retrieval-ranking-math). Iterates the smaller of the two sets —
- * the intersection size doesn't depend on which side you walk.
- */
-function tokenContainment(queryTokens: Set<string>, candidateTokens: Set<string>): number {
-  if (queryTokens.size === 0) return 0;
-  const [small, large] =
-    queryTokens.size <= candidateTokens.size
-      ? [queryTokens, candidateTokens]
-      : [candidateTokens, queryTokens];
-  let hits = 0;
-  for (const t of small) if (large.has(t)) hits++;
-  return hits / queryTokens.size;
 }

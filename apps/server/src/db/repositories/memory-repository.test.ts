@@ -239,6 +239,72 @@ describe('MemoryRepository', () => {
     });
   });
 
+  describe('textByIds', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '09G', title: 'Global row', content: 'global body' }),
+          row({
+            id: '09P1',
+            title: 'P1 row',
+            content: 'p1 body',
+            scope: 'project',
+            projectId: 'p1',
+          }),
+          row({
+            id: '09P2',
+            title: 'P2 row',
+            content: 'p2 body',
+            scope: 'project',
+            projectId: 'p2',
+          }),
+        ])
+        .run();
+    });
+
+    it('returns title and content for in-scope ids only', () => {
+      const rows = repo.textByIds({
+        ids: ['09G', '09P1', '09P2'],
+        scope: 'project',
+        projectId: 'p1',
+      });
+      expect(rows).toEqual([{ id: '09P1', title: 'P1 row', content: 'p1 body' }]);
+    });
+
+    it('drops another project and the global partition unless includeGlobal is set', () => {
+      const strict = repo.textByIds({
+        ids: ['09G', '09P1', '09P2'],
+        scope: 'project',
+        projectId: 'p1',
+      });
+      expect(strict.map((r) => r.id)).toEqual(['09P1']);
+
+      const widened = repo.textByIds({
+        ids: ['09G', '09P1', '09P2'],
+        scope: 'project',
+        projectId: 'p1',
+        includeGlobal: true,
+      });
+      expect(widened.map((r) => r.id).sort()).toEqual(['09G', '09P1']);
+      expect(widened).toHaveLength(2);
+    });
+
+    it('a global scope never sees a project row, even with includeGlobal', () => {
+      const rows = repo.textByIds({
+        ids: ['09G', '09P1', '09P2'],
+        scope: 'global',
+        projectId: null,
+        includeGlobal: true,
+      });
+      expect(rows.map((r) => r.id)).toEqual(['09G']);
+    });
+
+    it('reads nothing for an empty id list', () => {
+      expect(repo.textByIds({ ids: [], scope: 'global', projectId: null })).toEqual([]);
+    });
+  });
+
   describe('scoped search status default', () => {
     const base = { scope: 'global', projectId: null, limit: 10, offset: 0 } as const;
 

@@ -104,6 +104,8 @@ export const QUERIES: QueryItem[] = [
     scope: project('nimbus', true),
   },
 
+  // >= 8 so the rates move in 0.125 steps; each shares vocabulary with its own
+  // scope so the gate is scored, not an empty candidate set. See queries.test.ts.
   {
     id: 'q-abstain-atlas-graphql',
     text: 'what GraphQL schema versioning strategy does atlas use',
@@ -117,6 +119,48 @@ export const QUERIES: QueryItem[] = [
     type: 'abstention',
     goldStableIds: [],
     scope: project('nimbus'),
+  },
+  {
+    id: 'q-abstain-atlas-feature-flags',
+    text: 'which feature flag provider does atlas use for gradual rollouts',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: project('atlas'),
+  },
+  {
+    id: 'q-abstain-atlas-invoice-pdf-slo',
+    text: 'what latency SLO does atlas promise for invoice PDF generation',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: project('atlas'),
+  },
+  {
+    id: 'q-abstain-nimbus-worker-replicas',
+    text: 'how many worker replicas does the nimbus ingestion service run',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: project('nimbus'),
+  },
+  {
+    id: 'q-abstain-nimbus-tracing-vendor',
+    text: 'which observability vendor stores the nimbus scheduler traces',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: project('nimbus'),
+  },
+  {
+    id: 'q-abstain-global-shell-theme',
+    text: 'what terminal shell and prompt theme does the user prefer',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: GLOBAL,
+  },
+  {
+    id: 'q-abstain-global-changelog',
+    text: 'how does the user want changelog entries written for a release',
+    type: 'abstention',
+    goldStableIds: [],
+    scope: GLOBAL,
   },
 
   {

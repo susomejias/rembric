@@ -49,6 +49,14 @@ export interface SearchMemoryIdsOpts {
   includeGlobal?: boolean;
 }
 
+export interface TextByIdsOpts {
+  ids: readonly string[];
+  scope: MemoryScope;
+  projectId: string | null;
+  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
+  includeGlobal?: boolean;
+}
+
 export interface SearchBm25IdsOpts {
   /** Pre-sanitized FTS5 MATCH expression (see services/hybrid-search.ts). */
   matchExpr: string;
@@ -322,6 +330,22 @@ export class MemoryRepository {
         AND EXISTS (SELECT 1 FROM json_each(m.tags) je WHERE je.value = ${tag})
     `);
     return new Set(rows.map((r) => r.id));
+  }
+
+  /** An out-of-scope id is absent from the result rather than reported. */
+  textByIds(opts: TextByIdsOpts): Pick<Memory, 'id' | 'title' | 'content'>[] {
+    if (opts.ids.length === 0) return [];
+    // `CROSS JOIN` is the join-order hint, not a semantic change: SQLite has no
+    // cardinality estimate for `json_each` and otherwise drives from
+    // `memory_scope_seen_idx`, bloom-filtering its way through every row in the
+    // scope — the corpus-sized scan this hot-path read exists to avoid. Pinning
+    // the id list as the outer loop makes it one PK seek per id.
+    return this.db.all<Pick<Memory, 'id' | 'title' | 'content'>>(sql`
+      SELECT m.id AS id, m.title AS title, m.content AS content
+      FROM json_each(${JSON.stringify([...opts.ids])}) je
+        CROSS JOIN memory m ON m.id = je.value
+      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
+    `);
   }
 
   /** Subset of `ids` whose memory carries `topicKey` (dense-branch topic_key post-filter). */

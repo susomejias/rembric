@@ -37,19 +37,19 @@ export function computeRankWindowSize(limit: number, offset: number): number {
 }
 
 /**
- * Absolute floor on the best normalized branch score (see
- * `normalizeLexicalScore` / the dense branch's `1 - distance`). `null` ships
- * this disabled — an untuned floor silently destroys recall, which is
- * exactly the failure improve-recall-relevance must not introduce. Set to a
- * harness-calibrated value in a follow-up commit (design.md Decision 3).
+ * Absolute floor on the highest relevance level in the gate window (see
+ * `computeRelevanceLevel`). `null` ships this disabled: an uncalibrated floor
+ * silently destroys recall. Enabling it requires a committed
+ * `pnpm run eval --sweep-abstention` grid meeting the bar in memory/spec.md
+ * ("Retrieval and lifecycle constants MUST be named and bounded in one place").
  */
 export const ABSTENTION_FLOOR: number | null = null;
 /**
- * Gap-ratio tail filter over the final (fused + boosted) score list: once
- * `next/current` drops below this ratio, everything after is truncated as
- * noise. `null` ships this disabled, same reasoning as `ABSTENTION_FLOOR`.
+ * Relative-filter ratio: a pool row survives only while its relevance level is
+ * at or above `ratio × leaderLevel`. `null` ships this disabled, same bar as
+ * `ABSTENTION_FLOOR`.
  */
-export const GAP_RATIO_THRESHOLD: number | null = null;
+export const RELATIVE_LEVEL_RATIO: number | null = null;
 /**
  * At most this many results per originating session. `null` ships this
  * disabled, same reasoning as `ABSTENTION_FLOOR`: it is applied to the whole
@@ -79,12 +79,12 @@ export interface HybridSearchOpts {
   includeGlobal?: boolean;
   /** Injectable clock for the recency term of the ranking boost; defaults to `new Date()`. */
   now?: () => Date;
-  /** Overrides the module `ABSTENTION_FLOOR` constant — for tests; production callers omit this. */
+  /** These three override their module constants; production callers omit them. */
   abstentionFloor?: number | null;
-  /** Overrides the module `GAP_RATIO_THRESHOLD` constant — for tests; production callers omit this. */
-  gapRatioThreshold?: number | null;
-  /** Overrides the module `DIVERSITY_CAP` constant — for tests; production callers omit this. */
+  relativeLevelRatio?: number | null;
   diversityCap?: number;
+  /** Calibration-sweep sink; supplying it forces the pool text read even with both gates `null`. */
+  onGateWindow?: (leader: GateLeader) => void;
 }
 
 export interface HybridSearchResult {
@@ -93,39 +93,120 @@ export interface HybridSearchResult {
   reason?: string;
 }
 
+const ABSTAIN_REASON = 'no candidate cleared the relevance floor';
+
+/** The pool leader's level and the two components of that same row, so a per-branch split can be decided on evidence. */
+export interface GateLeader {
+  level: number;
+  coverage: number;
+  cosine: number;
+  poolSize: number;
+}
+
 export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearchResult> {
   const rankWindowSize = computeRankWindowSize(opts.limit, opts.offset);
   const abstentionFloor =
     opts.abstentionFloor !== undefined ? opts.abstentionFloor : ABSTENTION_FLOOR;
-  const gapRatioThreshold =
-    opts.gapRatioThreshold !== undefined ? opts.gapRatioThreshold : GAP_RATIO_THRESHOLD;
+  const relativeLevelRatio =
+    opts.relativeLevelRatio !== undefined ? opts.relativeLevelRatio : RELATIVE_LEVEL_RATIO;
   const diversityCap = opts.diversityCap ?? DIVERSITY_CAP;
 
-  const lexical = lexicalRetriever(opts, rankWindowSize);
+  const lexicalIds = lexicalRetriever(opts, rankWindowSize);
   const dense = await denseRetriever(opts, rankWindowSize);
 
-  if (abstentionFloor !== null) {
-    // An empty candidate set abstains regardless of the floor's value — a
-    // `Math.max(..., 0)` default would otherwise clear a floor of exactly 0.
-    const hasCandidates = lexical.length > 0 || dense.length > 0;
-    const bestScore = Math.max(lexical[0]?.score ?? 0, dense[0]?.score ?? 0);
-    if (!hasCandidates || bestScore < abstentionFloor) {
-      return { ids: [], abstained: true, reason: 'no candidate cleared the relevance floor' };
+  const fused = fuseRRFWithScores([dense.map((d) => d.id), lexicalIds], RANK_CONSTANT);
+
+  // Pre-boost: the boost is a ranking multiplier, not a relevance measure.
+  const gatesEnabled = abstentionFloor !== null || relativeLevelRatio !== null;
+  let gated: { id: string; score: number }[] = fused;
+  if (gatesEnabled || opts.onGateWindow) {
+    const scored = poolLevels(fused, dense, opts);
+    const leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
+    const leader = poolLeader(leveled, scored);
+    opts.onGateWindow?.({ ...leader, poolSize: fused.length });
+    if (abstentionFloor !== null && (leveled.length === 0 || leader.level < abstentionFloor)) {
+      return { ids: [], abstained: true, reason: ABSTAIN_REASON };
+    }
+    if (relativeLevelRatio !== null) {
+      gated = applyRelativeLevelFilter(leveled, leader.level, relativeLevelRatio);
     }
   }
 
-  const fused = fuseRRFWithScores(
-    [dense.map((d) => d.id), lexical.map((l) => l.id)],
-    RANK_CONSTANT,
-  );
-  const boosted = applyRankingBoost(fused, opts);
-  const gapFiltered =
-    gapRatioThreshold !== null ? applyGapRatioFilter(boosted, gapRatioThreshold) : boosted;
-  const diversified =
-    diversityCap !== null ? applyDiversityCap(gapFiltered, diversityCap) : gapFiltered;
+  const boosted = applyRankingBoost(gated, opts);
+  const diversified = diversityCap !== null ? applyDiversityCap(boosted, diversityCap) : boosted;
 
   const ids = diversified.map((r) => r.id);
   return { ids: ids.slice(opts.offset, opts.offset + opts.limit), abstained: false };
+}
+
+function poolLevels(
+  pool: readonly { id: string }[],
+  dense: readonly { id: string; score: number }[],
+  opts: HybridSearchOpts,
+): Map<string, { level: number; coverage: number; cosine: number }> {
+  const scored = new Map<string, { level: number; coverage: number; cosine: number }>();
+  if (pool.length === 0) return scored;
+  const queryTokens = tokenSet(opts.query);
+  const cosineById = new Map(dense.map((d) => [d.id, d.score]));
+  const rows = opts.repos.memory.textByIds({
+    ids: pool.map((r) => r.id),
+    scope: opts.scope,
+    projectId: opts.projectId,
+    includeGlobal: opts.includeGlobal,
+  });
+  for (const r of rows) {
+    scored.set(r.id, relevanceComponents(queryTokens, r, cosineById.get(r.id)));
+  }
+  return scored;
+}
+
+/**
+ * The reference both gates measure against: the best-scoring row in the WHOLE
+ * fused pool, with its own two components. Fusion orders by rank position, so
+ * its first row is not necessarily the best-matching one. Maxing over the pool
+ * rather than a `limit + offset` prefix is what makes a gate decision
+ * independent of the requested page and of the order the branches happened to
+ * fuse in; ties resolve to the earliest row in fused order.
+ */
+export function poolLeader(
+  leveled: readonly { id: string; level: number }[],
+  scored: ReadonlyMap<string, { coverage: number; cosine: number }>,
+): { level: number; coverage: number; cosine: number } {
+  let best: { id: string; level: number } | undefined;
+  for (const r of leveled) if (!best || r.level > best.level) best = r;
+  const components = best ? scored.get(best.id) : undefined;
+  return {
+    level: best?.level ?? 0,
+    coverage: components?.coverage ?? 0,
+    cosine: components?.cosine ?? 0,
+  };
+}
+
+/**
+ * Per-row relevance level in `[0,1]`: the greater of the query's token coverage
+ * in the row's text and the row's dense cosine. Both are bounded and read only
+ * the query and the row, so a calibrated threshold means the same thing at 40
+ * rows and at 5,000. A row the dense branch never returned scores on coverage
+ * alone.
+ */
+export function relevanceComponents(
+  queryTokens: ReadonlySet<string>,
+  row: { title: string; content: string },
+  denseCosine: number | undefined,
+): { level: number; coverage: number; cosine: number } {
+  const coverage = tokenContainment(queryTokens, tokenSet(`${row.title}\n\n${row.content}`));
+  const cosine = denseCosine ?? 0;
+  return { level: Math.max(coverage, cosine), coverage, cosine };
+}
+
+/** Keeps a row iff `level >= ratio × leaderLevel`, in fused order. */
+export function applyRelativeLevelFilter<T extends { level: number }>(
+  ranked: readonly T[],
+  leaderLevel: number,
+  ratio: number,
+): T[] {
+  const cut = ratio * leaderLevel;
+  return ranked.filter((r) => r.level >= cut);
 }
 
 // Declared clamp bounds; the per-signal weights below only ever reach
@@ -191,24 +272,6 @@ export function applyRankingBoost(
 }
 
 /**
- * Truncates the ranked pool once the score falls off a cliff relative to
- * its predecessor: the first index where `next/current < gapRatio` ends
- * the page. Always keeps at least one row (abstention — "nothing at all"
- * — is `ABSTENTION_FLOOR`'s job, not this one's).
- */
-export function applyGapRatioFilter<T extends { score: number }>(
-  ranked: T[],
-  gapRatio: number,
-): T[] {
-  for (let i = 0; i < ranked.length - 1; i++) {
-    const current = ranked[i]!.score;
-    const next = ranked[i + 1]!.score;
-    if (current <= 0 || next / current < gapRatio) return ranked.slice(0, i + 1);
-  }
-  return ranked;
-}
-
-/**
  * Walks the ranked pool in order, admitting at most `cap` rows per
  * originating session; a row over its session's cap is held back and
  * appended (in its original relative order) once the walk ends, so the
@@ -241,21 +304,11 @@ export function applyDiversityCap<T extends { sessionId: string | null }>(
 }
 
 /**
- * Maps FTS5's raw bm25 (negative, more-negative-is-better, unbounded and
- * corpus-size dependent) to a bounded, monotonically-increasing (0, 1)
- * value via a logistic curve — the same normalize-before-comparing
- * discipline as `fix-retrieval-ranking-math`'s token-containment fix, so an
- * absolute floor over it means the same thing across corpus sizes.
+ * FTS5/BM25 branch — fault-isolated (a parse error degrades to empty). Best
+ * match first, ids only: RRF fuses on rank, and bm25 is unbounded and
+ * corpus-relative, so no downstream gate may read its magnitude.
  */
-function normalizeLexicalScore(bm25Rank: number): number {
-  return 1 / (1 + Math.exp(bm25Rank));
-}
-
-/** FTS5/BM25 branch — fault-isolated (a parse error degrades to empty). Best match first. */
-function lexicalRetriever(
-  opts: HybridSearchOpts,
-  rankWindowSize: number,
-): { id: string; score: number }[] {
+function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): string[] {
   const matchExpr = sanitizeFtsQuery(opts.query);
   if (!matchExpr) return [];
   try {
@@ -270,7 +323,7 @@ function lexicalRetriever(
       limit: rankWindowSize,
       includeGlobal: opts.includeGlobal,
     });
-    return rows.map((r) => ({ id: r.id, score: normalizeLexicalScore(r.rank) }));
+    return rows.map((r) => r.id);
   } catch {
     return [];
   }
@@ -281,8 +334,7 @@ function lexicalRetriever(
  * or when searching `archived` (archived vectors are outside the
  * post-model-change semantic guarantee). `tag` is a bounded post-filter over
  * the rank window because tags are not duplicated into the vector index.
- * Best match first; `score` is cosine similarity (`1 - distance`), already
- * bounded and comparable to the normalized lexical score.
+ * Best match first; `score` is cosine similarity (`1 - distance`), bounded [0,1].
  */
 async function denseRetriever(
   opts: HybridSearchOpts,
@@ -385,6 +437,29 @@ export function tokenizeWords(text: string): string[] {
     if (t && /[\p{L}\p{N}]/u.test(t)) tokens.push(t);
   }
   return tokens;
+}
+
+export function tokenSet(text: string): Set<string> {
+  return new Set(tokenizeWords(text).map((t) => t.toLowerCase()));
+}
+
+/**
+ * Corpus-independent lexical overlap: the fraction of `queryTokens` present in
+ * `candidateTokens`. Bounded [0,1], unlike raw bm25 (unbounded, corpus-size
+ * dependent, and inverted: see fix-retrieval-ranking-math).
+ */
+export function tokenContainment(
+  queryTokens: ReadonlySet<string>,
+  candidateTokens: ReadonlySet<string>,
+): number {
+  if (queryTokens.size === 0) return 0;
+  const [small, large] =
+    queryTokens.size <= candidateTokens.size
+      ? [queryTokens, candidateTokens]
+      : [candidateTokens, queryTokens];
+  let hits = 0;
+  for (const t of small) if (large.has(t)) hits++;
+  return hits / queryTokens.size;
 }
 
 /**

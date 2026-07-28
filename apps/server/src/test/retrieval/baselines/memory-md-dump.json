@@ -25,5 +25,15 @@
       "recallAtK": 0.60625,
       "mrr": 0.24546130952380957
     }
+  },
+  "caps": {
+    "5": {
+      "abstentionFalsePositiveRate": 1,
+      "overAbstentionRate": 0.0625
+    },
+    "8": {
+      "abstentionFalsePositiveRate": 1,
+      "overAbstentionRate": 0.0625
+    }
   }
 }

@@ -1,4 +1,5 @@
 import type { Memory, MemoryScope, MemoryType } from '../../db/schema/memory.js';
+import type { GateOverrides } from '../../services/memory.js';
 import type { MemoryService } from '../../services/memory.js';
 
 /** A single corpus fixture row, before ingestion. See `corpus.ts`. */
@@ -73,14 +74,30 @@ export interface QueryItem {
   bilingual?: boolean;
 }
 
+/** One retrieval outcome: ids ranked best-first, plus the explicit abstention flag where a retriever has one. */
+export interface RetrievalOutcome {
+  ids: string[];
+  /** Set only by a retriever that reports abstention explicitly; the harness fails the run when it disagrees with `ids.length === 0`. */
+  abstained?: boolean;
+}
+
+/** Gate values the calibration sweep varies; a retriever that has no gates ignores them. */
+export type GateSetting = Required<Pick<GateOverrides, 'abstentionFloor' | 'relativeLevelRatio'>> &
+  Pick<GateOverrides, 'onGateWindow'>;
+
 /** A retriever under evaluation. All three run against the identical ingested corpus and query set. */
 export interface Retriever<TState = unknown> {
   name: string;
   /** What this retriever's scorecard is meant to be read against — see design.md Decision 5. */
   discriminatingMetric: string;
   init(corpus: IngestedCorpus): TState | Promise<TState>;
-  /** Returns real memory ids, ranked best-first, length <= k. */
-  query(text: string, state: TState, k: number, scope: QueryScope): string[] | Promise<string[]>;
+  query(
+    text: string,
+    state: TState,
+    k: number,
+    scope: QueryScope,
+    gates?: GateSetting,
+  ): RetrievalOutcome | Promise<RetrievalOutcome>;
   teardown?(state: TState): void | Promise<void>;
 }
 

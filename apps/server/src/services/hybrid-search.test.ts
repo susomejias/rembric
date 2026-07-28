@@ -7,15 +7,18 @@ import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 import { EmbeddingWorker } from './embedding-worker.js';
 import {
   applyDiversityCap,
-  applyGapRatioFilter,
   applyRankingBoost,
+  applyRelativeLevelFilter,
   computeRankWindowSize,
   fuseRRF,
   fuseRRFWithScores,
+  poolLeader,
+  relevanceComponents,
   hybridSearch,
   RANK_CONSTANT,
   RANK_WINDOW_CEILING,
   sanitizeFtsQuery,
+  tokenSet,
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
@@ -197,19 +200,169 @@ describe('applyRankingBoost', () => {
   });
 });
 
-describe('applyGapRatioFilter', () => {
-  it('truncates once a score falls below the gap ratio relative to its predecessor', () => {
-    const ranked = [{ score: 1.0 }, { score: 0.9 }, { score: 0.2 }, { score: 0.15 }];
-    expect(applyGapRatioFilter(ranked, 0.5)).toEqual([{ score: 1.0 }, { score: 0.9 }]);
+/**
+ * The evidence that no threshold in RRF space can gate relevance. Pure
+ * arithmetic over `RANK_CONSTANT`, so it holds as long as that constant does.
+ */
+/** The consecutive-pair rule both replaced quantities used, kept as the thing being disproved. */
+function consecutiveFilter<T>(ranked: T[], ratio: number, of: (r: T) => number): T[] {
+  for (let i = 0; i < ranked.length - 1; i++) {
+    const current = of(ranked[i]!);
+    if (current <= 0 || of(ranked[i + 1]!) / current < ratio) return ranked.slice(0, i + 1);
+  }
+  return ranked;
+}
+
+describe('RRF scores cannot carry a relevance threshold', () => {
+  const rrf = (rank: number) => 1 / (RANK_CONSTANT + rank);
+
+  it('pins the consecutive ratios inside a branch-membership class between 0.9839 and 0.9962', () => {
+    expect(rrf(2) / rrf(1)).toBeCloseTo(0.9839, 4);
+    expect(rrf(201) / rrf(200)).toBeCloseTo(0.9962, 4);
   });
 
-  it('keeps the full list when no gap crosses the threshold', () => {
-    const ranked = [{ score: 1.0 }, { score: 0.9 }, { score: 0.85 }];
-    expect(applyGapRatioFilter(ranked, 0.5)).toEqual(ranked);
+  it('a both-branches row scores exactly twice a single-branch row at the same rank', () => {
+    for (const rank of [1, 8, 60, 200]) {
+      expect(rrf(rank) / (2 * rrf(rank))).toBe(0.5);
+    }
   });
 
-  it('keeps a single-row pool unchanged', () => {
-    expect(applyGapRatioFilter([{ score: 1 }], 0.9)).toEqual([{ score: 1 }]);
+  it('leaves only two bands, so no ratio can express relevance', () => {
+    // The class-boundary ratio is `(60+m)/(2·(61+m))` for m both-branches rows:
+    // 0.4919 at m=1, rising to 0.5. Within a class it is 0.9839 upwards. Every
+    // ratio therefore lands in one of three regimes and none of them is a
+    // statement about match quality.
+    const boundary = (m: number) => (RANK_CONSTANT + m) / (2 * (RANK_CONSTANT + m + 1));
+    expect(boundary(1)).toBeCloseTo(0.4919, 4);
+    expect(boundary(200)).toBeLessThan(0.5);
+    expect(rrf(2) / rrf(1)).toBeGreaterThan(boundary(200));
+  });
+
+  it('is a three-valued knob: below the boundary band nothing fires, the middle selects branch membership', () => {
+    // Two ids found by both branches, five found by one — the only structure
+    // an RRF-space ratio can see.
+    const both = ['b0', 'b1'];
+    const single = ['s0', 's1', 's2', 's3', 's4'];
+    const fused = fuseRRFWithScores([both, [...both, ...single]], RANK_CONSTANT);
+    expect(fused).toHaveLength(7);
+
+    expect(consecutiveFilter(fused, 0.49, (r) => r.score)).toHaveLength(7);
+    expect(consecutiveFilter(fused, 0.7, (r) => r.score).map((r) => r.id)).toEqual(both);
+    expect(consecutiveFilter(fused, 0.99, (r) => r.score)).toHaveLength(1);
+  });
+});
+
+describe('applyRelativeLevelFilter', () => {
+  const decaying = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3].map((level) => ({ level }));
+
+  it('cuts a gradually decaying tail the consecutive form passed in full', () => {
+    const kept = applyRelativeLevelFilter(decaying, 0.9, 0.5);
+    expect(kept.map((r) => r.level)).toEqual([0.9, 0.8, 0.7, 0.6, 0.5]);
+    expect(kept).toHaveLength(5);
+    // Every consecutive step here is >= 0.75, so the old rule kept all seven
+    // and returned a row at 33% of the leader.
+    expect(consecutiveFilter(decaying, 0.5, (r) => r.level)).toHaveLength(7);
+  });
+
+  it('is order-independent over a non-monotone sequence, where truncation is not', () => {
+    const nonMonotone = [{ level: 0.9 }, { level: 0.2 }, { level: 0.85 }, { level: 0.8 }];
+    expect(applyRelativeLevelFilter(nonMonotone, 0.9, 0.5).map((r) => r.level)).toEqual([
+      0.9, 0.85, 0.8,
+    ]);
+    expect(consecutiveFilter(nonMonotone, 0.5, (r) => r.level)).toHaveLength(1);
+  });
+
+  it('is idempotent — refiltering its own output changes nothing', () => {
+    const once = applyRelativeLevelFilter(decaying, 0.9, 0.5);
+    expect(applyRelativeLevelFilter(once, 0.9, 0.5)).toEqual(once);
+  });
+
+  it('keeps the leader itself at any ratio in [0,1]', () => {
+    for (const ratio of [0, 0.5, 0.99, 1]) {
+      expect(applyRelativeLevelFilter(decaying, 0.9, ratio)[0]).toEqual({ level: 0.9 });
+    }
+  });
+});
+
+describe('relevanceComponents', () => {
+  const query = tokenSet('alpha beta gamma delta epsilon zeta eta theta');
+  const level = (...args: Parameters<typeof relevanceComponents>) =>
+    relevanceComponents(...args).level;
+
+  it('scores exactly 1.0 for a row containing every query token', () => {
+    expect(
+      level(
+        query,
+        { title: 'alpha beta gamma delta', content: 'epsilon zeta eta theta' },
+        undefined,
+      ),
+    ).toBe(1);
+  });
+
+  it('scores one shared token of eight at exactly 0.125', () => {
+    expect(level(query, { title: 'unrelated', content: 'alpha only here' }, undefined)).toBe(0.125);
+  });
+
+  it('scores 0 with no shared token and no dense cosine', () => {
+    expect(level(query, { title: 'nothing', content: 'in common at all' }, undefined)).toBe(0);
+  });
+
+  it('takes the dense cosine when it exceeds coverage, and coverage when it does not', () => {
+    const row = { title: 'unrelated', content: 'alpha only here' }; // coverage 0.125
+    expect(level(query, row, 0.82)).toBe(0.82);
+    expect(level(query, row, 0.05)).toBe(0.125);
+  });
+
+  it('is bounded above by 1 even for a row far longer than the query', () => {
+    const padded = {
+      title: 'alpha beta gamma delta',
+      content: `epsilon zeta eta theta ${'x '.repeat(5000)}`,
+    };
+    expect(level(query, padded, undefined)).toBe(1);
+  });
+});
+
+describe('poolLeader', () => {
+  const leveled = [
+    { id: 'a', level: 0.2 },
+    { id: 'b', level: 0.9 },
+    { id: 'c', level: 0.4 },
+  ];
+  const scored = new Map([
+    ['a', { coverage: 0.2, cosine: 0.0 }],
+    ['b', { coverage: 0.1, cosine: 0.9 }],
+    ['c', { coverage: 0.4, cosine: 0.3 }],
+  ]);
+
+  it('is the pool maximum, which is not the first row when fusion ordered a weak row first', () => {
+    expect(poolLeader(leveled, scored).level).toBe(0.9);
+  });
+
+  it('is order-independent', () => {
+    expect(poolLeader([...leveled].reverse(), scored)).toEqual(poolLeader(leveled, scored));
+  });
+
+  // The previous shape reported per-component maxima over DIFFERENT rows while
+  // the spec instructs a reader to take them as one row's pair: here the
+  // highest coverage in the pool is c's 0.4, which must NOT be reported.
+  it("reports the leader row's own two components, not each component's pool maximum", () => {
+    expect(poolLeader(leveled, scored)).toEqual({ level: 0.9, coverage: 0.1, cosine: 0.9 });
+  });
+
+  it('resolves a tie to the earliest row in fused order', () => {
+    const tied = [
+      { id: 'a', level: 0.5 },
+      { id: 'b', level: 0.5 },
+    ];
+    const comps = new Map([
+      ['a', { coverage: 0.5, cosine: 0.1 }],
+      ['b', { coverage: 0.2, cosine: 0.5 }],
+    ]);
+    expect(poolLeader(tied, comps).coverage).toBe(0.5);
+  });
+
+  it('is 0 for an empty pool', () => {
+    expect(poolLeader([], scored)).toEqual({ level: 0, coverage: 0, cosine: 0 });
   });
 });
 
@@ -511,21 +664,15 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(result.abstained).toBe(false);
   });
 
-  it('an unrelated query abstains once a floor is enabled (no lexical or dense candidate at all)', async () => {
-    // No embedder wired — dense contributes nothing, isolating the lexical
-    // branch's own "found literally nothing" signal.
+  it('abstains when the candidate set is empty and a floor is enabled', async () => {
     const ftsOnly = new MemoryService(repos, db.handle.db);
     ftsOnly.save(
-      {
-        type: 'user',
-        title: 'kubernetes autoscaling threshold',
-        content: 'kubernetes autoscaling threshold',
-      },
+      { type: 'user', title: 'nothing in common', content: 'nothing in common' },
       projectScope(projectId),
     );
     const result = await hybridSearch({
       repos,
-      query: 'completely unrelated topic never mentioned anywhere',
+      query: 'zzzqqq wwwvvv',
       scope: 'project',
       projectId,
       status: 'active',
@@ -536,24 +683,397 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(result.abstained).toBe(true);
     expect(result.ids).toEqual([]);
   });
+});
 
-  it('a sharp exact-phrase query does not abstain once a floor is enabled', async () => {
-    mem.save(
-      { type: 'user', title: 'exact phrase match probe', content: 'exact phrase match probe' },
-      projectScope(projectId),
-    );
-    const result = await hybridSearch({
+/**
+ * The gate decision itself, with a non-empty candidate set on BOTH sides of
+ * every assertion — no embedder is wired, so `level` is pure token coverage
+ * and each expected value is arithmetic the test states outright.
+ */
+const relevanceLevel = (...args: Parameters<typeof relevanceComponents>) =>
+  relevanceComponents(...args).level;
+
+describe('the relevance gates discriminate (no embedder — level is pure coverage)', () => {
+  const QUERY = 'kubernetes autoscaling threshold for the nimbus scheduler'; // 7 distinct tokens
+  const WEAK = { title: 'The nimbus scheduler', content: 'the nimbus scheduler runs jobs' }; // 3/7
+  const STRONG = {
+    title: 'Kubernetes autoscaling threshold',
+    content: 'the threshold for the nimbus scheduler under kubernetes autoscaling',
+  }; // 7/7
+
+  let db: TestDb;
+  let repos: Repositories;
+  let projectId: string;
+  let mem: MemoryService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    repos = createRepositories(db.handle.db);
+    projectId = new ProjectsService(repos).create({ slug: 'app' }).id;
+    mem = new MemoryService(repos, db.handle.db);
+  });
+
+  afterEach(() => db.cleanup());
+
+  const search = (over: Partial<Parameters<typeof hybridSearch>[0]>) =>
+    hybridSearch({
       repos,
-      query: 'exact phrase match probe',
+      query: QUERY,
       scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
       offset: 0,
-      abstentionFloor: 0.5,
+      ...over,
     });
+
+  it('pins the two levels the thresholds below are placed around', () => {
+    const q = tokenSet(QUERY);
+    expect(relevanceLevel(q, WEAK, undefined)).toBeCloseTo(3 / 7, 10);
+    expect(relevanceLevel(q, STRONG, undefined)).toBe(1);
+  });
+
+  it('abstains on a weak leader and returns it at a floor below that same level', async () => {
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+
+    const above = await search({ abstentionFloor: 0.6 }); // 3/7 = 0.4286 < 0.6
+    expect(above.abstained).toBe(true);
+    expect(above.ids).toEqual([]);
+
+    // Same corpus, same query, same non-empty candidate set — only the floor moved.
+    const below = await search({ abstentionFloor: 0.4 });
+    expect(below.abstained).toBe(false);
+    expect(below.ids).toHaveLength(1);
+  });
+
+  it('does not abstain at the same floor once a strong row joins the same window', async () => {
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+
+    const result = await search({ abstentionFloor: 0.6 });
     expect(result.abstained).toBe(false);
-    expect(result.ids.length).toBeGreaterThan(0);
+    expect(result.ids).toContain(strong.id);
+  });
+
+  it('passes a leader whose level exactly equals the floor', async () => {
+    // 2 of the 4 distinct query tokens = 0.5 exactly, so this pins the
+    // comparison as `level < floor` and not `<=`.
+    const query = 'alpha beta gamma delta';
+    mem.save(
+      { type: 'project', title: 'Alpha notes', content: 'alpha and beta only' },
+      projectScope(projectId),
+    );
+    expect(
+      relevanceLevel(
+        tokenSet(query),
+        { title: 'Alpha notes', content: 'alpha and beta only' },
+        undefined,
+      ),
+    ).toBe(0.5);
+
+    const atFloor = await search({ query, abstentionFloor: 0.5 });
+    expect(atFloor.abstained).toBe(false);
+    expect(atFloor.ids).toHaveLength(1);
+
+    const justAbove = await search({ query, abstentionFloor: 0.5000001 });
+    expect(justAbove.abstained).toBe(true);
+  });
+
+  it('measures the floor against the window maximum, not the fusion leader', async () => {
+    // `weak` is returned by BOTH branches so RRF ranks it first; `strong` is
+    // lexical-only and ranks behind it while carrying full coverage.
+    const fake = new FakeEmbedder();
+    const embedded = new MemoryService(repos, db.handle.db, undefined, (t) => fake.embed(t));
+    const weakText = { title: 'Nimbus roster', content: 'nimbus roster of on-call names' }; // 1/7
+    const weak = embedded.save({ type: 'project', ...weakText }, projectScope(projectId));
+    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId)); // 7/7
+    const worker = new EmbeddingWorker({ repos, embedder: fake });
+    while ((await worker.processBatch()).processed > 0) {
+      /* only `weak` is queued: `mem` has no embedQuery */
+    }
+
+    const q = tokenSet(QUERY);
+    expect(relevanceLevel(q, weakText, undefined)).toBeCloseTo(1 / 7, 10);
+    expect(relevanceLevel(q, STRONG, undefined)).toBe(1);
+
+    const embedQuery = (t: string) => fake.embed(t);
+    const ungated = await search({ embedQuery });
+    expect(ungated.ids[0]).toBe(weak.id); // fusion put the weak row first
+
+    // Window max = 1.0 clears the floor; the fusion leader's own 0.143 would not.
+    const gated = await search({ embedQuery, abstentionFloor: 0.6 });
+    expect(gated.abstained).toBe(false);
+    expect(gated.ids).toContain(strong.id);
+  });
+
+  it('a page shortened by the relative filter reports abstained:false', async () => {
+    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+    for (let i = 0; i < 3; i++) {
+      mem.save(
+        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+        projectScope(projectId),
+      );
+    }
+
+    // leaderLevel = 1.0, cut = 0.5; the three 3/7 = 0.4286 rows fall below it.
+    const result = await search({ relativeLevelRatio: 0.5 });
+    expect(result.abstained).toBe(false);
+    expect(result.ids).toEqual([strong.id]);
+
+    // The same pool is returned whole at a ratio under the weak rows' level.
+    const loose = await search({ relativeLevelRatio: 0.4 });
+    expect(loose.ids).toHaveLength(4);
+  });
+
+  it('only the floor sets abstained:true — the relative filter never does, even at ratio 1', async () => {
+    mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+    for (let i = 0; i < 3; i++) {
+      mem.save(
+        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+        projectScope(projectId),
+      );
+    }
+    const result = await search({ relativeLevelRatio: 1 });
+    expect(result.abstained).toBe(false);
+    expect(result.ids).toHaveLength(1);
+  });
+
+  it('filters before the page slice, so page 2 can be empty while page 1 was full — and that is not an abstention', async () => {
+    const survivors = [
+      mem.save({ type: 'project', ...STRONG }, projectScope(projectId)).id,
+      mem.save(
+        { type: 'project', title: STRONG.title, content: STRONG.content },
+        projectScope(projectId),
+      ).id,
+    ];
+    for (let i = 0; i < 3; i++) {
+      mem.save(
+        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+        projectScope(projectId),
+      );
+    }
+
+    const page1 = await search({ relativeLevelRatio: 0.5, limit: 2, offset: 0 });
+    expect(page1.ids).toHaveLength(2); // full
+    expect(new Set(page1.ids)).toEqual(new Set(survivors));
+
+    const page2 = await search({ relativeLevelRatio: 0.5, limit: 2, offset: 2 });
+    expect(page2.ids).toEqual([]); // short/empty because only two rows were relevant
+    expect(page2.abstained).toBe(false);
+
+    // Without the filter the same page 2 is populated, so the emptiness is the
+    // filter's doing and not corpus exhaustion.
+    const page2Ungated = await search({ limit: 2, offset: 2 });
+    expect(page2Ungated.ids).toHaveLength(2);
+  });
+
+  // The gate levels the WHOLE fused pool. Asserted on the row set actually read
+  // rather than on a verdict, because the two are only loosely coupled: a
+  // `limit + offset + margin` prefix silently levels fewer rows, and whether
+  // that changes the verdict then depends on where fusion happened to put the
+  // best row. This pins the mechanism instead of one corpus's luck.
+  const fillPool = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      mem.save(
+        {
+          type: 'project',
+          title: `Filler ${i}`,
+          content: `the nimbus scheduler filler row ${i} for padding`,
+        },
+        projectScope(projectId),
+      );
+    }
+  };
+
+  it('levels every fused candidate, at every offset, not a page-sized prefix of them', async () => {
+    mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+    fillPool(40);
+    const textByIds = vi.spyOn(repos.memory, 'textByIds');
+
+    for (const offset of [0, 8, 24]) {
+      textByIds.mockClear();
+      let reported = 0;
+      await search({
+        abstentionFloor: 0.6,
+        offset,
+        onGateWindow: (l) => {
+          reported = l.poolSize;
+        },
+      });
+      expect(textByIds).toHaveBeenCalledTimes(1);
+      const read = textByIds.mock.calls[0]![0].ids.length;
+      expect(read, `offset ${offset} reads the whole pool`).toBe(reported);
+      expect(read, `offset ${offset} pool is the full candidate set`).toBe(41);
+    }
+    textByIds.mockRestore();
+  });
+
+  it('reaches the same abstention verdict at every offset', async () => {
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    fillPool(40);
+
+    for (const offset of [0, 8, 16, 24, 32]) {
+      const page = await search({ abstentionFloor: 0.6, offset });
+      expect(page.abstained, `offset ${offset}`).toBe(true);
+      expect(page.ids, `offset ${offset}`).toEqual([]);
+    }
+  });
+
+  it('reaches the same gate decision after 500 unrelated rows, where the replaced quantity has no range at all', async () => {
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    const level = () => relevanceLevel(tokenSet(QUERY), WEAK, undefined);
+    /** The deleted `normalizeLexicalScore`, recomputed here to show what it could not express. */
+    const normalizedLexicalLeader = () => {
+      const rank = repos.memory.searchBm25Ids({
+        matchExpr: sanitizeFtsQuery(QUERY),
+        scope: 'project',
+        projectId,
+        status: 'active',
+        limit: 400,
+      })[0]!.rank;
+      return 1 / (1 + Math.exp(rank));
+    };
+
+    const before = await search({ abstentionFloor: 0.6 });
+    const levelBefore = level();
+    const normalizedBefore = normalizedLexicalLeader();
+
+    for (let i = 0; i < 500; i++) {
+      mem.save(
+        {
+          type: 'project',
+          title: `Filler ${i}`,
+          content: `the nimbus scheduler filler row ${i} for padding`,
+        },
+        projectScope(projectId),
+      );
+    }
+
+    const after = await search({ abstentionFloor: 0.6 });
+    expect(after.abstained).toBe(before.abstained);
+    expect(after.abstained).toBe(true);
+    expect(level()).toBe(levelBefore);
+    expect(levelBefore).toBeCloseTo(3 / 7, 10);
+
+    // Why a floor over the level can work and a floor over the old quantity
+    // cannot: the whole observable range of the latter is under 1e-5 wide and
+    // pinned just above 0.5, at both corpus sizes.
+    for (const v of [normalizedBefore, normalizedLexicalLeader()]) {
+      expect(v).toBeGreaterThan(0.5);
+      expect(v).toBeLessThan(0.50001);
+    }
+  }, 30_000);
+});
+
+describe('the disabled path does no gate work', () => {
+  let db: TestDb;
+  let repos: Repositories;
+  let projectId: string;
+  let mem: MemoryService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    repos = createRepositories(db.handle.db);
+    projectId = new ProjectsService(repos).create({ slug: 'app' }).id;
+    mem = new MemoryService(repos, db.handle.db);
+  });
+
+  afterEach(() => db.cleanup());
+
+  /** Records every `repos.memory` method name `hybridSearch` reaches for. */
+  function countingRepos(): { repos: Repositories; calls: string[] } {
+    const calls: string[] = [];
+    const memoryProxy = new Proxy(repos.memory, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          calls.push(String(prop));
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { repos: { ...repos, memory: memoryProxy }, calls };
+  }
+
+  it('issues exactly the pre-change reads and never the gate window text read', async () => {
+    for (let i = 0; i < 12; i++) {
+      mem.save(
+        {
+          type: 'project',
+          title: `Rollout ${i}`,
+          content: `rollout note ${i} on timezone rotation`,
+        },
+        projectScope(projectId),
+      );
+    }
+    const { repos: counting, calls } = countingRepos();
+    await hybridSearch({
+      repos: counting,
+      query: 'rollout timezone rotation',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    // The pre-change disabled path: one lexical read plus the boost's two
+    // metadata reads. An exact list, not a `not.toContain`, so a second new
+    // read added later fails here too.
+    expect(calls).toEqual(['searchBm25Ids', 'rankingMetadataByIds', 'confirmationCountsByIds']);
+    expect(calls).not.toContain('textByIds');
+  });
+
+  it('returns the ids the pre-gate pipeline produces, reconstructed from its surviving parts', async () => {
+    const saved = [];
+    for (let i = 0; i < 12; i++) {
+      saved.push(
+        mem.save(
+          {
+            type: i % 2 === 0 ? 'project' : 'user',
+            title: `Rollout ${i}`,
+            content: `rollout note ${i} on timezone rotation and on-call handoff`,
+          },
+          projectScope(projectId),
+        ),
+      );
+    }
+    // Give one row every boost signal, so the oracle has to agree about the
+    // boost too rather than only about fusion order.
+    mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
+    mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
+    mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
+
+    const opts = {
+      repos,
+      query: 'rollout timezone rotation handoff',
+      scope: 'project' as const,
+      projectId,
+      status: 'active' as const,
+      limit: 8,
+      offset: 0,
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    // No embedder is wired, so the dense list is empty and the whole
+    // pre-change pipeline is reproducible here: FTS ids -> RRF -> boost -> slice.
+    const lexicalIds = repos.memory
+      .searchBm25Ids({
+        matchExpr: sanitizeFtsQuery(opts.query),
+        scope: 'project',
+        projectId,
+        status: 'active',
+        limit: computeRankWindowSize(opts.limit, opts.offset),
+      })
+      .map((r) => r.id);
+    const expected = applyRankingBoost(fuseRRFWithScores([[], lexicalIds], RANK_CONSTANT), opts)
+      .map((r) => r.id)
+      .slice(0, 8);
+
+    const result = await hybridSearch(opts);
+    expect(result.ids).toEqual(expected);
+    expect(result.ids).toHaveLength(8);
+    expect(result.abstained).toBe(false);
   });
 });
 

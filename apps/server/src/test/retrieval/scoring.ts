@@ -75,13 +75,19 @@ export function scoreQuery(outcome: QueryOutcome): QueryMetrics {
 
 export interface AggregateMetrics {
   k: number;
+  /** Gold-bearing queries — the denominator of P/R/MRR and of `overAbstentionRate`. */
   n: number;
+  /** Empty-gold queries — the denominator of `abstentionFalsePositiveRate`. */
+  nAbstention: number;
   precisionAtK: number;
   recallAtK: number;
   mrr: number;
   ceilingPrecisionAtK: number;
   ceilingRecallAtK: number;
+  /** Empty-gold queries that returned something. */
   abstentionFalsePositiveRate: number | null;
+  /** Gold-bearing queries that returned nothing; folded into recall it is indistinguishable from a confidently wrong answer. */
+  overAbstentionRate: number | null;
   avgTokensReturned: number;
   p50LatencyMs: number;
   p95LatencyMs: number;
@@ -111,6 +117,7 @@ export function aggregate(
   return {
     k,
     n: scored.length,
+    nAbstention: abstentionQueries.length,
     precisionAtK: mean(scored.map((m) => m.precisionAtK!)),
     recallAtK: mean(scored.map((m) => m.recallAtK!)),
     mrr: mean(scored.map((m) => m.reciprocalRank!)),
@@ -120,6 +127,7 @@ export function aggregate(
       abstentionQueries.length === 0
         ? null
         : mean(abstentionQueries.map((m) => (m.abstained ? 0 : 1))),
+    overAbstentionRate: scored.length === 0 ? null : mean(scored.map((m) => (m.abstained ? 1 : 0))),
     avgTokensReturned: mean(metrics.map((m) => m.tokensReturned)),
     p50LatencyMs: percentile(
       metrics.map((m) => m.latencyMs),

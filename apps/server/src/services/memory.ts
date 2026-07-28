@@ -7,7 +7,7 @@ import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
-import { hybridSearch, RANK_WINDOW_CEILING } from './hybrid-search.js';
+import { hybridSearch, type HybridSearchOpts, RANK_WINDOW_CEILING } from './hybrid-search.js';
 import {
   deriveReviewState,
   REFUTED_PRIORITY_MS,
@@ -111,6 +111,12 @@ export interface ConfirmOptions {
   /** Required when `verdict: 'refute'`; optional otherwise. */
   reason?: string;
 }
+
+/** Deliberately not part of `SearchMemoriesInput`, so no MCP tool schema can reach these. */
+export type GateOverrides = Pick<
+  HybridSearchOpts,
+  'abstentionFloor' | 'relativeLevelRatio' | 'onGateWindow'
+>;
 
 export interface SearchMemoriesInput {
   query?: string;
@@ -407,15 +413,14 @@ export class MemoryService {
   }
 
   /**
-   * Same as `search`, plus whether the text-query branch abstained (the
-   * gates behind it — `ABSTENTION_FLOOR`/`GAP_RATIO_THRESHOLD` in
-   * hybrid-search.ts — ship disabled, so `abstained` is always `false`
-   * until they're calibrated and enabled). Only `memory.search`'s MCP
-   * response surfaces this; other callers use the plain `search` above.
+   * Same as `search`, plus the `ABSTENTION_FLOOR`'s verdict alone: a page
+   * shortened by `RELATIVE_LEVEL_RATIO` reports `false`, so a caller can tell
+   * "nothing relevant exists" from "fewer than `limit` rows were relevant".
    */
   async searchWithAbstention(
     input: SearchMemoriesInput,
     scope: Scope,
+    gates?: GateOverrides,
   ): Promise<{
     memories: Memory[];
     abstained: boolean;
@@ -499,6 +504,7 @@ export class MemoryService {
         limit,
         offset,
         includeGlobal: input.includeGlobal,
+        ...gates,
       });
       ids = result.ids;
       abstained = result.abstained;
