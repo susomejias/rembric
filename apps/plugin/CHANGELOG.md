@@ -4,6 +4,29 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.23.0](https://github.com/susomejias/rembric/compare/plugin-v0.22.0...plugin-v0.23.0) (2026-07-28)
+
+
+### Features
+
+* **sessions:** enrich the summary rubric and give it one source ([357ac56](https://github.com/susomejias/rembric/commit/357ac5634de9b9f46ab8d816d7767c8493f9a3a9))
+* **sessions:** extract deterministic facts from a Claude Code transcript ([013238a](https://github.com/susomejias/rembric/commit/013238acb7908b4d7b0b80210c21f09b5161a4a4))
+* **sessions:** move the summary reminder to the end of the turn, grounded in facts ([77564be](https://github.com/susomejias/rembric/commit/77564be5c4cfb3907c515867ed4d176446925113))
+* **sessions:** send extracted facts as the fallback summary body ([5c9e113](https://github.com/susomejias/rembric/commit/5c9e11326313df87a3978895aa570617dbaaba84))
+
+
+### Bug Fixes
+
+* **plugin:** reconcile three specs with the shipped tree, and gate what drifted ([878171b](https://github.com/susomejias/rembric/commit/878171bc0bb42a76a6d6fc3f62e99b13b600791c))
+* **plugin:** set the hook config explicitly in stop-nudge tests ([a9799fa](https://github.com/susomejias/rembric/commit/a9799fa89797dcc9342fbe2d980e8660243d18ae))
+* **sessions:** close a fact-injection hole and three more review findings ([9170804](https://github.com/susomejias/rembric/commit/917080452c1399d80c359a9eb00b283e8cf08d4d))
+* **sessions:** close the five findings the review left open ([78e304e](https://github.com/susomejias/rembric/commit/78e304ec2d898626798776b0867b4395449365e8))
+
+
+### Documentation
+
+* **openspec:** archive ground-session-summaries ([ced66dd](https://github.com/susomejias/rembric/commit/ced66dd4a75508795487dfdc39e433bfd585af8c))
+
 ## [0.22.0](https://github.com/susomejias/rembric/compare/plugin-v0.21.0...plugin-v0.22.0) (2026-07-25)
 
 
