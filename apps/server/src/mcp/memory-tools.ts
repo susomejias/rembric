@@ -59,6 +59,11 @@ import { ok } from './result.js';
 const MEMORY_SCOPES = ['global', 'project'] as const;
 const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 
+/** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
+const PENDING_JUDGMENTS_MAX = 50;
+/** A queue-depth warning, not a page of an inventory — the caller asks for inventory by passing a size. */
+const PENDING_JUDGMENTS_DEFAULT = 5;
+
 export const memorySaveSchema = {
   scope: z.enum(MEMORY_SCOPES).default('project'),
   type: z.enum(MEMORY_TYPES),
@@ -201,6 +206,15 @@ export const contextSchema = {
   sessions: z.number().int().min(0).max(25).optional(),
   prompts: z.number().int().min(0).max(50).optional(),
   memories: z.number().int().min(0).max(100).optional(),
+  judgments: z
+    .number()
+    .int()
+    .min(0)
+    .max(PENDING_JUDGMENTS_MAX)
+    .optional()
+    .describe(
+      'How many pendingJudgments[] to return. Passing it also LIFTS the age filter, so the un-aged pairs become reachable; omit it for the aged queue-depth warning. Compare against pendingJudgmentsTotal to tell a page from the queue.',
+    ),
   includeArchived: z.boolean().optional(),
   focus: z
     .string()
@@ -425,6 +439,14 @@ export const contextOutput = {
       ageMs: z.number(),
     }),
   ),
+  /**
+   * Total in-scope pending-judgment count — `pendingJudgments` above is a page,
+   * and by default an AGED one, so its length says nothing about the queue.
+   * Drain with `judgments: min(pendingJudgmentsTotal, PENDING_JUDGMENTS_MAX)`,
+   * repeating while the total stays above 0: a total over the max is rejected
+   * by the input schema before the handler's clamp can round it down.
+   */
+  pendingJudgmentsTotal: z.number(),
   needsReview: z.array(
     z.object({
       id: z.string(),
@@ -1166,6 +1188,7 @@ async function handleContext(
     sessions?: number;
     prompts?: number;
     memories?: number;
+    judgments?: number;
     includeArchived?: boolean;
     focus?: string;
   },
@@ -1182,7 +1205,10 @@ async function handleContext(
   const sessionsLimit = clamp(args.sessions ?? 3, 0, 25);
   const memoriesLimit = clamp(args.memories ?? 10, 0, 100);
   const clamped =
-    (args.sessions ?? 0) > 25 || (args.prompts ?? 0) > 50 || (args.memories ?? 0) > 100;
+    (args.sessions ?? 0) > 25 ||
+    (args.prompts ?? 0) > 50 ||
+    (args.memories ?? 0) > 100 ||
+    (args.judgments ?? 0) > PENDING_JUDGMENTS_MAX;
   const includeArchived = args.includeArchived === true;
 
   const recentSessions = deps.agentSessions
@@ -1292,17 +1318,26 @@ async function handleContext(
     }));
   }
 
-  // Aged pending relations (older than the orphan threshold) the agent
-  // should close with memory.judge while context is fresh. Unjudged rows
-  // are deterministically orphaned by the sweep after the deadline.
+  // Pending relations the agent should close with memory.judge while context
+  // is fresh. Unjudged rows are deterministically orphaned by the sweep after
+  // the deadline.
   const now = Date.now();
+  const wantsInventory = args.judgments !== undefined;
+  const judgmentsLimit = clamp(
+    args.judgments ?? PENDING_JUDGMENTS_DEFAULT,
+    0,
+    PENDING_JUDGMENTS_MAX,
+  );
   const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
+  const relationsScope = {
+    scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+  };
   const pendingJudgments = deps.repos.relations
-    .listPendingOlderThanInScope({
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
-      cutoffMs: pendingCutoff,
-      limit: 5,
+    .listPendingInScope({
+      ...relationsScope,
+      cutoffMs: wantsInventory ? null : pendingCutoff,
+      limit: judgmentsLimit,
     })
     .map((r) => ({
       judgmentId: r.judgmentId,
@@ -1314,6 +1349,7 @@ async function handleContext(
       targetSnippet: snippet(r.targetContent, CONTEXT_SNIPPET_CHARS),
       ageMs: now - r.createdAt.getTime(),
     }));
+  const pendingJudgmentsTotal = deps.repos.relations.countPendingInScope(relationsScope);
 
   // Active memories past their review shelf life — re-affirm with
   // memory.confirm, supersede with memory.save + topic_key, or judge if they
@@ -1336,6 +1372,7 @@ async function handleContext(
     recentMemories,
     relevantMemories,
     pendingJudgments,
+    pendingJudgmentsTotal,
     needsReview,
     needsReviewTotal,
     clamped,
