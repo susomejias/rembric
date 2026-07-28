@@ -46,10 +46,12 @@ export function computeRankWindowSize(limit: number, offset: number): number {
 export const ABSTENTION_FLOOR: number | null = null;
 /**
  * Relative-filter ratio: a pool row survives only while its relevance level is
- * at or above `ratio × leaderLevel`. `null` ships this disabled, same bar as
- * `ABSTENTION_FLOOR`.
+ * at or above `ratio × leaderLevel`. Enabled at 0.40 on the committed sweep in
+ * `archive/2026-07-28-rescore-relevance-abstention/measurements/sweep.txt`,
+ * which is plateau-interior with two admissible steps either side. `ABSTENTION_FLOOR`
+ * stays `null` — its two level distributions overlap and no value separates them.
  */
-export const RELATIVE_LEVEL_RATIO: number | null = null;
+export const RELATIVE_LEVEL_RATIO: number | null = 0.4;
 /**
  * At most this many results per originating session. `null` ships this
  * disabled, same reasoning as `ABSTENTION_FLOOR`: it is applied to the whole

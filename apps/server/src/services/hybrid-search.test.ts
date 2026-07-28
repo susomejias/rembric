@@ -797,11 +797,13 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
     expect(relevanceLevel(q, STRONG, undefined)).toBe(1);
 
     const embedQuery = (t: string) => fake.embed(t);
-    const ungated = await search({ embedQuery });
+    // `relativeLevelRatio: null` is explicit: this test isolates the FLOOR, and
+    // inheriting a shipped ratio would let a second mechanism move the result.
+    const ungated = await search({ embedQuery, relativeLevelRatio: null });
     expect(ungated.ids[0]).toBe(weak.id); // fusion put the weak row first
 
-    // Window max = 1.0 clears the floor; the fusion leader's own 0.143 would not.
-    const gated = await search({ embedQuery, abstentionFloor: 0.6 });
+    // Pool max = 1.0 clears the floor; the fusion leader's own 0.143 would not.
+    const gated = await search({ embedQuery, abstentionFloor: 0.6, relativeLevelRatio: null });
     expect(gated.abstained).toBe(false);
     expect(gated.ids).toContain(strong.id);
   });
@@ -965,6 +967,19 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
   }, 30_000);
 });
 
+// The tests around the gates pass their values EXPLICITLY so they test the
+// mechanism rather than the shipped configuration. That leaves nothing watching
+// the configuration itself, so this pins it: `memory/spec.md` requires a
+// committed sweep before a gate is enabled, and this is what makes a silent
+// change to one visible in review.
+describe('the shipped gate configuration', () => {
+  it('ships the floor disabled and the relative filter at its swept value', async () => {
+    const mod = await import('./hybrid-search.js');
+    expect(mod.ABSTENTION_FLOOR).toBe(null);
+    expect(mod.RELATIVE_LEVEL_RATIO).toBe(0.4);
+  });
+});
+
 describe('the disabled path does no gate work', () => {
   let db: TestDb;
   let repos: Repositories;
@@ -1008,6 +1023,10 @@ describe('the disabled path does no gate work', () => {
       );
     }
     const { repos: counting, calls } = countingRepos();
+    // Both gates passed as `null` EXPLICITLY. This test's subject is the
+    // mechanism — disabled gates issue no extra read — not the current value of
+    // the shipped constants. Reading them from the module made it fail the day
+    // one gate was enabled on evidence, which is a legitimate change.
     await hybridSearch({
       repos: counting,
       query: 'rollout timezone rotation',
@@ -1016,10 +1035,11 @@ describe('the disabled path does no gate work', () => {
       status: 'active',
       limit: 8,
       offset: 0,
+      abstentionFloor: null,
+      relativeLevelRatio: null,
     });
-    // The pre-change disabled path: one lexical read plus the boost's two
-    // metadata reads. An exact list, not a `not.toContain`, so a second new
-    // read added later fails here too.
+    // One lexical read plus the boost's two metadata reads. An exact list, not a
+    // `not.toContain`, so a second new read added later fails here too.
     expect(calls).toEqual(['searchBm25Ids', 'rankingMetadataByIds', 'confirmationCountsByIds']);
     expect(calls).not.toContain('textByIds');
   });

@@ -16,14 +16,14 @@
   },
   "floors": {
     "5": {
-      "precisionAtK": 0.15000000000000002,
-      "recallAtK": 0.7625,
-      "mrr": 0.60625
+      "precisionAtK": 0.1875,
+      "recallAtK": 0.91875,
+      "mrr": 0.7333333333333333
     },
     "8": {
       "precisionAtK": 0.10625,
       "recallAtK": 0.95,
-      "mrr": 0.6255952380952381
+      "mrr": 0.7333333333333333
     }
   },
   "caps": {
