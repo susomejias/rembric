@@ -778,7 +778,7 @@ The opencode plugin installer SHALL detect an existing Rembric MCP configuration
 - The handler SHALL push the **save** nudge part when `turn % SAVE_NUDGE_EVERY === 0` (`SAVE_NUDGE_EVERY = 5`).
 - The handler SHALL push the **summary** nudge part when `turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0` (`SUMMARY_NUDGE_EVERY = 10`).
 - The save, summary, and recall nudges SHALL be mutually independent — any combination MAY fire on the same turn, each pushed as its own separate `output.parts` text part (none replaces another).
-- The summary nudge text SHALL direct `memory.session_summary({title≤100, summary})` with the `Goal · Discoveries · Accomplished · Next Steps · Files` structure, byte-identical to the Claude/Codex and Hermes copies.
+- The summary nudge text SHALL direct `memory.session_summary({title≤100, summary})` with the canonical section list defined in `sessions`, byte-identical to the Claude/Codex and Hermes copies.
 - Subagent sessions SHALL NOT be nudged (the handler's existing subagent guard covers this).
 - The counter entry SHALL be evicted in the existing `session.deleted` cleanup.
 

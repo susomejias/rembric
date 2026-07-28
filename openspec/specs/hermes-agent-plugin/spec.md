@@ -131,7 +131,7 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Credentia
 
 - **WHEN** Hermes calls `provider.system_prompt_block()`
 - **THEN** the returned string SHALL be non-empty and SHALL contain the substring `memory.session_summary`
-- **AND** SHALL contain a reference to `title` and the structure `Goal · Discoveries · Accomplished · Next Steps · Files`
+- **AND** SHALL contain a reference to `title` and the canonical section list defined in `sessions`
 - **AND** SHALL phrase the trigger as firing at the end of every working turn (never silent) and SHALL NOT bind it solely to the literal word "done"
 - **AND** SHALL contain the substrings `memory.context`, `memory.save`, and `memory.about` (the unified RECALL / SAVE / update flows)
 - **AND** SHALL be ≤1000 chars total (self-imposed budget matching the server's `INSTRUCTIONS_MAX_LENGTH`; Hermes applies no truncation)
@@ -422,7 +422,7 @@ The Hermes `MemoryProvider` (`apps/plugin/.hermes-plugin/__init__.py`) SHALL rei
   - the **summary** hint when `_turn_number == 1` OR `_turn_number % _SUMMARY_HINT_EVERY == 0` (`_SUMMARY_HINT_EVERY = 10`);
   - when the urgent flag is armed, the **urgent pre-compaction** save reminder INSTEAD of the normal save hint, then mark itself warned (fires at most once per session). The urgent reminder and the summary hint are independent — both MAY appear.
 - The save, summary, and urgent reminders SHALL be mutually independent lines; none SHALL overwrite another.
-- The summary hint text SHALL direct `memory.session_summary({title≤100, summary})` with the `Goal · Discoveries · Accomplished · Next Steps · Files` structure, byte-identical to the Claude/Codex and opencode copies.
+- The summary hint text SHALL direct `memory.session_summary({title≤100, summary})` with the canonical section list defined in `sessions`, byte-identical to the Claude/Codex and opencode copies.
 - `prefetch()` SHALL remain inline (no network call) and SHALL return a non-empty hint even when the recall cache is empty.
 - The urgent/warned flags and the turn counter SHALL reset on session end and session switch.
 

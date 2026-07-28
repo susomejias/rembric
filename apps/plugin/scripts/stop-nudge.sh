@@ -46,6 +46,13 @@ _emit_nothing() {
   exit 0
 }
 
+# Unconfigured means the MCP tools are not reachable either, so a reminder to
+# call one is noise. Every other hook skips on this; this one never made a request
+# and so never checked.
+if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
+  _emit_nothing
+fi
+
 RAW_SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 COUNT="$(rembric_turn_count_peek rembric-turnnudge "$RAW_SESSION_ID")"
 case "$COUNT" in

@@ -391,7 +391,7 @@ Never autocreate or autopin silently.
 
 Long-running agents compact their context. To survive that, two tools fire at specific moments:
 
-- **Before "done" / before compaction**: `memory.session_summary({Goal, Discoveries, Accomplished, Next Steps, Files})` closes the session and persists the state.
+- **Before "done" / before compaction**: `memory.session_summary({Goal, Accomplished, Decisions+why, Verified+how, Unfinished+why, Files})` closes the session and persists the state.
 - **After compaction / new session**: `memory.context({sessions, prompts, memories})` restores it.
 
 The proactive-save protocol embedded in `initialize.instructions` already tells agents to do this. If your client ignores the field, paste the equivalent into the client's rules file (`AGENTS.md`, `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, `~/.gemini/system.md`, etc.).

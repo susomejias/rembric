@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: The plugin SHALL ship six hook event types across nine handler entries at `apps/plugin/hooks/hooks.json`
 
@@ -179,6 +179,8 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
 - **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, SessionEnd, PreCompact, PostCompact, Stop}` carrying exactly eight handler entries, with NO `PostToolUse` entry
 
+## MODIFIED Requirements
+
 ### Requirement: The plugin SHALL ship a unified `UserPromptSubmit` per-turn nudge hook
 
 The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a matcher-less `UserPromptSubmit` entry — distinct from the existing keyword-gated recall entry (`prompt-search.sh`) — invoking a new shared script `${CLAUDE_PLUGIN_ROOT}/scripts/prompt-nudge.sh` that carries BOTH the save and the session-summary reminders on a per-turn cadence. The plugin SHALL NOT ship a `PostToolUse` save-nudge hook (the prior `post-tool.sh` approach is removed; `hooks.json` SHALL contain no `PostToolUse` entry emitting a `memory.save` reminder).
@@ -234,3 +236,11 @@ The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a match
 - **WHEN** `prompt-nudge.sh` runs on a turn where `count % SUMMARY_NUDGE_EVERY == 0` and `count != 1`
 - **THEN** it SHALL NOT emit the summary nudge line
 - **AND** `SUMMARY_NUDGE_EVERY` SHALL NOT be declared in `prompt-nudge.sh`, so the cadence has exactly one owner
+
+## REMOVED Requirements
+
+### Requirement: The plugin SHALL ship six hook event types across eight handler entries at `apps/plugin/hooks/hooks.json`
+
+**Reason**: The handler count is in the requirement's own header, so adding the ninth entry renames it. Same mechanism `audit-plugin-spec-integrity` used when it moved this count from seven to eight.
+
+**Migration**: Replaced by "The plugin SHALL ship six hook event types across nine handler entries at `apps/plugin/hooks/hooks.json`", which carries every scenario forward unchanged and adds one, and which corrects three further statements the ninth entry falsifies: that `UserPromptSubmit`'s second entry is a combined save+summary nudge (the summary half moved to the end of the turn), that the post-compact block's section list is written out here rather than derived from its single source, and that the `Stop` hook "never emits `hookSpecificOutput.additionalContext` or any other model-facing output". That last one cites `proactive-save-nudges`' decision to decline `Stop`; the replacement **narrows rather than reverses** it, on the ground that forced continuation is a property of the host's blocking decision and not of the event, so a non-interrupting reminder falls outside its reasoning. No behavioural claim is weakened: the shipped tree satisfies the replacement, and the ordered-pair assertion on the two entries' `async` flags is stricter than the single-value assertion it replaces.

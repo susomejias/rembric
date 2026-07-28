@@ -43,7 +43,7 @@ describe('hooks.json (Claude Code)', () => {
     );
   });
 
-  it('carries exactly eight handler entries', () => {
+  it('carries exactly nine handler entries', () => {
     expect(handlerCount(claudeHooks)).toBe(9);
   });
 

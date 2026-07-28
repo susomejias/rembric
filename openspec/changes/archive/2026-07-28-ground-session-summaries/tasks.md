@@ -88,8 +88,10 @@
 
 ## 6. Specs and archive
 
-- [ ] 6.1 Apply the `sessions` delta. Both MODIFIED requirements reproduce every published scenario — 5 on the structure requirement and 7 on the cap requirement. **Verify that count against the published file before archiving**: the previous change had four scenarios silently dropped by its delta and the archiver caught it, after that change's own task had claimed nothing was lost.
-- [ ] 6.2 Apply the `plugin-session-protocol` delta (ADDED only, so no published scenario is at risk).
+- [x] 6.1 Apply the `sessions` delta. Both MODIFIED requirements reproduce every published scenario — 5 on the structure requirement and 7 on the cap requirement. **Verify that count against the published file before archiving**: the previous change had four scenarios silently dropped by its delta and the archiver caught it, after that change's own task had claimed nothing was lost.
+  - Applied by the archiver. It refused the first attempt: the handler count lives in the requirement's own HEADER, so raising it to nine RENAMES the requirement and a MODIFIED block cannot match. Restructured as ADDED + REMOVED with a `Reason`/`Migration` pair, the same shape `audit-plugin-spec-integrity` used when it moved that count from seven to eight.
+- [x] 6.2 Apply the `plugin-session-protocol` delta (ADDED only, so no published scenario is at risk).
+  - Applied. Scenario counts verified against the published file BEFORE archiving this time, which is why nothing was dropped — unlike the previous change, where the archiver caught four.
 - [x] 6.3 Grep `openspec/specs/` for `Goal · Discoveries`, `Goal /`, `truncat`, and `19500`, and reconcile every hit. Any spec that states the head-truncation behaviour becomes false the moment this lands.
   - **Six false statements found across four capabilities, and two of them were in MY OWN delta.** The delta claimed the reminder "SHALL NOT fire when the session already carries a curated summary" with a scenario for it — never implemented, because no read endpoint exists — and its fail-open clause listed "non-2xx, timeout, unparseable response" for a hook that makes NO request at all. Both corrected to what the code does, with the missing endpoint recorded as the reason and a follow-up named.
   - `claude-code-plugin`: "eight handler entries" → nine; "the unified per-turn save+summary nudge" → save only; the post-compact block naming the old rubric; and **"[the Stop hook] never emits `hookSpecificOutput.additionalContext` or any other model-facing output"**, which cites the `proactive-save-nudges` decision that declined `Stop`. That decision is **narrowed, not reversed**, and the delta says why: forced-continuation is a property of the BLOCKING decision, not of the event, so a non-interrupting reminder is outside its scope.
@@ -102,10 +104,16 @@
 
 ## 7. Verify
 
-- [ ] 7.1 `pnpm run typecheck`, `pnpm run lint`, full test suite.
-- [ ] 7.2 Real end-to-end against the dev stack, driving the actual hook scripts rather than calling the helpers: a session that writes a curated summary must not be interrupted; a session that does not must be interrupted exactly once; a stopped server must not interrupt at all. Testing the helpers in isolation does not exercise the wiring, and the wiring is where the `async: true` defect lived.
-- [ ] 7.3 Confirm the disabled/unconfigured path is inert: with no server URL or token configured, every new hook entry exits 0 and writes nothing.
-- [ ] 7.4 Run the `rembric-plugin-development` e2e walkthrough — this change touches `apps/plugin/` hook manifests for more than one client.
+- [x] 7.1 `pnpm run typecheck`, `pnpm run lint`, full test suite.
+  - `pnpm run typecheck`, `pnpm run lint`, **1825 server tests + 72 Hermes tests**, all green.
+- [x] 7.2 Real end-to-end against the dev stack, driving the actual hook scripts rather than calling the helpers: a session that writes a curated summary must not be interrupted; a session that does not must be interrupted exactly once; a stopped server must not interrupt at all. Testing the helpers in isolation does not exercise the wiring, and the wiring is where the `async: true` defect lived.
+  - **Driven against a real dev stack, reading the row back out of `data-dev/data.db`.** A tool-bearing transcript through the real `stop-sync.sh` persisted `SESSION FACTS`, the failed `pnpm run lint`, the edited path, and the final exchange, with `summary_final = 0`. The real `stop-nudge.sh` emitted 857 bytes of `hookSpecificOutput.additionalContext` carrying both the rubric and the facts, with no blocking key.
+  - **Precedence verified end to end**: a `final:true` curated summary written first SURVIVES a subsequent raw sync — the facts do not overwrite it.
+- [x] 7.3 Confirm the disabled/unconfigured path is inert: with no server URL or token configured, every new hook entry exits 0 and writes nothing.
+  - **The e2e found a real gap a unit test had not.** `stop-nudge.sh` reminded even with `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN` unset, because it makes no request and so never checked configuration — telling the model to call a tool that is not reachable. The delta REQUIRED this ("any missing configuration ... SHALL exit successfully and produce no output") and the code did not do it: the third time in this change my own spec text outran the implementation. Gated and covered by a test whose comment says it came from the e2e.
+  - Re-verified against the real hook: 0 bytes unconfigured, 857 configured. `stop-sync.sh` unconfigured exits 0.
+- [x] 7.4 Run the `rembric-plugin-development` e2e walkthrough — this change touches `apps/plugin/` hook manifests for more than one client.
+  - `pnpm run e2e:installer`: 57 tests green. The hook manifests are what the installer installs, and this change adds an entry to both.
 
 ## 8. Deferred, recorded so it is not lost
 
@@ -113,3 +121,7 @@
 - [ ] 8.2 Server-side model summarisation of a session that ended raw is **not** in this change. The consolidation sweep is contractually deterministic with no LLM and no cron; introducing one is a decision about cost and latency that belongs to its own change.
 - [ ] 8.3 Keeping both ends of an over-cap summary and eliding the middle is **rejected for now**, not forgotten: it needs a policy for splitting the budget and produces a discontinuity that is harder to read and to assert than a clean tail. Revisit only if 0.2's measurement shows the opening carries something the extraction does not already surface.
 - [ ] 8.4 Raising `SUMMARY_MAX_CHARS` is **rejected** on the grounds recorded in design D2. If real sessions still truncate after §2 lands, that measurement is the trigger to reconsider — and the constant is one line, with no migration.
+
+- [x] 9.1 **Post-archive sweep for stale documentation, requested explicitly.** The first grep found three leftovers; each fix surfaced more, and it took five passes to converge. Final tally beyond the six already recorded in 6.3: `plugin-session-protocol` carried BOTH handler counts plus `the Stop handler SHALL declare "async": true` (now an ordered statement about two entries with opposite obligations); `claude-code-plugin` had a SECOND requirement asserting eight entries, and my own delta had left the old section list sitting beside the new "carried verbatim from the single source" sentence, so the published text contradicted itself; `opencode-plugin`, `hermes-agent-plugin` (twice) and `mcp-api` all restated the old list; `docs/agents.md` twice; and `hook-manifests.test.ts` had a test TITLE reading "carries exactly eight handler entries" while asserting nine.
+  - Editing `mcp-api`, `hermes-agent-plugin` and `opencode-plugin` meant three capabilities were touched with no paired delta, which this repo's own provenance guard rejects. Deltas were added to the archive folder for each, and the pairing was verified by diffing the edited-capability set against the arriving-delta set rather than by assuming it.
+  - `openspec/specs/sessions/spec.md:71` was deliberately left: the old list appears there as an arbitrary sample VALUE inside a `writeSummary` scenario, not as a statement about the rubric.

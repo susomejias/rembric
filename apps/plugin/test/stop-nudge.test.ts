@@ -185,6 +185,23 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
     expect(ctx).toContain('Decisions+why');
   });
 
+  // Found by the e2e, not by a unit test: the hook makes no request, so it never
+  // checked configuration and reminded the model to call a tool that is not
+  // reachable. The spec required this and the code did not do it.
+  it('is silent when no server is configured', () => {
+    const tx = toolTranscript('unconf.jsonl');
+    advanceTurn('s9');
+    const bare = { ...process.env, TMPDIR: counterDir };
+    delete bare.REMBRIC_SERVER_URL;
+    delete bare.REMBRIC_API_TOKEN;
+    const out = execFileSync('bash', [stopNudgeSh], {
+      input: stdin('s9', tx),
+      encoding: 'utf8',
+      env: bare,
+    });
+    expect(out).toBe('');
+  });
+
   it('emits a JSON object rather than nothing for codex-cli when silent', () => {
     expect(run(stopNudgeSh, stdin('s7'), 'codex-cli')).toBe('{}');
   });

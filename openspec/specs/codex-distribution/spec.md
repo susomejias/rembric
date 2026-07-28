@@ -58,7 +58,7 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 
 ### Requirement: Codex hook configuration
 
-The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **five event types across seven handler entries**.
+The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **five event types across eight handler entries**.
 
 Codex's hook surface differs from Claude Code's in ways the platform forces, and has evolved since this requirement was first written:
 
@@ -74,7 +74,7 @@ Codex's mapping of lifecycle events to HTTP endpoints still diverges from Claude
 
 - **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
 - **THEN** the `hooks` object SHALL declare exactly these five event types and no others: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`
-- **AND** those five SHALL carry exactly seven handler entries in total
+- **AND** those five SHALL carry exactly eight handler entries in total
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, with the literal matchers `startup|resume|clear` and `compact`
 - **AND** `UserPromptSubmit` SHALL declare exactly two entries, invoking `prompt-search.sh` and `prompt-nudge.sh`, and NEITHER SHALL carry a `matcher` key
 - **AND** the `hooks` object SHALL NOT contain `SessionEnd` (Codex does not support this event)
@@ -87,7 +87,7 @@ Codex's mapping of lifecycle events to HTTP endpoints still diverges from Claude
 #### Scenario: Codex Stop wires to a per-turn summary writer
 
 - **WHEN** the `Stop` hook fires (which it does once per agent turn under Codex semantics)
-- **THEN** the hook SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-sync.sh codex-cli` — the same single script Claude Code's `Stop` hook invokes with `claude-code`, diverging in exactly THREE ways selected by that agent-name argument: (1) the transcript parser (`*_codex_cli` vs `*_claude_code`), (2) the stdout contract (Codex MUST `printf '{}'`; Claude Code MUST emit nothing), and (3) the `final` field (Codex sends `"final":false` explicitly; Claude Code OMITS the key entirely). It also diverges in execution model, which the agent argument selects rather than the caller: Codex runs synchronously because it has no documented async escape hatch and must emit its JSON before exiting, while Claude Code daemonizes the body into a detached, output-redirected subshell
+- **THEN** the hook's FIRST entry SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-sync.sh codex-cli` — the same script Claude Code's `Stop` hook invokes with `claude-code` in its own first entry, diverging in exactly THREE ways selected by that agent-name argument: (1) the transcript parser (`*_codex_cli` vs `*_claude_code`), (2) the stdout contract (Codex MUST `printf '{}'`; Claude Code MUST emit nothing), and (3) the `final` field (Codex sends `"final":false` explicitly; Claude Code OMITS the key entirely). It also diverges in execution model, which the agent argument selects rather than the caller: Codex runs synchronously because it has no documented async escape hatch and must emit its JSON before exiting, while Claude Code daemonizes the body into a detached, output-redirected subshell
 - **AND** the script SHALL read `session_id`, `cwd`, and `transcript_path` from stdin
 - **AND** SHALL read `${cwd}/.rembric` for the slug
 - **AND** SHALL read `transcript_path` if readable, format it via `_transcript.sh`, derive a title from the first non-empty assistant message (≤100 chars)
@@ -127,6 +127,13 @@ Codex's mapping of lifecycle events to HTTP endpoints still diverges from Claude
 - **WHEN** the repository is at HEAD
 - **THEN** `apps/plugin/scripts/pre-compact.sh`, `apps/plugin/scripts/post-compaction.sh`, and `apps/plugin/scripts/post-compact.sh` SHALL all exist and be executable
 - **AND** `hooks.codex.json` SHALL reference `pre-compact.sh` from its `PreCompact` entry, `post-compaction.sh` from its `PostCompact` entry, and `post-compact.sh` from its `SessionStart` `"compact"` matcher group
+
+#### Scenario: Codex's Stop carries the end-of-turn reminder as a second entry
+
+- **WHEN** `hooks.codex.json`'s `Stop` handlers are read in order
+- **THEN** the second SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-nudge.sh codex-cli`
+- **AND** it SHALL be the same single script Claude Code invokes with no agent argument, diverging only in the stdout contract: Codex requires a JSON object on every invocation, so a silent turn SHALL emit `{}` where Claude Code emits nothing
+- **AND** no `stop-nudge.codex.sh` variant SHALL exist
 
 ### Requirement: Codex hooks MUST receive `session_id` from stdin in the same JSON shape as Claude Code
 
