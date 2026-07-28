@@ -15,13 +15,15 @@ The host's end-of-turn event SHALL therefore carry TWO independent entries with 
 
 When the reminder fires, its payload SHALL carry the canonical summary structure in full (see `sessions`) AND the grounded facts extracted from the session, so the model summarises against evidence rather than recollection. This is the surface that carries the long form precisely because it has no length budget, unlike a tool description.
 
-The entry SHALL NOT fire when the session already carries a curated summary, and SHALL NOT fire when the session has produced nothing worth summarising.
+The entry SHALL NOT fire when the session has produced nothing worth summarising — a turn that only read or only talked. "Produced nothing" SHALL be decided from the session's own transcript, not from the server: no files written or edited and no commands run.
 
-**Fail-open is absolute.** On any non-2xx response, any timeout, any unparseable response, any missing configuration, any unreadable turn counter, or any unexpected error, the entry SHALL exit successfully and produce no output. The failure mode of a missed reminder is a thinner summary; there SHALL be no failure mode in which the host is degraded.
+It SHALL NOT be required to know whether a curated summary already exists, and SHALL NOT make a request to find out. No read endpoint for a session exists — the HTTP surface offers only `POST .../summary` and `POST .../end` — so the reminder is cadence-gated and may fire on a session that has already been summarised. That is deliberate under-precision: the cost is one redundant reminder every N turns, and the alternative is new HTTP surface. A follow-up MAY add a read endpoint and narrow this; until it does, no requirement here SHALL assert the reminder consults server state.
+
+**Fail-open is absolute.** On unparseable input, an unreadable or absent turn counter, a missing or unreadable transcript, an unavailable parser, or any unexpected error, the entry SHALL exit successfully and produce no output. Where a host requires a JSON object on every invocation, it SHALL emit an empty one rather than nothing. The failure mode of a missed reminder is a thinner summary; there SHALL be no failure mode in which the host is degraded.
 
 #### Scenario: The reminder fires at the counter's cadence when a summary is owed
 
-- **GIVEN** a session with `summary_final = false` that has produced work worth summarising, on a turn at which the shared counter's cadence fires
+- **GIVEN** a session that has written or edited a file, or run a command, on a turn at which the shared counter's cadence fires
 - **WHEN** the end-of-turn event fires
 - **THEN** the hook SHALL emit non-interrupting feedback carrying the canonical structure and the extracted facts
 - **AND** it SHALL NOT emit an interrupting decision
@@ -32,17 +34,17 @@ The entry SHALL NOT fire when the session already carries a curated summary, and
 - **WHEN** the end-of-turn event fires
 - **THEN** the hook SHALL produce no output
 
-#### Scenario: A session that already has a curated summary is never reminded
+#### Scenario: The reminder does not consult the server
 
-- **GIVEN** a session with `summary_final = true`
+- **GIVEN** any session state, including one that already carries a curated summary
 - **WHEN** the end-of-turn event fires at a cadence point
-- **THEN** the hook SHALL produce no output
+- **THEN** the hook SHALL decide from the transcript and the counter alone, and SHALL make no request
 
-#### Scenario: The server is unreachable
+#### Scenario: The transcript is missing or unreadable
 
-- **GIVEN** a configured server that does not answer, or answers non-2xx, or exceeds the timeout
-- **WHEN** the end-of-turn event fires
-- **THEN** the hook SHALL exit successfully with no output, and the turn SHALL complete normally
+- **GIVEN** an end-of-turn event whose payload names no transcript, or one that cannot be parsed
+- **WHEN** the hook runs
+- **THEN** it SHALL exit successfully with no output, and the turn SHALL complete normally
 
 #### Scenario: The turn counter is unreadable
 
@@ -52,26 +54,34 @@ The entry SHALL NOT fire when the session already carries a curated summary, and
 
 #### Scenario: A session with nothing worth summarising
 
-- **GIVEN** a session that produced no files, no commands and no memories
+- **GIVEN** a session that wrote or edited no file and ran no command
 - **WHEN** the end-of-turn event fires at a cadence point
 - **THEN** the hook SHALL produce no output
 
-### Requirement: Delegated work MUST reach the parent session's record
+## MODIFIED Requirements
 
-Work performed by a subagent SHALL contribute to the parent session's extracted facts. A session that delegated all of its work SHALL NOT be indistinguishable from a session that did nothing.
+### Requirement: The protocol nudge MUST be in `initialize.instructions` to cover all three clients uniformly
 
-Where a host exposes a subagent-completion event, it SHALL append the subagent's extracted facts to the parent session's record, and SHALL NOT emit feedback of any kind: a subagent finishing is not the point at which a handoff is owed.
+The MCP server's `initialize.instructions` string (loaded into the model's system prompt on connect) SHALL include a directive flow instructing the model to call `memory.session_summary` with `{title, summary}` at the end of every turn in which real work happened — never ending a working turn silent. The flow SHALL:
 
-Host parity SHALL be pursued only where it does not require per-host logic beyond the existing per-host seams. Where a host exposes no end-of-turn or subagent-completion event, the absence SHALL be recorded per client rather than emulated.
+- Be present in both the path-scoped and path-less variants of `initialize.instructions`.
+- Stay within the 1000-character cap enforced by `instructions.test.ts` (raised from 800; the cap is a self-imposed token budget chosen for token cost rather than the binding limit — Claude Code truncates `instructions` at 2048 characters, so the self-imposed cap binds first; the `mcp-api` capability holds the authoritative statement).
+- Be phrased as a **calibrated imperative**: a directive to curate (not a passive suggestion), **conditioned on real memorable work having happened** (a decision, fix, discovery, or files changed). It SHALL preserve the model's discretion to skip trivial turns with nothing worth persisting (so the imperative does not induce vacuous summaries), and SHALL NOT bind the trigger solely to the literal word "done".
+- Describe the title constraint (≤100 chars, descriptive of what was worked on) and the summary structure, carried verbatim from the canonical section list defined in `sessions` rather than restated here. The list names, at minimum, the goal, what was accomplished, the decisions taken AND why, what was verified AND how, what was left unfinished AND why, and the files that matter — the three `+why`/`+how` sections exist because the code records what changed and never why it beat the alternative nor what evidence a claim rests on.
 
-#### Scenario: A session whose work was done entirely by subagents
+This nudge is the only mechanism that covers the case where Codex CLI cannot inject post-compact instructions and where short sessions never compact; it is likewise the only nudging surface available to in-process clients (e.g. Hermes Agent) that expose no per-turn hook. All clients ship with the same MCP server reachable, so this is the single deployment surface.
 
-- **GIVEN** a session that edited no files directly but whose subagents edited several
-- **WHEN** the subagent-completion events have fired and the session ends without a curated summary
-- **THEN** the fallback SHALL name the files the subagents edited
+#### Scenario: Instructions string contains the protocol nudge
 
-#### Scenario: A host without a subagent-completion event
+- **WHEN** an MCP client retrieves `initialize.instructions` from either `/mcp` or `/mcp/<slug>`
+- **THEN** the string SHALL contain the substring `memory.session_summary` AND the substring `title` AND the substring `before` (referring to before ending a working turn)
 
-- **GIVEN** a client whose host exposes no subagent-completion event
-- **WHEN** the plugin is installed for that client
-- **THEN** the absence SHALL be recorded for that client and SHALL NOT be emulated by other means
+#### Scenario: Instructions string respects the 1000-char cap
+
+- **WHEN** the test suite runs `instructions.test.ts` against both variants
+- **THEN** both outputs SHALL be ≤1000 characters
+
+#### Scenario: Protocol nudge is imperative and work-conditioned
+
+- **WHEN** the `initialize.instructions` SUMMARIZE flow is read
+- **THEN** it SHALL read as a directive to curate (imperative), conditioned on real work having happened, rather than an unconditional or purely advisory phrasing

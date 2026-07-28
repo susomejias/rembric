@@ -79,19 +79,26 @@
   - `invariants.test.ts::"the session-summary rubric has one source"`, three assertions: every surface carries the canonical list (accepting interpolation for TS and split literals for Python), no surface still names a superseded section, and **the enumeration itself is complete** — derived from `git grep`, so adding a ninth surface fails here.
   - **Mutation-checked both ways.** Reverting `post-compact.sh` to the old list fails two of the three. Adding a new tracked surface not in the list fails the completeness check and names the file. The first attempt at the second mutation was invalid — the rogue file was untracked, and `git grep` only sees tracked files, so it passed for the wrong reason.
 
-## 5. Delegated work
+## 5. Delegated work — DEFERRED, and the requirement pulled with it
 
-- [ ] 5.1 Wire the subagent-completion event to append its extracted facts to the parent session's record, where the host exposes one.
-- [ ] 5.2 Assert it emits no feedback of any kind, whatever the parent's summary state.
-- [ ] 5.3 Test the case that motivates it: a session that edited nothing directly but whose subagents edited several must not produce an empty-looking fallback.
-- [ ] 5.4 Record per client whether the host exposes a subagent-completion event. Do not emulate an absent one.
+- [x] 5.0 **Section 5 is deferred to its own change, and the `Delegated work MUST reach the parent session's record` requirement was REMOVED from the `plugin-session-protocol` delta rather than shipped unimplemented.** Publishing a requirement no code honours is the exact failure this repository keeps finding in its own archives; the delta now covers only the end-of-turn reminder, which is implemented and tested.
+  - **The gap is real and measured**: the parent transcript contains no subagent turns (no `isSidechain` entries; 124 `Agent` tool calls and not one of their file edits), so a session that delegated its work shows `tool: Agent` and nothing about what changed.
+  - **Also verified, because it would have been a defect I introduced**: plugin-level `Stop` hooks fire ONLY on the main agent's completion. The host's "for subagents, `Stop` hooks are automatically converted to `SubagentStop`" applies to hooks declared in subagent frontmatter, not to plugin-level ones — so `stop-nudge.sh` does not fire mid-work when a subagent finishes.
+  - **Why deferred rather than done**: the subagent's facts have to reach the PARENT's record, and `POST /summary` overwrites rather than appends. That leaves either a new HTTP append endpoint (an `http-api` delta) or client-side accumulation in a per-session temp file. The second is not unreasonable — `rembric_turn_count` already establishes exactly that pattern — but it introduces a statefile whose lifecycle nothing currently owns, and the operator asked for parity only where it needs no complex per-client logic. It deserves its own change with that decision made deliberately.
 
 ## 6. Specs and archive
 
 - [ ] 6.1 Apply the `sessions` delta. Both MODIFIED requirements reproduce every published scenario — 5 on the structure requirement and 7 on the cap requirement. **Verify that count against the published file before archiving**: the previous change had four scenarios silently dropped by its delta and the archiver caught it, after that change's own task had claimed nothing was lost.
 - [ ] 6.2 Apply the `plugin-session-protocol` delta (ADDED only, so no published scenario is at risk).
-- [ ] 6.3 Grep `openspec/specs/` for `Goal · Discoveries`, `Goal /`, `truncat`, and `19500`, and reconcile every hit. Any spec that states the head-truncation behaviour becomes false the moment this lands.
-- [ ] 6.4 Re-check `mcp-api`'s truncation-ceiling requirement still reads true after 4.3 changes the description, and reconcile it in the same commit if it does not.
+- [x] 6.3 Grep `openspec/specs/` for `Goal · Discoveries`, `Goal /`, `truncat`, and `19500`, and reconcile every hit. Any spec that states the head-truncation behaviour becomes false the moment this lands.
+  - **Six false statements found across four capabilities, and two of them were in MY OWN delta.** The delta claimed the reminder "SHALL NOT fire when the session already carries a curated summary" with a scenario for it — never implemented, because no read endpoint exists — and its fail-open clause listed "non-2xx, timeout, unparseable response" for a hook that makes NO request at all. Both corrected to what the code does, with the missing endpoint recorded as the reason and a follow-up named.
+  - `claude-code-plugin`: "eight handler entries" → nine; "the unified per-turn save+summary nudge" → save only; the post-compact block naming the old rubric; and **"[the Stop hook] never emits `hookSpecificOutput.additionalContext` or any other model-facing output"**, which cites the `proactive-save-nudges` decision that declined `Stop`. That decision is **narrowed, not reversed**, and the delta says why: forced-continuation is a property of the BLOCKING decision, not of the event, so a non-interrupting reminder is outside its scope.
+  - `claude-code-plugin` (nudge requirement): the summary line fired at `count == 1 OR count % 10 == 0`; now `count == 1` only, with a scenario asserting `SUMMARY_NUDGE_EVERY` is not even declared there so the cadence has one owner.
+  - `codex-distribution`: "seven handler entries" → eight, and "the same **single** script Claude Code's `Stop` hook invokes" → the first of two entries.
+  - `plugin-session-protocol`: the instructions-block requirement restated the old section list; now points at the single source and says why the three `+why`/`+how` sections exist.
+  - `docs/agents.md`: "seven handler entries, since `SessionStart` and `UserPromptSubmit` each declare two" → eight, since `Stop` now declares two as well.
+- [x] 6.4 Re-check `mcp-api`'s truncation-ceiling requirement still reads true after 4.3 changes the description, and reconcile it in the same commit if it does not.
+  - Still true: `DESCRIPTION_MAX_LENGTH` is unchanged and the description shrank rather than grew. The budget that actually bound was the 1000-char instructions block, and prose was cut there instead of raising anything (see 4.3).
 
 ## 7. Verify
 
