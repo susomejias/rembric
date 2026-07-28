@@ -34,7 +34,7 @@ cat <<'PROTOCOL'
 rembric: This session resumes from a compaction. BEFORE continuing:
 1. Call memory.session_summary({title, summary}) with the compact summary shown above.
    - title: ≤100 chars, descriptive of the actual work (not generic, not the cwd).
-   - summary: ≤10000 chars. Goal · Discoveries · Accomplished · Next Steps · Files.
+   - summary: ≤10000 chars. Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.
 2. If the summary above lacks detail you need (exact file paths, concrete technical decisions, specific prior errors), call memory.context or memory.search BEFORE responding.
 3. Only then, continue with the user's request.
 PROTOCOL

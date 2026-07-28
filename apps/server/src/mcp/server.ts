@@ -77,6 +77,7 @@ import {
   sessionSummaryOutput,
   sessionSummarySchema,
 } from './session-tools.js';
+import { SUMMARY_SECTIONS } from './summary-rubric.js';
 
 /**
  * Construct the MCP server and register every tool.
@@ -297,7 +298,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   server.registerTool(
     'memory.session_summary',
     {
-      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Keep it concise but include useful handoff detail. Body: Goal · Instructions · Discoveries · Accomplished · Next Steps · Relevant Files. Does NOT end the session — use memory.session_end for that.`,
+      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Keep it concise but include useful handoff detail. Body: ${SUMMARY_SECTIONS}. Does NOT end the session — use memory.session_end for that.`,
       inputSchema: sessionSummarySchema,
       outputSchema: sessionSummaryOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),

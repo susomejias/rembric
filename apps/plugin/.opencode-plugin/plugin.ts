@@ -68,7 +68,7 @@ const SAVE_NUDGE =
   'rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).';
 const SUMMARY_NUDGE_EVERY = 10;
 const SUMMARY_NUDGE =
-  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Discoveries · Accomplished · Next Steps · Files. Nothing memorable? Skip.';
+  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.';
 const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 

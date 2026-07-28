@@ -124,8 +124,9 @@ _SAVE_HINT_URGENT = (
 _SUMMARY_HINT = (
     "<memory-hint>did real work happen this turn? You MUST call "
     "memory.session_summary({title, summary}) now — title ≤100 chars (the "
-    "work, not cwd); summary: Goal · Discoveries · Accomplished · Next "
-    "Steps · Files. Nothing memorable? Skip.</memory-hint>"
+    "work, not cwd); summary: Goal · Accomplished · Decisions+why · "
+    "Verified+how · Unfinished+why · Files. Nothing memorable? "
+    "Skip.</memory-hint>"
 )
 _SESSION_ID_HINT_TEMPLATE = (
     '<memory-hint>sessionId="{{SESSION_ID}}" — pass it explicitly to '
@@ -388,8 +389,8 @@ class RembricMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric — persistent memory across sessions. Use tools "
-            "proactively; each description has exact mechanics.\n\n"
+            "Rembric — persistent memory across sessions. Use the tools "
+            "proactively.\n\n"
             "SAVE: the moment it happens — bug fix · decision · discovery · "
             "config · pattern · preference — call memory.save with a title≤100 "
             "headline + content (don't batch). Evolving a prior topic? pass "
@@ -399,8 +400,8 @@ class RembricMemoryProvider(MemoryProvider):
             "lookup) if you lack prior detail.\n"
             "SUMMARIZE: did real work happen? Before ending, you MUST call "
             "memory.session_summary({title≤100 (the work, not cwd), "
-            "summary≤10000}) — Goal · Discoveries · Accomplished · Next "
-            "Steps · Files. Trivial? Skip.\n"
+            "summary≤10000}) — Goal · Accomplished · Decisions+why · "
+            "Verified+how · Unfinished+why · Files.\n"
             "Know your sessionId? Pass it — never guess it.\n"
             "Update Rembric: memory.about."
         )

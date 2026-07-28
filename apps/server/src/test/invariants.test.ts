@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
 
 /**
@@ -880,5 +881,56 @@ describe('summary truncation keeps the same side in every layer', () => {
     const src = readFileSync(join(srcRoot, 'services', 'agent-sessions.ts'), 'utf8');
     const body = src.slice(src.indexOf('export function truncateTitle'));
     expect(body.slice(0, body.indexOf('\n}'))).toContain('sliceWithoutSplittingSurrogatePair');
+  });
+});
+
+// The rubric was restated at EIGHT surfaces and seven agreed while the tool
+// description named two sections the others did not. This asserts every surface
+// carries the one definition, AND that the enumeration below is complete — a
+// fixture that only checked the constant exists would have passed against all
+// eight divergent copies. `design.md` said six sites; enumerating them found
+// eight, which is why the count is asserted rather than trusted.
+describe('the session-summary rubric has one source', () => {
+  const surfaces = [
+    'apps/server/src/mcp/instructions.ts',
+    'apps/server/src/mcp/server.ts',
+    'apps/plugin/scripts/prompt-nudge.sh',
+    'apps/plugin/scripts/post-compact.sh',
+    'apps/plugin/commands/summary.md',
+    'apps/plugin/.opencode-plugin/plugin.ts',
+    'apps/plugin/.hermes-plugin/__init__.py',
+  ];
+
+  it('every surface carries the canonical section list', () => {
+    for (const rel of surfaces) {
+      const src = readFileSync(join(repoRoot, rel), 'utf8');
+      const carriesIt =
+        src.includes(SUMMARY_SECTIONS) ||
+        // TypeScript surfaces interpolate the constant instead of restating it.
+        src.includes('${SUMMARY_SECTIONS}') ||
+        // Python wraps it across adjacent string literals.
+        SUMMARY_SECTIONS.split(' · ').every((section) => src.includes(section));
+      expect(carriesIt, `${rel} does not carry the canonical section list`).toBe(true);
+    }
+  });
+
+  it('no surface still carries a superseded section name', () => {
+    for (const rel of surfaces) {
+      const src = readFileSync(join(repoRoot, rel), 'utf8');
+      for (const stale of ['Discoveries', 'Next Steps', 'Relevant Files']) {
+        expect(src, `${rel} still names '${stale}'`).not.toContain(stale);
+      }
+    }
+  });
+
+  it('the enumeration above is complete', () => {
+    const found = execSync(
+      `git -C ${repoRoot} grep -l -e 'Goal · ' -e 'SUMMARY_SECTIONS' -- apps/ ':!*.test.*' ':!*/tests/*' || true`,
+      { encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean)
+      .filter((f) => !f.endsWith('summary-rubric.ts'));
+    expect(found.sort()).toEqual([...surfaces].sort());
   });
 });
