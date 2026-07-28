@@ -77,6 +77,14 @@
             "async": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-nudge.sh"
+          }
+        ]
       }
     ]
   }

@@ -296,6 +296,20 @@ rembric_extract_facts_claude_code() {
   return 0
 }
 
+# "Did this session DO anything", as opposed to "is there anything to say about
+# it". Deliberately separate from the extraction: the fallback body wants the
+# final exchange even when no tool ran, while the end-of-turn reminder must stay
+# silent on a turn that only talked.
+rembric_session_has_work() {
+  local parser="${1:-}" path="${2:-}"
+  [ -z "$path" ] || [ ! -f "$path" ] && return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  case "$parser" in
+    claude_code) [ -n "$(_rembric_facts_raw_claude_code "$path" 2>/dev/null)" ] ;;
+    *) return 1 ;;
+  esac
+}
+
 # Dispatcher, so a host without an extraction degrades to the conversation slice
 # rather than erroring. Codex CLI has none yet.
 rembric_session_facts() {

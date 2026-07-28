@@ -115,6 +115,25 @@ rembric_turn_count() {
   printf '%s' "$count"
 }
 
+# Reads the counter WITHOUT advancing it. The end-of-turn hook has to see the
+# same turn number the start-of-turn hook saw, so it must not append: calling
+# `rembric_turn_count` twice per turn would double the count and silently halve
+# every cadence keyed on it.
+rembric_turn_count_peek() {
+  local counter_name="${1:-}" session_id="${2:-}"
+  [ -z "$counter_name" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "${session_id:-nosession}" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/${counter_name}/${safe_id}"
+  [ -f "$file" ] || return 0
+  local count
+  count="$(wc -c <"$file" 2>/dev/null | tr -d '[:space:]')"
+  case "$count" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  printf '%s' "$count"
+}
+
 # Best-effort extraction of a session id from the hook stdin JSON. Prefers
 # Claude Code's `session_id`; falls back to Codex's `sessionId`.
 rembric_session_id_from_stdin_json() {

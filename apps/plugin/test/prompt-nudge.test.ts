@@ -68,13 +68,22 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
     expect(last.trim()).toBe(`${sessionIdLine('s-five')}\n${fixtures.save}`);
   });
 
-  it('emits the sessionId line + BOTH nudges on turn 10 (save first)', () => {
+  // Turn 10 used to emit BOTH nudges. The summary reminder moved to
+  // stop-nudge.sh, which fires at the END of the turn on this same counter and
+  // cadence — the one moment it can be acted on. Asserted as an exact ordered
+  // list, so moving it back here fails.
+  it('emits the sessionId line + the save nudge ALONE on turn 10', () => {
     let last = '';
     for (let i = 1; i <= 10; i++) {
       last = runPromptNudge(JSON.stringify({ session_id: 's-ten' }));
     }
     const lines = last.split('\n').filter((l) => l.length > 0);
-    expect(lines).toEqual([sessionIdLine('s-ten'), fixtures.save, fixtures.summary]);
+    expect(lines).toEqual([sessionIdLine('s-ten'), fixtures.save]);
+  });
+
+  it('still emits the summary reminder on turn 1, which is protocol', () => {
+    const first = runPromptNudge(JSON.stringify({ session_id: 's-one' }));
+    expect(first.split('\n').filter((l) => l.length > 0)).toContain(fixtures.summary);
   });
 
   it('persists the counter per session across invocations', () => {

@@ -44,7 +44,7 @@ describe('hooks.json (Claude Code)', () => {
   });
 
   it('carries exactly eight handler entries', () => {
-    expect(handlerCount(claudeHooks)).toBe(8);
+    expect(handlerCount(claudeHooks)).toBe(9);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -65,8 +65,21 @@ describe('hooks.json (Claude Code)', () => {
     }
   });
 
-  it('declares the Stop handler async', () => {
-    expect(claudeHooks.Stop.flatMap((group) => group.hooks).map((h) => h.async)).toEqual([true]);
+  // Stop carries TWO entries with opposite obligations, and getting either wrong
+  // silently disables it. The raw sync must stay async so it never delays the
+  // turn; the reminder must NOT be async, because an async hook is fire-and-forget
+  // by the host's contract and cannot contribute feedback to the turn at all.
+  // Asserted as an ordered pair of (script, async), not as a set.
+  it('pairs an async raw sync with a synchronous reminder', () => {
+    expect(
+      claudeHooks.Stop.flatMap((group) => group.hooks).map((h) => [
+        h.command.replace(/^.*scripts\//, 'scripts/').split(' ')[0],
+        h.async ?? false,
+      ]),
+    ).toEqual([
+      ['scripts/stop-sync.sh', true],
+      ['scripts/stop-nudge.sh', false],
+    ]);
   });
 });
 
@@ -77,8 +90,8 @@ describe('hooks.codex.json (Codex CLI)', () => {
     );
   });
 
-  it('carries exactly seven handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(7);
+  it('carries exactly eight handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(8);
   });
 
   it('declares neither SessionEnd nor PostToolUse', () => {
@@ -176,6 +189,7 @@ describe('every hook invokes the script the spec names', () => {
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
       'Stop command scripts/stop-sync.sh claude-code',
+      'Stop command scripts/stop-nudge.sh',
     ]);
   });
 
@@ -186,6 +200,7 @@ describe('every hook invokes the script the spec names', () => {
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
       'Stop command scripts/stop-sync.sh codex-cli',
+      'Stop command scripts/stop-nudge.sh codex-cli',
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
     ]);

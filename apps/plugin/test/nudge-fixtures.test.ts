@@ -44,6 +44,7 @@ const bytes = (s: string): number => Buffer.byteLength(s, 'utf8');
 const UUID_SESSION_ID = '0189d5f2-6c3a-7b4e-9f21-8c7d6e5a4b30';
 
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
+const stopNudgeSh = join(here, '..', 'scripts', 'stop-nudge.sh');
 const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
 const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
@@ -123,9 +124,15 @@ function pythonNumberConstant(name: '_SAVE_HINT_EVERY' | '_SUMMARY_HINT_EVERY'):
   return Number(execFileSync('python3', ['-c', program, hermesInit, name], { encoding: 'utf8' }));
 }
 
+// SAVE_NUDGE_EVERY lives in prompt-nudge.sh (start of turn); SUMMARY_NUDGE_EVERY
+// moved to stop-nudge.sh (end of turn), where the reminder can actually be acted
+// on. The NUMBER must still match every other client's, because the in-process
+// clients have no end-of-turn event and keep firing it themselves — the cadence
+// is shared even though the firing point is not.
 function bashCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
-  const match = readFileSync(promptNudgeSh, 'utf8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
-  if (!match) throw new Error(`${name} not found in prompt-nudge.sh`);
+  const file = name === 'SUMMARY_NUDGE_EVERY' ? stopNudgeSh : promptNudgeSh;
+  const match = readFileSync(file, 'utf8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
+  if (!match) throw new Error(`${name} not found in ${file}`);
   return Number(match[1]);
 }
 
@@ -393,8 +400,11 @@ describe('UserPromptSubmit emitted-output budgets', () => {
       // cadence coincides with turn 1 of the relevance one.
       rmSync(join(counterDir, 'rembric-relevance-prefetch'), { recursive: true, force: true });
       const diverged = turnBytes(counterDir, 'what did we do yesterday');
-      expect(diverged).toBeGreaterThan(720);
-      expect(diverged).toBeLessThanOrEqual(840);
+      // Lower than it used to be (>720) because the summary reminder MOVED to
+      // stop-nudge.sh. Asserted as a range rather than relaxed to a ceiling, so
+      // moving it back — or adding a fourth line here — fails.
+      expect(diverged).toBeGreaterThan(460);
+      expect(diverged).toBeLessThanOrEqual(620);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }

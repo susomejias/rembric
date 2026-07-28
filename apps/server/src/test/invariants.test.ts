@@ -895,6 +895,7 @@ describe('the session-summary rubric has one source', () => {
     'apps/server/src/mcp/instructions.ts',
     'apps/server/src/mcp/server.ts',
     'apps/plugin/scripts/prompt-nudge.sh',
+    'apps/plugin/scripts/stop-nudge.sh',
     'apps/plugin/scripts/post-compact.sh',
     'apps/plugin/commands/summary.md',
     'apps/plugin/.opencode-plugin/plugin.ts',
@@ -923,6 +924,10 @@ describe('the session-summary rubric has one source', () => {
     }
   });
 
+  // NOTE: derived from `git grep`, so it only sees TRACKED files — a new surface
+  // passes until it is staged. That is why this caught `stop-nudge.sh` at
+  // pre-push rather than during development, and it is the correct trade: the
+  // alternative walks the working tree and flags scratch files.
   it('the enumeration above is complete', () => {
     const found = execSync(
       `git -C ${repoRoot} grep -l -e 'Goal · ' -e 'SUMMARY_SECTIONS' -- apps/ ':!*.test.*' ':!*/tests/*' || true`,
