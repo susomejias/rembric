@@ -370,13 +370,15 @@ export class RelationsRepository {
   }
 
   /**
-   * Aged pending relations whose source AND target both lie in `scope`,
-   * with joined content — feeds memory.context.pendingJudgments[].
+   * Pending relations whose source AND target both lie in `scope`, oldest
+   * first, with joined content — feeds memory.context.pendingJudgments[].
+   * `cutoffMs: null` skips the age predicate, which is how the caller asks
+   * for inventory rather than the aged queue-depth warning.
    */
-  listPendingOlderThanInScope(opts: {
+  listPendingInScope(opts: {
     scope: MemoryScope;
     projectId: string | null;
-    cutoffMs: number;
+    cutoffMs: number | null;
     limit: number;
   }): AdminRelationWithContent[] {
     return this.db
@@ -387,7 +389,9 @@ export class RelationsRepository {
       .where(
         and(
           eq(memoryRelations.status, 'pending'),
-          lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
+          opts.cutoffMs === null
+            ? undefined
+            : lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
           endpointsInScope(opts.scope, opts.projectId),
         ),
       )

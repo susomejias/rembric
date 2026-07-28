@@ -226,6 +226,25 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.context description advertises the judgment total and the size that lifts the age filter', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const context = tools.find((t) => t.name === 'memory.context');
+    const desc = context?.description ?? '';
+    const schema = context?.inputSchema as
+      | { properties?: { judgments?: { maximum?: number } } }
+      | undefined;
+
+    expect(schema?.properties?.judgments?.maximum).toBe(50);
+    expect(desc).toContain('pendingJudgmentsTotal');
+    expect(desc).toContain('judgments');
+    // A size argument that silently changes WHICH rows qualify is not guessable
+    // from the argument name, so the description has to say so.
+    expect(desc).toMatch(/lifts the age filter/i);
+
+    await client.close();
+  });
+
   it('keeps every tool description under the client truncation ceiling', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
@@ -1248,12 +1267,32 @@ describe('MCP protocol conformance', () => {
         targetSnippet: string;
         ageMs: number;
       }[];
+      pendingJudgmentsTotal: number;
     };
     expect(payload.pendingJudgments).toHaveLength(1);
     expect(payload.pendingJudgments[0]?.judgmentId).toBe('jdg-aged-itest');
     expect(payload.pendingJudgments[0]?.sourceSnippet).toContain('pending-source-marker');
     expect(payload.pendingJudgments[0]?.targetSnippet).toContain('pending-target-marker');
     expect(payload.pendingJudgments[0]?.ageMs).toBeGreaterThan(86_400_000);
+    // The fresh row is hidden from the list but counted — that gap is the whole
+    // point of the total. Bounded loosely because earlier saves in this shared
+    // server may have left their own pendings behind.
+    expect(payload.pendingJudgmentsTotal).toBeGreaterThanOrEqual(2);
+
+    // Asking for a size lifts the age filter, so the fresh row becomes
+    // judgeable instead of waiting out JUDGMENT_ORPHAN_AFTER_MS.
+    const inventory = (await client.callTool({
+      name: 'memory.context',
+      arguments: { judgments: 50 },
+    })) as ToolResult;
+    const inventoryPayload = readJson(inventory) as {
+      pendingJudgments: { judgmentId: string }[];
+      clamped: boolean;
+    };
+    const inventoryIds = inventoryPayload.pendingJudgments.map((r) => r.judgmentId);
+    expect(inventoryIds).toContain('jdg-aged-itest');
+    expect(inventoryIds).toContain('jdg-fresh-itest');
+    expect(inventoryPayload.clamped).toBe(false);
 
     const judged = (await client.callTool({
       name: 'memory.judge',

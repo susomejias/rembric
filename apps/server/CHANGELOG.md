@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.24.14](https://github.com/susomejias/rembric/compare/server-v0.24.13...server-v0.24.14) (2026-07-28)
+
+
+### Features
+
+* **mcp:** report the pending-judgment total and make the queue drainable ([29874ea](https://github.com/susomejias/rembric/commit/29874eaf7c41932f6eb479ab57ff9c000a707d78))
+* **memory:** enable the relative-level filter at its swept value ([e4c77ad](https://github.com/susomejias/rembric/commit/e4c77ada92c1d420394711b97df75ce5b6fb1bac))
+* **memory:** give both recall gates a bounded relevance level ([e73be39](https://github.com/susomejias/rembric/commit/e73be397d0cd5ce4d5466096399494891073fab2))
+* **sessions:** enrich the summary rubric and give it one source ([357ac56](https://github.com/susomejias/rembric/commit/357ac5634de9b9f46ab8d816d7767c8493f9a3a9))
+* **sessions:** move the summary reminder to the end of the turn, grounded in facts ([77564be](https://github.com/susomejias/rembric/commit/77564be5c4cfb3907c515867ed4d176446925113))
+
+
+### Bug Fixes
+
+* **ci:** run the provenance history replay where the history exists ([b45af18](https://github.com/susomejias/rembric/commit/b45af18c1b70afe2eb502154ff5ee97fbbb108e2))
+* **dev:** keep the dev stack off the published production image tag ([1b41583](https://github.com/susomejias/rembric/commit/1b415838d1272d08c8d5a2254a107ab6e9b30f3e))
+* **embeddings:** stop a failed vector reset from destroying the index and blocking boot ([6854e5d](https://github.com/susomejias/rembric/commit/6854e5dcb450b995201d6d42d26be9d5b153a35f))
+* **entities:** stop the extractor indexing prose, and stop one kind eating the budget ([32a6c6f](https://github.com/susomejias/rembric/commit/32a6c6fece6d78298002e89616709947abed1b1b))
+* **sessions:** close a fact-injection hole and three more review findings ([9170804](https://github.com/susomejias/rembric/commit/917080452c1399d80c359a9eb00b283e8cf08d4d))
+* **sessions:** close the five findings the review left open ([78e304e](https://github.com/susomejias/rembric/commit/78e304ec2d898626798776b0867b4395449365e8))
+* **sessions:** keep the END of an oversized summary, not the beginning ([ca67603](https://github.com/susomejias/rembric/commit/ca676038114f191c9c89c425119caddcaf2c248e))
+* **sessions:** let a closed session write the summary it never got to write ([74ce04f](https://github.com/susomejias/rembric/commit/74ce04f036f02f361ef5b38e745e86f8fc659216))
+
 ## [0.24.13](https://github.com/susomejias/rembric/compare/server-v0.24.12...server-v0.24.13) (2026-07-25)
 
 
