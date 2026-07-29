@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 
 /**
  * In-process embedder. The model is part of the engine, not configuration:
@@ -93,6 +94,17 @@ export async function loadEmbedder(): Promise<Embedder> {
   }
   const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
     dtype: EMBEDDING_DTYPE,
+    // onnxruntime sizes its pool from the kernel's CPU topology, not from the
+    // cgroup/cpuset the process is confined to: unpinned it opens one thread
+    // per HOST core, and exceeding the cores actually available degrades
+    // linearly (measured on 1 core: 20ms at 1 thread, 181ms at 8).
+    // availableParallelism honours both cpuset and cgroup quota. Capped at 2
+    // because past that a short-text embed buys ~3ms of latency for 2.6x the
+    // CPU — the wrong trade for a server sharing a self-hoster's box.
+    session_options: {
+      intraOpNumThreads: Math.min(2, availableParallelism()),
+      interOpNumThreads: 1,
+    },
     ...(baked ? {} : { revision: EMBEDDING_MODEL_REVISION }),
   })) as unknown as FeaturePipeline;
 

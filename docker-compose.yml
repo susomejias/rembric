@@ -4,6 +4,10 @@ services:
     container_name: rembric
     restart: unless-stopped
 
+    cpus: ${REMBRIC_CPUS:-0}
+    mem_limit: ${REMBRIC_MEMORY:-0}
+    pids_limit: ${REMBRIC_PIDS_LIMIT:-512}
+
     ports:
       # Default: bind on all interfaces — the bearer token is the real
       # security boundary, and the common selfhost case (server on a
