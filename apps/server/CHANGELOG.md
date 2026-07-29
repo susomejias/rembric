@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.25.0](https://github.com/susomejias/rembric/compare/server-v0.24.14...server-v0.25.0) (2026-07-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** `entitiesTruncated` is removed from every memory-returning MCP response rather than deprecated alongside `entitiesTotal`. Shipping both would violate, in the same response object, the no-companion-boolean clause this change is modelled on. Grep found zero consumers — no test, no template, no plugin file, and no published spec named it.
+
+### Features
+
+* **dashboard:** order a memory's judgments, and withdraw the graph view ([00d8dde](https://github.com/susomejias/rembric/commit/00d8dde00a4f5680310eccbce686f2defcb80fc3))
+* **mcp:** order relation annotations and report how many exist ([a660548](https://github.com/susomejias/rembric/commit/a660548f6b9b94d62e403b3ca49d29d558042b2c))
+* **mcp:** report how many save-time candidates detection produced ([7960d87](https://github.com/susomejias/rembric/commit/7960d8766a3e80656650fd2ea1b8658ed326591e))
+
+
+### Bug Fixes
+
+* **entities:** bring three reads into line with their published specs ([db37a97](https://github.com/susomejias/rembric/commit/db37a974246c6efd826f45828c4743ce595aab0c))
+* **entities:** measure entity rarity over the active population ([9ac8602](https://github.com/susomejias/rembric/commit/9ac86022170c259ee1cd1aaaa6e622a14369f581))
+
+
+### Performance
+
+* **server:** bound embedder threads and container resources ([80d173d](https://github.com/susomejias/rembric/commit/80d173d52f2860c665849e139c751b0fb92c86e3))
+
+
+### Refactor
+
+* **mcp:** replace entitiesTruncated with a true entitiesTotal ([a235c97](https://github.com/susomejias/rembric/commit/a235c97be8d153978b219224c6d7142a56d481de))
+* **server:** apply the cleanup and review findings ([a01d051](https://github.com/susomejias/rembric/commit/a01d0511f8e355f5e26f1dab0c2e3aeb7ab6dc92))
+
 ## [0.24.14](https://github.com/susomejias/rembric/compare/server-v0.24.13...server-v0.24.14) (2026-07-28)
 
 
