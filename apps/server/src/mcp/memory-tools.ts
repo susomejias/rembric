@@ -302,9 +302,9 @@ const memoryRow = z.object({
   relationsTotal: z.number().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
-  /** Bounded projection; `entitiesTruncated` is true when more exist. */
   entities: z.array(entityRef).optional(),
-  entitiesTruncated: z.boolean().optional(),
+  /** Pre-bound count, exact (the reads carry no LIMIT). Truncation is `entitiesTotal > entities.length`. */
+  entitiesTotal: z.number().optional(),
 });
 
 const memoryNeighbor = z.object({
@@ -394,7 +394,7 @@ export const memoryGetOutput = {
   // Single-id response's entities[] projection (bounded; see memoryRow for
   // the batch response's equivalent field).
   entities: z.array(entityRef).optional(),
-  entitiesTruncated: z.boolean().optional(),
+  entitiesTotal: z.number().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
   /** True once the memory has sat in `needs_review` past its escalation window. */
@@ -981,7 +981,7 @@ async function handleSearch(
           relations: annotations?.views ?? [],
           relationsTotal: annotations?.total ?? 0,
           entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-          ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
+          entitiesTotal: ents.length,
           ...(r && r.reviewState !== null
             ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
             : {}),
@@ -1047,7 +1047,7 @@ async function handleGet(
             relations: annotations?.views ?? [],
             relationsTotal: annotations?.total ?? 0,
             entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-            ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
+            entitiesTotal: ents.length,
           };
         }),
         notFound: args.ids.filter((id) => !found.has(id)),
@@ -1102,7 +1102,7 @@ async function handleGet(
         const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
         return {
           entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-          ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
+          entitiesTotal: ents.length,
         };
       })(),
       ...(result.reviewState !== null

@@ -351,6 +351,123 @@ describe('memory.save — candidatesDetected', () => {
   });
 });
 
+describe('memory.get / memory.search — entitiesTotal', () => {
+  const CAP = 10;
+
+  interface EntityView {
+    entities: { kind: string; value: string }[];
+    entitiesTotal: number;
+  }
+
+  function linkPaths(repos: ReturnType<typeof createRepositories>, id: string, n: number): void {
+    repos.entities.linkMemory(
+      id,
+      'project',
+      projectA.id,
+      Array.from({ length: n }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
+      new Date(),
+    );
+  }
+
+  async function readAllThreeSurfaces(id: string) {
+    const repos = createRepositories(db.handle.db);
+    const h = buildMemoryHandlers({ memory, repos });
+    return runWithContext(fakeContext(projectA), async () => ({
+      single: parseText<EntityView>(await h.get({ id })),
+      batch: parseText<{ memories: EntityView[] }>(await h.get({ ids: [id] })).memories[0]!,
+      search: parseText<{ memories: EntityView[] }>(await h.search({})).memories.find(
+        (r) => (r as unknown as { id: string }).id === id,
+      )!,
+    }));
+  }
+
+  it('reports the true count on all three surfaces when the bound binds', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkPaths(repos, m.id, 27);
+
+    const seen = await readAllThreeSurfaces(m.id);
+    for (const [surface, row] of Object.entries(seen)) {
+      expect(row.entities, surface).toHaveLength(CAP);
+      expect(row.entitiesTotal, surface).toBe(27);
+    }
+  });
+
+  it('an untruncated list still carries the count, and an empty one reports zero', async () => {
+    const repos = createRepositories(db.handle.db);
+    const few = memory.save(
+      { type: 'project', title: 'Narrow change', content: 'touches three files' },
+      projectScope(projectA.id),
+    );
+    linkPaths(repos, few.id, 3);
+    const none = memory.save(
+      { type: 'project', title: 'No identifiers', content: 'a purely prose observation' },
+      projectScope(projectA.id),
+    );
+
+    const withFew = await readAllThreeSurfaces(few.id);
+    for (const [surface, row] of Object.entries(withFew)) {
+      expect(row.entitiesTotal, surface).toBe(3);
+      expect(row.entitiesTotal, surface).toBe(row.entities.length);
+    }
+    const withNone = await readAllThreeSurfaces(none.id);
+    for (const [surface, row] of Object.entries(withNone)) {
+      expect(row.entities, surface).toEqual([]);
+      expect(row.entitiesTotal, surface).toBe(0);
+    }
+  });
+
+  it('no surface reports entity truncation as a boolean', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkPaths(repos, m.id, 27);
+    const h = buildMemoryHandlers({ memory, repos });
+    const raw = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(h.get({ id: m.id })),
+    );
+    const payload = parseText<Record<string, unknown>>(raw);
+    expect(payload).not.toHaveProperty('entitiesTruncated');
+    // `truncated`/`headTruncated` describe the predecessor chain and stay; what
+    // must not exist is a boolean about the ENTITY projection.
+    const entityBooleans = Object.entries(payload).filter(
+      ([k, v]) => /entit/i.test(k) && typeof v === 'boolean',
+    );
+    expect(entityBooleans).toEqual([]);
+  });
+
+  it('counts only entities in the memory own scope', async () => {
+    const repos = createRepositories(db.handle.db);
+    const mine = memory.save(
+      { type: 'project', title: 'Mine', content: 'touches shared paths' },
+      projectScope(projectA.id),
+    );
+    const theirs = memory.save(
+      { type: 'project', title: 'Theirs', content: 'touches shared paths' },
+      projectScope(projectB.id),
+    );
+    linkPaths(repos, mine.id, 4);
+    // Same values, other project: a leak would show up as a larger count.
+    repos.entities.linkMemory(
+      theirs.id,
+      'project',
+      projectB.id,
+      Array.from({ length: 20 }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
+      new Date(),
+    );
+
+    const seen = await readAllThreeSurfaces(mine.id);
+    for (const [surface, row] of Object.entries(seen)) {
+      expect(row.entitiesTotal, surface).toBe(4);
+    }
+  });
+});
+
 describe('memory.title — read payloads expose the saved title', () => {
   it('memory.search returns rows whose title equals what was saved', async () => {
     memory.save(
