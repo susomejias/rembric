@@ -1,10 +1,16 @@
 import { Hono } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
+import type { RelationKind } from '../db/schema/memory-relations.js';
 import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
+import {
+  compareAnnotations,
+  type AnnotationKind,
+  type OrderedAnnotation,
+} from '../services/relations.js';
 import {
   deriveReviewState,
   REFUTED_PRIORITY_MS,
@@ -451,7 +457,15 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const sourceLabel = sourceLine(row.source);
 
-    const touchingRelations = deps.repos.relations.adminListTouching(row.id);
+    // Uncapped and unpaginated on purpose: the `memory` capability promises the
+    // annotations its MCP bound withholds stay "visible via the dashboard", and
+    // this is the only per-memory judgment view the dashboard has.
+    const touchingRelations = deps.repos.relations
+      .adminListTouching(row.id)
+      .map((r) => ({ r, key: orderKeyFor(r, row.id) }))
+      .sort((a, b) => compareAnnotations(a.key, b.key))
+      .map((e) => e.r);
+    const degree = touchingRelations.length;
     const judgmentsHtml =
       touchingRelations.length === 0
         ? tblEmpty('No judgments touch this memory.')
@@ -548,7 +562,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
       ${predHtml}
 
-      <h2>Judgments</h2>
+      <h2>Judgments (${degree})</h2>
       ${judgmentsHtml}
 
       <h2>Actions</h2>
@@ -612,6 +626,31 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
   });
 
   return app;
+}
+
+/**
+ * The shape `compareAnnotations` orders, built from a joined relation row.
+ * `kind` is POV-dependent, which is why it cannot be an `ORDER BY` column:
+ * the same row is `supersedes` to its source and `superseded_by` to its target.
+ * `adminListTouching` already excludes `not_conflict`; a NULL `relation` is an
+ * unjudged candidate, as is an operator-orphaned one.
+ */
+function orderKeyFor(
+  r: { relation: RelationKind | null; sourceId: string; createdAt: Date; judgmentId: string },
+  memoryId: string,
+): OrderedAnnotation {
+  const isSource = r.sourceId === memoryId;
+  const kind: AnnotationKind =
+    r.relation === null || r.relation === 'not_conflict'
+      ? 'pending_conflict'
+      : r.relation === 'supersedes' && !isSource
+        ? 'superseded_by'
+        : r.relation;
+  return {
+    view: { kind, targetId: memoryId, status: 'judged' },
+    createdAt: r.createdAt,
+    judgmentId: r.judgmentId,
+  };
 }
 
 function sourceLine(source: Memory['source']): string {

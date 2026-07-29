@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 
 import type { AdminRelationFilters, Repositories } from '../db/repositories/index.js';
-import type { RelationKind, RelationStatus } from '../db/schema/memory-relations.js';
 import type { RelationsService } from '../services/relations.js';
 import type { SessionsService } from '../services/sessions.js';
 
@@ -24,6 +23,12 @@ import {
 } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import {
+  parseRelationKind,
+  parseRelationStatus,
+  relationKindOptions,
+  relationStatusOptions,
+} from './relation-filters.js';
 import { escape, formatTs, html, raw, shortId, statusPill, verdictPill } from './templates.js';
 
 export interface JudgmentsDeps {
@@ -31,8 +36,6 @@ export interface JudgmentsDeps {
   relations: RelationsService;
   sessions: SessionsService;
 }
-
-const VALID_STATUSES = new Set(['pending', 'judged', 'orphaned']);
 
 export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
   const app = new Hono();
@@ -48,22 +51,10 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const offset = page * PAGE_SIZE;
 
     const filters: AdminRelationFilters = {};
-    if (VALID_STATUSES.has(statusFilter)) {
-      filters.status = statusFilter as RelationStatus;
-    }
-    const KIND_VALUES = new Set([
-      'supersedes',
-      'conflicts_with',
-      'related',
-      'compatible',
-      'scoped',
-      'not_conflict',
-    ]);
-    if (kindFilter && KIND_VALUES.has(kindFilter)) {
-      filters.kind = kindFilter as RelationKind;
-    } else if (kindFilter === 'pending') {
-      filters.kind = 'pending';
-    }
+    const status = parseRelationStatus(statusFilter);
+    if (status) filters.status = status;
+    const kind = parseRelationKind(kindFilter);
+    if (kind) filters.kind = kind;
 
     const rows = deps.repos.relations.adminListWithContent(filters, PAGE_SIZE + 1, offset);
 
@@ -71,30 +62,13 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const visible = rows.slice(0, PAGE_SIZE);
     const total = deps.repos.relations.adminCountWithFilters(filters);
 
-    const statusOptions = [
-      { value: '', label: 'all statuses', selected: statusFilter === '' },
-      { value: 'pending', label: 'pending', selected: statusFilter === 'pending' },
-      { value: 'judged', label: 'judged', selected: statusFilter === 'judged' },
-      { value: 'orphaned', label: 'orphaned', selected: statusFilter === 'orphaned' },
-    ];
-    const kindOptions = [
-      { value: '', label: 'all kinds', selected: kindFilter === '' },
-      ...(
-        [
-          'supersedes',
-          'conflicts_with',
-          'related',
-          'compatible',
-          'scoped',
-          'not_conflict',
-          'pending',
-        ] as const
-      ).map((k) => ({ value: k, label: k, selected: kindFilter === k })),
-    ];
-
     const filterBar = filtersBar([
-      filterGroup('STATUS', 'f-status', sel('status', statusOptions, { id: 'f-status' })),
-      filterGroup('KIND', 'f-kind', sel('kind', kindOptions, { id: 'f-kind' })),
+      filterGroup(
+        'STATUS',
+        'f-status',
+        sel('status', relationStatusOptions(statusFilter), { id: 'f-status' }),
+      ),
+      filterGroup('KIND', 'f-kind', sel('kind', relationKindOptions(kindFilter), { id: 'f-kind' })),
       html`<span class="acts">
         <button class="btn primary" type="submit">FILTER</button>
         <a class="clear" href="/dashboard/judgments">CLEAR</a>

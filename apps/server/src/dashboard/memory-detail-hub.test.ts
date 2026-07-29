@@ -210,6 +210,134 @@ describe('memory detail hub', () => {
     expect(targetHtml).toContain(`href="/dashboard/memories/${source.id}"`);
   });
 
+  describe('Judgments section ordering and degree', () => {
+    const mem = (title: string) =>
+      memorySvc.save({ type: 'feedback', title, content: title }, SCOPE_GLOBAL);
+
+    /** Judgment-row ids in the order the section rendered them. */
+    function renderedOrder(html: string): string[] {
+      const out: string[] = [];
+      const re = /data-href="\/dashboard\/judgments\/([^"]+)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(html)) !== null) out.push(m[1]!);
+      return out;
+    }
+
+    const setCreatedAt = (relationId: string, ms: number) =>
+      t.handle.raw
+        .prepare('UPDATE memory_relations SET created_at = ? WHERE id = ?')
+        .run(ms, relationId);
+
+    it('a conflicts_with created before twelve related rows still leads, and all thirteen render', async () => {
+      const hub = mem('order-hub');
+      const conflict = relationsSvc.compare({
+        sourceId: hub.id,
+        targetId: mem('order-conflict-target').id,
+        relation: 'conflicts_with',
+        actor: 'test',
+        kind: 'agent',
+        confidence: 0.9,
+      });
+      setCreatedAt(conflict.id, 1_000);
+      const relatedIds: string[] = [];
+      for (let i = 0; i < 12; i++) {
+        const rel = relationsSvc.compare({
+          sourceId: hub.id,
+          targetId: mem(`order-related-${i}`).id,
+          relation: 'related',
+          actor: 'test',
+          kind: 'agent',
+          confidence: 0.5,
+        });
+        setCreatedAt(rel.id, 100_000 + i);
+        relatedIds.push(rel.id);
+      }
+
+      const order = renderedOrder(await (await app.request(`/${hub.id}`)).text());
+      expect(order).toHaveLength(13);
+      expect(order[0]).toBe(conflict.id);
+      for (const id of relatedIds) expect(order.indexOf(id)).toBeGreaterThan(0);
+    });
+
+    it('twenty pending rows do not displace one judged supersedes', async () => {
+      const hub = mem('pending-hub');
+      const pendingIds: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        const p = relationsSvc.createPending({
+          sourceId: hub.id,
+          targetId: mem(`pending-target-${i}`).id,
+        });
+        setCreatedAt(p.id, 500_000 + i);
+        pendingIds.push(p.id);
+      }
+      const judged = relationsSvc.compare({
+        sourceId: hub.id,
+        targetId: mem('supersedes-target').id,
+        relation: 'supersedes',
+        actor: 'test',
+        kind: 'agent',
+        confidence: 0.95,
+      });
+      setCreatedAt(judged.id, 1_000);
+
+      const order = renderedOrder(await (await app.request(`/${hub.id}`)).text());
+      expect(order).toHaveLength(21);
+      expect(order[0]).toBe(judged.id);
+      expect(Math.min(...pendingIds.map((id) => order.indexOf(id)))).toBe(1);
+    });
+
+    it('a same-millisecond batch renders in the same order twice, broken by judgment_id', async () => {
+      const hub = mem('tie-hub');
+      const ids: string[] = [];
+      for (let i = 0; i < 8; i++) {
+        const rel = relationsSvc.compare({
+          sourceId: hub.id,
+          targetId: mem(`tie-target-${i}`).id,
+          relation: 'related',
+          actor: 'test',
+          kind: 'agent',
+          confidence: 0.5,
+        });
+        setCreatedAt(rel.id, 777_000);
+        ids.push(rel.id);
+      }
+      // judgment_id descends as the rows were inserted, so the comparator's
+      // third key must reverse the scan order rather than agree with it.
+      ids.forEach((id, i) =>
+        t.handle.raw
+          .prepare('UPDATE memory_relations SET judgment_id = ? WHERE id = ?')
+          .run(`tie-J${7 - i}`, id),
+      );
+
+      const first = renderedOrder(await (await app.request(`/${hub.id}`)).text());
+      const second = renderedOrder(await (await app.request(`/${hub.id}`)).text());
+      expect(first).toHaveLength(8);
+      expect(first).toEqual([...ids].reverse());
+      expect(second).toEqual(first);
+    });
+
+    it('the heading reports the degree, and 0 on the empty state', async () => {
+      const hub = mem('degree-hub');
+      const empty = await (await app.request(`/${hub.id}`)).text();
+      expect(empty).toContain('Judgments (0)');
+      expect(empty).toContain('No judgments touch this memory.');
+
+      for (let i = 0; i < 7; i++) {
+        relationsSvc.compare({
+          sourceId: hub.id,
+          targetId: mem(`degree-target-${i}`).id,
+          relation: 'related',
+          actor: 'test',
+          kind: 'agent',
+          confidence: 0.5,
+        });
+      }
+      const html = await (await app.request(`/${hub.id}`)).text();
+      expect(renderedOrder(html)).toHaveLength(7);
+      expect(html).toContain('Judgments (7)');
+    });
+  });
+
   it('confirm rejects without CSRF (403) and succeeds with CSRF, refreshing review + confirm count on reload', async () => {
     const DAY = 24 * 60 * 60 * 1000;
     const staleSvc = new MemoryService(repos, t.handle.db, () => new Date(Date.now() - 120 * DAY));
