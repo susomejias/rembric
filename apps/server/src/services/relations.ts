@@ -60,12 +60,65 @@ export interface CompareInput {
 
 export interface RelationView {
   /** `kind` from the receiver's POV: outgoing (`supersedes`) vs incoming (`superseded_by`). */
-  kind: RelationKind | 'superseded_by' | 'pending_conflict';
+  kind: AnnotationKind;
   targetId: string;
   judgmentId?: string;
   status: 'pending' | 'judged' | 'orphaned';
   reason?: string | null;
   confidence?: number | null;
+}
+
+/** The kinds an annotation can carry. `not_conflict` is absent — see `toOrderedAnnotation`. */
+export type AnnotationKind =
+  | Exclude<RelationKind, 'not_conflict'>
+  | 'superseded_by'
+  | 'pending_conflict';
+
+/**
+ * Annotation precedence, lowest first: contradiction, then the two lifecycle
+ * edges, then unjudged candidates, then the informational tags. The two
+ * load-bearing groups lead so a flood of `related` rows — 82% of a judged graph
+ * — or of `pending_conflict` rows cannot evict them from a bounded list.
+ */
+export const ANNOTATION_TIER: Record<AnnotationKind, number> = {
+  conflicts_with: 0,
+  supersedes: 1,
+  superseded_by: 2,
+  pending_conflict: 3,
+  scoped: 4,
+  compatible: 5,
+  related: 6,
+};
+
+/** The highest `relations` bound any read surface will serve, shared by all of them. */
+export const RELATION_ANNOTATION_MAX = 50;
+
+/** A `RelationView` plus the two row columns the order needs and the view does not carry. */
+export interface OrderedAnnotation {
+  view: RelationView;
+  createdAt: Date;
+  /** Unique-indexed, which is what makes the annotation order total rather than merely stable. */
+  judgmentId: string;
+}
+
+/** A memory's annotations, bounded and ordered, with the count that existed before the bound. */
+export interface AnnotationPage {
+  views: RelationView[];
+  total: number;
+}
+
+/**
+ * Total order over annotations, applied before any bound: tier, then most
+ * recently created, then `judgment_id`. The third key never ties, so a batch of
+ * judgments sharing a `created_at` millisecond is still ordered deterministically
+ * instead of being left to the scan order this comparator exists to replace.
+ */
+export function compareAnnotations(a: OrderedAnnotation, b: OrderedAnnotation): number {
+  const tier = ANNOTATION_TIER[a.view.kind] - ANNOTATION_TIER[b.view.kind];
+  if (tier !== 0) return tier;
+  const age = b.createdAt.getTime() - a.createdAt.getTime();
+  if (age !== 0) return age;
+  return a.judgmentId < b.judgmentId ? -1 : a.judgmentId > b.judgmentId ? 1 : 0;
 }
 
 export class RelationsService {
@@ -312,97 +365,54 @@ export class RelationsService {
 
   /**
    * Return all rows whose `source_id` or `target_id` is `memoryId`,
-   * shaped as annotation views for `memory.search` / `memory.get`. Cap
-   * at `limit`. Hides `relation='not_conflict'` rows from the output —
-   * those are acknowledged false positives and shouldn't surface as
-   * annotations.
+   * shaped as annotation views for `memory.search` / `memory.get`,
+   * ordered by `compareAnnotations` and bounded at `limit`. `total`
+   * counts the annotations that exist after the `not_conflict` and
+   * `orphaned` exclusions and before the bound — `listTouching`, unlike
+   * `listTouchingAny`, does not filter orphaned rows in SQL, so it is
+   * never `rows.length`.
    */
-  listForMemory(memoryId: string, limit = 10): RelationView[] {
-    const rows = this.repos.relations.listTouching(memoryId);
-
-    const out: RelationView[] = [];
-    for (const r of rows) {
-      const isSource = r.sourceId === memoryId;
-      const otherId = isSource ? r.targetId : r.sourceId;
-      const status = r.status;
-
-      if (status === 'pending') {
-        out.push({
-          kind: 'pending_conflict',
-          targetId: otherId,
-          judgmentId: r.judgmentId,
-          status,
-        });
-        continue;
-      }
-      if (status === 'orphaned') {
-        // Orphaned rows are admin-visible only; not surfaced as
-        // annotations in search results.
-        continue;
-      }
-
-      const kind: RelationView['kind'] =
-        r.relation === 'supersedes' && !isSource ? 'superseded_by' : (r.relation ?? 'related');
-      out.push({
-        kind,
-        targetId: otherId,
-        status,
-        reason: r.reason,
-        confidence: r.confidence,
-      });
+  listForMemory(memoryId: string, limit = 10): AnnotationPage {
+    const ordered: OrderedAnnotation[] = [];
+    for (const r of this.repos.relations.listTouching(memoryId)) {
+      const entry = toOrderedAnnotation(r, memoryId);
+      if (entry) ordered.push(entry);
     }
-    return out.slice(0, limit);
+    ordered.sort(compareAnnotations);
+    return { views: ordered.slice(0, limit).map((e) => e.view), total: ordered.length };
   }
 
   /**
    * Bulk variant for `memory.search`: takes a list of memory ids and
-   * returns a Map from each id to its annotation list. Single JOIN, no
+   * returns a Map from each id to its annotation page. Single JOIN, no
    * N+1.
    */
-  listForMemories(memoryIds: readonly string[], capPerMemory = 10): Map<string, RelationView[]> {
+  listForMemories(memoryIds: readonly string[], capPerMemory = 10): Map<string, AnnotationPage> {
     if (memoryIds.length === 0) return new Map();
     const rows = this.repos.relations.listTouchingAny(memoryIds);
 
-    const out = new Map<string, RelationView[]>();
-    for (const id of memoryIds) out.set(id, []);
+    const ordered = new Map<string, OrderedAnnotation[]>();
+    for (const id of memoryIds) ordered.set(id, []);
 
     for (const r of rows) {
       // Each row gets annotated against BOTH endpoints if both are in
       // the input set; that mirrors how `listForMemory` would behave
-      // when called individually.
+      // when called individually — and is why `total` counts views, not rows.
       for (const id of [r.sourceId, r.targetId]) {
-        if (!memoryIds.includes(id)) continue;
-        const isSource = r.sourceId === id;
-        const otherId = isSource ? r.targetId : r.sourceId;
-        if (r.status === 'pending') {
-          appendCapped(
-            out,
-            id,
-            {
-              kind: 'pending_conflict',
-              targetId: otherId,
-              judgmentId: r.judgmentId,
-              status: 'pending',
-            },
-            capPerMemory,
-          );
-          continue;
-        }
-        const kind: RelationView['kind'] =
-          r.relation === 'supersedes' && !isSource ? 'superseded_by' : (r.relation ?? 'related');
-        appendCapped(
-          out,
-          id,
-          {
-            kind,
-            targetId: otherId,
-            status: 'judged',
-            reason: r.reason,
-            confidence: r.confidence,
-          },
-          capPerMemory,
-        );
+        const bucket = ordered.get(id);
+        if (!bucket) continue;
+        const entry = toOrderedAnnotation(r, id);
+        if (entry) bucket.push(entry);
       }
+    }
+
+    const out = new Map<string, AnnotationPage>();
+    for (const [id, bucket] of ordered) {
+      bucket.sort(compareAnnotations);
+      out.set(id, {
+        views: bucket.slice(0, capPerMemory).map((e) => e.view),
+        total: bucket.length,
+      });
     }
     return out;
   }
@@ -484,12 +494,42 @@ export class RelationsService {
   }
 }
 
-function appendCapped<T>(map: Map<string, T[]>, key: string, value: T, cap: number): void {
-  const arr = map.get(key);
-  if (!arr) {
-    map.set(key, [value]);
-    return;
+/**
+ * Project one relation row into the annotation `memoryId` would see, or `null`
+ * when that memory is shown nothing. Orphaned rows are admin-visible only, and
+ * `listTouching` — unlike `listTouchingAny` — does not filter them in SQL, so
+ * that branch is load-bearing for the single-memory read. `not_conflict` is an
+ * acknowledged false positive, excluded here and in both repository queries.
+ */
+function toOrderedAnnotation(r: MemoryRelation, memoryId: string): OrderedAnnotation | null {
+  if (r.status === 'orphaned' || r.relation === 'not_conflict') return null;
+
+  const isSource = r.sourceId === memoryId;
+  const otherId = isSource ? r.targetId : r.sourceId;
+  const keys = { createdAt: r.createdAt, judgmentId: r.judgmentId };
+
+  if (r.status === 'pending') {
+    return {
+      view: {
+        kind: 'pending_conflict',
+        targetId: otherId,
+        judgmentId: r.judgmentId,
+        status: 'pending',
+      },
+      ...keys,
+    };
   }
-  if (arr.length >= cap) return;
-  arr.push(value);
+
+  const kind: AnnotationKind =
+    r.relation === 'supersedes' && !isSource ? 'superseded_by' : (r.relation ?? 'related');
+  return {
+    view: {
+      kind,
+      targetId: otherId,
+      status: 'judged',
+      reason: r.reason,
+      confidence: r.confidence,
+    },
+    ...keys,
+  };
 }

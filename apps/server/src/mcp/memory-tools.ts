@@ -11,7 +11,7 @@ import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
-import type { RelationsService } from '../services/relations.js';
+import { RELATION_ANNOTATION_MAX, type RelationsService } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import type { Scope } from '../services/scope.js';
 
@@ -63,6 +63,28 @@ const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 const PENDING_JUDGMENTS_MAX = 50;
 /** A queue-depth warning, not a page of an inventory — the caller asks for inventory by passing a size. */
 const PENDING_JUDGMENTS_DEFAULT = 5;
+
+/** Per-surface `relations` defaults; only the maximum (`RELATION_ANNOTATION_MAX`) is shared. */
+const RELATION_ANNOTATION_DEFAULT = 10;
+/** Single-id `memory.get` is the deliberate deep read, so it defaults to the maximum. */
+const RELATION_ANNOTATION_DEFAULT_SINGLE = RELATION_ANNOTATION_MAX;
+
+/** The text must keep naming `min(relationsTotal, MAX)`: a bare `relationsTotal` is the ask this schema rejects. */
+function relationsLimitParam(defaults: string) {
+  return z
+    .number()
+    .int()
+    .min(1)
+    .max(RELATION_ANNOTATION_MAX)
+    .optional()
+    .describe(
+      `How many relation annotations to return per memory (${defaults}). Each row's ` +
+        '`relationsTotal` reports how many exist, so when it exceeds the returned length ' +
+        `ask again with relations_limit: min(relationsTotal, ${RELATION_ANNOTATION_MAX}). ` +
+        `A value above ${RELATION_ANNOTATION_MAX} is REJECTED, not clamped. Annotations come ` +
+        'contradiction- and lifecycle-first, so a lower bound never hides one of those.',
+    );
+}
 
 export const memorySaveSchema = {
   scope: z.enum(MEMORY_SCOPES).default('project'),
@@ -143,6 +165,7 @@ export const memorySearchSchema = {
     .describe(
       'Restrict each result to these fields; identity fields (id, type, title) are always included. Omit for the full row.',
     ),
+  relations_limit: relationsLimitParam(`default ${RELATION_ANNOTATION_DEFAULT}`),
 };
 
 export const memoryGetSchema = {
@@ -159,6 +182,9 @@ export const memoryGetSchema = {
     .describe(
       'Batch: fetch several memories by id in one scoped call. Out-of-scope/unknown ids come back in `notFound`. Provide exactly one of `id` or `ids`.',
     ),
+  relations_limit: relationsLimitParam(
+    `default ${RELATION_ANNOTATION_DEFAULT_SINGLE} with \`id\`, ${RELATION_ANNOTATION_DEFAULT} with \`ids\``,
+  ),
 };
 
 export const memoryConfirmSchema = {
@@ -268,6 +294,12 @@ const memoryRow = z.object({
   lastSeenAt: z.string().nullable().optional(),
   topicKey: z.string().nullable().optional(),
   relations: z.array(relationView).optional(),
+  /**
+   * Annotations that exist for this memory before `relations_limit` bounds the
+   * array above — never the array's length restated, so a bounded list is
+   * `relationsTotal > relations.length` and needs no companion flag.
+   */
+  relationsTotal: z.number().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
   /** Bounded projection; `entitiesTruncated` is true when more exist. */
@@ -356,6 +388,7 @@ export const memoryGetOutput = {
   headTruncated: z.boolean().optional(),
   confirmationCount: z.number().optional(),
   relations: z.array(relationView).optional(),
+  relationsTotal: z.number().optional(),
   // Single-id response's entities[] projection (bounded; see memoryRow for
   // the batch response's equivalent field).
   entities: z.array(entityRef).optional(),
@@ -841,6 +874,7 @@ async function handleSearch(
     offset?: number;
     snippet?: number;
     fields?: string[];
+    relations_limit?: number;
   },
 ) {
   const { scope } = await resolveEffectiveScope(deps);
@@ -872,7 +906,7 @@ async function handleSearch(
     const relations = deps.relations
       ? deps.relations.listForMemories(
           memories.map((m) => m.id),
-          10,
+          args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
         )
       : null;
     // Derived review metadata (batched confirmation lookup) — informational
@@ -885,6 +919,8 @@ async function handleSearch(
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
         : null;
+    // A projected `relations` keeps its total: the two are one field's worth of meaning.
+    if (fieldSet?.has('relations')) fieldSet.add('relationsTotal');
     const formatRow = (m: (typeof memories)[number]): Record<string, unknown> => ({
       id: m.id,
       scope: m.scope,
@@ -906,7 +942,7 @@ async function handleSearch(
       const seenTargets = new Set<string>();
       const candidates: { targetId: string; originId: string; relationKind: string }[] = [];
       outer: for (const m of memories) {
-        for (const rel of relations.get(m.id) ?? []) {
+        for (const rel of relations.get(m.id)?.views ?? []) {
           if (!RELATION_EXPANSION_KINDS.has(rel.kind)) continue;
           if (primaryIds.has(rel.targetId) || seenTargets.has(rel.targetId)) continue;
           seenTargets.add(rel.targetId);
@@ -935,9 +971,11 @@ async function handleSearch(
       memories: memories.map((m) => {
         const r = review.get(m.id);
         const ents = entitiesByMemory.get(m.id) ?? [];
+        const annotations = relations?.get(m.id);
         const full: Record<string, unknown> = {
           ...formatRow(m),
-          relations: relations?.get(m.id) ?? [],
+          relations: annotations?.views ?? [],
+          relationsTotal: annotations?.total ?? 0,
           entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
           ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
           ...(r && r.reviewState !== null
@@ -958,7 +996,10 @@ async function handleSearch(
   }
 }
 
-async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string[] }) {
+async function handleGet(
+  deps: MemoryToolDeps,
+  args: { id?: string; ids?: string[]; relations_limit?: number },
+) {
   const { scope } = await resolveEffectiveScope(deps);
 
   const hasId = typeof args.id === 'string' && args.id.length > 0;
@@ -976,7 +1017,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
       const relations = deps.relations
         ? deps.relations.listForMemories(
             rows.map((m) => m.id),
-            10,
+            args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
           )
         : null;
       const entitiesByMemory = deps.repos
@@ -986,6 +1027,7 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
       return ok({
         memories: rows.map((m) => {
           const ents = entitiesByMemory.get(m.id) ?? [];
+          const annotations = relations?.get(m.id);
           return {
             id: m.id,
             scope: m.scope,
@@ -998,7 +1040,8 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
             createdAt: m.createdAt,
             lastSeenAt: m.lastSeenAt,
             topicKey: m.topicKey,
-            relations: relations?.get(m.id) ?? [],
+            relations: annotations?.views ?? [],
+            relationsTotal: annotations?.total ?? 0,
             entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
             ...(ents.length > ENTITIES_PROJECTION_CAP ? { entitiesTruncated: true } : {}),
           };
@@ -1044,7 +1087,13 @@ async function handleGet(deps: MemoryToolDeps, args: { id?: string; ids?: string
       truncated: result.truncated,
       headTruncated: result.headTruncated,
       confirmationCount: result.confirmationCount,
-      relations: deps.relations ? deps.relations.listForMemory(result.memory.id, 50) : [],
+      ...(() => {
+        const annotations = deps.relations?.listForMemory(
+          result.memory.id,
+          args.relations_limit ?? RELATION_ANNOTATION_DEFAULT_SINGLE,
+        );
+        return { relations: annotations?.views ?? [], relationsTotal: annotations?.total ?? 0 };
+      })(),
       ...(() => {
         const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
         return {

@@ -652,6 +652,164 @@ describe('memory.search — relation expansion (include_relations)', () => {
   });
 });
 
+describe('memory.search / memory.get — relation annotations', () => {
+  const MARKER = 'zzfloodmarker';
+  let relHandlers: ReturnType<typeof buildMemoryHandlers>;
+  let relations: RelationsService;
+  let floodedId: string;
+  let conflictTargetId: string;
+  let calmId: string;
+
+  interface Row {
+    id: string;
+    relations: { kind: string; targetId: string }[];
+    relationsTotal: number;
+  }
+
+  /** `count` judged `related` rows written BEFORE a judged `conflicts_with`, so arrival order buries it. */
+  function flood(sourceId: string, count: number): string {
+    for (let i = 0; i < count; i++) {
+      relations.compare({
+        sourceId,
+        targetId: memory.save(
+          { type: 'user', title: `filler neighbour ${i}`, content: `filler neighbour ${i}` },
+          projectScope(projectA.id),
+        ).id,
+        relation: 'related',
+        confidence: 0.5,
+        actor: 'test',
+      });
+    }
+    const target = memory.save(
+      { type: 'user', title: 'the contradiction', content: 'the contradiction' },
+      projectScope(projectA.id),
+    );
+    relations.compare({
+      sourceId,
+      targetId: target.id,
+      relation: 'conflicts_with',
+      confidence: 0.9,
+      actor: 'test',
+    });
+    return target.id;
+  }
+
+  beforeEach(() => {
+    relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
+    relHandlers = buildMemoryHandlers({ memory, relations });
+    floodedId = memory.save(
+      { type: 'user', title: MARKER, content: MARKER },
+      projectScope(projectA.id),
+    ).id;
+    conflictTargetId = flood(floodedId, 12);
+    calmId = memory.save(
+      { type: 'user', title: `${MARKER} calm`, content: `${MARKER} calm` },
+      projectScope(projectA.id),
+    ).id;
+    flood(calmId, 2);
+  });
+
+  async function search(args: Record<string, unknown> = {}) {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(relHandlers.search({ query: MARKER, ...args })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    return parseText<{ memories: Row[] }>(r).memories;
+  }
+
+  it('a search row surfaces the contradiction and reports the true total', async () => {
+    const rows = await search();
+    const flooded = rows.find((m) => m.id === floodedId);
+    expect(flooded?.relations).toHaveLength(10);
+    expect(flooded?.relations[0]).toMatchObject({
+      kind: 'conflicts_with',
+      targetId: conflictTargetId,
+    });
+    expect(flooded?.relationsTotal).toBe(13);
+
+    const calm = rows.find((m) => m.id === calmId);
+    expect(calm?.relations).toHaveLength(3);
+    expect(calm?.relationsTotal).toBe(3);
+  });
+
+  it('the batch `memory.get` form agrees with search', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(relHandlers.get({ ids: [floodedId, calmId] })),
+    );
+    const { memories } = parseText<{ memories: Row[] }>(r);
+    expect(memories[0]?.relations).toHaveLength(10);
+    expect(memories[0]?.relations[0]?.kind).toBe('conflicts_with');
+    expect(memories[0]?.relationsTotal).toBe(13);
+    expect(memories[1]?.relations).toHaveLength(3);
+    expect(memories[1]?.relationsTotal).toBe(3);
+
+    const searched = (await search()).find((m) => m.id === floodedId);
+    expect(memories[0]?.relations).toEqual(searched?.relations);
+  });
+
+  it('the single-id `memory.get` form reports the same total at its own default of 50', async () => {
+    const r = await runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(relHandlers.get({ id: floodedId })),
+    );
+    const payload = parseText<{ relations: { kind: string }[]; relationsTotal: number }>(r);
+    expect(payload.relations).toHaveLength(13);
+    expect(payload.relations[0]?.kind).toBe('conflicts_with');
+    expect(payload.relationsTotal).toBe(13);
+  });
+
+  it('relations_limit raises the bound without reordering, and keeps the total', async () => {
+    const flooded = (await search({ relations_limit: 25 })).find((m) => m.id === floodedId);
+    expect(flooded?.relations).toHaveLength(13);
+    expect(flooded?.relations[0]?.kind).toBe('conflicts_with');
+    expect(flooded?.relationsTotal).toBe(13);
+
+    const atDefault = (await search()).find((m) => m.id === floodedId);
+    expect(flooded?.relations.slice(0, 10)).toEqual(atDefault?.relations);
+  });
+
+  it('relations_limit does not change which memories a search returns', async () => {
+    const atDefault = await search();
+    const raised = await search({ relations_limit: 25 });
+    expect(raised.map((m) => m.id)).toEqual(atDefault.map((m) => m.id));
+  });
+
+  describe('on a memory with more annotations than any default', () => {
+    beforeEach(() => {
+      flood(floodedId, 46); // 12 + 46 related + 2 conflicts_with = 60
+    });
+
+    it('the per-surface defaults are 10 for search, 10 for the batch and 50 for the single id', async () => {
+      const flooded = (await search()).find((m) => m.id === floodedId);
+      expect(flooded?.relations).toHaveLength(10);
+      expect(flooded?.relationsTotal).toBe(60);
+
+      const batch = await runWithContext(fakeContext(projectA), () =>
+        Promise.resolve(relHandlers.get({ ids: [floodedId] })),
+      );
+      const batchRow = parseText<{ memories: Row[] }>(batch).memories[0];
+      expect(batchRow?.relations).toHaveLength(10);
+      expect(batchRow?.relationsTotal).toBe(60);
+
+      const single = await runWithContext(fakeContext(projectA), () =>
+        Promise.resolve(relHandlers.get({ id: floodedId })),
+      );
+      const singleRow = parseText<{ relations: unknown[]; relationsTotal: number }>(single);
+      expect(singleRow.relations).toHaveLength(50);
+      expect(singleRow.relationsTotal).toBe(60);
+    });
+
+    it('relations_limit: 25 returns exactly 25 of the 60, contradictions first', async () => {
+      const flooded = (await search({ relations_limit: 25 })).find((m) => m.id === floodedId);
+      expect(flooded?.relations).toHaveLength(25);
+      expect(flooded?.relationsTotal).toBe(60);
+      expect(flooded?.relations.filter((rel) => rel.kind === 'conflicts_with')).toHaveLength(2);
+      expect(flooded?.relations.slice(0, 2).every((rel) => rel.kind === 'conflicts_with')).toBe(
+        true,
+      );
+    });
+  });
+});
+
 describe('memory.get — batch (ids)', () => {
   let aId1: string;
   let aId2: string;

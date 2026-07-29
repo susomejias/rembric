@@ -26,7 +26,9 @@ export type MemoryScope = 'global' | 'project';
 export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference', 'procedural'] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
-export type MemoryStatus = 'active' | 'superseded' | 'archived';
+/** Single declaration of the status domain, in the shape `MEMORY_TYPES` uses. */
+export const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
+export type MemoryStatus = (typeof MEMORY_STATUSES)[number];
 
 export interface MemorySource {
   /** Token name that produced this memory (never the secret). */
@@ -58,7 +60,7 @@ export const memory = sqliteTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
-    status: text('status', { enum: ['active', 'superseded', 'archived'] })
+    status: text('status', { enum: [...MEMORY_STATUSES] })
       .notNull()
       .default('active'),
     /** Array of predecessor memory ids this row replaces. */

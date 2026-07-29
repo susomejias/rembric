@@ -16,6 +16,7 @@ import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ProjectsService } from '../services/projects.js';
+import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
@@ -241,6 +242,64 @@ describe('MCP protocol conformance', () => {
     // A size argument that silently changes WHICH rows qualify is not guessable
     // from the argument name, so the description has to say so.
     expect(desc).toMatch(/lifts the age filter/i);
+
+    await client.close();
+  });
+
+  it('the relations_limit parameter publishes the bounded-ask recipe on both reading tools', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    await client.close();
+
+    for (const name of ['memory.search', 'memory.get']) {
+      const schema = tools.find((t) => t.name === name)?.inputSchema as
+        | { properties?: { relations_limit?: { maximum?: number; description?: string } } }
+        | undefined;
+      const param = schema?.properties?.relations_limit;
+      expect(param?.maximum, `${name}.relations_limit maximum`).toBe(RELATION_ANNOTATION_MAX);
+      const desc = param?.description ?? '';
+      expect(desc, name).toContain('default');
+      expect(desc, name).toContain('relationsTotal');
+      // The whole mitigation: an ask of `relationsTotal` alone is what this
+      // schema rejects, so the recipe has to be the bounded one.
+      expect(desc, name).toContain(`min(relationsTotal, ${RELATION_ANNOTATION_MAX})`);
+      expect(desc, name).toMatch(/rejected, not clamped/i);
+    }
+  });
+
+  it('rejects a relations_limit above the maximum instead of clamping it', async () => {
+    const client = await connect();
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'project',
+        title: 'relations_limit over-ask probe',
+        content: 'relations-limit-over-ask-probe',
+      },
+    })) as ToolResult;
+    const { id } = readJson(saved) as { id: string };
+
+    for (const call of [
+      { name: 'memory.search', arguments: { query: 'probe', relations_limit: 51 } },
+      { name: 'memory.get', arguments: { id, relations_limit: 51 } },
+    ]) {
+      const rejected = (await client.callTool(call)) as ToolResult;
+      expect(rejected.isError, call.name).toBe(true);
+      const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(text, call.name).toContain('-32602');
+      expect(text, call.name).toContain('relations_limit');
+      // No clamped payload rides along with the rejection.
+      expect(text, call.name).not.toContain('relationsTotal');
+    }
+
+    // The maximum itself is accepted, so the recipe the description teaches works.
+    const atMax = (await client.callTool({
+      name: 'memory.get',
+      arguments: { id, relations_limit: RELATION_ANNOTATION_MAX },
+    })) as ToolResult;
+    expect(atMax.isError).toBeFalsy();
+    expect(readJson(atMax)).toMatchObject({ relations: [], relationsTotal: 0 });
 
     await client.close();
   });

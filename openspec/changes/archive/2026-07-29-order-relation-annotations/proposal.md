@@ -1,0 +1,66 @@
+## Why
+
+`memory.search` can already fail to surface a contradiction, and which contradictions it drops is decided by SQLite's scan order.
+
+The annotation list on a search result row is capped at 10 per memory (`RelationsService.listForMemories(ids, 10)`, `mcp/memory-tools.ts:872`). The rows it caps arrive from `RelationsRepository.listTouchingAny`, which has **no `ORDER BY` and no `LIMIT`**, and `appendCapped` keeps the first 10 it happens to see. So the surviving 10 are an arbitrary sample, and the sample can differ between two identical reads.
+
+Measured 2026-07-29 with the real embedder over `ingestCorpus` and all 24 committed queries at top-8, then against a production-shaped drained judgment graph:
+
+- **37 of 158 result rows (23%) exhaust the cap of 10.** Truncation is not an edge case; it is one row in four.
+- **`related` is 82% of the graph** (`related` 957, `compatible` 76, `scoped` 65, `conflicts_with` 56, `supersedes` 10 annotations across those pages). With that skew the edge the arbitrary sample drops is _probably_ an informational tag — and sometimes the `conflicts_with` or `supersedes` the agent must see. On a 10-memory sample from the author's own instance the internal graph is **9 `related` + 1 `supersedes`**, so `include_relations` covers exactly 1 of its 10 edges.
+- **On an instance with a judgment backlog the flood is worse.** Before the pendings are drained, annotations across the same 24 pages are **1154 `pending_conflict` + 10 `supersedes`** — 99% of the list is one kind, and any judged edge on a busy memory is at the mercy of where the scan lands.
+
+Dropping a `conflicts_with` silently is a correctness failure, not a presentation one: `memory.search` is the surface where an agent about to act on a memory learns that another memory contradicts it. The row is in the database, the JOIN returns it, and the projection throws it away.
+
+Two further findings from the same measurement bound the scope of the fix.
+
+**Widening `include_relations` to `related`/`compatible`/`scoped` was measured and rejected.** Today's 3 kinds surface 32 expansion rows across 15 of 24 queries, **+11.5%** payload. The widened 6 kinds surface 108 rows across **24 of 24** queries, **+62.4%** (ranked pages total 39,019 chars; the widened appendix adds 24,362). At 108/24 = 4.5 rows per query against a cap of 5 the budget **saturates on every single query** — the mechanism stops being "co-surface the relevant neighbour" and becomes "append five arbitrary related memories to every search". A fair-share allocation across kinds does not fix that: it decides _which_ kinds get slots, not that every query now fills them. And there is no recall to buy with the tokens — measured recall@8 is **1.000 against an arithmetic ceiling of 1** (`baselines/hybrid.json` floors are `measured − 0.05`). The three kinds already traversed cover both load-bearing cases, lifecycle (`supersedes`/`superseded_by`) and contradiction (`conflicts_with`); the three that would have been added are informational tags.
+
+**The eval harness cannot observe relation expansion at all**, so instrumenting it would have measured a guaranteed no-op. `ingestCorpus` runs real save-time candidate detection and produces `{pending: 145, judged: 2}` (the 2 are `topic_key` upserts). Annotations across all 24 top-8 pages: 1154 `pending_conflict` + 10 `supersedes`, nothing else — `related` does not exist until an agent calls `memory.judge`, which the harness never does. A/B over the corpus: **today 10 candidates, widened 10 candidates, delta exactly 0.**
+
+One last piece of evidence that the expansion requirement has never been exercised: a `superseded_by` annotation only ever attaches to a row whose `status` is `superseded` (`applySupersedesSideEffect` flips the target), and the ranked search path defaults to `status = 'active'` (`services/memory.ts:437`). The requirement's own motivating scenario — "a superseded hit's head is co-surfaced" — is unreachable unless the caller passes an explicit `status` or `topic_key`.
+
+## What Changes
+
+- **The annotation list gets a total order, applied before the cap.** Sort by (1) kind tier, (2) relation `created_at` descending, (3) `judgment_id`. The order is provably _total_, not merely stable: `memory_relations_judgment_id_unique` guarantees the third key never ties, so two identical reads cannot disagree even when a batch of judgments shares a millisecond.
+- **Three tiers, load-bearing first.** `conflicts_with` > `supersedes` > `superseded_by`, then `pending_conflict`, then `scoped` > `compatible` > `related`. A flood of informational edges can no longer evict a contradiction, and neither can a flood of pendings.
+- **`pending_conflict` sits below the judged load-bearing tier and above the informational one.** Below, because it was measured at 1154 of 1164 annotations on an undrained corpus: ranked top it would evict every judged edge on any instance with a backlog — the same bug with a different dominant kind. Above the informational tier, because an unjudged candidate carries a required action (the fresh-context-judgment invariant has the agent that produced the conflict close it) and an informational tag does not.
+- **One comparator, applied to every annotation surface.** `listForMemories` (feeding `memory.search` rows and `memory.get`'s batch form, both capped at 10) and `listForMemory` (`memory.get` single form, capped at 50). Two surfaces cannot disagree about which relations a memory has.
+- **Truncation stops being silent, and the signal is a number rather than a flag.** Every row carrying `relations` also carries `relationsTotal` — the count of annotations that exist for that memory after the `not_conflict`/`orphaned` exclusions and before the bound. A bare boolean says information is missing but gives the caller nothing to decide with, so an agent reading it does nothing; a total tells it whether a second ask is worth the tokens, and `relationsTotal > relations.length` derives the boolean anyway. **The total is free**: `listTouchingAny` has no `LIMIT`, so the service already holds the complete per-memory count before it truncates — the same fact that keeps the comparator out of SQL. Follows `pendingJudgmentsTotal` (`surface-pending-judgment-inventory`, "never the returned list's length"), not `predecessorCount`, whose scenario defines it as the number _returned_ and which is therefore the array length restated.
+- **The caller gets a parameter to act on the total: `relations_limit`, default per surface, hard maximum 50.** A total that says information is missing with no way to ask for it is half a feature. 50 is the highest annotation bound already shipping (single-id `memory.get`), so the ceiling introduces no new payload regime; a `RelationView` is bounded (`reason` is zod-capped at 2000 chars), so a single row's annotations cannot exceed ~100 KB at the maximum, and the caller opts in per request. **Over-ask is rejected, not clamped** (`-32602`), consistent with `limit`'s `.max(200)` and every other numeric bound on this surface — and the parameter's description carries the `min(relationsTotal, 50)` recipe explicitly, which is the fix `surface-pending-judgment-inventory` had to make after documenting an ask that could exceed its own maximum.
+- **No SQL, no repository change, no `ORDER BY`.** `listTouchingAny` already returns every touching row unbounded, so the comparator sorts in the service, where the kind enum and the POV-dependent `superseded_by` derivation already live. **Rejected: raising the fixed cap** (10 → 25 or 50 for everyone) — the measured pending flood shows no constant is safe without an ordering, and a raise spends tokens on every response whether the caller needs them or not. Letting the caller ask is a different mechanism, and that one is in (above).
+- **No change to `include_relations`.** Its kind set, its cap of 5, and its `false` default all stand. Its input improves for free: it reads the same now-ordered list, so a `supersedes` edge can no longer be hidden from it by scan order.
+- **No change to the eval harness.** `pnpm run eval` is a non-regression check here, not evidence: retrievers return ids, the annotation list is not scored, and the corpus contains no judged `related` edges to order.
+
+Explicitly out of scope, each with its measured reason:
+
+- Widening the expansion kind set — measured at +62.4% payload with the budget saturated on 24/24 queries and zero recall headroom.
+- Flipping the `include_relations` default — the mechanism it would enable is the one just rejected.
+- `coverageAtK`, a `relation-hop` query type, and the harness plumbing to drive the expansion — an instrument for a win measured as absent (A/B delta exactly 0 on the shipped corpus).
+- `fields` is applied to `results` rows but not to `expanded` rows, so a caller passing `fields: ['status']` still receives full-content appendix rows. A real inconsistency with `mcp-api`'s projection requirement, independent of this defect, and a follow-up rather than a rider.
+- The two entity-extraction defects found while measuring: relative paths are not canonicalized (`db/client.ts` and `apps/server/src/db/client.ts` are two entities that never join, contradicting `archive/2026-07-25-add-entity-index/design.md` Decision 3), and the `env_var:MRR` false positive.
+
+## Capabilities
+
+### New Capabilities
+
+(none)
+
+### Modified Capabilities
+
+- `memory`: the relation-annotation requirement — the annotation list gains a specified total order with load-bearing kinds ranked ahead of informational ones, so which annotations survive the bound is deterministic and decision-relevant rather than scan-order dependent; the bound becomes caller-supplied with a per-surface default; and the true total is reported so a truncated list is distinguishable from a complete one.
+- `mcp-api`: a new requirement for the `relations_limit` tool parameter and the `relationsTotal` response field on `memory.search` and `memory.get` — the default, the shared maximum, over-ask rejection rather than clamping, and the description recipe an agent needs so it cannot write the ask that its own maximum rejects. This capability owns tool contracts and already owns the `pendingJudgmentsTotal` precedent (`:483-503`), so the parameter belongs here; the ORDERING contract stays in `memory` alone and is not restated.
+
+`retrieval-evaluation` is **not** modified: no metric, query type, or baseline changes.
+
+## Impact
+
+- `apps/server/src/services/relations.ts` — an exported `ANNOTATION_TIER` order, `compareAnnotations`, and `RELATION_ANNOTATION_MAX = 50`; the comparator applied in `listForMemories` before `appendCapped` and in `listForMemory` before its `slice`; both now return the true per-memory total alongside the capped list
+- `apps/server/src/mcp/memory-tools.ts` — `relations_limit` on the `memory.search` and `memory.get` input schemas (with the description recipe); `relationsTotal` on the shared `memoryRow` zod object and on the single-id `memory.get` output; both populated at the three annotation call sites (`:873` search, `:977` batch get, `:1047` single get)
+- `apps/server/src/services/relations.test.ts` — the ordering, the total-order tiebreak, the flood-eviction reproduction, the total's arithmetic
+- `apps/server/src/mcp/memory-tools.test.ts` — end to end: a `conflicts_with` survives twelve `related` edges on a search row; repeated reads agree; `relationsTotal` exceeds the returned length; `relations_limit: 51` is rejected
+- `openspec/specs/{memory,mcp-api}/spec.md` — published at archive time only (`pnpm run check:spec-provenance` is CI-gated)
+
+Existing installations: no migration, no schema change, no derived-index invalidation (`memory_fts`, `memory_vec`, `memory_entities`/`memory_entity_links`/`memory_entity_scan` untouched; `EXTRACTOR_VERSION` not bumped). This is a read-time projection over unchanged rows. On the first boot after upgrade a memory carrying more than 10 relations surfaces a different 10 than before — deterministic, and a superset in decision value — plus a `relationsTotal` that reveals how many exist; a memory with 10 or fewer sees a possible reordering and nothing else. Response defaults are unchanged, so no caller's payload grows unless it passes the new parameter. Rollback is a plain image downgrade: the older code reads the same rows, returns an arbitrary 10 again, and ignores `relations_limit` — a client that had started sending it degrades to the old default rather than erroring. The excess has always been visible in full on `/dashboard/judgments`, so nothing was or becomes unreachable.
+
+Invariants: append-only untouched — this is a read. Scope-at-service-layer untouched: the comparator and the bound run inside the already-scoped annotation projection and touch no scope decision. Data-access confinement preserved: no SQL leaves `db/` and no repository method changes. Fresh-context judgment untouched — `pending_conflict` annotations still surface, and `memory.save.candidates[]` / `memory.context.pendingJudgments[]` remain the queue's authoritative surfaces. No new MCP tool; two existing tools gain one optional input each and one optional output field each, both additive, so no plugin work across the four clients.
