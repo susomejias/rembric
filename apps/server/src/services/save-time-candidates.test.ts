@@ -600,6 +600,119 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       wide[0]!.similarity,
     );
   });
+
+  it('a long superseded topic chain on the same entity does not switch the channel off', () => {
+    const repos = createRepositories(db.handle.db);
+    const target = memorySvc.save(
+      { type: 'project', title: 'Bind the port', content: 'bind the port to loopback only' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(
+      target.id,
+      'global',
+      null,
+      [{ kind: 'path', value: 'docker-compose.yml' }],
+      new Date(),
+    );
+    for (let i = 0; i < 9; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    // Non-archived: 6/16 = 0.375, over the gate. Active: 1/11 = 0.09, under it.
+    const chain: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const { memory: m } = memorySvc.saveWithTopicKey(
+        {
+          type: 'project',
+          title: `Compose revision ${i}`,
+          content: `compose revision ${i} adjusts the healthcheck interval`,
+          topicKey: 'ops/compose-healthcheck',
+        },
+        SCOPE_GLOBAL,
+      );
+      chain.push(m.id);
+    }
+    // The five superseded rows carry the entity; the still-active head does not,
+    // so the active numerator stays at 1 (the target) rather than 2.
+    for (const id of chain.slice(0, -1)) {
+      repos.entities.linkMemory(
+        id,
+        'global',
+        null,
+        [{ kind: 'path', value: 'docker-compose.yml' }],
+        new Date(),
+      );
+    }
+    // `findOtherMemoriesForEntity` is `ORDER BY created_at DESC LIMIT n`, so the
+    // one active target is backdated behind the whole chain: a fixture with it
+    // newest would surface first under any predicate.
+    db.handle.db
+      .update(memory)
+      .set({ createdAt: new Date(1_000) })
+      .where(eq(memory.id, target.id))
+      .run();
+
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Publish on all interfaces',
+        content: 'publish on 0.0.0.0 instead',
+      },
+      SCOPE_GLOBAL,
+    );
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'path', value: 'docker-compose.yml' },
+    ]);
+    const match = cands.find((c) => c.targetId === target.id);
+    expect(match).toBeDefined();
+    expect(match!.source).toBe('entity');
+    expect(match!.entityValue).toBe('docker-compose.yml');
+  });
+
+  it('an entity concentrated on the active population is gated even where superseded rows dilute it', () => {
+    const repos = createRepositories(db.handle.db);
+    for (let i = 0; i < 2; i++) {
+      const m = memorySvc.save(
+        { type: 'project', title: `Retry note ${i}`, content: `retry note ${i} on the queue` },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'global',
+        null,
+        [{ kind: 'error_code', value: 'ETIMEDOUT' }],
+        new Date(),
+      );
+    }
+    for (let i = 0; i < 2; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    // Active: 2/4 = 0.50, over the gate. Non-archived: 2/20 = 0.10, under it.
+    for (let i = 0; i < 16; i++) {
+      memorySvc.saveWithTopicKey(
+        {
+          type: 'project',
+          title: `Unrelated revision ${i}`,
+          content: `unrelated revision ${i} of the release checklist`,
+          topicKey: 'ops/release-checklist',
+        },
+        SCOPE_GLOBAL,
+      );
+    }
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Queue timeout raised', content: 'queue timeout raised to sixty' },
+      SCOPE_GLOBAL,
+    );
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'error_code', value: 'ETIMEDOUT' },
+    ]);
+    expect(cands.some((c) => c.source === 'entity')).toBe(false);
+  });
 });
 
 describe('9.7 property: at most one active row per (scope, project_id, topic_key)', () => {

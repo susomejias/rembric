@@ -239,7 +239,7 @@ export class EntitiesRepository {
     const conditions = [
       eq(memory.scope, opts.scope),
       opts.projectId === null ? isNull(memory.projectId) : eq(memory.projectId, opts.projectId),
-      sql`${memory.status} != 'archived'`,
+      eq(memory.status, 'active'),
     ];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
     return (
@@ -263,7 +263,7 @@ export class EntitiesRepository {
       entityScopeCondition(opts.scope, opts.projectId),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
-      sql`${memory.status} != 'archived'`,
+      eq(memory.status, 'active'),
     ];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
     return (

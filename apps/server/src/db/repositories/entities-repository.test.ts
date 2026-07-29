@@ -2,6 +2,7 @@ import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
+import { ENTITY_RARITY_THRESHOLD } from '../../services/save-time-candidates.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memory, type NewMemory } from '../schema/memory.js';
 import { projects } from '../schema/projects.js';
@@ -223,18 +224,38 @@ describe('EntitiesRepository', () => {
   });
 
   describe('scopeActiveMemoryCount and entityLinkCount', () => {
-    it('count active links and the scope total, excluding archived rows', () => {
+    it('count only active rows, excluding superseded and archived alike', () => {
       insertMemory('m1');
       insertMemory('m2');
-      insertMemory('m3', { status: 'archived' });
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
-      repo.linkMemory('m2', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
-      repo.linkMemory('m3', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      insertMemory('m3', { status: 'superseded' });
+      insertMemory('m4', { status: 'superseded' });
+      insertMemory('m5', { status: 'archived' });
+      for (const id of ['m1', 'm2', 'm3', 'm4', 'm5']) {
+        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      }
 
       expect(repo.scopeActiveMemoryCount({ scope: 'global', projectId: null })).toBe(2);
       expect(
         repo.entityLinkCount({ scope: 'global', projectId: null, kind: 'path', value: 'x.ts' }),
       ).toBe(2);
+    });
+
+    it('blocks what the non-archived population admitted: 2/4 active is over 0.15, 2/20 non-archived is under', () => {
+      for (const id of ['a1', 'a2', 'a3', 'a4']) insertMemory(id);
+      for (let i = 0; i < 16; i++) insertMemory(`s${i}`, { status: 'superseded' });
+      repo.linkMemory('a1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('a2', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+
+      const scopeTotal = repo.scopeActiveMemoryCount({ scope: 'global', projectId: null });
+      const links = repo.entityLinkCount({
+        scope: 'global',
+        projectId: null,
+        kind: 'path',
+        value: 'x.ts',
+      });
+      expect(scopeTotal).toBe(4);
+      expect(links).toBe(2);
+      expect(links / scopeTotal).toBeGreaterThan(ENTITY_RARITY_THRESHOLD);
     });
 
     it('excludeMemoryId excludes a given memory from both counts', () => {
