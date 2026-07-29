@@ -2,7 +2,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import { MEMORY_TYPES, type Memory, type MemoryScope } from '../db/schema/memory.js';
+import {
+  MEMORY_STATUSES,
+  MEMORY_TYPES,
+  type Memory,
+  type MemoryScope,
+} from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -57,7 +62,6 @@ import { ok } from './result.js';
  */
 
 const MEMORY_SCOPES = ['global', 'project'] as const;
-const MEMORY_STATUSES = ['active', 'superseded', 'archived'] as const;
 
 /** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
 const PENDING_JUDGMENTS_MAX = 50;
@@ -82,7 +86,9 @@ function relationsLimitParam(defaults: string) {
         '`relationsTotal` reports how many exist, so when it exceeds the returned length ' +
         `ask again with relations_limit: min(relationsTotal, ${RELATION_ANNOTATION_MAX}). ` +
         `A value above ${RELATION_ANNOTATION_MAX} is REJECTED, not clamped. Annotations come ` +
-        'contradiction- and lifecycle-first, so a lower bound never hides one of those.',
+        'contradiction- and lifecycle-first, so a lower bound never hides one of those — but ' +
+        'it does bound what `include_relations` can expand from, since expansion draws on the ' +
+        'annotations returned here.',
     );
 }
 
@@ -923,8 +929,11 @@ async function handleSearch(
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
         : null;
-    // A projected `relations` keeps its total: the two are one field's worth of meaning.
+    // A projected bounded list keeps its total: the two are one field's worth of
+    // meaning, and both are specified as present WHENEVER the list is, so a
+    // projection that dropped the count would make truncation undetectable.
     if (fieldSet?.has('relations')) fieldSet.add('relationsTotal');
+    if (fieldSet?.has('entities')) fieldSet.add('entitiesTotal');
     const formatRow = (m: (typeof memories)[number]): Record<string, unknown> => ({
       id: m.id,
       scope: m.scope,
@@ -1061,6 +1070,11 @@ async function handleGet(
     if (!result) {
       return mcpError('not_found', `memory '${args.id}' not found`);
     }
+    const annotations = deps.relations?.listForMemory(
+      result.memory.id,
+      args.relations_limit ?? RELATION_ANNOTATION_DEFAULT_SINGLE,
+    );
+    const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
     return ok({
       memory: {
         id: result.memory.id,
@@ -1091,20 +1105,10 @@ async function handleGet(
       truncated: result.truncated,
       headTruncated: result.headTruncated,
       confirmationCount: result.confirmationCount,
-      ...(() => {
-        const annotations = deps.relations?.listForMemory(
-          result.memory.id,
-          args.relations_limit ?? RELATION_ANNOTATION_DEFAULT_SINGLE,
-        );
-        return { relations: annotations?.views ?? [], relationsTotal: annotations?.total ?? 0 };
-      })(),
-      ...(() => {
-        const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
-        return {
-          entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-          entitiesTotal: ents.length,
-        };
-      })(),
+      relations: annotations?.views ?? [],
+      relationsTotal: annotations?.total ?? 0,
+      entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
+      entitiesTotal: ents.length,
       ...(result.reviewState !== null
         ? {
             reviewState: result.reviewState,

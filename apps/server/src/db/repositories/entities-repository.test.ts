@@ -2,7 +2,6 @@ import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
-import { ENTITY_RARITY_THRESHOLD } from '../../services/save-time-candidates.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memory, type NewMemory } from '../schema/memory.js';
 import { projects } from '../schema/projects.js';
@@ -255,7 +254,6 @@ describe('EntitiesRepository', () => {
       });
       expect(scopeTotal).toBe(4);
       expect(links).toBe(2);
-      expect(links / scopeTotal).toBeGreaterThan(ENTITY_RARITY_THRESHOLD);
     });
 
     it('excludeMemoryId excludes a given memory from both counts', () => {

@@ -93,12 +93,16 @@ export const ANNOTATION_TIER: Record<AnnotationKind, number> = {
 /** The highest `relations` bound any read surface will serve, shared by all of them. */
 export const RELATION_ANNOTATION_MAX = 50;
 
-/** A `RelationView` plus the two row columns the order needs and the view does not carry. */
-export interface OrderedAnnotation {
-  view: RelationView;
+/** Exactly what the order reads. A caller that only sorts needs nothing else. */
+export interface AnnotationKey {
+  kind: AnnotationKind;
   createdAt: Date;
   /** Unique-indexed, which is what makes the annotation order total rather than merely stable. */
   judgmentId: string;
+}
+
+export interface OrderedAnnotation extends AnnotationKey {
+  view: RelationView;
 }
 
 /** A memory's annotations, bounded and ordered, with the count that existed before the bound. */
@@ -113,8 +117,8 @@ export interface AnnotationPage {
  * judgments sharing a `created_at` millisecond is still ordered deterministically
  * instead of being left to the scan order this comparator exists to replace.
  */
-export function compareAnnotations(a: OrderedAnnotation, b: OrderedAnnotation): number {
-  const tier = ANNOTATION_TIER[a.view.kind] - ANNOTATION_TIER[b.view.kind];
+export function compareAnnotations(a: AnnotationKey, b: AnnotationKey): number {
+  const tier = ANNOTATION_TIER[a.kind] - ANNOTATION_TIER[b.kind];
   if (tier !== 0) return tier;
   const age = b.createdAt.getTime() - a.createdAt.getTime();
   if (age !== 0) return age;
@@ -504,32 +508,35 @@ export class RelationsService {
 function toOrderedAnnotation(r: MemoryRelation, memoryId: string): OrderedAnnotation | null {
   if (r.status === 'orphaned' || r.relation === 'not_conflict') return null;
 
-  const isSource = r.sourceId === memoryId;
-  const otherId = isSource ? r.targetId : r.sourceId;
-  const keys = { createdAt: r.createdAt, judgmentId: r.judgmentId };
+  const kind = annotationKindFor(r, memoryId);
+  const otherId = r.sourceId === memoryId ? r.targetId : r.sourceId;
+  const keys = { kind, createdAt: r.createdAt, judgmentId: r.judgmentId };
 
   if (r.status === 'pending') {
     return {
-      view: {
-        kind: 'pending_conflict',
-        targetId: otherId,
-        judgmentId: r.judgmentId,
-        status: 'pending',
-      },
+      view: { kind, targetId: otherId, judgmentId: r.judgmentId, status: 'pending' },
       ...keys,
     };
   }
-
-  const kind: AnnotationKind =
-    r.relation === 'supersedes' && !isSource ? 'superseded_by' : (r.relation ?? 'related');
   return {
-    view: {
-      kind,
-      targetId: otherId,
-      status: 'judged',
-      reason: r.reason,
-      confidence: r.confidence,
-    },
+    view: { kind, targetId: otherId, status: 'judged', reason: r.reason, confidence: r.confidence },
     ...keys,
   };
+}
+
+/**
+ * The receiver's point of view on a relation row: the same row is `supersedes` to
+ * its source and `superseded_by` to its target, which is why the ordering key
+ * cannot be an `ORDER BY` column. Shared by the MCP annotation projection and the
+ * dashboard's judgment table so the two cannot disagree about a row's tier.
+ */
+export function annotationKindFor(
+  r: Pick<MemoryRelation, 'relation' | 'status' | 'sourceId'>,
+  memoryId: string,
+): AnnotationKind {
+  // `orphaned` counts as unjudged, not as judged-`related`: the MCP projection
+  // drops those rows before they reach here, but the dashboard shows them.
+  if (r.status === 'pending' || r.status === 'orphaned') return 'pending_conflict';
+  if (r.relation === 'supersedes' && r.sourceId !== memoryId) return 'superseded_by';
+  return r.relation === null || r.relation === 'not_conflict' ? 'related' : r.relation;
 }

@@ -190,17 +190,28 @@ export class EntitiesRepository {
     );
   }
 
-  /** The `entities[]` projection for a single memory's read/search result. */
+  /**
+   * The `entities[]` projection for a single memory's read/search result.
+   * Ordered because the caller slices to `ENTITIES_PROJECTION_CAP`: without a
+   * total order, WHICH entities survive the bound is whatever SQLite's scan
+   * produced, so two identical reads of the same memory could show different
+   * subsets. `(kind, value)` is unique per memory, so the order is total.
+   */
   findEntitiesForMemory(memoryId: string): MemoryEntityView[] {
     return this.db
       .select({ kind: memoryEntities.kind, value: memoryEntities.value })
       .from(memoryEntityLinks)
       .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
       .where(eq(memoryEntityLinks.memoryId, memoryId))
+      .orderBy(memoryEntities.kind, memoryEntities.value)
       .all();
   }
 
-  /** Batched form of `findEntitiesForMemory` — one JOIN, no N+1, for a search result page. */
+  /**
+   * Batched form of `findEntitiesForMemory` — one JOIN, no N+1, for a search
+   * result page. Same total order, for the same reason: the caller bounds each
+   * memory's list, so the surviving subset must not depend on scan order.
+   */
   findEntitiesForMemories(memoryIds: string[]): Map<string, MemoryEntityView[]> {
     const out = new Map<string, MemoryEntityView[]>();
     if (memoryIds.length === 0) return out;
@@ -213,6 +224,7 @@ export class EntitiesRepository {
       .from(memoryEntityLinks)
       .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
       .where(sql`${memoryEntityLinks.memoryId} IN ${memoryIds}`)
+      .orderBy(memoryEntities.kind, memoryEntities.value)
       .all();
     for (const r of rows) {
       const list = out.get(r.memoryId) ?? [];

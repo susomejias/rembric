@@ -259,6 +259,56 @@ describe('memory detail hub', () => {
       for (const id of relatedIds) expect(order.indexOf(id)).toBeGreaterThan(0);
     });
 
+    it('an orphaned row is tiered as unjudged, not demoted to related', async () => {
+      // `adminListTouching` does not hide orphaned rows the way `listTouchingAny`
+      // does, so the dashboard is the only surface that ranks them. They must sit
+      // with the pendings — an orphaned candidate is unresolved, not informational.
+      const hub = mem('orphan-hub');
+      const orphanPending = relationsSvc.createPending({
+        sourceId: hub.id,
+        targetId: mem('orphan-target').id,
+      });
+      relationsSvc.orphan(orphanPending.judgmentId, 'deadline reached');
+      setCreatedAt(orphanPending.id, 1_000);
+      const related = relationsSvc.compare({
+        sourceId: hub.id,
+        targetId: mem('orphan-related-target').id,
+        relation: 'related',
+        actor: 'test',
+        kind: 'agent',
+        confidence: 0.5,
+      });
+      setCreatedAt(related.id, 900_000);
+
+      // Orphan is far OLDER, so only its tier can put it ahead of the `related`.
+      const html = await (await app.request(`/${hub.id}`)).text();
+      expect(renderedOrder(html)).toEqual([orphanPending.id, related.id]);
+      // And the kind column shows what it was sorted by. A raw `relation` here is
+      // NULL, which rendered an empty pill on a row leading the table.
+      expect(html).toContain('pending_conflict');
+    });
+
+    it('the kind column shows this memory POV, not the raw relation', async () => {
+      const predecessor = mem('pov-predecessor');
+      const successor = mem('pov-successor');
+      relationsSvc.compare({
+        sourceId: successor.id,
+        targetId: predecessor.id,
+        relation: 'supersedes',
+        actor: 'test',
+        kind: 'agent',
+        confidence: 0.9,
+      });
+
+      const fromSuccessor = await (await app.request(`/${successor.id}`)).text();
+      expect(fromSuccessor).toContain('supersedes');
+      expect(fromSuccessor).not.toContain('superseded_by');
+
+      // Same row, other end: it is what superseded THIS memory.
+      const fromPredecessor = await (await app.request(`/${predecessor.id}`)).text();
+      expect(fromPredecessor).toContain('superseded_by');
+    });
+
     it('twenty pending rows do not displace one judged supersedes', async () => {
       const hub = mem('pending-hub');
       const pendingIds: string[] = [];

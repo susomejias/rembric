@@ -10,7 +10,8 @@ import {
   ANNOTATION_TIER,
   compareAnnotations,
   RelationsService,
-  type OrderedAnnotation,
+  type AnnotationKey,
+  type AnnotationKind,
 } from './relations.js';
 import { projectScope, type Scope } from './scope.js';
 
@@ -35,8 +36,8 @@ function saveMemory(label: string): string {
   return memory.save({ type: 'project', title: label, content: label }, scope).id;
 }
 
-function orderKey(kind: OrderedAnnotation['view']['kind'], judgmentId: string, createdAt: Date) {
-  return { view: { kind, targetId: 't', status: 'judged' as const }, judgmentId, createdAt };
+function orderKey(kind: AnnotationKind, judgmentId: string, createdAt: Date): AnnotationKey {
+  return { kind, judgmentId, createdAt };
 }
 
 describe('ANNOTATION_TIER', () => {
@@ -62,7 +63,7 @@ describe('ANNOTATION_TIER', () => {
 describe('compareAnnotations', () => {
   it('is a TOTAL order: same-millisecond rows never compare equal', () => {
     const ts = new Date('2026-03-01T12:00:00.123Z');
-    const sameMs: OrderedAnnotation[] = [
+    const sameMs: AnnotationKey[] = [
       orderKey('related', 'j-05', ts),
       orderKey('related', 'j-01', ts),
       orderKey('conflicts_with', 'j-09', ts),

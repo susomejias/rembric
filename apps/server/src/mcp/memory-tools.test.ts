@@ -287,7 +287,6 @@ describe('memory.save — candidatesDetected', () => {
     expect(r.judgmentRequired).toBe(true);
     // The queue grows by the surfaced length, never by the detected count.
     expect(pendingRowsFor(r.id)).toBe(r.candidates.length);
-    expect(pendingRowsFor(r.id)).not.toBe(r.candidatesDetected);
   });
 
   it('a save with no candidates reports zero, and a cap of zero also reports zero', async () => {

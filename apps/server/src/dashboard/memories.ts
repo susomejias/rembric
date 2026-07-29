@@ -1,16 +1,11 @@
 import { Hono } from 'hono';
 
 import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
-import type { RelationKind } from '../db/schema/memory-relations.js';
 import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
-import {
-  compareAnnotations,
-  type AnnotationKind,
-  type OrderedAnnotation,
-} from '../services/relations.js';
+import { annotationKindFor, compareAnnotations } from '../services/relations.js';
 import {
   deriveReviewState,
   REFUTED_PRIORITY_MS,
@@ -462,9 +457,8 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // this is the only per-memory judgment view the dashboard has.
     const touchingRelations = deps.repos.relations
       .adminListTouching(row.id)
-      .map((r) => ({ r, key: orderKeyFor(r, row.id) }))
-      .sort((a, b) => compareAnnotations(a.key, b.key))
-      .map((e) => e.r);
+      .map((r) => ({ r, kind: annotationKindFor(r, row.id) }))
+      .sort((a, b) => compareAnnotations({ ...a.r, kind: a.kind }, { ...b.r, kind: b.kind }));
     const degree = touchingRelations.length;
     const judgmentsHtml =
       touchingRelations.length === 0
@@ -481,14 +475,17 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                   </tr>
                 </thead>
                 <tbody>
-                  ${touchingRelations.map((r) => {
+                  ${touchingRelations.map(({ r, kind }) => {
                     const isSource = r.sourceId === row.id;
                     const counterpartId = isSource ? r.targetId : r.sourceId;
                     const counterpartTitle = isSource ? r.targetTitle : r.sourceTitle;
                     const ts = r.judgedAt ?? r.createdAt;
+                    // `kind`, not `r.relation`: the column must show what the rows
+                    // are sorted by, from this memory's POV. The raw value put a row
+                    // labelled supersedes in the superseded_by tier.
                     return html`
                       <tr data-href="/dashboard/judgments/${r.id}">
-                        <td>${verdictPill(r.relation)}</td>
+                        <td>${verdictPill(kind)}</td>
                         <td>${statusPill(r.status)}</td>
                         <td class="small">
                           <a href="/dashboard/memories/${counterpartId}"
@@ -626,31 +623,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
   });
 
   return app;
-}
-
-/**
- * The shape `compareAnnotations` orders, built from a joined relation row.
- * `kind` is POV-dependent, which is why it cannot be an `ORDER BY` column:
- * the same row is `supersedes` to its source and `superseded_by` to its target.
- * `adminListTouching` already excludes `not_conflict`; a NULL `relation` is an
- * unjudged candidate, as is an operator-orphaned one.
- */
-function orderKeyFor(
-  r: { relation: RelationKind | null; sourceId: string; createdAt: Date; judgmentId: string },
-  memoryId: string,
-): OrderedAnnotation {
-  const isSource = r.sourceId === memoryId;
-  const kind: AnnotationKind =
-    r.relation === null || r.relation === 'not_conflict'
-      ? 'pending_conflict'
-      : r.relation === 'supersedes' && !isSource
-        ? 'superseded_by'
-        : r.relation;
-  return {
-    view: { kind, targetId: memoryId, status: 'judged' },
-    createdAt: r.createdAt,
-    judgmentId: r.judgmentId,
-  };
 }
 
 function sourceLine(source: Memory['source']): string {

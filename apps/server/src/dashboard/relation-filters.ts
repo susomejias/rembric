@@ -4,17 +4,17 @@
  * reaching the filter bar.
  */
 
+import type { AdminRelationFilters } from '../db/repositories/index.js';
 import {
   RELATION_STATUSES,
   RELATION_VALUES,
-  type RelationKind,
   type RelationStatus,
 } from '../db/schema/memory-relations.js';
 
 import type { SelOption } from './components.js';
 
-/** `'pending'` is a pseudo-kind: rows whose `relation` is still NULL. */
-export type RelationKindFilter = RelationKind | 'pending';
+/** The repository owns this domain (`'pending'` is its pseudo-kind for a NULL `relation`). */
+export type RelationKindFilter = NonNullable<AdminRelationFilters['kind']>;
 
 const KIND_FILTERS: readonly RelationKindFilter[] = [...RELATION_VALUES, 'pending'];
 

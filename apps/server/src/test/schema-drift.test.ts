@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import * as schema from '../db/schema/index.js';
 
 import { createTestDb } from './db.js';
+import { ALL_TABLES } from './schema-inventory.js';
 
 /**
  * 13.12 — migration round-trip + 13.13 — schema-drift detection.
@@ -53,54 +54,21 @@ const EXPECTED_TRIGGERS: Record<string, string[]> = {
   prompts: ['prompts_ai', 'prompts_ad', 'prompts_au'],
 };
 
-const EXPECTED_TABLES = [
-  '_migrations',
-  'confirmations',
-  'consolidation_ops',
-  'consolidation_runs',
-  'dashboard_sessions',
-  'memory',
-  'memory_entities',
-  'memory_entity_links',
-  'memory_entity_scan',
-  'memory_fts',
-  'memory_fts_config',
-  'memory_fts_data',
-  'memory_fts_docsize',
-  'memory_fts_idx',
-  'memory_relations',
-  // Derived reverse-edge table (migration 0021); no Drizzle declaration.
-  'memory_replaces',
-  'memory_vec',
-  'oauth_authorization_codes',
-  'oauth_clients',
-  'oauth_tokens',
-  'projects',
-  'prompts',
-  'prompts_fts',
-  'prompts_fts_config',
-  'prompts_fts_data',
-  'prompts_fts_docsize',
-  'prompts_fts_idx',
-  'sessions',
-  'tokens',
-];
-
 /**
- * The only table set that legitimately varies by extension version: sqlite-vec
- * rebuilds its vec0 shadow layout across releases (the `metadatachunks*` /
- * `metadatatext*` tables appear only once metadata columns exist). FTS5's
- * shadows are enumerated above instead, because their set is fixed by the
- * table's own options — `_content` showing up would mean a migration silently
- * stopped using external content, which is drift worth failing on.
+ * Derived from the shared taxonomy in `schema-inventory.ts`, not restated: this
+ * list and the source/derived registry in `invariants.test.ts` were two
+ * hand-maintained copies of the same 29 names and drifted within one branch
+ * (`memory_replaces`, `prompts_fts` and the three `oauth_*` tables were missing
+ * here while the rest of this file already knew them). The vec0 shadow set is
+ * pinned there too, so a sqlite-vec layout change is one edit.
  */
-const VERSIONED_SHADOW_TABLE = /^memory_vec_/;
+const EXPECTED_TABLES = [...ALL_TABLES];
 
 /**
- * Shadow tables of FTS5 / vec0. Their INDEX set varies by extension version, so
- * they are excluded from the index/PK/WITHOUT-ROWID assertions below. Wider than
- * `VERSIONED_SHADOW_TABLE` on purpose: the table set is pinned for FTS5, the
- * index set is not.
+ * Shadow tables of FTS5 / vec0. Their INDEX set varies by extension version even
+ * when the table set does not, so they are excluded from the index/PK/
+ * WITHOUT-ROWID assertions below — a prefix on purpose here, because it is the
+ * index set that is unpinnable, not the table set.
  */
 const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
 
@@ -394,12 +362,12 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
       expect(tables, `table '${expected}' missing after migrations`).toContain(expected);
     }
 
-    // Exact set outside the vec0 shadows: tolerating unclassified tables is
-    // how `memory_replaces`, `prompts_fts` and the three `oauth_*` tables
-    // stayed unenumerated here while the rest of the file already knew them.
-    expect(tables.filter((t) => !VERSIONED_SHADOW_TABLE.test(t))).toEqual(
-      [...EXPECTED_TABLES].sort(),
-    );
+    // Exact set, shadows included: tolerating unclassified tables is how
+    // `memory_replaces`, `prompts_fts` and the three `oauth_*` tables stayed
+    // unenumerated here while the rest of the file already knew them. The vec0
+    // shadows used to be exempt for varying by extension version; they are now
+    // pinned in `schema-inventory.ts`, so an upgrade fails in one place.
+    expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
   it('records every migration file in _migrations exactly once', () => {

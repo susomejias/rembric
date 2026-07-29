@@ -3,12 +3,13 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
 
 import { createTestDb } from './db.js';
+import { DERIVED_TABLES, SHADOW_TABLE_NAMES, SOURCE_TABLES } from './schema-inventory.js';
 
 type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
 
@@ -964,90 +965,8 @@ describe('the session-summary rubric has one source', () => {
 });
 
 describe('derived-table reproducibility invariant', () => {
-  const SOURCE_TABLES = [
-    '_migrations',
-    'confirmations',
-    'consolidation_ops',
-    'consolidation_runs',
-    'dashboard_sessions',
-    'memory',
-    'memory_relations',
-    'oauth_authorization_codes',
-    'oauth_clients',
-    'oauth_tokens',
-    'projects',
-    'prompts',
-    'sessions',
-    'tokens',
-  ] as const;
-
-  interface DerivedEntry {
-    derivesFrom: string;
-    /** Triggers ARE the recipe, so a trigger-maintained table needs no marker. */
-    triggers?: readonly string[];
-    rebuild?: { module: string; entryPoint: string };
-    markers?: readonly string[];
-  }
-
-  const DERIVED_TABLES: Record<string, DerivedEntry> = {
-    memory_fts: { derivesFrom: 'memory', triggers: ['memory_ai', 'memory_au', 'memory_ad'] },
-    prompts_fts: { derivesFrom: 'prompts', triggers: ['prompts_ai', 'prompts_au', 'prompts_ad'] },
-    memory_replaces: {
-      derivesFrom: 'memory.replaces',
-      triggers: ['memory_replaces_ai', 'memory_replaces_au', 'memory_replaces_ad'],
-    },
-    memory_vec: {
-      derivesFrom: 'memory.title+content',
-      rebuild: { module: 'embeddings/state.ts', entryPoint: 'ensureVectorModel' },
-      markers: ['EMBEDDING_MODEL_ID', 'EMBEDDING_INPUT_VERSION'],
-    },
-    memory_entities: {
-      derivesFrom: 'memory.title+content',
-      rebuild: { module: 'services/entity-state.ts', entryPoint: 'ensureEntityExtractor' },
-      markers: ['EXTRACTOR_VERSION'],
-    },
-    memory_entity_links: {
-      derivesFrom: 'memory.title+content',
-      rebuild: { module: 'services/entity-state.ts', entryPoint: 'resetEntityIndex' },
-      markers: ['EXTRACTOR_VERSION'],
-    },
-    memory_entity_scan: {
-      derivesFrom: 'memory.title+content',
-      rebuild: { module: 'services/entity-state.ts', entryPoint: 'resetEntityIndex' },
-      markers: ['EXTRACTOR_VERSION'],
-    },
-  };
-
-  /**
-   * Exact sets per parent, never a prefix. A `^memory_vec_` prefix rule was
-   * tried and rejected: it silently swallowed an unclassified `memory_vec_impostor`
-   * into "derived with its parent", which is the tolerate-extras hole this
-   * partition exists to close. The cost is that a sqlite-vec upgrade changing
-   * vec0's shadow layout fails here — deliberately, so the new set is reviewed
-   * and pinned rather than absorbed.
-   */
-  const SHADOWS: Record<string, readonly string[]> = {
-    memory_fts: ['memory_fts_config', 'memory_fts_data', 'memory_fts_docsize', 'memory_fts_idx'],
-    prompts_fts: [
-      'prompts_fts_config',
-      'prompts_fts_data',
-      'prompts_fts_docsize',
-      'prompts_fts_idx',
-    ],
-    memory_vec: [
-      'memory_vec_chunks',
-      'memory_vec_info',
-      'memory_vec_metadatachunks00',
-      'memory_vec_metadatachunks01',
-      'memory_vec_metadatatext00',
-      'memory_vec_metadatatext01',
-      'memory_vec_rowids',
-      'memory_vec_vector_chunks00',
-    ],
-  };
-
   function ownedTables(raw: DbRaw): string[] {
-    const shadows = new Set(Object.values(SHADOWS).flat());
+    const shadows = new Set(SHADOW_TABLE_NAMES);
     return raw
       .prepare<[], { name: string }>(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
@@ -1058,6 +977,7 @@ describe('derived-table reproducibility invariant', () => {
   }
 
   const fixture = createTestDb();
+  afterAll(() => fixture.cleanup());
 
   it('classifies every owned table as exactly one of source or derived', () => {
     const owned = ownedTables(fixture.handle.raw);
@@ -1078,8 +998,6 @@ describe('derived-table reproducibility invariant', () => {
 
     // A partition, not a subset: a listed table that no longer exists is drift too.
     expect([...owned].sort()).toEqual(classified);
-    expect(Object.keys(DERIVED_TABLES)).toHaveLength(7);
-    expect(SOURCE_TABLES).toHaveLength(14);
   });
 
   it('every named trigger exists in the migrated schema', () => {
@@ -1090,7 +1008,8 @@ describe('derived-table reproducibility invariant', () => {
         .map((r) => r.name),
     );
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
-      for (const t of entry.triggers ?? []) {
+      if (!entry.triggers) continue;
+      for (const t of entry.triggers) {
         expect(triggers.has(t), `${table} names trigger '${t}', absent from sqlite_master`).toBe(
           true,
         );
@@ -1116,23 +1035,13 @@ describe('derived-table reproducibility invariant', () => {
     const markerModules = ['embeddings/embedder.ts', 'services/entities.ts'];
     const sources = markerModules.map((m) => readFileSync(join(srcRoot, m), 'utf8')).join('\n');
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
-      for (const marker of entry.markers ?? []) {
+      if (!entry.markers) continue;
+      for (const marker of entry.markers) {
         expect(
           new RegExp(`export\\s+const\\s+${marker}\\b`).test(sources),
           `${table} names marker ${marker}, not exported by any of ${markerModules.join(', ')}`,
         ).toBe(true);
       }
-    }
-  });
-
-  it('markers are declared by exactly the entries that are not trigger-maintained', () => {
-    for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
-      const triggerMaintained = (entry.triggers?.length ?? 0) > 0;
-      expect(
-        (entry.markers?.length ?? 0) > 0,
-        `${table}: a trigger-maintained table needs no marker; a rebuildable one must have`,
-      ).toBe(!triggerMaintained);
-      expect(triggerMaintained).toBe(entry.rebuild === undefined);
     }
   });
 });

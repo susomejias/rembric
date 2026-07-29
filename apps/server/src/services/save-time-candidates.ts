@@ -265,16 +265,17 @@ function collectAncestorIds(
   start: readonly string[],
 ): string[] {
   const visited = new Set<string>();
-  const out: string[] = [];
   const queue = [...start];
-  while (queue.length > 0 && out.length < PREDECESSOR_CAP) {
+  while (queue.length > 0) {
     const id = queue.shift();
     if (!id || visited.has(id)) continue;
     visited.add(id);
-    out.push(id);
+    // Checked after the insert, not at the loop top: at the cap the walk is done,
+    // and probing this row's parents would issue a query whose result is discarded.
+    if (visited.size === PREDECESSOR_CAP) break;
     for (const p of repo.findReplaces(id) ?? []) if (!visited.has(p)) queue.push(p);
   }
-  return out;
+  return [...visited];
 }
 
 function snippet(content: string, max: number): string {

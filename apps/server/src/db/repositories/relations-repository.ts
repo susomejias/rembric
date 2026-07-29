@@ -344,19 +344,23 @@ export class RelationsRepository {
    * `listTouching` — no new SQL shape, just the admin content join.
    */
   adminListTouching(memoryId: string): AdminRelationWithContent[] {
-    return this.db
-      .select(withContentSelection)
-      .from(memoryRelations)
-      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
-      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
-      .where(
-        and(
-          or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
-          or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
-        ),
-      )
-      .orderBy(desc(memoryRelations.createdAt))
-      .all();
+    return (
+      this.db
+        .select(withContentSelection)
+        .from(memoryRelations)
+        .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+        .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+        .where(
+          and(
+            or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
+            or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
+          ),
+        )
+        // Unordered, like `listTouching`: both callers re-sort by `compareAnnotations`,
+        // whose leading key is POV-dependent and so cannot be an ORDER BY column. An
+        // ORDER BY here only bought a temp B-tree on an uncapped read.
+        .all()
+    );
   }
 
   adminGetWithContent(id: string): AdminRelationWithContent | undefined {
