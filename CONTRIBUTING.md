@@ -14,11 +14,11 @@ corepack enable
 pnpm install
 ```
 
-The `prepare` script wires up Husky on install. Husky is one of three packages
-allowlisted as `true` in `pnpm-workspace.yaml::allowBuilds` (along with the two
-native bindings `better-sqlite3` and `sqlite-vec`) — every other dependency has
-its lifecycle scripts blocked by `.npmrc::ignore-scripts=true`. See the
-[Adding a dependency](#adding-a-dependency) section below.
+The `prepare` script wires up Husky on install. Husky's `prepare` is allowlisted
+as `true` in `pnpm-workspace.yaml::allowBuilds` — every dependency not listed
+there has its lifecycle scripts blocked by `.npmrc::ignore-scripts=true`. That
+file is the complete, justified set: each entry carries the reason it exists on
+its own line. See the [Adding a dependency](#adding-a-dependency) section below.
 
 ## Commit messages
 
@@ -150,12 +150,15 @@ work, the load-bearing items are:
   `lockfile-lint` v4.x does NOT support `pnpm-lock.yaml`, so it isn't used here
   — see `.agents/skills/npm-security-best-practices/SKILL.md` practice #5 for
   the rationale.
-- **Lifecycle scripts are blocked** for every dep except the three set to
-  `true` in `pnpm-workspace.yaml::allowBuilds` (`husky`, `better-sqlite3`,
-  `sqlite-vec`). If a new dep declares a `postinstall` that genuinely needs to
-  run (e.g., a new native binding), add an explicit `<pkg>: true` line in the
-  same PR and call it out in the description — that's a security-relevant
-  decision and reviewers should see it.
+- **Lifecycle scripts are blocked** for every dep except those set to `true` in
+  `pnpm-workspace.yaml::allowBuilds`, which is the only place their membership is
+  enumerated. If a new dep declares a `postinstall` that genuinely needs to run
+  (e.g., a new native binding), add an explicit `<pkg>: true` line with a trailing
+  comment saying why, in the same PR, and call it out in the description — that's
+  a security-relevant decision and reviewers should see it. A new `true` entry
+  also has to be added to `ALLOWED_BUILD_SCRIPTS` (`grep -rn ALLOWED_BUILD_SCRIPTS`)
+  or `pnpm test` fails; that is deliberate, so the grant is reviewed rather than
+  noticed later.
 - **Install cooldown**: `pnpm-workspace.yaml::minimumReleaseAge: 4320` (3 days)
   blocks versions younger than 3 days from being installed. If you need to
   bypass for a genuine security patch:

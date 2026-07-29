@@ -10,6 +10,7 @@ import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator
 
 import { createTestDb } from './db.js';
 import { DERIVED_TABLES, SHADOW_TABLE_NAMES, SOURCE_TABLES } from './schema-inventory.js';
+import { findSupplyChainViolations, readSupplyChainSources } from './supply-chain-inventory.js';
 
 type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
 
@@ -284,6 +285,21 @@ describe('session lifecycle-column invariants', () => {
 // srcRoot resolves to apps/server/src; the actual repo root is two levels up
 // from apps/server (one extra `..` for apps, one for the repo).
 const repoRoot = join(srcRoot, '..', '..', '..');
+
+/**
+ * `pnpm-workspace.yaml::allowBuilds` is the repo's entire install-time
+ * code-execution surface, because `.npmrc::ignore-scripts=true` makes lifecycle
+ * scripts default-deny. Six prose copies of its membership drifted from it for
+ * 54 days and 42 releases; nothing compared any of them to the file.
+ *
+ * Every failure path is driven against mutated in-memory copies in
+ * `supply-chain-inventory.test.ts` — a gate never observed to fail is not a gate.
+ */
+describe('install-time code-execution surface', () => {
+  it('nothing grants install-time code execution unreviewed', () => {
+    expect(findSupplyChainViolations(readSupplyChainSources(repoRoot))).toEqual([]);
+  });
+});
 
 describe('image packaging invariants', () => {
   it('Dockerfile: the LAST `FROM ... AS <name>` stage is `runtime`', () => {
