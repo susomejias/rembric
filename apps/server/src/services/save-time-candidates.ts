@@ -3,6 +3,7 @@ import type { Memory } from '../db/schema/memory.js';
 
 import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
+import { PREDECESSOR_CAP } from './memory.js';
 
 /**
  * Save-time candidate detector for `memory.save`.
@@ -91,12 +92,13 @@ export function findSaveTimeCandidates(
 ): SaveCandidate[] {
   const poolSize = opts.poolSize ?? 20;
 
-  // Suppress targets the new memory's ancestry (`replaces`) already judged
-  // `not_conflict`, so a re-save never re-surfaces an already-dismissed pair.
+  // Suppress targets the new memory's ancestry already judged `not_conflict`,
+  // so a re-save never re-surfaces an already-dismissed pair. `saved.replaces`
+  // alone is one hop — `saveWithTopicKey` sets a single predecessor — which
+  // loses a dismissal made two or more saves back on the same topic.
+  const ancestorIds = collectAncestorIds(repos.memory, saved.replaces);
   const dismissedIds =
-    saved.replaces.length > 0
-      ? repos.relations.listNotConflictTargetsForSources(saved.replaces)
-      : [];
+    ancestorIds.length > 0 ? repos.relations.listNotConflictTargetsForSources(ancestorIds) : [];
   const excludeIds = [...saved.replaces, ...dismissedIds];
 
   // Vec kNN is only useful once the just-saved row has an embedding (the
@@ -230,6 +232,29 @@ export function findSaveTimeCandidates(
       Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
   );
   return all.slice(0, opts.perSaveMax);
+}
+
+/**
+ * Breadth-first `replaces` ancestry of the just-saved row, ids only, bounded to
+ * the same `PREDECESSOR_CAP` depth `memory.get` uses. Each hop is one PK probe
+ * reading only the `replaces` column, so the cost is bounded by the cap rather
+ * than by chain length — a 52-save topic chain walks 10 rows, not 52.
+ */
+function collectAncestorIds(
+  repo: Pick<Repositories['memory'], 'findReplaces'>,
+  start: readonly string[],
+): string[] {
+  const visited = new Set<string>();
+  const out: string[] = [];
+  const queue = [...start];
+  while (queue.length > 0 && out.length < PREDECESSOR_CAP) {
+    const id = queue.shift();
+    if (!id || visited.has(id)) continue;
+    visited.add(id);
+    out.push(id);
+    for (const p of repo.findReplaces(id) ?? []) if (!visited.has(p)) queue.push(p);
+  }
+  return out;
 }
 
 function snippet(content: string, max: number): string {

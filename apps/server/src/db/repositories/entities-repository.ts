@@ -295,7 +295,7 @@ export class EntitiesRepository {
       entityScopeCondition(opts.scope, opts.projectId),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
-      sql`${memory.status} != 'archived'`,
+      eq(memory.status, 'active'),
       sql`${memory.id} != ${opts.excludeMemoryId}`,
     ];
     if (opts.excludeIds.length > 0) {

@@ -277,6 +277,30 @@ describe('EntitiesRepository', () => {
       });
       expect(found.map((m) => m.id)).toEqual(['m3']);
     });
+
+    // `created_at DESC` puts the superseded and archived rows ahead of the
+    // active one, so a status predicate that admits them shows up at index 0
+    // rather than being hidden by scan order.
+    it('returns only active rows — a superseded row is not an entity-channel candidate', () => {
+      insertMemory('m_active', { createdAt: new Date(1_000) });
+      insertMemory('m_superseded', { status: 'superseded', createdAt: new Date(2_000) });
+      insertMemory('m_archived', { status: 'archived', createdAt: new Date(3_000) });
+      insertMemory('m_new', { createdAt: new Date(4_000) });
+      for (const id of ['m_active', 'm_superseded', 'm_archived', 'm_new']) {
+        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      }
+
+      const found = repo.findOtherMemoriesForEntity({
+        scope: 'global',
+        projectId: null,
+        kind: 'path',
+        value: 'x.ts',
+        excludeMemoryId: 'm_new',
+        excludeIds: [],
+        limit: 10,
+      });
+      expect(found.map((m) => m.id)).toEqual(['m_active']);
+    });
   });
 
   describe('findMissingScans', () => {

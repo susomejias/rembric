@@ -768,7 +768,7 @@ const DEFAULT_SEARCH_LIMIT = 8;
  * projection (applied at the MCP layer) is what keeps a single call bounded
  * in tokens — see openspec/changes/fix-audited-defects.
  */
-const PREDECESSOR_CAP = 10;
+export const PREDECESSOR_CAP = 10;
 
 /** Bound on forward-successor hops when resolving a supersedes-chain head. */
 const HEAD_RESOLUTION_HOP_CAP = 64;

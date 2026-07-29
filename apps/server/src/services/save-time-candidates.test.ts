@@ -369,6 +369,53 @@ describe('findSaveTimeCandidates', () => {
     expect(ids).toContain(y.id); // conflicts_with → still surfaces
   });
 
+  // `saveWithTopicKey` sets a single-element `replaces`, so reading only the
+  // just-saved row's own `replaces` sees one hop and loses a dismissal made
+  // two or more saves back on the same topic.
+  it('carries a not_conflict dismissal forward across two saves of the same topic', () => {
+    const x = memorySvc.save(
+      { type: 'feedback', title: 'shared dedup marker', content: 'shared dedup marker token' },
+      SCOPE_GLOBAL,
+    );
+    const y = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'shared dedup marker two',
+        content: 'shared dedup marker token two',
+      },
+      SCOPE_GLOBAL,
+    );
+    const saveTopic = (suffix: string) =>
+      memorySvc.saveWithTopicKey(
+        {
+          type: 'feedback',
+          title: `shared dedup marker ${suffix}`,
+          content: `shared dedup marker token ${suffix}`,
+          topicKey: 'dedup/deep',
+        },
+        SCOPE_GLOBAL,
+      ).memory;
+
+    const base = saveTopic('base');
+    const px = relations.createPending({ sourceId: base.id, targetId: x.id });
+    relations.judge(px.judgmentId, { relation: 'not_conflict', actor: 'tester', kind: 'agent' });
+    const py = relations.createPending({ sourceId: base.id, targetId: y.id });
+    relations.judge(py.judgmentId, { relation: 'conflicts_with', actor: 'tester', kind: 'agent' });
+
+    const v2 = saveTopic('v2');
+    const v3 = saveTopic('v3');
+    // Two hops from the dismissal: v3 -> v2 -> base, and no relation row
+    // anywhere references v3 as a source.
+    expect(v3.replaces).toEqual([v2.id]);
+    expect(v2.replaces).toEqual([base.id]);
+
+    const ids = findSaveTimeCandidates(createRepositories(db.handle.db), v3, {
+      perSaveMax: 10,
+    }).map((c) => c.targetId);
+    expect(ids).not.toContain(x.id);
+    expect(ids).toContain(y.id);
+  });
+
   it('skips rows already linked via the just-saved row replaces[]', () => {
     const first = memorySvc.saveWithTopicKey(
       {

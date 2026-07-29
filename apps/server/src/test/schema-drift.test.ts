@@ -69,17 +69,38 @@ const EXPECTED_TABLES = [
   'memory_fts_docsize',
   'memory_fts_idx',
   'memory_relations',
+  // Derived reverse-edge table (migration 0021); no Drizzle declaration.
+  'memory_replaces',
   'memory_vec',
+  'oauth_authorization_codes',
+  'oauth_clients',
+  'oauth_tokens',
   'projects',
   'prompts',
+  'prompts_fts',
+  'prompts_fts_config',
+  'prompts_fts_data',
+  'prompts_fts_docsize',
+  'prompts_fts_idx',
   'sessions',
   'tokens',
 ];
 
 /**
- * Shadow tables of FTS5 / vec0. Their index set varies by extension version, so
- * they are excluded from the exact-set assertions below (same reason the table
- * check tolerates extra tables).
+ * The only table set that legitimately varies by extension version: sqlite-vec
+ * rebuilds its vec0 shadow layout across releases (the `metadatachunks*` /
+ * `metadatatext*` tables appear only once metadata columns exist). FTS5's
+ * shadows are enumerated above instead, because their set is fixed by the
+ * table's own options — `_content` showing up would mean a migration silently
+ * stopped using external content, which is drift worth failing on.
+ */
+const VERSIONED_SHADOW_TABLE = /^memory_vec_/;
+
+/**
+ * Shadow tables of FTS5 / vec0. Their INDEX set varies by extension version, so
+ * they are excluded from the index/PK/WITHOUT-ROWID assertions below. Wider than
+ * `VERSIONED_SHADOW_TABLE` on purpose: the table set is pinned for FTS5, the
+ * index set is not.
  */
 const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
 
@@ -369,11 +390,16 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
       .map((r) => r.name)
       .sort();
 
-    // Every expected table must be present; tolerate additional ones
-    // (sqlite-vec or FTS5 internals can vary by version).
     for (const expected of EXPECTED_TABLES) {
       expect(tables, `table '${expected}' missing after migrations`).toContain(expected);
     }
+
+    // Exact set outside the vec0 shadows: tolerating unclassified tables is
+    // how `memory_replaces`, `prompts_fts` and the three `oauth_*` tables
+    // stayed unenumerated here while the rest of the file already knew them.
+    expect(tables.filter((t) => !VERSIONED_SHADOW_TABLE.test(t))).toEqual(
+      [...EXPECTED_TABLES].sort(),
+    );
   });
 
   it('records every migration file in _migrations exactly once', () => {
