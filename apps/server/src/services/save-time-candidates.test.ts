@@ -10,7 +10,7 @@ import { createTestDb, type TestDb } from '../test/index.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { RelationsService } from './relations.js';
-import { findSaveTimeCandidates } from './save-time-candidates.js';
+import { CANDIDATE_POOL_SIZE, findSaveTimeCandidates } from './save-time-candidates.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from './scope.js';
 
 let db: TestDb;
@@ -182,7 +182,7 @@ describe('findSaveTimeCandidates', () => {
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
       perSaveMax: 5,
-    });
+    }).candidates;
     const match = cands.find((c) => c.targetId === original.id);
     expect(match).toBeDefined();
     expect(match!.source).toBe('fts');
@@ -212,7 +212,7 @@ describe('findSaveTimeCandidates', () => {
 
       const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
         perSaveMax: 5,
-      });
+      }).candidates;
       expect(cands.some((c) => c.targetId === original.id && c.source === 'fts')).toBe(true);
     },
   );
@@ -242,7 +242,7 @@ describe('findSaveTimeCandidates', () => {
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
       perSaveMax: 5,
-    });
+    }).candidates;
     const genuineMatch = cands.find((c) => c.targetId === genuine.id);
     expect(genuineMatch).toBeDefined();
     expect(genuineMatch!.similarity).toBeGreaterThan(0.5);
@@ -266,7 +266,9 @@ describe('findSaveTimeCandidates', () => {
       },
       SCOPE_GLOBAL,
     );
-    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, { perSaveMax: 5 });
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, {
+      perSaveMax: 5,
+    }).candidates;
     expect(cands.some((c) => c.targetId === a.id && c.source === 'fts')).toBe(true);
   });
 
@@ -291,7 +293,7 @@ describe('findSaveTimeCandidates', () => {
     );
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), recent, {
       perSaveMax: 3,
-    });
+    }).candidates;
     expect(cands.length).toBeLessThanOrEqual(3);
   });
 
@@ -315,7 +317,7 @@ describe('findSaveTimeCandidates', () => {
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
       perSaveMax: 5,
-    });
+    }).candidates;
     // The global match must NOT appear because it has scope='global'.
     expect(cands.some((c) => c.targetId === _global.id)).toBe(false);
   });
@@ -363,7 +365,7 @@ describe('findSaveTimeCandidates', () => {
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), revised, {
       perSaveMax: 10,
-    });
+    }).candidates;
     const ids = cands.map((c) => c.targetId);
     expect(ids).not.toContain(x.id); // dismissed not_conflict → suppressed
     expect(ids).toContain(y.id); // conflicts_with → still surfaces
@@ -411,7 +413,7 @@ describe('findSaveTimeCandidates', () => {
 
     const ids = findSaveTimeCandidates(createRepositories(db.handle.db), v3, {
       perSaveMax: 10,
-    }).map((c) => c.targetId);
+    }).candidates.map((c) => c.targetId);
     expect(ids).not.toContain(x.id);
     expect(ids).toContain(y.id);
   });
@@ -439,8 +441,104 @@ describe('findSaveTimeCandidates', () => {
     // detection must not re-surface it.
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), second.memory, {
       perSaveMax: 5,
-    });
+    }).candidates;
     expect(cands.some((c) => c.targetId === first.memory.id)).toBe(false);
+  });
+});
+
+describe('findSaveTimeCandidates — the pre-cap detected count', () => {
+  function fillNearDuplicates(n: number): void {
+    for (let i = 0; i < n; i++) {
+      memorySvc.save(
+        {
+          type: 'feedback',
+          title: `Indentation rule ${i}`,
+          content: `use two-space indentation always in every file, revision ${i}`,
+        },
+        SCOPE_GLOBAL,
+      );
+    }
+  }
+
+  it('reports the pre-cap length when the cap binds, and the list length when it does not', () => {
+    fillNearDuplicates(12);
+    const saved = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'Indentation rule',
+        content: 'use two-space indentation always in every file, revision final',
+      },
+      SCOPE_GLOBAL,
+    );
+    const repos = createRepositories(db.handle.db);
+
+    const capped = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 });
+    expect(capped.candidates).toHaveLength(5);
+    expect(capped.detected).toBeGreaterThan(5);
+
+    const uncapped = findSaveTimeCandidates(repos, saved, { perSaveMax: 50 });
+    expect(uncapped.candidates.length).toBe(uncapped.detected);
+    expect(uncapped.detected).toBe(capped.detected);
+  });
+
+  it('the capped list is the prefix of the order the count was taken over', () => {
+    fillNearDuplicates(12);
+    const saved = memorySvc.save(
+      {
+        type: 'feedback',
+        title: 'Indentation rule',
+        content: 'use two-space indentation always in every file, revision final',
+      },
+      SCOPE_GLOBAL,
+    );
+    const repos = createRepositories(db.handle.db);
+    const full = findSaveTimeCandidates(repos, saved, { perSaveMax: 50 }).candidates;
+    for (const n of [1, 3, 5, 8]) {
+      const page = findSaveTimeCandidates(repos, saved, { perSaveMax: n }).candidates;
+      expect(page.map((c) => c.targetId)).toEqual(full.slice(0, n).map((c) => c.targetId));
+    }
+  });
+
+  it('the count MAY exceed CANDIDATE_POOL_SIZE — each rare entity contributes its own pool', () => {
+    const repos = createRepositories(db.handle.db);
+    // Four rare entities, each on distinct targets, each pool bounded by 5.
+    // No target overlaps, so the merged list exceeds any single channel's bound.
+    const entities = ['a.ts', 'b.ts', 'c.ts', 'd.ts'];
+    for (let i = 0; i < 40; i++) {
+      const m = memorySvc.save(
+        { type: 'project', title: `Note ${i}`, content: `wholly unrelated note ${i}` },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'global',
+        null,
+        [{ kind: 'path', value: entities[i % entities.length]! }],
+        new Date(),
+      );
+    }
+    // Dilute so each entity's 10 links stay under the 0.15 rarity gate.
+    for (let i = 0; i < 90; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Filler ${i}`, content: `filler ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Touches four files', content: 'touches four files at once' },
+      SCOPE_GLOBAL,
+    );
+    const res = findSaveTimeCandidates(
+      repos,
+      saved,
+      { perSaveMax: 100 },
+      entities.map((value) => ({ kind: 'path' as const, value })),
+    );
+    // 4 entities × 10 links each, all distinct targets: 40 pairs from a
+    // per-channel bound of 20. This is what makes the reported count a lower
+    // bound that MAY exceed the pool size, rather than one capped by it.
+    expect(res.detected).toBe(40);
+    expect(res.detected).toBeGreaterThan(CANDIDATE_POOL_SIZE);
   });
 });
 
@@ -473,7 +571,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
     const cands = findSaveTimeCandidates(repos, root, { perSaveMax: 5 }, [
       { kind: 'path', value: 'docs/docker.md' },
-    ]);
+    ]).candidates;
     const match = cands.find((c) => c.targetId === chown.id);
     expect(match).toBeDefined();
     expect(match!.source).toBe('entity');
@@ -504,7 +602,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'ticket', value: 'PROJ-1' },
-    ]);
+    ]).candidates;
     expect(cands.some((c) => c.source === 'entity')).toBe(false);
   });
 
@@ -546,7 +644,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 2 }, [
       { kind: 'error_code', value: 'ENOENT' },
-    ]);
+    ]).candidates;
     expect(cands.some((c) => c.source === 'entity')).toBe(true);
     expect(cands.length).toBeLessThanOrEqual(2);
   });
@@ -585,7 +683,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 1 }, [
       { kind: 'path', value: 'docs/docker.md' },
-    ]);
+    ]).candidates;
 
     // perSaveMax of 1 is the whole point: the entity row must occupy it even
     // though the near-duplicate scores far higher on the shared quantity.
@@ -594,7 +692,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
     const wide = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'path', value: 'docs/docker.md' },
-    ]);
+    ]).candidates;
     expect(wide[0]!.targetId).toBe(entityOnly.id);
     expect(wide.find((c) => c.targetId === nearDuplicate.id)!.similarity).toBeGreaterThan(
       wide[0]!.similarity,
@@ -664,7 +762,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     );
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'path', value: 'docker-compose.yml' },
-    ]);
+    ]).candidates;
     const match = cands.find((c) => c.targetId === target.id);
     expect(match).toBeDefined();
     expect(match!.source).toBe('entity');
@@ -710,7 +808,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     );
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'error_code', value: 'ETIMEDOUT' },
-    ]);
+    ]).candidates;
     expect(cands.some((c) => c.source === 'entity')).toBe(false);
   });
 });

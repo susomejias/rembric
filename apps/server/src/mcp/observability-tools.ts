@@ -124,6 +124,8 @@ export const capturePassiveOutput = {
   candidates: z.array(candidate).optional(),
   /** Present (and `saved` will be 0) when no learnings section was found. */
   reason: z.string().optional(),
+  /** Summed over the saves this capture performed; 0 when it extracted nothing. */
+  candidatesDetected: z.number(),
 };
 
 export interface ObservabilityToolDeps {
@@ -207,6 +209,7 @@ async function handleCapturePassive(
       saved: 0,
       ids: [] as string[],
       reason: `No "${KEY_LEARNINGS_HEADING_HINT}" (or "###") section found; nothing was extracted.`,
+      candidatesDetected: 0,
     });
   }
   const captureProjectId = scope.kind === 'project' ? scope.projectId : null;
@@ -220,11 +223,12 @@ async function handleCapturePassive(
   }
   const ids: string[] = [];
   const candidates: SaveTimeCandidateView[] = [];
+  let candidatesDetected = 0;
   for (const content of items) {
     // Same curation pipeline as memory.save: convergent-topic handling,
     // inline embedding before candidate detection, and save-time candidate
     // detection — so bulk-captured rows are never unlinked/unembedded.
-    const { memory: m, candidates: detected } = await saveMemoryWithCandidates(
+    const saved = await saveMemoryWithCandidates(
       deps,
       {
         type: 'reference',
@@ -236,10 +240,16 @@ async function handleCapturePassive(
       scope,
       ctx.token.name,
     );
-    ids.push(m.id);
-    candidates.push(...detected);
+    ids.push(saved.memory.id);
+    candidates.push(...saved.candidates);
+    candidatesDetected += saved.candidatesDetected;
   }
-  return ok({ saved: ids.length, ids, ...(candidates.length > 0 ? { candidates } : {}) });
+  return ok({
+    saved: ids.length,
+    ids,
+    ...(candidates.length > 0 ? { candidates } : {}),
+    candidatesDetected,
+  });
 }
 
 async function handleDoctor(deps: ObservabilityToolDeps) {

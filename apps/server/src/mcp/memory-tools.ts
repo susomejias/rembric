@@ -323,6 +323,8 @@ export const memorySaveOutput = {
   createdAt: z.string(),
   candidates: z.array(candidate),
   judgmentRequired: z.boolean(),
+  /** Pre-cap detection count. Truncation is `candidatesDetected > candidates.length`. */
+  candidatesDetected: z.number(),
 };
 
 const expandedMemoryRow = memoryRow.extend({
@@ -655,6 +657,7 @@ export async function saveMemoryWithCandidates(
   memory: Awaited<ReturnType<MemoryService['save']>>;
   supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
   candidates: SaveTimeCandidateView[];
+  candidatesDetected: number;
 }> {
   const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
 
@@ -689,16 +692,16 @@ export async function saveMemoryWithCandidates(
   // Save-time candidate detection: surface up to N similar active
   // memories so the agent can judge them while the context is fresh.
   let candidates: SaveTimeCandidateView[] = [];
+  let candidatesDetected = 0;
   if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
     try {
       // Give the new row its vector before detection runs, so the vec
       // pass has a self-vector to kNN from (model is warm by boot
       // contract; on failure detection degrades to FTS5 for this save).
       if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
-      const detected = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
-      for (const c of detected) {
-        // Skip the topic_key supersede target — we already wrote that relation.
-        if (supersededByTopicKey && c.targetId === supersededByTopicKey.id) continue;
+      const found = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
+      candidatesDetected = found.detected;
+      for (const c of found.candidates) {
         const row = deps.relations.createPending({
           sourceId: m.id,
           targetId: c.targetId,
@@ -719,6 +722,7 @@ export async function saveMemoryWithCandidates(
       // FTS5 query rejects an unusual token) must not prevent the
       // save from returning a usable response.
       candidates = [];
+      candidatesDetected = 0;
     }
   }
 
@@ -734,7 +738,7 @@ export async function saveMemoryWithCandidates(
     }
   }
 
-  return { memory: m, supersededByTopicKey, candidates };
+  return { memory: m, supersededByTopicKey, candidates, candidatesDetected };
 }
 
 async function handleSave(
@@ -836,12 +840,11 @@ async function handleSave(
     // read paths (search/get) keep returning an archived project's memories.
     if (activeProject) deps.projects?.assertWritable(activeProject.id);
 
-    const { memory: m, candidates } = await saveMemoryWithCandidates(
-      deps,
-      input,
-      scope,
-      ctx.token.name,
-    );
+    const {
+      memory: m,
+      candidates,
+      candidatesDetected,
+    } = await saveMemoryWithCandidates(deps, input, scope, ctx.token.name);
 
     return ok({
       id: m.id,
@@ -849,6 +852,7 @@ async function handleSave(
       createdAt: m.createdAt,
       candidates,
       judgmentRequired: candidates.length > 0,
+      candidatesDetected,
     });
   } catch (err) {
     return errToMcp(err);

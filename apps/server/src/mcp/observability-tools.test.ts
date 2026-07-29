@@ -253,6 +253,41 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     expect(out.reason).toBeTruthy();
     expect(out.reason).toMatch(/Key Learnings/);
   });
+
+  it('reports candidatesDetected summed over its saves, and 0 when it extracts nothing', async () => {
+    for (let i = 0; i < 8; i++) {
+      memory.save(
+        {
+          type: 'feedback',
+          title: `Indentation rule ${i}`,
+          content: `use two-space indentation always in every file, revision ${i}`,
+        },
+        SCOPE_GLOBAL,
+      );
+    }
+    const text =
+      '## Key Learnings:\n\n' +
+      '1. use two-space indentation always in every file, per the rule\n' +
+      '2. use two-space indentation always in every file, restated\n';
+
+    const r = await runWithContext(fakeContext(), () => handlers.capturePassive({ text }));
+    const out = parse<{
+      saved: number;
+      candidates?: { targetId: string }[];
+      candidatesDetected: number;
+    }>(r);
+
+    expect(out.saved).toBe(2);
+    // Two saves, each detecting over the 8 lookalikes: the sum exceeds what
+    // either one could report alone, and exceeds the surfaced length.
+    expect(out.candidatesDetected).toBeGreaterThan(8);
+    expect(out.candidatesDetected).toBeGreaterThan(out.candidates!.length);
+
+    const empty = await runWithContext(fakeContext(), () =>
+      handlers.capturePassive({ text: 'no learnings heading anywhere' }),
+    );
+    expect(parse<{ candidatesDetected: number }>(empty).candidatesDetected).toBe(0);
+  });
 });
 
 function parse<T>(resp: unknown): T {

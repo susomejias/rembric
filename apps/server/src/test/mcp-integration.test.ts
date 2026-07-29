@@ -334,6 +334,17 @@ describe('MCP protocol conformance', () => {
     const savesMeasured = measured.find((m) => m.name === 'memory.save')?.length;
     expect(savesMeasured).toBe(save.length);
     expect(savesMeasured).not.toBe(Buffer.byteLength(save, 'utf8'));
+
+    // The one behavioural lever `candidatesDetected` gives an agent. A future
+    // edit that trims the description for length must not quietly drop it and
+    // leave a bare number the agent can only read.
+    expect(save).toContain('candidatesDetected');
+    expect(save).toContain('memory.suggest_topic_key');
+    expect(save).toContain('CANDIDATES_PER_SAVE_MAX');
+    // No request argument raises the surfaced count, so the description must
+    // not send the agent at one — the defect this repo already shipped once.
+    expect(save).not.toMatch(/pass\s+`?candidatesDetected/i);
+    expect(save).not.toMatch(/candidates_limit|candidates_max/i);
   });
 
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {

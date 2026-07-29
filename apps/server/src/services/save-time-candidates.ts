@@ -59,9 +59,18 @@ export const VEC_THRESHOLD = 0.7;
  */
 export const ENTITY_RARITY_THRESHOLD = 0.15;
 
+/**
+ * The per-channel pool each detection channel scans BEFORE the merged list is
+ * ranked and capped. Applied per channel, and once per extracted entity on the
+ * entity channel, so the merged pool — and therefore `detected` — MAY exceed it.
+ * Not operator-configurable: for the lexical channel it IS the admission rule,
+ * so exposing it would make an admission rule environment-settable.
+ */
+export const CANDIDATE_POOL_SIZE = 20;
+
 export interface CandidateOptions {
   perSaveMax: number;
-  /** Internal candidate pool size before the cap is applied; default 20. */
+  /** Test seam only — never read from the environment. */
   poolSize?: number;
 }
 
@@ -84,13 +93,24 @@ export interface SaveCandidate {
   entityValue?: string;
 }
 
+export interface SaveCandidateResult {
+  /** The first `perSaveMax` of the same ranked order `detected` was counted over. */
+  candidates: SaveCandidate[];
+  /**
+   * Distinct pairs the ranking saw before the cap. A LOWER BOUND on how many
+   * memories in scope resemble the saved row, never a scope total: each channel
+   * scanned at most `CANDIDATE_POOL_SIZE` rows before ranking.
+   */
+  detected: number;
+}
+
 export function findSaveTimeCandidates(
   repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities'>,
   saved: Memory,
   opts: CandidateOptions,
   extractedEntities: ExtractedEntity[] = [],
-): SaveCandidate[] {
-  const poolSize = opts.poolSize ?? 20;
+): SaveCandidateResult {
+  const poolSize = opts.poolSize ?? CANDIDATE_POOL_SIZE;
 
   // Suppress targets the new memory's ancestry already judged `not_conflict`,
   // so a re-save never re-surfaces an already-dismissed pair. `saved.replaces`
@@ -231,7 +251,7 @@ export function findSaveTimeCandidates(
     (a, b) =>
       Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
   );
-  return all.slice(0, opts.perSaveMax);
+  return { candidates: all.slice(0, opts.perSaveMax), detected: all.length };
 }
 
 /**

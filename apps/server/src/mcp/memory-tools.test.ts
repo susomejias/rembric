@@ -1,6 +1,8 @@
+import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
+import { memoryRelations } from '../db/schema/memory-relations.js';
 import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
@@ -232,6 +234,120 @@ describe('memory.save — entity extraction and linking (add-entity-index)', () 
     }>(second);
     const match = payload.candidates.find((c) => c.targetId === firstId && c.source === 'entity');
     expect(match?.entityValue).toBe('docs/docker.md');
+  });
+});
+
+describe('memory.save — candidatesDetected', () => {
+  interface SavePayload {
+    id: string;
+    candidates: { judgmentId: string; targetId: string }[];
+    judgmentRequired: boolean;
+    candidatesDetected: number;
+  }
+
+  function handlersWithCap(perSaveMax: number) {
+    const repos = createRepositories(db.handle.db);
+    return buildMemoryHandlers({
+      memory,
+      repos,
+      relations: new RelationsService(repos, db.handle.db),
+      candidates: { perSaveMax },
+    });
+  }
+
+  function pendingRowsFor(sourceId: string): number {
+    return db.handle.db
+      .select()
+      .from(memoryRelations)
+      .where(and(eq(memoryRelations.sourceId, sourceId), eq(memoryRelations.status, 'pending')))
+      .all().length;
+  }
+
+  function save(
+    h: ReturnType<typeof buildMemoryHandlers>,
+    title: string,
+    content: string,
+    extra: { topic_key?: string } = {},
+    project: Project | null = projectA,
+  ) {
+    return runWithContext(fakeContext(project), () =>
+      Promise.resolve(h.save({ scope: 'project', type: 'project', title, content, ...extra })),
+    );
+  }
+
+  const RULE = 'use two-space indentation always in every file';
+
+  it('a truncated save returns perSaveMax candidates and the larger detected count', async () => {
+    const h = handlersWithCap(5);
+    for (let i = 0; i < 12; i++) await save(h, `Rule ${i}`, `${RULE}, revision ${i}`);
+    const r = parseText<SavePayload>(await save(h, 'Rule final', `${RULE}, revision final`));
+
+    expect(r.candidates).toHaveLength(5);
+    expect(r.candidatesDetected).toBeGreaterThan(5);
+    expect(r.judgmentRequired).toBe(true);
+    // The queue grows by the surfaced length, never by the detected count.
+    expect(pendingRowsFor(r.id)).toBe(r.candidates.length);
+    expect(pendingRowsFor(r.id)).not.toBe(r.candidatesDetected);
+  });
+
+  it('a save with no candidates reports zero, and a cap of zero also reports zero', async () => {
+    const h = handlersWithCap(5);
+    const lonely = parseText<SavePayload>(
+      await save(h, 'Wholly unrelated', 'an utterly singular observation about nothing'),
+    );
+    expect(lonely.candidates).toEqual([]);
+    expect(lonely.candidatesDetected).toBe(0);
+    expect(lonely.judgmentRequired).toBe(false);
+
+    const off = handlersWithCap(0);
+    for (let i = 0; i < 6; i++) await save(off, `Rule ${i}`, `${RULE}, revision ${i}`);
+    const disabled = parseText<SavePayload>(await save(off, 'Rule x', `${RULE}, revision x`));
+    expect(disabled.candidates).toEqual([]);
+    expect(disabled.candidatesDetected).toBe(0);
+  });
+
+  it("a topic_key save's superseded predecessor is neither surfaced nor counted", async () => {
+    const h = handlersWithCap(5);
+    const first = parseText<SavePayload>(
+      await save(h, 'Auth model', 'auth via JWT with rotating refresh tokens', {
+        topic_key: 'decision/auth',
+      }),
+    );
+    const second = parseText<SavePayload>(
+      await save(h, 'Auth model', 'auth via JWT with rotating refresh tokens, revised', {
+        topic_key: 'decision/auth',
+      }),
+    );
+    expect(second.candidates.map((c) => c.targetId)).not.toContain(first.id);
+    expect(second.candidatesDetected).toBe(0);
+  });
+
+  it('no response field reports truncation as a boolean', async () => {
+    const h = handlersWithCap(2);
+    for (let i = 0; i < 8; i++) await save(h, `Rule ${i}`, `${RULE}, revision ${i}`);
+    const raw = parseText<Record<string, unknown>>(
+      await save(h, 'Rule final', `${RULE}, revision final`),
+    );
+    expect(raw.candidatesDetected).toBeGreaterThan(2);
+    const booleans = Object.entries(raw).filter(([, v]) => typeof v === 'boolean');
+    expect(booleans.map(([k]) => k)).toEqual(['judgmentRequired']);
+    expect(raw).not.toHaveProperty('candidatesTruncated');
+  });
+
+  it('counts only in-scope pairs', async () => {
+    const h = handlersWithCap(5);
+    for (let i = 0; i < 12; i++) await save(h, `Rule ${i}`, `${RULE}, revision ${i}`, {}, projectB);
+
+    // The same save in the project holding the lookalikes DOES count them, so
+    // the zero below is scope isolation rather than detection failing to run.
+    const inB = parseText<SavePayload>(
+      await save(h, 'Rule final', `${RULE}, revision final`, {}, projectB),
+    );
+    expect(inB.candidatesDetected).toBeGreaterThan(5);
+
+    const inA = parseText<SavePayload>(await save(h, 'Rule final', `${RULE}, revision final`));
+    expect(inA.candidates).toEqual([]);
+    expect(inA.candidatesDetected).toBe(0);
   });
 });
 
