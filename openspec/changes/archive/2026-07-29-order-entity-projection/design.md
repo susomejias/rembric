@@ -100,6 +100,10 @@ If a memory carries more than `ENTITIES_PROJECTION_CAP` distinct kinds, round on
 
 It needs 11 of 12 kinds on one memory. Measured maximum distinct kinds per production-shaped document: **4** (distribution: 0→61, 1→159, 2→58, 3→4, 4→2 of 284). No rule is added for it, because any rule would be an unmeasured kind precedence — D1's rejected alternative, reintroduced for a case nothing has ever produced. A spec scenario pins the behaviour so it is contracted rather than incidental.
 
+**Correction found during apply: this is not the only place kind name arbitrates, and the other place is far more reachable.** When equal-sized kinds compete for a _surplus_ slot, the slot goes to the kind whose name sorts first. Measured with the shipped helper at cap 10: `{cve_id: 4, ticket: 4, uuid: 4}` allocates `{4, 3, 3}`, and `{path: 6, ticket: 3, url: 6}` allocates `{path: 4, ticket: 3, url: 3}` — `path` beats `url` on identical counts purely because `p < u`. That needs **three** kinds, not eleven.
+
+The residue is accepted and disclosed rather than fixed. It is inherited from `admit`, the extraction-budget allocator, so removing it here would leave the two allocators disagreeing. And it is an order of magnitude smaller than what this change fixes: losing one slot of a tied kind is not losing the kind. What is corrected is the delta spec, which had claimed the ordering was "symmetric across kinds" — a stronger claim than the code keeps, and exactly the kind of unverified assertion this batch of changes exists to stop shipping.
+
 ### D7. No eval-harness change, and `pnpm run eval` is a non-regression check only
 
 The projection is not scored. Retrievers return ids; `entities[]` is an annotation on a row that was already selected and already ordered, and nothing in this change touches selection, ranking, abstention or the entity retrieval path (`findMemoriesByEntity` is untouched). A metric over projection order would have to be invented for this change alone. `pnpm run eval` runs to prove nothing moved, and its output is not evidence for the change — the same disposition `order-relation-annotations` D6 recorded, for the same reason.

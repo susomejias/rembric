@@ -2,9 +2,15 @@
 
 ### Requirement: Memory-returning reads MUST expose the entities a memory is about
 
-An agent that receives a memory SHALL be able to see what it is about, so it can pivot to related knowledge without guessing a query. Memory-returning reads SHALL include an `entities[]` field listing the entities linked to each memory, each with its kind. The list SHALL be bounded per memory so a content-heavy row cannot inflate a response.
+An agent that receives a memory SHALL be able to see what it is about, so it can pivot to related knowledge without guessing a query. The three primary memory-returning reads — `memory.search` result rows, batch `memory.get`, and single-id `memory.get` — SHALL include an `entities[]` field listing the entities linked to each memory, each with its kind. The list SHALL be bounded per memory so a content-heavy row cannot inflate a response.
 
-The bound SHALL be applied to an order that reflects the memory's own entity composition, not the spelling of a kind name. The projection SHALL be built by max-min fair share across the kinds linked to the memory: every kind present SHALL contribute one entity before any kind contributes a second, and the remaining slots SHALL fall to the kinds that have more. Consequently a kind linked to the memory SHALL NOT be absent from the projection while another kind occupies two or more slots. No kind SHALL be declared to outrank another — the ordering is symmetric across kinds, because which entity is the better pivot depends on the question being asked and that question is not in the row.
+**Scoped to those three deliberately.** `memory.search`'s relation-expansion rows (`expanded[]`) are a fourth surface that returns whole memories and carries no `entities[]` today. The previous wording said "memory-returning reads" without qualification and therefore overclaimed: the shipped repo has never satisfied it for `expanded[]`. The requirement is narrowed to what is true rather than left asserting what is not, and extending the projection to `expanded[]` — which would add a per-turn repository read for up to `RELATION_EXPANSION_CAP` rows on the hottest path — is a scoped decision, not a wording fix. `memory.context` is out of scope for a different reason: it projects no per-memory entity list at all, only an `entities.backlog` diagnostics counter.
+
+**When the bound binds** (`entitiesTotal` exceeds it), the bound SHALL be applied to an order that reflects the memory's own entity composition, not the spelling of a kind name: max-min fair share across the kinds linked to the memory, so every kind present contributes one entity before any kind contributes a second, and the remaining slots fall to the kinds that have more. Consequently a kind linked to the memory SHALL NOT be absent from the projection while another kind occupies two or more slots.
+
+**When the bound does not bind, the projection SHALL be the repository's `(kind, value)` order, unchanged.** This is the case on the overwhelming majority of rows (measured: the bound binds on 2 of 285 production-shaped documents), nothing is withheld, so there is no selection to make fair — and re-interleaving a complete list would change what every existing caller sees to no end. The two paths therefore differ in ORDER, not in membership, and only above the bound.
+
+No kind SHALL be declared to outrank another. The ordering carries no precedence claim: which entity is the better pivot depends on the question being asked and that question is not in the row. Note the one residue this does not remove — when equal-sized kinds compete for a surplus slot, the slot goes to the kind whose name sorts first, so `path` beats `url` at identical counts. That is inherited from the extraction budget's allocator, is reachable with as few as three kinds, and is a far smaller effect than the whole-kind eviction this requirement fixes; it is recorded rather than claimed away.
 
 Within a kind the entities SHALL be ordered by value, and the whole order SHALL be total: two identical reads over unchanged data SHALL return the same entities in the same order. `(kind, value)` is unique per memory, so no tie can be left to scan order.
 
@@ -20,7 +26,7 @@ Cross-scope entities SHALL NOT be counted: `entitiesTotal` obeys the same scope 
 
 #### Scenario: A returned memory carries its entities
 
-- **GIVEN** a memory linked to two file paths and a package name
+- **GIVEN** a memory linked to two file paths and a ticket reference
 - **WHEN** it is returned by `memory.get` or `memory.search`
 - **THEN** its `entities[]` SHALL list those three with their kinds
 

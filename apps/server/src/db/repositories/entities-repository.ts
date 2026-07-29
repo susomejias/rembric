@@ -192,10 +192,14 @@ export class EntitiesRepository {
 
   /**
    * The `entities[]` projection for a single memory's read/search result.
-   * Ordered because the caller slices to `ENTITIES_PROJECTION_CAP`: without a
-   * total order, WHICH entities survive the bound is whatever SQLite's scan
+   * Ordered because the caller bounds the list at `ENTITIES_PROJECTION_CAP`:
+   * without a total order, WHICH entities survive is whatever SQLite's scan
    * produced, so two identical reads of the same memory could show different
    * subsets. `(kind, value)` is unique per memory, so the order is total.
+   *
+   * This clause is now load-bearing twice over: `projectEntities` fair-shares the
+   * bound across kinds, and this order is the within-kind order it preserves.
+   * Dropping it makes the projection non-deterministic, not merely unsorted.
    */
   findEntitiesForMemory(memoryId: string): MemoryEntityView[] {
     return this.db
@@ -209,8 +213,9 @@ export class EntitiesRepository {
 
   /**
    * Batched form of `findEntitiesForMemory` — one JOIN, no N+1, for a search
-   * result page. Same total order, for the same reason: the caller bounds each
-   * memory's list, so the surviving subset must not depend on scan order.
+   * result page. Same total order, for the same reason, and equally load-bearing
+   * as `projectEntities`' within-kind input: the caller bounds each memory's
+   * list, so neither the surviving subset nor its order may depend on the scan.
    */
   findEntitiesForMemories(memoryIds: string[]): Map<string, MemoryEntityView[]> {
     const out = new Map<string, MemoryEntityView[]>();

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractEntities } from './entities.js';
+import { ENTITY_KINDS } from '../db/schema/entities.js';
+
+import { extractEntities, projectEntities } from './entities.js';
 
 function values(title: string, content: string, kind?: string): string[] {
   const found = extractEntities(title, content);
@@ -315,5 +317,99 @@ describe('extractEntities — deduplication and normalization', () => {
 
   it('does not match a mixed-case token (real git SHAs are always lowercase)', () => {
     expect(values('', 'ABCdef1', 'git_ref')).toEqual([]);
+  });
+});
+
+describe('projectEntities — fair share across kinds, not kind-name order', () => {
+  const ents = (spec: Record<string, number>) =>
+    Object.entries(spec).flatMap(([kind, n]) =>
+      Array.from({ length: n }, (_, i) => ({ kind, value: `${kind}-${i}` })),
+    );
+
+  it('gives every kind a slot before any kind gets a second, surplus to the larger', () => {
+    // The measured worst case: 21 paths plus one each of ticket, url, env_var.
+    // Under (kind, value) the three singletons are evicted; under fair share they
+    // are the first three placed.
+    const { entities, entitiesTotal } = projectEntities(
+      ents({ path: 21, ticket: 1, url: 1, env_var: 1 }),
+      10,
+    );
+    expect(entitiesTotal).toBe(24);
+    expect(entities).toHaveLength(10);
+    expect(new Set(entities.map((e) => e.kind))).toEqual(
+      new Set(['env_var', 'path', 'ticket', 'url']),
+    );
+    // Round 1 places one of each in ascending kind name; the surplus is all path.
+    expect(entities.slice(0, 4).map((e) => e.kind)).toEqual(['env_var', 'path', 'ticket', 'url']);
+    expect(entities.slice(4).every((e) => e.kind === 'path')).toBe(true);
+  });
+
+  it('returns a list under the bound whole, in the caller order, as a copy', () => {
+    const input = ents({ path: 2, ticket: 1 });
+    const { entities, entitiesTotal } = projectEntities(input, 10);
+    expect(entities).toEqual(input);
+    expect(entitiesTotal).toBe(3);
+    // A copy, not the caller's array: the projection must not be a channel
+    // through which a consumer can mutate what the repository returned.
+    expect(entities).not.toBe(input);
+    entities.pop();
+    expect(input).toHaveLength(3);
+  });
+
+  it('never returns more than the bound, even for a fractional or nonsense one', () => {
+    const input = ents({ path: 5 });
+    expect(projectEntities(input, 2.5).entities).toHaveLength(2);
+    expect(projectEntities(input, -1)).toEqual({ entities: [], entitiesTotal: 5 });
+    expect(projectEntities(input, Number.NaN)).toEqual({ entities: [], entitiesTotal: 5 });
+  });
+
+  it('handles an empty list', () => {
+    expect(projectEntities([], 10)).toEqual({ entities: [], entitiesTotal: 0 });
+  });
+
+  it('a single-kind list is a plain prefix, with no interleave artefact', () => {
+    const input = ents({ path: 27 });
+    const { entities, entitiesTotal } = projectEntities(input, 10);
+    expect(entities).toEqual(input.slice(0, 10));
+    expect(entitiesTotal).toBe(27);
+  });
+
+  it('with more distinct kinds than the bound, kind-name order decides and the total is complete', () => {
+    const kinds = ENTITY_KINDS.slice(0, 11);
+    const { entities, entitiesTotal } = projectEntities(
+      kinds.map((kind) => ({ kind, value: `${kind}-0` })),
+      10,
+    );
+    expect(entitiesTotal).toBe(11);
+    expect(entities.map((e) => e.kind)).toEqual([...kinds].sort().slice(0, 10));
+  });
+
+  it('preserves the caller order within a kind', () => {
+    const input = [
+      { kind: 'path', value: 'z.ts' },
+      { kind: 'path', value: 'a.ts' },
+      { kind: 'ticket', value: '#1' },
+    ];
+    expect(projectEntities(input, 2).entities).toEqual([
+      { kind: 'path', value: 'z.ts' },
+      { kind: 'ticket', value: '#1' },
+    ]);
+  });
+
+  it('does not mutate its input, so two calls agree exactly', () => {
+    const input = ents({ path: 21, ticket: 1, url: 1, env_var: 1 });
+    const snapshot = structuredClone(input);
+    const first = projectEntities(input, 10);
+    expect(first.entities).toHaveLength(10);
+    expect(input).toEqual(snapshot);
+    expect(projectEntities(input, 10)).toEqual(first);
+  });
+
+  it('the surplus tie-break falls to the kind whose name sorts first — the disclosed residue', () => {
+    // Recorded, not endorsed (design D6): equal-sized kinds are not symmetric.
+    const { entities } = projectEntities(ents({ path: 6, ticket: 3, url: 6 }), 10);
+    const per = new Map<string, number>();
+    for (const e of entities) per.set(e.kind, (per.get(e.kind) ?? 0) + 1);
+    expect(Object.fromEntries(per)).toEqual({ path: 4, ticket: 3, url: 3 });
   });
 });

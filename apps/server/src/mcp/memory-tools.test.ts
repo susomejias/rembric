@@ -395,6 +395,119 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     }
   });
 
+  function linkMixed(repos: ReturnType<typeof createRepositories>, id: string): void {
+    // The measured worst case: paths dominate, three kinds have exactly one link.
+    // Under (kind, value) the surviving 10 are env_var + 9 paths; ticket and url
+    // — the two that address exactly one thing each — are evicted.
+    repos.entities.linkMemory(
+      id,
+      'project',
+      projectA.id,
+      [
+        ...Array.from({ length: 21 }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
+        { kind: 'env_var' as const, value: 'HOME' },
+        { kind: 'ticket' as const, value: '#56' },
+        { kind: 'url' as const, value: 'https://opencode.ai' },
+      ],
+      new Date(),
+    );
+  }
+
+  it('the bound is fair-shared across kinds, so no kind is evicted whole', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkMixed(repos, m.id);
+
+    const seen = await readAllThreeSurfaces(m.id);
+    for (const [surface, row] of Object.entries(seen)) {
+      expect(row.entities, surface).toHaveLength(CAP);
+      expect(row.entitiesTotal, surface).toBe(24);
+      // Every kind present survives — this is what (kind, value) got wrong.
+      expect(new Set(row.entities.map((e) => e.kind)), surface).toEqual(
+        new Set(['env_var', 'path', 'ticket', 'url']),
+      );
+      expect(
+        row.entities.slice(0, 4).map((e) => e.kind),
+        surface,
+      ).toEqual(['env_var', 'path', 'ticket', 'url']);
+      // The exact values, not just the kinds. Within a kind the projection
+      // preserves its input order, which is the repository's `ORDER BY (kind,
+      // value)` — so `src/f1.ts` is followed by `src/f10.ts`, not `src/f2.ts`.
+      // Asserting only the kinds leaves that ORDER BY unprotected: removing it
+      // failed nothing until this line existed.
+      expect(
+        row.entities.map((e) => e.value),
+        surface,
+      ).toEqual([
+        'HOME',
+        'src/f0.ts',
+        '#56',
+        'https://opencode.ai',
+        'src/f1.ts',
+        'src/f10.ts',
+        'src/f11.ts',
+        'src/f12.ts',
+        'src/f13.ts',
+        'src/f14.ts',
+      ]);
+    }
+  });
+
+  it('all three surfaces return the identical list, element for element', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkMixed(repos, m.id);
+
+    const seen = await readAllThreeSurfaces(m.id);
+    // Non-empty floor first: an equality between two empty lists proves nothing.
+    expect(seen.single.entities).toHaveLength(CAP);
+    expect(seen.single.entitiesTotal).toBe(24);
+    expect(seen.batch.entities).toEqual(seen.single.entities);
+    expect(seen.search.entities).toEqual(seen.single.entities);
+  });
+
+  it('two reads with no intervening write return the identical array', async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkMixed(repos, m.id);
+
+    const first = await readAllThreeSurfaces(m.id);
+    const second = await readAllThreeSurfaces(m.id);
+    expect(first.single.entities).toHaveLength(CAP);
+    expect(second.single.entities).toEqual(first.single.entities);
+    expect(second.batch.entities).toEqual(first.batch.entities);
+    expect(second.search.entities).toEqual(first.search.entities);
+  });
+
+  it("fields: ['entities'] matches an unprojected read — order, bound and total", async () => {
+    const repos = createRepositories(db.handle.db);
+    const m = memory.save(
+      { type: 'project', title: 'Wide change', content: 'touches many files' },
+      projectScope(projectA.id),
+    );
+    linkMixed(repos, m.id);
+    const h = buildMemoryHandlers({ memory, repos });
+
+    const projected = await runWithContext(fakeContext(projectA), async () =>
+      parseText<{ memories: EntityView[] }>(await h.search({ fields: ['entities'] })),
+    );
+    const row = projected.memories.find((r) => (r as unknown as { id: string }).id === m.id)!;
+    const full = await readAllThreeSurfaces(m.id);
+    expect(row.entities).toHaveLength(CAP);
+    expect(row.entitiesTotal).toBe(24);
+    expect(row.entities).toEqual(full.single.entities);
+    expect(row.entitiesTotal).toBe(full.single.entitiesTotal);
+  });
+
   it('an untruncated list still carries the count, and an empty one reports zero', async () => {
     const repos = createRepositories(db.handle.db);
     const few = memory.save(

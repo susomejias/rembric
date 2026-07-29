@@ -86,6 +86,64 @@ function admit(byKind: Map<EntityKind, Set<string>>): Map<EntityKind, Set<string
   return admitted;
 }
 
+/**
+ * Bounded projection of a memory's entity list, plus its exact pre-bound total.
+ *
+ * Returned together on purpose: `a01d051` had to repair a read that projected ten
+ * of twenty-seven entities and no count, breaking a guarantee published in the
+ * same branch. Three call sites times two coupled fields is the shape that
+ * produced it.
+ *
+ * The bound is applied to a max-min fair share across the kinds present — the
+ * same rule `admit` applies to the extraction budget, for the same reason — not
+ * to the `(kind, value)` order the repository returns. That order is stable but
+ * alphabetical by KIND NAME, so on a memory that exceeds the bound it evicts
+ * whole minority kinds and hands the surplus to whichever kind dominates.
+ * Measured over this repo's commit bodies (284 at propose time, 285 today): the bound binds on 2, and both
+ * lose an entire kind (their issue reference) under `(kind, value)` and none
+ * under fair share.
+ *
+ * Entity kinds admit no defensible precedence — `ticket` does not outrank `path`
+ * the way `conflicts_with` outranks `related` — so fair share is chosen over a
+ * precedence tier precisely because it needs no such claim.
+ *
+ * Input order is the caller's; within a kind it is preserved, and kinds are
+ * visited by ascending name so the result is a pure function of the input.
+ */
+export function projectEntities<T extends { kind: string }>(
+  entities: readonly T[],
+  cap: number,
+): { entities: T[]; entitiesTotal: number } {
+  const total = entities.length;
+  // Truncated and floored: the loop's exit test is `length < bound`, so a
+  // fractional bound would return ceil(bound) elements — more than asked for.
+  const bound = Number.isFinite(cap) ? Math.max(0, Math.trunc(cap)) : 0;
+  if (total <= bound) return { entities: [...entities], entitiesTotal: total };
+
+  const byKind = new Map<string, T[]>();
+  for (const entity of entities) {
+    const group = byKind.get(entity.kind);
+    if (group) group.push(entity);
+    else byKind.set(entity.kind, [entity]);
+  }
+  const kinds = [...byKind.keys()].sort();
+
+  const projected: T[] = [];
+  for (let round = 0; projected.length < bound; round += 1) {
+    let placedAny = false;
+    for (const kind of kinds) {
+      const group = byKind.get(kind)!;
+      if (round >= group.length) continue;
+      projected.push(group[round]!);
+      placedAny = true;
+      if (projected.length === bound) break;
+    }
+    if (!placedAny) break;
+  }
+
+  return { entities: projected, entitiesTotal: total };
+}
+
 export function extractEntities(title: string, content: string): ExtractedEntity[] {
   const text = `${title}\n\n${content}`.slice(0, MAX_INPUT_CHARS);
   const collected = EXTRACTOR_RULES.map((rule) => collect(rule, text));

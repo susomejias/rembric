@@ -11,7 +11,7 @@ import {
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
-import { extractEntities, type ExtractedEntity } from '../services/entities.js';
+import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
 import { DomainError } from '../services/errors.js';
 import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -867,6 +867,12 @@ async function handleSave(
 
 const RELATION_EXPANSION_KINDS = new Set(['supersedes', 'superseded_by', 'conflicts_with']);
 const RELATION_EXPANSION_CAP = 5;
+/**
+ * 10 sits above the 99th percentile of production-shaped extraction (measured
+ * p99 = 8, max 23), so it withholds something on 0.7% of rows. Raising it to 25
+ * would cover the observed maximum and add nothing to the other 99.3%. Changing
+ * it requires a fresh distribution — see the `memory` spec's constants rule.
+ */
 const ENTITIES_PROJECTION_CAP = 10;
 
 async function handleSearch(
@@ -989,8 +995,7 @@ async function handleSearch(
           ...formatRow(m),
           relations: annotations?.views ?? [],
           relationsTotal: annotations?.total ?? 0,
-          entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-          entitiesTotal: ents.length,
+          ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
           ...(r && r.reviewState !== null
             ? { reviewState: r.reviewState, reviewAfter: r.reviewAfter ?? null }
             : {}),
@@ -1055,8 +1060,7 @@ async function handleGet(
             topicKey: m.topicKey,
             relations: annotations?.views ?? [],
             relationsTotal: annotations?.total ?? 0,
-            entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-            entitiesTotal: ents.length,
+            ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
           };
         }),
         notFound: args.ids.filter((id) => !found.has(id)),
@@ -1107,8 +1111,7 @@ async function handleGet(
       confirmationCount: result.confirmationCount,
       relations: annotations?.views ?? [],
       relationsTotal: annotations?.total ?? 0,
-      entities: ents.slice(0, ENTITIES_PROJECTION_CAP),
-      entitiesTotal: ents.length,
+      ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
       ...(result.reviewState !== null
         ? {
             reviewState: result.reviewState,
