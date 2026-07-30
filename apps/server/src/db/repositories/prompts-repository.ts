@@ -1,7 +1,21 @@
-import { and, count, desc, eq, inArray, isNotNull, isNull, like, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { prompts, type NewPrompt, type Prompt } from '../schema/prompts.js';
+
+import { idJsonSet } from './scope-clause.js';
 
 export interface AdminPromptFilters {
   includeDeleted: boolean;
@@ -71,25 +85,31 @@ export class PromptsRepository {
       if (opts.agent) ftsFilters.push(sql`p.agent = ${opts.agent}`);
       const ftsWhere = sql.join(ftsFilters, sql` AND `);
 
-      const matchedIds = this.db
-        .all<{ id: string }>(
-          sql`
+      // One row beyond the page, at offset 0 only: that is the only place an
+      // unfull page proves the total, so elsewhere the extra row is waste.
+      const lookahead = opts.offset === 0 ? opts.limit + 1 : opts.limit;
+      const matched = this.db.all<{ id: string }>(
+        sql`
             SELECT p.id FROM prompts p
               JOIN prompts_fts f ON f.rowid = p.rowid
              WHERE prompts_fts MATCH ${opts.query}
                AND ${ftsWhere}
              ORDER BY rank
-             LIMIT ${opts.limit} OFFSET ${opts.offset}
+             LIMIT ${lookahead} OFFSET ${opts.offset}
           `,
-        )
-        .map((r) => r.id);
-      const totalRow = this.db.get<{ v: number }>(sql`
-        SELECT COUNT(*) AS v FROM prompts p
-          JOIN prompts_fts f ON f.rowid = p.rowid
-         WHERE prompts_fts MATCH ${opts.query}
-           AND ${ftsWhere}
-      `) as { v: number } | undefined;
-      const total = totalRow?.v ?? 0;
+      );
+      const matchedIds = matched.slice(0, opts.limit).map((r) => r.id);
+      const total =
+        opts.offset === 0 && matched.length <= opts.limit
+          ? matched.length
+          : ((
+              this.db.get<{ v: number }>(sql`
+                SELECT COUNT(*) AS v FROM prompts p
+                  JOIN prompts_fts f ON f.rowid = p.rowid
+                 WHERE prompts_fts MATCH ${opts.query}
+                   AND ${ftsWhere}
+              `) as { v: number } | undefined
+            )?.v ?? 0);
 
       if (matchedIds.length === 0) return { prompts: [], total };
 
@@ -178,7 +198,11 @@ export class PromptsRepository {
     }
     if (opts.agent) conditions.push(eq(prompts.agent, opts.agent));
     if (opts.sessionIdPrefix) {
-      conditions.push(like(prompts.sessionId, opts.sessionIdPrefix + '%'));
+      // Range, not LIKE: LIKE needs NOCASE and this column collates BINARY.
+      // Upper-cased because LIKE was ASCII-case-insensitive and session ids are
+      // ULIDs — without this, a lowercase prefix silently matches nothing.
+      const prefix = opts.sessionIdPrefix.toUpperCase();
+      conditions.push(and(gte(prompts.sessionId, prefix), lt(prompts.sessionId, prefix + '￿'))!);
     }
     return conditions;
   }
@@ -203,12 +227,14 @@ export class PromptsRepository {
     return row?.value ?? 0;
   }
 
-  /** Non-deleted prompt count per agent session, keyed by session id. */
-  adminCountBySession(): Record<string, number> {
+  /** Non-deleted prompt count per agent session, for the caller's page. */
+  adminCountBySession(sessionIds: readonly string[]): Record<string, number> {
+    if (sessionIds.length === 0) return {};
     const rows = this.db
       .select({ sessionId: prompts.sessionId, n: count() })
       .from(prompts)
-      .where(and(isNotNull(prompts.sessionId), isNull(prompts.deletedAt)))
+      // `IN (<non-null set>)` already excludes a NULL session_id.
+      .where(and(isNull(prompts.deletedAt), inArray(prompts.sessionId, idJsonSet(sessionIds))))
       .groupBy(prompts.sessionId)
       .all();
     const out: Record<string, number> = {};

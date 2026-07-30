@@ -42,56 +42,65 @@ Ordered so the cheapest, highest-value and least-reversible-risk work lands firs
 
 ## 4. Per-turn indexes and rewrites (the real value)
 
-- [ ] 4.1 `CREATE INDEX memory_scope_project_status_created_idx ON memory(scope, project_id, status, created_at)` and **DROP** `memory_scope_project_status_idx` (strict prefix, so index-count neutral). Fixes `searchMemoryIds`' temp B-tree: 12.8–38.6ms → 0.03–0.40ms, and `includeGlobal` 27.6 → 0.06ms.
-- [ ] 4.2 Rewrite `linkMemory`'s get-or-create OR chain as one row-value predicate `(kind, value) IN (VALUES …)`. Plan must become an unconditional 4-column seek. Verify with `sqlite_stat1` both present and **deleted** — the point is removing stats-dependence (0.058/3.538ms → 0.024/0.028ms), not the best-case gain.
-- [ ] 4.3 `CREATE INDEX memory_type_in_scope_idx ON memory(scope, project_id, type)` — covering for `countByStatusAndTypeInScope`'s by-type group: 17.4 → 1.15ms. Note a single `GROUP BY status, type` rewrite does **not** help (20.9ms, still a temp B-tree).
-- [ ] 4.4 Partial expression index for `findActiveForTransport` (**every MCP call**): `sessions (token_id, project_id, COALESCE(last_activity_at, started_at) DESC) WHERE status='active' AND deleted_at IS NULL`. 1.53 → 0.151ms and 1.38 → 0.095ms at 50k sessions.
-- [ ] 4.5 `scopeActiveMemoryCount` counts the whole scope partition on every save (1.09ms at 50k, linear onward) purely as a rarity-gate denominator. Cache per `(scope, projectId)` for the request, or maintain a counter.
-- [ ] 4.6 Decide on `searchBm25Ids`: `rank MATCH 'bm25(1.0,1.0,2.0)'` + `ORDER BY memory_fts.rank` removes the temp B-tree with **verified byte-identical order and set**, but the gain is marginal (mid-selectivity 16.8 → 10.9ms; match-all no gain) because the FTS scan dominates. Ship only if the diff stays small.
-- [ ] 4.7 `prompts.searchByScope`'s FTS match runs twice (page + unpaginated count) on a per-turn path: 12.63ms at 50k. Skip the count when no total is rendered, or compute it only at offset 0.
-- [ ] 4.8 `findMemoriesByEntity` / `findOtherMemoriesForEntity`: `ORDER BY memory.created_at DESC` forces a temp B-tree over **every** link before `LIMIT`, so cost is O(fan-out) not O(limit) — 0.13ms at typical fan-out, **5.33ms** at a 7143-link entity. No index fixes it (tested `memory(created_at DESC, status)`: 5.33 → 4.70ms). Cap fan-out or denormalise `created_at` onto the link row.
+- [x] 4.1 `CREATE INDEX memory_scope_project_status_created_idx ON memory(scope, project_id, status, created_at)` and **DROP** `memory_scope_project_status_idx` (strict prefix, so index-count neutral). Fixes `searchMemoryIds`' temp B-tree: 12.8–38.6ms → 0.03–0.40ms, and `includeGlobal` 27.6 → 0.06ms.
+- [x] 4.2 Rewrite `linkMemory`'s get-or-create OR chain as one row-value predicate `(kind, value) IN (VALUES …)`. Plan must become an unconditional 4-column seek. Verify with `sqlite_stat1` both present and **deleted** — the point is removing stats-dependence (0.058/3.538ms → 0.024/0.028ms), not the best-case gain.
+- [x] 4.3 `CREATE INDEX memory_type_in_scope_idx ON memory(scope, project_id, type)` — covering for `countByStatusAndTypeInScope`'s by-type group: 17.4 → 1.15ms. Note a single `GROUP BY status, type` rewrite does **not** help (20.9ms, still a temp B-tree).
+- [x] 4.4 Partial expression index for `findActiveForTransport` (**every MCP call**): `sessions (token_id, project_id, COALESCE(last_activity_at, started_at) DESC) WHERE status='active' AND deleted_at IS NULL`. 1.53 → 0.151ms and 1.38 → 0.095ms at 50k sessions.
+- [x] 4.5 `scopeActiveMemoryCount` counts the whole scope partition on every save (1.09ms at 50k, linear onward) purely as a rarity-gate denominator. Cache per `(scope, projectId)` for the request, or maintain a counter.
+  - **Measured and declined** (`deferred.md`): 0.184 ms/save, not the 1.09 ms reported here. Both offered fixes cost more than they buy.
+- [x] 4.6 Decide on `searchBm25Ids`: `rank MATCH 'bm25(1.0,1.0,2.0)'` + `ORDER BY memory_fts.rank` removes the temp B-tree with **verified byte-identical order and set**, but the gain is marginal (mid-selectivity 16.8 → 10.9ms; match-all no gain) because the FTS scan dominates. Ship only if the diff stays small.
+  - **Measured and declined** (`deferred.md`): the rewrite removes the temp B-tree and is SLOWER in all three selectivity bands (12.5→18.6, 13.9→18.6, 29.9→39.8 ms), order byte-identical. The predicted ordering is reversed on this corpus.
+- [x] 4.7 `prompts.searchByScope`'s FTS match runs twice (page + unpaginated count) on a per-turn path: 12.63ms at 50k. Skip the count when no total is rendered, or compute it only at offset 0.
+- [x] 4.8 `findMemoriesByEntity` / `findOtherMemoriesForEntity`: `ORDER BY memory.created_at DESC` forces a temp B-tree over **every** link before `LIMIT`, so cost is O(fan-out) not O(limit) — 0.13ms at typical fan-out, **5.33ms** at a 7143-link entity. No index fixes it (tested `memory(created_at DESC, status)`: 5.33 → 4.70ms). Cap fan-out or denormalise `created_at` onto the link row.
+  - **Measured, then reverted** (`deferred.md`): the alternative is 104× with an identical result set, but equivalent only while every `memory.id` is a ULID matching its `created_at`. Follow-up `order-entity-fanout-by-link-pk`; the invariant is now pinned by a test.
 
 ## 5. Boot and background
 
-- [ ] 5.1 `vectors.backlogCount` → `(SELECT count(*) FROM memory WHERE status!='archived') - (SELECT count(*) FROM memory_vec WHERE status!='archived')`. `memory_vec.status` is trigger-synced; verified identical (both 137 with a 137-row backlog). 658–760ms → **48ms**. Reachable from `memory.doctor`, so an agent can trigger it.
-- [ ] 5.2 `findMissingEmbeddings` — gate on the cheap count above and skip the scan when zero. Keep the LEFT JOIN for the non-empty case: it exits early (0.93ms with 137 pending); the 760ms is the steady state scanning the whole table to find nothing.
-- [ ] 5.3 `entities.adminBacklogCount` → same arithmetic shape, 10.68 → 0.871ms (12×), but it over-counts archived-scanned rows. Gated on design.md Q3. Rejected alternatives, measured: `NOT EXISTS` 9.64ms, partial index 9.70ms, `LIMIT 501` cap 9.93ms.
-- [ ] 5.4 `abandonInactiveSince`: the expression index `sessions (COALESCE(last_activity_at, started_at)) WHERE status='active'` gives 4× at 5k sessions but the planner reverts to the status index at 50k. Ship only alongside 4.4, which shares the expression.
+- [x] 5.1 `vectors.backlogCount` → `(SELECT count(*) FROM memory WHERE status!='archived') - (SELECT count(*) FROM memory_vec WHERE status!='archived')`. `memory_vec.status` is trigger-synced; verified identical (both 137 with a 137-row backlog). 658–760ms → **48ms**. Reachable from `memory.doctor`, so an agent can trigger it.
+  - **Not taken in any form** (`deferred.md`): the arithmetic goes negative AND cancels to zero on orphaned `memory_vec` rows. Both pinned by tests. The orphan source (`seed-dev`'s wipe) is fixed; follow-up `memory-vec-orphans-on-wipe` cleans existing databases.
+- [x] 5.2 `findMissingEmbeddings` — gate on the cheap count above and skip the scan when zero. Keep the LEFT JOIN for the non-empty case: it exits early (0.93ms with 137 pending); the 760ms is the steady state scanning the whole table to find nothing.
+  - **Not taken**: `EmbeddingWorker.possiblyPending` already skips this scan at the service layer, and a repository gate measured as a 325× regression in front of the `LIMIT`-bounded query it guarded.
+- [x] 5.3 `entities.adminBacklogCount` → same arithmetic shape, 10.68 → 0.871ms (12×), but it over-counts archived-scanned rows. Gated on design.md Q3. Rejected alternatives, measured: `NOT EXISTS` 9.64ms, partial index 9.70ms, `LIMIT 501` cap 9.93ms.
+- [x] 5.4 `abandonInactiveSince`: the expression index `sessions (COALESCE(last_activity_at, started_at)) WHERE status='active'` gives 4× at 5k sessions but the planner reverts to the status index at 50k. Ship only alongside 4.4, which shares the expression.
+  - **Measured, no index added** (`deferred.md`): 4.4's index carries an equality prefix this sweep has no predicate for; measured effect nil.
 
 ## 6. Dashboard — only where growth is unbounded or the fix is free
 
-- [ ] 6.1 `adminCountEntities({})` ≡ `SELECT count(*) FROM memory_entities` — the join and GROUP BY are pure waste when `singleReferenceOnly` is false (verified identical). 58.4 → **0.014ms**. `{kind}` → `count(*) … WHERE kind=?`, 46 → 0.71ms. **Free win, take it regardless of Q1.**
-- [ ] 6.2 `CREATE INDEX memory_relations_created_at_idx ON memory_relations(created_at)` — the unfiltered judgments page has no status equality so `memory_relations_status_created_idx` cannot serve it: 115.6ms at 43k relations → **0.32ms**.
-- [ ] 6.3 `adminCountWithFilters` — drop two `INNER JOIN memory` on FK→PK that cannot change a count: 13.8 → **0.00ms**.
-- [ ] 6.4 `CREATE INDEX memory_status_created_idx ON memory(status, created_at)`; `memory_status_last_seen_idx` then becomes droppable (verified nothing regresses). `adminList`/`adminCount` 51.7/113.0 → 0.13/0.21ms.
-- [ ] 6.5 `adminCountBySession` and its `memory` twin group the whole table to decorate 25 visible rows — pass the page's session ids: 6.29 → **0.038ms** (165×).
-- [ ] 6.6 `prompts`: `created_at DESC WHERE deleted_at IS NULL` (10.9 → 0.143ms), `deleted_at WHERE deleted_at IS NOT NULL` (0.598 → 0.022ms), and rewrite `sessionIdPrefix`'s `LIKE` as an explicit range (0.606 → 0.098ms — SQLite's LIKE optimisation needs `NOCASE` and the index is BINARY).
-- [ ] 6.7 `sessions` recency lists — partial indexes on `started_at DESC WHERE deleted_at IS NULL` plus one for the `activeFirst` CASE ordering. 14–19ms → 0.10–0.18ms at 50k sessions; writes measured to **improve**. Gated on design.md Q2.
-- [ ] 6.8 `adminSearchFts` + `adminCountFts` duplicate identical FTS work for one render (92.1ms at 50k). Drop the exact total or cap it — `dashboard/memories.ts:163` already drops it for the `needs_review + query` case, so the precedent exists.
-- [ ] 6.9 Decide Q1: materialise `memory_entities.link_count` with triggers plus `(link_count DESC, value)` and `(kind, link_count DESC, value)` — list page 92.5 → 0.027ms, page 41 → 0.047ms (3400×), one-off backfill 181ms. Design leans toward deferring; if shipped, add a reconciliation check against a recomputed count.
-- [ ] 6.10 `diagnostics.readDbstatBytes` walks every page (97.8ms on 571MB) and is unbounded in DB size. Cache it or move it behind an explicit button.
+- [x] 6.1 `adminCountEntities({})` ≡ `SELECT count(*) FROM memory_entities` — the join and GROUP BY are pure waste when `singleReferenceOnly` is false (verified identical). 58.4 → **0.014ms**. `{kind}` → `count(*) … WHERE kind=?`, 46 → 0.71ms. **Free win, take it regardless of Q1.**
+- [x] 6.2 `CREATE INDEX memory_relations_created_at_idx ON memory_relations(created_at)` — the unfiltered judgments page has no status equality so `memory_relations_status_created_idx` cannot serve it: 115.6ms at 43k relations → **0.32ms**.
+- [x] 6.3 `adminCountWithFilters` — drop two `INNER JOIN memory` on FK→PK that cannot change a count: 13.8 → **0.00ms**.
+- [x] 6.4 `CREATE INDEX memory_status_created_idx ON memory(status, created_at)`; `memory_status_last_seen_idx` then becomes droppable (verified nothing regresses). `adminList`/`adminCount` 51.7/113.0 → 0.13/0.21ms.
+- [x] 6.5 `adminCountBySession` and its `memory` twin group the whole table to decorate 25 visible rows — pass the page's session ids: 6.29 → **0.038ms** (165×).
+- [x] 6.6 `prompts`: `created_at DESC WHERE deleted_at IS NULL` (10.9 → 0.143ms), `deleted_at WHERE deleted_at IS NOT NULL` (0.598 → 0.022ms), and rewrite `sessionIdPrefix`'s `LIKE` as an explicit range (0.606 → 0.098ms — SQLite's LIKE optimisation needs `NOCASE` and the index is BINARY).
+- [x] 6.7 `sessions` recency lists — partial indexes on `started_at DESC WHERE deleted_at IS NULL` plus one for the `activeFirst` CASE ordering. 14–19ms → 0.10–0.18ms at 50k sessions; writes measured to **improve**. Gated on design.md Q2.
+  - **Deferred by operator decision Q2** (`deferred.md`).
+- [x] 6.8 `adminSearchFts` + `adminCountFts` duplicate identical FTS work for one render (92.1ms at 50k). Drop the exact total or cap it — `dashboard/memories.ts:163` already drops it for the `needs_review + query` case, so the precedent exists.
+- [x] 6.9 Decide Q1: materialise `memory_entities.link_count` with triggers plus `(link_count DESC, value)` and `(kind, link_count DESC, value)` — list page 92.5 → 0.027ms, page 41 → 0.047ms (3400×), one-off backfill 181ms. Design leans toward deferring; if shipped, add a reconciliation check against a recomputed count.
+  - **Deferred by operator decision Q1** (`deferred.md`), but the basis moved: 1487 ms at the declared entity density, not 98.7 ms.
+- [x] 6.10 `diagnostics.readDbstatBytes` walks every page (97.8ms on 571MB) and is unbounded in DB size. Cache it or move it behind an explicit button.
 
 ## 7. Remove what nothing can use
 
 Separate commit from the additions, so a bisect can tell them apart.
 
-- [ ] 7.1 Drop `confirmations_event_ts_idx` — absent from all 120 captured plans; every reader takes `MAX(event_ts)` _inside_ a `memory_id`-filtered subquery, which a bare `(event_ts)` index cannot serve.
-- [ ] 7.2 Drop `consolidation_ops_reverted_at_idx` (planner correctly prefers `consolidation_ops_run_id_idx`, verified at 200k ops), `oauth_tokens_expires_at_idx`, `tokens_revoked_at_idx`, `dashboard_sessions_token_id_idx`.
-- [ ] 7.3 `confirmations_session_idx` is borderline — `agent-sessions-repository.ts:94`'s correlated `EXISTS` on `session_id` _could_ use it. Measure before deciding.
-- [ ] 7.4 Delete `adminTopEntities` — no call site outside its own test, and it carries the same full-aggregate shape (87.3ms at 50k).
+- [x] 7.1 Drop `confirmations_event_ts_idx` — absent from all 120 captured plans; every reader takes `MAX(event_ts)` _inside_ a `memory_id`-filtered subquery, which a bare `(event_ts)` index cannot serve.
+- [x] 7.2 Drop `consolidation_ops_reverted_at_idx` (planner correctly prefers `consolidation_ops_run_id_idx`, verified at 200k ops), `oauth_tokens_expires_at_idx`, `tokens_revoked_at_idx`, `dashboard_sessions_token_id_idx`.
+- [x] 7.3 `confirmations_session_idx` is borderline — `agent-sessions-repository.ts:94`'s correlated `EXISTS` on `session_id` _could_ use it. Measure before deciding.
+- [x] 7.4 Delete `adminTopEntities` — no call site outside its own test, and it carries the same full-aggregate shape (87.3ms at 50k).
 
 ## 8. Specs
 
-- [ ] 8.1 `data-access`: record the index contract with its measured basis, including the rejected alternatives so they are not re-proposed. Cross-reference `index-confirmation-review-reads` rather than duplicating it.
-- [ ] 8.2 `persistence`: the new DDL, the dropped indexes, and a requirement that the index set is snapshot-asserted.
-- [ ] 8.3 Record the dense-branch floor (design.md Q4): `knnByQueryVector` is ~42ms at 50k, `k` is not the lever (k=64 34.6ms, k=400 40.5ms), cost is linear in partition size. Writing it down stops it being rediscovered as a defect.
-- [ ] 8.4 State the figures as measured-relative ordering on one machine, not as absolute guarantees.
+- [x] 8.1 `data-access`: record the index contract with its measured basis, including the rejected alternatives so they are not re-proposed. Cross-reference `index-confirmation-review-reads` rather than duplicating it.
+- [x] 8.2 `persistence`: the new DDL, the dropped indexes, and a requirement that the index set is snapshot-asserted.
+- [x] 8.3 Record the dense-branch floor (design.md Q4): `knnByQueryVector` is ~42ms at 50k, `k` is not the lever (k=64 34.6ms, k=400 40.5ms), cost is linear in partition size. Writing it down stops it being rediscovered as a defect.
+- [x] 8.4 State the figures as measured-relative ordering on one machine, not as absolute guarantees.
 
 ## 9. Verify
 
-- [ ] 9.1 **Result-identity is the acceptance criterion.** For every rewrite, assert the result set and order are unchanged. A pure index addition that changes a result set means the query relied on scan order — a latent defect either way.
-- [ ] 9.2 Re-capture `EXPLAIN QUERY PLAN` for every touched query and confirm each new index is actually selected. An index nobody's plan picks is pure write cost.
-- [ ] 9.3 Measure write amplification: per-save cost with the final index set (baseline 0.126ms including FTS and `memory_replaces` triggers; ~0.005ms per extra index).
-- [ ] 9.4 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` · `pnpm run eval`.
-- [ ] 9.5 Real Docker smoke against pre-existing seeded data: every migration applies cleanly to a populated DB, and the dashboard counters, the review queue and `memory.search` return the same rows as before.
-- [ ] 9.6 If `link_count` ships, prove the triggers agree with a recomputed count after a full lifecycle (save, supersede, archive, purge, recipe-bump rebuild).
+- [x] 9.1 **Result-identity is the acceptance criterion.** For every rewrite, assert the result set and order are unchanged. A pure index addition that changes a result set means the query relied on scan order — a latent defect either way.
+- [x] 9.2 Re-capture `EXPLAIN QUERY PLAN` for every touched query and confirm each new index is actually selected. An index nobody's plan picks is pure write cost.
+- [x] 9.3 Measure write amplification: per-save cost with the final index set (baseline 0.126ms including FTS and `memory_replaces` triggers; ~0.005ms per extra index).
+- [x] 9.4 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` · `pnpm run eval`.
+- [x] 9.5 Real Docker smoke against pre-existing seeded data: every migration applies cleanly to a populated DB, and the dashboard counters, the review queue and `memory.search` return the same rows as before.
+- [x] 9.6 If `link_count` ships, prove the triggers agree with a recomputed count after a full lifecycle (save, supersede, archive, purge, recipe-bump rebuild).
+  - Moot: conditional on 6.9, which did not ship.

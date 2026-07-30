@@ -88,12 +88,14 @@ export const memory = sqliteTable(
     topicKey: text('topic_key'),
   },
   (table) => ({
-    scopeProjectStatusIdx: index('memory_scope_project_status_idx').on(
+    scopeProjectStatusCreatedIdx: index('memory_scope_project_status_created_idx').on(
       table.scope,
       table.projectId,
       table.status,
+      table.createdAt,
     ),
-    statusLastSeenIdx: index('memory_status_last_seen_idx').on(table.status, table.lastSeenAt),
+    statusCreatedIdx: index('memory_status_created_idx').on(table.status, table.createdAt),
+    typeInScopeIdx: index('memory_type_in_scope_idx').on(table.scope, table.projectId, table.type),
     createdAtIdx: index('memory_created_at_idx').on(table.createdAt),
     sessionIdx: index('memory_session_idx').on(table.sessionId),
     topicKeyActiveIdx: index('memory_topic_key_active_idx')

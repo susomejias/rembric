@@ -159,11 +159,11 @@ export class AgentSessionsRepository {
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
       sql`${EFFECTIVE_LAST_ACTIVITY} >= ${activeSinceMs}`,
     ];
+    // No ORDER BY: "sole match or nothing" makes it unobservable.
     const rows = this.db
       .select()
       .from(agentSessions)
       .where(and(...conditions))
-      .orderBy(desc(agentSessions.startedAt))
       .limit(2)
       .all();
     return rows.length === 1 ? rows[0] : undefined;

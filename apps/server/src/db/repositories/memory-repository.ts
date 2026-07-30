@@ -11,7 +11,7 @@ import {
   type NewMemory,
 } from '../schema/memory.js';
 
-import { scopeCondition, scopeWhere } from './scope-clause.js';
+import { idJsonSet, scopeCondition, scopeWhere } from './scope-clause.js';
 
 // BM25 column weights for the interactive search lexical branch, in
 // `memory_fts` declaration order (content, tags, title). A title hit is a
@@ -30,11 +30,6 @@ const FTS_WEIGHT_TITLE = 2.0;
  * keeping the traversal flat cannot be removed by a caller passing a large number.
  */
 const ANCESTRY_HARD_LIMIT = 1000;
-
-/** One JSON bind, not one placeholder per id: SQLite throws above 32 766 binds. */
-function idJsonSet(ids: readonly string[]): SQL {
-  return sql`(SELECT value FROM json_each(${JSON.stringify([...ids])}))`;
-}
 
 export interface ReviewTimestamps {
   affirmedAt: Date | null;
@@ -1014,12 +1009,14 @@ export class MemoryRepository {
     return this.countConfirmations(memoryId);
   }
 
-  /** Memory count per agent session, keyed by session id. */
-  adminCountBySession(): Record<string, number> {
+  /** Memory count per session, for the caller's page. Empty input → `{}`. */
+  adminCountBySession(sessionIds: readonly string[]): Record<string, number> {
+    if (sessionIds.length === 0) return {};
     const rows = this.db
       .select({ sessionId: memory.sessionId, n: count() })
       .from(memory)
-      .where(isNotNull(memory.sessionId))
+      // `IN (<non-null set>)` already excludes a NULL session_id.
+      .where(inArray(memory.sessionId, idJsonSet(sessionIds)))
       .groupBy(memory.sessionId)
       .all();
     const out: Record<string, number> = {};

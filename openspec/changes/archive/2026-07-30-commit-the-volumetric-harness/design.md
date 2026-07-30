@@ -75,5 +75,17 @@ This costs generation speed — it is why §2 measures the cost rather than assu
 
 ## Open questions
 
-1. **Should the harness emit a manifest alongside the corpus** (seed, sizes, shape, generator version, timestamp) so a `measurements.md` can cite one line instead of restating the parameters? Leaning yes — it is cheap and it is exactly the "carry the denominator" discipline in file form — but it adds an artifact whose staleness rules would need stating, so it is flagged rather than assumed.
+Both were closed during apply rather than left to lapse. Recorded here, with the
+deferral register in `deferred.md`.
+
+1. **Should the harness emit a manifest alongside the corpus** (seed, sizes, shape, generator version, timestamp) so a `measurements.md` can cite one line instead of restating the parameters?
+
+   **Resolved: no — the harness prints the invocation instead.** The leaning was yes; implementing the substitute is what changed it. The build's last lines are the exact command that rebuilds the corpus (`--db <dir> --memories N --sessions M --seed S`), which is the same information the manifest would have carried, at the moment the operator is looking at the terminal they will paste from.
+
+   A file beside the corpus buys nothing over that and costs two things. It needs staleness rules that cannot be enforced: the harness refuses a populated database, so a manifest can never disagree with the corpus it sits beside _in place_ — but copy the directory, or copy the manifest alone into a change folder, and it becomes an unversioned claim about a corpus nobody can re-associate with it. And it points the obligation at the wrong artifact: the `data-access` requirement this change adds binds **the record of a claim** to carry its invocation, not the corpus directory to describe itself. A manifest invites citing the file when the requirement wants the figure and the command in the same paragraph.
+
+   What would reopen this: a consumer that must read the parameters programmatically (a CI gate comparing two runs — see `deferred.md` 9.1). A printed line is for a human; that consumer would want structured output, and should add it with its own argument.
+
 2. **What happens when the schema gains a table the harness does not populate?** `schema-inventory.ts` already enumerates every table and is asserted; the harness could read it and fail on an unpopulated source table it does not know about. Attractive, and out of scope here: it couples a dev tool to an invariant module and the coupling deserves its own argument.
+
+   **Carried forward, named: `couple-volumetric-harness-to-schema-inventory`.** Not silently dropped — `deferred.md` 9.4 records the shape and names the hand-maintained list (`derivedStateProblems` in `seed-volumetric.test.ts`) that the follow-up would replace with a generated one.

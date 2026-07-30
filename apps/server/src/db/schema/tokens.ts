@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { projects } from './projects.js';
 
@@ -27,7 +27,6 @@ export const tokens = sqliteTable(
   },
   (table) => ({
     nameUnique: uniqueIndex('tokens_name_unique').on(table.name),
-    revokedAtIdx: index('tokens_revoked_at_idx').on(table.revokedAt),
   }),
 );
 

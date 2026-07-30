@@ -88,6 +88,23 @@ export function vacuumInto(handle: DbHandle, dest: string): void {
 }
 
 /**
+ * Re-sample `sqlite_stat1` on the open connection, bounded by the
+ * `analysis_limit` the client already set.
+ *
+ * `createDb` runs this once at open and `PRAGMA optimize` once at close, which
+ * is the right cadence for a long-lived server: it boots, its statistics match
+ * the corpus it booted with, and a restart refreshes them. A bulk writer has no
+ * restart — it compresses a year of saves into minutes — so without this its
+ * planner keeps the statistics of an empty database for the whole run. Measured
+ * consequence on `entities.linkMemory`'s OR chain: the degenerate
+ * `(scope, project_id)` prefix scan instead of a MULTI-INDEX OR, whose cost is
+ * linear in the scope's entity count and therefore quadratic over a build.
+ */
+export function refreshStatistics(handle: DbHandle): void {
+  handle.raw.exec('ANALYZE');
+}
+
+/**
  * Handle-bound facade for consumers that must not hold the raw database
  * handle themselves (the dashboard maintenance page).
  */

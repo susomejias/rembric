@@ -295,11 +295,7 @@ export class RelationsRepository {
       .all();
   }
 
-  adminListWithContent(
-    filters: AdminRelationFilters,
-    limit: number,
-    offset: number,
-  ): AdminRelationWithContent[] {
+  private adminFilterConditions(filters: AdminRelationFilters): SQL[] {
     const conditions: SQL[] = [];
     if (filters.status) conditions.push(eq(memoryRelations.status, filters.status));
     if (filters.kind === 'pending') {
@@ -307,7 +303,15 @@ export class RelationsRepository {
     } else if (filters.kind) {
       conditions.push(eq(memoryRelations.relation, filters.kind));
     }
+    return conditions;
+  }
 
+  adminListWithContent(
+    filters: AdminRelationFilters,
+    limit: number,
+    offset: number,
+  ): AdminRelationWithContent[] {
+    const conditions = this.adminFilterConditions(filters);
     const query = this.db
       .select(withContentSelection)
       .from(memoryRelations)
@@ -321,19 +325,9 @@ export class RelationsRepository {
   }
 
   adminCountWithFilters(filters: AdminRelationFilters): number {
-    const conditions: SQL[] = [];
-    if (filters.status) conditions.push(eq(memoryRelations.status, filters.status));
-    if (filters.kind === 'pending') {
-      conditions.push(isNull(memoryRelations.relation));
-    } else if (filters.kind) {
-      conditions.push(eq(memoryRelations.relation, filters.kind));
-    }
-    const query = this.db
-      .select({ value: count() })
-      .from(memoryRelations)
-      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
-      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
-      .$dynamic();
+    const conditions = this.adminFilterConditions(filters);
+    // No joins: both endpoints are NOT NULL FKs onto a PK, so neither can change a count.
+    const query = this.db.select({ value: count() }).from(memoryRelations).$dynamic();
     const row = conditions.length > 0 ? query.where(and(...conditions)).get() : query.get();
     return row?.value ?? 0;
   }

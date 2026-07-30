@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.25.1](https://github.com/susomejias/rembric/compare/server-v0.25.0...server-v0.25.1) (2026-07-30)
+
+
+### Features
+
+* **scripts:** commit the volumetric seeding harness ([c69aae6](https://github.com/susomejias/rembric/commit/c69aae6e32668462c063766024f0a537bcd6e2da))
+
+
+### Bug Fixes
+
+* **entities:** fair-share the entities[] bound across kinds instead of by kind name ([dba5b91](https://github.com/susomejias/rembric/commit/dba5b91078661fa714d41865b114165cb5392890))
+* **entities:** stop the rarity gate blocking entities too sparse to saturate ([c4c2b03](https://github.com/susomejias/rembric/commit/c4c2b03756d52f5dbc50cd5ae250bb9b845342f3))
+* **mcp:** give the annotation response an aggregate budget and bound its reason ([14c2c18](https://github.com/susomejias/rembric/commit/14c2c18b1e0f686b23bb4d0f0a1bc6762b9e2def))
+* **supply-chain:** pin the install-time execution surface instead of describing it ([749c7b7](https://github.com/susomejias/rembric/commit/749c7b78c30133d93a71512e8bc749009fdef3b0))
+
+
+### Performance
+
+* **db:** drop five indexes no query predicate can serve ([b4f69f4](https://github.com/susomejias/rembric/commit/b4f69f4c92c02b4004f7b24d108aa186b2b4bb5b))
+* **db:** index and rewrite the hot query paths measured by tune-hot-query-paths ([a9a9737](https://github.com/susomejias/rembric/commit/a9a9737597d21e8a38ddbfeb50f1224471872a78))
+* **memory:** walk the replaces ancestry in one query instead of one per hop ([1645540](https://github.com/susomejias/rembric/commit/16455400f2aa8854d0e2340218a184be8267f322))
+
 ## [0.25.0](https://github.com/susomejias/rembric/compare/server-v0.24.14...server-v0.25.0) (2026-07-29)
 
 

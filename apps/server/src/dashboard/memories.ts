@@ -173,6 +173,10 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       totalCount = 0;
     } else if (query && wantNeedsReview) {
       totalCount = undefined;
+    } else if (offset === 0 && !hasMore) {
+      // All three row queries over-fetch by one and paginate in SQL, so an
+      // unfull first page IS the total and the count query can be skipped.
+      totalCount = visible.length;
     } else if (query) {
       totalCount = deps.repos.memory.adminCountFts(query, {
         status: statusFilter as Memory['status'],

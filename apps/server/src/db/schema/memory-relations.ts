@@ -85,6 +85,7 @@ export const memoryRelations = sqliteTable(
       table.status,
       table.createdAt,
     ),
+    createdAtIdx: index('memory_relations_created_at_idx').on(table.createdAt),
   }),
 );
 

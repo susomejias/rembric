@@ -80,10 +80,6 @@ const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
  */
 const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
-    name: 'confirmations_event_ts_idx',
-    sql: 'CREATE INDEX confirmations_event_ts_idx ON confirmations (event_ts)',
-  },
-  {
     name: 'confirmations_memory_id_idx',
     sql: 'CREATE INDEX confirmations_memory_id_idx ON confirmations (memory_id)',
   },
@@ -96,10 +92,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX confirmations_session_idx ON confirmations (session_id)',
   },
   {
-    name: 'consolidation_ops_reverted_at_idx',
-    sql: 'CREATE INDEX consolidation_ops_reverted_at_idx ON consolidation_ops (reverted_at)',
-  },
-  {
     name: 'consolidation_ops_run_id_idx',
     sql: 'CREATE INDEX consolidation_ops_run_id_idx ON consolidation_ops (run_id)',
   },
@@ -110,10 +102,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
     name: 'dashboard_sessions_expires_at_idx',
     sql: 'CREATE INDEX dashboard_sessions_expires_at_idx ON dashboard_sessions (expires_at)',
-  },
-  {
-    name: 'dashboard_sessions_token_id_idx',
-    sql: 'CREATE INDEX dashboard_sessions_token_id_idx ON dashboard_sessions (token_id)',
   },
   {
     name: 'memory_created_at_idx',
@@ -144,8 +132,8 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX memory_relations_target_status_idx ON memory_relations (target_id, status)',
   },
   {
-    name: 'memory_scope_project_status_idx',
-    sql: 'CREATE INDEX memory_scope_project_status_idx ON memory (scope, project_id, status)',
+    name: 'memory_scope_project_status_created_idx',
+    sql: 'CREATE INDEX memory_scope_project_status_created_idx ON memory (scope, project_id, status, created_at)',
   },
   {
     name: 'memory_scope_seen_idx',
@@ -153,8 +141,28 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   },
   { name: 'memory_session_idx', sql: 'CREATE INDEX memory_session_idx ON memory (session_id)' },
   {
-    name: 'memory_status_last_seen_idx',
-    sql: 'CREATE INDEX memory_status_last_seen_idx ON memory (status, last_seen_at)',
+    name: 'memory_status_created_idx',
+    sql: 'CREATE INDEX memory_status_created_idx ON memory (status, created_at)',
+  },
+  {
+    name: 'memory_type_in_scope_idx',
+    sql: 'CREATE INDEX memory_type_in_scope_idx ON memory (scope, project_id, type)',
+  },
+  {
+    name: 'memory_relations_created_at_idx',
+    sql: 'CREATE INDEX memory_relations_created_at_idx ON memory_relations (created_at)',
+  },
+  {
+    name: 'prompts_created_active_idx',
+    sql: 'CREATE INDEX prompts_created_active_idx ON prompts (created_at) WHERE deleted_at IS NULL',
+  },
+  {
+    name: 'prompts_deleted_idx',
+    sql: 'CREATE INDEX prompts_deleted_idx ON prompts (deleted_at) WHERE deleted_at IS NOT NULL',
+  },
+  {
+    name: 'sessions_active_transport_idx',
+    sql: "CREATE INDEX sessions_active_transport_idx ON sessions (token_id, project_id, COALESCE(last_activity_at, started_at) DESC) WHERE status = 'active' AND deleted_at IS NULL",
   },
   {
     name: 'memory_topic_key_active_idx',
@@ -167,10 +175,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
     name: 'oauth_authorization_codes_hash_idx',
     sql: 'CREATE INDEX oauth_authorization_codes_hash_idx ON oauth_authorization_codes (hash)',
-  },
-  {
-    name: 'oauth_tokens_expires_at_idx',
-    sql: 'CREATE INDEX oauth_tokens_expires_at_idx ON oauth_tokens (expires_at)',
   },
   {
     name: 'oauth_tokens_family_idx',
@@ -221,10 +225,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   { name: 'sqlite_autoindex_sessions_1', sql: null },
   { name: 'sqlite_autoindex_tokens_1', sql: null },
   { name: 'tokens_name_unique', sql: 'CREATE UNIQUE INDEX tokens_name_unique ON tokens (name)' },
-  {
-    name: 'tokens_revoked_at_idx',
-    sql: 'CREATE INDEX tokens_revoked_at_idx ON tokens (revoked_at)',
-  },
 ];
 
 /**
@@ -234,7 +234,14 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
  * (verified). `memory_topic_key_active_uidx` additionally needs to be an
  * expression index to enforce its uniqueness across NULL project_id at all.
  */
-const DRIZZLE_INEXPRESSIBLE_INDEXES = ['memory_scope_seen_idx', 'memory_topic_key_active_uidx'];
+const DRIZZLE_INEXPRESSIBLE_INDEXES = [
+  'memory_scope_seen_idx',
+  'memory_topic_key_active_uidx',
+  // Expression column (COALESCE) plus a partial WHERE. `.where()` alone is
+  // expressible — `memory_topic_key_active_idx` is declared — but an `sql`
+  // index COLUMN is what drizzle-kit mangles, so this joins the other two.
+  'sessions_active_transport_idx',
+];
 
 /** Same category: no Drizzle release models `WITHOUT ROWID`. */
 const EXPECTED_WITHOUT_ROWID_TABLES = [

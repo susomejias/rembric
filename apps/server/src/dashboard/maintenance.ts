@@ -177,14 +177,15 @@ const BREAKDOWN_TABLES = [
   'projects',
 ];
 
-function readBreakdown(diagnostics: DbDiagnostics): DbBreakdown {
+/** `withBytes` runs `dbstat`, which walks every page — opt-in, not per render. */
+function readBreakdown(diagnostics: DbDiagnostics, withBytes: boolean): DbBreakdown {
   const size = diagnostics.readDbSize();
   const totalBytes = size.totalBytes;
   const freelistBytes = size.freelistBytes;
 
   const perTable: DbBreakdown['perTable'] = [];
   let source: DbBreakdown['source'] = 'row-counts';
-  const byName = diagnostics.readDbstatBytes();
+  const byName = withBytes ? diagnostics.readDbstatBytes() : null;
   if (byName && byName.size > 0) {
     source = 'dbstat';
     for (const t of BREAKDOWN_TABLES) {
@@ -231,7 +232,8 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     const emptyCount = deps.agentSessions.countPurgeableEmpty();
     const archivedCount = deps.memory.countPurgeableDisconnectedArchived();
     const deletedPromptsCount = deps.prompts.countPurgeableDeleted();
-    const breakdown = readBreakdown(deps.diagnostics);
+    const withBytes = url.searchParams.get('bytes') === '1';
+    const breakdown = readBreakdown(deps.diagnostics, withBytes);
     const latestBackup = latestOnDemandBackup(deps.dataDir);
     const allBackups = listAllBackupsDesc(deps.dataDir);
 
@@ -348,6 +350,9 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
           <b>${formatBytes(breakdown.freelistBytes)}</b>
           ${breakdown.freelistBytes > 0 ? html` · Run <code>VACUUM</code> to reclaim` : raw('')} ·
           Source: <code>${breakdown.source}</code>
+          ${withBytes
+            ? raw('')
+            : html` · <a href="/dashboard/maintenance?bytes=1">Measure per-table bytes</a>`}
         </p>
         <table>
           <thead>

@@ -140,6 +140,47 @@ describe('VectorsRepository', () => {
     });
   });
 
+  describe('backlog count survives orphaned vec rows', () => {
+    // `memory_vec` has no AFTER DELETE trigger, so a deleted memory leaves its
+    // vector behind. A `count(memory) - count(memory_vec)` shortcut goes negative
+    // there and would report a zero backlog while rows are genuinely pending.
+    it('reports the real backlog when memory_vec holds more rows than memory', () => {
+      insertWithEmbedding('m1', unit(1, 0));
+      insertWithEmbedding('m2', unit(0, 1));
+      t.handle.raw.exec("DELETE FROM memory WHERE id IN ('m1','m2')");
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'm3', content: 'needs an embedding' })])
+        .run();
+
+      expect(repo.adminBacklogCount()).toBe(1);
+      expect(repo.findMissingEmbeddings(10).map((r) => r.id)).toEqual(['m3']);
+    });
+
+    // The case a `count(memory) - count(memory_vec)` shortcut cannot see: one
+    // orphan against one pending row cancels to exactly zero.
+    it('reports the real backlog when one orphan cancels one pending row', () => {
+      insertWithEmbedding('m1', unit(1, 0));
+      t.handle.raw.exec("DELETE FROM memory WHERE id = 'm1'");
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'm2', content: 'needs an embedding' })])
+        .run();
+
+      const memories = t.handle.raw.prepare('SELECT COUNT(*) v FROM memory').get();
+      const vecs = t.handle.raw.prepare('SELECT COUNT(*) v FROM memory_vec').get();
+      expect(memories).toEqual(vecs);
+      expect(repo.adminBacklogCount()).toBe(1);
+      expect(repo.findMissingEmbeddings(10).map((r) => r.id)).toEqual(['m2']);
+    });
+
+    it('reports zero when every memory is embedded', () => {
+      insertWithEmbedding('m1', unit(1, 0));
+      expect(repo.adminBacklogCount()).toBe(0);
+      expect(repo.findMissingEmbeddings(10)).toEqual([]);
+    });
+  });
+
   describe('insertEmbedding status/type derivation (#257)', () => {
     it('derives status from the live memory row, not whatever was true earlier', () => {
       // Insert as 'active', then flip status BEFORE insertEmbedding runs —

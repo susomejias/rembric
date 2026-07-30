@@ -42,7 +42,6 @@ export const confirmations = sqliteTable(
   },
   (table) => ({
     memoryIdIdx: index('confirmations_memory_id_idx').on(table.memoryId),
-    eventTsIdx: index('confirmations_event_ts_idx').on(table.eventTs),
     sessionIdx: index('confirmations_session_idx').on(table.sessionId),
     // Covering index for the review-axis subqueries. Column order is
     // load-bearing: equality, equality, then the MAX/range column last.

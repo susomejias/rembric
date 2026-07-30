@@ -225,6 +225,27 @@ describe('AgentSessionsService', () => {
     expect(found?.id).not.toBe(b.id);
   });
 
+  it('findActiveForTransport does not depend on row order: the sole match wins even when oldest', () => {
+    const oldest = sessions.start({ tokenId, projectId, agent: 'oldest' });
+    const newer = sessions.start({ tokenId, projectId, agent: 'newer' });
+    // Behind `newer` on both ordering columns, but still inside
+    // TRANSPORT_STALENESS_MS so it stays eligible.
+    const past = Date.now() - 5 * 60_000;
+    db.handle.raw
+      .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+      .run(past, past, oldest.id);
+    sessions.end(newer.id, { tokenId, summary: 'done', title: 'done', final: true });
+
+    expect(sessions.findActiveForTransport({ tokenId, projectId })?.id).toBe(oldest.id);
+  });
+
+  it('findActiveForTransport still returns null with THREE active matches', () => {
+    sessions.start({ tokenId, projectId, agent: 'a' });
+    sessions.start({ tokenId, projectId, agent: 'b' });
+    sessions.start({ tokenId, projectId, agent: 'c' });
+    expect(sessions.findActiveForTransport({ tokenId, projectId })).toBeNull();
+  });
+
   it('abandonStale flips old active rows to abandoned', () => {
     const old = sessions.start({ tokenId, projectId, agent: 'old' });
     // Backdate BOTH started_at and last_activity_at by 48h via raw SQL so

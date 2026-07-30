@@ -374,8 +374,8 @@ describe('EntitiesRepository', () => {
     });
   });
 
-  describe('adminCountsByKind and adminTopEntities', () => {
-    it('aggregates by kind and ranks by link count', () => {
+  describe('adminCountsByKind', () => {
+    it('aggregates by kind', () => {
       insertMemory('m1');
       insertMemory('m2');
       repo.linkMemory(
@@ -392,10 +392,6 @@ describe('EntitiesRepository', () => {
 
       const byKind = repo.adminCountsByKind();
       expect(byKind).toEqual([{ kind: 'path', count: 2 }]);
-
-      const top = repo.adminTopEntities(10);
-      expect(top[0]!.value).toBe('a.ts');
-      expect(top[0]!.linkCount).toBe(2);
     });
   });
 

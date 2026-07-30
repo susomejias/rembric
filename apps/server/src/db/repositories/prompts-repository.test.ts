@@ -127,6 +127,16 @@ describe('PromptsRepository', () => {
       });
       expect(byPrefix.map((p) => p.id)).toEqual(['P2']);
 
+      // `LIKE` was ASCII-case-insensitive; the range that replaced it must stay
+      // so, or a lowercase prefix in a URL silently matches nothing.
+      const byLowerPrefix = repo.adminList({
+        includeDeleted: false,
+        sessionIdPrefix: 'sess',
+        limit: 10,
+        offset: 0,
+      });
+      expect(byLowerPrefix.map((p) => p.id)).toEqual(['P2']);
+
       const noMatch = repo.adminList({
         includeDeleted: false,
         sessionIdPrefix: 'ZZZ',
