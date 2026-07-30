@@ -409,8 +409,12 @@ _rembric_format_transcript_claude_code_fallback() {
       sub(/".*/, "", tag)
       role = tag
       content = ""
-      if (match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
-      if (content == "" && match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      # `text` FIRST: it is only ever a text blocks field. `content` is tried after,
+      # and only when the line carries no tool_use — a tool_use input has its own
+      # `content`, and on Write that field is the FILE BODY. Matching it made this
+      # fallback emit file contents as conversation text.
+      if (match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      if (content == "" && line !~ /"type"[[:space:]]*:[[:space:]]*"tool_use"/ && match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)
@@ -437,8 +441,12 @@ _rembric_extract_first_assistant_claude_code_fallback() {
       line = $0
       if (line !~ /"type"[[:space:]]*:[[:space:]]*"assistant"/) next
       content = ""
-      if (match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
-      if (content == "" && match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      # `text` FIRST: it is only ever a text blocks field. `content` is tried after,
+      # and only when the line carries no tool_use — a tool_use input has its own
+      # `content`, and on Write that field is the FILE BODY. Matching it made this
+      # fallback emit file contents as conversation text.
+      if (match(line, /"text"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
+      if (content == "" && line !~ /"type"[[:space:]]*:[[:space:]]*"tool_use"/ && match(line, /"content"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"/)) content = clean(substr(line, RSTART, RLENGTH))
       if (content == "") next
       stripped = content
       gsub(/[[:space:]]/, "", stripped)
