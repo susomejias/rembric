@@ -10,7 +10,11 @@ import { createTestDb, type TestDb } from '../test/index.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { RelationsService } from './relations.js';
-import { CANDIDATE_POOL_SIZE, findSaveTimeCandidates } from './save-time-candidates.js';
+import {
+  CANDIDATE_POOL_SIZE,
+  ENTITY_RARITY_MIN_LINKS,
+  findSaveTimeCandidates,
+} from './save-time-candidates.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from './scope.js';
 
 let db: TestDb;
@@ -578,10 +582,15 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     expect(match!.entityValue).toBe('docs/docker.md');
   });
 
-  it('a very common entity surfaces nothing', () => {
+  it('a very common entity surfaces nothing — exactly AT the link floor', () => {
     const repos = createRepositories(db.handle.db);
     // 5 of 6 scope memories link the same entity — well over the 15% rarity
     // gate, so it must generate zero candidates despite being an exact match.
+    //
+    // This fixture sits exactly AT ENTITY_RARITY_MIN_LINKS, so it is the accidental
+    // guard on that constant's value: it passes at 5 and would break at 6. Asserted
+    // rather than left implicit, so a future bump fails loudly here instead of
+    // being absorbed by re-diluting the fixture.
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Note ${i}`, content: `note number ${i}` },
@@ -599,6 +608,16 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       { type: 'project', title: 'Note last', content: 'note number last' },
       SCOPE_GLOBAL,
     );
+
+    expect(
+      repos.entities.entityLinkCount({
+        scope: 'global',
+        projectId: null,
+        kind: 'ticket',
+        value: 'PROJ-1',
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(ENTITY_RARITY_MIN_LINKS);
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'ticket', value: 'PROJ-1' },
@@ -769,9 +788,159 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     expect(match!.entityValue).toBe('docker-compose.yml');
   });
 
+  it('a young scope is not gated into silence: one link below the floor still surfaces', () => {
+    const repos = createRepositories(db.handle.db);
+    // 1/2 = 0.50 far exceeds the 0.15 threshold and blocked outright before the
+    // floor — the young-project convergence case the entity channel exists for.
+    // 1 < ENTITY_RARITY_MIN_LINKS, so the gate does not apply and the target
+    // surfaces. This test fails without the floor condition.
+    const target = memorySvc.save(
+      { type: 'project', title: 'Auth module note', content: 'the auth module retries twice' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(
+      target.id,
+      'global',
+      null,
+      [{ kind: 'ticket', value: 'AUTH-7' }],
+      new Date(),
+    );
+    memorySvc.save(
+      { type: 'project', title: 'Unrelated one', content: 'nothing to do with auth' },
+      SCOPE_GLOBAL,
+    );
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Auth retry raised', content: 'auth retry count raised' },
+      SCOPE_GLOBAL,
+    );
+    expect(
+      repos.entities.scopeActiveMemoryCount({
+        scope: 'global',
+        projectId: null,
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(2);
+    expect(
+      repos.entities.entityLinkCount({
+        scope: 'global',
+        projectId: null,
+        kind: 'ticket',
+        value: 'AUTH-7',
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(1);
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'ticket', value: 'AUTH-7' },
+    ]).candidates;
+    const match = cands.find((c) => c.targetId === target.id);
+    expect(match).toBeDefined();
+    expect(match!.source).toBe('entity');
+    expect(match!.entityValue).toBe('AUTH-7');
+  });
+
+  it('several separately-exempt entities CAN together fill the budget — recorded, not claimed away', () => {
+    const repos = createRepositories(db.handle.db);
+    // The floor's justification is per entity: one sub-floor entity cannot occupy
+    // the budget. The budget is shared and entity candidates lead, so five of them
+    // can. Each is blocked before the floor (1/6 = 0.167 > 0.15) and exempt after,
+    // and together they displace an FTS hit on a byte-identical duplicate.
+    //
+    // Pinned so the consequence is contracted rather than discovered. Bounding the
+    // entity channel's share of the budget is the deferred composition follow-up.
+    const DUP = 'The deploy pipeline retries three times before giving up entirely.';
+    const original = memorySvc.save(
+      { type: 'project', title: 'Deploy retries', content: DUP },
+      SCOPE_GLOBAL,
+    );
+    const ents = Array.from({ length: 5 }, (_, i) => ({
+      kind: 'ticket' as const,
+      value: `TCK-${i}`,
+    }));
+    for (const e of ents) {
+      const m = memorySvc.save(
+        { type: 'project', title: `Note ${e.value}`, content: `about ${e.value}` },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(m.id, 'global', null, [e], new Date());
+    }
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Deploy retries again', content: DUP },
+      SCOPE_GLOBAL,
+    );
+
+    const result = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, ents);
+    expect(result.candidates.map((c) => c.source)).toEqual([
+      'entity',
+      'entity',
+      'entity',
+      'entity',
+      'entity',
+    ]);
+    // The exact duplicate is what gets pushed out. Before the floor this save
+    // returned exactly one candidate, `fts`, and it was this row.
+    expect(result.candidates.some((c) => c.targetId === original.id)).toBe(false);
+  });
+
+  it('the floor is an exemption for entities that cannot saturate, not a small-scope bypass', () => {
+    const repos = createRepositories(db.handle.db);
+    // La = 5 AT the floor in a small scope, 5/8 = 0.625 over the threshold: still
+    // blocked. The floor exempts entities too sparse to occupy the per-save budget,
+    // not every entity in a small scope.
+    for (let i = 0; i < 5; i++) {
+      const m = memorySvc.save(
+        { type: 'project', title: `Ticketed ${i}`, content: `ticketed note ${i}` },
+        SCOPE_GLOBAL,
+      );
+      repos.entities.linkMemory(
+        m.id,
+        'global',
+        null,
+        [{ kind: 'ticket', value: 'OPS-3' }],
+        new Date(),
+      );
+    }
+    for (let i = 0; i < 3; i++) {
+      memorySvc.save(
+        { type: 'project', title: `Plain ${i}`, content: `plain note ${i}` },
+        SCOPE_GLOBAL,
+      );
+    }
+    const saved = memorySvc.save(
+      { type: 'project', title: 'Ops follow-up', content: 'ops follow-up note' },
+      SCOPE_GLOBAL,
+    );
+    expect(
+      repos.entities.entityLinkCount({
+        scope: 'global',
+        projectId: null,
+        kind: 'ticket',
+        value: 'OPS-3',
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(ENTITY_RARITY_MIN_LINKS);
+    expect(
+      repos.entities.scopeActiveMemoryCount({
+        scope: 'global',
+        projectId: null,
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(8);
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'ticket', value: 'OPS-3' },
+    ]).candidates;
+    expect(cands.some((c) => c.source === 'entity')).toBe(false);
+  });
+
   it('an entity concentrated on the active population is gated even where superseded rows dilute it', () => {
     const repos = createRepositories(db.handle.db);
-    for (let i = 0; i < 2; i++) {
+    // RESCALED, not relaxed: the old fixture used La = 2, which the link floor now
+    // admits, so it would have stopped pinning the population fix. All three must
+    // hold at once — La >= ENTITY_RARITY_MIN_LINKS so the gate applies at all,
+    // active 5/20 = 0.25 over the threshold so it blocks, and non-archived
+    // 5/34 = 0.147 UNDER it so reverting the predicate admits.
+    for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Retry note ${i}`, content: `retry note ${i} on the queue` },
         SCOPE_GLOBAL,
@@ -784,14 +953,15 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
         new Date(),
       );
     }
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 14; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
         SCOPE_GLOBAL,
       );
     }
-    // Active: 2/4 = 0.50, over the gate. Non-archived: 2/20 = 0.10, under it.
-    for (let i = 0; i < 16; i++) {
+    // 15 saves on one topic_key leave 1 active and 14 superseded, which is the
+    // dilution the reverted predicate would count.
+    for (let i = 0; i < 15; i++) {
       memorySvc.saveWithTopicKey(
         {
           type: 'project',
@@ -806,6 +976,23 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       { type: 'project', title: 'Queue timeout raised', content: 'queue timeout raised to sixty' },
       SCOPE_GLOBAL,
     );
+    // Non-vacuous: the arithmetic the assertion rests on, asserted.
+    expect(
+      repos.entities.entityLinkCount({
+        scope: 'global',
+        projectId: null,
+        kind: 'error_code',
+        value: 'ETIMEDOUT',
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(5);
+    expect(
+      repos.entities.scopeActiveMemoryCount({
+        scope: 'global',
+        projectId: null,
+        excludeMemoryId: saved.id,
+      }),
+    ).toBe(20);
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'error_code', value: 'ETIMEDOUT' },
     ]).candidates;

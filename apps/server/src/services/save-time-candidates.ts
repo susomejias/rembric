@@ -72,6 +72,22 @@ export const VEC_THRESHOLD = 0.7;
 export const ENTITY_RARITY_THRESHOLD = 0.15;
 
 /**
+ * Link count below which the rarity gate does not apply at all.
+ *
+ * Derived ONCE, at authoring time, from `CANDIDATES_PER_SAVE_MAX_DEFAULT`: the
+ * gate exists so a ubiquitous entity cannot occupy the whole per-save budget, and
+ * an entity linked to fewer memories than that budget holds cannot occupy it. So
+ * blocking it serves nothing the requirement names.
+ *
+ * Deliberately NOT read from the operator setting. `CANDIDATES_PER_SAVE_MAX` is
+ * environment-configurable and may be `0`; reading it here would make an
+ * ADMISSION rule environment-settable — the same reason `CANDIDATE_POOL_SIZE` is
+ * not exposed — and at `0` would invert the gate into always-applies. The
+ * coupling is a documented derivation, not a dependency.
+ */
+export const ENTITY_RARITY_MIN_LINKS = 5;
+
+/**
  * The per-channel pool each detection channel scans BEFORE the merged list is
  * ranked and capped. Applied per channel, and once per extracted entity on the
  * entity channel, so the merged pool — and therefore `detected` — MAY exceed it.
@@ -215,7 +231,15 @@ export function findSaveTimeCandidates(
         value: e.value,
         excludeMemoryId: saved.id,
       });
-      if (linkCount / scopeMemoryCount > ENTITY_RARITY_THRESHOLD) continue;
+      // `>=`, so an entity AT the floor is still gated: the exemption is for
+      // entities too sparse to occupy the budget, not for small scopes. Without it
+      // the proportion form blocks a single-link entity outright on a young scope
+      // (`1/2 = 0.50`), which is the convergence case the channel exists for.
+      if (
+        linkCount >= ENTITY_RARITY_MIN_LINKS &&
+        linkCount / scopeMemoryCount > ENTITY_RARITY_THRESHOLD
+      )
+        continue;
 
       const rows = repos.entities.findOtherMemoriesForEntity({
         scope: saved.scope,

@@ -502,7 +502,7 @@ The `memory` table SHALL gain a nullable `topic_key TEXT` column. When `memory.s
 
 ### Requirement: `memory.save` MUST surface candidate conflicts at save-time
 
-After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always), vec kNN neighbors (when the just-saved row has an embedding), and entity-overlap neighbors (see `memory-entities`'s save-time conflict-detection requirement — gated by a rarity threshold so a common entity contributes nothing), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, rank the merged list by the precedence the `memory-entities` capability defines (entity-sourced candidates lead, then the reported `similarity` descending), and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates.
+After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always), vec kNN neighbors (when the just-saved row has an embedding), and entity-overlap neighbors (see `memory-entities`'s save-time conflict-detection requirement, which owns the gate: an entity common enough to occupy the whole per-save budget contributes nothing, while one linked to fewer memories than that budget holds is not gated at all), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, rank the merged list by the precedence the `memory-entities` capability defines (entity-sourced candidates lead, then the reported `similarity` descending), and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates.
 
 Each detection channel SHALL scan a bounded pool before that ranking is applied, sized by a single named constant (`CANDIDATE_POOL_SIZE`, see "Retrieval and lifecycle constants MUST be named and bounded in one place"). The pool bound is therefore UPSTREAM of the cap: the merged, ranked list is itself bounded, and no scope-wide count of related memories is available at save time. Consequently the count the response reports (see the `mcp-api` capability, "`memory.save` MUST report how many candidates its detection produced") SHALL be specified as a LOWER BOUND on how many memories in scope resemble the saved row, and SHALL NOT be specified as a total. A count that happens to be exact — which it is whenever the scope holds fewer comparable rows than the pool bound — SHALL NOT be relied upon as exact, because that exactness is a property of corpus size and not of the count.
 
@@ -1220,7 +1220,8 @@ Ranking, projection and lifecycle behaviour is governed by a set of compile-time
 - `RELATIVE_LEVEL_RATIO` — the relative-filter ratio applied against the fused pool's highest relevance level. Named for what it measures; it is not a consecutive-pair gap ratio and SHALL NOT be described as one.
 - `RELEVANCE_LIMIT` — the cap on `memory.context`'s relevance channel, shared by its entity pre-pass and its ranked pass.
 - `CANDIDATE_POOL_SIZE` — the per-channel pool each save-time candidate channel scans BEFORE the merged list is ranked and capped. It is the bound that makes the reported detected count a lower bound rather than a total, and for the lexical channel it IS the admission rule (see "Save-time lexical candidate scoring MUST increase with match quality"), so exposing it as configuration would make an admission rule operator-settable. It is applied per channel, and the entity channel applies it once per extracted entity, so the merged pool — and therefore the detected count — MAY exceed it.
-- `ENTITY_RARITY_THRESHOLD` — the maximum share of a scope's active memories an entity may be linked to before it stops proposing save-time candidates. A proportion, not an absolute count, so it does not become inert as a corpus grows.
+- `ENTITY_RARITY_THRESHOLD` — the share of a scope's active memories above which an entity stops proposing save-time candidates. It is a proportion rather than an absolute count so the BLOCKING decision does not become inert as a corpus grows, and it SHALL be consulted only once the entity's active link count reaches `ENTITY_RARITY_MIN_LINKS` below. It SHALL NOT be described as bounding candidate COMPOSITION at every corpus size: a fixed proportion admits a link count that rises with the active population while the per-save budget does not, so above an active count of the budget divided by this threshold a single admitted entity may still fill every slot (see `memory-entities`).
+- `ENTITY_RARITY_MIN_LINKS` — the active link count below which the rarity gate above does not apply at all, so an entity linked to fewer active memories than the per-save budget holds is admitted whatever its proportion. Derived ONCE from `CANDIDATES_PER_SAVE_MAX`'s default and NOT read from that setting at request time: such an entity cannot occupy the budget by itself — though several separately-exempt entities from one save can, which `memory-entities` records — while following the operator's value would make an admission rule environment-settable and, at a value of zero, would invert the gate into one that always applies.
 - `ENTITIES_PROJECTION_CAP` — the per-memory bound on the `entities[]` projection. The reads behind it carry no `LIMIT`, so the complete per-memory count is in hand where the bound is applied and SHALL be reported as a count rather than as an indication that the bound was hit. Unlike `CANDIDATE_POOL_SIZE` above there is no pool upstream of it, so that count is exact and MAY carry a `Total` suffix. It SHALL be applied to a fair-shared order rather than an arbitrary one (see `mcp-api`), so that what the bound withholds is a stated consequence of the memory's entity composition rather than an accident of kind naming — a bound over an arbitrary order cannot be reviewed, because what it costs is unknowable. Changing its value SHALL therefore be argued against a measured distribution of entities per memory, produced by running the shipped extractor over production-shaped content, not against the returned array's length.
 - `PREDECESSOR_CAP` — the bound on `memory.get`'s predecessor PROJECTION, and nothing else. Its value is a token budget for that one response, so no other consumer of the `replaces` ancestry SHALL borrow it: a decision to show more or fewer predecessors would otherwise silently change unrelated behaviour elsewhere.
 - `DISMISSAL_ANCESTRY_CAP` — how far back along the `replaces` ancestry a `not_conflict` dismissal is carried forward when save-time candidates are suppressed. A suppression-reach decision, not a payload decision, and SHALL be declared separately from `PREDECESSOR_CAP` even while the two hold the same value.
@@ -1239,6 +1240,8 @@ Enabling the abstention floor or `RELATIVE_LEVEL_RATIO` SHALL require, in the sa
 
 Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluation fixture, because it is applied to the whole fused pool before the page is sliced — a held-back row is replaced by whatever ranked next in a 64–400 row pool rather than by a comparable row, which on a single-topic session measurably swaps most of page 1 for noise — and the current corpus cannot see that regression, every corpus row carrying a null session id, which is never grouped.
 
+That sweep obligation SHALL NOT be extended to `ENTITY_RARITY_THRESHOLD` by analogy. The evaluation harness enters retrieval through the ranked search path and never runs save-time candidate detection, so the harness cannot observe this gate's decisions at all and a sweep over it would report an unmoved baseline at every grid point — a measurement that discriminates nothing while appearing to calibrate. A change to this constant SHALL instead carry a decision table over the gate's own inputs (the active link count and the active scope total), stating both the admitting and the blocking direction with each proportion's denominator, because the decision function is exhaustively enumerable over those two integers where a corpus is only a sample of them.
+
 #### Scenario: A constant is not reachable as a request parameter
 
 - **WHEN** any MCP tool input schema is inspected
@@ -1247,7 +1250,13 @@ Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluatio
 #### Scenario: The candidate pool size is not operator-configurable
 
 - **WHEN** the environment schema is inspected
-- **THEN** `CANDIDATE_POOL_SIZE` SHALL NOT be readable from the environment, and `CANDIDATES_PER_SAVE_MAX` SHALL remain the only operator knob over save-time candidate surfacing
+- **THEN** neither `CANDIDATE_POOL_SIZE` nor `ENTITY_RARITY_MIN_LINKS` SHALL be readable from the environment, and `CANDIDATES_PER_SAVE_MAX` SHALL remain the only operator knob over save-time candidate surfacing
+
+#### Scenario: The entity link minimum does not follow the operator's per-save maximum
+
+- **GIVEN** an operator setting `CANDIDATES_PER_SAVE_MAX` to a value other than its default
+- **WHEN** the entity channel's rarity gate is evaluated
+- **THEN** the link count below which the gate does not apply SHALL be the compile-time constant, unchanged by that setting
 
 #### Scenario: A disabled gate stays disabled without a calibration
 
@@ -1270,6 +1279,12 @@ Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluatio
 - **GIVEN** a swept candidate value that meets every criterion at its own grid point and fails at both adjacent grid points
 - **WHEN** that value is proposed
 - **THEN** it SHALL be rejected as a cliff edge, and the gate SHALL remain disabled
+
+#### Scenario: A harness sweep is not accepted as a calibration of the rarity gate
+
+- **GIVEN** a change to `ENTITY_RARITY_THRESHOLD` whose only evidence is an evaluation-harness sweep
+- **WHEN** that change is reviewed
+- **THEN** it SHALL be rejected, because the harness does not run save-time candidate detection and its unmoved baseline is not evidence about this gate
 
 #### Scenario: Re-enabling the diversity cap without a session-labelled fixture
 
