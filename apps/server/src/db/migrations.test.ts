@@ -585,6 +585,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0025_confirmation_review_index.sql',
       '0026_confirmation_verdict_check.sql',
       '0027_tune_hot_query_paths.sql',
+      '0028_drop_unusable_indexes.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -751,7 +752,7 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
       .run();
   }
 
-  it('preserves every affirmation and refutation and recreates all four indexes', () => {
+  it('preserves every affirmation and refutation and recreates the surviving indexes', () => {
     seed();
     raw
       .prepare(
@@ -818,7 +819,6 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
         .all()
         .map((r) => r.name),
     ).toEqual([
-      'confirmations_event_ts_idx',
       'confirmations_memory_id_idx',
       'confirmations_memory_verdict_ts_idx',
       'confirmations_session_idx',

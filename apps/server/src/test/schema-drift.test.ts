@@ -80,10 +80,6 @@ const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
  */
 const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
-    name: 'confirmations_event_ts_idx',
-    sql: 'CREATE INDEX confirmations_event_ts_idx ON confirmations (event_ts)',
-  },
-  {
     name: 'confirmations_memory_id_idx',
     sql: 'CREATE INDEX confirmations_memory_id_idx ON confirmations (memory_id)',
   },
@@ -96,20 +92,12 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX confirmations_session_idx ON confirmations (session_id)',
   },
   {
-    name: 'consolidation_ops_reverted_at_idx',
-    sql: 'CREATE INDEX `consolidation_ops_reverted_at_idx` ON `consolidation_ops` (`reverted_at`)',
-  },
-  {
     name: 'consolidation_ops_run_id_idx',
     sql: 'CREATE INDEX consolidation_ops_run_id_idx ON consolidation_ops (run_id)',
   },
   {
     name: 'consolidation_runs_started_at_idx',
     sql: 'CREATE INDEX consolidation_runs_started_at_idx ON consolidation_runs (started_at)',
-  },
-  {
-    name: 'dashboard_sessions_token_id_idx',
-    sql: 'CREATE INDEX `dashboard_sessions_token_id_idx` ON `dashboard_sessions` (`token_id`)',
   },
   {
     name: 'dashboard_sessions_expires_at_idx',
@@ -189,10 +177,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX oauth_authorization_codes_hash_idx ON oauth_authorization_codes (hash)',
   },
   {
-    name: 'oauth_tokens_expires_at_idx',
-    sql: 'CREATE INDEX oauth_tokens_expires_at_idx ON oauth_tokens (expires_at)',
-  },
-  {
     name: 'oauth_tokens_family_idx',
     sql: 'CREATE INDEX oauth_tokens_family_idx ON oauth_tokens (family_id)',
   },
@@ -240,10 +224,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   { name: 'sqlite_autoindex_prompts_1', sql: null },
   { name: 'sqlite_autoindex_sessions_1', sql: null },
   { name: 'sqlite_autoindex_tokens_1', sql: null },
-  {
-    name: 'tokens_revoked_at_idx',
-    sql: 'CREATE INDEX tokens_revoked_at_idx ON tokens (revoked_at)',
-  },
   { name: 'tokens_name_unique', sql: 'CREATE UNIQUE INDEX tokens_name_unique ON tokens (name)' },
 ];
 

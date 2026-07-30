@@ -72,7 +72,6 @@ export const oauthTokens = sqliteTable(
   (table) => ({
     hashIdx: index('oauth_tokens_hash_idx').on(table.hash),
     familyIdx: index('oauth_tokens_family_idx').on(table.familyId),
-    expiresAtIdx: index('oauth_tokens_expires_at_idx').on(table.expiresAt),
   }),
 );
 

@@ -64,7 +64,6 @@ export const consolidationOps = sqliteTable(
   },
   (table) => ({
     runIdIdx: index('consolidation_ops_run_id_idx').on(table.runId),
-    revertedAtIdx: index('consolidation_ops_reverted_at_idx').on(table.revertedAt),
   }),
 );
 

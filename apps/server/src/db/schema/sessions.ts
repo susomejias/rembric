@@ -21,7 +21,6 @@ export const dashboardSessions = sqliteTable(
     lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => ({
-    tokenIdIdx: index('dashboard_sessions_token_id_idx').on(table.tokenId),
     expiresAtIdx: index('dashboard_sessions_expires_at_idx').on(table.expiresAt),
   }),
 );
