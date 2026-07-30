@@ -112,6 +112,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # A working-tree property, so it runs here on the shallow checkout rather
+      # than in `spec-provenance`, which needs fetch-depth: 0 for its diff.
+      - name: Check active OpenSpec deltas are not stale
+        run: pnpm run check:delta-freshness
+
       # Server suite runs WITH coverage so the vitest thresholds actually gate
       # PRs; the Hermes plugin's Python tests run separately (they have no
       # coverage gate). Together these cover what `pnpm test` runs.
