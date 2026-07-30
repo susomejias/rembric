@@ -142,10 +142,16 @@ export interface SearchMemoriesInput {
   includeGlobal?: boolean;
 }
 
+/**
+ * The four fields `memory.get` publishes per predecessor. Narrowed from `Memory`
+ * so `content` is not merely unused downstream but never read from the database.
+ */
+export type PredecessorView = Pick<Memory, 'id' | 'title' | 'status' | 'createdAt'>;
+
 export interface MemoryWithHistory {
   memory: Memory;
-  /** Bounded to PREDECESSOR_CAP nearest predecessors, breadth-first. */
-  predecessors: Memory[];
+  /** Bounded to PREDECESSOR_CAP nearest predecessors, breadth-first. Content-free by construction. */
+  predecessors: PredecessorView[];
   /** Number of predecessors actually returned (== predecessors.length). */
   predecessorCount: number;
   /** True when the reachable `replaces` graph has more predecessors than the cap. */
@@ -711,30 +717,43 @@ export class MemoryService {
   }
 
   /**
-   * Breadth-first walk of the `replaces` DAG, bounded to PREDECESSOR_CAP
-   * rows so a well-maintained topic_key chain (which can reach thousands of
-   * predecessors) cannot make a single `memory.get` fetch an unbounded
-   * number of rows. `truncated` is true whenever the reachable graph holds
-   * more predecessors than the cap.
+   * Bounded `replaces` ancestry for `memory.get`, as ids then a four-field
+   * projection: two statements instead of one full-row select per hop.
+   *
+   * The ten `content` bodies the previous walk read are no longer read at all —
+   * the response has always discarded them, so a 30-save chain was pulling ~13 KB
+   * of text to emit ten titles.
+   *
+   * The bound now counts ancestor IDS rather than rows found, which is what
+   * `PREDECESSOR_CAP`'s docstring always described and what the save path's walk
+   * already did. The two differ only where an ancestor id has no `memory` row — a
+   * state the purge predicate structurally prevents, since it refuses to purge a
+   * row another row's `replaces` references. `truncated` is decided by asking for
+   * one id beyond the bound.
    */
-  private collectPredecessors(start: Memory): { rows: Memory[]; truncated: boolean } {
-    const visited = new Set<string>([start.id]);
-    const rows: Memory[] = [];
-    const queue = [...start.replaces];
-    let truncated = false;
-    while (queue.length > 0) {
-      const id = queue.shift();
-      if (!id || visited.has(id)) continue;
-      visited.add(id);
-      if (rows.length >= PREDECESSOR_CAP) {
-        truncated = true;
-        break;
-      }
-      const row = this.unsafeGetById(id);
-      if (!row) continue;
-      rows.push(row);
-      for (const r of row.replaces) if (!visited.has(r)) queue.push(r);
-    }
+  private collectPredecessors(start: Memory): {
+    rows: PredecessorView[];
+    truncated: boolean;
+  } {
+    // `+ 2`, not `+ 1`: the extra probe row detects truncation, and the start id
+    // can occupy one slot when the graph cycles back to it. Asking for only one
+    // extra let that cycle mask truncation — the filter ran after the SQL LIMIT,
+    // so a reachable start id pushed the real eleventh ancestor out of the window
+    // and `truncated` came back false with ancestry still unreached. `UNION`
+    // dedupes, so the start id can appear at most once and one spare slot suffices.
+    const ids = this.repos.memory
+      .unsafeAncestorIds({ startIds: start.replaces, limit: PREDECESSOR_CAP + 2 })
+      // The old walk seeded `visited` with the start id, so a cycle back to it was
+      // never reported as its own ancestor.
+      .filter((id) => id !== start.id);
+    const truncated = ids.length > PREDECESSOR_CAP;
+    const wanted = ids.slice(0, PREDECESSOR_CAP);
+    const byId = new Map(this.repos.memory.unsafeProjectionByIds(wanted).map((r) => [r.id, r]));
+    // Re-ordered to the traversal's order: the repository read is an id-set lookup
+    // and carries no ORDER BY, deliberately.
+    const rows = wanted
+      .map((id) => byId.get(id))
+      .filter((r): r is PredecessorView => r !== undefined);
     return { rows, truncated };
   }
 
@@ -763,10 +782,12 @@ export class MemoryService {
 const DEFAULT_SEARCH_LIMIT = 8;
 
 /**
- * Max predecessors `memory.get` returns. A daily-updated topic_key chain
- * reaches this depth in ~10 days; the cap plus the id/title/status/createdAt
- * projection (applied at the MCP layer) is what keeps a single call bounded
- * in tokens — see openspec/changes/fix-audited-defects.
+ * Max predecessors `memory.get` returns — a TOKEN BUDGET for that response and
+ * nothing else. A daily-updated topic_key chain reaches this depth in ~10 days.
+ *
+ * Save-time dismissal suppression used to borrow this number; it now has its own
+ * `DISMISSAL_ANCESTRY_CAP`, so changing the payload budget here cannot silently
+ * change how far back a save looks for dismissals.
  */
 export const PREDECESSOR_CAP = 10;
 

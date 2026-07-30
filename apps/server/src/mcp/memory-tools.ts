@@ -1099,12 +1099,9 @@ async function handleGet(
         content: result.head.content,
         status: result.head.status,
       },
-      predecessors: result.predecessors.map((p) => ({
-        id: p.id,
-        title: p.title,
-        status: p.status,
-        createdAt: p.createdAt,
-      })),
+      // Pass-through: the service already projects exactly these four fields, so
+      // re-mapping here would only be a second place for them to drift.
+      predecessors: result.predecessors,
       predecessorCount: result.predecessorCount,
       truncated: result.truncated,
       headTruncated: result.headTruncated,

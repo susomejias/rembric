@@ -89,3 +89,17 @@ The `memory.replaces` form is a primary-key seek per hop (`SEARCH m USING INDEX 
 **Q1 — Should `findReplaces` and `findSuccessorId` be renamed into the `unsafe*` family?** `data-access` says there is "no third, unprefixed category" and that every unscoped read must carry a prefix, yet both of these are unscoped, id-keyed and reachable from agent-facing paths. They cannot leak cross-scope rows in any meaningful sense — a `replaces` link never crosses a scope — which is presumably why they were left alone. Default if nobody objects: leave them, and note the tension here rather than renaming a family in a change about traversal cost.
 
 **Q2 — Does the shipped `PREDECESSOR_CAP = 10` still fit `memory.get`'s token budget now that predecessors are read as a four-field projection?** Not answered here, and deliberately: the answer is a payload-budget measurement, and the whole point of D9 is that it can now be answered without touching suppression.
+
+### D11 — The consumer was the untested half, and that is where the bug was
+
+Found by adversarial review after the change was already green. Worth recording because the failure was structural, not careless.
+
+The repository primitive got 900 fuzzed equivalence comparisons and a plan assertion. `MemoryService.collectPredecessors` — the thing whose _observable contract_ actually changed — got none: its old loop was never transcribed as an oracle, and the repo contained zero assertions on `predecessorCount`, none on predecessor order, and none on `truncated === false`. So a real regression shipped with 2018 tests passing.
+
+The regression: `.filter((id) => id !== start.id)` ran after the SQL `LIMIT PREDECESSOR_CAP + 1`. The deleted loop pre-seeded `visited` with the start id, so the start id never consumed a slot; the CTE emits it, so when the graph cycles back to the requested row that id ate the probe slot and `truncated` came back **false** with ancestry unreached. `memory.compare({relation: 'supersedes'})` applies no direction or cycle guard, so the state is reachable through the public API — and this change's own delta spec treats `replaces` cycles as in scope.
+
+Two lessons, both cheap to state and both violated here:
+
+**Proving the primitive is not proving the change.** The acceptance criterion was "same ids, same order, same cap" for the OBSERVABLE behaviour. `unsafeAncestorIds` is an implementation detail; `memory.get`'s response is the contract. Both walks are now pinned as oracles, and the consumer is compared against its own.
+
+**A `+ 1` probe assumes every returned row is a candidate.** It was not: one row could be filtered out after the bound was applied. Whenever a filter runs downstream of a `LIMIT`, the limit has to budget for what the filter removes — `+ 2` here, justified by `UNION` guaranteeing the start id appears at most once.

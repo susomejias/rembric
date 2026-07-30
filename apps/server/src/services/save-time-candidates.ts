@@ -3,7 +3,19 @@ import type { Memory } from '../db/schema/memory.js';
 
 import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
-import { PREDECESSOR_CAP } from './memory.js';
+
+/**
+ * How far back through the new row's `replaces` ancestry save-time detection
+ * looks for `not_conflict` dismissals to suppress.
+ *
+ * Its own constant, not `memory.get`'s `PREDECESSOR_CAP`, even though both are 10
+ * today. That constant's docstring justifies 10 as a TOKEN BUDGET for a response
+ * payload; borrowing it coupled two unrelated decisions, so raising the payload
+ * budget to show 25 predecessors would have silently deepened suppression, and
+ * trimming it to 5 would have silently lost dismissals an agent already made.
+ * Neither can move the other now without a spec change.
+ */
+export const DISMISSAL_ANCESTRY_CAP = 10;
 
 /**
  * Save-time candidate detector for `memory.save`.
@@ -116,7 +128,10 @@ export function findSaveTimeCandidates(
   // so a re-save never re-surfaces an already-dismissed pair. `saved.replaces`
   // alone is one hop — `saveWithTopicKey` sets a single predecessor — which
   // loses a dismissal made two or more saves back on the same topic.
-  const ancestorIds = collectAncestorIds(repos.memory, saved.replaces);
+  const ancestorIds = repos.memory.unsafeAncestorIds({
+    startIds: saved.replaces,
+    limit: DISMISSAL_ANCESTRY_CAP,
+  });
   const dismissedIds =
     ancestorIds.length > 0 ? repos.relations.listNotConflictTargetsForSources(ancestorIds) : [];
   const excludeIds = [...saved.replaces, ...dismissedIds];
@@ -252,30 +267,6 @@ export function findSaveTimeCandidates(
       Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
   );
   return { candidates: all.slice(0, opts.perSaveMax), detected: all.length };
-}
-
-/**
- * Breadth-first `replaces` ancestry of the just-saved row, ids only, bounded to
- * the same `PREDECESSOR_CAP` depth `memory.get` uses. Each hop is one PK probe
- * reading only the `replaces` column, so the cost is bounded by the cap rather
- * than by chain length — a 52-save topic chain walks 10 rows, not 52.
- */
-function collectAncestorIds(
-  repo: Pick<Repositories['memory'], 'findReplaces'>,
-  start: readonly string[],
-): string[] {
-  const visited = new Set<string>();
-  const queue = [...start];
-  while (queue.length > 0) {
-    const id = queue.shift();
-    if (!id || visited.has(id)) continue;
-    visited.add(id);
-    // Checked after the insert, not at the loop top: at the cap the walk is done,
-    // and probing this row's parents would issue a query whose result is discarded.
-    if (visited.size === PREDECESSOR_CAP) break;
-    for (const p of repo.findReplaces(id) ?? []) if (!visited.has(p)) queue.push(p);
-  }
-  return [...visited];
 }
 
 function snippet(content: string, max: number): string {

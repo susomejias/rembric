@@ -508,7 +508,7 @@ Each detection channel SHALL scan a bounded pool before that ranking is applied,
 
 The lexical pass SHALL build its FTS5 `MATCH` expression with the SAME Unicode-aware builder used by interactive `memory.search` (see the `mcp-api` hybrid-retrieval contract): it SHALL keep whole Unicode word tokens and SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII (accented or CJK text), and it SHALL apply a bounded term cap so a long save body cannot build an unbounded `MATCH` expression. Consequently, save-time candidate detection SHALL NOT silently degrade to vector-only for non-ASCII content: a non-ASCII memory body SHALL produce a non-empty `MATCH` expression and SHALL be eligible to surface `source: 'fts'` candidates. The lexical pass SHALL still skip only when the builder yields no usable tokens at all.
 
-The detection SHALL additionally exclude any target id that was already judged `relation = 'not_conflict'` against the new memory's `replaces` ancestry — i.e. against any of the predecessor ids in the new row's `replaces[]` (the chain the new save supersedes). This suppresses the re-surfacing of a pair the agent already dismissed as a false positive on an earlier save of the same evolving topic. Because `memory_relations` has no topic column and each save mints a fresh `source_id`, the dismissal SHALL be carried forward by walking the `replaces` chain, NOT by the new row's own id (which no prior relation references). Only `not_conflict` SHALL be suppressed; other judged relations (notably `conflicts_with`) SHALL continue to surface so an unresolved contradiction re-confronts the agent on the next save.
+The detection SHALL additionally exclude any target id that was already judged `relation = 'not_conflict'` against the new memory's `replaces` ancestry. That ancestry is the TRANSITIVE closure of `replaces[]`, bounded by its own constant — see "Dismissal suppression MUST bound its ancestry walk with its own named constant", which owns the depth, the order and the bound. It is NOT the array's own elements: `replaces[]` alone is one hop, and one hop loses a dismissal made two or more saves back on the same topic, which is the case this suppression exists for. This suppresses the re-surfacing of a pair the agent already dismissed as a false positive on an earlier save of the same evolving topic. Because `memory_relations` has no topic column and each save mints a fresh `source_id`, the dismissal SHALL be carried forward by walking that ancestry, NOT by the new row's own id (which no prior relation references). Only `not_conflict` SHALL be suppressed; other judged relations (notably `conflicts_with`) SHALL continue to surface so an unresolved contradiction re-confronts the agent on the next save.
 
 For each candidate surfaced, a `memory_relations` row SHALL be inserted with `status = 'pending'`, `source_id = <new row>`, `target_id = <candidate>`, and a generated `judgment_id`.
 
@@ -1031,7 +1031,13 @@ The service layer SHALL expose a scoped batch retrieve that returns multiple mem
 
 A memory's predecessor ancestry is a DAG, not a chain: `replaces[]` is extended both by `saveWithTopicKey` (one immediate predecessor) and by `applySupersedesSideEffect` (an additional predecessor per judged `supersedes` verdict). Any read that walks that ancestry SHALL bound the traversal by a compile-time depth/count limit and SHALL project each predecessor to identity and lifecycle fields only — `{id, title, status, createdAt}` — never its `content`.
 
-The response SHALL carry `predecessorCount` (the number of predecessors reached) and `truncated` (whether the bound was hit), so a caller can tell that more ancestry exists and page into it with the existing batch read. Because `title` is fixed at insert and never updated, the projected title is a faithful immutable label for the omitted content.
+That traversal SHALL be a SINGLE bounded query owned by the data layer (see the `data-access` capability, "Bounded ancestry traversal MUST be one recursive query over `memory.replaces`"), never a per-ancestor probe loop in a service. Its cost SHALL therefore be independent of both the chain's length and the corpus size: a walk from the head of a 1 000-save chain reads the same bounded number of rows as one from the head of a 40-save chain.
+
+The bound SHALL count ancestor IDS reached, and SHALL mean the same thing to every reader of the ancestry. An ancestor id carrying no `memory` row SHALL consume the bound and contribute no projection, rather than causing the walk to continue past the bound in search of one. That state is not expected — the purge predicate refuses to purge a row that another row's `replaces` references — so the bound is defined for it rather than the walk being tuned around it.
+
+The read itself SHALL select only the projected fields. Projecting at the response boundary while the read fetches whole rows satisfies the letter of "never its `content`" and none of its purpose: on a chain at the bound that is ten memory bodies read from disk and discarded on every `memory.get`.
+
+The response SHALL carry `predecessorCount` (the number of predecessors PROJECTED, i.e. the length of the returned array) and `truncated` (whether the bound was hit), so a caller can tell that more ancestry exists and page into it with the existing batch read. The two are independent: an ancestor id inside the bound that carries no row is reached without being projected, so `predecessorCount` MAY be below the bound while `truncated` is `true`. Because `title` is fixed at insert and never updated, the projected title is a faithful immutable label for the omitted content.
 
 #### Scenario: A deep topic_key chain is read
 
@@ -1052,6 +1058,19 @@ The response SHALL carry `predecessorCount` (the number of predecessors reached)
 - **GIVEN** a `replaces` graph whose forward walk from the requested id exceeds the head-resolution hop cap
 - **WHEN** the head is resolved (e.g. by `memory.confirm`)
 - **THEN** the caller SHALL receive an explicit signal that the head was not reached, rather than a silently-returned non-active row
+
+#### Scenario: A dangling ancestor id consumes the bound
+
+- **GIVEN** an ancestry whose reachable ids include one with no corresponding `memory` row, within the bound
+- **WHEN** the ancestry is read
+- **THEN** that id SHALL count against the bound and SHALL NOT appear in the returned projections
+- **AND** `predecessorCount` SHALL report the number of projections returned, which MAY be fewer than the bound while `truncated` is `true`
+
+#### Scenario: The traversal cost does not grow with the chain
+
+- **GIVEN** two memories, one at the head of a 40-save `topic_key` chain and one at the head of a 1 000-save chain
+- **WHEN** each one's ancestry is read
+- **THEN** both reads SHALL issue the same number of statements, and SHALL read a number of rows bounded by the cap rather than by the chain length
 
 ### Requirement: Reactivating a decayed memory MUST survive the next sweep
 
@@ -1203,7 +1222,8 @@ Ranking, projection and lifecycle behaviour is governed by a set of compile-time
 - `CANDIDATE_POOL_SIZE` — the per-channel pool each save-time candidate channel scans BEFORE the merged list is ranked and capped. It is the bound that makes the reported detected count a lower bound rather than a total, and for the lexical channel it IS the admission rule (see "Save-time lexical candidate scoring MUST increase with match quality"), so exposing it as configuration would make an admission rule operator-settable. It is applied per channel, and the entity channel applies it once per extracted entity, so the merged pool — and therefore the detected count — MAY exceed it.
 - `ENTITY_RARITY_THRESHOLD` — the maximum share of a scope's active memories an entity may be linked to before it stops proposing save-time candidates. A proportion, not an absolute count, so it does not become inert as a corpus grows.
 - `ENTITIES_PROJECTION_CAP` — the per-memory bound on the `entities[]` projection. The reads behind it carry no `LIMIT`, so the complete per-memory count is in hand where the bound is applied and SHALL be reported as a count rather than as an indication that the bound was hit. Unlike `CANDIDATE_POOL_SIZE` above there is no pool upstream of it, so that count is exact and MAY carry a `Total` suffix. It SHALL be applied to a fair-shared order rather than an arbitrary one (see `mcp-api`), so that what the bound withholds is a stated consequence of the memory's entity composition rather than an accident of kind naming — a bound over an arbitrary order cannot be reviewed, because what it costs is unknowable. Changing its value SHALL therefore be argued against a measured distribution of entities per memory, produced by running the shipped extractor over production-shaped content, not against the returned array's length.
-- `PREDECESSOR_CAP` — the bound on the supersedes-chain walk.
+- `PREDECESSOR_CAP` — the bound on `memory.get`'s predecessor PROJECTION, and nothing else. Its value is a token budget for that one response, so no other consumer of the `replaces` ancestry SHALL borrow it: a decision to show more or fewer predecessors would otherwise silently change unrelated behaviour elsewhere.
+- `DISMISSAL_ANCESTRY_CAP` — how far back along the `replaces` ancestry a `not_conflict` dismissal is carried forward when save-time candidates are suppressed. A suppression-reach decision, not a payload decision, and SHALL be declared separately from `PREDECESSOR_CAP` even while the two hold the same value.
 - `ESCALATION_MULTIPLIER` — the multiple of its own TTL a memory sits `needs_review` before `reviewEscalated` derives true.
 - `REBUILD_MAX_BATCHES` — the bound on one operator-triggered derived-index rebuild pass, so the rebuild cannot become an unbounded blocking loop.
 
@@ -1256,7 +1276,51 @@ Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluatio
 - **WHEN** `DIVERSITY_CAP` is set to a non-null value while every row in the evaluation corpus carries a null session id
 - **THEN** the change SHALL be rejected, because the harness cannot observe the regression the cap causes
 
+#### Scenario: The projection bound is not reused as the suppression bound
+
+- **WHEN** `PREDECESSOR_CAP` is changed
+- **THEN** the depth of save-time dismissal suppression SHALL be unchanged, and no module outside `memory.get`'s predecessor projection SHALL read that constant
+
 #### Scenario: The projection bound is changed without a distribution
 
 - **WHEN** a change alters `ENTITIES_PROJECTION_CAP` citing only that the bound is reached, without a measured distribution of entities per memory over production-shaped content
 - **THEN** the change SHALL be rejected
+
+### Requirement: Dismissal suppression MUST bound its ancestry walk with its own named constant
+
+Save-time candidate detection suppresses targets the new row's `replaces` ancestry already judged `not_conflict` (see "`memory.save` MUST surface candidate conflicts at save-time"). How far back that suppression reaches is a decision about how long an agent's dismissal stays honoured. It SHALL be governed by `DISMISSAL_ANCESTRY_CAP`, declared in the module that owns save-time detection, and SHALL NOT be governed by `PREDECESSOR_CAP` — whose value is a token budget for `memory.get`'s payload, an unrelated concern. Sharing one constant means a future decision to show 25 predecessors silently deepens suppression, and a decision to show 5 silently discards dismissals an agent already made.
+
+`DISMISSAL_ANCESTRY_CAP` SHALL be introduced at the value `PREDECESSOR_CAP` held when the two were split, so the split itself changes no behaviour, and either SHALL be changeable thereafter without moving the other.
+
+The walk SHALL be transitive over `replaces`, breadth-first from the new row's immediate predecessors, deduplicated on first encounter, and bounded by counting ancestor IDS — including the immediate predecessors it starts from. Breadth-first ordering is the contract, not an implementation accident: the bound discards the far end of the ancestry, so the ancestors retained SHALL be the nearest ones, whose dismissals are the most recent. Deduplication on first encounter SHALL make the walk terminate on a `replaces` graph containing a cycle rather than depend on the bound to stop it.
+
+A save whose `replaces[]` is empty SHALL issue no ancestry query at all: with no ancestry there is nothing to suppress, and the walk SHALL NOT cost a statement to discover that.
+
+#### Scenario: A dismissal two saves back is still suppressed
+
+- **GIVEN** a target X judged `not_conflict` against M0, and M1 saved on the same `topic_key` superseding M0
+- **WHEN** M2 is saved on that same `topic_key`, so its ancestry reaches M0 through M1, and X would otherwise clear the similarity thresholds
+- **THEN** X SHALL NOT appear in M2's `candidates[]` and no pending `memory_relations` row SHALL be inserted for `(M2, X)`
+
+#### Scenario: A dismissal beyond the bound is no longer suppressed
+
+- **GIVEN** a `topic_key` chain longer than `DISMISSAL_ANCESTRY_CAP` whose oldest member dismissed X
+- **WHEN** a new save on that chain runs detection and X clears the thresholds
+- **THEN** X MAY surface again — the bound is a deliberate limit on suppression reach, not a best-effort attempt at completeness
+
+#### Scenario: Changing the projection budget does not change suppression
+
+- **WHEN** `PREDECESSOR_CAP` is raised or lowered
+- **THEN** the set of targets suppressed by an identical save SHALL be unchanged
+
+#### Scenario: A save with no predecessors runs no ancestry query
+
+- **GIVEN** a save whose `replaces[]` is empty
+- **WHEN** candidate detection runs
+- **THEN** no ancestry traversal statement SHALL be executed
+
+#### Scenario: A cycle in the ancestry terminates the walk
+
+- **GIVEN** two memories whose `replaces` arrays reference each other
+- **WHEN** the ancestry of either is walked
+- **THEN** the walk SHALL return both ids once and terminate

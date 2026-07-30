@@ -35,10 +35,11 @@ Replacing a probe loop with a single statement SHALL be proven equivalent, not a
 - **WHEN** its ancestry is read
 - **THEN** exactly one ancestry statement SHALL be executed, whatever the bound is set to
 
-#### Scenario: A statement count is measured on a fresh connection
+#### Scenario: A statement count is measured where the counter can see every execution
 
 - **WHEN** a change measures how many statements a path executes
-- **THEN** the counter SHALL be installed on a connection that has executed nothing yet, because drizzle reuses prepared statements and a counter installed after the corpus was built observes only the statements prepared since
+- **THEN** the counter SHALL wrap the terminal `all`/`get`/`run` of each prepared statement rather than counting `prepare` calls, because a statement prepared once and executed many times is one `prepare` and many executions
+- **AND** the measurement SHALL be taken on a connection whose statements were all prepared under the counter, so that any path which does cache a prepared statement cannot execute it unobserved
 
 #### Scenario: A second traversal implementation is rejected
 
@@ -49,3 +50,19 @@ Replacing a probe loop with a single statement SHALL be proven equivalent, not a
 
 - **WHEN** the ancestry read returns rows rather than ids
 - **THEN** the projection SHALL be selected through the Drizzle builder as a `Pick<Memory, …>` so timestamps and JSON columns are mapped by the schema, and SHALL NOT be hand-hydrated from a raw result row
+
+## MODIFIED Requirements
+
+### Requirement: Repositories per aggregate own all SQL for their tables
+
+The data layer SHALL provide one repository per aggregate at `apps/server/src/db/repositories/`: `memory` (owning `memory` and `memory_fts`), `relations` (`memory_relations`), `agent-sessions` (`sessions`), `prompts` (`prompts` and `prompts_fts`), `projects`, `tokens`, `consolidation` (`consolidation_ops`, `consolidation_runs`), `vectors` (`memory_vec`, including sqlite-vec kNN queries), and `dashboard-sessions` (`dashboard_sessions`, the cookie-auth table). Each repository SHALL be a class receiving the database handle via constructor injection, instantiated once during server bootstrap. Raw SQL inside repositories SHALL be limited to constructs the Drizzle builder cannot express: FTS5 `MATCH`, sqlite-vec functions, `json_each`, recursive common table expressions (`WITH RECURSIVE`), PRAGMA, and `VACUUM INTO`.
+
+#### Scenario: A query expressible in the builder uses the builder
+
+- **WHEN** a repository implements a query consisting of standard relational operations (joins, grouped counts, filters, ordering, pagination)
+- **THEN** it SHALL use the Drizzle query builder, not the `sql` template tag
+
+#### Scenario: FTS5 search lives in its content table's repository
+
+- **WHEN** any layer needs full-text search over memories or prompts
+- **THEN** it SHALL call the corresponding repository method; the FTS5 `MATCH` statement exists only inside that repository

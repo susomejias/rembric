@@ -24,6 +24,13 @@ const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
 
+/**
+ * Ceiling on any single ancestry read, far above both call sites' bounds
+ * (`PREDECESSOR_CAP + 2` and `DISMISSAL_ANCESTRY_CAP`). It exists so the one thing
+ * keeping the traversal flat cannot be removed by a caller passing a large number.
+ */
+const ANCESTRY_HARD_LIMIT = 1000;
+
 /** One JSON bind, not one placeholder per id: SQLite throws above 32 766 binds. */
 function idJsonSet(ids: readonly string[]): SQL {
   return sql`(SELECT value FROM json_each(${JSON.stringify([...ids])}))`;
@@ -521,6 +528,75 @@ export class MemoryRepository {
   findReplaces(id: string): string[] | undefined {
     return this.db.select({ replaces: memory.replaces }).from(memory).where(eq(memory.id, id)).get()
       ?.replaces;
+  }
+
+  /**
+   * Bounded `replaces` ancestry of `startIds`, breadth-first, ids only, in one
+   * statement. Replaces two hand-rolled walks that each issued one PK probe per
+   * hop on the single synchronous connection every other caller queues behind.
+   *
+   * Walks `memory.replaces` via `json_each`, NOT the `memory_replaces` edge
+   * table. Verified rather than assumed, because the edge table is the intuitive
+   * choice and is the wrong one here: its primary key is
+   * `(predecessor_id, successor_id)` and it is `WITHOUT ROWID`, so `sqlite_master`
+   * holds no index object for it at all. The ancestor direction keys on
+   * `successor_id`, so SQLite builds a transient index per query — linear in the
+   * whole edge table. This form seeks the `memory` PK autoindex and is flat in
+   * both chain length and corpus size. `memory_replaces` keeps the forward hop
+   * (`findSuccessorId`), which is what it was built for.
+   *
+   * `UNION`, not `UNION ALL`: dedup is on the id, so a shared grandparent in a
+   * diamond is visited once. The `LIMIT` stays inside SQL — bounding in JS after
+   * the fact restores the O(chain) cost the bound exists to avoid.
+   *
+   * `unsafe*` because it is deliberately unscoped, and the prefix is the whole
+   * warning: nothing here filters by scope. It is safe only because `replaces`
+   * links never cross a scope, so an ancestor of an in-scope row is in scope by
+   * construction. The callers scope the START row, not the results.
+   */
+  unsafeAncestorIds(opts: { startIds: readonly string[]; limit: number }): string[] {
+    if (opts.startIds.length === 0 || opts.limit <= 0) return [];
+    // Clamped, because the bound is the ONLY thing keeping this flat: measured on a
+    // 5000-deep chain, `limit: 10` is 0.042 ms/call and an unbounded limit is
+    // 6.08 ms/call returning every row. Both call sites pass small constants, but an
+    // `unsafe*` method is callable from any service and must not depend on that.
+    const limit = Math.min(Math.trunc(opts.limit), ANCESTRY_HARD_LIMIT);
+    const rows = this.db.all<{ id: string }>(sql`
+      WITH RECURSIVE anc(id) AS (
+        SELECT value FROM json_each(${JSON.stringify([...opts.startIds])})
+        UNION
+        SELECT je.value
+          FROM anc
+          JOIN ${memory} m ON m.id = anc.id
+          JOIN json_each(m.replaces) je
+      )
+      SELECT id FROM anc LIMIT ${limit}
+    `);
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * The four fields `memory.get` publishes for a predecessor. Through the builder
+   * rather than raw SQL so `createdAt` stays drizzle-mapped instead of
+   * hand-hydrated from an integer.
+   *
+   * No `ORDER BY`: the caller re-orders to the traversal's order, which is the
+   * contract, and a SQL sort here would silently become a second one.
+   */
+  unsafeProjectionByIds(
+    ids: readonly string[],
+  ): Pick<Memory, 'id' | 'title' | 'status' | 'createdAt'>[] {
+    if (ids.length === 0) return [];
+    return this.db
+      .select({
+        id: memory.id,
+        title: memory.title,
+        status: memory.status,
+        createdAt: memory.createdAt,
+      })
+      .from(memory)
+      .where(sql`${memory.id} IN ${idJsonSet(ids)}`)
+      .all();
   }
 
   findDecayCandidateIds(opts: {
