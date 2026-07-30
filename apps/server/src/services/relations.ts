@@ -10,6 +10,7 @@ import {
 import type { MemoryScope } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
+import { RANK_WINDOW_CEILING } from './hybrid-search.js';
 import { memoryMatchesScope, type Scope } from './scope.js';
 
 /**
@@ -92,6 +93,68 @@ export const ANNOTATION_TIER: Record<AnnotationKind, number> = {
 
 /** The highest `relations` bound any read surface will serve, shared by all of them. */
 export const RELATION_ANNOTATION_MAX = 50;
+
+/**
+ * The two inputs the response budget is derived from. They live here, not in the
+ * MCP schema that enforces them, so the budget can be a real product rather than a
+ * literal restating numbers declared a layer above it — services never import from
+ * `mcp/`. The schema reads them back.
+ */
+export const SEARCH_LIMIT_MAX = 200;
+export const MULTI_ROW_ANNOTATION_DEFAULT = 10;
+
+/**
+ * Character bound applied to a judged annotation's `reason` on the MULTI-ROW
+ * surfaces. A read projection, never a write: `memory_relations.reason` keeps the
+ * full stored text, which append-only requires.
+ *
+ * 350 is the value `CONTEXT_SNIPPET_CHARS` already ships for every other
+ * multi-item text projection, so no new number is invented. Measured: `reason` is
+ * 94% of a judged annotation (2 127 pretty chars verbatim against 129 with it
+ * removed), and bounding it here takes the worst legal request from 40.53 MB
+ * transported to 1.81 MB.
+ */
+export const ANNOTATION_REASON_CHARS = 350;
+
+/**
+ * Maximum annotations one multi-row response may project, bounding
+ * `rows × per-row bound` rather than either alone.
+ *
+ * Derived from the shipped numbers rather than written as a literal, so raising an
+ * input moves the budget visibly instead of leaving a stale constant. Its value is
+ * exactly the worst case the server ALREADY serves when nobody passes
+ * `relations_limit`, so no default request can ever be rejected and the ceiling
+ * introduces no payload regime that is not already shipping.
+ *
+ * The row term is `RANK_WINDOW_CEILING`, not `SEARCH_LIMIT_MAX`. Review caught the
+ * first version using the latter: `memory.search`'s ENTITY branch sets its page size
+ * to `RANK_WINDOW_CEILING` when the caller names no `limit` (that branch is specified
+ * as complete within scope), so the true default worst case is 400 x 10, not
+ * 200 x 10. Budgeting against the smaller number let `search({ entity,
+ * relations_limit: 50 })` serve 20 000 annotations — twice the regression this bound
+ * exists to remove.
+ */
+export const RELATION_ANNOTATION_RESPONSE_BUDGET =
+  RANK_WINDOW_CEILING * MULTI_ROW_ANNOTATION_DEFAULT;
+
+/**
+ * Ceiling on the serialized bytes of the largest LEGAL annotation payload, counting
+ * both copies `mcp/result.ts::ok()` emits (a `text` block plus `structuredContent`).
+ *
+ * Measured, not chosen: at the budget with `reason` bounded, the annotation
+ * projection is **3 792 003 bytes**, against 40.53 MB before this change. Asserted
+ * in CI so a future change that widens the payload must either fit or raise this
+ * number and record the re-measurement — the same contract `DESCRIPTION_MAX_LENGTH`
+ * carries for tool descriptions.
+ *
+ * It bounds the ANNOTATION projection alone, not the whole `CallToolResult`. A
+ * result also carries `content`, which this change deliberately leaves unbounded
+ * (design D8) and which would otherwise make this ceiling a function of how long the
+ * memories happen to be rather than of the constants it exists to pin — the first
+ * version measured the whole result and was an artifact of its fixture's 600-char
+ * bodies.
+ */
+export const ANNOTATION_PAYLOAD_CEILING_BYTES = 4_000_000;
 
 /** Exactly what the order reads. A caller that only sorts needs nothing else. */
 export interface AnnotationKey {

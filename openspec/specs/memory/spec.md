@@ -621,13 +621,13 @@ Consequently a memory carrying more relations than the bound SHALL surface its l
 
 Every row carrying `relations` SHALL also carry `relationsTotal`: the number of annotations that exist for that memory after the `not_conflict` and `orphaned` exclusions and BEFORE the bound is applied. It SHALL be present whether or not the list was bounded, and it SHALL NEVER be the returned list's length restated — when the list was cut, `relationsTotal` SHALL be strictly greater. Computing it SHALL NOT cost an additional query: the underlying reads are unbounded, so the complete count is already available at the moment the list is bounded.
 
-The same ordering, the same caller-supplied bound, and the same total SHALL apply to every annotation list a memory-returning read projects, including both forms of `memory.get`, so two surfaces can never describe the same memory's relations differently. The one-hop expansion in "Memory search MAY expand results via one-hop relation traversal" reads this same ordered list; its kind set and its own cap of 5 are unchanged, but its input SHALL no longer depend on scan order.
+The same ordering, the same caller-supplied bound, and the same total SHALL apply to every annotation list a memory-returning read projects, including both forms of `memory.get`, so two surfaces can never describe the same memory's relations differently. That agreement is about WHICH annotations a read shows and in what order; the SIZE of an annotation's body is a separate, per-surface projection decision. A read that projects annotations for many memories MAY bound the judged `reason` field where the single-memory deep read does not (see the `mcp-api` capability, "Relation annotation reasons MUST be bounded on multi-row reads"), because that field is the only unbounded term in an annotation and it is multiplied by the row count. Where it is bounded, the returned value SHALL be a prefix of the stored one, and no OTHER field, the ordering, the bound, or `relationsTotal` SHALL differ between surfaces. The one-hop expansion in "Memory search MAY expand results via one-hop relation traversal" reads this same ordered list; its kind set and its own cap of 5 are unchanged, but its input SHALL no longer depend on scan order.
 
 #### Scenario: A judged supersedes relation appears on both sides
 
 - **GIVEN** memory N supersedes memory M (judged)
 - **WHEN** `memory.search` includes N or M in its results
-- **THEN** N's row SHALL include `{ kind: 'supersedes', targetId: 'M', snippet }` and M's row (when surfaced) SHALL include `{ kind: 'superseded_by', targetId: 'N', snippet }`
+- **THEN** N's row SHALL include `{ kind: 'supersedes', targetId: 'M', status: 'judged' }` and M's row (when surfaced) SHALL include `{ kind: 'superseded_by', targetId: 'N', status: 'judged' }`, each carrying the judgment's `reason` and `confidence`
 
 #### Scenario: A pending judgment surfaces as `pending_conflict`
 
@@ -669,6 +669,13 @@ The same ordering, the same caller-supplied bound, and the same total SHALL appl
 - **GIVEN** memory M carries 40 annotations
 - **WHEN** `memory.search` is called for M at the default bound and again at a bound of 25
 - **THEN** the 25-entry list SHALL begin with exactly the 10 entries the default returned, in the same order, and `relationsTotal` SHALL be 40 in both responses
+
+#### Scenario: Surfaces agree on which annotations, not on how long a reason is
+
+- **GIVEN** memory M carries a judged annotation whose stored `reason` exceeds the multi-row reason bound
+- **WHEN** M is read via `memory.search` and via `memory.get` with `id`
+- **THEN** both responses SHALL report the same `relationsTotal` and the same annotations in the same order, with the same `kind`, `targetId`, `status` and `confidence`
+- **AND** the only difference SHALL be that the search row's `reason` is a bounded prefix of the value `memory.get` returns in full
 
 ### Requirement: An active memory MAY be archived at explicit user request
 
@@ -1227,6 +1234,9 @@ Ranking, projection and lifecycle behaviour is governed by a set of compile-time
 - `DISMISSAL_ANCESTRY_CAP` — how far back along the `replaces` ancestry a `not_conflict` dismissal is carried forward when save-time candidates are suppressed. A suppression-reach decision, not a payload decision, and SHALL be declared separately from `PREDECESSOR_CAP` even while the two hold the same value.
 - `ESCALATION_MULTIPLIER` — the multiple of its own TTL a memory sits `needs_review` before `reviewEscalated` derives true.
 - `REBUILD_MAX_BATCHES` — the bound on one operator-triggered derived-index rebuild pass, so the rebuild cannot become an unbounded blocking loop.
+- `ANNOTATION_REASON_CHARS` — the character bound applied to a judged annotation's `reason` on the multi-row annotation surfaces. It bounds a READ PROJECTION only: the stored `reason` and its input cap are untouched, and the single-memory deep read projects the value verbatim (see the `mcp-api` capability, "Relation annotation reasons MUST be bounded on multi-row reads").
+- `RELATION_ANNOTATION_RESPONSE_BUDGET` — the maximum number of annotations one multi-row response may project, bounding `row count × per-row annotation bound`. It SHALL be derived from shipped default behaviour so that no request relying on defaults can be rejected by it — and that derivation SHALL use the LARGEST row count any branch serves for an omitted `limit`, not the `limit` maximum. The entity branch's page size when no `limit` is given exceeds the `limit` maximum, so deriving from the latter leaves that branch able to project several times the budget. It is not itself a per-request tunable: it bounds the product of two request parameters, and a request exceeding it is rejected rather than served with a reduced projection.
+- The annotation payload ceiling — the maximum serialized size the annotation projection of any legal request may reach, asserted in CI against a measured worst-case response rather than against the product of the constants above (see the `mcp-api` capability, "The worst-case annotation payload MUST be bounded by a named ceiling asserted in CI").
 
 Three gates ship disabled (`null`): the abstention floor and `RELATIVE_LEVEL_RATIO` (see "Recall MUST be able to return nothing"), and the per-session `DIVERSITY_CAP`. Their disabled state is not itself the contract — an uncalibrated gate silently removes recall, so what is contracted is the evidence a commit must carry to enable one.
 
@@ -1300,6 +1310,11 @@ That sweep obligation SHALL NOT be extended to `ENTITY_RARITY_THRESHOLD` by anal
 
 - **WHEN** a change alters `ENTITIES_PROJECTION_CAP` citing only that the bound is reached, without a measured distribution of entities per memory over production-shaped content
 - **THEN** the change SHALL be rejected
+
+#### Scenario: The annotation payload constants are declared once
+
+- **WHEN** the modules owning the annotation projection are inspected
+- **THEN** `ANNOTATION_REASON_CHARS` and `RELATION_ANNOTATION_RESPONSE_BUDGET` SHALL each be declared exactly once, alongside `RELATION_ANNOTATION_MAX`, and every enforcement site SHALL read them from that declaration rather than restating a literal
 
 ### Requirement: Dismissal suppression MUST bound its ancestry walk with its own named constant
 

@@ -13,16 +13,30 @@ import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
 import { DomainError } from '../services/errors.js';
-import type { MemoryService, SaveMemoryInput, SearchMemoriesInput } from '../services/memory.js';
+import { RANK_WINDOW_CEILING } from '../services/hybrid-search.js';
+import {
+  DEFAULT_SEARCH_LIMIT,
+  type MemoryService,
+  type SaveMemoryInput,
+  type SearchMemoriesInput,
+} from '../services/memory.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
-import { RELATION_ANNOTATION_MAX, type RelationsService } from '../services/relations.js';
+import {
+  ANNOTATION_REASON_CHARS,
+  MULTI_ROW_ANNOTATION_DEFAULT,
+  RELATION_ANNOTATION_MAX,
+  RELATION_ANNOTATION_RESPONSE_BUDGET,
+  SEARCH_LIMIT_MAX,
+  type RelationsService,
+} from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
   assertExplicitSessionOwned,
+  boundAnnotationReasons,
   clamp,
   requireScope,
   resolveEffectiveScope,
@@ -68,8 +82,8 @@ const PENDING_JUDGMENTS_MAX = 50;
 /** A queue-depth warning, not a page of an inventory — the caller asks for inventory by passing a size. */
 const PENDING_JUDGMENTS_DEFAULT = 5;
 
-/** Per-surface `relations` defaults; only the maximum (`RELATION_ANNOTATION_MAX`) is shared. */
-const RELATION_ANNOTATION_DEFAULT = 10;
+/** Per-surface `relations` defaults; the maximum and the multi-row default are shared. */
+const RELATION_ANNOTATION_DEFAULT = MULTI_ROW_ANNOTATION_DEFAULT;
 /** Single-id `memory.get` is the deliberate deep read, so it defaults to the maximum. */
 const RELATION_ANNOTATION_DEFAULT_SINGLE = RELATION_ANNOTATION_MAX;
 
@@ -88,7 +102,12 @@ function relationsLimitParam(defaults: string) {
         `A value above ${RELATION_ANNOTATION_MAX} is REJECTED, not clamped. Annotations come ` +
         'contradiction- and lifecycle-first, so a lower bound never hides one of those — but ' +
         'it does bound what `include_relations` can expand from, since expansion draws on the ' +
-        'annotations returned here.',
+        'annotations returned here. Rows and this bound are limited TOGETHER: their product may ' +
+        `not exceed ${RELATION_ANNOTATION_RESPONSE_BUDGET} annotations per response, so trade one ` +
+        `against the other (e.g. ${Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / RELATION_ANNOTATION_MAX)} ` +
+        `rows at ${RELATION_ANNOTATION_MAX}, or the row maximum at the default). ` +
+        'Over-budget is REJECTED too. On the multi-row surfaces a judged `reason` is truncated; ' +
+        'single-id `memory.get` reads one memory at the maximum and returns it verbatim.',
     );
 }
 
@@ -144,10 +163,10 @@ export const memorySearchSchema = {
     .number()
     .int()
     .min(1)
-    .max(200)
+    .max(SEARCH_LIMIT_MAX)
     .optional()
     .describe(
-      'Max results (default 8). Raise it (up to 200) when 8 are all relevant and you need more.',
+      `Max results (default 8). Raise it (up to ${SEARCH_LIMIT_MAX}) when 8 are all relevant and you need more.`,
     ),
   offset: z
     .number()
@@ -875,6 +894,35 @@ const RELATION_EXPANSION_CAP = 5;
  */
 const ENTITIES_PROJECTION_CAP = 10;
 
+/**
+ * The aggregate annotation budget: `rows × per-row bound`, checked BEFORE any query.
+ *
+ * Rejected rather than clamped, matching the per-row bound's published rule — a
+ * silently smaller answer is worse than a refused one, because a caller that asked
+ * for 50 annotations and got 10 has no way to tell. The message has to name both
+ * parameters and a legal trade, since the caller cannot see the budget otherwise.
+ */
+function annotationBudgetError(
+  rowParam: 'limit' | 'ids',
+  rows: number,
+  perRow: number,
+): ReturnType<typeof mcpError> | null {
+  // `rows` is the EFFECTIVE count. On the entity branch with no `limit` that is
+  // `RANK_WINDOW_CEILING`, so the message quotes a number the caller never typed —
+  // which is the point: it is what the server would have served.
+  if (rows * perRow <= RELATION_ANNOTATION_RESPONSE_BUDGET) return null;
+  const affordable = Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / perRow);
+  return mcpError(
+    'invalid_input',
+    `${rowParam} ${rows} x relations_limit ${perRow} projects ${rows * perRow} annotations, over ` +
+      `the ${RELATION_ANNOTATION_RESPONSE_BUDGET} a single response may carry. Either lower ` +
+      `${rowParam} to ${affordable} at relations_limit ${perRow}, or keep ${rowParam} ${rows} at ` +
+      `relations_limit ${Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / rows)} or below. For one ` +
+      "memory's annotations at the maximum, use memory.get with a single `id` — it is exempt by " +
+      'construction and returns each `reason` verbatim.',
+  );
+}
+
 async function handleSearch(
   deps: MemoryToolDeps,
   args: {
@@ -911,6 +959,19 @@ async function handleSearch(
     offset: args.offset,
     includeGlobal: args.include_global,
   };
+
+  // The EFFECTIVE row count, not the declared one. An omitted `limit` means 8 rows
+  // on the ranked branch but `RANK_WINDOW_CEILING` on the entity branch, which is
+  // specified as complete within scope — budgeting against the declared value let
+  // `{ entity, relations_limit: 50 }` through and serve 20 000 annotations.
+  const effectiveRows =
+    args.limit ?? (args.entity !== undefined ? RANK_WINDOW_CEILING : DEFAULT_SEARCH_LIMIT);
+  const searchBudget = annotationBudgetError(
+    'limit',
+    effectiveRows,
+    args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
+  );
+  if (searchBudget) return searchBudget;
 
   try {
     const { memories, abstained, reason, viaEntity, entityIndexDraining } =
@@ -993,7 +1054,7 @@ async function handleSearch(
         const annotations = relations?.get(m.id);
         const full: Record<string, unknown> = {
           ...formatRow(m),
-          relations: annotations?.views ?? [],
+          relations: boundAnnotationReasons(annotations?.views ?? [], ANNOTATION_REASON_CHARS),
           relationsTotal: annotations?.total ?? 0,
           ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
           ...(r && r.reviewState !== null
@@ -1029,6 +1090,12 @@ async function handleGet(
   try {
     assertAuthorized('read', scope);
     if (args.ids !== undefined) {
+      const batchBudget = annotationBudgetError(
+        'ids',
+        args.ids.length,
+        args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
+      );
+      if (batchBudget) return batchBudget;
       // Batch: scoped + ordered; out-of-scope / unknown ids land in
       // `notFound` and never leak content.
       const rows = deps.memory.getMany(args.ids, scope);
@@ -1058,7 +1125,7 @@ async function handleGet(
             createdAt: m.createdAt,
             lastSeenAt: m.lastSeenAt,
             topicKey: m.topicKey,
-            relations: annotations?.views ?? [],
+            relations: boundAnnotationReasons(annotations?.views ?? [], ANNOTATION_REASON_CHARS),
             relationsTotal: annotations?.total ?? 0,
             ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
           };

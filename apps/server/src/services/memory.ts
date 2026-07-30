@@ -779,7 +779,8 @@ export class MemoryService {
   }
 }
 
-const DEFAULT_SEARCH_LIMIT = 8;
+/** Exported so the annotation response budget can compute the EFFECTIVE row count. */
+export const DEFAULT_SEARCH_LIMIT = 8;
 
 /**
  * Max predecessors `memory.get` returns — a TOKEN BUDGET for that response and

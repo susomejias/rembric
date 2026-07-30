@@ -7,6 +7,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
 import { isAuthorized } from '../services/tokens.js';
 
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
@@ -173,6 +174,31 @@ export function clamp(n: number, lo: number, hi: number): number {
 export function snippet(content: string, max: number): string {
   if (content.length <= max) return content;
   return content.slice(0, max - 1) + '…';
+}
+
+/**
+ * Bound each judged annotation's `reason` for a MULTI-ROW projection.
+ *
+ * A read projection only — `memory_relations.reason` keeps the full stored text,
+ * which append-only requires and which single-id `memory.get` still returns
+ * verbatim as the drill-down destination.
+ *
+ * Lives here rather than in the service because services never import from `mcp/`
+ * and the per-surface difference is a presentation decision. One helper, so the two
+ * multi-row call sites cannot drift.
+ */
+export function boundAnnotationReasons<T extends { reason?: string | null }>(
+  views: readonly T[],
+  max: number,
+): T[] {
+  return views.map((v) =>
+    typeof v.reason === 'string' && v.reason.length > max
+      ? // Surrogate-safe, unlike a bare `snippet`: a raw cut at `max - 1` can leave a
+        // lone high surrogate that every client decodes to U+FFFD, so the bounded
+        // value would not be a prefix of the stored text in DECODED terms.
+        { ...v, reason: sliceWithoutSplittingSurrogatePair(v.reason, max - 1) + '…' }
+      : v,
+  );
 }
 
 export function serializeMemory(m: Memory) {

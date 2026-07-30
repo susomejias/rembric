@@ -171,7 +171,9 @@ A `relations_limit` above the maximum SHALL be REJECTED as an invalid argument, 
 
 A per-row bound does not bound a response. `memory.search` accepts `limit` up to 200 and `memory.get` accepts up to 100 `ids`, each independent of `relations_limit`, so the two maxima multiply into a response the specification permitted and no requirement bounded. The multi-row surfaces SHALL therefore ALSO be bounded in aggregate: the product of the requested row count and the effective per-row annotation bound — `limit × effective relations bound` for `memory.search`, `ids.length × effective relations bound` for batch `memory.get` — SHALL NOT exceed a single named budget constant. The effective bound is the caller's `relations_limit` when supplied and the surface's default otherwise.
 
-The budget SHALL be the largest annotation count the server already serves to a caller who passes nothing — the maximum `limit` times the multi-row default — so that no request relying on DEFAULTS can ever be rejected and the aggregate ceiling introduces no payload regime that is not already shipping. It follows that the budget is a TRADE rather than a reduction: a caller MAY spend it on many rows with few annotations each, or few rows with the maximum annotations each, and any combination whose product is within the budget SHALL be served.
+The budget SHALL be the largest annotation count the server already serves to a caller who passes nothing — the largest row count ANY branch serves for an omitted `limit`, times the multi-row default — so that no request relying on DEFAULTS can ever be rejected and the aggregate ceiling introduces no payload regime that is not already shipping. The check SHALL be applied to the EFFECTIVE row count — the number of rows the request would actually serve — and not to the value the caller declared. Where a branch substitutes its own page size for an omitted `limit`, budgeting against the declared value bounds nothing on that branch.
+
+It follows that the budget is a TRADE rather than a reduction: a caller MAY spend it on many rows with few annotations each, or few rows with the maximum annotations each, and any combination whose product is within the budget SHALL be served.
 
 A request whose product exceeds the budget SHALL be REJECTED with an invalid-argument error, on the same terms and for the same reason as an over-maximum `relations_limit`: silently serving fewer annotations than asked for would be indistinguishable from a complete list except by comparison against `relationsTotal`, which is the truncation-flag defect in a new place. The rejection SHALL name both parameters, the budget, and at least one legal combination, so the caller can comply in the same turn. Because the constraint spans two parameters it cannot be declared in a single field's schema; the `relations_limit` description SHALL therefore state that the two bounds are jointly limited and how to trade between them, and SHALL name single-id `memory.get` as the way to read one memory's annotations at the maximum.
 
@@ -209,7 +211,7 @@ Every response row carrying `relations` SHALL carry `relationsTotal` alongside i
 
 #### Scenario: The budget is spendable either way
 
-- **GIVEN** a budget equal to the maximum `limit` times the multi-row default
+- **GIVEN** a budget equal to the largest row count any branch serves for an omitted `limit`, times the multi-row default
 - **WHEN** the caller asks for few rows with the maximum `relations_limit`, or for the maximum rows at the default annotation bound
 - **THEN** both requests SHALL be served, and only a request whose product exceeds the budget SHALL be rejected
 
