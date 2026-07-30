@@ -483,8 +483,9 @@ function wipe(handle: DbHandle): void {
   // we haven't reached yet (e.g. memory_relations → memory is fine, but
   // depending on schema details, some checks fire mid-transaction).
   // Defer + dependency-ordered deletes + atomic commit = clean wipe.
-  // memory_vec / memory_fts have AFTER DELETE triggers on memory and
-  // clean up automatically.
+  // `memory_fts` has AFTER DELETE triggers on memory; `memory_vec` does NOT —
+  // it is a vec0 vtable outside FK enforcement, so it is deleted explicitly
+  // here. Omitting it leaked the previous boot's vectors on every --reset.
   handle.raw.transaction(() => {
     handle.raw.exec('PRAGMA defer_foreign_keys = ON');
     handle.raw.exec('DELETE FROM memory_relations');
@@ -494,6 +495,7 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('DELETE FROM prompts');
     // memory_entity_links references both memory_entities and memory;
     // memory_entity_scan references memory — both must go before memory.
+    handle.raw.exec('DELETE FROM memory_vec');
     handle.raw.exec('DELETE FROM memory_entity_links');
     handle.raw.exec('DELETE FROM memory_entity_scan');
     handle.raw.exec('DELETE FROM memory_entities');

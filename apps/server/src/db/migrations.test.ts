@@ -584,6 +584,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0024_confirmation_verdict.sql',
       '0025_confirmation_review_index.sql',
       '0026_confirmation_verdict_check.sql',
+      '0027_tune_hot_query_paths.sql',
     ]);
 
     // FK integrity after the rebuild.

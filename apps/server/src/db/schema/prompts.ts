@@ -46,12 +46,14 @@ export const prompts = sqliteTable(
   (table) => ({
     projectCreatedIdx: index('prompts_project_created_idx').on(table.projectId, table.createdAt),
     sessionIdx: index('prompts_session_idx').on(table.sessionId),
+    createdActiveIdx: index('prompts_created_active_idx')
+      .on(table.createdAt)
+      .where(sql`deleted_at IS NULL`),
+    deletedIdx: index('prompts_deleted_idx')
+      .on(table.deletedAt)
+      .where(sql`deleted_at IS NOT NULL`),
   }),
 );
 
 export type Prompt = typeof prompts.$inferSelect;
 export type NewPrompt = typeof prompts.$inferInsert;
-
-// Imported `sql` is referenced via drizzle migration meta when applied; kept
-// to keep parity with sibling schema modules.
-void sql;

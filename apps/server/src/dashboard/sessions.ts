@@ -99,8 +99,9 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const deletedHasMore = deletedRowsRaw.length > PAGE_SIZE;
     const deletedRows = deletedRowsRaw.slice(0, PAGE_SIZE);
 
-    const countRows = deps.repos.memory.adminCountBySession();
-    const promptCountRows = deps.repos.prompts.adminCountBySession();
+    const pageSessionIds = [...visibleRows, ...deletedRows].map((r) => r.id);
+    const countRows = deps.repos.memory.adminCountBySession(pageSessionIds);
+    const promptCountRows = deps.repos.prompts.adminCountBySession(pageSessionIds);
 
     const renderRow = (r: (typeof visibleRows)[number], opts: { deleted: boolean }) => {
       const displayTitle = titleCascade(r.title, r.description, r.id);

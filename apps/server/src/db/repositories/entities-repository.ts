@@ -81,20 +81,16 @@ export class EntitiesRepository {
       const idByKey = new Map<string, string>();
       for (let i = 0; i < entities.length; i += LOOKUP_CHUNK) {
         const chunk = entities.slice(i, i + LOOKUP_CHUNK);
-        const existing = this.db
-          .select({ id: memoryEntities.id, kind: memoryEntities.kind, value: memoryEntities.value })
-          .from(memoryEntities)
-          .where(
-            and(
-              entityScopeCondition(scope, projectId),
-              or(
-                ...chunk.map((e) =>
-                  and(eq(memoryEntities.kind, e.kind), eq(memoryEntities.value, e.value)),
-                ),
-              ),
-            ),
-          )
-          .all();
+        // Row value, not an OR chain: the OR form's plan is stats-dependent.
+        const existing = this.db.all<{ id: string; kind: EntityKind; value: string }>(sql`
+          SELECT id, kind, value
+          FROM ${memoryEntities}
+          WHERE ${entityScopeCondition(scope, projectId)}
+            AND (kind, value) IN (VALUES ${sql.join(
+              chunk.map((e) => sql`(${e.kind}, ${e.value})`),
+              sql`, `,
+            )})
+        `);
         for (const r of existing) idByKey.set(`${r.kind}:${r.value}`, r.id);
       }
 
@@ -178,12 +174,9 @@ export class EntitiesRepository {
         .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
         .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
         .where(and(...conditions))
-        // `created_at` is millisecond-resolution, so a batch save ties. Without a
-        // tiebreaker SQLite is free to return tied rows in any order, and the
-        // caller pages this result by slicing — so page 2 could repeat or skip a
-        // row page 1 already showed. `id` is a ULID: same-millisecond rows sort
-        // by their monotonic suffix, which makes the total order deterministic
-        // AND still chronological.
+        // `id` (a ULID) is a required tiebreaker, not decoration: `created_at` is
+        // millisecond-resolution, so a batch save ties and the caller pages by
+        // slicing — page 2 could then repeat or skip a row page 1 showed.
         .orderBy(sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
         .limit(opts.limit)
         .all()
@@ -362,6 +355,16 @@ export class EntitiesRepository {
    * backlog that never reaches zero.
    */
   adminBacklogCount(): number {
+    // Exact while `memory_entity_scan.memory_id` is an FK-enforced PK on
+    // `memory.id`. A negative means an orphan slipped in (a table rebuild runs
+    // with `foreign_keys = OFF`), so fall back rather than show the operator a
+    // negative backlog.
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT (SELECT COUNT(*) FROM ${memory})
+           - (SELECT COUNT(*) FROM ${memoryEntityScan}) AS v
+    `) as { v: number } | undefined;
+    const diff = row?.v ?? 0;
+    if (diff >= 0) return diff;
     return (
       this.db
         .select({ n: sql<number>`count(*)` })
@@ -409,24 +412,6 @@ export class EntitiesRepository {
       .all();
   }
 
-  adminTopEntities(
-    limit: number,
-  ): { id: string; kind: EntityKind; value: string; linkCount: number }[] {
-    return this.db
-      .select({
-        id: memoryEntities.id,
-        kind: memoryEntities.kind,
-        value: memoryEntities.value,
-        linkCount: sql<number>`count(${memoryEntityLinks.memoryId})`,
-      })
-      .from(memoryEntities)
-      .leftJoin(memoryEntityLinks, eq(memoryEntityLinks.entityId, memoryEntities.id))
-      .groupBy(memoryEntities.id)
-      .orderBy(sql`count(${memoryEntityLinks.memoryId}) desc`)
-      .limit(limit)
-      .all();
-  }
-
   /**
    * The dashboard entities view's row source. `singleReferenceOnly` is the
    * thinly-documented-area proxy: an entity mentioned by exactly one memory
@@ -467,16 +452,24 @@ export class EntitiesRepository {
   }
 
   adminCountEntities(filters: { kind?: EntityKind; singleReferenceOnly?: boolean }): number {
-    const conditions = filters.kind ? [eq(memoryEntities.kind, filters.kind)] : [];
+    const kindFilter = filters.kind ? eq(memoryEntities.kind, filters.kind) : undefined;
+    // No HAVING: the join and GROUP BY cannot change the count.
+    if (!filters.singleReferenceOnly) {
+      const row = this.db
+        .select({ n: sql<number>`count(*)` })
+        .from(memoryEntities)
+        .where(kindFilter)
+        .get();
+      return row?.n ?? 0;
+    }
+
     const grouped = this.db
       .select({ id: memoryEntities.id })
       .from(memoryEntities)
       .leftJoin(memoryEntityLinks, eq(memoryEntityLinks.entityId, memoryEntities.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(kindFilter)
       .groupBy(memoryEntities.id)
-      .having(
-        filters.singleReferenceOnly ? sql`count(${memoryEntityLinks.memoryId}) = 1` : undefined,
-      )
+      .having(sql`count(${memoryEntityLinks.memoryId}) = 1`)
       .as('grouped');
     return (
       this.db

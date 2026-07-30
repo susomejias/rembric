@@ -1,3 +1,4 @@
+import { decodeTime } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
@@ -1277,5 +1278,35 @@ describe('deriveTitle', () => {
     const lastCode = title.charCodeAt(title.length - 1);
     const isLoneHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
     expect(isLoneHighSurrogate).toBe(false);
+  });
+});
+
+// Prerequisite for the deferred `order-entity-fanout-by-link-pk` follow-up.
+describe('ULID prefix equals created_at', () => {
+  it('holds for every saved row, so id order is created_at order', () => {
+    const rows = Array.from({ length: 25 }, (_, i) => {
+      clock.advance(1000);
+      return memory.save({ type: 'project', title: `t${i}`, content: `c${i}` }, SCOPE_GLOBAL);
+    });
+    for (const r of rows) {
+      expect(decodeTime(r.id)).toBe(r.createdAt.getTime());
+    }
+    const byId = [...rows].sort((a, b) => b.id.localeCompare(a.id)).map((r) => r.id);
+    const byCreated = [...rows]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))
+      .map((r) => r.id);
+    expect(byId).toEqual(byCreated);
+  });
+
+  it('holds for a backdated clock, which is how the dev seed writes history', () => {
+    const past = new Date('2020-06-01T00:00:00.000Z');
+    const backdated = new MemoryService(
+      createRepositories(db.handle.db),
+      db.handle.db,
+      new TestClock(past).now,
+    );
+    const row = backdated.save({ type: 'project', title: 'old', content: 'old' }, SCOPE_GLOBAL);
+    expect(decodeTime(row.id)).toBe(past.getTime());
+    expect(row.createdAt.getTime()).toBe(past.getTime());
   });
 });

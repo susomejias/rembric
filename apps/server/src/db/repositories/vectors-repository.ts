@@ -151,7 +151,7 @@ export class VectorsRepository {
     );
   }
 
-  /** Non-archived memories still missing an embedding, oldest first. */
+  /** Non-archived memories missing an embedding, oldest first. */
   findMissingEmbeddings(limit: number): PendingEmbedding[] {
     return this.db.all<PendingEmbedding>(sql`
       SELECT m.id AS id, m.title AS title, m.content AS content, m.scope AS scope,
@@ -169,6 +169,10 @@ export class VectorsRepository {
    * Unscoped — `admin`-prefixed so the confinement gate covers it, matching
    * `entities.adminBacklogCount()`. Reachable from `memory.doctor`, whose
    * report is deliberately server-wide.
+   *
+   * The anti-join, not `count(memory) - count(memory_vec)`: `memory_vec` is the
+   * one derived child of `memory` with no foreign key, so an orphaned vec row
+   * and a genuinely pending memory cancel to exactly zero.
    */
   adminBacklogCount(): number {
     const row = this.db.get<{ v: number }>(sql`

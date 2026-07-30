@@ -25,11 +25,14 @@ import { countTableRows, refreshStatistics } from '../db/diagnostics.js';
 import { createDb, type DbHandle } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
+import { RELATION_VALUES } from '../db/schema/memory-relations.js';
 import { MEMORY_TYPES, type MemoryType } from '../db/schema/memory.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
+import { PromptsService } from '../services/prompts.js';
+import { RelationsService } from '../services/relations.js';
 import { SCOPE_GLOBAL, projectScope, type Scope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 
@@ -37,13 +40,8 @@ export const SYNTHETIC_VECTOR_CAVEAT =
   'vectors are deterministic pseudo-random unit vectors, NOT embeddings — no retrieval-quality, ranking, fusion or abstention claim may be drawn from this corpus (use `pnpm run eval`)';
 
 /**
- * Directory names this harness refuses outright, independent of whether they
- * are populated. Both compose files bind a host directory named `data` or
- * `data-dev` onto the container's `/data`, so refusing the name covers a host
- * invocation and refusing the absolute path covers an in-container one. The
- * emptiness check alone would not: `dev:docker:up` runs `seed-dev --reset` on
- * every boot, so `data-dev` is routinely empty at exactly the moment a
- * measurement tool would find it writable.
+ * Refused regardless of whether they are populated: `dev:docker:up` reseeds on
+ * every boot, so an empty `data-dev` is exactly when a corpus would be lost.
  */
 export const RESERVED_DIR_NAMES: readonly string[] = ['data', 'data-dev'];
 export const RESERVED_ABSOLUTE_DIRS: readonly string[] = ['/data'];
@@ -53,10 +51,18 @@ export interface VolumetricArgs {
   dataDir: string;
   memories: number;
   sessions: number;
+  relations: number;
+  prompts: number;
   seed: number;
 }
 
-export const DEFAULT_ARGS = { memories: 1000, sessions: 0, seed: 1 } as const;
+export const DEFAULT_ARGS = {
+  memories: 1000,
+  sessions: 0,
+  relations: 0,
+  prompts: 0,
+  seed: 1,
+} as const;
 
 export class UsageError extends Error {}
 
@@ -73,16 +79,13 @@ function requireCount(flag: string, raw: string): number {
   return n;
 }
 
-/**
- * There is no `--reset`, no `--force`, and no destructive environment gate, by
- * construction: an unrecognised flag is a usage error rather than something the
- * parser tolerates, so a caller who types `--reset` out of habit gets told the
- * harness never deletes instead of silently having it ignored.
- */
+/** An unrecognised flag is a usage error, so `--reset` cannot be silently ignored. */
 export function parseArgs(argv: readonly string[]): VolumetricArgs {
   let dataDir: string | undefined;
   let memories: number = DEFAULT_ARGS.memories;
   let sessions: number = DEFAULT_ARGS.sessions;
+  let relations: number = DEFAULT_ARGS.relations;
+  let prompts: number = DEFAULT_ARGS.prompts;
   let seed: number = DEFAULT_ARGS.seed;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -97,37 +100,49 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
       case '--sessions':
         sessions = requireCount(flag, requireValue(flag, argv[(i += 1)]));
         break;
+      case '--relations':
+        relations = requireCount(flag, requireValue(flag, argv[(i += 1)]));
+        break;
+      case '--prompts':
+        prompts = requireCount(flag, requireValue(flag, argv[(i += 1)]));
+        break;
       case '--seed':
         seed = requireCount(flag, requireValue(flag, argv[(i += 1)]));
         break;
       default:
         throw new UsageError(
-          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --seed S. ` +
+          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --relations R --prompts P --seed S. ` +
             'This harness never deletes, so there is no --reset and no --force: remove the corpus directory yourself.',
         );
     }
   }
 
   if (dataDir === undefined) throw new UsageError('--db <dir> is required');
-  return { dataDir: normalizeDataDir(dataDir), memories, sessions, seed };
+  const args = { dataDir: normalizeDataDir(dataDir), memories, sessions, relations, prompts, seed };
+  assertBuildable(args);
+  return args;
 }
 
 /**
- * `--db` accepts either the directory that holds the SQLite file or the file
- * itself, because `createDb` owns the `data.db` basename and a caller who
- * passes `corpus-50k.db` expecting a file would otherwise silently get
- * `./data.db`. Any other basename is taken as the directory.
+ * The one cross-axis precondition. Asserted by `buildCorpus` too, so a
+ * programmatic caller cannot bypass it and silently get self-relations.
  */
+export function assertBuildable(args: VolumetricArgs): void {
+  if (args.relations > 0 && args.memories < MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS) {
+    throw new UsageError(
+      `--relations ${args.relations} needs --memories at least ${MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS} ` +
+        `(a relation joins two memories in the same scope, and the corpus spreads memories over ${VOLUMETRIC_SHAPE.scopeCount} scopes)`,
+    );
+  }
+}
+
+/** Accepts the directory or the `data.db` file itself; `createDb` owns the basename. */
 export function normalizeDataDir(dbArg: string): string {
   const abs = resolve(dbArg);
   return basename(abs) === 'data.db' ? resolve(abs, '..') : abs;
 }
 
-/**
- * The refusals, as a pure-ish precheck: it opens nothing for a reserved path and
- * opens read-only for the emptiness test, so a refusal never modifies a file.
- * Returns the operator-facing message, or null when the target is usable.
- */
+/** Opens read-only for the emptiness test, so a refusal never modifies a file. */
 export function refuseTarget(dataDir: string): string | null {
   const abs = resolve(dataDir);
   if (RESERVED_DIR_NAMES.includes(basename(abs)) || RESERVED_ABSOLUTE_DIRS.includes(abs)) {
@@ -166,11 +181,8 @@ export function refuseTarget(dataDir: string): string | null {
 }
 
 /**
- * The declared shape of a generated corpus, in ONE place so the co-located test
- * has something to compare a realised corpus against rather than re-deriving
- * the intent. Every figure sourced from `tune-hot-query-paths/design.md` is
- * labelled with it; the two that are not are labelled as harness choices, so a
- * reader can tell a reproduction from a decision.
+ * The declared shape, asserted by the co-located test. Each figure is labelled
+ * with its provenance: reproduced from `tune`, or a harness choice.
  */
 export const VOLUMETRIC_SHAPE = {
   /** `tune`: "6 scopes" — read here as the global scope plus five projects. */
@@ -193,20 +205,32 @@ export const VOLUMETRIC_SHAPE = {
   supersededFraction: 0.2,
   /** HARNESS CHOICE: an all-active session corpus would not exercise the status filters. */
   sessionsEndedFraction: 0.8,
+  /** HARNESS CHOICE: an all-NULL `session_id` makes session-grouped reads free. */
+  memoriesWithSessionFraction: 0.7,
+  /** HARNESS CHOICES: `tune` publishes a relation count but no status spread. */
+  relationsPendingFraction: 0.25,
+  relationsOrphanedFraction: 0.05,
+  /** HARNESS CHOICES: prompts are short directives, not memory bodies. */
+  promptBytesP50: 260,
+  promptsDeletedFraction: 0.15,
   /** Confirmed on disk at `embedder.ts:24` and in migration 0014, not copied from prose. */
   embeddingDims: 768,
 } as const;
 
+/** Upper bound of the pending band; above it a relation is judged. */
+const RELATION_ORPHAN_CUTOFF =
+  VOLUMETRIC_SHAPE.relationsPendingFraction + VOLUMETRIC_SHAPE.relationsOrphanedFraction;
+
+/** Two per scope: a relation needs two distinct memories in one scope. */
+const MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS = 2 * VOLUMETRIC_SHAPE.scopeCount;
+
+/** `supersedes` absent on purpose: it would couple the memory axis to this one. */
+const JUDGED_VERDICTS = RELATION_VALUES.filter((r) => r !== 'supersedes');
+
 /**
- * Fixed base instant for every generated timestamp. A wall-clock `Date.now()`
- * would make the corpus a function of when it was built, which is precisely
- * what determinism has to exclude.
- *
- * Consequence, stated rather than left to be discovered: the decay and review
- * axes are derived against the clock at READ time, so a corpus built today and
- * queried in six months reports different `needsReview` counts. A review- or
- * decay-axis measurement must therefore pass an explicit `nowMs` (the
- * repository reads already take one) instead of relying on the ambient clock.
+ * Fixed, so the corpus is not a function of when it was built. Consequence:
+ * decay/review are derived against the READ clock, so those axes need an
+ * explicit `nowMs` rather than the ambient one.
  */
 export const CORPUS_EPOCH_MS = Date.parse('2026-01-01T00:00:00.000Z');
 const CORPUS_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
@@ -214,11 +238,7 @@ const CORPUS_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
 /** Memories per enclosing transaction. Purely a throughput knob; no shape effect. */
 const BATCH_SIZE = 500;
 
-/**
- * splitmix32 — a small, fast, well-distributed PRNG. `Math.random()` is
- * deliberately absent from this file (a test asserts it): a corpus that cannot
- * be rebuilt byte-for-byte is the failure this harness exists to fix.
- */
+/** `Math.random()` is absent from this file, and a test asserts that. */
 function splitmix32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -231,11 +251,8 @@ function splitmix32(seed: number): () => number {
 }
 
 /**
- * An index-addressable substream. Deriving each row's generator from
- * `(seed, stream, index)` rather than pulling from one shared sequence means a
- * row's content does not depend on how many draws the rows before it happened
- * to make — so adding a field to the session generator cannot silently change
- * every memory body.
+ * Index-addressable substream: a row's content does not depend on how many draws
+ * earlier rows made, so extending one generator cannot perturb another.
  */
 function rngFor(seed: number, stream: number, index: number): () => number {
   let h = (seed ^ 0x9e3779b9) >>> 0;
@@ -246,7 +263,15 @@ function rngFor(seed: number, stream: number, index: number): () => number {
   return splitmix32(h);
 }
 
-const STREAM = { memory: 1, confirmation: 2, session: 3, vector: 4 } as const;
+const STREAM = {
+  memory: 1,
+  confirmation: 2,
+  session: 3,
+  vector: 4,
+  relation: 5,
+  prompt: 6,
+  memorySession: 7,
+} as const;
 
 function int(rng: () => number, lo: number, hi: number): number {
   return lo + Math.floor(rng() * (hi - lo + 1));
@@ -257,11 +282,8 @@ function pick<T>(rng: () => number, xs: readonly T[]): T {
 }
 
 /**
- * Ordinary lowercase vocabulary, sampled to build bodies (design D3). FTS5 is a
- * real consumer here: one repeated token would produce an index that does not
- * behave like production's. Deliberately free of anything the entity extractor
- * matches — no dots, no digits, no capitals — so the entity count of a body is
- * the number of tokens the generator deliberately placed in it.
+ * Free of anything the entity extractor matches — no dots, digits or capitals —
+ * so a body's entity count is exactly the tokens the generator placed in it.
  */
 // prettier-ignore
 const WORDS: readonly string[] = [
@@ -293,12 +315,7 @@ const SHOUT: readonly string[] = [
   'READONLY', 'SCHEMA', 'TOOBIG', 'CONSTRAINT',
 ];
 
-/**
- * A subset of the extractor's closed errno whitelist, restated here as sample
- * text rather than imported: these are tokens a generated body says, not the
- * extractor's contract, and coupling the generator to `ERRNO_NAMES` would make
- * narrowing that list a generator change too.
- */
+/** Restated, not imported: these are tokens a body says, not the extractor's contract. */
 // prettier-ignore
 const ERRNOS: readonly string[] = [
   'ENOENT', 'EACCES', 'EBUSY', 'ETIMEDOUT', 'ECONNRESET', 'ENOSPC', 'EEXIST', 'EINVAL',
@@ -307,6 +324,8 @@ const ERRNOS: readonly string[] = [
 /** JIRA-style prefixes, none of them in the extractor's standards denylist. */
 const TICKET_PREFIXES: readonly string[] = ['RBR', 'OPS', 'PLT', 'SRE', 'DEV', 'INF'];
 
+const AGENTS: readonly string[] = ['claude-code', 'codex-cli', 'hermes', 'opencode'];
+
 function hex(rng: () => number, n: number): string {
   let out = '';
   for (let i = 0; i < n; i += 1) out += '0123456789abcdef'[Math.floor(rng() * 16)];
@@ -314,11 +333,8 @@ function hex(rng: () => number, n: number): string {
 }
 
 /**
- * One generator per entity shape the extractor recognises, so a corpus exercises
- * all twelve kinds rather than whichever one was easiest to synthesise. Each
- * carries a random suffix so the values do not collide inside one body — the
- * extractor dedupes per kind, and a collision would silently lower the realised
- * entity count below the declared one.
+ * One per entity kind the extractor recognises. Suffixed so values cannot
+ * collide within a body: the extractor dedupes per kind, which would undercount.
  */
 const ENTITY_TOKENS: readonly ((rng: () => number) => string)[] = [
   (r) => `https://${pick(r, WORDS)}-${int(r, 100, 999)}.example.com/repo/pull/${int(r, 1, 9999)}`,
@@ -346,12 +362,7 @@ const ENTITY_TOKENS: readonly ((rng: () => number) => string)[] = [
   (r) => `${pick(r, WORDS)}-${int(r, 10, 99)}.local`,
 ];
 
-/**
- * Body length multipliers as a four-bucket mixture over the declared median.
- * Chosen so the median lands on `bodyBytesP50` and the 90th percentile near
- * `bodyBytesP90`, with a thin tail beyond it — a single uniform range would give
- * FTS a corpus with no long documents in it at all.
- */
+/** Mixture chosen to land p50/p90 on the declared figures with a thin tail beyond. */
 const LENGTH_BUCKETS: readonly { lo: number; hi: number; p: number }[] = [
   { lo: 0.5, hi: 1.0, p: 0.5 },
   { lo: 1.0, hi: 1.7, p: 0.35 },
@@ -397,11 +408,7 @@ export interface GeneratedMemory {
   tags: string[];
 }
 
-/**
- * A body: the entity tokens the shape asks for, spread evenly through sampled
- * prose so the FTS index sees them interleaved rather than clustered in a
- * header. Pure function of `(seed, index)`.
- */
+/** Pure function of `(seed, index)`. Tokens interleaved, not clustered in a header. */
 export function generateMemory(seed: number, index: number, scopeSlot: number): GeneratedMemory {
   const rng = rngFor(seed, STREAM.memory, index);
 
@@ -420,9 +427,7 @@ export function generateMemory(seed: number, index: number, scopeSlot: number): 
   while (bytes < proseBytes) {
     const word = pick(rng, WORDS);
     sinceStop += 1;
-    // A sentence stop after 8..14 words, never immediately after an entity
-    // token: several extractor rules strip or refuse trailing punctuation, and
-    // punctuating a token would make the realised kind depend on placement.
+    // Never immediately after a token: some rules strip trailing punctuation.
     const stop = sinceStop >= int(rng, 8, 14);
     prose.push(stop ? `${word}.` : word);
     if (stop) sinceStop = 0;
@@ -440,9 +445,7 @@ export function generateMemory(seed: number, index: number, scopeSlot: number): 
   while (ti < tokens.length) parts.push(tokens[ti++]!);
 
   const type = MEMORY_TYPES[index % MEMORY_TYPES.length]!;
-  // Two fifths of memories sit in two-long topic chains, so a fifth of the
-  // corpus ends up superseded. The scope slot is in the key so a chain can
-  // never straddle two scopes, which the topic_key upsert scopes by anyway.
+  // Two fifths sit in two-long chains, so a fifth end up superseded.
   const chainPos = Math.floor(index / VOLUMETRIC_SHAPE.scopeCount) % 5;
   const chainId = Math.floor(index / VOLUMETRIC_SHAPE.scopeCount / 5);
   const topicKey = chainPos < 2 ? `vol/chain/${scopeSlot}/${chainId}` : null;
@@ -477,6 +480,11 @@ export interface BuildResult {
   confirmations: number;
   sessions: number;
   endedSessions: number;
+  relations: number;
+  pendingRelations: number;
+  orphanedRelations: number;
+  prompts: number;
+  deletedPrompts: number;
   projects: number;
   seed: number;
 }
@@ -488,14 +496,13 @@ export interface BuildDeps {
 }
 
 /**
- * Rows go in through the services, so the FTS triggers, the `memory_replaces`
- * triggers and the entity tables are populated the way the running server
- * populates them (design D6). Nothing here writes to a derived table directly —
- * `insertEmbedding` is the embedding worker's own call, which is why the vec
- * index is reached through it rather than with an INSERT of our own.
+ * Rows go in through the services so derived state is trigger-built as in
+ * production. `insertEmbedding` is the embedding worker's own call, not a
+ * direct write to the vec index.
  */
 export function buildCorpus(deps: BuildDeps): BuildResult {
   const { handle, args } = deps;
+  assertBuildable(args);
   const log = deps.log ?? ((l: string) => console.error(l));
   const repos = createRepositories(handle.db);
 
@@ -505,8 +512,12 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   const tokensSvc = new TokensService(repos, clock);
   const memorySvc = new MemoryService(repos, handle.db, clock);
   const sessionsSvc = new AgentSessionsService(repos, handle.db, clock);
+  const relationsSvc = new RelationsService(repos, handle.db, clock);
+  const promptsSvc = new PromptsService(repos, handle.db, clock);
 
-  log(`[corpus] seed=${args.seed} memories=${args.memories} sessions=${args.sessions}`);
+  log(
+    `[corpus] seed=${args.seed} memories=${args.memories} sessions=${args.sessions} relations=${args.relations} prompts=${args.prompts}`,
+  );
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
 
   clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS;
@@ -523,118 +534,203 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     confirmations: 0,
     sessions: 0,
     endedSessions: 0,
+    relations: 0,
+    pendingRelations: 0,
+    orphanedRelations: 0,
+    prompts: 0,
+    deletedPrompts: 0,
     projects: projects.length,
     seed: args.seed,
   };
 
-  const memoryStep = args.memories > 0 ? CORPUS_SPAN_MS / args.memories : 0;
+  // Per scope slot, so the relation axis can pair within a scope without a query.
+  const idsByScope: string[][] = Array.from({ length: VOLUMETRIC_SHAPE.scopeCount }, () => []);
+  const sessionIds: string[] = [];
 
-  for (let start = 0; start < args.memories; start += BATCH_SIZE) {
-    const end = Math.min(start + BATCH_SIZE, args.memories);
-    handle.db.transaction(() => {
-      for (let i = start; i < end; i += 1) {
-        const scopeSlot = i % VOLUMETRIC_SHAPE.scopeCount;
-        const scope = scopes[scopeSlot]!;
-        const gen = generateMemory(args.seed, i, scopeSlot);
-
-        clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS + Math.round(i * memoryStep);
-        const { memory: row, supersededByTopicKey } = memorySvc.saveWithTopicKey(
-          {
-            type: gen.type,
-            title: gen.title,
-            content: gen.content,
-            tags: gen.tags,
-            topicKey: gen.topicKey,
-          },
-          scope,
-        );
-        if (supersededByTopicKey) result.superseded += 1;
-        result.memories += 1;
-
-        const vector = generateVector(args.seed, i);
-        repos.vectors.insertEmbedding(
-          row.id,
-          Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
-          partitionKeyFor(row.scope, row.projectId),
-        );
-
-        repos.entities.linkMemory(
-          row.id,
-          row.scope,
-          row.projectId,
-          extractEntities(row.title, row.content),
-          row.createdAt,
-        );
-
-        const confirmRng = rngFor(args.seed, STREAM.confirmation, i);
-        const n = confirmationCount(confirmRng);
-        for (let c = 0; c < n; c += 1) {
-          // Spread through the window between this row and the next, so the
-          // affirmation timeline is not degenerate on `created_at`.
-          clockMs += Math.max(1, Math.round(memoryStep / (n + 1)));
-          memorySvc.confirm(row.id, scope, { source: { agent: 'volumetric-harness' } });
-          result.confirmations += 1;
+  /**
+   * One batch/progress/clock scaffold for all four phases. A closure, not a
+   * module function, because it assigns the captured `clockMs`.
+   */
+  const phase = (
+    label: string,
+    total: number,
+    each: (i: number, step: number) => void,
+    afterBatch?: () => void,
+  ): void => {
+    const step = total > 0 ? CORPUS_SPAN_MS / total : 0;
+    for (let start = 0; start < total; start += BATCH_SIZE) {
+      const end = Math.min(start + BATCH_SIZE, total);
+      handle.db.transaction(() => {
+        for (let i = start; i < end; i += 1) {
+          clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS + Math.round(i * step);
+          each(i, step);
         }
-      }
-    });
-    // Between batches, never inside one: a bulk writer gets no restart, and
-    // without this the planner keeps an empty database's statistics for the
-    // whole run — which puts `linkMemory`'s OR chain on the degenerate scope
-    // scan `tune-hot-query-paths` characterised, at a cost linear in the
-    // scope's entity count and therefore quadratic over the build. Measured in
-    // measurements.md §5: 149s to 20k without it, and it is not a bypass of
-    // design D6 — the rows still go through the services, only `sqlite_stat1`
-    // is refreshed, exactly as `createDb` refreshes it on every boot.
-    refreshStatistics(handle);
-    if (end % 5000 === 0 || end === args.memories) {
-      log(`[corpus] memories ${end}/${args.memories}`);
+      });
+      afterBatch?.();
+      if (end % 5000 === 0 || end === total) log(`[corpus] ${label} ${end}/${total}`);
     }
-  }
+  };
 
-  const sessionStep = args.sessions > 0 ? CORPUS_SPAN_MS / args.sessions : 0;
-  for (let start = 0; start < args.sessions; start += BATCH_SIZE) {
-    const end = Math.min(start + BATCH_SIZE, args.sessions);
-    handle.db.transaction(() => {
-      for (let i = start; i < end; i += 1) {
-        const rng = rngFor(args.seed, STREAM.session, i);
-        // The session axis is independent of the memory axis by construction
-        // (design D4), but its rows still spread across the projects so a
-        // project-scoped session query is not a single-value lookup.
-        const project = projects[i % projects.length]!;
-        clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS + Math.round(i * sessionStep);
-        const session = sessionsSvc.start({
-          tokenId: token.token.id,
-          projectId: project.id,
-          agent: pick(rng, ['claude-code', 'codex-cli', 'hermes', 'opencode']),
-          description: null,
-          cwd: `/srv/${pick(rng, WORDS)}/${pick(rng, WORDS)}`,
+  phase('sessions', args.sessions, (i, sessionStep) => {
+    const rng = rngFor(args.seed, STREAM.session, i);
+    // Spread across projects so a project-scoped query is not a single value.
+    const project = projects[i % projects.length]!;
+    const session = sessionsSvc.start({
+      tokenId: token.token.id,
+      projectId: project.id,
+      agent: pick(rng, AGENTS),
+      description: null,
+      cwd: `/srv/${pick(rng, WORDS)}/${pick(rng, WORDS)}`,
+    });
+    result.sessions += 1;
+    if (rng() < VOLUMETRIC_SHAPE.sessionsEndedFraction) {
+      clockMs += Math.max(1, Math.round(sessionStep / 2));
+      const body = Array.from({ length: int(rng, 40, 160) }, () => pick(rng, WORDS)).join(' ');
+      sessionsSvc.end(session.id, {
+        tokenId: token.token.id,
+        summary: `Goal: ${body}`,
+        title: `volumetric session ${String(i).padStart(7, '0')}`,
+        final: true,
+      });
+      result.endedSessions += 1;
+    }
+    sessionIds.push(session.id);
+  });
+
+  phase(
+    'memories',
+    args.memories,
+    (i, memoryStep) => {
+      const scopeSlot = i % VOLUMETRIC_SHAPE.scopeCount;
+      const scope = scopes[scopeSlot]!;
+      const gen = generateMemory(args.seed, i, scopeSlot);
+      const sessionRng = rngFor(args.seed, STREAM.memorySession, i);
+      const sessionId =
+        sessionIds.length > 0 && sessionRng() < VOLUMETRIC_SHAPE.memoriesWithSessionFraction
+          ? sessionIds[int(sessionRng, 0, sessionIds.length - 1)]!
+          : null;
+      const { memory: row, supersededByTopicKey } = memorySvc.saveWithTopicKey(
+        {
+          type: gen.type,
+          title: gen.title,
+          content: gen.content,
+          tags: gen.tags,
+          topicKey: gen.topicKey,
+          sessionId,
+        },
+        scope,
+      );
+      if (supersededByTopicKey) result.superseded += 1;
+      result.memories += 1;
+      idsByScope[scopeSlot]!.push(row.id);
+
+      const vector = generateVector(args.seed, i);
+      repos.vectors.insertEmbedding(
+        row.id,
+        Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
+        partitionKeyFor(row.scope, row.projectId),
+      );
+
+      repos.entities.linkMemory(
+        row.id,
+        row.scope,
+        row.projectId,
+        extractEntities(row.title, row.content),
+        row.createdAt,
+      );
+
+      const confirmRng = rngFor(args.seed, STREAM.confirmation, i);
+      const n = confirmationCount(confirmRng);
+      for (let c = 0; c < n; c += 1) {
+        // Spread through the window so the timeline is not degenerate.
+        clockMs += Math.max(1, Math.round(memoryStep / (n + 1)));
+        memorySvc.confirm(row.id, scope, {
+          source: { agent: 'volumetric-harness' },
+          sessionId,
         });
-        result.sessions += 1;
-        if (rng() < VOLUMETRIC_SHAPE.sessionsEndedFraction) {
-          clockMs += Math.max(1, Math.round(sessionStep / 2));
-          const body = Array.from({ length: int(rng, 40, 160) }, () => pick(rng, WORDS)).join(' ');
-          sessionsSvc.end(session.id, {
-            tokenId: token.token.id,
-            summary: `Goal: ${body}`,
-            title: `volumetric session ${String(i).padStart(7, '0')}`,
-            final: true,
-          });
-          result.endedSessions += 1;
-        }
+        result.confirmations += 1;
       }
+    },
+    // Between batches, never inside one: without it the planner keeps an empty
+    // database's statistics all run, which makes the build quadratic.
+    () => refreshStatistics(handle),
+  );
+
+  phase('relations', args.relations, (i, relationStep) => {
+    const rng = rngFor(args.seed, STREAM.relation, i);
+    const slot = i % VOLUMETRIC_SHAPE.scopeCount;
+    const pool = idsByScope[slot]!;
+    // Offset rather than a second draw, so a pair is never degenerate.
+    const a = int(rng, 0, pool.length - 1);
+    const b = (a + 1 + int(rng, 0, pool.length - 2)) % pool.length;
+    const pending = relationsSvc.createPending({
+      sourceId: pool[a]!,
+      targetId: pool[b]!,
+      markedByKind: 'system',
     });
-    if (end % 5000 === 0 || end === args.sessions) {
-      log(`[corpus] sessions ${end}/${args.sessions}`);
+    result.relations += 1;
+
+    const u = rng();
+    if (u < VOLUMETRIC_SHAPE.relationsPendingFraction) {
+      result.pendingRelations += 1;
+      return;
     }
-  }
+    clockMs += Math.max(1, Math.round(relationStep / 2));
+    if (u < RELATION_ORPHAN_CUTOFF) {
+      relationsSvc.orphan(pending.judgmentId, 'volumetric: aged out');
+      result.orphanedRelations += 1;
+      return;
+    }
+    relationsSvc.judge(pending.judgmentId, {
+      relation: pick(rng, JUDGED_VERDICTS),
+      actor: 'volumetric-harness',
+      kind: 'agent',
+      confidence: Math.round(rng() * 100) / 100,
+      reason: `volumetric: ${pick(rng, WORDS)} ${pick(rng, WORDS)}`,
+    });
+  });
+
+  phase('prompts', args.prompts, (i, promptStep) => {
+    const rng = rngFor(args.seed, STREAM.prompt, i);
+    // Slot 0 is global (`project_id` NULL), a shape the readers must serve.
+    const slot = i % VOLUMETRIC_SHAPE.scopeCount;
+    const projectId = slot === 0 ? null : projects[slot - 1]!.id;
+    // Only when the session axis was built, so the axes stay independent.
+    const sessionId = sessionIds.length > 0 ? sessionIds[i % sessionIds.length]! : null;
+    const words: string[] = [];
+    let bytes = 0;
+    while (bytes < VOLUMETRIC_SHAPE.promptBytesP50) {
+      const w = pick(rng, WORDS);
+      words.push(w);
+      bytes += w.length + 1;
+    }
+    const row = promptsSvc.save({
+      sessionId,
+      projectId,
+      title: `volumetric prompt ${String(i).padStart(7, '0')}`,
+      content: `Always ${words.join(' ')}.`,
+      tags: ['vol', `scope-${slot}`],
+      agent: pick(rng, AGENTS),
+    });
+    result.prompts += 1;
+    if (rng() < VOLUMETRIC_SHAPE.promptsDeletedFraction) {
+      clockMs += Math.max(1, Math.round(promptStep / 2));
+      promptsSvc.softDelete(row.id);
+      result.deletedPrompts += 1;
+    }
+  });
 
   log('[corpus] done.');
   log(`  memories:      ${result.memories} (${result.superseded} superseded)`);
   log(`  confirmations: ${result.confirmations}`);
   log(`  sessions:      ${result.sessions} (${result.endedSessions} ended)`);
+  log(
+    `  relations:     ${result.relations} (${result.pendingRelations} pending, ${result.orphanedRelations} orphaned)`,
+  );
+  log(`  prompts:       ${result.prompts} (${result.deletedPrompts} soft-deleted)`);
   log(`  projects:      ${result.projects} (+ the global scope = ${VOLUMETRIC_SHAPE.scopeCount})`);
   log(
-    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --seed ${args.seed}`,
+    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --seed ${args.seed}`,
   );
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
   return result;

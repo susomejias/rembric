@@ -72,6 +72,8 @@ describe('seed-volumetric argument surface', () => {
       dataDir: resolve('/tmp/corpus-x'),
       memories: 1000,
       sessions: 0,
+      relations: 0,
+      prompts: 0,
       seed: 1,
     });
   });
@@ -203,6 +205,8 @@ describe('seed-volumetric refusals', () => {
  */
 const SHARED_MEMORIES = 480;
 const SHARED_SESSIONS = 120;
+const SHARED_RELATIONS = 240;
+const SHARED_PROMPTS = 200;
 
 function buildInto(
   dir: string,
@@ -215,6 +219,8 @@ function buildInto(
       dataDir: dir,
       memories: SHARED_MEMORIES,
       sessions: SHARED_SESSIONS,
+      relations: SHARED_RELATIONS,
+      prompts: SHARED_PROMPTS,
       seed: 1,
       ...overrides,
     },
@@ -250,6 +256,11 @@ function derivedStateProblems(handle: ReturnType<typeof createDb>): string[] {
     'memory_entity_scan',
     scalar(handle, 'SELECT COUNT(*) v FROM memory_entity_scan'),
     memories,
+  );
+  check(
+    'prompts_fts',
+    scalar(handle, 'SELECT COUNT(*) v FROM prompts_fts'),
+    scalar(handle, 'SELECT COUNT(*) v FROM prompts'),
   );
   check(
     'memory_replaces',
@@ -379,6 +390,84 @@ describe('seed-volumetric generates the shape it declares', () => {
     expect(norm).toBeCloseTo(1, 6);
   });
 
+  it('spreads relations over the declared status mix, within one scope', () => {
+    const byStatus = Object.fromEntries(
+      rows<{ status: string; n: number }>(
+        handle,
+        'SELECT status, COUNT(*) n FROM memory_relations GROUP BY status',
+      ).map((r) => [r.status, r.n]),
+    );
+    const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
+    expect(total).toBe(SHARED_RELATIONS);
+    // One draw per relation, so a 240-row sample sits inside binomial noise of
+    // the declared fraction; asserted to one decimal rather than exactly.
+    expect((byStatus['pending'] ?? 0) / total).toBeCloseTo(
+      VOLUMETRIC_SHAPE.relationsPendingFraction,
+      1,
+    );
+    expect((byStatus['orphaned'] ?? 0) / total).toBeLessThan(
+      VOLUMETRIC_SHAPE.relationsOrphanedFraction + 0.08,
+    );
+    expect(byStatus['judged']).toBeGreaterThan(0);
+
+    // Scope containment is load-bearing: endpoints straddling two scopes would
+    // make every scoped relation read wrong, not merely slow.
+    expect(
+      scalar(
+        handle,
+        "SELECT COUNT(*) v FROM memory_relations r JOIN memory s ON s.id = r.source_id JOIN memory t ON t.id = r.target_id WHERE s.scope != t.scope OR IFNULL(s.project_id,'') != IFNULL(t.project_id,'')",
+      ),
+    ).toBe(0);
+    expect(
+      scalar(handle, 'SELECT COUNT(*) v FROM memory_relations WHERE source_id = target_id'),
+    ).toBe(0);
+  });
+
+  it('judges no relation as `supersedes`, so the memory axis stays independent', () => {
+    expect(
+      scalar(handle, "SELECT COUNT(*) v FROM memory_relations WHERE relation = 'supersedes'"),
+    ).toBe(0);
+    // The exact figure the memory-axis test asserts, re-checked on a corpus that
+    // also built 240 relations: judging `supersedes` would have moved it.
+    expect(scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'")).toBe(
+      SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction,
+    );
+  });
+
+  it('stamps the declared share of memories with a session id', () => {
+    const attached = scalar(handle, 'SELECT COUNT(*) v FROM memory WHERE session_id IS NOT NULL');
+    expect(attached / SHARED_MEMORIES).toBeCloseTo(VOLUMETRIC_SHAPE.memoriesWithSessionFraction, 1);
+    // Spread over many sessions, not all on one: `adminCountBySession` groups by
+    // this column, and a single-value column would make the group free.
+    expect(
+      scalar(
+        handle,
+        'SELECT COUNT(DISTINCT session_id) v FROM memory WHERE session_id IS NOT NULL',
+      ),
+    ).toBeGreaterThan(SHARED_SESSIONS / 2);
+  });
+
+  it('spreads prompts over both scope shapes and soft-deletes the declared share', () => {
+    expect(scalar(handle, 'SELECT COUNT(*) v FROM prompts')).toBe(SHARED_PROMPTS);
+    // Both shapes must be present: the global one is what `searchByScope` has to
+    // serve with an IS NULL predicate rather than an equality.
+    expect(
+      scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NULL'),
+    ).toBeGreaterThan(0);
+    expect(
+      scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NOT NULL'),
+    ).toBeGreaterThan(0);
+    const deleted = scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE deleted_at IS NOT NULL');
+    expect(deleted / SHARED_PROMPTS).toBeCloseTo(VOLUMETRIC_SHAPE.promptsDeletedFraction, 1);
+    const lens = rows<{ L: number }>(
+      handle,
+      'SELECT length(content) L FROM prompts ORDER BY L',
+    ).map((r) => r.L);
+    const p50 = lens[Math.floor((lens.length - 1) * 0.5)]!;
+    expect(p50).toBeGreaterThan(VOLUMETRIC_SHAPE.promptBytesP50 * 0.85);
+    expect(p50).toBeLessThan(VOLUMETRIC_SHAPE.promptBytesP50 * 1.3);
+  });
+
   it('populates every derived table consistently with its source', () => {
     expect(derivedStateProblems(handle)).toEqual([]);
   });
@@ -394,7 +483,7 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
     try {
       buildCorpus({
         handle,
-        args: { dataDir: dir, memories: 60, sessions: 0, seed: 1 },
+        args: { dataDir: dir, memories: 60, sessions: 0, relations: 0, prompts: 0, seed: 1 },
         log: () => {},
       });
       expect(derivedStateProblems(handle)).toEqual([]);
@@ -448,13 +537,24 @@ describe('seed-volumetric is deterministic under a seed', () => {
       handle,
       'SELECT group_concat(h, char(10)) s FROM (SELECT hex(embedding) h FROM memory_vec ORDER BY memory_id)',
     )[0]!.s;
-    return createHash('sha256').update(`${body}\n${sessions}\n${vectors}`).digest('hex');
+    const relations = rows<{ s: string }>(
+      handle,
+      "SELECT group_concat(t, char(10)) s FROM (SELECT status || char(31) || coalesce(relation,'') || char(31) || coalesce(reason,'') || char(31) || coalesce(confidence,'') AS t FROM memory_relations ORDER BY created_at, id)",
+    )[0]!.s;
+    const prompts = rows<{ s: string }>(
+      handle,
+      "SELECT group_concat(t, char(10)) s FROM (SELECT title || char(31) || content || char(31) || coalesce(agent,'') || char(31) || (deleted_at IS NOT NULL) AS t FROM prompts ORDER BY created_at, title)",
+    )[0]!.s;
+    return createHash('sha256')
+      .update(`${body}\n${sessions}\n${vectors}\n${relations}\n${prompts}`)
+      .digest('hex');
   }
 
   it('produces the same corpus twice from the same seed, and a different one from another', () => {
-    const a = buildInto(tempDir(), { memories: 120, sessions: 40, seed: 42 });
-    const b = buildInto(tempDir(), { memories: 120, sessions: 40, seed: 42 });
-    const c = buildInto(tempDir(), { memories: 120, sessions: 40, seed: 43 });
+    const shape = { memories: 120, sessions: 40, relations: 60, prompts: 50 };
+    const a = buildInto(tempDir(), { ...shape, seed: 42 });
+    const b = buildInto(tempDir(), { ...shape, seed: 42 });
+    const c = buildInto(tempDir(), { ...shape, seed: 43 });
     try {
       expect(a.result).toEqual({ ...b.result });
       expect(corpusDigest(a.handle)).toBe(corpusDigest(b.handle));
@@ -462,7 +562,13 @@ describe('seed-volumetric is deterministic under a seed', () => {
       // the seed entirely.
       expect(corpusDigest(c.handle)).not.toBe(corpusDigest(a.handle));
       // A non-empty digest, so the comparison is not two empty strings matching.
-      expect(corpusDigest(a.handle)).not.toBe(createHash('sha256').update('\n\n').digest('hex'));
+      expect(corpusDigest(a.handle)).not.toBe(
+        createHash('sha256').update('\n\n\n\n').digest('hex'),
+      );
+      // Each axis contributes: a digest that matched with relations or prompts
+      // empty would not be asserting their determinism at all.
+      expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory_relations')).toBe(60);
+      expect(scalar(a.handle, 'SELECT COUNT(*) v FROM prompts')).toBe(50);
       expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory')).toBe(120);
     } finally {
       for (const x of [a, b, c]) x.handle.close();
