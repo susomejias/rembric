@@ -7,7 +7,7 @@
 # Build context is the repo root (the monorepo's pnpm workspace).
 # docker-compose specifies context: . and dockerfile: apps/server/Dockerfile.
 
-FROM node:22-bookworm-slim AS builder
+FROM node:25-bookworm-slim AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 ca-certificates \
@@ -75,7 +75,7 @@ RUN set -eux; cd /prod-out/node_modules; \
     [ -n "$found" ]
 
 
-FROM node:22-bookworm-slim AS dev
+FROM node:25-bookworm-slim AS dev
 
 LABEL rembric.stage=dev
 
