@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.2](https://github.com/susomejias/rembric/compare/server-v0.25.1...server-v0.25.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **mcp:** gate the project→global search widening on connection and token ([1f070bc](https://github.com/susomejias/rembric/commit/1f070bc8b2bb318ff88e0a993e7c498d190a8885))
+* **mcp:** suggest topic keys beyond ASCII, and refuse rather than collide ([cebc9c2](https://github.com/susomejias/rembric/commit/cebc9c248eee561c15c8c613bdc7188bd7aeb668))
+* **memory:** refuse a supersedes verdict when either endpoint is retired ([b5f8366](https://github.com/susomejias/rembric/commit/b5f8366d7c3a0fead743e50eae7ae31776ce5b0b))
+* **memory:** withhold pending judgments whose endpoint is retired ([b354f37](https://github.com/susomejias/rembric/commit/b354f37291f4094fa2367eebc77b020b97842db4)), closes [#298](https://github.com/susomejias/rembric/issues/298)
+* **openspec:** reconcile three claims the pending-queue change left stale ([4f7adff](https://github.com/susomejias/rembric/commit/4f7adff8113e351549a644cafe5c513024e5b87d))
+
 ## [0.25.1](https://github.com/susomejias/rembric/compare/server-v0.25.0...server-v0.25.1) (2026-07-30)
 
 
