@@ -1649,3 +1649,118 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
     expect(confirmationSessionIdFor(m.id)).toBeNull();
   });
 });
+
+describe('memory.search — include_global is gated on connection and token', () => {
+  // Each case isolates one of the two gates: the project.use cases can only
+  // fail on the token check, the path-scoped ones only on the connection check.
+
+  const MCP_SESSION = 'mcp-sess-gate';
+
+  function scopedCtx(
+    scope: TokenScope,
+    opts: { project?: Project | null; mcpSessionId?: string | null },
+  ): RequestContext {
+    const token: Token = {
+      id: 'tk_test',
+      name: 'test-token',
+      hash: 'hash',
+      scope,
+      projectId: null,
+      createdAt: new Date(),
+      expiresAt: null,
+      revokedAt: null,
+    };
+    return {
+      token,
+      scope,
+      project: opts.project ?? null,
+      requestedSlug: opts.project?.slug ?? null,
+      mcpSessionId: opts.mcpSessionId ?? null,
+    };
+  }
+
+  let router: SessionRouter;
+  let gateHandlers: ReturnType<typeof buildMemoryHandlers>;
+  let repos: ReturnType<typeof createRepositories>;
+
+  const rows = (r: unknown): { scope: string; title: string }[] =>
+    parseText<{ memories: { scope: string; title: string }[] }>(r).memories;
+  const globalTitles = (r: unknown): string[] =>
+    rows(r)
+      .filter((m) => m.scope === 'global')
+      .map((m) => m.title);
+
+  beforeEach(() => {
+    repos = createRepositories(db.handle.db);
+    router = new SessionRouter();
+    gateHandlers = buildMemoryHandlers({ memory, router, projects, repos });
+    memory.save(
+      { type: 'user', title: 'user-wide convention', content: 'user-wide convention about tabs' },
+      SCOPE_GLOBAL,
+    );
+    memory.save(
+      { type: 'user', title: 'project-A convention', content: 'project-A convention about tabs' },
+      projectScope(projectA.id),
+    );
+  });
+
+  // Spec scenario: auth — "Project-restricted token requests global widening".
+  // A project.use-derived scope, so the connection half cannot mask the token half.
+  // The prefix, not the whole scope: `projectA` does not exist yet at collection time.
+  it.each(['project', 'read:project'] as const)(
+    'a %s:<id> token asking for globals succeeds and receives none',
+    async (prefix) => {
+      router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
+      const scope = `${prefix}:${projectA.id}` as TokenScope;
+      const r = await runWithContext(scopedCtx(scope, { mcpSessionId: MCP_SESSION }), () =>
+        Promise.resolve(gateHandlers.search({ query: 'convention', include_global: true })),
+      );
+      expect(isErrorResponse(r)).toBeFalsy();
+      expect(globalTitles(r)).toEqual([]);
+    },
+  );
+
+  // Spec scenario: mcp-api — "Path-scoped connection with a full-access token".
+  it('a path-scoped connection ignores include_global even for a `*` token', async () => {
+    const r = await runWithContext(scopedCtx(ADMIN_TOKEN_SCOPE, { project: projectA }), () =>
+      Promise.resolve(gateHandlers.search({ query: 'convention', include_global: true })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(globalTitles(r)).toEqual([]);
+  });
+
+  // Spec scenario: mcp-api — "The entity branch is gated identically".
+  it('gates the entity branch on the same terms', async () => {
+    const ENT = [{ kind: 'path' as const, value: 'src/gate-probe.ts' }];
+    const g = memory.save(
+      { type: 'reference', title: 'global note on file', content: 'see the probe file for this' },
+      SCOPE_GLOBAL,
+    );
+    const p = memory.save(
+      { type: 'reference', title: 'project note on file', content: 'see the probe file here too' },
+      projectScope(projectA.id),
+    );
+    repos.entities.linkMemory(g.id, 'global', null, ENT, new Date());
+    repos.entities.linkMemory(p.id, 'project', projectA.id, ENT, new Date());
+    const r = await runWithContext(scopedCtx(ADMIN_TOKEN_SCOPE, { project: projectA }), () =>
+      Promise.resolve(gateHandlers.search({ entity: 'src/gate-probe.ts', include_global: true })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    // Without this the entity lookup could return nothing and satisfy the
+    // global-exclusion assertion for free.
+    expect(rows(r).some((m) => m.title === 'project note on file')).toBe(true);
+    expect(globalTitles(r)).toEqual([]);
+  });
+
+  // Spec scenario: mcp-api — "`project.use` scope with an authorized token".
+  // The control: the capability still works where it is authorized.
+  it('still widens for a `*` token on a project.use-derived scope', async () => {
+    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
+    const r = await runWithContext(
+      scopedCtx(ADMIN_TOKEN_SCOPE, { mcpSessionId: MCP_SESSION }),
+      () => Promise.resolve(gateHandlers.search({ query: 'convention', include_global: true })),
+    );
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(globalTitles(r)).toEqual(['user-wide convention']);
+  });
+});

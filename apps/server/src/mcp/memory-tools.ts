@@ -31,13 +31,15 @@ import {
   type RelationsService,
 } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import type { Scope } from '../services/scope.js';
+import { SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
   assertExplicitSessionOwned,
   boundAnnotationReasons,
   clamp,
+  isAuthorizedFor,
+  isPathScoped,
   requireScope,
   resolveEffectiveScope,
   routerKey,
@@ -134,7 +136,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global` (which is gated — see its own description); with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
     ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
@@ -151,7 +153,7 @@ export const memorySearchSchema = {
     .boolean()
     .optional()
     .describe(
-      'When scoped to a project, also include global memories in the results (e.g. user-wide preferences/conventions). No-op on a global-scoped connection.',
+      "When scoped to a project, also include global memories in the results (e.g. user-wide preferences/conventions), on the ranked and entity branches alike. Silently ignored, never an error, on a path-scoped connection ('/mcp/<slug>'), on a global-scoped connection, or when this token is not authorized to read global.",
     ),
   include_relations: z
     .boolean()
@@ -780,10 +782,8 @@ async function handleSave(
 ) {
   const ctx = getRequestContext();
 
-  // Path-scoped connections forbid global writes. "Path-scoped" means the
-  // URL carried a slug (`requestedSlug` is non-null), regardless of whether
-  // the slug resolved to an existing project.
-  if (ctx.requestedSlug && args.scope === 'global') {
+  // Path-scoped connections forbid global writes.
+  if (isPathScoped() && args.scope === 'global') {
     return mcpError(
       'scope_locked',
       `This MCP connection is path-scoped to project '${ctx.requestedSlug}'. ` +
@@ -794,7 +794,7 @@ async function handleSave(
   }
 
   // Path-scoped to a slug that doesn't exist: writes need an existing project.
-  if (ctx.requestedSlug && !ctx.project && args.scope === 'project') {
+  if (isPathScoped() && !ctx.project && args.scope === 'project') {
     return mcpError(
       'project_not_found',
       `project '${ctx.requestedSlug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
@@ -923,6 +923,12 @@ function annotationBudgetError(
   );
 }
 
+/** Denial narrows the result rather than rejecting: the caller is authorized for every row it receives. */
+function resolveIncludeGlobal(requested: boolean | undefined): boolean {
+  if (!requested) return false;
+  return !isPathScoped() && isAuthorizedFor('read', SCOPE_GLOBAL);
+}
+
 async function handleSearch(
   deps: MemoryToolDeps,
   args: {
@@ -957,7 +963,7 @@ async function handleSearch(
     status: args.status,
     limit: args.limit,
     offset: args.offset,
-    includeGlobal: args.include_global,
+    includeGlobal: resolveIncludeGlobal(args.include_global),
   };
 
   // The EFFECTIVE row count, not the declared one. An omitted `limit` means 8 rows

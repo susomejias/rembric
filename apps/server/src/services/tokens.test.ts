@@ -98,6 +98,10 @@ describe('isAuthorized', () => {
       false,
     );
     expect(isAuthorized('project:abc', 'write', { scope: 'global' })).toBe(false);
+    // The premise the include_global widening gate rests on: neither
+    // project-pinned form may READ global either.
+    expect(isAuthorized('project:abc', 'read', { scope: 'global' })).toBe(false);
+    expect(isAuthorized('read:project:abc', 'read', { scope: 'global' })).toBe(false);
   });
 
   it('read:project:<id> only allows reads of that project', () => {

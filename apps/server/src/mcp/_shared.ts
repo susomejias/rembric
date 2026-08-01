@@ -66,6 +66,23 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
 }
 
 /**
+ * A slug in the URL, whether or not it resolved to an existing project: an
+ * unresolvable slug is still a caller asking to be confined to one.
+ */
+export function isPathScoped(): boolean {
+  return getRequestContext().requestedSlug !== null;
+}
+
+/** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
+export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean {
+  const ctx = getRequestContext();
+  return isAuthorized(ctx.scope, action, {
+    scope: scope.kind,
+    projectId: scope.kind === 'project' ? scope.projectId : null,
+  });
+}
+
+/**
  * Authorization gate every tool handler (except the data-free `memory.about`)
  * passes through: checks the request token's scope against the tool's
  * read/write classification and the target scope, throwing
@@ -73,11 +90,7 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
  */
 export function assertAuthorized(action: 'read' | 'write', scope: Scope): void {
   const ctx = getRequestContext();
-  const authorized = isAuthorized(ctx.scope, action, {
-    scope: scope.kind,
-    projectId: scope.kind === 'project' ? scope.projectId : null,
-  });
-  if (!authorized) {
+  if (!isAuthorizedFor(action, scope)) {
     const target = scope.kind === 'project' ? `project '${scope.projectId}'` : 'global scope';
     throw new DomainError(
       'forbidden',
