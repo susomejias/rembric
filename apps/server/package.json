@@ -33,7 +33,7 @@
     "sqlite-vec": "^0.1.6",
     "stopword": "^3.1.5",
     "ulid": "^2.3.0",
-    "zod": "^3.23.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
