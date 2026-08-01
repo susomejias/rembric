@@ -12,6 +12,7 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 | Dev stack        | `pnpm run dev:docker:up` (foreground, wipes+reseeds; `docs/docker.md`) |
 | OpenSpec         | `/opsx:propose` · `/opsx:explore` · `/opsx:apply` · `/opsx:archive`    |
 | Spec provenance  | `pnpm run check:spec-provenance` (CI-gated; see below)                 |
+| Mutation check   | `node scripts/mutate.mjs --file … --spec … --mutation … --with …`      |
 
 Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --noEmit --incremental`. Pre-push = `pnpm test`. Never bypass git hooks with `--no-verify`.
 
@@ -27,6 +28,8 @@ A finding is not a finding until it has been executed. Scale the evidence to the
 - **A subagent's finding is a hypothesis.** Re-verify before acting on it or repeating it — subagents report plausible readings as results.
 - **Probe the boundary the real caller uses, and include a control that must pass.** A probe that skips a layer proves nothing about it (calling an MCP handler directly bypasses its zod schema, so "the tool accepts X" measured that way is not a fact about the tool). With only a failing case you cannot tell a real defect from a broken probe; the control is what tells you which you have.
 - **Classify from behaviour, not from the symptom's shape.** "The observable result changes" makes something a behaviour change; whether it is a _defect_ depends on whether the current behaviour is defensible — same evidence bar as anything else.
+- **A new guard is not covered until its test fails without it.** Weaken each condition separately and confirm the tests naming it go red — `scripts/mutate.mjs` does the backup/mutate/run/restore loop. Three tests in one session passed while proving nothing (one asserted over an empty result set; two short-circuited before the condition they named), and only mutation found them. A test green on both sides of the change is the default outcome, not the exception.
+- **One instrument per series, named.** Never present an isolated statement's timing and an end-to-end operation's timing as one table: a 39× statement speedup was a 2.5× user-facing one, and the ratio came from silently switching instruments between rows. State which you measured, and quote the end-to-end figure when a user waits on it.
 
 Where a claim is about spec text rather than runtime, the evidence is the verbatim quote with `file:line`, never a paraphrase.
 
