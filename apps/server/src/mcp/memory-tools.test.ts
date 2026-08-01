@@ -1764,3 +1764,35 @@ describe('memory.search — include_global is gated on connection and token', ()
     expect(globalTitles(r)).toEqual(['user-wide convention']);
   });
 });
+
+describe('KNOWN DEFECT #302 — an unresolvable path slug resolves to the global scope', () => {
+  // Documents current behaviour, which is wrong. `resolveEffectiveScope` falls
+  // back to SCOPE_GLOBAL when a slug is present but names no project, so the
+  // connection reads user-wide memory while presenting as path-scoped. This test
+  // SHOULD FAIL once #302 is fixed — invert it there rather than deleting it.
+  it('serves global memories to a `*` token at /mcp/<unknown-slug>', async () => {
+    memory.save({ type: 'user', title: 'user-wide row', content: 'user-wide row' }, SCOPE_GLOBAL);
+    const token: Token = {
+      id: 'tk_test',
+      name: 'test-token',
+      hash: 'hash',
+      scope: ADMIN_TOKEN_SCOPE,
+      projectId: null,
+      createdAt: new Date(),
+      expiresAt: null,
+      revokedAt: null,
+    };
+    const ctx: RequestContext = {
+      token,
+      scope: ADMIN_TOKEN_SCOPE,
+      project: null,
+      requestedSlug: 'no-such-project',
+      mcpSessionId: null,
+    };
+    const r = await runWithContext(ctx, () =>
+      Promise.resolve(handlers.search({ query: 'user-wide' })),
+    );
+    const { memories } = parseText<{ memories: { scope: string }[] }>(r);
+    expect(memories.some((m) => m.scope === 'global')).toBe(true);
+  });
+});
