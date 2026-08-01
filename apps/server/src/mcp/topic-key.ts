@@ -1,3 +1,6 @@
+import transliterate from 'slugify';
+import * as stopwords from 'stopword';
+
 /**
  * Deterministic topic_key suggestion.
  *
@@ -17,43 +20,21 @@
  *   procedural     runbook
  *
  * The slug-from-text logic:
- *   1. lowercase
- *   2. drop stopwords (a / an / the / and / or / to / of / in / on / for / with)
+ *   1. transliterate to ASCII, lowercased
+ *   2. drop stopwords
  *   3. keep up to 6 surviving word-shaped tokens
- *   4. join with `-`, trim to 48 chars
+ *   4. join with `-`, trim to 48 chars, never ending on a particle
  */
 
-const STOPWORDS = new Set([
-  'a',
-  'an',
-  'the',
-  'and',
-  'or',
-  'to',
-  'of',
-  'in',
-  'on',
-  'for',
-  'with',
-  'is',
-  'are',
-  'be',
-  'this',
-  'that',
-  'these',
-  'those',
-  'it',
-  'as',
-  'at',
-  'by',
-  'about',
-  'from',
-  'into',
-  'over',
-  'under',
-  'after',
-  'before',
-]);
+/**
+ * Languages whose particles are filtered. Deliberately the two this corpus
+ * actually contains: measured, every wider grouping eats load-bearing English
+ * vocabulary for no gain — `romance+germanic` swallows `dos` and `mit`, and all
+ * 60 languages swallow `global`, `save` and `stop`.
+ */
+export const STOPWORD_LANGUAGES = ['eng', 'spa'] as const;
+
+const STOPWORDS = new Set(STOPWORD_LANGUAGES.flatMap((l) => stopwords[l]));
 
 const FAMILY_BY_TYPE: Record<string, string> = {
   user: 'preference',
@@ -65,27 +46,50 @@ const FAMILY_BY_TYPE: Record<string, string> = {
 
 const MAX_SLUG_CHARS = 48;
 const MAX_KEEP_TOKENS = 6;
+const HAS_LETTER = /[a-z]/;
 
-export function suggestTopicKey(input: { type: string; title?: string; content?: string }): string {
+/**
+ * `topicKey: null` is the answer for a title no transliteration reaches — a
+ * placeholder would hand two unrelated memories the same key, and adopting it
+ * makes the topic_key upsert supersede the wrong row.
+ */
+export type TopicKeySuggestion =
+  | { topicKey: string; reason?: never }
+  | { topicKey: null; reason: string };
+
+export function suggestTopicKey(input: {
+  type: string;
+  title?: string;
+  content?: string;
+}): TopicKeySuggestion {
   const family = FAMILY_BY_TYPE[input.type] ?? 'topic';
   const source = (input.title ?? input.content ?? '').trim();
-  const slug = slugify(source) || 'untitled';
-  return `${family}/${slug}`;
+  if (source.length === 0) {
+    return { topicKey: null, reason: 'no title or content to derive a key from' };
+  }
+  const slug = slugify(source);
+  if (slug === null) {
+    return {
+      topicKey: null,
+      reason:
+        'the title transliterates to no word-shaped token (scripts such as Han, Kana or Hangul have no ASCII equivalent) — author a topic_key yourself, Unicode is accepted',
+    };
+  }
+  return { topicKey: `${family}/${slug}` };
 }
 
-function slugify(text: string): string {
-  const tokens = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
+/** `null` when the text yields no token carrying topic signal. */
+function slugify(text: string): string | null {
+  // `.`/`_`/`/` are deleted by the library, not split on, so `db/client.ts`
+  // would collapse to one token. The pre-pass restores them as boundaries.
+  const tokens = transliterate(text.replace(/[._/\\]+/g, ' '), { lower: true, strict: true })
+    .split('-')
     .filter((t) => t.length > 0 && !STOPWORDS.has(t));
   const kept = tokens.slice(0, MAX_KEEP_TOKENS);
-  let s = kept
-    .join('-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  if (s.length > MAX_SLUG_CHARS) s = s.slice(0, MAX_SLUG_CHARS).replace(/-+$/, '');
-  return s;
+  // On `kept`, not on every token: an all-numeric budget with one late word
+  // would otherwise pass the check and still yield a digits-only slug.
+  if (!kept.some((t) => HAS_LETTER.test(t))) return null;
+  return kept.join('-').slice(0, MAX_SLUG_CHARS).replace(/-+$/, '');
 }
 
 const NEARBY_PREFIX_TOKENS = 2;

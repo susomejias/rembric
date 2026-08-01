@@ -229,7 +229,7 @@ describe('memory.judge — cross-scope targets never leak existence', () => {
 describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-defects)', () => {
   it('reports occupied:true with the occupant when the exact suggested key is already active', async () => {
     const title = 'Dev stack data dir needs chown 10001';
-    const suggestion = suggestTopicKey({ type: 'project', title });
+    const suggestion = suggestTopicKey({ type: 'project', title }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title, content: 'x', topicKey: suggestion },
       { kind: 'global' },
@@ -269,7 +269,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
 
   it('surfaces a near-miss active key sharing a prefix in nearby[]', async () => {
     const heldTitle = 'Dev stack data dir needs chown permissions';
-    const heldKey = suggestTopicKey({ type: 'project', title: heldTitle });
+    const heldKey = suggestTopicKey({ type: 'project', title: heldTitle }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title: heldTitle, content: 'x', topicKey: heldKey },
       { kind: 'global' },
@@ -298,7 +298,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
         type: 'project',
         title,
         content: 'x',
-        topicKey: suggestTopicKey({ type: 'project', title }),
+        topicKey: suggestTopicKey({ type: 'project', title }).topicKey!,
       },
       { kind: 'project', projectId: projectB.id },
     );

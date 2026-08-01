@@ -84,7 +84,10 @@ export const compareSchema = {
 };
 
 export const suggestTopicKeyOutput = {
-  topic_key: z.string(),
+  /** Null when the title reaches no transliterable token — see `reason`. */
+  topic_key: z.string().nullable(),
+  /** Present only when `topic_key` is null: why no key could be derived. */
+  reason: z.string().optional(),
   /** Whether an active memory in scope already holds this exact key. */
   occupied: z.boolean(),
   occupantId: z.string().optional(),
@@ -153,7 +156,12 @@ async function handleSuggestTopicKey(
   } catch (err) {
     return errToMcp(err);
   }
-  const topicKey = suggestTopicKey(args);
+  const suggestion = suggestTopicKey(args);
+  if (suggestion.topicKey === null) {
+    // Nothing to look up, so the scope-aware probes are skipped entirely.
+    return ok({ topic_key: null, reason: suggestion.reason, occupied: false, nearby: [] });
+  }
+  const topicKey = suggestion.topicKey;
   if (!deps.repos) {
     // Not wired with the memory repository — fall back to the pure
     // suggestion with no scope awareness (should not happen in production).
