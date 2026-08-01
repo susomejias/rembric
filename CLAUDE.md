@@ -19,6 +19,17 @@ PR titles and descriptions are always written in English (regardless of the lang
 
 Operator surface = dashboard (`/dashboard/{tokens,projects,sessions,judgments,memories,consolidation,maintenance}`). No operator CLI; Docker image runs the server only.
 
+## Claims need evidence
+
+A finding is not a finding until it has been executed. Scale the evidence to the cost of being wrong: the higher the consequence, the less an argument from reading the code is worth. This generalises the standard `db-performance-auditor` already applies to queries — measure the alternative, don't assume it.
+
+- **Never publish what you have not run.** Issue comments, security advisories, PR descriptions and spec text are outward-facing; a wrong claim there has to be retracted in public.
+- **A subagent's finding is a hypothesis.** Re-verify before acting on it or repeating it — subagents report plausible readings as results.
+- **Probe the boundary the real caller uses, and include a control that must pass.** A probe that skips a layer proves nothing about it (calling an MCP handler directly bypasses its zod schema, so "the tool accepts X" measured that way is not a fact about the tool). With only a failing case you cannot tell a real defect from a broken probe; the control is what tells you which you have.
+- **Classify from behaviour, not from the symptom's shape.** "The observable result changes" makes something a behaviour change; whether it is a _defect_ depends on whether the current behaviour is defensible — same evidence bar as anything else.
+
+Where a claim is about spec text rather than runtime, the evidence is the verbatim quote with `file:line`, never a paraphrase.
+
 ## Architecture
 
 Single Node process, single SQLite file. Server layers at `apps/server/src/{server,mcp,dashboard,services,db,consolidation,llm}/`. Shared plugin tree at `apps/plugin/` ships to FOUR clients (Claude Code, Codex CLI, Hermes Agent, opencode) — see [Plugin development](#plugin-development-discipline). Monorepo uses pnpm workspaces with `apps/*` (deliverables) and `packages/*` (shared libraries — empty for now, staged for future extractions).
