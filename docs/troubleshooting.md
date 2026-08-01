@@ -92,7 +92,7 @@ The runtime image moved to a distroless base in v0.21.14 (node is at `/nodejs/bi
 
 Every save inserts `memory_relations` rows with `status='pending'` for each candidate. If the agent ignores `candidates[]`, they accumulate as `pending_conflict` annotations.
 
-- After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge` — unless one of the pair has since left `active`, in which case the queue withholds it (the sweep still orphans it at the deadline, and `/dashboard/judgments` still lists it).
+- After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge` — unless one of the pair has since left `active`, in which case the queue withholds it. `/dashboard/judgments` still lists it, and the sweep still orphans it — but the sweep is bounded per scope per run, so a burst of retirements drains over several days rather than all at the deadline.
 - After `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks them `orphaned` (journaled, undoable from `/dashboard/consolidation`).
 - If the agent never calls `memory.judge`, confirm the tool is in `tools/list` and paste the relations excerpt into the agent's prompt.
 

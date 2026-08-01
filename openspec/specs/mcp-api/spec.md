@@ -498,9 +498,9 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 
 #### Scenario: `pendingJudgmentsTotal` reports the queue, not the page
 
-- **GIVEN** a scope holding more aged pending relations than the default page size
+- **GIVEN** a scope holding more aged pending relations with two `active` endpoints than the default page size
 - **WHEN** an MCP client calls `memory.context` with no `judgments` argument
-- **THEN** `pendingJudgments` SHALL hold 5 entries and `pendingJudgmentsTotal` SHALL be the full in-scope pending count, strictly greater than 5
+- **THEN** `pendingJudgments` SHALL hold 5 entries and `pendingJudgmentsTotal` SHALL be the full in-scope ADJUDICABLE pending count, strictly greater than 5
 
 #### Scenario: `pendingJudgmentsTotal` counts the un-aged pairs the default list hides
 

@@ -502,7 +502,8 @@ export const contextOutput = {
     }),
   ),
   /**
-   * Total in-scope pending-judgment count — `pendingJudgments` above is a page,
+   * Total in-scope ADJUDICABLE pending-judgment count (both endpoints still
+   * `active`) — `pendingJudgments` above is a page,
    * and by default an AGED one, so its length says nothing about the queue.
    * Drain with `judgments: min(pendingJudgmentsTotal, PENDING_JUDGMENTS_MAX)`,
    * repeating while the total stays above 0: a total over the max is rejected
