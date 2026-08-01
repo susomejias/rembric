@@ -82,6 +82,12 @@ function endpointsInScope(scope: MemoryScope, projectId: string | null): SQL {
       ) as SQL);
 }
 
+/** Requires both aliases to be joined already. */
+const endpointsActive = and(
+  eq(sourceMemory.status, 'active'),
+  eq(targetMemory.status, 'active'),
+) as SQL;
+
 const withContentSelection = {
   id: memoryRelations.id,
   judgmentId: memoryRelations.judgmentId,
@@ -391,6 +397,7 @@ export class RelationsRepository {
             ? undefined
             : lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
           endpointsInScope(opts.scope, opts.projectId),
+          endpointsActive,
         ),
       )
       .orderBy(memoryRelations.createdAt)
@@ -406,7 +413,11 @@ export class RelationsRepository {
       .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
       .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
       .where(
-        and(eq(memoryRelations.status, 'pending'), endpointsInScope(opts.scope, opts.projectId)),
+        and(
+          eq(memoryRelations.status, 'pending'),
+          endpointsInScope(opts.scope, opts.projectId),
+          endpointsActive,
+        ),
       )
       .get();
     return row?.value ?? 0;

@@ -181,6 +181,43 @@ describe('deadline orphaning', () => {
     expect(aRows.every((r) => r.status === 'pending')).toBe(true);
   });
 
+  // The agent queue withholds this pair, so the sweep is the only thing left that can close it.
+  it('orphans a pending row whose source was superseded on its topic_key', () => {
+    const a = memory.saveWithTopicKey(
+      { type: 'feedback', title: 'first take', content: 'first take', topicKey: 't' },
+      SCOPE_GLOBAL,
+    ).memory;
+    const target = memory.save(
+      { type: 'feedback', title: 'other', content: 'other' },
+      SCOPE_GLOBAL,
+    );
+    const pending = relations.createPending({ sourceId: a.id, targetId: target.id });
+    backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
+    memory.saveWithTopicKey(
+      { type: 'feedback', title: 'second take', content: 'second take', topicKey: 't' },
+      SCOPE_GLOBAL,
+    );
+
+    expect(memory.unsafeGetById(a.id)?.status).toBe('superseded');
+
+    const summary = runner.runAll({ force: true });
+    expect(summary.runs.reduce((acc, r) => acc + r.ops.orphaned, 0)).toBe(1);
+
+    const post = db.handle.db
+      .select()
+      .from(memoryRelations)
+      .where(eq(memoryRelations.judgmentId, pending.judgmentId))
+      .get();
+    expect(post?.status).toBe('orphaned');
+    expect(
+      db.handle.db
+        .select()
+        .from(consolidationOps)
+        .where(eq(consolidationOps.opType, 'orphan_promote'))
+        .all(),
+    ).toHaveLength(1);
+  });
+
   it('is idempotent: a second forced run orphans nothing new', () => {
     const a = memory.save({ type: 'feedback', title: 'p', content: 'p' }, SCOPE_GLOBAL);
     const b = memory.save({ type: 'feedback', title: 'q', content: 'q' }, SCOPE_GLOBAL);

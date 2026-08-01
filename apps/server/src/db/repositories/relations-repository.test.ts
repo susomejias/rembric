@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { deriveTitle } from '../../services/memory.js';
+import { deriveTitle, MemoryService } from '../../services/memory.js';
+import { ProjectsService } from '../../services/projects.js';
+import { RelationsService } from '../../services/relations.js';
+import { projectScope, SCOPE_GLOBAL } from '../../services/scope.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memoryRelations, type NewMemoryRelation } from '../schema/memory-relations.js';
 import { memory, type NewMemory } from '../schema/memory.js';
 
 import { RelationsRepository } from './relations-repository.js';
+
+import { createRepositories, type Repositories } from './index.js';
 
 function mem(id: string, content: string): NewMemory {
   return {
@@ -239,5 +244,125 @@ describe('RelationsRepository', () => {
     it('returns [] for empty input', () => {
       expect(repo.listNotConflictTargetsForSources([])).toEqual([]);
     });
+  });
+});
+
+describe('RelationsRepository scoped pending reads', () => {
+  const GLOBAL = { scope: 'global' as const, projectId: null };
+
+  let t: TestDb;
+  let repo: RelationsRepository;
+  let repos: Repositories;
+  let memories: MemoryService;
+
+  beforeEach(() => {
+    t = createTestDb();
+    repos = createRepositories(t.handle.db);
+    repo = new RelationsRepository(t.handle.db);
+    memories = new MemoryService(repos, t.handle.db);
+  });
+
+  afterEach(() => {
+    t.cleanup();
+  });
+
+  function save(label: string, topicKey?: string): string {
+    return memories.saveWithTopicKey(
+      { type: 'project', title: label, content: label, topicKey },
+      SCOPE_GLOBAL,
+    ).memory.id;
+  }
+
+  function pendingAt(sourceId: string, targetId: string, at: Date): string {
+    return new RelationsService(repos, t.handle.db, () => at).createPending({ sourceId, targetId })
+      .judgmentId;
+  }
+
+  function seedTopicKeyRevision(): { a: string; b: string; live: string } {
+    const a = save('A on t', 't');
+    for (let i = 0; i < 5; i += 1) {
+      pendingAt(a, save(`x${i}`), new Date(1_000 + i));
+    }
+    const b = save('B on t', 't');
+    const live = pendingAt(b, save('y'), new Date(9_000));
+    return { a, b, live };
+  }
+
+  it('withholds a superseded source under a project scope too', () => {
+    const projects = new ProjectsService(repos);
+    const project = projects.create({ slug: 'pending-scoped', displayName: null });
+    const scope = projectScope(project.id);
+    const inProject = (label: string, topicKey?: string): string =>
+      memories.saveWithTopicKey({ type: 'project', title: label, content: label, topicKey }, scope)
+        .memory.id;
+
+    const a = inProject('A on p', 'p');
+    const dead = pendingAt(a, inProject('pa'), new Date(1_000));
+    const b = inProject('B on p', 'p');
+    const live = pendingAt(b, inProject('pb'), new Date(9_000));
+    // A global pair too, so the assertion below distinguishes scope filtering
+    // from lifecycle filtering rather than passing on either alone.
+    pendingAt(save('G on t', 'g'), save('gt'), new Date(2_000));
+
+    expect(repos.memory.unsafeGetById(a)?.status).toBe('superseded');
+    const args = { scope: 'project' as const, projectId: project.id };
+    const rows = repo.listPendingInScope({ ...args, cutoffMs: null, limit: 10 });
+
+    expect(rows.map((r) => r.judgmentId)).toEqual([live]);
+    expect(repo.countPendingInScope(args)).toBe(1);
+    expect(repo.adminCountWithFilters({ status: 'pending' })).toBe(3);
+    expect(rows.map((r) => r.judgmentId)).not.toContain(dead);
+  });
+
+  it('withholds a superseded source from both the page and the total', () => {
+    const { a, b, live } = seedTopicKeyRevision();
+
+    expect(repos.memory.unsafeGetById(a)?.status).toBe('superseded');
+    expect(repos.memory.unsafeGetById(b)?.status).toBe('active');
+
+    const rows = repo.listPendingInScope({ ...GLOBAL, cutoffMs: null, limit: 10 });
+    expect(rows.map((r) => r.judgmentId)).toEqual([live]);
+    expect(rows.map((r) => r.sourceId)).toEqual([b]);
+    expect(repo.countPendingInScope(GLOBAL)).toBe(1);
+  });
+
+  it('withholds an archived target from both the page and the total', () => {
+    const deadTarget = save('dead target');
+    pendingAt(save('live source'), deadTarget, new Date(1_000));
+    const live = pendingAt(save('s'), save('t'), new Date(2_000));
+    memories.archive(deadTarget, SCOPE_GLOBAL);
+
+    expect(repos.memory.unsafeGetById(deadTarget)?.status).toBe('archived');
+
+    const rows = repo.listPendingInScope({ ...GLOBAL, cutoffMs: null, limit: 10 });
+    expect(rows.map((r) => r.judgmentId)).toEqual([live]);
+    expect(repo.countPendingInScope(GLOBAL)).toBe(1);
+  });
+
+  it('control: a pair between two active memories is listed and counted, aged or not', () => {
+    const live = pendingAt(save('s'), save('t'), new Date(1_000));
+
+    expect(
+      repo.listPendingInScope({ ...GLOBAL, cutoffMs: 5_000, limit: 10 }).map((r) => r.judgmentId),
+    ).toEqual([live]);
+    expect(
+      repo.listPendingInScope({ ...GLOBAL, cutoffMs: null, limit: 10 }).map((r) => r.judgmentId),
+    ).toEqual([live]);
+    expect(repo.countPendingInScope(GLOBAL)).toBe(1);
+  });
+
+  it('control: the operator reads still return every pending row', () => {
+    seedTopicKeyRevision();
+
+    expect(repo.adminCountWithFilters({ status: 'pending' })).toBe(6);
+    expect(repo.adminListWithContent({ status: 'pending' }, 20, 0)).toHaveLength(6);
+  });
+
+  it("control: the sweep's aged-pending selection still sees the withheld pairs", () => {
+    const { a } = seedTopicKeyRevision();
+
+    const aged = repo.findPendingOlderThanInScope({ ...GLOBAL, cutoffMs: 100_000, limit: 50 });
+    expect(aged).toHaveLength(6);
+    expect(aged.filter((r) => r.sourceId === a)).toHaveLength(5);
   });
 });

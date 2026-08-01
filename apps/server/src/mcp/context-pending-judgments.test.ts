@@ -14,6 +14,8 @@ import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
+import { buildObservabilityHandlers } from './observability-tools.js';
+import { buildRelationsHandlers } from './relations-tools.js';
 
 /**
  * `memory.context.pendingJudgments[]` is a page of an AGED queue: five rows,
@@ -31,7 +33,9 @@ let db: TestDb;
 let repos: Repositories;
 let projects: ProjectsService;
 let memory: MemoryService;
+let relations: RelationsService;
 let handlers: ReturnType<typeof buildMemoryHandlers>;
+let observability: ReturnType<typeof buildObservabilityHandlers>;
 let adminToken: Token;
 
 function makeContext(token: Token): RequestContext {
@@ -69,13 +73,21 @@ function callContext(args: Record<string, unknown> = {}) {
   return runWithContext(makeContext(adminToken), () => handlers.context(args));
 }
 
+function callStats() {
+  return runWithContext(makeContext(adminToken), () => observability.stats());
+}
+
 /** A pending pair created `ageMs` ago, so the aged/un-aged split is controllable. */
 function seedPending(label: string, ageMs: number, scope: Scope = SCOPE_GLOBAL): string {
-  const at = new Date(Date.now() - ageMs);
   const source = memory.save({ type: 'project', title: `${label} source`, content: label }, scope);
   const target = memory.save({ type: 'project', title: `${label} target`, content: label }, scope);
-  const relations = new RelationsService(repos, db.handle.db, () => at);
-  return relations.createPending({ sourceId: source.id, targetId: target.id }).judgmentId;
+  return pendingBetween(source.id, target.id, ageMs);
+}
+
+function pendingBetween(sourceId: string, targetId: string, ageMs: number): string {
+  const at = new Date(Date.now() - ageMs);
+  return new RelationsService(repos, db.handle.db, () => at).createPending({ sourceId, targetId })
+    .judgmentId;
 }
 
 beforeEach(() => {
@@ -84,14 +96,29 @@ beforeEach(() => {
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
   adminToken = mintTestToken(db.handle, SCOPE).token;
+  const agentSessions = new AgentSessionsService(repos, db.handle.db);
+  const router = new SessionRouter();
+  relations = new RelationsService(repos, db.handle.db);
   handlers = buildMemoryHandlers({
     repos,
     memory,
     projects,
-    agentSessions: new AgentSessionsService(repos, db.handle.db),
+    agentSessions,
     prompts: new PromptsService(repos, db.handle.db),
-    router: new SessionRouter(),
+    relations,
+    router,
     orphanAfterMs: ORPHAN_AFTER_MS,
+  });
+  observability = buildObservabilityHandlers({
+    repos,
+    memory,
+    projects,
+    agentSessions,
+    router,
+    relations,
+    doctor: () => {
+      throw new Error('memory.doctor is not under test here');
+    },
   });
 });
 
@@ -220,5 +247,144 @@ describe('memory.context `judgments` size lifts the age filter', () => {
 
     expect(payload.pendingJudgments).toEqual([]);
     expect(payload.pendingJudgmentsTotal).toBe(0);
+  });
+});
+
+describe('memory.context withholds pending pairs whose endpoint is retired', () => {
+  function seedTopicKeyRevision(): { a: string; b: string; live: string } {
+    const a = memory.saveWithTopicKey(
+      { type: 'project', title: 'A on t', content: 'a on t', topicKey: 't' },
+      SCOPE_GLOBAL,
+    ).memory;
+    for (let i = 0; i < 5; i += 1) {
+      const target = memory.save(
+        { type: 'project', title: `x${i}`, content: `x${i}` },
+        SCOPE_GLOBAL,
+      );
+      pendingBetween(a.id, target.id, 3 * ORPHAN_AFTER_MS - i);
+    }
+    const b = memory.saveWithTopicKey(
+      { type: 'project', title: 'B on t', content: 'b on t', topicKey: 't' },
+      SCOPE_GLOBAL,
+    ).memory;
+    const target = memory.save({ type: 'project', title: 'y', content: 'y' }, SCOPE_GLOBAL);
+    const live = pendingBetween(b.id, target.id, 2 * ORPHAN_AFTER_MS);
+    return { a: a.id, b: b.id, live };
+  }
+
+  it('a topic_key revision does not evict the live pending from the page', async () => {
+    const { a, b, live } = seedTopicKeyRevision();
+
+    expect(repos.memory.unsafeGetById(a)?.status).toBe('superseded');
+    expect(repos.memory.unsafeGetById(b)?.status).toBe('active');
+
+    const { payload } = decode(await callContext());
+
+    const list = payload.pendingJudgments as PendingEntry[];
+    expect(list.map((r) => r.judgmentId)).toEqual([live]);
+    expect(list.map((r) => r.sourceId)).toEqual([b]);
+    expect(payload.pendingJudgmentsTotal).toBe(1);
+  });
+
+  it('a withheld pair stays reachable and closable through its annotation', async () => {
+    const a = memory.saveWithTopicKey(
+      { type: 'project', title: 'A on u', content: 'a on u', topicKey: 'u' },
+      SCOPE_GLOBAL,
+    ).memory;
+    const counterpart = memory.save({ type: 'project', title: 'z', content: 'z' }, SCOPE_GLOBAL);
+    const jid = pendingBetween(a.id, counterpart.id, 3 * ORPHAN_AFTER_MS);
+    memory.saveWithTopicKey(
+      { type: 'project', title: 'B on u', content: 'b on u', topicKey: 'u' },
+      SCOPE_GLOBAL,
+    );
+    expect(repos.memory.unsafeGetById(a.id)?.status).toBe('superseded');
+    expect(repos.memory.unsafeGetById(counterpart.id)?.status).toBe('active');
+
+    const { payload } = decode(await callContext({ judgments: 50 }));
+    expect(payload.pendingJudgments).toEqual([]);
+    expect(payload.pendingJudgmentsTotal).toBe(0);
+
+    const got = decode(
+      await runWithContext(makeContext(adminToken), () => handlers.get({ id: counterpart.id })),
+    ).payload;
+    const annotations = got.relations as { judgmentId?: string; status: string }[];
+    expect(annotations.map((r) => r.judgmentId)).toContain(jid);
+
+    const relationHandlers = buildRelationsHandlers({
+      relations,
+      router: new SessionRouter(),
+      projects,
+      repos,
+    });
+    const judged = decode(
+      await runWithContext(makeContext(adminToken), () =>
+        relationHandlers.judge({ judgmentId: jid, relation: 'related', reason: 'still reachable' }),
+      ),
+    );
+    expect(judged.isError).toBe(false);
+    expect(judged.payload.status).toBe('judged');
+  });
+
+  it('an aged pair whose target was archived is withheld on the same terms', async () => {
+    const source = memory.save({ type: 'project', title: 's', content: 's' }, SCOPE_GLOBAL);
+    const target = memory.save({ type: 'project', title: 't', content: 't' }, SCOPE_GLOBAL);
+    pendingBetween(source.id, target.id, 2 * ORPHAN_AFTER_MS);
+    memory.archive(target.id, SCOPE_GLOBAL);
+
+    expect(repos.memory.unsafeGetById(target.id)?.status).toBe('archived');
+
+    const { payload } = decode(await callContext());
+
+    expect(payload.pendingJudgments).toEqual([]);
+    expect(payload.pendingJudgmentsTotal).toBe(0);
+  });
+
+  it('an explicit size does not readmit a pair withheld for a retired endpoint', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const source = memory.save(
+        { type: 'project', title: `dead-src-${i}`, content: `dead-src-${i}` },
+        SCOPE_GLOBAL,
+      );
+      const target = memory.save(
+        { type: 'project', title: `dead-tgt-${i}`, content: `dead-tgt-${i}` },
+        SCOPE_GLOBAL,
+      );
+      pendingBetween(source.id, target.id, 0);
+      memory.archive(target.id, SCOPE_GLOBAL);
+    }
+    const live = seedPending('adjudicable', 0);
+
+    const { payload } = decode(await callContext({ judgments: 50 }));
+
+    const list = payload.pendingJudgments as PendingEntry[];
+    expect(list.map((r) => r.judgmentId)).toEqual([live]);
+    expect(payload.pendingJudgmentsTotal).toBe(1);
+  });
+
+  it('memory.stats reports the same pending depth as memory.context', async () => {
+    seedTopicKeyRevision();
+
+    const context = decode(await callContext());
+    const stats = decode(await callStats());
+
+    expect(stats.isError).toBe(false);
+    expect(stats.payload.pendingJudgmentsTotal).toBe(1);
+    expect(stats.payload.pendingJudgmentsTotal).toBe(context.payload.pendingJudgmentsTotal);
+  });
+
+  it('control: an adjudicable pair is still listed and counted, with and without a size', async () => {
+    const live = seedPending('both-active', 2 * ORPHAN_AFTER_MS);
+
+    const bare = decode(await callContext());
+    expect((bare.payload.pendingJudgments as PendingEntry[]).map((r) => r.judgmentId)).toEqual([
+      live,
+    ]);
+    expect(bare.payload.pendingJudgmentsTotal).toBe(1);
+
+    const sized = decode(await callContext({ judgments: 50 }));
+    expect((sized.payload.pendingJudgments as PendingEntry[]).map((r) => r.judgmentId)).toEqual([
+      live,
+    ]);
+    expect(sized.payload.pendingJudgmentsTotal).toBe(1);
   });
 });
