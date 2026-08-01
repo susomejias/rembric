@@ -238,10 +238,10 @@ The engine is code, not configuration: there is no model selector, no threshold 
 
 Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
 
-| Variable                      | Default      | Description                                                                                     |
-| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
-| `JUDGMENT_ORPHAN_AFTER_MS`    | `86400000`   | Age (ms) past which pending judgments surface in `memory.context` for the agent to close. 24h.  |
-| `JUDGMENT_ORPHAN_DEADLINE_MS` | `1209600000` | Age (ms) past which unjudged pendings are orphaned by the sweep (journaled, undoable). 14 days. |
+| Variable                      | Default      | Description                                                                                                                |
+| ----------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `JUDGMENT_ORPHAN_AFTER_MS`    | `86400000`   | Age (ms) past which pending judgments with two `active` endpoints surface in `memory.context` for the agent to close. 24h. |
+| `JUDGMENT_ORPHAN_DEADLINE_MS` | `1209600000` | Age (ms) past which unjudged pendings are orphaned by the sweep (journaled, undoable). 14 days.                            |
 
 ### Rate limiting
 
@@ -411,7 +411,7 @@ Four load-bearing invariants:
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
 - **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
-- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
+- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
 Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
 

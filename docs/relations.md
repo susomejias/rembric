@@ -20,7 +20,7 @@ The `memory_relations` table records the judgment graph between memories. Each r
     orphaned ────────────▶ (terminal — re-judging not allowed)
 ```
 
-A row stays `pending` until an agent closes it via `memory.judge({judgmentId})`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context; after `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
+A row stays `pending` until an agent closes it via `memory.judge({judgmentId})`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context — but only while BOTH endpoints are still `active`, since a pair naming a superseded or archived memory is withheld from that queue (it stays visible on `/dashboard/judgments`, and still reaches `orphaned` on schedule); after `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
 
 ## Taxonomy
 
