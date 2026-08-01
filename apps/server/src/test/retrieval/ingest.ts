@@ -85,7 +85,6 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
         topicKey: item.topicKey,
       },
       scope,
-      'eval-harness',
     );
 
     idByStableId.set(item.id, saved.id);

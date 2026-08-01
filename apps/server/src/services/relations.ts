@@ -331,11 +331,11 @@ export class RelationsService {
     this.assertSameScope(input.sourceId, input.targetId);
 
     const existing = this.repos.relations.findBySourceAndTarget(input.sourceId, input.targetId);
-
     const ts = this.now();
+    const applySideEffect = input.relation === 'supersedes';
 
     if (existing) {
-      const updated = this.tx.transaction(() => {
+      return this.tx.transaction(() => {
         const next = this.repos.relations.markJudged(
           existing.id,
           {
@@ -355,16 +355,14 @@ export class RelationsService {
             `relations.compare: ${existing.id} was concurrently mutated`,
           );
         }
-        if (input.relation === 'supersedes') {
+        if (applySideEffect) {
           this.applySupersedesSideEffect(input.sourceId, input.targetId);
         }
         return next;
       });
-      return updated;
     }
 
-    // Fresh row.
-    const inserted = this.tx.transaction(() => {
+    return this.tx.transaction(() => {
       const row = this.repos.relations.insert({
         id: ulid(ts.getTime()),
         judgmentId: ulid(ts.getTime()),
@@ -383,12 +381,11 @@ export class RelationsService {
       if (!row) {
         throw new DomainError('conflict', 'relations.compare: insert returned no row');
       }
-      if (input.relation === 'supersedes') {
+      if (applySideEffect) {
         this.applySupersedesSideEffect(input.sourceId, input.targetId);
       }
       return row;
     });
-    return inserted;
   }
 
   /**
@@ -553,6 +550,25 @@ export class RelationsService {
     const source = this.repos.memory.findScopeTupleById(sourceId);
     if (!source) {
       throw new DomainError('memory_not_found', `relations.judge: source ${sourceId} disappeared`);
+    }
+    const target = this.repos.memory.findScopeTupleById(targetId);
+    if (!target) {
+      throw new DomainError('memory_not_found', `relations.judge: target ${targetId} disappeared`);
+    }
+    // Already applied by this pair: a no-op, not the rewrite guarded against below.
+    if (target.status === 'superseded' && source.replaces.includes(targetId)) return;
+
+    for (const [role, id, row] of [
+      ['source', sourceId, source],
+      ['target', targetId, target],
+    ] as const) {
+      if (row.status !== 'active') {
+        throw new DomainError(
+          'conflict',
+          `relations.judge: ${role} ${id} is '${row.status}', not active; ` +
+            "'supersedes' rewrites the lifecycle of both memories and would retire a row on the authority of a retired one",
+        );
+      }
     }
     const nextReplaces = Array.from(new Set<string>([...source.replaces, targetId]));
 

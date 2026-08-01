@@ -261,3 +261,259 @@ describe('the annotation total', () => {
     expect(page?.total).toBe(3);
   });
 });
+
+describe('supersedes verdicts on retired endpoints', () => {
+  let repos: ReturnType<typeof createRepositories>;
+
+  const statusOf = (id: string) => repos.memory.unsafeGetById(id)?.status;
+  const replacesOf = (id: string) => repos.memory.unsafeGetById(id)?.replaces ?? [];
+
+  beforeEach(() => {
+    repos = createRepositories(db.handle.db);
+  });
+
+  /** V1 then V2 on one topic_key, so V1 is left `superseded`. */
+  function retiredSource(): string {
+    const v1 = memory.saveWithTopicKey(
+      { type: 'project', title: 'stale take', content: 'stale take', topicKey: 't/x' },
+      scope,
+    ).memory;
+    memory.saveWithTopicKey(
+      { type: 'project', title: 'current take', content: 'current take', topicKey: 't/x' },
+      scope,
+    );
+    return v1.id;
+  }
+
+  function pending(sourceId: string, targetId: string): string {
+    const row = repos.relations.insert({
+      id: `rel_${sourceId}_${targetId}`.slice(0, 40),
+      judgmentId: `jud_${sourceId}_${targetId}`.slice(0, 40),
+      sourceId,
+      targetId,
+      status: 'pending',
+      createdAt: clock.now(),
+    });
+    if (!row) throw new Error('fixture: relation insert failed');
+    return row.judgmentId;
+  }
+
+  it('refuses to judge supersedes when the source is superseded', () => {
+    const source = retiredSource();
+    const live = saveMemory('live and correct');
+    const jid = pending(source, live);
+    expect(statusOf(source)).toBe('superseded');
+    expect(statusOf(live)).toBe('active');
+
+    expect(() =>
+      relations.judge(jid, { relation: 'supersedes', kind: 'agent', actor: 'probe' }),
+    ).toThrow(/not active/i);
+    expect(statusOf(live)).toBe('active');
+    expect(replacesOf(source)).toEqual([]);
+    expect(repos.relations.findByJudgmentId(jid)?.status).toBe('pending');
+  });
+
+  it('refuses to judge supersedes when the target is archived', () => {
+    const source = saveMemory('live source');
+    const target = saveMemory('archived target');
+    memory.archive(target, scope);
+    const jid = pending(source, target);
+    expect(statusOf(target)).toBe('archived');
+
+    expect(() =>
+      relations.judge(jid, { relation: 'supersedes', kind: 'agent', actor: 'probe' }),
+    ).toThrow(/not active/i);
+    expect(statusOf(target)).toBe('archived');
+    expect(replacesOf(source)).toEqual([]);
+  });
+
+  it('refuses compare(supersedes) on a fresh pair with a retired source', () => {
+    const source = retiredSource();
+    const live = saveMemory('live and correct');
+
+    expect(() =>
+      relations.compare({
+        sourceId: source,
+        targetId: live,
+        relation: 'supersedes',
+        confidence: 1,
+        actor: 'probe',
+      }),
+    ).toThrow(/not active/i);
+    expect(statusOf(live)).toBe('active');
+    expect(repos.relations.findBySourceAndTarget(source, live)).toBeUndefined();
+  });
+
+  it('refuses compare(supersedes) when a judged row for the pair already exists', () => {
+    const source = retiredSource();
+    const live = saveMemory('live and correct');
+    relations.compare({
+      sourceId: source,
+      targetId: live,
+      relation: 'related',
+      confidence: 1,
+      actor: 'probe',
+    });
+    expect(repos.relations.findBySourceAndTarget(source, live)?.relation).toBe('related');
+
+    expect(() =>
+      relations.compare({
+        sourceId: source,
+        targetId: live,
+        relation: 'supersedes',
+        confidence: 1,
+        actor: 'probe',
+      }),
+    ).toThrow(/not active/i);
+    expect(statusOf(live)).toBe('active');
+    expect(repos.relations.findBySourceAndTarget(source, live)?.relation).toBe('related');
+  });
+
+  it('CONTROL — not_conflict stays closable on a retired-source pair', () => {
+    const source = retiredSource();
+    const live = saveMemory('unrelated');
+    const jid = pending(source, live);
+
+    const judged = relations.judge(jid, {
+      relation: 'not_conflict',
+      kind: 'agent',
+      actor: 'probe',
+    });
+    expect(judged.status).toBe('judged');
+    expect(judged.relation).toBe('not_conflict');
+  });
+
+  it('CONTROL — supersedes with both endpoints active still performs the side effect', () => {
+    const source = saveMemory('winner');
+    const target = saveMemory('loser');
+    const jid = pending(source, target);
+
+    relations.judge(jid, { relation: 'supersedes', kind: 'agent', actor: 'probe' });
+    expect(statusOf(target)).toBe('superseded');
+    expect(replacesOf(source)).toEqual([target]);
+  });
+
+  it('is idempotent: re-applying a supersede that already holds is a no-op', () => {
+    const source = saveMemory('winner');
+    const target = saveMemory('loser');
+
+    relations.compare({
+      sourceId: source,
+      targetId: target,
+      relation: 'supersedes',
+      confidence: 1,
+      actor: 'probe',
+    });
+    expect(statusOf(target)).toBe('superseded');
+    expect(replacesOf(source)).toEqual([target]);
+
+    expect(() =>
+      relations.compare({
+        sourceId: source,
+        targetId: target,
+        relation: 'supersedes',
+        confidence: 1,
+        actor: 'probe',
+      }),
+    ).not.toThrow();
+    expect(statusOf(target)).toBe('superseded');
+    expect(replacesOf(source)).toEqual([target]);
+  });
+
+  it('the idempotent exemption does not readmit a retired source over a LIVE target', () => {
+    const source = retiredSource();
+    const live = saveMemory('live and correct');
+    // The target is active, so the already-applied exemption cannot fire.
+    expect(() =>
+      relations.compare({
+        sourceId: source,
+        targetId: live,
+        relation: 'supersedes',
+        confidence: 1,
+        actor: 'probe',
+      }),
+    ).toThrow(/not active/i);
+    expect(statusOf(live)).toBe('active');
+  });
+
+  it('CONTROL — compare(related) on a retired pair still persists its row', () => {
+    const source = retiredSource();
+    const live = saveMemory('unrelated');
+
+    relations.compare({
+      sourceId: source,
+      targetId: live,
+      relation: 'related',
+      confidence: 1,
+      actor: 'probe',
+    });
+    expect(repos.relations.findBySourceAndTarget(source, live)?.relation).toBe('related');
+  });
+});
+
+describe('the topic_key audit relation is written inside the save transaction', () => {
+  // Written by saveWithTopicKey itself, so the guard never sees this row.
+  let repos: ReturnType<typeof createRepositories>;
+
+  beforeEach(() => {
+    repos = createRepositories(db.handle.db);
+  });
+
+  it('records source, target, kind and actor without a follow-up call', () => {
+    const first = memory.saveWithTopicKey(
+      {
+        type: 'project',
+        title: 'v1',
+        content: 'v1',
+        topicKey: 't/audit',
+        source: { tokenName: 'tk-under-test' },
+      },
+      scope,
+    ).memory;
+    const second = memory.saveWithTopicKey(
+      { type: 'project', title: 'v2', content: 'v2', topicKey: 't/audit' },
+      scope,
+    ).memory;
+
+    const row = repos.relations.findBySourceAndTarget(second.id, first.id);
+    expect(row?.relation).toBe('supersedes');
+    expect(row?.status).toBe('judged');
+    expect(row?.markedByKind).toBe('agent_topic_key');
+    expect(repos.memory.unsafeGetById(first.id)?.status).toBe('superseded');
+    expect(repos.memory.unsafeGetById(second.id)?.replaces).toEqual([first.id]);
+  });
+
+  it('carries the saving token as the actor when one is supplied', () => {
+    memory.saveWithTopicKey(
+      {
+        type: 'project',
+        title: 'v1',
+        content: 'v1',
+        topicKey: 't/actor',
+        source: { tokenName: 'tk-under-test' },
+      },
+      scope,
+    );
+    const second = memory.saveWithTopicKey(
+      {
+        type: 'project',
+        title: 'v2',
+        content: 'v2',
+        topicKey: 't/actor',
+        source: { tokenName: 'tk-under-test' },
+      },
+      scope,
+    ).memory;
+
+    const rows = repos.relations.listTouching(second.id);
+    expect(rows[0]?.markedByActor).toBe('tk-under-test');
+  });
+
+  it('writes no relation when the topic_key slot was empty', () => {
+    const only = memory.saveWithTopicKey(
+      { type: 'project', title: 'lone', content: 'lone', topicKey: 't/lone' },
+      scope,
+    ).memory;
+    expect(repos.relations.listTouching(only.id)).toEqual([]);
+  });
+});

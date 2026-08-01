@@ -679,7 +679,6 @@ export async function saveMemoryWithCandidates(
   deps: SaveWithCandidatesDeps,
   input: SaveMemoryInput,
   scope: Scope,
-  tokenName: string,
 ): Promise<{
   memory: Awaited<ReturnType<MemoryService['save']>>;
   supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
@@ -687,28 +686,6 @@ export async function saveMemoryWithCandidates(
   candidatesDetected: number;
 }> {
   const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
-
-  // If the topic_key upsert path fired, record the auto-judged
-  // 'supersedes' relation so the search annotations and the dashboard
-  // can show provenance.
-  if (supersededByTopicKey && deps.relations) {
-    try {
-      deps.relations.compare({
-        sourceId: m.id,
-        targetId: supersededByTopicKey.id,
-        relation: 'supersedes',
-        reason: `topic_key='${input.topicKey}' upsert`,
-        confidence: 1.0,
-        actor: tokenName,
-        kind: 'agent_topic_key',
-      });
-    } catch {
-      // Topic-key relation logging is best-effort. The supersede side
-      // effect on the memory row already happened atomically in
-      // saveWithTopicKey; failing to record the audit row should not
-      // fail the save itself.
-    }
-  }
 
   // Deterministic entity extraction — pure, no I/O. Linking (below) is
   // deferred until AFTER candidate detection reads: the just-saved row must
@@ -869,7 +846,7 @@ async function handleSave(
       memory: m,
       candidates,
       candidatesDetected,
-    } = await saveMemoryWithCandidates(deps, input, scope, ctx.token.name);
+    } = await saveMemoryWithCandidates(deps, input, scope);
 
     return ok({
       id: m.id,

@@ -398,14 +398,21 @@ describe('seed-volumetric generates the shape it declares', () => {
       ).map((r) => [r.status, r.n]),
     );
     const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
-    expect(total).toBe(SHARED_RELATIONS);
+    // Generated relations plus one `agent_topic_key` audit row per superseded memory.
+    const auditRows = scalar(
+      handle,
+      "SELECT COUNT(*) v FROM memory_relations WHERE marked_by_kind = 'agent_topic_key'",
+    );
+    expect(auditRows).toBe(SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction);
+    expect(total).toBe(SHARED_RELATIONS + auditRows);
     // One draw per relation, so a 240-row sample sits inside binomial noise of
     // the declared fraction; asserted to one decimal rather than exactly.
-    expect((byStatus['pending'] ?? 0) / total).toBeCloseTo(
+    // Against the generated population: the audit rows are all `judged`.
+    expect((byStatus['pending'] ?? 0) / SHARED_RELATIONS).toBeCloseTo(
       VOLUMETRIC_SHAPE.relationsPendingFraction,
       1,
     );
-    expect((byStatus['orphaned'] ?? 0) / total).toBeLessThan(
+    expect((byStatus['orphaned'] ?? 0) / SHARED_RELATIONS).toBeLessThan(
       VOLUMETRIC_SHAPE.relationsOrphanedFraction + 0.08,
     );
     expect(byStatus['judged']).toBeGreaterThan(0);
@@ -423,12 +430,17 @@ describe('seed-volumetric generates the shape it declares', () => {
     ).toBe(0);
   });
 
-  it('judges no relation as `supersedes`, so the memory axis stays independent', () => {
+  it('judges `supersedes` exactly once per superseded memory, and never in the generated mix', () => {
+    // JUDGED_VERDICTS excludes `supersedes`, so every one is an audit row.
     expect(
       scalar(handle, "SELECT COUNT(*) v FROM memory_relations WHERE relation = 'supersedes'"),
+    ).toBe(SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction);
+    expect(
+      scalar(
+        handle,
+        "SELECT COUNT(*) v FROM memory_relations WHERE relation = 'supersedes' AND marked_by_kind != 'agent_topic_key'",
+      ),
     ).toBe(0);
-    // The exact figure the memory-axis test asserts, re-checked on a corpus that
-    // also built 240 relations: judging `supersedes` would have moved it.
     expect(scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'")).toBe(
       SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction,
     );
@@ -539,7 +551,9 @@ describe('seed-volumetric is deterministic under a seed', () => {
     )[0]!.s;
     const relations = rows<{ s: string }>(
       handle,
-      "SELECT group_concat(t, char(10)) s FROM (SELECT status || char(31) || coalesce(relation,'') || char(31) || coalesce(reason,'') || char(31) || coalesce(confidence,'') AS t FROM memory_relations ORDER BY created_at, id)",
+      // Ordered by the digested tuple, not `id`: relations tie on `created_at`,
+      // and an `id` tiebreak would let a minted ULID decide the order.
+      "SELECT group_concat(t, char(10)) s FROM (SELECT status || char(31) || coalesce(relation,'') || char(31) || coalesce(reason,'') || char(31) || coalesce(confidence,'') AS t FROM memory_relations ORDER BY created_at, status, relation, reason, confidence)",
     )[0]!.s;
     const prompts = rows<{ s: string }>(
       handle,
@@ -567,7 +581,10 @@ describe('seed-volumetric is deterministic under a seed', () => {
       );
       // Each axis contributes: a digest that matched with relations or prompts
       // empty would not be asserting their determinism at all.
-      expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory_relations')).toBe(60);
+      // 60 generated + one audit row per superseded memory.
+      expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory_relations')).toBe(
+        60 + 120 * VOLUMETRIC_SHAPE.supersededFraction,
+      );
       expect(scalar(a.handle, 'SELECT COUNT(*) v FROM prompts')).toBe(50);
       expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory')).toBe(120);
     } finally {

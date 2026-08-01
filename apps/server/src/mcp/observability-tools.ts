@@ -238,7 +238,6 @@ async function handleCapturePassive(
         sessionId: explicitSession,
       },
       scope,
-      ctx.token.name,
     );
     ids.push(saved.memory.id);
     candidates.push(...saved.candidates);

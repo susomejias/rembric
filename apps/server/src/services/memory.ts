@@ -177,7 +177,10 @@ export interface NeedsReviewItem {
 
 export class MemoryService {
   constructor(
-    private readonly repos: Pick<Repositories, 'memory' | 'consolidation' | 'vectors' | 'entities'>,
+    private readonly repos: Pick<
+      Repositories,
+      'memory' | 'consolidation' | 'vectors' | 'entities' | 'relations'
+    >,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     /**
@@ -194,12 +197,9 @@ export class MemoryService {
   }
 
   /**
-   * Save plus topic_key upsert. Returns both the new row and the row
-   * that was superseded (if any) so the MCP layer can write the
-   * accompanying `memory_relations` rows in the same transaction.
-   *
-   * The save itself is atomic: insert + supersede happen in a single
-   * SQLite transaction; a failure rolls both back.
+   * Save plus topic_key upsert: insert, supersede and the `agent_topic_key`
+   * relation row are one transaction. `supersededByTopicKey` is returned for
+   * the response payload, not for a follow-up write.
    */
   saveWithTopicKey(input: SaveMemoryInput, scope: Scope): SaveResult {
     if (input.content.trim().length === 0) {
@@ -258,6 +258,25 @@ export class MemoryService {
       });
       if (!inserted) {
         throw new DomainError('conflict', 'memory.save: insert did not return a row');
+      }
+
+      if (supersededByTopicKey) {
+        // No same-scope assertion needed: findActiveByTopicKey matched on (scope, project_id).
+        const relId = ulid(ts.getTime());
+        this.repos.relations.insert({
+          id: relId,
+          judgmentId: relId,
+          sourceId: inserted.id,
+          targetId: supersededByTopicKey.id,
+          relation: 'supersedes',
+          status: 'judged',
+          reason: `topic_key='${topicKey ?? ''}' upsert`,
+          confidence: 1,
+          markedByKind: 'agent_topic_key',
+          markedByActor: input.source?.tokenName ?? null,
+          judgedAt: ts,
+          createdAt: ts,
+        });
       }
 
       return { memory: inserted, supersededByTopicKey };

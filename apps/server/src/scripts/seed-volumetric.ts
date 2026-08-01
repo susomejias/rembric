@@ -224,7 +224,7 @@ const RELATION_ORPHAN_CUTOFF =
 /** Two per scope: a relation needs two distinct memories in one scope. */
 const MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS = 2 * VOLUMETRIC_SHAPE.scopeCount;
 
-/** `supersedes` absent on purpose: it would couple the memory axis to this one. */
+/** `supersedes` absent here, so every one in the corpus is a `topic_key` audit row. */
 const JUDGED_VERDICTS = RELATION_VALUES.filter((r) => r !== 'supersedes');
 
 /**

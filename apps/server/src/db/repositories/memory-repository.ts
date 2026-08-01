@@ -404,11 +404,21 @@ export class MemoryRepository {
   }
 
   /** Minimal scope tuple for same-scope assertions; no content leaks. */
-  findScopeTupleById(
-    id: string,
-  ): { scope: MemoryScope; projectId: string | null; replaces: string[] } | undefined {
+  findScopeTupleById(id: string):
+    | {
+        scope: MemoryScope;
+        projectId: string | null;
+        replaces: string[];
+        status: MemoryStatus;
+      }
+    | undefined {
     return this.db
-      .select({ scope: memory.scope, projectId: memory.projectId, replaces: memory.replaces })
+      .select({
+        scope: memory.scope,
+        projectId: memory.projectId,
+        replaces: memory.replaces,
+        status: memory.status,
+      })
       .from(memory)
       .where(eq(memory.id, id))
       .get();
