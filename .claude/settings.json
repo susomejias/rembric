@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "codegraph prompt-hook"
+            "command": "if command -v codegraph >/dev/null 2>&1; then codegraph prompt-hook; fi"
           }
         ]
       }

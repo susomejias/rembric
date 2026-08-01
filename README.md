@@ -539,16 +539,17 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ### CodeGraph (code intelligence)
 
-This repo ships a committed [CodeGraph](https://github.com/codegraph) setup so agents can query the codebase as a knowledge graph. The MCP server is registered in `.mcp.json` (Claude Code) and `opencode.jsonc` (opencode); both point at a local `codegraph` binary.
+This repo ships a committed [CodeGraph](https://github.com/colbymchenry/codegraph) setup so agents can query the codebase as a knowledge graph. The MCP server is registered in `.mcp.json` (Claude Code) and `opencode.jsonc` (opencode); both point at a local `codegraph` binary.
 
 CodeGraph is **opt-in per developer** — install the binary to enable it:
 
 ```bash
-# install the codegraph CLI, then from the repo root:
+# install the codegraph CLI (see https://colbymchenry.github.io/codegraph/),
+# then from the repo root:
 codegraph index        # builds .codegraph/codegraph.db (git-ignored, ~11 MB)
 ```
 
-If you do **not** install the binary, nothing breaks: the `codegraph` MCP entry just shows as failed/unavailable in `/mcp` and every other workflow is unaffected. The index, daemon socket, pid, and logs under `.codegraph/` are git-ignored (only `.codegraph/.gitignore` is committed) — they are local to each machine and never belong in a commit.
+If you do **not** install the binary, nothing breaks: the `codegraph` MCP entry just shows as failed/unavailable in `/mcp`, the `UserPromptSubmit` hook in `.claude/settings.json` no-ops on the `command -v` guard, and every other workflow is unaffected. The index, daemon socket, pid, and logs under `.codegraph/` are git-ignored (only `.codegraph/.gitignore` is committed) — they are local to each machine and never belong in a commit.
 
 ## More docs
 
