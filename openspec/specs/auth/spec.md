@@ -43,7 +43,7 @@ Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` fo
 #### Scenario: Project-scoped token used for another project
 
 - **GIVEN** a token with `scope = 'project:A'`
-- **WHEN** the token is used to make an MCP call with `X-Rembric-Project: B`
+- **WHEN** the token is used to make an MCP call on a connection scoped to project B (`/mcp/B`)
 - **THEN** the request SHALL be rejected with `403 Forbidden`
 
 #### Scenario: Read-only token attempts to save

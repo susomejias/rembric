@@ -186,7 +186,7 @@ When `id` is NOT supplied, the service SHALL mint a ULID as today and SHALL retu
 
 ### Requirement: A session belongs to exactly one token and at most one project
 
-Every session row SHALL carry a `token_id` referencing an existing row in `tokens`. When a session is registered through a path-scoped MCP connection (`/mcp/<slug>`) or via `X-Rembric-Project`, the session row SHALL carry the resolved `project_id`. When the session is registered through `/mcp` with no project header, `project_id` SHALL be null and the session is global-scope.
+Every session row SHALL carry a `token_id` referencing an existing row in `tokens`. When a session is registered through a path-scoped MCP connection (`/mcp/<slug>`), the session row SHALL carry the resolved `project_id`. When the session is registered through `/mcp` with no active project, `project_id` SHALL be null and the session is global-scope.
 
 #### Scenario: A token is revoked while one of its sessions is active
 

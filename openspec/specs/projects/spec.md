@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines project identity and scope resolution for Rembric, including `findOrCreate(path)` semantics, equivalent path-based and header-based scoping for MCP requests, and project lifecycle (rename, archive).
+Defines project identity and scope resolution for Rembric, including path-based scoping for MCP requests, and project lifecycle (rename, archive).
 
 ## Requirements
 

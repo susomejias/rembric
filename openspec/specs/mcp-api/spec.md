@@ -868,7 +868,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp` without a project
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
-- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note indicating the connection is global-scope and that project memories require opening `/mcp/<slug>` or sending `X-Rembric-Project`
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note indicating how a project becomes active on an unscoped connection — roots-based auto-detection where the client supports it, otherwise `project.use`. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `apps/server/src/mcp/instructions.test.ts`.
 
 #### Scenario: Instructions length is checked at build time
 
