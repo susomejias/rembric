@@ -375,7 +375,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.doctor',
     {
       description:
-        'Read-only operational diagnostics. Returns DB/LLM/embeddings/consolidation health plus warnings. Use at session start when behavior seems off.',
+        'Read-only operational diagnostics, SERVER-WIDE (all projects + global): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ. Use at session start when behavior seems off.',
       inputSchema: {},
       outputSchema: doctorOutput,
       annotations: READ_ANNOTATIONS('Diagnostics'),
@@ -397,7 +397,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.stats',
     {
       description:
-        'Read-only counters: memoriesByStatus, memoriesByType, sessionsByStatus, scoped to the active project (or global).',
+        'Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal` — all scoped to the active project (or global). `memory.doctor` reports same-named counters server-wide, so its numbers will differ.',
       inputSchema: {},
       outputSchema: statsOutput,
       annotations: READ_ANNOTATIONS('Stats'),

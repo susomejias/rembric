@@ -246,6 +246,66 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.doctor description discloses the server-wide population and names memory.stats', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const doctor = tools.find((t) => t.name === 'memory.doctor');
+    // Control: a missing tool leaves `desc` empty, and every negative assertion
+    // below then passes while proving nothing.
+    expect(doctor, 'memory.doctor missing from tools/list').toBeDefined();
+    const desc = doctor?.description ?? '';
+    expect(desc.length).toBeGreaterThan(0);
+
+    // The report has no `llm` block, so advertising one invites a client to read
+    // its absence as a fault.
+    expect(desc).not.toMatch(/llm/i);
+
+    expect(desc).toMatch(/server-wide/i);
+    expect(desc).toMatch(/all projects/i);
+    expect(desc).toMatch(/global/i);
+    expect(desc).toContain('memory.stats');
+    expect(desc).toMatch(/differ/i);
+
+    expect(desc).toContain('entities');
+    expect(desc).toContain('sessions');
+    expect(desc).toContain('review');
+
+    // Client truncation is a tail cut, so the disclosure sits in the first
+    // sentence rather than after the usage hint.
+    expect(desc.split('. ')[0]).toMatch(/server-wide/i);
+
+    // Asserting the string alone cannot catch the description drifting from the
+    // payload again, which is how the `llm` claim survived its own removal.
+    const report = (await client.callTool({ name: 'memory.doctor', arguments: {} })) as ToolResult;
+    expect(report.isError).toBeFalsy();
+    const payload = readJson(report) as Record<string, unknown>;
+    expect('llm' in payload).toBe(false);
+    expect('review' in payload).toBe(true);
+    expect('entities' in payload).toBe(true);
+
+    await client.close();
+  });
+
+  it('memory.stats description names its queue-depth totals and the divergence', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const stats = tools.find((t) => t.name === 'memory.stats');
+    expect(stats, 'memory.stats missing from tools/list').toBeDefined();
+    const desc = stats?.description ?? '';
+    expect(desc.length).toBeGreaterThan(0);
+
+    // memory.doctor's description sends the model here for the scoped
+    // equivalents, so a pointer that lands on silence is the failure mode.
+    expect(desc).toContain('needsReviewTotal');
+    expect(desc).toContain('pendingJudgmentsTotal');
+    expect(desc).toMatch(/scoped to the active project/i);
+    expect(desc).toContain('memory.doctor');
+    expect(desc).toMatch(/server-wide/i);
+    expect(desc).toMatch(/differ/i);
+
+    await client.close();
+  });
+
   it('the relations_limit parameter publishes the bounded-ask recipe on both reading tools', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
