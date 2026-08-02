@@ -1239,6 +1239,7 @@ describe('MCP protocol conformance', () => {
     const payload = readJson(result) as {
       db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
       embeddings: { model: string; backlog: number };
+      entities: { backlog: number };
       consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
       sessions: { active: number };
       review: { needsReview: number; pendingJudgments: number };
@@ -1254,6 +1255,12 @@ describe('MCP protocol conformance', () => {
     expect('enabled' in payload.embeddings).toBe(false);
     expect(typeof payload.review.needsReview).toBe('number');
     expect(typeof payload.review.pendingJudgments).toBe('number');
+    // Neither had a runtime assertion. A rename consistent across the
+    // interface, the zod schema and the producing closure yields a payload
+    // that passes output validation, so the SDK does not catch it either —
+    // only a read of the field does.
+    expect(typeof payload.sessions.active).toBe('number');
+    expect(typeof payload.entities.backlog).toBe('number');
     expect(Array.isArray(payload.warnings)).toBe(true);
     await client.close();
   });
