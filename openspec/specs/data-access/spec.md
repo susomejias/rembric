@@ -108,7 +108,7 @@ The repository extraction SHALL NOT change any observable behavior: HTTP endpoin
 
 ### Requirement: Scoped repository reads MUST require a Scope parameter, not merely a naming convention
 
-Data-access confinement is enforced by a grep gate that matches call sites by method-name prefix: `admin*` reads are callable only from the dashboard, `unsafe*` marks a deliberate cross-scope read. A repository read that is unscoped but carries **neither** prefix is invisible to that gate, so an unscoped aggregate can be served from the MCP layer while the invariant test passes — which is the case today for the session status count consumed by `memory.stats`.
+Data-access confinement is enforced by a grep gate that matches call sites by method-name prefix: `admin*` reads are callable only from the dashboard, `unsafe*` marks a deliberate cross-scope read. A repository read that is unscoped but carries **neither** prefix is invisible to that gate, so an unscoped aggregate can be served from the MCP layer while the invariant test passes — which was the case for the session status count consumed by `memory.stats` until `countByStatus` was made to require a `Scope`.
 
 Every repository read reachable from the MCP layer SHALL take the `Scope` as a required parameter, so omitting it is a type error rather than a naming oversight. An unscoped variant SHALL exist only under the `admin` prefix, bringing it inside the confinement gate.
 
