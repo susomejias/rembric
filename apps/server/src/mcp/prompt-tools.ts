@@ -100,19 +100,21 @@ async function handleSavePrompt(
   },
 ) {
   const ctx = getRequestContext();
-  const { scope, project } = await resolveEffectiveScope(deps);
-  // Same gate as memory.save: an unscoped connection with pending
-  // roots-derived suggestions must not silently write to global.
-  if (!project) {
-    const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
-    if (pending) {
-      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
-        suggestedSlugs: pending,
-      });
-    }
-  }
+  let scope: Scope;
   try {
-    assertAuthorized('write', scope);
+    const resolved = await resolveEffectiveScope(deps);
+    scope = resolved.scope;
+    // Same gate as memory.save: an unscoped connection with pending
+    // roots-derived suggestions must not silently write to global.
+    if (!resolved.project) {
+      const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
+      if (pending) {
+        return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+          suggestedSlugs: pending,
+        });
+      }
+    }
+    assertAuthorized('write', scope, deps);
   } catch (err) {
     return errToMcp(err);
   }

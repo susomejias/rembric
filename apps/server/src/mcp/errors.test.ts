@@ -19,6 +19,23 @@ describe('errToMcp', () => {
     });
   });
 
+  it('forwards a DomainError payload into the body, like a hand-built mcpError', () => {
+    const result = errToMcp(new DomainError('project_not_found', 'x', { suggestedSlugs: ['a'] }));
+    const body = JSON.parse(result.content[0]?.text ?? '{}') as {
+      code: string;
+      suggestedSlugs: string[];
+    };
+    expect(body.code).toBe('project_not_found');
+    expect(body.suggestedSlugs).toEqual(['a']);
+  });
+
+  it('omits the payload keys entirely when a DomainError carries none', () => {
+    const body = JSON.parse(
+      errToMcp(new DomainError('forbidden', 'nope')).content[0]?.text ?? '{}',
+    ) as Record<string, unknown>;
+    expect(Object.keys(body)).toEqual(['ok', 'code', 'message']);
+  });
+
   describe('non-domain errors', () => {
     let errorSpy: ReturnType<typeof vi.spyOn>;
 

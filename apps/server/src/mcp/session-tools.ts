@@ -7,7 +7,13 @@ import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-
 import { type ProjectsService } from '../services/projects.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
 
-import { assertAuthorized, requireScope, resolveSessionId, routerKey } from './_shared.js';
+import {
+  assertAuthorized,
+  requireScope,
+  resolveSessionId,
+  routerKey,
+  unresolvableSlugError,
+} from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
@@ -98,6 +104,13 @@ async function handleSessionStart(
 ) {
   const ctx = getRequestContext();
 
+  // This handler resolves the session's project itself rather than through
+  // `resolveEffectiveScope`, so it needs the unresolvable-slug refusal
+  // explicitly or it opens a global-scope session on a path-scoped connection.
+  if (ctx.requestedSlug !== null && !ctx.project) {
+    return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
+  }
+
   // Await any eager (or in-flight) roots discovery; trigger it lazily
   // if no eager run happened. The agent may then end up scoped via the
   // derived slug.
@@ -152,7 +165,7 @@ async function handleSessionStart(
   }
 
   try {
-    assertAuthorized('write', projectId ? projectScope(projectId) : SCOPE_GLOBAL);
+    assertAuthorized('write', projectId ? projectScope(projectId) : SCOPE_GLOBAL, deps);
   } catch (err) {
     return errToMcp(err);
   }

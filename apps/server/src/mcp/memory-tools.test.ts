@@ -1765,12 +1765,12 @@ describe('memory.search — include_global is gated on connection and token', ()
   });
 });
 
-describe('KNOWN DEFECT #302 — an unresolvable path slug resolves to the global scope', () => {
-  // Documents current behaviour, which is wrong. `resolveEffectiveScope` falls
-  // back to SCOPE_GLOBAL when a slug is present but names no project, so the
-  // connection reads user-wide memory while presenting as path-scoped. This test
-  // SHOULD FAIL once #302 is fixed — invert it there rather than deleting it.
-  it('serves global memories to a `*` token at /mcp/<unknown-slug>', async () => {
+describe('an unresolvable path slug establishes no scope', () => {
+  // The inverted characterization test for the leak this suite used to
+  // document: a slug naming no project used to resolve to SCOPE_GLOBAL, so the
+  // connection read user-wide memory while presenting as path-scoped. It now
+  // resolves to nothing and the call is refused, reads included.
+  it('refuses a `*` token at /mcp/<unknown-slug> instead of serving global memories', async () => {
     memory.save({ type: 'user', title: 'user-wide row', content: 'user-wide row' }, SCOPE_GLOBAL);
     const token: Token = {
       id: 'tk_test',
@@ -1792,7 +1792,10 @@ describe('KNOWN DEFECT #302 — an unresolvable path slug resolves to the global
     const r = await runWithContext(ctx, () =>
       Promise.resolve(handlers.search({ query: 'user-wide' })),
     );
-    const { memories } = parseText<{ memories: { scope: string }[] }>(r);
-    expect(memories.some((m) => m.scope === 'global')).toBe(true);
+    expect(isErrorResponse(r)).toBe(true);
+    const payload = parseText<{ code: string; message: string; memories?: unknown }>(r);
+    expect(payload.code).toBe('project_not_found');
+    expect(payload.message).toContain('no-such-project');
+    expect(payload.memories).toBeUndefined();
   });
 });

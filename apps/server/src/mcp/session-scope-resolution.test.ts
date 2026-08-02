@@ -27,7 +27,8 @@ import { buildPromptHandlers } from './prompt-tools.js';
  * All handlers now share `resolveEffectiveScope` (`_shared.ts`):
  *   1. ctx.project          → path-scoped connection
  *   2. SessionRouter entry  → path-less connection with prior project.use
- *   3. SCOPE_GLOBAL         → no resolution
+ *   3. SCOPE_GLOBAL         → nothing resolved on a path-LESS connection
+ *      (a path slug naming no project is refused, not widened to global)
  */
 
 const MCP_SESSION_ID = 'mcp-sess-scope-test';
@@ -311,13 +312,12 @@ describe('resolveEffectiveScope — fallback to SCOPE_GLOBAL', () => {
 });
 
 describe('resolveEffectiveScope — path-scoped connections override router', () => {
-  it('ctx.requestedSlug set + ctx.project null → returns global, ignores router pin', async () => {
+  it('ctx.requestedSlug set + ctx.project null → refuses, ignores router pin', async () => {
     // Simulate a path-scoped request to a slug whose project does NOT
-    // exist (e.g., archived or deleted). Auth would not populate
-    // ctx.project, but a leftover router entry from a previous session
-    // might still exist. The session-tool surface MUST NOT fall back to
-    // the stale router entry — that would silently leak data from a
-    // different project.
+    // exist. Auth would not populate ctx.project, but a leftover router entry
+    // from a previous session might still exist. The session-tool surface MUST
+    // NOT fall back to the stale router entry — that would silently leak data
+    // from a different project — and no longer falls back to global either.
     const leftoverProject = projects.create({ slug: 'leftover', displayName: null });
     memory.save(
       {
@@ -336,12 +336,9 @@ describe('resolveEffectiveScope — path-scoped connections override router', ()
     );
     const { isError, payload } = decode(r);
 
-    expect(isError).toBeFalsy();
-    expect(payload.scope).toBe('global');
-    const recent = payload.recentMemories as Array<{ snippet: string }>;
-    expect(recent.some((m) => m.snippet.includes('leftover memory that must not leak'))).toBe(
-      false,
-    );
+    expect(isError).toBe(true);
+    expect(payload.code).toBe('project_not_found');
+    expect(payload.recentMemories).toBeUndefined();
   });
 
   it('ctx.project set (path-scoped, valid slug) → uses ctx.project regardless of router', async () => {

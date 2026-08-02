@@ -32,6 +32,12 @@ export class DomainError extends Error {
   constructor(
     public readonly code: DomainErrorCode,
     message: string,
+    /**
+     * Machine-readable extras `errToMcp` merges into the response body, so a
+     * thrown error can carry what a hand-built `mcpError` would (e.g.
+     * `suggestedSlugs` on `project_not_found`). The HTTP mapper drops them.
+     */
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'DomainError';

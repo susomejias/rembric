@@ -16,7 +16,7 @@ Header: Authorization: Bearer <agent-token>
 ```
 
 - `/mcp` → global scope. The agent operates user-wide until it calls `project.use({slug})`.
-- `/mcp/<slug>` → path-scoped. The agent is locked to that project; `scope=global` saves are rejected with `code: scope_locked`.
+- `/mcp/<slug>` → path-scoped. The agent is locked to that project; `scope=global` saves are rejected with `code: scope_locked`. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never treated as a user-wide connection. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 

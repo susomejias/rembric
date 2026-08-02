@@ -270,6 +270,18 @@ export function isAuthorized(
   return false;
 }
 
+/**
+ * The single project a token is pinned to, or null for `*` / `read:*`. Derived
+ * from the scope string rather than `tokens.project_id`, which the only
+ * production creation path leaves NULL — the scope string is what
+ * `isAuthorized` compares against.
+ */
+export function pinnedProjectId(scope: TokenScope): string | null {
+  if (scope.startsWith('read:project:')) return scope.slice('read:project:'.length);
+  if (scope.startsWith('project:')) return scope.slice('project:'.length);
+  return null;
+}
+
 /** Derive an HMAC-based session-signing key from a base secret. */
 export function deriveSessionKey(baseSecret: string): Buffer {
   return createHmac('sha256', baseSecret).update('rembric:session').digest();

@@ -121,4 +121,18 @@ Three possibilities:
 
 ### `code: scope_locked`
 
-You connected to `/mcp/<slug>` and asked for `scope=global`. Open a second connection at `/mcp` for user-wide writes.
+You connected to `/mcp/<slug>` and asked for `scope=global`. User-wide memory is not reachable from a path-scoped connection: save it as `scope=project` instead, or add a second, path-less `/mcp` entry to the client's MCP config. The agent cannot do the latter itself — the bridge derives its URL path from `.rembric`, so only an operator can add another entry.
+
+### `code: project_not_found`
+
+The slug in the URL path names no project, so the connection has no scope to operate in and every memory tool refuses. It is **not** silently treated as a user-wide connection. The response carries `suggestedSlugs[]` (nearest existing slugs by edit distance), which usually names the intended project after a typo.
+
+Three remedies:
+
+1. **Correct the slug.** Fix `PROJECT_SLUG` in the repo's `.rembric` (or the `REMBRIC_PROJECT` env var) to match an existing project.
+2. **Create the project.** Add it at `/dashboard/projects`, using the exact slug the client is requesting.
+3. **Let the agent create it.** `project.use({slug: '<the path slug>', autocreate: true})` works from the refusing connection itself and needs a token authorized to write.
+
+`project.use`, `project.list`, `project.current` and `memory.about` keep working throughout — they resolve no scope, so the connection is never stuck.
+
+A committed `.rembric` is the usual cause: `apps/plugin/README.md` recommends committing it when a team shares one Rembric project, and every teammate whose own server lacks that project gets this error.

@@ -25,7 +25,7 @@ export function mcpError(code: string, message: string, extra?: Record<string, u
  */
 export function errToMcp(err: unknown) {
   if (err instanceof DomainError) {
-    return mcpError(err.code, err.message);
+    return mcpError(err.code, err.message, err.details);
   }
   const errorId = logInternalError(err, 'unhandled MCP tool error');
   return mcpError('internal_error', 'An unexpected error occurred.', { errorId });

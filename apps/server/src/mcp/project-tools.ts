@@ -125,7 +125,7 @@ function handleUse(
   }
 
   try {
-    assertAuthorized('read', projectScope(project.id));
+    assertAuthorized('read', projectScope(project.id), deps);
   } catch (err) {
     return errToMcp(err);
   }
@@ -234,7 +234,7 @@ async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>
 
   const activeProjectId = entry?.projectId ?? ctx.project?.id ?? null;
   try {
-    assertAuthorized('read', activeProjectId ? projectScope(activeProjectId) : SCOPE_GLOBAL);
+    assertAuthorized('read', activeProjectId ? projectScope(activeProjectId) : SCOPE_GLOBAL, deps);
   } catch (err) {
     return errToMcp(err);
   }

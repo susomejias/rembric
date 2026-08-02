@@ -45,6 +45,7 @@ import {
   routerKey,
   serializeMemory,
   snippet,
+  unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
@@ -765,18 +766,15 @@ async function handleSave(
     return mcpError(
       'scope_locked',
       `This MCP connection is path-scoped to project '${ctx.requestedSlug}'. ` +
-        'Global writes are not permitted on this connection. To save a ' +
-        "user-wide memory, open a separate MCP connection at '/mcp' (no " +
-        'project slug) with the same token.',
+        'Global writes are not permitted and user-wide memory is not reachable ' +
+        "here. Save this as a project memory instead (scope='project'), or ask " +
+        "your operator to add a path-less '/mcp' entry for user-wide memory.",
     );
   }
 
   // Path-scoped to a slug that doesn't exist: writes need an existing project.
-  if (isPathScoped() && !ctx.project && args.scope === 'project') {
-    return mcpError(
-      'project_not_found',
-      `project '${ctx.requestedSlug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
-    );
+  if (ctx.requestedSlug !== null && !ctx.project && args.scope === 'project') {
+    return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
   }
 
   // Pick up the project the agent already activated via `project.use` on
@@ -809,7 +807,7 @@ async function handleSave(
   }
 
   try {
-    assertAuthorized('write', scope);
+    assertAuthorized('write', scope, deps);
   } catch (err) {
     return errToMcp(err);
   }
@@ -925,9 +923,10 @@ async function handleSearch(
     relations_limit?: number;
   },
 ) {
-  const { scope } = await resolveEffectiveScope(deps);
+  let scope: Scope;
   try {
-    assertAuthorized('read', scope);
+    scope = (await resolveEffectiveScope(deps)).scope;
+    assertAuthorized('read', scope, deps);
   } catch (err) {
     return errToMcp(err);
   }
@@ -1063,16 +1062,16 @@ async function handleGet(
   deps: MemoryToolDeps,
   args: { id?: string; ids?: string[]; relations_limit?: number },
 ) {
-  const { scope } = await resolveEffectiveScope(deps);
-
-  const hasId = typeof args.id === 'string' && args.id.length > 0;
-  const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
-  if (hasId === hasIds) {
-    return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-  }
-
   try {
-    assertAuthorized('read', scope);
+    const { scope } = await resolveEffectiveScope(deps);
+
+    const hasId = typeof args.id === 'string' && args.id.length > 0;
+    const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
+    if (hasId === hasIds) {
+      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+    }
+
+    assertAuthorized('read', scope, deps);
     if (args.ids !== undefined) {
       const batchBudget = annotationBudgetError(
         'ids',
@@ -1184,16 +1183,17 @@ async function handleConfirm(
   },
 ) {
   const ctx = getRequestContext();
-  const { scope } = await resolveEffectiveScope(deps);
-
-  const hasId = typeof args.id === 'string' && args.id.length > 0;
-  const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
-  if (hasId === hasIds) {
-    return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-  }
 
   try {
-    assertAuthorized('write', scope);
+    const { scope } = await resolveEffectiveScope(deps);
+
+    const hasId = typeof args.id === 'string' && args.id.length > 0;
+    const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
+    if (hasId === hasIds) {
+      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
+    }
+
+    assertAuthorized('write', scope, deps);
     // An explicit sessionId wins; otherwise fall back to the unambiguous
     // active session for (token, project) — either way
     // confirmations.session_id stops being permanently NULL. See
@@ -1229,9 +1229,9 @@ async function handleConfirm(
 }
 
 async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
-  const { scope } = await resolveEffectiveScope(deps);
   try {
-    assertAuthorized('write', scope);
+    const { scope } = await resolveEffectiveScope(deps);
+    assertAuthorized('write', scope, deps);
     deps.memory.archive(args.id, scope);
     return ok({ ok: true, id: args.id, status: 'archived' as const });
   } catch (err) {
