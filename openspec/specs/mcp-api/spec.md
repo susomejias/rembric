@@ -243,15 +243,50 @@ Each result row SHALL additionally carry the derived review metadata for the mem
 
 When the text-query branch abstains, the response SHALL carry an explicit flag and a reason, and the tool description SHALL instruct the agent that an abstaining response means no relevant memory exists — not that it should proceed on assumption. An empty result that the model interprets as "search is broken" or fills in from its own priors is worse than a populated one.
 
+Abstention has two causes (see the `memory` capability, "Recall MUST be able to return nothing") and the response SHALL distinguish them: the reason accompanying an abstention caused by an empty fused pool SHALL differ from the reason accompanying the relevance floor's verdict. A single reason string covering both would attribute the verdict to whichever mechanism the string happens to name, and on the shipped configuration that is a mechanism that never ran.
+
+A response that returns no results SHALL NOT be treated as sufficient evidence of abstention, and no tool description SHALL teach that equivalence. An `offset` past the end of a non-empty pool returns an empty page with `abstained: false`, and that is specified behaviour rather than an inconsistency.
+
+Because a page may be shortened by the enabled relevance filter rather than exhausted by the corpus, and because those two states are otherwise byte-identical in the response, `memory.search` SHALL carry an additional flag — `gateShortened` — under the exact condition the `memory` capability defines for it. It SHALL be declared in the tool's `outputSchema` as an OPTIONAL literal `true` rather than an optional boolean, SHALL be present and `true` only when that condition holds, and SHALL be OMITTED otherwise rather than emitted as `false`, matching the existing conditional fields on the same response (`abstainReason`, `viaEntity`, `entityIndexDraining`). The literal form makes the omit-rather-than-`false` rule self-enforcing rather than merely documented: emitting `false` fails the declared output schema and the call is rejected (`-32602`, `Invalid literal value, expected true`) instead of a silently wrong payload reaching the agent. Being additive and optional, it SHALL NOT change the `text` content block's meaning for a client that ignores it, and SHALL NOT be required by any existing client.
+
+The `memory.search` description SHALL state what an abstaining response means and what the shortening flag means, in terms of the OBSERVABLE outcome rather than by naming the mechanism that produced it, so that the description stays true when a gate's enabled state changes. In particular, while the abstention floor is disabled the description SHALL NOT attribute abstention to that floor. This content obligation is bounded by "Tool descriptions MUST stay below the client truncation ceiling" and SHALL be satisfied within the existing cap by replacing text rather than appending it; the cap SHALL NOT be raised to accommodate it.
+
 #### Scenario: An abstaining response is distinguishable from an error
 
 - **WHEN** `memory.search` abstains
 - **THEN** the call SHALL succeed with an explicit abstention flag and reason, and SHALL NOT return an error code
 
+#### Scenario: The two abstention causes carry different reasons
+
+- **WHEN** `memory.search` abstains because the fused pool was empty, and the same tool abstains because no pool row reached the floor
+- **THEN** the two responses SHALL carry different reason strings, and the floor's string SHALL be unchanged from the one already shipped
+
+#### Scenario: A gate-shortened page is marked as such over the MCP boundary
+
+- **GIVEN** a scope in which the relevance filter removes candidates from the fused pool for a given query
+- **WHEN** an MCP client calls `memory.search` with a `limit` larger than the number of surviving rows
+- **THEN** the response SHALL carry `gateShortened: true` alongside `abstained: false`
+- **AND** an `offset` past the surviving rows but still inside the fused pool SHALL also carry `gateShortened: true` — without the gate that page would have held rows, so the gate is why it ran out
+- **AND** an `offset` at or past the end of the fused pool SHALL carry `abstained: false` and NO `gateShortened` field — that page is empty because the caller paged past every candidate, gate or no gate, and the flag would promise a recovery that paging cannot deliver
+
+#### Scenario: The shortening flag is absent rather than false
+
+- **WHEN** `memory.search` returns a page the relevance filter did not shorten
+- **THEN** the response object SHALL NOT contain a `gateShortened` key
+- **AND** the response SHALL still validate against the tool's declared `outputSchema`
+- **AND** this SHALL hold for an `offset` past the end of a non-empty pool the filter removed nothing from — an empty page whose cause is the offset, not the gate, is the control that keeps the flag's two conjuncts honest
+
 #### Scenario: The description steers against confabulation
 
 - **WHEN** the `memory.search` tool description is inspected
 - **THEN** it SHALL state that an abstaining response means no relevant memory exists and that the agent SHALL NOT substitute assumed context
+
+#### Scenario: The description does not name a disabled mechanism
+
+- **GIVEN** the abstention floor ships disabled
+- **WHEN** a CI test inspects the `memory.search` description obtained from a real `tools/list` response
+- **THEN** the description SHALL NOT attribute abstention to the relevance floor
+- **AND** the test SHALL fail if that attribution is reintroduced
 
 ### Requirement: The `memory.get` tool MUST return the memory and its history
 
@@ -412,6 +447,10 @@ The server SHALL return MCP-conformant errors for invalid operations, including 
 
 The descriptions of `memory.save`, `memory.search`, `memory.get`, and `memory.confirm` SHALL begin with a "Call this WHEN …" trigger list before documenting the request/response shape. The request and response shapes themselves are unchanged. In addition, the `memory.search` description SHALL advertise that results are ranked by hybrid semantic + keyword relevance (vector similarity combined with FTS5) — so the agent knows paraphrases and cross-lingual queries match, not only exact keywords — and SHALL advertise the result-page affordance: results are a small default page that can be widened by passing a larger `limit` or paged with `offset` when more relevant results are needed. These additions SHALL NOT remove or weaken the recall trigger.
 
+The `memory.search` description SHALL additionally name the shortening flag and say what a short page does and does not imply: that the corpus is not necessarily exhausted. Ranked retrieval returns the best available rows whether or not any of them is relevant, so the description SHALL also state that a full page is not evidence that its rows are relevant. That sentence is the only mitigation available at the description layer for a ranked branch with no absolute relevance threshold, and it is required for the same reason the anti-confabulation instruction is.
+
+Every content obligation in this requirement SHALL be satisfied within `DESCRIPTION_MAX_LENGTH`. Where a new obligation cannot fit, text SHALL be reclaimed from clauses no requirement mandates, and the reclaimed clause SHALL be named in the change that removes it — not appended past the cap, and not paid for by raising the cap.
+
 #### Scenario: `memory.save` description teaches the trigger list
 
 - **WHEN** an MCP client retrieves the tool description for `memory.save` via `tools/list`
@@ -427,6 +466,16 @@ The descriptions of `memory.save`, `memory.search`, `memory.get`, and `memory.co
 - **WHEN** an MCP client retrieves the tool description for `memory.search`
 - **THEN** the description SHALL convey that ranking is hybrid semantic + keyword (so paraphrases / cross-lingual queries match), and SHALL convey that the default result page is small and can be widened via `limit` or paged via `offset`
 - **AND** the description SHALL still contain the recall trigger wording from the prior scenario
+
+#### Scenario: `memory.search` description explains a short page and a full one
+
+- **WHEN** an MCP client retrieves the tool description for `memory.search`
+- **THEN** the description SHALL name the shortening flag, SHALL state that a short page does not mean the corpus is exhausted, and SHALL state that a full page is not proof that its rows are relevant
+
+#### Scenario: A reworded description is still within the cap
+
+- **WHEN** the `memory.search` description is changed to satisfy a new content obligation
+- **THEN** its `String.length` measured from a real `tools/list` response SHALL remain at or below `DESCRIPTION_MAX_LENGTH`, and the change SHALL record the measured length and the remaining headroom
 
 #### Scenario: An accidental edit removes the protocol-teaching phrase
 
@@ -700,6 +749,10 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 
 The relevance channel is filled in two passes, in this order. First, an **entity pre-pass**: identifiers recognised in the seed text by the deterministic extractor are looked up as exact addresses, and their linked in-scope memories are admitted first, because an exact identifier match is stronger evidence than any ranked score. Second, if the channel is still under its cap, the scoped hybrid search that backs `memory.search` fills the remainder. Rows are deduped by id across both passes, and each row SHALL carry a `via` field (`'entity'` | `'ranked'`) naming the pass that found it, so the two populations stay distinguishable in the response — the same observability `memory.search`'s entity flag provides.
 
+The ranked pass's verdict SHALL NOT be discarded. Withholding it makes an empty or short relevance channel indistinguishable from a channel the search deliberately declined to fill, which is the same defect on this surface as it is on `memory.search`. The response SHALL therefore carry the ranked pass's abstention flag, its reason when abstaining, and its shortening flag, grouped under a single OPTIONAL response field so that one presence check answers "did the ranked pass run at all". Inside that field the flag names SHALL match `memory.search`'s, so the two surfaces read identically.
+
+That field SHALL be present ONLY when the ranked pass actually executed. Two paths skip it — no derivable seed, and an entity pre-pass that already filled the channel to its cap — and reporting `abstained: false` for a search that never ran would assert a verdict the server never measured. Its shortening flag describes the ranked pass's own page against the limit THAT PASS requested, not the channel's cap: the channel MAY therefore be full while the shortening flag is set, and the requirement is that this be stated rather than that the pass's limit be changed.
+
 When `focus` is absent, the server SHALL derive a seed from signals it already holds for the connection — the active project, the session's working directory, and the most recent curated prompts — so an agent that does not know to pass `focus` still receives relevance. When no seed can be derived, the relevance channel SHALL be empty rather than absent, and the recency channel SHALL still be returned.
 
 #### Scenario: An explicit focus drives the relevance channel
@@ -725,6 +778,25 @@ When `focus` is absent, the server SHALL derive a seed from signals it already h
 - **GIVEN** a `focus` containing no extractable identifier
 - **WHEN** `memory.context` is called
 - **THEN** `relevantMemories[]` SHALL be filled entirely by the ranked pass
+
+#### Scenario: The ranked pass reports an empty pool
+
+- **GIVEN** a `focus` for which both retrieval branches return no candidate in scope
+- **WHEN** `memory.context` is called
+- **THEN** `relevantMemories[]` SHALL be empty and the response SHALL report the ranked pass as abstaining, with the empty-pool reason
+
+#### Scenario: The ranked pass reports a gate-shortened page
+
+- **GIVEN** a `focus` for which the relevance filter removes candidates and leaves fewer rows than the ranked pass requested
+- **WHEN** `memory.context` is called
+- **THEN** the response SHALL report the ranked pass's shortening flag alongside `abstained: false`
+
+#### Scenario: A skipped ranked pass reports nothing
+
+- **GIVEN** an entity pre-pass that fills the relevance channel to its cap
+- **WHEN** `memory.context` is called
+- **THEN** the ranked-pass field SHALL be absent from the response, rather than reporting `abstained: false`
+- **AND** the same SHALL hold when no seed can be derived
 
 #### Scenario: A seed is derived when focus is omitted
 
@@ -2051,7 +2123,7 @@ Every tool description returned by `tools/list` SHALL be at most `DESCRIPTION_MA
 
 The cap guards a **verified external client limit**, not a self-imposed budget. Claude Code truncates each MCP tool description at 2,048 characters and appends `… [truncated]` (`prompt(){ return U.length > LB ? ma(U, LB) + "… [truncated]" : U }` with `LB = 2048`, verified in the 2.1.220 binary). This distinguishes it from the `instructions` cap, which is set far below its own client ceiling for token-cost reasons (see "The MCP `initialize` response MUST ship a protocol-teaching `instructions` block"). The 148-character margin between 1,900 and 2,048 exists so the guard fires on an edit that APPROACHES the ceiling: a cap set at 2,048 passes at exactly 2,048 and loses content at 2,049, giving no warning.
 
-Truncation is a tail cut, so the LAST content of a description is what is lost first. For `memory.search` the tail is the abstention instruction this specification mandates (see "An abstaining search response MUST tell the agent not to invent context"), which is why an untested ceiling is a live hazard rather than a theoretical one. The cap SHALL NOT be interpreted as a prohibition on description content: content requirements elsewhere in this specification remain authoritative, and this requirement obliges only that they be satisfied within the cap.
+Truncation is a tail cut, so the LAST content of a description is what is lost first. For `memory.search` the tail is the abstention-and-shortening guidance this specification mandates — the abstention instruction (see "An abstaining search response MUST tell the agent not to invent context") followed by the shortening flag and the full-page caveat (see "The four existing memory tools MUST advertise protocol-teaching descriptions") — which is why an untested ceiling is a live hazard rather than a theoretical one. The cap SHALL NOT be interpreted as a prohibition on description content: content requirements elsewhere in this specification remain authoritative, and this requirement obliges only that they be satisfied within the cap.
 
 A future requirement that mandates ADDITIONAL description content SHALL either fit within the cap or raise the cap deliberately, preserving a margin below the then-current verified client ceiling and recording the new ceiling's provenance. Raising the cap to remove a CI failure without re-verifying the ceiling SHALL NOT be treated as satisfying this requirement.
 

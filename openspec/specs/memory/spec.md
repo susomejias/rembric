@@ -369,9 +369,15 @@ At that point the two gates are:
 - The **floor** is absolute and is compared against the highest relevance level in the **whole fused pool**, not a `limit + offset` prefix of it. When no row in the pool reaches the floor, the response SHALL contain no results and SHALL carry an explicit abstention flag and a reason. Levelling a prefix would make both gates a function of the page requested and of the order the branches happened to fuse in: a deeper page widens the prefix and can only raise the leader, so the same query against the same corpus could abstain at one offset and not at the next, and a row the filter judged relevant could be cut from the pool the page is then sliced out of.
 - The **relative filter** keeps a row only while its level is at or above `ratio × leaderLevel`, where `leaderLevel` is the same pool maximum the floor used, and preserves fused order. It is a per-row test **relative to the best level**, not a truncation at the first consecutive-pair drop: a gradually decaying tail passes every consecutive test and so returns rows far below the leader, and over a level sequence that is not monotone in fused order, truncating at the first offender discards strictly better rows behind it.
 
-A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant".
+Abstention has exactly **two** causes, and the response SHALL name which one spoke. The floor is one. The other is an **empty fused pool**: when both retrieval branches return no candidate at all, the response SHALL report `abstained: true` with a reason string DISTINCT from the floor's, because attributing the verdict to a gate that did not run is a false statement about the search. This verdict is a property of the POOL, not of the returned page, and SHALL NOT be inferred from an empty response: an `offset` beyond a NON-empty pool yields an empty page (see "BREAKING — offset is best-effort on the hybrid branch") and SHALL keep reporting `abstained: false`, because candidates existed and the caller paged past them. A reader who takes "empty response implies abstention" away from this requirement has read it wrong.
 
-Each gate is independently enabled or disabled, and the shipped state of each is recorded once, in "Retrieval and lifecycle constants MUST be named and bounded in one place", so that this requirement does not have to be edited whenever a constant moves. While BOTH gates are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist. While EITHER gate is enabled the branch SHALL compute levels for the whole fused pool, and the cost of doing so SHALL be measured against a stated budget at 1 000, 20 000 and 50 000 memory rows before the enabling change lands.
+The empty-pool verdict is NOT a gate. It SHALL hold whatever the gates' shipped state, SHALL require no relevance level to be computed, and SHALL add no database read — an empty pool is observable from the fused candidate list already in hand. It applies to the text-query branch only: the exact-address entity branch and the no-query chronological listing SHALL continue to report `abstained: false` on an empty result, the former because it has its own index-lag signal and no relevance level, the latter because it paginates exactly and an empty page there is an ordinary end of list.
+
+A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict or the empty pool's, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant". Because `abstained: false` alone cannot make that second distinction, the branch SHALL additionally report **`gateShortened`** when, and only when, ALL THREE hold: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested limit, AND the requested `offset` still falls inside the fused pool. All three conditions are load-bearing. Without the removal condition, a page short because the pool itself was small would falsely blame the gate. Without the shortness condition, a full page sliced out of a heavily-filtered pool would carry a signal about rows the caller was never going to receive on this page. Without the offset condition, a page the caller emptied by paging past every candidate — one the ungated branch would have returned empty too — would blame the gate for an emptiness it did not cause. Together they answer the one question a short page raises: whether paging further or widening the query could recover anything the gate withheld.
+
+`gateShortened` and the empty-pool abstention SHALL NOT both be reported for the same response, and this SHALL hold by construction rather than by an added check: the relative filter always retains the pool leader, so a non-empty pool yields a non-empty filtered pool, and an empty pool gives the filter nothing to remove.
+
+Each gate is independently enabled or disabled, and the shipped state of each is recorded once, in "Retrieval and lifecycle constants MUST be named and bounded in one place", so that this requirement does not have to be edited whenever a constant moves. While BOTH gates are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist, and SHALL report no `gateShortened` — a disabled filter removes nothing. While EITHER gate is enabled the branch SHALL compute levels for the whole fused pool, and the cost of doing so SHALL be measured against a stated budget at 1 000, 20 000 and 50 000 memory rows before the enabling change lands.
 
 #### Scenario: A question-shaped query is not carried by its function words
 
@@ -384,6 +390,20 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **GIVEN** the floor is enabled with a calibrated value, and a scope whose memories are all unrelated to the query
 - **WHEN** `memory.search` is called
 - **THEN** the response SHALL contain no results and SHALL report abstention with a reason
+
+#### Scenario: An empty fused pool abstains with its own reason
+
+- **GIVEN** a text query for which both retrieval branches return no candidate — for example a `type` filter matching no row in scope, or an empty scope
+- **WHEN** `memory.search` is called
+- **THEN** the response SHALL contain no results, SHALL report `abstained: true`, and SHALL carry a reason string that is NOT the floor's reason
+- **AND** the verdict SHALL be reached with both gates disabled, without computing any relevance level
+
+#### Scenario: An empty page over a non-empty pool is not an abstention
+
+- **GIVEN** a text query whose fused pool holds candidates, and an `offset` past the last of them
+- **WHEN** `memory.search` is called
+- **THEN** the response SHALL contain no results and SHALL report `abstained: false`, carrying no reason
+- **AND** the same query at `offset: 0` SHALL return results, proving the pool was non-empty
 
 #### Scenario: A gate decision does not change when the corpus grows
 
@@ -408,18 +428,41 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **GIVEN** the relative filter is enabled, and a scope containing one strongly-matching memory and several weak ones
 - **WHEN** `memory.search` is called with a limit larger than one
 - **THEN** the weak results below `ratio × leaderLevel` SHALL be omitted, and the response SHALL NOT be padded to the requested limit
+- **AND** the response SHALL report `gateShortened`
 
 #### Scenario: A short page is distinguishable from an abstention
 
 - **GIVEN** the relative filter is enabled and it drops every row but two, while the leader clears the floor
 - **WHEN** `memory.search` is called with a limit of 8
 - **THEN** the response SHALL contain two results and SHALL report `abstained: false`
+- **AND** the response SHALL report `gateShortened`, so the two rows are distinguishable from a scope holding only two candidates
+
+#### Scenario: A full page over a filtered pool reports no shortening
+
+- **GIVEN** the relative filter is enabled and it removed rows from a pool that still holds at least `limit` survivors
+- **WHEN** `memory.search` is called with that limit
+- **THEN** the response SHALL contain exactly `limit` results and SHALL NOT report `gateShortened`
+
+#### Scenario: A short page the gate did not cause reports no shortening
+
+- **GIVEN** a text query whose fused pool holds fewer rows than the requested limit and from which the relative filter removes nothing
+- **WHEN** `memory.search` is called
+- **THEN** the response SHALL contain every pool row, SHALL report `abstained: false`, and SHALL NOT report `gateShortened`
+
+#### Scenario: A page paged past the whole pool reports no shortening
+
+- **GIVEN** the relative filter is enabled and it removed rows from a pool, and an `offset` at or past the end of that fused pool
+- **WHEN** `memory.search` is called
+- **THEN** the response SHALL be empty, SHALL report `abstained: false`, and SHALL NOT report `gateShortened` — the ungated branch returns that same empty page, so the gate is not its cause
+- **AND** an `offset` past the filter's survivors but still inside the fused pool SHALL report `gateShortened`, because there the ungated page would have held rows
 
 #### Scenario: Abstention is off by default
 
 - **GIVEN** both the floor and the relative filter are disabled
 - **WHEN** `memory.search` is called
 - **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic
+- **AND** no response SHALL report `gateShortened`
+- **AND** a query whose fused pool is empty SHALL still report `abstained: true` with the empty-pool reason
 
 ### Requirement: The relevance level's term statistics MUST come from the search index
 
