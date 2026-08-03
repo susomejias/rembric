@@ -15,7 +15,7 @@ import { agentSessions } from '../db/schema/agent-sessions.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
-import { ABSTENTION_FLOOR } from '../services/hybrid-search.js';
+import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
 import { ProjectsService } from '../services/projects.js';
 import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
@@ -61,6 +61,7 @@ async function findFreePort(): Promise<number> {
 interface ToolResult {
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 }
 
 function readJson(result: ToolResult): unknown {
@@ -411,7 +412,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('marks a gate-shortened page over the MCP boundary, including past the survivors, and leaves an unfiltered deep offset unmarked', async () => {
+  it('marks a gate-shortened page over the MCP boundary inside the pool, and leaves both a past-the-pool offset and an unfiltered deep offset unmarked', async () => {
     const projects = new ProjectsService(createRepositories(server.dbHandle.db));
     const shortened =
       projects.findBySlug('integration-gate-short') ??
@@ -431,40 +432,82 @@ describe('MCP protocol conformance', () => {
     // One row carrying every query term, four carrying one common term: the
     // relative filter cuts the four, leaving a page short of `limit`.
     const shortClient = await connect({ projectSlug: shortened.slug });
+    // Arms the CLIENT-side output-schema validator, which the SDK compiles only
+    // in `cacheToolMetadata` — reachable from `listTools` alone (client/index.js
+    // :540-563). The server validates its own output regardless; this puts the
+    // consumer's ajv pass in the loop too, so `structuredContent` is checked by
+    // both ends rather than only by the assertions below.
+    await shortClient.listTools();
     await save(shortClient, 'Quetzal ledger', 'quetzal ledger obsidian marmot tessellate');
     for (let i = 0; i < 4; i++) await save(shortClient, `Marmot ${i}`, `marmot sighting ${i}`);
-    const gated = readJson(
-      (await shortClient.callTool({
-        name: 'memory.search',
-        arguments: { query: 'quetzal ledger obsidian marmot tessellate', limit: 8 },
-      })) as ToolResult,
-    ) as { count: number; abstained: boolean; gateShortened?: boolean };
+    const gatedResult = (await shortClient.callTool({
+      name: 'memory.search',
+      arguments: { query: 'quetzal ledger obsidian marmot tessellate', limit: 8 },
+    })) as ToolResult;
+    const gated = readJson(gatedResult) as {
+      count: number;
+      abstained: boolean;
+      gateShortened?: boolean;
+    };
     expect(gated.count).toBeGreaterThan(0);
     expect(gated.count).toBeLessThan(8);
     expect(gated.abstained).toBe(false);
     expect(gated.gateShortened).toBe(true);
+    expect(gatedResult.structuredContent).toMatchObject({
+      abstained: false,
+      gateShortened: true,
+    });
 
-    // Same gated pool, paged past the survivors: still the gate's doing, so the
-    // flag holds. Empty here is not abstention — the pool was never empty.
-    const gatedDeep = readJson(
-      (await shortClient.callTool({
+    // Same gated pool, paged past the single survivor but still inside the
+    // five-row pool: the ungated page there holds rows, so the gate is why this
+    // one ran out. Empty here is not abstention — the pool was never empty.
+    const gatedDeepResult = (await shortClient.callTool({
+      name: 'memory.search',
+      arguments: {
+        query: 'quetzal ledger obsidian marmot tessellate',
+        limit: 2,
+        offset: 4,
+      },
+    })) as ToolResult;
+    const gatedDeep = readJson(gatedDeepResult) as Record<string, unknown>;
+    expect(gatedDeep.count).toBe(0);
+    expect(gatedDeep.abstained).toBe(false);
+    expect(gatedDeep.gateShortened).toBe(true);
+    expect(gatedDeepResult.structuredContent).toMatchObject({
+      abstained: false,
+      gateShortened: true,
+    });
+
+    // Same gated pool again, now paged AT and PAST the pool's end. The ungated
+    // page is empty here too, so the gate is not the cause and the flag would
+    // promise a recovery paging cannot deliver.
+    for (const offset of [5, 50]) {
+      const pastPoolResult = (await shortClient.callTool({
         name: 'memory.search',
         arguments: {
           query: 'quetzal ledger obsidian marmot tessellate',
           limit: 2,
-          offset: 5,
+          offset,
         },
-      })) as ToolResult,
-    ) as Record<string, unknown>;
+      })) as ToolResult;
+      const pastPool = readJson(pastPoolResult) as Record<string, unknown>;
+      expect(pastPool.count, `offset ${offset}`).toBe(0);
+      expect(pastPool.abstained, `offset ${offset}`).toBe(false);
+      expect(pastPool, `offset ${offset}`).not.toHaveProperty('gateShortened');
+      expect(pastPoolResult.structuredContent, `offset ${offset}`).not.toHaveProperty(
+        'gateShortened',
+      );
+      expect(pastPoolResult.structuredContent, `offset ${offset}`).toMatchObject({
+        abstained: false,
+      });
+    }
     await shortClient.close();
-    expect(gatedDeep.count).toBe(0);
-    expect(gatedDeep.abstained).toBe(false);
-    expect(gatedDeep.gateShortened).toBe(true);
 
     // Control: three equally-relevant rows, so the filter removes nothing. The
     // page past the end is empty because the caller paged past the pool, and
     // that is not the gate's doing.
     const deepClient = await connect({ projectSlug: untouched.slug });
+    await deepClient.listTools();
     for (let i = 0; i < 3; i++)
       await save(deepClient, `Basalt ${i}`, 'basalt cistern verdigris palimpsest');
     const deep = readJson(
@@ -478,6 +521,50 @@ describe('MCP protocol conformance', () => {
     expect(deep.abstained).toBe(false);
     expect(deep).not.toHaveProperty('gateShortened');
     expect(deep).not.toHaveProperty('abstainReason');
+  });
+
+  it('publishes the verdict on both search branches: a listing that never ranked still says abstained: false, and an abstention carries its reason', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const p =
+      projects.findBySlug('integration-verdict') ??
+      projects.create({ slug: 'integration-verdict' });
+    const client = await connect({ projectSlug: p.slug });
+    await client.listTools();
+    const saved = (await client.callTool({
+      name: 'memory.save',
+      arguments: { type: 'project', title: 'Cinnabar rota', content: 'cinnabar rota kestrel' },
+    })) as ToolResult;
+    expect(saved.isError).toBeFalsy();
+
+    // No-query listing: the ranked pass never runs, so there is no verdict to
+    // forward — but `abstained` is REQUIRED by the published output schema, so
+    // the branch must still assert its own `false` rather than omit the field.
+    const listing = (await client.callTool({
+      name: 'memory.search',
+      arguments: { limit: 5 },
+    })) as ToolResult;
+    const listed = readJson(listing) as Record<string, unknown>;
+    expect(listed.count).toBeGreaterThan(0);
+    expect(listed).toHaveProperty('abstained', false);
+    expect(listing.structuredContent).toHaveProperty('abstained', false);
+    expect(listed).not.toHaveProperty('abstainReason');
+
+    // A `type` filter matching no row empties the fused pool, which is the only
+    // abstention reachable with an embedder wired: sqlite-vec returns neighbours
+    // whatever their distance, so a populated scope never abstains on distance.
+    const abstained = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'cinnabar rota kestrel', type: 'user' },
+    })) as ToolResult;
+    const missed = readJson(abstained) as Record<string, unknown>;
+    await client.close();
+    expect(missed.count).toBe(0);
+    expect(missed).toHaveProperty('abstained', true);
+    expect(missed).toHaveProperty('abstainReason', EMPTY_POOL_REASON);
+    expect(abstained.structuredContent).toMatchObject({
+      abstained: true,
+      abstainReason: EMPTY_POOL_REASON,
+    });
   });
 
   it('keeps every tool description under the client truncation ceiling', async () => {

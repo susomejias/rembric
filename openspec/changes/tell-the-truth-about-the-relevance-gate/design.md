@@ -85,11 +85,11 @@ Reachability of the new state, since a state nothing reaches would just be a sec
 A second module constant beside `ABSTAIN_REASON`. Reusing `'no candidate cleared the relevance floor'` for an empty pool would attribute the verdict to a gate that is off and never ran — the same category of untruth this change exists to remove. The spec requires only that the two reasons be distinct and that the floor's be unchanged; the proposed wording is `'no candidate matched the query in this scope'`, which names the observable rather than a mechanism, so it stays true if the pool later empties for a different reason.
 
 **D4 — The field is `gateShortened`, fires on cause-and-effect, and is omitted otherwise.**
-Present and `true` iff **both**: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested `limit`. Omitted in every other case.
+Present and `true` iff **all three**: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested `limit`, AND the requested `offset` still falls inside the fused pool (`offset < poolSize`). Omitted in every other case.
 
-Both conjuncts are load-bearing. Without the removal test, a page short because the pool was small would claim the gate shortened it. Without the shortness test, a full page 1 of a heavily-gated pool would carry a flag that tells the caller nothing (nothing was withheld from _this_ page). The conjunction is exactly the question the caller has: "is there more behind this short page?"
+All three conjuncts are load-bearing. Without the removal test, a page short because the pool was small would claim the gate shortened it. Without the shortness test, a full page 1 of a heavily-gated pool would carry a flag that tells the caller nothing (nothing was withheld from _this_ page). Without the pool-boundary test, an `offset` at or past the end of the pool — where the ungated page is _also_ empty — would blame the gate for an emptiness the caller's own paging caused. The conjunction is exactly the question the caller has: "is there more behind this short page?"
 
-The deep-offset case discriminates the two candidate names. Consider pool 5, gate keeps 2, `limit: 2, offset: 2` → empty page, and the gate IS the cause (without it page 2 is full — the existing test at `hybrid-search.test.ts:898-905` proves precisely that with its `relativeLevelRatio: null` control). `gateShortened` fires: correct. Now pool 5, gate keeps 5, `limit: 2, offset: 4` → one row, short, gate removed nothing → flag absent: correct. The explorer's alternative `poolExhausted` inverts the framing and cannot express this: the second case _has_ exhausted the pool, so the name would demand `true` on the case that must stay silent. Rejected on that.
+The deep-offset case discriminates the two candidate names. Consider pool 5, gate keeps 2, `limit: 2, offset: 2` — an `offset` past the survivors but still **inside** the 5-row pool → empty page, and the gate IS the cause (without it page 2 is full — the existing test at `hybrid-search.test.ts:898-905` proves precisely that with its `relativeLevelRatio: null` control). `gateShortened` fires: correct. The same pool at `offset: 5` is the third conjunct's region: ungated it is empty too, so the flag stays absent. Now pool 5, gate keeps 5, `limit: 2, offset: 4` → one row, short, gate removed nothing → flag absent: correct. The explorer's alternative `poolExhausted` inverts the framing and cannot express this: the second case _has_ exhausted the pool, so the name would demand `true` on the case that must stay silent. Rejected on that.
 
 Optional-when-false rather than always-present-boolean, mirroring `viaEntity`, `entityIndexDraining` and `abstainReason` in the same response (`memory-tools.ts:1051-1054`). `abstained` stays always-present because it already is and removing it would be breaking.
 
@@ -127,7 +127,7 @@ The 26-char margin is an accepted consequence, recorded rather than hidden: the 
 The relevance channel switches from `deps.memory.search` to `searchWithAbstention` and gains one sibling field:
 
 ```
-rankedPass?: { abstained: boolean; reason?: string; gateShortened?: true }
+rankedPass?: { abstained: boolean; abstainReason?: string; gateShortened?: true }
 ```
 
 Present only when the ranked pass actually executed. Two paths skip it: no derivable `focusText` (`memory-tools.ts:1370`), and an entity pre-pass that already filled the channel to `RELEVANCE_LIMIT` (`:1410`, `if (byId.size < RELEVANCE_LIMIT)`). Emitting `abstained: false` for a search that never ran would be a claim the server did not measure — the same defect class as the dead flag.

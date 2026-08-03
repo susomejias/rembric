@@ -188,10 +188,13 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   const page = ids.slice(opts.offset, opts.offset + opts.limit);
   // Cause AND effect: without a removal a short page is ordinary corpus
   // exhaustion, and with a full page nothing was withheld from this caller.
+  // Past the pool the page is empty gate or no gate, so the gate is not its cause.
   return {
     ids: page,
     abstained: false,
-    ...(gateRemovedRows && page.length < opts.limit ? { gateShortened: true } : {}),
+    ...(gateRemovedRows && page.length < opts.limit && opts.offset < fused.length
+      ? { gateShortened: true }
+      : {}),
   };
 }
 

@@ -30,7 +30,7 @@ Abstention has exactly **two** causes, and the response SHALL name which one spo
 
 The empty-pool verdict is NOT a gate. It SHALL hold whatever the gates' shipped state, SHALL require no relevance level to be computed, and SHALL add no database read — an empty pool is observable from the fused candidate list already in hand. It applies to the text-query branch only: the exact-address entity branch and the no-query chronological listing SHALL continue to report `abstained: false` on an empty result, the former because it has its own index-lag signal and no relevance level, the latter because it paginates exactly and an empty page there is an ordinary end of list.
 
-A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict or the empty pool's, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant". Because `abstained: false` alone cannot make that second distinction, the branch SHALL additionally report **`gateShortened`** when, and only when, BOTH hold: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested limit. Both conditions are load-bearing. Without the removal condition, a page short because the pool itself was small would falsely blame the gate. Without the shortness condition, a full page sliced out of a heavily-filtered pool would carry a signal about rows the caller was never going to receive on this page. Together they answer the one question a short page raises: whether paging further or widening the query could recover anything the gate withheld.
+A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict or the empty pool's, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant". Because `abstained: false` alone cannot make that second distinction, the branch SHALL additionally report **`gateShortened`** when, and only when, ALL THREE hold: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested limit, AND the requested `offset` still falls inside the fused pool. All three conditions are load-bearing. Without the removal condition, a page short because the pool itself was small would falsely blame the gate. Without the shortness condition, a full page sliced out of a heavily-filtered pool would carry a signal about rows the caller was never going to receive on this page. Without the offset condition, a page the caller emptied by paging past every candidate — one the ungated branch would have returned empty too — would blame the gate for an emptiness it did not cause. Together they answer the one question a short page raises: whether paging further or widening the query could recover anything the gate withheld.
 
 `gateShortened` and the empty-pool abstention SHALL NOT both be reported for the same response, and this SHALL hold by construction rather than by an added check: the relative filter always retains the pool leader, so a non-empty pool yields a non-empty filtered pool, and an empty pool gives the filter nothing to remove.
 
@@ -105,6 +105,13 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **GIVEN** a text query whose fused pool holds fewer rows than the requested limit and from which the relative filter removes nothing
 - **WHEN** `memory.search` is called
 - **THEN** the response SHALL contain every pool row, SHALL report `abstained: false`, and SHALL NOT report `gateShortened`
+
+#### Scenario: A page paged past the whole pool reports no shortening
+
+- **GIVEN** the relative filter is enabled and it removed rows from a pool, and an `offset` at or past the end of that fused pool
+- **WHEN** `memory.search` is called
+- **THEN** the response SHALL be empty, SHALL report `abstained: false`, and SHALL NOT report `gateShortened` — the ungated branch returns that same empty page, so the gate is not its cause
+- **AND** an `offset` past the filter's survivors but still inside the fused pool SHALL report `gateShortened`, because there the ungated page would have held rows
 
 #### Scenario: Abstention is off by default
 
