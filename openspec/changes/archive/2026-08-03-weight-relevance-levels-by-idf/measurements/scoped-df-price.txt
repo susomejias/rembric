@@ -1,0 +1,33 @@
+corpus: 50000 memory rows, 6 scopes
+instrument: isolated statement time, p50 of 40
+
+control: scoped df <= global df on 228/228 (scope, term) pairs
+
+query      scope                  terms  A global  B scoped  marginal
+3 terms    global                 3          1.249    29.625   28.376
+3 terms    vol-0                  3          1.333    37.183   35.850
+3 terms    vol-1                  3          1.274    33.485   32.210
+3 terms    vol-2                  3          1.273    35.141   33.868
+3 terms    vol-3                  3          1.237    33.038   31.802
+3 terms    vol-4                  3          1.197    30.540   29.343
+6 terms    global                 6          2.312    51.943   49.631
+6 terms    vol-0                  6          2.356    61.003   58.647
+6 terms    vol-1                  6          2.382    63.461   61.079
+6 terms    vol-2                  6          2.365    62.307   59.942
+6 terms    vol-3                  6          2.271    62.053   59.781
+6 terms    vol-4                  6          2.291    62.866   60.576
+10 terms   global                 10         3.636    90.213   86.576
+10 terms   vol-0                  10         3.628   107.737  104.109
+10 terms   vol-1                  10         3.758   115.557  111.799
+10 terms   vol-2                  10         3.597    98.729   95.132
+10 terms   vol-3                  10         3.602    99.628   96.026
+10 terms   vol-4                  10         3.586    96.012   92.426
+19 terms   global                 19         2.351    52.529   50.178
+19 terms   vol-0                  19         2.367    61.463   59.096
+19 terms   vol-1                  19         2.380    59.059   56.679
+19 terms   vol-2                  19         2.383    62.430   60.047
+19 terms   vol-3                  19         2.388    61.426   59.038
+19 terms   vol-4                  19         2.369    59.678   57.309
+
+A global: 1.197-3.758 ms per search
+B scoped: 29.625-115.557 ms per search

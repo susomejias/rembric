@@ -1,0 +1,591 @@
+{
+  "q-atlas-orm@5": ["atlas-orm-choice"],
+  "q-atlas-orm@8": ["atlas-orm-choice"],
+  "q-atlas-orm@200": ["atlas-orm-choice"],
+  "q-nimbus-scheduler-port@5": [
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-retry-v2",
+    "nimbus-scheduler-port"
+  ],
+  "q-nimbus-scheduler-port@8": [
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-retry-v2",
+    "nimbus-scheduler-port",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-pg-pin-distractor"
+  ],
+  "q-nimbus-scheduler-port@200": [
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-retry-v2",
+    "nimbus-scheduler-port",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-pg-pin-distractor",
+    "nimbus-deploy-pipeline-old",
+    "nimbus-dup-fix"
+  ],
+  "q-nimbus-pg-pin@5": [
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-nimbus-pg-pin@8": [
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-nimbus-pg-pin@200": [
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-atlas-auth-provider@5": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor",
+    "atlas-cache-decision"
+  ],
+  "q-atlas-auth-provider@8": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor",
+    "atlas-cache-decision",
+    "atlas-zod-validation-es",
+    "atlas-cache-bug-fix",
+    "atlas-test-colocation-instance"
+  ],
+  "q-atlas-auth-provider@200": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor",
+    "atlas-cache-decision",
+    "atlas-zod-validation-es",
+    "atlas-cache-bug-fix",
+    "atlas-test-colocation-instance",
+    "atlas-test-colocation-distractor",
+    "atlas-rate-limit-old",
+    "atlas-orm-choice",
+    "atlas-orm-distractor"
+  ],
+  "q-nimbus-retry-strategy@5": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor"
+  ],
+  "q-nimbus-retry-strategy@8": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-conventional-commits-instance",
+    "nimbus-pg-pin",
+    "nimbus-mq-decision"
+  ],
+  "q-nimbus-retry-strategy@200": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-conventional-commits-instance",
+    "nimbus-pg-pin",
+    "nimbus-mq-decision",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-deploy-pipeline-old",
+    "nimbus-dup-fix",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-atlas-rate-limit-latest@5": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-cache-decision",
+    "atlas-test-colocation-instance",
+    "atlas-test-colocation-distractor"
+  ],
+  "q-atlas-rate-limit-latest@8": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-cache-decision",
+    "atlas-test-colocation-instance",
+    "atlas-test-colocation-distractor",
+    "atlas-rate-limit-old",
+    "atlas-cache-bug-fix",
+    "atlas-orm-choice"
+  ],
+  "q-atlas-rate-limit-latest@200": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-cache-decision",
+    "atlas-test-colocation-instance",
+    "atlas-test-colocation-distractor",
+    "atlas-rate-limit-old",
+    "atlas-cache-bug-fix",
+    "atlas-orm-choice",
+    "atlas-orm-distractor"
+  ],
+  "q-nimbus-deploy-pipeline-latest@5": [
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings",
+    "nimbus-cron-migration-es-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es"
+  ],
+  "q-nimbus-deploy-pipeline-latest@8": [
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings",
+    "nimbus-cron-migration-es-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es",
+    "nimbus-pg-pin-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-pg-pin"
+  ],
+  "q-nimbus-deploy-pipeline-latest@200": [
+    "nimbus-deploy-pipeline-new",
+    "pref-nimbus-docstrings",
+    "nimbus-cron-migration-es-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es",
+    "nimbus-pg-pin-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-pg-pin",
+    "nimbus-mq-decision",
+    "nimbus-commit-distractor",
+    "nimbus-retry-v2",
+    "nimbus-conventional-commits-instance",
+    "nimbus-dup-fix",
+    "nimbus-deploy-pipeline-old",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-pref-pr-review@5": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-conventional-commits"
+  ],
+  "q-pref-pr-review@8": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-conventional-commits",
+    "global-atomic-commits-distractor",
+    "global-test-colocation",
+    "global-atomic-commits"
+  ],
+  "q-pref-pr-review@200": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-conventional-commits",
+    "global-atomic-commits-distractor",
+    "global-test-colocation",
+    "global-atomic-commits"
+  ],
+  "q-pref-nimbus-docstrings@5": [
+    "pref-nimbus-docstrings",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-dup-fix"
+  ],
+  "q-pref-nimbus-docstrings@8": [
+    "pref-nimbus-docstrings",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-dup-fix",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-pref-nimbus-docstrings@200": [
+    "pref-nimbus-docstrings",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-dup-fix",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-atlas-cache-fix-reason@5": [
+    "atlas-cache-decision",
+    "atlas-cache-bug-fix",
+    "atlas-cache-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-distractor"
+  ],
+  "q-atlas-cache-fix-reason@8": [
+    "atlas-cache-decision",
+    "atlas-cache-bug-fix",
+    "atlas-cache-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-distractor",
+    "atlas-test-colocation-instance",
+    "atlas-orm-choice",
+    "atlas-orm-distractor"
+  ],
+  "q-atlas-cache-fix-reason@200": [
+    "atlas-cache-decision",
+    "atlas-cache-bug-fix",
+    "atlas-cache-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-distractor",
+    "atlas-test-colocation-instance",
+    "atlas-orm-choice",
+    "atlas-orm-distractor",
+    "atlas-rate-limit-old"
+  ],
+  "q-nimbus-dup-processing-reason@5": [
+    "nimbus-dup-fix",
+    "nimbus-pg-pin-distractor",
+    "nimbus-mq-decision"
+  ],
+  "q-nimbus-dup-processing-reason@8": [
+    "nimbus-dup-fix",
+    "nimbus-pg-pin-distractor",
+    "nimbus-mq-decision"
+  ],
+  "q-nimbus-dup-processing-reason@200": [
+    "nimbus-dup-fix",
+    "nimbus-pg-pin-distractor",
+    "nimbus-mq-decision"
+  ],
+  "q-cross-scope-test-colocation@5": [
+    "global-test-colocation",
+    "atlas-test-colocation-distractor",
+    "atlas-test-colocation-instance",
+    "atlas-cache-decision",
+    "global-conventional-commits"
+  ],
+  "q-cross-scope-test-colocation@8": [
+    "global-test-colocation",
+    "atlas-test-colocation-distractor",
+    "atlas-test-colocation-instance",
+    "atlas-cache-decision",
+    "global-conventional-commits",
+    "pref-pr-review-depth",
+    "atlas-orm-choice",
+    "atlas-rate-limit-old"
+  ],
+  "q-cross-scope-test-colocation@200": [
+    "global-test-colocation",
+    "atlas-test-colocation-distractor",
+    "atlas-test-colocation-instance",
+    "atlas-cache-decision",
+    "global-conventional-commits",
+    "pref-pr-review-depth",
+    "atlas-orm-choice",
+    "atlas-rate-limit-old",
+    "atlas-orm-distractor"
+  ],
+  "q-cross-scope-commit-convention@5": [
+    "global-no-emoji-distractor",
+    "nimbus-conventional-commits-instance",
+    "nimbus-commit-distractor",
+    "pref-nimbus-docstrings",
+    "global-no-emoji"
+  ],
+  "q-cross-scope-commit-convention@8": [
+    "global-no-emoji-distractor",
+    "nimbus-conventional-commits-instance",
+    "nimbus-commit-distractor",
+    "pref-nimbus-docstrings",
+    "global-no-emoji",
+    "nimbus-mq-decision",
+    "global-conventional-commits",
+    "nimbus-pg-pin-distractor"
+  ],
+  "q-cross-scope-commit-convention@200": [
+    "global-no-emoji-distractor",
+    "nimbus-conventional-commits-instance",
+    "nimbus-commit-distractor",
+    "pref-nimbus-docstrings",
+    "global-no-emoji",
+    "nimbus-mq-decision",
+    "global-conventional-commits",
+    "nimbus-pg-pin-distractor",
+    "nimbus-dup-fix",
+    "nimbus-retry-v2"
+  ],
+  "q-abstain-atlas-graphql@5": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-zod-validation-es-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance"
+  ],
+  "q-abstain-atlas-graphql@8": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-zod-validation-es-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance",
+    "atlas-cache-decision",
+    "atlas-zod-validation-es",
+    "atlas-test-colocation-distractor"
+  ],
+  "q-abstain-atlas-graphql@200": [
+    "atlas-rate-limit-new",
+    "atlas-cache-distractor",
+    "atlas-zod-validation-es-distractor",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance",
+    "atlas-cache-decision",
+    "atlas-zod-validation-es",
+    "atlas-test-colocation-distractor",
+    "atlas-orm-distractor",
+    "atlas-orm-choice",
+    "atlas-rate-limit-old"
+  ],
+  "q-abstain-nimbus-k8s-autoscaling@5": [
+    "pref-nimbus-docstrings",
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2"
+  ],
+  "q-abstain-nimbus-k8s-autoscaling@8": [
+    "pref-nimbus-docstrings",
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-pg-pin"
+  ],
+  "q-abstain-nimbus-k8s-autoscaling@200": [
+    "pref-nimbus-docstrings",
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-deploy-pipeline-new",
+    "nimbus-retry-v2",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-pg-pin",
+    "nimbus-mq-decision",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-dup-fix",
+    "nimbus-scheduler-port",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-deploy-pipeline-old"
+  ],
+  "q-abstain-atlas-feature-flags@5": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor"
+  ],
+  "q-abstain-atlas-feature-flags@8": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor",
+    "atlas-orm-choice",
+    "atlas-zod-validation-es",
+    "atlas-orm-distractor"
+  ],
+  "q-abstain-atlas-feature-flags@200": [
+    "atlas-rate-limit-new",
+    "atlas-auth-v2",
+    "atlas-test-colocation-instance",
+    "atlas-zod-validation-es-distractor",
+    "atlas-cache-distractor",
+    "atlas-orm-choice",
+    "atlas-zod-validation-es",
+    "atlas-orm-distractor",
+    "atlas-rate-limit-old"
+  ],
+  "q-abstain-atlas-invoice-pdf-slo@5": [
+    "atlas-cache-decision",
+    "atlas-rate-limit-new",
+    "atlas-test-colocation-instance",
+    "atlas-cache-distractor",
+    "atlas-auth-v2"
+  ],
+  "q-abstain-atlas-invoice-pdf-slo@8": [
+    "atlas-cache-decision",
+    "atlas-rate-limit-new",
+    "atlas-test-colocation-instance",
+    "atlas-cache-distractor",
+    "atlas-auth-v2",
+    "atlas-cache-bug-fix",
+    "atlas-orm-choice",
+    "atlas-orm-distractor"
+  ],
+  "q-abstain-atlas-invoice-pdf-slo@200": [
+    "atlas-cache-decision",
+    "atlas-rate-limit-new",
+    "atlas-test-colocation-instance",
+    "atlas-cache-distractor",
+    "atlas-auth-v2",
+    "atlas-cache-bug-fix",
+    "atlas-orm-choice",
+    "atlas-orm-distractor"
+  ],
+  "q-abstain-nimbus-worker-replicas@5": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-mq-decision",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor"
+  ],
+  "q-abstain-nimbus-worker-replicas@8": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-mq-decision",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-retry-v2",
+    "nimbus-conventional-commits-instance",
+    "nimbus-pg-pin-distractor"
+  ],
+  "q-abstain-nimbus-worker-replicas@200": [
+    "nimbus-deploy-pipeline-new",
+    "nimbus-mq-decision",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-mq-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-retry-v2",
+    "nimbus-conventional-commits-instance",
+    "nimbus-pg-pin-distractor",
+    "nimbus-commit-distractor",
+    "nimbus-pg-pin",
+    "nimbus-dup-fix",
+    "nimbus-deploy-pipeline-old",
+    "nimbus-scheduler-port-distractor",
+    "nimbus-scheduler-port"
+  ],
+  "q-abstain-nimbus-tracing-vendor@5": [
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-cron-migration-es",
+    "nimbus-deploy-pipeline-new"
+  ],
+  "q-abstain-nimbus-tracing-vendor@8": [
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-cron-migration-es",
+    "nimbus-deploy-pipeline-new",
+    "nimbus-conventional-commits-instance",
+    "nimbus-scheduler-port",
+    "nimbus-retry-v2"
+  ],
+  "q-abstain-nimbus-tracing-vendor@200": [
+    "nimbus-mq-distractor",
+    "pref-nimbus-docstrings-distractor",
+    "nimbus-cron-migration-es-distractor",
+    "nimbus-cron-migration-es",
+    "nimbus-deploy-pipeline-new",
+    "nimbus-conventional-commits-instance",
+    "nimbus-scheduler-port",
+    "nimbus-retry-v2",
+    "nimbus-mq-decision",
+    "nimbus-pg-pin-distractor",
+    "nimbus-pg-pin",
+    "nimbus-commit-distractor",
+    "nimbus-dup-fix",
+    "nimbus-deploy-pipeline-old",
+    "nimbus-scheduler-port-distractor"
+  ],
+  "q-abstain-global-shell-theme@5": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-atomic-commits-distractor"
+  ],
+  "q-abstain-global-shell-theme@8": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-atomic-commits-distractor",
+    "global-conventional-commits",
+    "global-test-colocation",
+    "global-atomic-commits"
+  ],
+  "q-abstain-global-shell-theme@200": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "pref-pr-review-depth",
+    "pref-pr-review-depth-distractor",
+    "global-atomic-commits-distractor",
+    "global-conventional-commits",
+    "global-test-colocation",
+    "global-atomic-commits"
+  ],
+  "q-abstain-global-changelog@5": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "global-conventional-commits",
+    "global-atomic-commits",
+    "pref-pr-review-depth-distractor"
+  ],
+  "q-abstain-global-changelog@8": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "global-conventional-commits",
+    "global-atomic-commits",
+    "pref-pr-review-depth-distractor",
+    "global-atomic-commits-distractor",
+    "pref-pr-review-depth",
+    "global-test-colocation"
+  ],
+  "q-abstain-global-changelog@200": [
+    "global-no-emoji",
+    "global-no-emoji-distractor",
+    "global-conventional-commits",
+    "global-atomic-commits",
+    "pref-pr-review-depth-distractor",
+    "global-atomic-commits-distractor",
+    "pref-pr-review-depth",
+    "global-test-colocation"
+  ],
+  "q-es-atlas-validation@5": ["atlas-zod-validation-es", "atlas-zod-validation-es-distractor"],
+  "q-es-atlas-validation@8": ["atlas-zod-validation-es", "atlas-zod-validation-es-distractor"],
+  "q-es-atlas-validation@200": ["atlas-zod-validation-es", "atlas-zod-validation-es-distractor"],
+  "q-es-commit-language@5": ["global-commit-language-es", "global-commit-language-es-distractor"],
+  "q-es-commit-language@8": ["global-commit-language-es", "global-commit-language-es-distractor"],
+  "q-es-commit-language@200": ["global-commit-language-es", "global-commit-language-es-distractor"],
+  "q-es-nimbus-cron-migration@5": [
+    "nimbus-cron-migration-es",
+    "nimbus-cron-migration-es-distractor"
+  ],
+  "q-es-nimbus-cron-migration@8": [
+    "nimbus-cron-migration-es",
+    "nimbus-cron-migration-es-distractor"
+  ],
+  "q-es-nimbus-cron-migration@200": [
+    "nimbus-cron-migration-es",
+    "nimbus-cron-migration-es-distractor"
+  ]
+}

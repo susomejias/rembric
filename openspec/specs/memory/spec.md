@@ -254,7 +254,7 @@ A marker written by a build that predates the two-phase scheme carries no in-pro
 
 ### Requirement: Memory search MUST implement standard hybrid retrieval on the text-query branch
 
-When `memory.search` is called with a non-empty text `query`, the system SHALL implement the standard hybrid-search pattern used by mainstream search engines: run an independent **lexical retriever** (FTS5/BM25 ranked ids) and **dense retriever** (vector k-nearest-neighbor ranked ids), then combine their ranked lists using Reciprocal Rank Fusion (RRF): `score(id) = Σ 1/(rank_constant + rank_branch(id))` over the branches in which the id appears. Each child retriever SHALL over-fetch into a bounded **rank window** (at least `limit + offset`, clamped to a fixed ceiling set strictly above the maximum `limit` so an unbounded `offset` cannot force a near-full partition scan) so that fusion is not artificially recall-capped. When `memory.search` is called WITHOUT a text `query`, the system SHALL use the existing chronological listing path unchanged (ordered by `created_at`, with exact `limit`/`offset`). The dense branch SHALL NOT apply a similarity threshold — fusion orders results, it does not filter them. The text query SHALL be sanitized before it is passed to the FTS5 `MATCH` so that an arbitrary natural-language query cannot raise an FTS5 syntax error or be reinterpreted as an FTS5 query expression. The sanitizer SHALL keep whole Unicode word tokens (it SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII — e.g. accented or CJK text), SHALL strip FTS5 metacharacters and balance quotes, and SHALL neutralize FTS5 bareword operators (`AND`, `OR`, `NOT`, `NEAR`) so a phrase like "coffee OR tea" matches literal terms rather than being parsed as a boolean expression. (The FTS tokenizer folds diacritics, so a sanitized accented or ASCII-folded token matches accented stored content either way; the binding requirement is to preserve whole tokens and neutralize operators, not to special-case accents.) A failure of either branch SHALL degrade gracefully to the other branch rather than failing the whole search. Filters SHALL have explicit guarantees: `status` and `type` apply to BOTH branches; `tag` is exact on the lexical branch and post-filters dense candidates inside the bounded rank window (so no wrong-tag rows are returned, but dense+tag recall is bounded by the rank window rather than globally complete). Result rows SHALL carry the same shape as today (including the `relations` array). Search SHALL NOT advance `last_seen_at` for any returned row — see "Being returned by a search MUST NOT be sufficient to confer durability".
+When `memory.search` is called with a non-empty text `query`, the system SHALL implement the standard hybrid-search pattern used by mainstream search engines: run an independent **lexical retriever** (FTS5/BM25 ranked ids) and **dense retriever** (vector k-nearest-neighbor ranked ids), then combine their ranked lists using Reciprocal Rank Fusion (RRF): `score(id) = Σ 1/(rank_constant + rank_branch(id))` over the branches in which the id appears. Each child retriever SHALL over-fetch into a bounded **rank window** (at least `limit + offset`, clamped to a fixed ceiling set strictly above the maximum `limit` so an unbounded `offset` cannot force a near-full partition scan) so that fusion is not artificially recall-capped. When `memory.search` is called WITHOUT a text `query`, the system SHALL use the existing chronological listing path unchanged (ordered by `created_at`, with exact `limit`/`offset`). The dense branch SHALL NOT apply a similarity threshold — fusion orders results, it does not filter them. The text query SHALL be sanitized before it is passed to the FTS5 `MATCH` so that an arbitrary natural-language query cannot raise an FTS5 syntax error or be reinterpreted as an FTS5 query expression. The sanitizer SHALL keep whole Unicode word tokens (it SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII — e.g. accented or CJK text), SHALL strip FTS5 metacharacters and balance quotes, and SHALL neutralize FTS5 bareword operators (`AND`, `OR`, `NOT`, `NEAR`) so a phrase like "coffee OR tea" matches literal terms rather than being parsed as a boolean expression. (The FTS tokenizer folds SOME diacritics and not others — measured, its folding table covers `migración` → `migracion` but leaves `phở`, `αναζήτηση` and `ǻrsrapport` accented — so an ASCII-folded token matches accented stored content on some scripts and not on others, and the sanitizer SHALL NOT attempt to close that gap: the binding requirement is to preserve whole tokens and neutralize operators. Where a lookup key must match the index's terms exactly, it is read back out of FTS5 instead — see "Term-statistics lookups MUST be keyed on the index's own terms".) A failure of either branch SHALL degrade gracefully to the other branch rather than failing the whole search. Filters SHALL have explicit guarantees: `status` and `type` apply to BOTH branches; `tag` is exact on the lexical branch and post-filters dense candidates inside the bounded rank window (so no wrong-tag rows are returned, but dense+tag recall is bounded by the rank window rather than globally complete). Result rows SHALL carry the same shape as today (including the `relations` array). Search SHALL NOT advance `last_seen_at` for any returned row — see "Being returned by a search MUST NOT be sufficient to confer durability".
 
 After RRF produces the fused, ordered candidate pool for the over-fetched rank window, the system SHALL apply a post-fusion multiplier BEFORE truncating to the top `limit` results: `finalScore(id) = rrfScore(id) * boost(id)`, where `boost(id)` is a compile-time-constant function of the candidate row's `confirmationCount`, time since `last_seen_at`, and `type`, clamped to a fixed range (declared `[0.7, 1.4]`; reachable in practice `[0.9, 1.35]` given the current per-signal weights). Applying the boost before truncation is deliberate: it CAN and is meant to change which rows make the page — a fresh, confirmed memory SHALL be able to outrank a stale unconfirmed one at a close raw RRF score. The clamp bounds the multiplier's magnitude; it does not, and is not meant to, prevent reordering near-ties. This boost applies ONLY to the text-query (fused hybrid-search) branch; the no-query chronological listing path is UNCHANGED and continues to use exact chronological order with no boost applied. The boost multiplier SHALL NOT be exposed as a per-request tunable — it is a fixed constant, matching the existing style of `RANK_CONSTANT` and the rank-window ceiling.
 
@@ -351,11 +351,16 @@ The text-query branch SHALL be able to report that it found nothing relevant, ra
 
 Both gates SHALL read ONE quantity, at ONE point in the pipeline.
 
-The quantity is a per-row **relevance level** in `[0,1]`: the greater of (a) the fraction of the query's distinct tokens present in the row's title and content, and (b) the dense branch's cosine similarity for that row. It is bounded and independent of corpus size by construction, so a calibrated value means the same thing on a 40-row corpus and a 5,000-row one. The level SHALL NOT be derived from:
+The quantity is a per-row **relevance level** in `[0,1]`: the greater of (a) the **inverse-document-frequency-weighted** fraction of the query's distinct terms present in the row's title and content, and (b) the dense branch's cosine similarity for that row.
+
+The lexical component SHALL be the sum of the weights of the query terms the row contains divided by the sum of the weights of all the query's distinct terms, and each term's weight SHALL be strictly positive at every document frequency so that the denominator is never zero and the component is bounded to `[0,1]` by construction. Its two halves are sourced differently and that asymmetry is contracted, not incidental: the query's terms and their weights come from the index's own tokenizer and statistics, while whether a row contains a term is decided by the application's tokenisation, whose disagreement with the index can only lower a row's lexical component and can never fabricate a weight (see "Term-statistics lookups MUST be keyed on the index's own terms"). An UNWEIGHTED fraction SHALL NOT be used: it measures the share of the query's tokens a row carries rather than the share of its information, so a question-shaped query with no answer in the corpus scores on its function words alone. The committed grid in `openspec/changes/archive/2026-07-28-rescore-relevance-abstention/measurements/sweep.txt` records the consequence — an empty-gold query at 0.455 above a gold-bearing query at 0.333, with no threshold between them.
+
+The level is therefore corpus-DEPENDENT, and SHALL NOT be described as independent of corpus size. What SHALL hold instead is that the level depends only on the query, the row, and corpus-wide term statistics — never on the result list the level is used to filter, on the page requested, or on the order the branches fused in. Corpus growth consequently moves levels, and SHALL move them in one direction only: a term appearing in more documents SHALL never gain weight, so rows carrying the query's rarer terms SHALL never lose ground to rows carrying only its commoner ones. The level SHALL NOT be derived from:
 
 - **raw or logistically-normalised `bm25()`** — unbounded, corpus-relative, and, because FTS5 clamps a non-positive IDF to `1e-6`, always at or above 0.5 under the logistic, saturating to 0.98 within a few IDF units. No absolute threshold on it can fire in the usable range;
 - **fused RRF scores** — a function of rank position, not of match quality. Their consecutive ratios are fixed by the rank constant (0.984 rising to 0.996 within a branch-membership class, exactly 0.500 across the both-branches → single-branch boundary), so a threshold over them selects branch membership rather than relevance;
-- **any window-relative normalisation** (min-max, rank-percentile, z-score over the branch's own rank window) — each maps the window's best row to a constant, so it can express the _shape_ of a result list but never its _level_, and an absolute floor is a statement about level.
+- **any window-relative normalisation** (min-max, rank-percentile, z-score over the branch's own rank window) — each maps the window's best row to a constant, so it can express the _shape_ of a result list but never its _level_, and an absolute floor is a statement about level;
+- **term statistics computed over the candidate pool** — the pool is not a sample of the corpus but the set of rows the query already matched, so a discriminative term is over-represented in it precisely because it drove the match, and its pool-derived weight is anti-correlated with its true rarity. This is the same error as the window-relative normalisations above, applied to the weights instead of to the score.
 
 The evaluation point is **after fusion and before the ranking boost**. After fusion, because the page only exists once the branches are fused. Before the boost, because the boost is a ranking multiplier over recency, type and confirmation count with a reachable spread of 1.5× — it is not a relevance measure, and a gate placed behind it lets a fresh, repeatedly-confirmed, irrelevant row clear an abstention check that a stale relevant row fails.
 
@@ -366,7 +371,13 @@ At that point the two gates are:
 
 A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant".
 
-Both gates SHALL be disabled by default. While both are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist.
+Each gate is independently enabled or disabled, and the shipped state of each is recorded once, in "Retrieval and lifecycle constants MUST be named and bounded in one place", so that this requirement does not have to be edited whenever a constant moves. While BOTH gates are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist. While EITHER gate is enabled the branch SHALL compute levels for the whole fused pool, and the cost of doing so SHALL be measured against a stated budget at 1 000, 20 000 and 50 000 memory rows before the enabling change lands.
+
+#### Scenario: A question-shaped query is not carried by its function words
+
+- **GIVEN** a scope whose memories all contain the terms `how`, `does`, `the` and `for`, none of which answers the query, and a query composed of those terms plus one term absent from the scope
+- **WHEN** the relevance level of the best-matching row is computed
+- **THEN** it SHALL be lower than the level of a row in the same scope that contains the query's absent term, and the difference SHALL come from the weighting rather than from the number of terms matched
 
 #### Scenario: A query with nothing relevant abstains
 
@@ -378,7 +389,7 @@ Both gates SHALL be disabled by default. While both are disabled the branch SHAL
 
 - **GIVEN** the floor and the relative filter are enabled, and a query whose decision is recorded against a corpus
 - **WHEN** the corpus is enlarged with rows that share the query's vocabulary without answering it, so they sort ahead of the answering row
-- **THEN** both gates SHALL reach the same decision, because the level of a row depends only on that row and the query AND every fused candidate is levelled
+- **THEN** both gates SHALL reach the same decision and the answering row SHALL still be returned — every fused candidate is levelled, and the added rows can only lower the weight of the terms they share, which lowers their own levels rather than the answering row's
 
 #### Scenario: A gate decision does not change with the page requested
 
@@ -406,8 +417,99 @@ Both gates SHALL be disabled by default. While both are disabled the branch SHAL
 
 #### Scenario: Abstention is off by default
 
-- **WHEN** the system runs without calibrated abstention values configured
-- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf
+- **GIVEN** both the floor and the relative filter are disabled
+- **WHEN** `memory.search` is called
+- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic
+
+### Requirement: The relevance level's term statistics MUST come from the search index
+
+The weights in the relevance level's lexical component are document frequencies, and where they are read from decides whether a threshold over the level means anything. They SHALL be read from the full-text index's own term statistics — the document count of each term across every indexed row — and the document total SHALL be the same population that index covers, so that a weight and its total are never drawn from two different denominators.
+
+The statistics SHALL NOT be derived from the candidate pool, from the requested page, or from any set that the query itself selected.
+
+They SHALL be defined at every corpus size, with no minimum-corpus fallback and no clamping regime:
+
+- a term present in every indexed document SHALL still carry a strictly positive weight, so a query composed only of ubiquitous terms still has a defined level;
+- a term absent from the index entirely SHALL carry the maximum weight, so failing to match the query's rarest term is the strongest available evidence of irrelevance;
+- when every term of a query carries the same weight, the weighted fraction SHALL equal the unweighted fraction, so a corpus too small to discriminate degrades to the previous behaviour rather than to a discontinuity.
+
+These statistics are aggregates over the whole index and are therefore NOT scope-filtered. That is a deliberate exception to scope resolution and is bounded: a term statistic carries no memory id, no content, and no attribution, and it SHALL NOT be usable to return, count, or infer the existence of an individual row outside the caller's scope. No response field SHALL expose a raw term statistic.
+
+#### Scenario: A five-memory instance still produces a defined level
+
+- **GIVEN** an instance holding five memories, and a query whose terms all appear in all five
+- **WHEN** the relevance level is computed
+- **THEN** every term SHALL carry a positive weight, the level SHALL be defined, and it SHALL equal the unweighted coverage of the same query
+
+#### Scenario: An empty index does not divide by zero
+
+- **GIVEN** an instance with no memories at all
+- **WHEN** a search is issued
+- **THEN** the search SHALL complete without error and SHALL return nothing, and no term weight SHALL be zero or undefined
+
+#### Scenario: A term the corpus has never seen weighs most
+
+- **GIVEN** two candidate rows, one matching a query term that appears in nearly every memory and one matching a query term that appears in none of the others
+- **WHEN** their relevance levels are compared
+- **THEN** the row matching the rarer term SHALL score higher
+
+#### Scenario: Term statistics are not a cross-scope read channel
+
+- **WHEN** any response payload from any tool is inspected
+- **THEN** no document frequency, document total, or per-term weight SHALL appear in it, and no scoped read SHALL return a row whose only path into the result was a term statistic
+
+### Requirement: Term-statistics lookups MUST be keyed on the index's own terms
+
+The relevance level looks a term up in the index's own statistics, so a token the tokenizer would never have produced finds no entry, receives the weight reserved for a term the corpus has never seen — the maximum — and the level silently treats the corpus's commonest word as its rarest. A term is therefore only safe to look up if the index itself produced it.
+
+The terms whose document frequencies are read SHALL be obtained from the full-text index's own tokenizer, by tokenising the query text through an FTS5 table declared with that same tokenizer and reading the resulting terms back, in the same read that resolves their document frequencies. The application SHALL NOT reproduce the index's tokenizer in order to key that read.
+
+Reproducing it is not merely undesirable, it is unavailable, and the requirement is written this way because the alternative was measured and does not exist. The index's rule disagrees with any application-side rule in at least three independent ways — which characters delimit a term, whether text is compared decomposed or precomposed, and whether case folding is per-codepoint or context-sensitive — and its diacritic-folding table is neither "fold everything" nor "fold nothing", so agreement cannot be recovered by choosing a folding option on either side. A rule that agrees on one set of scripts trades away another.
+
+Because the terms come from the index's tokenizer, absence becomes evidence rather than inference. The read SHALL distinguish a term the index holds from a term it does not, explicitly, so that the maximum weight is applied because the index reported no such term and not because a lookup key was missing from a map. A term reported absent SHALL carry the maximum weight; that is the same rule as before, and it is only correct under this requirement.
+
+The declaration of the tokenising table SHALL be derived from the shipped declaration of the full-text index, read from the database's own schema at startup, so that the two cannot be separately edited into disagreement. A declaration option the derivation does not recognise SHALL fail startup rather than be silently dropped: a tokenizer option carried by the index and not by the tokenising table would reintroduce exactly the divergence this requirement removes, and would do so invisibly.
+
+The tokenising table SHALL store no text. It exists to produce terms, not to hold a copy of the query, and SHALL NOT write to the durable database.
+
+**The row-membership half of the lexical component is NOT covered by this requirement, deliberately.** Deciding which of the query's terms a candidate row contains is a separate operation over the whole fused pool, and the two families priced for doing it through the index — tokenising the pool at query time, and reading the index's term-major structures — were measured at eight to twenty-nine times the change's own cost budget. The one term-major variant that measures under the budget does so only while a per-row cache holds about a single pool's worth of rows, and the reason is structural: a term-major read has the term constraint pushed down and decides document membership only afterwards, so its cost tracks the corpus rather than the pool, and one and the same pool measures forty-six times as expensive at a corpus-sized cache as at a pool-sized one. It therefore continues to use the application's own tokenisation, and the consequence SHALL be bounded rather than hidden: a disagreement there can only cause a term the row does contain to be counted as not covered, which lowers that row's lexical component. It SHALL NOT be able to produce the absent-term maximum weight, SHALL NOT raise any row's level, and SHALL leave the dense branch's contribution to the level untouched — so a row the lexical component under-counts is still reachable on its cosine. This asymmetry SHALL be stated wherever the lexical component is specified; it SHALL NOT be described as agreement.
+
+There SHALL be ONE application-side tokenisation shared by the search path's row-membership test and the save-time candidate path, so those two cannot disagree about what a token is.
+
+#### Scenario: A term the index holds resolves to its real document frequency
+
+- **GIVEN** a corpus containing a word whose index term differs from what an application-side tokenisation of the same word would produce — a Greek word ending in a final sigma, or a Cyrillic word containing a precomposed accented character
+- **WHEN** that word is issued as a query term and its weight is resolved
+- **THEN** it SHALL resolve to the document frequency the index records for it, and SHALL NOT resolve to the weight of a term absent from the index
+
+#### Scenario: A term the index has never seen is reported absent, not zero
+
+- **GIVEN** a query containing a term no indexed row contains
+- **WHEN** the term statistics for that query are read
+- **THEN** the term SHALL appear in the result marked as absent, distinguishably from a term the index holds, and SHALL receive the maximum weight on that basis
+
+#### Scenario: The tokenising table inherits the index's declared tokenizer
+
+- **WHEN** the tokenising table is created
+- **THEN** its tokenizer declaration SHALL have been read from the shipped declaration of the full-text index in the database's schema, and SHALL NOT be restated independently anywhere in the source
+
+#### Scenario: An unrecognised declaration option fails startup
+
+- **GIVEN** a full-text index whose shipped declaration carries a tokenizer option the derivation does not recognise
+- **WHEN** startup derives the tokenising table's declaration
+- **THEN** startup SHALL fail naming the option, and SHALL NOT proceed with an option silently omitted
+
+#### Scenario: A row-side tokenisation disagreement can only under-count
+
+- **GIVEN** a candidate row containing a query term whose application-side tokenisation differs from the index's
+- **WHEN** that row's relevance level is computed
+- **THEN** the term SHALL be counted as not covered, the row's lexical component SHALL be no higher than if the term were absent from the row, and the row's level SHALL still be at least its dense-branch cosine
+
+#### Scenario: Query text is not written to the durable database
+
+- **GIVEN** a sequence of searches
+- **WHEN** the durable database file and its write-ahead log are inspected before and after
+- **THEN** neither SHALL have grown on account of tokenising the queries, and no table in the durable schema SHALL hold the query text
 
 ### Requirement: Search results MUST be diversified across originating sessions
 
@@ -1134,6 +1236,8 @@ FTS5's bm25 score is negative and unbounded, and a better match is _more_ negati
 
 Because bm25 magnitudes scale with corpus size and term IDF, the system SHALL NOT gate lexical candidates on an absolute threshold over the raw bm25 value: no such threshold is stable across corpus sizes. Admission SHALL instead be by rank position within the already-correctly-ordered candidate pool, and the reported `similarity` SHALL be computed as a corpus-independent lexical overlap measure between the saved text and the candidate.
 
+That overlap measure SHALL remain UNWEIGHTED, and SHALL NOT be replaced by the inverse-document-frequency weighting the search path's relevance level uses (see "Recall MUST be able to return nothing"). The two serve different contracts: `similarity` is reported to the agent as a number in a documented range and is required above to be corpus-independent, while the level exists to be thresholded and is required to be corpus-dependent. The two paths SHALL nonetheless share ONE tokenisation, so they cannot disagree about what a token is.
+
 #### Scenario: A byte-identical duplicate is surfaced lexically
 
 - **GIVEN** a scope containing at least fifty active memories, and a newly saved memory whose text is byte-identical to one of them, with no embedding available
@@ -1153,6 +1257,12 @@ Because bm25 magnitudes scale with corpus size and term IDF, the system SHALL NO
 - **GIVEN** the same duplicate-save scenario evaluated at corpus sizes of 50, 150 and 300 active memories
 - **WHEN** save-time candidate detection runs at each size
 - **THEN** the identical memory SHALL be surfaced at every size
+
+#### Scenario: Save-time similarity does not move with the corpus
+
+- **GIVEN** one saved text and one candidate memory, evaluated in two scopes whose other memories differ entirely
+- **WHEN** save-time candidate detection runs in each
+- **THEN** the reported `similarity` SHALL be identical in both, unaffected by how common the shared terms are in either corpus
 
 ### Requirement: The rank window MUST be wide enough for the rank constant it uses
 
@@ -1246,7 +1356,7 @@ Ranking, projection and lifecycle behaviour is governed by a set of compile-time
 - `RELATION_ANNOTATION_RESPONSE_BUDGET` — the maximum number of annotations one multi-row response may project, bounding `row count × per-row annotation bound`. It SHALL be derived from shipped default behaviour so that no request relying on defaults can be rejected by it — and that derivation SHALL use the LARGEST row count any branch serves for an omitted `limit`, not the `limit` maximum. The entity branch's page size when no `limit` is given exceeds the `limit` maximum, so deriving from the latter leaves that branch able to project several times the budget. It is not itself a per-request tunable: it bounds the product of two request parameters, and a request exceeding it is rejected rather than served with a reduced projection.
 - The annotation payload ceiling — the maximum serialized size the annotation projection of any legal request may reach, asserted in CI against a measured worst-case response rather than against the product of the constants above (see the `mcp-api` capability, "The worst-case annotation payload MUST be bounded by a named ceiling asserted in CI").
 
-Three gates ship disabled (`null`): the abstention floor and `RELATIVE_LEVEL_RATIO` (see "Recall MUST be able to return nothing"), and the per-session `DIVERSITY_CAP`. Their disabled state is not itself the contract — an uncalibrated gate silently removes recall, so what is contracted is the evidence a commit must carry to enable one.
+Three of those constants are gates whose shipped state is recorded HERE and nowhere else, so that exactly one requirement has to be edited when one of them moves: the abstention floor and `RELATIVE_LEVEL_RATIO` (see "Recall MUST be able to return nothing"), and the per-session `DIVERSITY_CAP`. The abstention floor and `DIVERSITY_CAP` ship disabled (`null`); `RELATIVE_LEVEL_RATIO` ships ENABLED, at a value carried by a committed sweep. A gate's disabled state is not itself the contract — an uncalibrated gate silently removes recall, so what is contracted is the evidence a commit must carry to enable one, and any statement elsewhere in this capability about which gates are currently on SHALL defer to this paragraph.
 
 Enabling the abstention floor or `RELATIVE_LEVEL_RATIO` SHALL require, in the same change:
 
@@ -1254,7 +1364,9 @@ Enabling the abstention floor or `RELATIVE_LEVEL_RATIO` SHALL require, in the sa
 2. an over-abstention rate of zero at every committed `k` — no query with a gold answer returns nothing;
 3. an abstention false-positive rate at or below its committed cap;
 4. precision, recall and MRR at or above their committed floors at every committed `k`;
-5. the chosen value in the interior of a plateau at least two grid steps wide on each of the criteria above, so a value that holds at exactly one grid point is rejected as a cliff edge rather than accepted as a calibration.
+5. the chosen value in the interior of an admissible plateau at least **0.10 wide in level units** on each of the criteria above — an absolute width, not a count of grid steps, because the grid's resolution is chosen by the same change that is being judged and refining it manufactures compliance without changing anything real. The sweep's grid step SHALL be no coarser than 0.05, so a compliant plateau is always resolved by at least two measured points either side of the chosen value, and a value that holds only across a narrower band SHALL be rejected as a cliff edge rather than accepted as a calibration.
+
+A change to the relevance level's definition SHALL re-derive every enabled gate's value from a fresh sweep and SHALL NOT carry a value forward: a constant calibrated against a different quantity is uncalibrated.
 
 Enabling `DIVERSITY_CAP` SHALL additionally require a session-labelled evaluation fixture, because it is applied to the whole fused pool before the page is sliced — a held-back row is replaced by whatever ranked next in a 64–400 row pool rather than by a comparable row, which on a single-topic session measurably swaps most of page 1 for noise — and the current corpus cannot see that regression, every corpus row carrying a null session id, which is never grouped.
 
@@ -1297,6 +1409,18 @@ That sweep obligation SHALL NOT be extended to `ENTITY_RARITY_THRESHOLD` by anal
 - **GIVEN** a swept candidate value that meets every criterion at its own grid point and fails at both adjacent grid points
 - **WHEN** that value is proposed
 - **THEN** it SHALL be rejected as a cliff edge, and the gate SHALL remain disabled
+
+#### Scenario: Refining the grid does not manufacture a plateau
+
+- **GIVEN** an admissible band 0.03 wide in level units, and a sweep whose grid step is refined to 0.005 so that six consecutive grid points inside that band pass every criterion
+- **WHEN** a value from the interior of that band is proposed
+- **THEN** it SHALL be rejected, because the plateau is narrower than 0.10 in level units regardless of how many grid points fall inside it
+
+#### Scenario: A new level function does not inherit the old calibration
+
+- **GIVEN** an enabled gate whose value was chosen on a sweep over the previous relevance-level definition
+- **WHEN** a change alters how the relevance level is computed
+- **THEN** that change SHALL re-run the sweep and re-derive the value, and SHALL be rejected if it carries the value forward on the strength of the superseded grid
 
 #### Scenario: A harness sweep is not accepted as a calibration of the rarity gate
 

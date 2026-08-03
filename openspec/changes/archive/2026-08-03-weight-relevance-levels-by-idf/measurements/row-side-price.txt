@@ -1,0 +1,20 @@
+# 10.5.4 — price of an index-authoritative ROW side, re-taken against the real schema
+#
+# produced by: pnpm --filter @rembric/server exec tsx $REPO/openspec/changes/weight-relevance-levels-by-idf/measurements/row-side-price.mjs
+# same machine as cost-amendment.txt (~2x slower than the one design.md D3b was taken on:
+# the JS arm reads 2.3/6.6/12.9 ms here against D3b's 0.865/2.362/4.802)
+
+corpus: 50000 memories, pool = the first N active rows by rowid
+60 queries per cell, p50 ms to decide row membership for one query
+
+row-membership source                      pool 64   pool 200  pool 400  
+JS indexTerms over the pool — today        2.251     6.660     12.980    
+pool insert + per-term MATCH               4.771     15.405    34.347    
+pool insert + filtered instance read       4.878     15.624    37.371    
+cached by memory id, warm instance read    0.273     0.520     0.941     
+per-term MATCH against memory_fts ∩ pool   3.723     11.530    22.942    
+
+warm instance read at pool 400, by how many rows the cache holds:
+  cache 400     rows, 85525     term instances: p50 0.966 ms
+  cache 5000    rows, 1096239   term instances: p50 2.395 ms
+  cache 39998   rows, 8733845   term instances: p50 13.099 ms

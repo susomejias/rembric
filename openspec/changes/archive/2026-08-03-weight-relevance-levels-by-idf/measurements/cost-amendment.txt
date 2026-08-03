@@ -1,0 +1,41 @@
+# 10.5 — the amendment's cost, three instruments, kept apart
+#
+# produced by: pnpm --filter @rembric/server exec tsx $REPO/openspec/changes/weight-relevance-levels-by-idf/measurements/cost-amendment.mjs
+# machine: 8 cores, load average ~1.1, SQLite 3.53.2 / better-sqlite3 12.11.1
+# NOTE: absolute p50s here are ~2x cost.md §5.2's on the same corpus builder, so this
+#       machine is slower than the one §5.2 was taken on. Only same-run comparisons are safe.
+
+
+=== 10.5.2 END-TO-END (the budgeted instrument): MemoryService.search p50 ===
+one process, one database per size, three arms interleaved, 150 samples per arm
+added/B−A columns are the MEDIAN OF PAIRED DIFFERENCES, not a difference of medians
+rows    limit  none p50  A p50    B p50    added A  added B  B − A    added B p90
+1000    8      3.798     3.979    4.011    0.111    0.214    0.079    0.598
+1000    200    5.836     6.196    6.083    0.271    0.230    0.042    0.590
+20000   8      15.003    15.826   16.200   0.842    0.895    0.040    3.057
+20000   200    28.721    29.938   29.699   0.957    1.061    0.083    2.937
+50000   8      35.781    38.022   38.335   0.370    0.541    0.116    7.047
+50000   200    53.830    51.069   57.145   0.110    2.610    0.709    7.143
+
+=== in-search read time (a third instrument, also kept separate) ===
+time spent inside queryTermFrequencies during a real search, 60 searches per cell
+rows    limit  arm  calls/search  read p50 (ms)
+1000    8      A    1.00          0.180
+1000    8      B    1.00          0.240
+1000    200    A    1.00          0.162
+1000    200    B    1.00          0.237
+20000   8      A    1.00          0.904
+20000   8      B    1.00          0.974
+20000   200    A    1.00          0.937
+20000   200    B    1.00          1.028
+50000   8      A    1.00          2.234
+50000   8      B    1.00          2.308
+50000   200    A    1.00          2.365
+50000   200    B    1.00          2.323
+
+=== 10.5.1 STATEMENT-LEVEL (a different instrument — never merged with the table above) ===
+400 iterations, one warm process, the read alone
+rows    vocabulary  A ms/query  B ms/query  marginal  rows A   rows B   of which absent
+1000    11990       0.1580      0.1817      0.0237    7.9      9.0      1.1
+20000   136569      1.2395      1.2740      0.0345    7.9      9.0      1.1
+50000   290456      3.0995      3.3643      0.2648    7.9      9.0      1.1

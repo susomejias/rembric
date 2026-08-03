@@ -1,0 +1,110 @@
+[
+  {
+    "retriever": "hybrid",
+    "generatedAt": "2026-08-03T06:53:08.855Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.23750000000000002,
+        "recallAtK": 0.96875,
+        "mrr": 0.796875,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 248.20833333333334,
+        "p50LatencyMs": 10.148515999999745,
+        "p95LatencyMs": 13.615993999999773
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.15625,
+        "recallAtK": 1,
+        "mrr": 0.796875,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 317.75,
+        "p50LatencyMs": 10.148515999999745,
+        "p95LatencyMs": 13.615993999999773
+      }
+    }
+  },
+  {
+    "retriever": "grep",
+    "generatedAt": "2026-08-03T06:53:08.857Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.21250000000000002,
+        "recallAtK": 0.84375,
+        "mrr": 0.7,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 304.875,
+        "p50LatencyMs": 0.0184239999998681,
+        "p95LatencyMs": 0.037489999999706924
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.1484375,
+        "recallAtK": 0.9375,
+        "mrr": 0.7104166666666667,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 490.0416666666667,
+        "p50LatencyMs": 0.0184239999998681,
+        "p95LatencyMs": 0.037489999999706924
+      }
+    }
+  },
+  {
+    "retriever": "memory-md-dump",
+    "generatedAt": "2026-08-03T06:53:08.857Z",
+    "aggregateByK": {
+      "5": {
+        "k": 5,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.11249999999999999,
+        "recallAtK": 0.46875,
+        "mrr": 0.26979166666666665,
+        "ceilingPrecisionAtK": 0.25,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 331.9166666666667,
+        "p50LatencyMs": 0.0016329999998561107,
+        "p95LatencyMs": 0.004417999999986932
+      },
+      "8": {
+        "k": 8,
+        "n": 16,
+        "nAbstention": 8,
+        "precisionAtK": 0.09375,
+        "recallAtK": 0.65625,
+        "mrr": 0.29546130952380956,
+        "ceilingPrecisionAtK": 0.15625,
+        "ceilingRecallAtK": 1,
+        "abstentionFalsePositiveRate": 1,
+        "overAbstentionRate": 0,
+        "avgTokensReturned": 516.25,
+        "p50LatencyMs": 0.0016329999998561107,
+        "p95LatencyMs": 0.004417999999986932
+      }
+    }
+  }
+]

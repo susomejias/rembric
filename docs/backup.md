@@ -12,7 +12,7 @@ The runtime container is [distroless](./docker.md#the-container-has-no-shell): i
 
 > **Append-only is a backup ally.** Rows are never DELETEd and `content` is never overwritten. An older snapshot is missing recent rows, never corrupted or internally inconsistent.
 
-> **Only `memory` (and the other operator tables) hold primary data.** Five tables are derived and fully regenerable from the append-only rows alone: `memory_fts` and `memory_vec` (search and vector indexes) plus `memory_entities`, `memory_entity_links` and `memory_entity_scan` (the entity index). A backup that carries them is fine; a restore that loses them costs a rebuild, not data. What a restore _can_ get wrong is leaving them pinned to the wrong recipe — see [Restoring a snapshot](#restoring-a-snapshot) step 3.
+> **Only `memory` (and the other operator tables) hold primary data.** Eight tables are derived and fully regenerable from the append-only rows alone: `memory_fts`, `memory_fts_vocab`, `prompts_fts` and `memory_vec` (search, term-statistics and vector indexes), `memory_replaces` (the reverse-edge table), plus `memory_entities`, `memory_entity_links` and `memory_entity_scan` (the entity index). The authoritative list is `apps/server/src/test/schema-inventory.ts::DERIVED_TABLES`, which the invariants suite asserts against the migrated schema. A backup that carries them is fine; a restore that loses them costs a rebuild, not data. What a restore _can_ get wrong is leaving them pinned to the wrong recipe — see [Restoring a snapshot](#restoring-a-snapshot) step 3.
 
 ## Dashboard backup (the default, online, no shell needed)
 

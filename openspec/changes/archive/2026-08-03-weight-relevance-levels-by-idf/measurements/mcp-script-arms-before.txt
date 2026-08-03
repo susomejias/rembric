@@ -1,0 +1,25 @@
+# 10.1.2 — end-to-end symptom through the real MCP tool, PRE-amendment tree
+#
+# produced by: pnpm --filter @rembric/server exec tsx $PWD/openspec/changes/weight-relevance-levels-by-idf/measurements/mcp-script-arms.mjs
+# tree: this change applied through task 9, amendment (task 10) NOT applied
+# server: in-process, FakeEmbedder (hash vectors, dense ~0), RELATIVE_LEVEL_RATIO = 0.4 as shipped
+# one fresh data dir per arm, so N = 20 for every arm
+
+rows per arm: 20   query: "<common> <rare>"   limit: 20
+the rare word is in exactly ONE of the 20 rows, so a correctly-weighted level
+returns 1; returning 20 means the two terms were weighted the same.
+
+arm                            ret/20  N   app term for 'common'  df   index commonest    w(common)  w(absent)  w(df=20) 
+Spanish (control)              1/20    20  migracion              20   cron=20            0.0241     3.7377     0.0241   
+German (control)               1/20    20  gruße                  20   die=20             0.0241     3.7377     0.0241   
+Cyrillic without й/ё (control) 1/20    20  проверка               20   запись=20          0.0241     3.7377     0.0241   
+Cyrillic with й/ё              20/20   20  маискии                —    запись=20          3.7377     3.7377     0.0241   
+Greek                          20/20   20  αναζητηση              —    αναζήτηση=20       3.7377     3.7377     0.0241   
+Vietnamese                     20/20   20  nho                    —    chu=20             3.7377     3.7377     0.0241   
+Devanagari                     20/20   20  जच                     —    क=20               3.7377     3.7377     0.0241   
+Arabic                         20/20   20  الموقت                 —    الخادم=20          3.7377     3.7377     0.0241   
+Japanese                       20/20   20  ハント設定                  —    サーバー=20            3.7377     3.7377     0.0241   
+stacked-diacritic Latin        20/20   20  arsrapport             —    anteckning=20      3.7377     3.7377     0.0241   
+
+df `—` means the index holds no such term: the app tokenised the query into a term
+the index never produced, so it receives w(absent) — the MAXIMUM weight.

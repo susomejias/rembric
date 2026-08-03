@@ -1,0 +1,74 @@
+q-abstain-nimbus-k8s-autoscaling@200  
+  before(14): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-scheduler-port-distractor, nimbus-dup-fix, nimbus-scheduler-port, nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-old
+  after (16): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-scheduler-port-distractor, nimbus-dup-fix, nimbus-scheduler-port, nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-old, nimbus-conventional-commits-instance, nimbus-cron-migration-es
+q-abstain-nimbus-tracing-vendor@200  
+  before(15): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port, nimbus-retry-v2, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-pg-pin, nimbus-commit-distractor, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+  after (16): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port, nimbus-retry-v2, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-pg-pin, nimbus-commit-distractor, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+q-abstain-nimbus-tracing-vendor@5  
+  before(5): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new
+  after (5): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es
+q-abstain-nimbus-tracing-vendor@8  
+  before(8): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port, nimbus-retry-v2
+  after (8): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port
+q-abstain-nimbus-worker-replicas@200  
+  before(14): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (15): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+q-abstain-nimbus-worker-replicas@5  
+  before(5): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor
+  after (5): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor
+q-abstain-nimbus-worker-replicas@8  
+  before(8): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor
+  after (8): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance
+q-cross-scope-commit-convention@200  
+  before(10): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, nimbus-pg-pin-distractor, nimbus-dup-fix, nimbus-retry-v2
+  after (11): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, nimbus-pg-pin-distractor, nimbus-dup-fix, pref-pr-review-depth, nimbus-retry-v2
+q-cross-scope-test-colocation@200  
+  before(9): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice, atlas-rate-limit-old, atlas-orm-distractor
+  after (10): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-cache-distractor, atlas-orm-choice, atlas-rate-limit-old, atlas-orm-distractor
+q-cross-scope-test-colocation@8  
+  before(8): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice, atlas-rate-limit-old
+  after (8): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-cache-distractor, atlas-orm-choice
+q-nimbus-dup-processing-reason@200  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (4): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision, nimbus-scheduler-port
+q-nimbus-dup-processing-reason@5  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (4): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision, nimbus-scheduler-port
+q-nimbus-dup-processing-reason@8  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (4): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision, nimbus-scheduler-port
+q-nimbus-pg-pin@200  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (6): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+q-nimbus-pg-pin@5  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (5): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor
+q-nimbus-pg-pin@8  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (6): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+q-nimbus-retry-strategy@200  
+  before(14): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (15): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+q-nimbus-retry-strategy@5  
+  before(5): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor
+  after (5): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor
+q-nimbus-retry-strategy@8  
+  before(8): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin, nimbus-mq-decision
+  after (8): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin
+q-nimbus-scheduler-port@200  
+  before(10): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-commit-distractor, nimbus-pg-pin-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix
+  after (11): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-pg-pin, nimbus-scheduler-port-distractor, nimbus-commit-distractor, nimbus-pg-pin-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix
+q-nimbus-scheduler-port@8  
+  before(8): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-commit-distractor, nimbus-pg-pin-distractor
+  after (8): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-pg-pin, nimbus-scheduler-port-distractor, nimbus-commit-distractor
+q-pref-nimbus-docstrings@200  
+  before(7): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (8): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+q-pref-nimbus-docstrings@5  
+  before(5): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix
+  after (5): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor
+q-pref-nimbus-docstrings@8  
+  before(7): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (8): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+
+24/72 entries moved (0 reorder-only), total ids before=469 after=484

@@ -1,0 +1,62 @@
+# 10.1.1 — indexTerms versus the terms FTS5 stores, per script
+#
+# produced by: pnpm --filter @rembric/server exec tsx $REPO/openspec/changes/weight-relevance-levels-by-idf/measurements/tokenizer-divergence.mjs
+# measures indexTerms, which the amendment does NOT change (the row side keeps it) — same before and after
+
+memory_fts declaration: CREATE VIRTUAL TABLE `memory_fts` USING fts5( content, tags, title, content='memory', content_rowid='rowid' )
+inherited fts5 arguments: (none)
+sqlite: 3.53.2
+
+sample                           app  index  absent       terms the index does not hold
+Spanish (CONTROL)                6    6      0 (0%)       —
+German (CONTROL)                 4    4      0 (0%)       —
+Cyrillic without й/ё (CONTROL)   3    3      0 (0%)       —
+Cyrillic with й/ё                4    4      4 (100%)     маискии раион воити елка
+Greek                            5    6      4 (80%)      αναζητηση ολοκληρωθηκε επιτυχως τελος
+Vietnamese                       8    8      4 (50%)      kiem bo nho đem
+Devanagari                       6    12     5 (83%)      डटबस कश जच पर हई
+Arabic                           6    6      1 (17%)      الموقت
+Japanese                         1    1      1 (100%)     ハント設定のテハックを完了しました
+stacked-diacritic Latin          4    4      4 (100%)     arsrapport anh nguyen pho
+
+full term lists, app versus index:
+
+Spanish (CONTROL): Migración de cron programada; validación ejecución
+  app  : migracion de cron programada validacion ejecucion
+  index: cron de ejecucion migracion programada validacion
+
+German (CONTROL): Grüße Straße Bäckerei Fuß
+  app  : gruße straße backerei fuß
+  index: backerei fuß gruße straße
+
+Cyrillic without й/ё (CONTROL): проверка база сервер
+  app  : проверка база сервер
+  index: база проверка сервер
+
+Cyrillic with й/ё: Майский район войти ёлка
+  app  : маискии раион воити елка
+  index: войти майский район ёлка
+
+Greek: Η αναζήτηση ολοκληρώθηκε επιτυχώς ΤΕΛΟΣ τέλος
+  app  : η αναζητηση ολοκληρωθηκε επιτυχως τελος
+  index: αναζήτηση επιτυχώσ η ολοκληρώθηκε τέλοσ τελοσ
+
+Vietnamese: Kiểm tra bộ nhớ đệm đã hoàn thành
+  app  : kiem tra bo nho đem đa hoan thanh
+  index: bộ hoan kiểm nhớ thanh tra đa đệm
+
+Devanagari: डेटाबेस कैश की जाँच पूरी हुई
+  app  : डटबस कश क जच पर हई
+  index: ई क च ज ट ड प ब र श स ह
+
+Arabic: تم التحقق من ذاكرة التخزين المؤقت
+  app  : تم التحقق من ذاكرة التخزين الموقت
+  index: التحقق التخزين المؤقت تم ذاكرة من
+
+Japanese: バンド設定のデバッグを完了しました
+  app  : ハント設定のテハックを完了しました
+  index: バンド設定のデバッグを完了しました
+
+stacked-diacritic Latin: Ǻrsrapport Ẫnh nguyễn phở
+  app  : arsrapport anh nguyen pho
+  index: nguyễn phở ǻrsrapport ẫnh

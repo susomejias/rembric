@@ -1,0 +1,176 @@
+q-abstain-atlas-feature-flags@200  
+  before(9): atlas-rate-limit-new, atlas-auth-v2, atlas-test-colocation-instance, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-orm-choice, atlas-zod-validation-es, atlas-orm-distractor, atlas-rate-limit-old
+  after (11): atlas-rate-limit-new, atlas-auth-v2, atlas-test-colocation-instance, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-test-colocation-distractor, atlas-orm-choice, atlas-zod-validation-es, atlas-cache-decision, atlas-orm-distractor, atlas-rate-limit-old
+q-abstain-atlas-feature-flags@8  
+  before(8): atlas-rate-limit-new, atlas-auth-v2, atlas-test-colocation-instance, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-orm-choice, atlas-zod-validation-es, atlas-orm-distractor
+  after (8): atlas-rate-limit-new, atlas-auth-v2, atlas-test-colocation-instance, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-test-colocation-distractor, atlas-orm-choice, atlas-zod-validation-es
+q-abstain-atlas-graphql@200  
+  before(11): atlas-rate-limit-new, atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-test-colocation-instance, atlas-cache-decision, atlas-zod-validation-es, atlas-test-colocation-distractor, atlas-orm-distractor, atlas-orm-choice, atlas-rate-limit-old
+  after (7): atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-cache-decision, atlas-zod-validation-es, atlas-orm-distractor, atlas-orm-choice
+q-abstain-atlas-graphql@5  
+  before(5): atlas-rate-limit-new, atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-test-colocation-instance
+  after (5): atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-cache-decision, atlas-zod-validation-es
+q-abstain-atlas-graphql@8  
+  before(8): atlas-rate-limit-new, atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-test-colocation-instance, atlas-cache-decision, atlas-zod-validation-es, atlas-test-colocation-distractor
+  after (7): atlas-cache-distractor, atlas-zod-validation-es-distractor, atlas-auth-v2, atlas-cache-decision, atlas-zod-validation-es, atlas-orm-distractor, atlas-orm-choice
+q-abstain-atlas-invoice-pdf-slo@200  
+  before(8): atlas-cache-decision, atlas-rate-limit-new, atlas-test-colocation-instance, atlas-cache-distractor, atlas-auth-v2, atlas-cache-bug-fix, atlas-orm-choice, atlas-orm-distractor
+  after (6): atlas-cache-decision, atlas-rate-limit-new, atlas-test-colocation-instance, atlas-cache-distractor, atlas-auth-v2, atlas-orm-choice
+q-abstain-atlas-invoice-pdf-slo@8  
+  before(8): atlas-cache-decision, atlas-rate-limit-new, atlas-test-colocation-instance, atlas-cache-distractor, atlas-auth-v2, atlas-cache-bug-fix, atlas-orm-choice, atlas-orm-distractor
+  after (6): atlas-cache-decision, atlas-rate-limit-new, atlas-test-colocation-instance, atlas-cache-distractor, atlas-auth-v2, atlas-orm-choice
+q-abstain-global-changelog@200  
+  before(8): global-no-emoji, global-no-emoji-distractor, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor, global-atomic-commits-distractor, pref-pr-review-depth, global-test-colocation
+  after (4): global-no-emoji, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor
+q-abstain-global-changelog@5  
+  before(5): global-no-emoji, global-no-emoji-distractor, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor
+  after (4): global-no-emoji, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor
+q-abstain-global-changelog@8  
+  before(8): global-no-emoji, global-no-emoji-distractor, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor, global-atomic-commits-distractor, pref-pr-review-depth, global-test-colocation
+  after (4): global-no-emoji, global-conventional-commits, global-atomic-commits, pref-pr-review-depth-distractor
+q-abstain-global-shell-theme@200  
+  before(8): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-atomic-commits-distractor, global-conventional-commits, global-test-colocation, global-atomic-commits
+  after (4): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor
+q-abstain-global-shell-theme@5  
+  before(5): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-atomic-commits-distractor
+  after (4): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor
+q-abstain-global-shell-theme@8  
+  before(8): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-atomic-commits-distractor, global-conventional-commits, global-test-colocation, global-atomic-commits
+  after (4): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor
+q-abstain-nimbus-k8s-autoscaling@200  
+  before(14): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-scheduler-port-distractor, nimbus-dup-fix, nimbus-scheduler-port, nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-old
+  after (15): pref-nimbus-docstrings, nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-scheduler-port-distractor, nimbus-dup-fix, nimbus-scheduler-port, nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-old, nimbus-conventional-commits-instance
+q-abstain-nimbus-tracing-vendor@200  
+  before(15): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port, nimbus-retry-v2, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-pg-pin, nimbus-commit-distractor, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+  after (8): nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-scheduler-port, nimbus-retry-v2, nimbus-mq-decision, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+q-abstain-nimbus-tracing-vendor@5  
+  before(5): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new
+  after (5): nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-scheduler-port, nimbus-retry-v2
+q-abstain-nimbus-tracing-vendor@8  
+  before(8): nimbus-mq-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-deploy-pipeline-new, nimbus-conventional-commits-instance, nimbus-scheduler-port, nimbus-retry-v2
+  after (8): nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-scheduler-port, nimbus-retry-v2, nimbus-mq-decision, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+q-abstain-nimbus-worker-replicas@200  
+  before(14): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-pg-pin, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (11): nimbus-deploy-pipeline-new, nimbus-mq-decision, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-pg-pin, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+q-abstain-nimbus-worker-replicas@5  
+  before(5): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor
+  after (5): nimbus-deploy-pipeline-new, nimbus-mq-decision, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2
+q-abstain-nimbus-worker-replicas@8  
+  before(8): nimbus-deploy-pipeline-new, nimbus-mq-decision, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-pg-pin-distractor
+  after (8): nimbus-deploy-pipeline-new, nimbus-mq-decision, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-retry-v2, nimbus-pg-pin-distractor, nimbus-pg-pin, nimbus-dup-fix
+q-atlas-auth-provider@200  
+  before(12): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-cache-decision, atlas-zod-validation-es, atlas-cache-bug-fix, atlas-test-colocation-instance, atlas-test-colocation-distractor, atlas-rate-limit-old, atlas-orm-choice, atlas-orm-distractor
+  after (6): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-decision, atlas-zod-validation-es, atlas-orm-choice
+q-atlas-auth-provider@5  
+  before(5): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-cache-decision
+  after (5): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-decision, atlas-zod-validation-es
+q-atlas-auth-provider@8  
+  before(8): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-distractor, atlas-cache-decision, atlas-zod-validation-es, atlas-cache-bug-fix, atlas-test-colocation-instance
+  after (6): atlas-rate-limit-new, atlas-auth-v2, atlas-zod-validation-es-distractor, atlas-cache-decision, atlas-zod-validation-es, atlas-orm-choice
+q-atlas-cache-fix-reason@200  
+  before(9): atlas-cache-decision, atlas-cache-bug-fix, atlas-cache-distractor, atlas-auth-v2, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-orm-choice, atlas-orm-distractor, atlas-rate-limit-old
+  after (6): atlas-cache-decision, atlas-cache-bug-fix, atlas-rate-limit-new, atlas-cache-distractor, atlas-auth-v2, atlas-orm-choice
+q-atlas-cache-fix-reason@5  
+  before(5): atlas-cache-decision, atlas-cache-bug-fix, atlas-cache-distractor, atlas-auth-v2, atlas-test-colocation-distractor
+  after (5): atlas-cache-decision, atlas-cache-bug-fix, atlas-rate-limit-new, atlas-cache-distractor, atlas-auth-v2
+q-atlas-cache-fix-reason@8  
+  before(8): atlas-cache-decision, atlas-cache-bug-fix, atlas-cache-distractor, atlas-auth-v2, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-orm-choice, atlas-orm-distractor
+  after (6): atlas-cache-decision, atlas-cache-bug-fix, atlas-rate-limit-new, atlas-cache-distractor, atlas-auth-v2, atlas-orm-choice
+q-atlas-orm@200  
+  before(1): atlas-orm-choice
+  after (2): atlas-auth-v2, atlas-orm-choice
+q-atlas-orm@5  
+  before(1): atlas-orm-choice
+  after (2): atlas-auth-v2, atlas-orm-choice
+q-atlas-orm@8  
+  before(1): atlas-orm-choice
+  after (2): atlas-auth-v2, atlas-orm-choice
+q-atlas-rate-limit-latest@200  
+  before(9): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-test-colocation-instance, atlas-test-colocation-distractor, atlas-rate-limit-old, atlas-cache-bug-fix, atlas-orm-choice, atlas-orm-distractor
+  after (5): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-rate-limit-old, atlas-orm-choice
+q-atlas-rate-limit-latest@5  
+  before(5): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-test-colocation-instance, atlas-test-colocation-distractor
+  after (5): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-rate-limit-old, atlas-orm-choice
+q-atlas-rate-limit-latest@8  
+  before(8): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-test-colocation-instance, atlas-test-colocation-distractor, atlas-rate-limit-old, atlas-cache-bug-fix, atlas-orm-choice
+  after (5): atlas-rate-limit-new, atlas-cache-distractor, atlas-cache-decision, atlas-rate-limit-old, atlas-orm-choice
+q-cross-scope-commit-convention@200  
+  before(10): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, nimbus-pg-pin-distractor, nimbus-dup-fix, nimbus-retry-v2
+  after (16): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, global-atomic-commits, global-commit-language-es, pref-pr-review-depth-distractor, nimbus-pg-pin-distractor, nimbus-dup-fix, pref-pr-review-depth, nimbus-retry-v2, nimbus-pg-pin, nimbus-cron-migration-es-distractor
+q-cross-scope-commit-convention@8  
+  before(8): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, nimbus-pg-pin-distractor
+  after (8): global-no-emoji-distractor, nimbus-conventional-commits-instance, nimbus-commit-distractor, pref-nimbus-docstrings, global-no-emoji, nimbus-mq-decision, global-conventional-commits, global-atomic-commits
+q-cross-scope-test-colocation@200  
+  before(9): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice, atlas-rate-limit-old, atlas-orm-distractor
+  after (6): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice
+q-cross-scope-test-colocation@5  
+  before(5): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits
+  after (5): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, global-conventional-commits, pref-pr-review-depth
+q-cross-scope-test-colocation@8  
+  before(8): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, atlas-cache-decision, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice, atlas-rate-limit-old
+  after (6): global-test-colocation, atlas-test-colocation-distractor, atlas-test-colocation-instance, global-conventional-commits, pref-pr-review-depth, atlas-orm-choice
+q-nimbus-deploy-pipeline-latest@200  
+  before(16): nimbus-deploy-pipeline-new, pref-nimbus-docstrings, nimbus-cron-migration-es-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es, nimbus-pg-pin-distractor, nimbus-mq-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-commit-distractor, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-dup-fix, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (11): nimbus-deploy-pipeline-new, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-pg-pin-distractor, nimbus-mq-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-retry-v2, nimbus-conventional-commits-instance, nimbus-deploy-pipeline-old, nimbus-scheduler-port-distractor
+q-nimbus-deploy-pipeline-latest@5  
+  before(5): nimbus-deploy-pipeline-new, pref-nimbus-docstrings, nimbus-cron-migration-es-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es
+  after (5): nimbus-deploy-pipeline-new, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-pg-pin-distractor, nimbus-mq-distractor
+q-nimbus-deploy-pipeline-latest@8  
+  before(8): nimbus-deploy-pipeline-new, pref-nimbus-docstrings, nimbus-cron-migration-es-distractor, pref-nimbus-docstrings-distractor, nimbus-cron-migration-es, nimbus-pg-pin-distractor, nimbus-mq-distractor, nimbus-pg-pin
+  after (8): nimbus-deploy-pipeline-new, nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-pg-pin-distractor, nimbus-mq-distractor, nimbus-pg-pin, nimbus-mq-decision, nimbus-retry-v2
+q-nimbus-dup-processing-reason@200  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (2): nimbus-dup-fix, nimbus-mq-decision
+q-nimbus-dup-processing-reason@5  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (2): nimbus-dup-fix, nimbus-mq-decision
+q-nimbus-dup-processing-reason@8  
+  before(3): nimbus-dup-fix, nimbus-pg-pin-distractor, nimbus-mq-decision
+  after (2): nimbus-dup-fix, nimbus-mq-decision
+q-nimbus-pg-pin@200  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (2): nimbus-pg-pin, nimbus-pg-pin-distractor
+q-nimbus-pg-pin@5  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (2): nimbus-pg-pin, nimbus-pg-pin-distractor
+q-nimbus-pg-pin@8  
+  before(5): pref-nimbus-docstrings-distractor, nimbus-pg-pin, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-scheduler-port
+  after (2): nimbus-pg-pin, nimbus-pg-pin-distractor
+q-nimbus-retry-strategy@200  
+  before(14): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin, nimbus-mq-decision, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (6): nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-cron-migration-es-distractor, nimbus-mq-decision, nimbus-deploy-pipeline-old, nimbus-scheduler-port
+q-nimbus-retry-strategy@5  
+  before(5): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor
+  after (5): nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-cron-migration-es-distractor, nimbus-mq-decision, nimbus-deploy-pipeline-old
+q-nimbus-retry-strategy@8  
+  before(8): nimbus-deploy-pipeline-new, nimbus-retry-v2, pref-nimbus-docstrings-distractor, nimbus-mq-distractor, nimbus-cron-migration-es-distractor, nimbus-conventional-commits-instance, nimbus-pg-pin, nimbus-mq-decision
+  after (6): nimbus-deploy-pipeline-new, nimbus-retry-v2, nimbus-cron-migration-es-distractor, nimbus-mq-decision, nimbus-deploy-pipeline-old, nimbus-scheduler-port
+q-nimbus-scheduler-port@200  
+  before(10): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-commit-distractor, nimbus-pg-pin-distractor, nimbus-deploy-pipeline-old, nimbus-dup-fix
+  after (6): nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-deploy-pipeline-old
+q-nimbus-scheduler-port@5  
+  before(5): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port
+  after (5): nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor
+q-nimbus-scheduler-port@8  
+  before(8): nimbus-cron-migration-es-distractor, nimbus-deploy-pipeline-new, pref-nimbus-docstrings-distractor, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-commit-distractor, nimbus-pg-pin-distractor
+  after (6): nimbus-cron-migration-es-distractor, nimbus-cron-migration-es, nimbus-retry-v2, nimbus-scheduler-port, nimbus-scheduler-port-distractor, nimbus-deploy-pipeline-old
+q-pref-nimbus-docstrings@200  
+  before(7): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (2): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor
+q-pref-nimbus-docstrings@5  
+  before(5): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix
+  after (2): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor
+q-pref-nimbus-docstrings@8  
+  before(7): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor, nimbus-pg-pin-distractor, nimbus-commit-distractor, nimbus-dup-fix, nimbus-scheduler-port-distractor, nimbus-scheduler-port
+  after (2): pref-nimbus-docstrings, pref-nimbus-docstrings-distractor
+q-pref-pr-review@200  
+  before(8): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-conventional-commits, global-atomic-commits-distractor, global-test-colocation, global-atomic-commits
+  after (2): global-no-emoji, pref-pr-review-depth
+q-pref-pr-review@5  
+  before(5): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-conventional-commits
+  after (2): global-no-emoji, pref-pr-review-depth
+q-pref-pr-review@8  
+  before(8): global-no-emoji, global-no-emoji-distractor, pref-pr-review-depth, pref-pr-review-depth-distractor, global-conventional-commits, global-atomic-commits-distractor, global-test-colocation, global-atomic-commits
+  after (2): global-no-emoji, pref-pr-review-depth
+
+58/72 entries moved (0 reorder-only), total ids before=469 after=358
