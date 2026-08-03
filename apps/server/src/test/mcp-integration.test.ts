@@ -15,6 +15,7 @@ import { agentSessions } from '../db/schema/agent-sessions.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
+import { ABSTENTION_FLOOR } from '../services/hybrid-search.js';
 import { ProjectsService } from '../services/projects.js';
 import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
@@ -188,6 +189,34 @@ describe('MCP protocol conformance', () => {
     expect(desc).toMatch(/offset/i);
 
     await client.close();
+  });
+
+  it('memory.search description explains abstention without naming a disabled gate', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const search = tools.find((t) => t.name === 'memory.search');
+    expect(search, 'memory.search missing from tools/list').toBeDefined();
+    const desc = search?.description ?? '';
+    await client.close();
+
+    // The anti-confabulation clause the mcp-api scenario is written against,
+    // verbatim.
+    expect(desc).toContain('not as a signal to invent or assume context');
+    expect(desc).toContain('nothing relevant found');
+    // `ABSTENTION_FLOOR` ships `null`, so the description must not attribute
+    // abstention to it. This is the assertion whose absence let the shipped
+    // description name a mechanism that cannot fire.
+    expect(ABSTENTION_FLOOR).toBeNull();
+    expect(desc).not.toMatch(/relevance floor/i);
+
+    // The shortening flag, and what a short page and a full page each do not mean.
+    expect(desc).toContain('gateShortened');
+    expect(desc).toContain('a short page is not corpus exhaustion');
+    expect(desc).toContain('a full page is not proof of relevance');
+
+    // Measured at the boundary the client reads, not off the constant.
+    expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(desc.length, 'the reword drifted from the budget recorded in design.md D5').toBe(1874);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {
@@ -380,6 +409,59 @@ describe('MCP protocol conformance', () => {
     expect(readJson(atMax)).toMatchObject({ relations: [], relationsTotal: 0 });
 
     await client.close();
+  });
+
+  it('marks a gate-shortened page over the MCP boundary, and a deep offset as not shortened', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const shortened =
+      projects.findBySlug('integration-gate-short') ??
+      projects.create({ slug: 'integration-gate-short' });
+    const untouched =
+      projects.findBySlug('integration-gate-deep') ??
+      projects.create({ slug: 'integration-gate-deep' });
+
+    const save = async (client: Client, title: string, content: string) => {
+      const r = (await client.callTool({
+        name: 'memory.save',
+        arguments: { type: 'project', title, content },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+    };
+
+    // One row carrying every query term, four carrying one common term: the
+    // relative filter cuts the four, leaving a page short of `limit`.
+    const shortClient = await connect({ projectSlug: shortened.slug });
+    await save(shortClient, 'Quetzal ledger', 'quetzal ledger obsidian marmot tessellate');
+    for (let i = 0; i < 4; i++) await save(shortClient, `Marmot ${i}`, `marmot sighting ${i}`);
+    const gated = readJson(
+      (await shortClient.callTool({
+        name: 'memory.search',
+        arguments: { query: 'quetzal ledger obsidian marmot tessellate', limit: 8 },
+      })) as ToolResult,
+    ) as { count: number; abstained: boolean; gateShortened?: boolean };
+    await shortClient.close();
+    expect(gated.count).toBeGreaterThan(0);
+    expect(gated.count).toBeLessThan(8);
+    expect(gated.abstained).toBe(false);
+    expect(gated.gateShortened).toBe(true);
+
+    // Control: three equally-relevant rows, so the filter removes nothing. The
+    // page past the end is empty because the caller paged past the pool, and
+    // that is not the gate's doing.
+    const deepClient = await connect({ projectSlug: untouched.slug });
+    for (let i = 0; i < 3; i++)
+      await save(deepClient, `Basalt ${i}`, 'basalt cistern verdigris palimpsest');
+    const deep = readJson(
+      (await deepClient.callTool({
+        name: 'memory.search',
+        arguments: { query: 'basalt cistern verdigris palimpsest', limit: 2, offset: 5 },
+      })) as ToolResult,
+    ) as Record<string, unknown>;
+    await deepClient.close();
+    expect(deep.count).toBe(0);
+    expect(deep.abstained).toBe(false);
+    expect(deep).not.toHaveProperty('gateShortened');
+    expect(deep).not.toHaveProperty('abstainReason');
   });
 
   it('keeps every tool description under the client truncation ceiling', async () => {

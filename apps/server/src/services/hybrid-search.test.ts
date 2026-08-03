@@ -6,10 +6,12 @@ import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
 import {
+  ABSTAIN_REASON,
   applyDiversityCap,
   applyRankingBoost,
   applyRelativeLevelFilter,
   computeRankWindowSize,
+  EMPTY_POOL_REASON,
   fuseRRF,
   fuseRRFWithScores,
   poolLeader,
@@ -20,6 +22,7 @@ import {
   sanitizeFtsQuery,
   termWeightsFor,
   tokenSet,
+  type GateLeader,
   type TermWeightLookup,
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
@@ -655,7 +658,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(res.map((m) => m.content)).toContain('lexical only lookup');
   });
 
-  it('with the gates disabled (the default), hybridSearch never abstains', async () => {
+  it('with the gates disabled (the default), a NON-EMPTY fused pool never abstains', async () => {
     mem.save(
       { type: 'user', title: 'gate default check', content: 'gate default check' },
       projectScope(projectId),
@@ -671,10 +674,15 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       limit: 8,
       offset: 0,
     });
+    // The dense branch has no distance floor, so the unrelated query still pools
+    // the row — which is what makes this an assertion about the gates and not
+    // about an empty pool (that case abstains, below).
+    expect(result.ids.length).toBeGreaterThan(0);
     expect(result.abstained).toBe(false);
+    expect(result.reason).toBeUndefined();
   });
 
-  it('abstains when the candidate set is empty and a floor is enabled', async () => {
+  it('abstains with the empty-pool reason when both branches return nothing, gates untouched', async () => {
     const ftsOnly = new MemoryService(repos, db.handle.db);
     ftsOnly.save(
       { type: 'user', title: 'nothing in common', content: 'nothing in common' },
@@ -688,10 +696,111 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       status: 'active',
       limit: 8,
       offset: 0,
-      abstentionFloor: 0.5,
     });
     expect(result.abstained).toBe(true);
     expect(result.ids).toEqual([]);
+    expect(result.reason).toBe(EMPTY_POOL_REASON);
+    expect(result.gateShortened).toBeUndefined();
+  });
+
+  it('abstains on an empty pool without reading term statistics or pool text', async () => {
+    const ftsOnly = new MemoryService(repos, db.handle.db);
+    ftsOnly.save(
+      { type: 'user', title: 'nothing in common', content: 'nothing in common' },
+      projectScope(projectId),
+    );
+    const textByIds = vi.spyOn(repos.memory, 'textByIds');
+    const documentCount = vi.spyOn(repos.termStatistics, 'adminDocumentCount');
+    const result = await hybridSearch({
+      repos,
+      query: 'zzzqqq wwwvvv',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    expect(result.abstained).toBe(true);
+    // "While BOTH gates are disabled the branch SHALL perform no gate-related
+    // work at all" (memory/spec.md) — the verdict is a length check on an array
+    // already in hand.
+    expect(textByIds).not.toHaveBeenCalled();
+    expect(documentCount).not.toHaveBeenCalled();
+    textByIds.mockRestore();
+    documentCount.mockRestore();
+  });
+
+  it('still feeds the calibration sweep on an empty pool, with the live term statistics', async () => {
+    const ftsOnly = new MemoryService(repos, db.handle.db);
+    ftsOnly.save(
+      { type: 'user', title: 'nothing in common', content: 'nothing in common' },
+      projectScope(projectId),
+    );
+    let leader: GateLeader | undefined;
+    const result = await hybridSearch({
+      repos,
+      query: 'zzzqqq wwwvvv',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      onGateWindow: (l) => {
+        leader = l;
+      },
+    });
+    expect(result.abstained).toBe(true);
+    expect(leader?.poolSize).toBe(0);
+    expect(leader?.level).toBe(0);
+    // The df list is why the sink is called at all here: it shows which query
+    // terms the index does not hold, which is why the pool is empty.
+    expect(leader?.documentCount).toBeGreaterThan(0);
+    expect([...(leader?.documentFrequencies.keys() ?? [])]).toContain('zzzqqq');
+  });
+
+  it('abstains with the empty-pool reason on a type filter that excludes every row', async () => {
+    mem.save(
+      { type: 'user', title: 'filter probe row', content: 'filter probe row content' },
+      projectScope(projectId),
+    );
+    await embedAll();
+    const shared = {
+      repos,
+      embedQuery: (t: string) => fake.embed(t),
+      query: 'filter probe',
+      scope: 'project' as const,
+      projectId,
+      status: 'active' as const,
+      limit: 8,
+      offset: 0,
+    };
+    // Control: the same query without the filter pools the row, so the
+    // abstention below is the filter's doing and not a broken probe.
+    const unfiltered = await hybridSearch(shared);
+    expect(unfiltered.ids.length).toBeGreaterThan(0);
+    expect(unfiltered.abstained).toBe(false);
+
+    const filtered = await hybridSearch({ ...shared, type: 'procedural' });
+    expect(filtered.ids).toEqual([]);
+    expect(filtered.abstained).toBe(true);
+    expect(filtered.reason).toBe(EMPTY_POOL_REASON);
+  });
+
+  it('abstains with the empty-pool reason in an empty scope', async () => {
+    const emptyProject = new ProjectsService(repos).create({ slug: 'empty' }).id;
+    const result = await hybridSearch({
+      repos,
+      embedQuery: (t) => fake.embed(t),
+      query: 'anything at all',
+      scope: 'project',
+      projectId: emptyProject,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    expect(result.ids).toEqual([]);
+    expect(result.abstained).toBe(true);
+    expect(result.reason).toBe(EMPTY_POOL_REASON);
   });
 });
 
@@ -904,6 +1013,123 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     // the shipped ratio would leave the filter on and make this no control.
     const page2Ungated = await search({ relativeLevelRatio: null, limit: 2, offset: 2 });
     expect(page2Ungated.ids).toHaveLength(2);
+
+    // The gate IS the cause of the empty page 2, so the flag fires there too.
+    expect(page2.gateShortened).toBe(true);
+    expect(page2Ungated.gateShortened).toBeUndefined();
+  });
+
+  describe('gateShortened fires on cause AND effect, never on one alone', () => {
+    /** STRONG at level 1.0 plus three weak rows, so a ratio can be placed between them. */
+    const fourRowPool = () => {
+      const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+      for (let i = 0; i < 3; i++) {
+        mem.save(
+          { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+          projectScope(projectId),
+        );
+      }
+      const weak = liveLevel({ title: 'Weak 0', content: WEAK.content });
+      expect(weak).toBeGreaterThan(0.05);
+      expect(weak).toBeLessThan(0.95);
+      return { strong, cuts: { removes: weak + 0.05, keepsAll: weak - 0.05 } };
+    };
+
+    it('the filter removed rows and the page is short — the flag fires', async () => {
+      const { strong, cuts } = fourRowPool();
+      const result = await search({ relativeLevelRatio: cuts.removes, limit: 8 });
+      expect(result.ids).toEqual([strong.id]);
+      expect(result.gateShortened).toBe(true);
+      expect(result.abstained).toBe(false);
+    });
+
+    it('the filter removed rows but the page is full — no flag', async () => {
+      const { strong, cuts } = fourRowPool();
+      const result = await search({ relativeLevelRatio: cuts.removes, limit: 1 });
+      expect(result.ids).toEqual([strong.id]);
+      expect(result.gateShortened).toBeUndefined();
+    });
+
+    it('the page is short but the filter removed nothing — no flag', async () => {
+      const { cuts } = fourRowPool();
+      const result = await search({ relativeLevelRatio: cuts.keepsAll, limit: 8 });
+      expect(result.ids).toHaveLength(4);
+      expect(result.gateShortened).toBeUndefined();
+    });
+
+    it('the page is full and the filter removed nothing — no flag', async () => {
+      const { cuts } = fourRowPool();
+      const result = await search({ relativeLevelRatio: cuts.keepsAll, limit: 4 });
+      expect(result.ids).toHaveLength(4);
+      expect(result.gateShortened).toBeUndefined();
+    });
+
+    it('the filter disabled removes nothing, so a short page carries no flag', async () => {
+      fourRowPool();
+      const result = await search({ relativeLevelRatio: null, limit: 8 });
+      expect(result.ids).toHaveLength(4);
+      expect(result.gateShortened).toBeUndefined();
+    });
+
+    it('survives the service layer, including on an empty page past the survivors', async () => {
+      const survivors = [
+        mem.save({ type: 'project', ...STRONG }, projectScope(projectId)).id,
+        mem.save(
+          { type: 'project', title: STRONG.title, content: STRONG.content },
+          projectScope(projectId),
+        ).id,
+      ];
+      for (let i = 0; i < 3; i++) {
+        mem.save(
+          { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+          projectScope(projectId),
+        );
+      }
+      const cut = liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05;
+
+      const page1 = await mem.searchWithAbstention(
+        { query: QUERY, limit: 2, offset: 0 },
+        projectScope(projectId),
+        { relativeLevelRatio: cut },
+      );
+      expect(page1.memories.map((m) => m.id).sort()).toEqual([...survivors].sort());
+      expect(page1.gateShortened).toBeUndefined(); // full page
+
+      const page2 = await mem.searchWithAbstention(
+        { query: QUERY, limit: 2, offset: 2 },
+        projectScope(projectId),
+        { relativeLevelRatio: cut },
+      );
+      expect(page2.memories).toEqual([]);
+      expect(page2.abstained).toBe(false);
+      expect(page2.gateShortened).toBe(true);
+    });
+
+    it('never reports both an abstention and a shortening, even at ratio 1', async () => {
+      fourRowPool();
+      const filtered = await search({ relativeLevelRatio: 1, limit: 8 });
+      expect(filtered.gateShortened).toBe(true);
+      expect(filtered.abstained).toBe(false);
+
+      // The other half of the disjointness: an empty pool gives the filter
+      // nothing to remove, so the flag cannot accompany the abstention.
+      const empty = await search({ query: 'zzzqqq wwwvvv', relativeLevelRatio: 1 });
+      expect(empty.abstained).toBe(true);
+      expect(empty.gateShortened).toBeUndefined();
+    });
+  });
+
+  it('names each abstention cause with its own reason', async () => {
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    const floor = await search({ abstentionFloor: liveLevel(WEAK) + 0.05 });
+    expect(floor.abstained).toBe(true);
+    expect(floor.reason).toBe(ABSTAIN_REASON);
+
+    const emptyPool = await search({ query: 'zzzqqq wwwvvv' });
+    expect(emptyPool.abstained).toBe(true);
+    expect(emptyPool.reason).toBe(EMPTY_POOL_REASON);
+
+    expect(emptyPool.reason).not.toBe(floor.reason);
   });
 
   // The gate levels the WHOLE fused pool. Asserted on the row set actually read

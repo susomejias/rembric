@@ -77,8 +77,18 @@ export interface QueryItem {
 /** One retrieval outcome: ids ranked best-first, plus the explicit abstention flag where a retriever has one. */
 export interface RetrievalOutcome {
   ids: string[];
-  /** Set only by a retriever that reports abstention explicitly; the harness fails the run when it disagrees with `ids.length === 0`. */
+  /** Set only by a retriever that reports abstention explicitly; the harness fails the run when it is `true` alongside results (see `abstention-flags.ts`). */
   abstained?: boolean;
+}
+
+/** One scored retrieval outcome as the eval loop records it, before aggregation. */
+export interface RawOutcome {
+  query: QueryItem;
+  retrieved: string[];
+  /** Undefined for a retriever with no explicit flag (`grep`, `memory-md-dump`). */
+  reportedAbstained: boolean | undefined;
+  latencyMs: number;
+  goldIds: string[];
 }
 
 /** Gate values the calibration sweep varies; a retriever that has no gates ignores them. */

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
 import { type GateLeader } from '../../services/hybrid-search.js';
 
+import { checkAbstentionFlags } from './abstention-flags.js';
 import { CORPUS } from './corpus.js';
 import {
   checkBounds,
@@ -25,22 +26,13 @@ import {
   tokensReturned,
   type QueryMetrics,
 } from './scoring.js';
-import type { GateSetting, IngestedCorpus, QueryItem, Retriever } from './types.js';
+import type { GateSetting, IngestedCorpus, RawOutcome, Retriever } from './types.js';
 
 const K_VALUES = [5, 8] as const;
 const MAX_K = 8;
 const BASELINES_DIR = join(import.meta.dirname, 'baselines');
 /** Absolute tolerance subtracted from a measured metric to set its committed floor. */
 const FLOOR_TOLERANCE = 0.05;
-
-interface RawOutcome {
-  query: QueryItem;
-  retrieved: string[];
-  /** Undefined for a retriever with no explicit flag (`grep`, `memory-md-dump`). */
-  reportedAbstained: boolean | undefined;
-  latencyMs: number;
-  goldIds: string[];
-}
 
 async function runRetriever(
   retriever: Retriever,
@@ -64,24 +56,6 @@ async function runRetriever(
   }
   await retriever.teardown?.(state);
   return outcomes;
-}
-
-/**
- * An explicit abstention flag that disagrees with emptiness fails the run.
- * Checked at MAX_K, the k the retriever was actually called with — a truncated
- * page at a smaller k is not the retriever's verdict.
- */
-function checkAbstentionFlags(retriever: string, outcomes: RawOutcome[]): string[] {
-  const failures: string[] = [];
-  for (const o of outcomes) {
-    if (o.reportedAbstained === undefined) continue;
-    if (o.reportedAbstained !== (o.retrieved.length === 0)) {
-      failures.push(
-        `${retriever} '${o.query.id}' reported abstained=${o.reportedAbstained} while returning ${o.retrieved.length} result(s) — the flag disagrees with the behaviour it describes`,
-      );
-    }
-  }
-  return failures;
 }
 
 function scoreOutcomes(

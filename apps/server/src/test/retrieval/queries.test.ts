@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { hybridSearch } from '../../services/hybrid-search.js';
+import { ABSTAIN_REASON, EMPTY_POOL_REASON, hybridSearch } from '../../services/hybrid-search.js';
 import { FakeEmbedder } from '../embedder.js';
 
 import { CORPUS } from './corpus.js';
@@ -59,5 +59,10 @@ describe('the abstention query set exercises the gate, not an empty candidate se
   it('the same probe returns nothing for vocabulary absent from the corpus (so the assertion above can fail)', async () => {
     const result = await lexicalOnly('zzqqwx vvbbnm ppllkk', ABSTENTION_QUERIES[0]!.scope);
     expect(result.ids).toEqual([]);
+    expect(result.abstained).toBe(true);
+    // The empty pool's reason, not the floor's: the floor ships disabled and
+    // never ran here.
+    expect(result.reason).toBe(EMPTY_POOL_REASON);
+    expect(result.reason).not.toBe(ABSTAIN_REASON);
   });
 });

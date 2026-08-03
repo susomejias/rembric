@@ -366,6 +366,12 @@ export const memorySearchOutput = {
   expanded: z.array(expandedMemoryRow).optional(),
   abstained: z.boolean(),
   abstainReason: z.string().optional(),
+  /**
+   * Present only when the relevance filter removed candidates AND the page came
+   * back short of `limit`: the short page is the gate's doing, not the corpus
+   * running out.
+   */
+  gateShortened: z.boolean().optional(),
   /** True when `entity` drove retrieval (exact-address, not ranked). */
   viaEntity: z.boolean().optional(),
   /**
@@ -490,6 +496,21 @@ export const contextOutput = {
       via: z.enum(['entity', 'ranked']),
     }),
   ),
+  /**
+   * The ranked pass's own verdict, with `memory.search`'s field names. ABSENT
+   * when that pass never ran (no derivable seed, or the entity pre-pass already
+   * filled the channel) — reporting `abstained: false` for a search that never
+   * happened would assert a verdict the server never measured. `gateShortened`
+   * is measured against the limit THAT pass requested, so the channel can be
+   * full while it is set.
+   */
+  rankedPass: z
+    .object({
+      abstained: z.boolean(),
+      reason: z.string().optional(),
+      gateShortened: z.boolean().optional(),
+    })
+    .optional(),
   pendingJudgments: z.array(
     z.object({
       judgmentId: z.string(),
@@ -957,7 +978,7 @@ async function handleSearch(
   if (searchBudget) return searchBudget;
 
   try {
-    const { memories, abstained, reason, viaEntity, entityIndexDraining } =
+    const { memories, abstained, reason, gateShortened, viaEntity, entityIndexDraining } =
       await deps.memory.searchWithAbstention(input, scope);
     const entitiesByMemory = deps.repos
       ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
@@ -1050,6 +1071,7 @@ async function handleSearch(
       ...(expanded ? { expanded } : {}),
       abstained,
       ...(reason ? { abstainReason: reason } : {}),
+      ...(gateShortened ? { gateShortened } : {}),
       ...(viaEntity ? { viaEntity } : {}),
       ...(entityIndexDraining ? { entityIndexDraining } : {}),
     });
@@ -1249,7 +1271,7 @@ const CONTEXT_SNIPPET_CHARS = 350;
 const NEEDS_REVIEW_MAX = 3;
 
 /** Small and separate from `memoriesLimit` so enabling relevance never halves the recency channel (design.md Open Questions). */
-const RELEVANCE_LIMIT = 5;
+export const RELEVANCE_LIMIT = 5;
 
 /**
  * When `focus` is absent, derive a seed from signals the server already
@@ -1379,6 +1401,7 @@ async function handleContext(
     topicKey: string | null;
     via: 'entity' | 'ranked';
   }[] = [];
+  let rankedPass: { abstained: boolean; reason?: string; gateShortened?: true } | undefined;
   if (focusText) {
     // Entity-derived results are folded into this one channel rather than
     // exposed separately (design.md's resolved open question 3: "leaning
@@ -1408,8 +1431,16 @@ async function handleContext(
       }
     }
     if (byId.size < RELEVANCE_LIMIT) {
-      const ranked = await deps.memory.search({ query: focusText, limit: RELEVANCE_LIMIT }, scope);
-      for (const r of ranked) {
+      const pass = await deps.memory.searchWithAbstention(
+        { query: focusText, limit: RELEVANCE_LIMIT },
+        scope,
+      );
+      rankedPass = {
+        abstained: pass.abstained,
+        ...(pass.reason ? { reason: pass.reason } : {}),
+        ...(pass.gateShortened ? { gateShortened: pass.gateShortened } : {}),
+      };
+      for (const r of pass.memories) {
         if (byId.size >= RELEVANCE_LIMIT) break;
         if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'ranked' });
       }
@@ -1479,6 +1510,7 @@ async function handleContext(
     recentPrompts,
     recentMemories,
     relevantMemories,
+    ...(rankedPass ? { rankedPass } : {}),
     pendingJudgments,
     pendingJudgmentsTotal,
     needsReview,

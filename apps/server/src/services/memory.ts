@@ -438,9 +438,10 @@ export class MemoryService {
   }
 
   /**
-   * Same as `search`, plus the `ABSTENTION_FLOOR`'s verdict alone: a page
-   * shortened by `RELATIVE_LEVEL_RATIO` reports `false`, so a caller can tell
-   * "nothing relevant exists" from "fewer than `limit` rows were relevant".
+   * Same as `search`, plus the ranked branch's two verdicts: `abstained` (the
+   * floor's, or an empty fused pool's) and `gateShortened`, which is what lets a
+   * caller tell "nothing relevant exists" from "fewer than `limit` rows were
+   * relevant" — `abstained: false` alone cannot make that distinction.
    */
   async searchWithAbstention(
     input: SearchMemoriesInput,
@@ -450,6 +451,7 @@ export class MemoryService {
     memories: Memory[];
     abstained: boolean;
     reason?: string;
+    gateShortened?: true;
     viaEntity?: boolean;
     entityIndexDraining?: boolean;
   }> {
@@ -515,6 +517,7 @@ export class MemoryService {
     let ids: string[];
     let abstained = false;
     let reason: string | undefined;
+    let gateShortened: true | undefined;
     if (query) {
       const result = await hybridSearch({
         repos: this.repos,
@@ -534,6 +537,7 @@ export class MemoryService {
       ids = result.ids;
       abstained = result.abstained;
       reason = result.reason;
+      gateShortened = result.gateShortened;
     } else {
       ids = this.repos.memory.searchMemoryIds({
         scope: memScope,
@@ -547,7 +551,10 @@ export class MemoryService {
         includeGlobal: input.includeGlobal,
       });
     }
-    if (ids.length === 0) return { memories: [], abstained, reason };
+    // An empty page can still be gate-shortened: the filter runs before the page
+    // slice, so a `limit + offset` past the survivors is the gate's doing.
+    if (ids.length === 0)
+      return { memories: [], abstained, reason, ...(gateShortened ? { gateShortened } : {}) };
 
     const raw = this.repos.memory.unsafeGetByIds(ids);
     const byId = new Map(raw.map((m) => [m.id, m]));
@@ -560,7 +567,7 @@ export class MemoryService {
       if (m && (status === undefined ? m.status !== 'archived' : m.status === status))
         ordered.push(m);
     }
-    return { memories: ordered, abstained, reason };
+    return { memories: ordered, abstained, reason, ...(gateShortened ? { gateShortened } : {}) };
   }
 
   /**

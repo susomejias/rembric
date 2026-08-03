@@ -97,9 +97,16 @@ export interface HybridSearchResult {
   ids: string[];
   abstained: boolean;
   reason?: string;
+  /**
+   * Set only when the relative filter removed rows AND the page came back
+   * short: the caller's question is whether anything is behind a short page.
+   */
+  gateShortened?: true;
 }
 
-const ABSTAIN_REASON = 'no candidate cleared the relevance floor';
+export const ABSTAIN_REASON = 'no candidate cleared the relevance floor';
+/** Distinct from the floor's: attributing an empty pool to a gate that never ran is untrue. */
+export const EMPTY_POOL_REASON = 'no candidate matched the query in this scope';
 
 /**
  * The pool leader's level and the two components of that same row, so a
@@ -129,9 +136,28 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
 
   const fused = fuseRRFWithScores([dense.map((d) => d.id), lexicalIds], RANK_CONSTANT);
 
+  // A property of the POOL, not of the page: an `offset` past a non-empty pool
+  // is an ordinary empty page. Ahead of the gates so it holds with both `null`,
+  // and ahead of the floor so the reason names the mechanism that spoke.
+  if (fused.length === 0) {
+    if (opts.onGateWindow) {
+      const { documentCount, documentFrequencies } = poolLevels(fused, dense, opts);
+      opts.onGateWindow({
+        level: 0,
+        coverage: 0,
+        cosine: 0,
+        poolSize: 0,
+        documentCount,
+        documentFrequencies,
+      });
+    }
+    return { ids: [], abstained: true, reason: EMPTY_POOL_REASON };
+  }
+
   // Pre-boost: the boost is a ranking multiplier, not a relevance measure.
   const gatesEnabled = abstentionFloor !== null || relativeLevelRatio !== null;
   let gated: { id: string; score: number }[] = fused;
+  let gateRemovedRows = false;
   if (gatesEnabled || opts.onGateWindow) {
     const { scored, documentCount, documentFrequencies } = poolLevels(fused, dense, opts);
     const leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
@@ -142,11 +168,12 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
       documentCount,
       documentFrequencies,
     });
-    if (abstentionFloor !== null && (leveled.length === 0 || leader.level < abstentionFloor)) {
+    if (abstentionFloor !== null && leader.level < abstentionFloor) {
       return { ids: [], abstained: true, reason: ABSTAIN_REASON };
     }
     if (relativeLevelRatio !== null) {
       gated = applyRelativeLevelFilter(leveled, leader.level, relativeLevelRatio);
+      gateRemovedRows = gated.length < leveled.length;
     }
   }
 
@@ -154,7 +181,12 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   const diversified = diversityCap !== null ? applyDiversityCap(boosted, diversityCap) : boosted;
 
   const ids = diversified.map((r) => r.id);
-  return { ids: ids.slice(opts.offset, opts.offset + opts.limit), abstained: false };
+  const page = ids.slice(opts.offset, opts.offset + opts.limit);
+  return {
+    ids: page,
+    abstained: false,
+    ...(gateRemovedRows && page.length < opts.limit ? { gateShortened: true } : {}),
+  };
 }
 
 interface PoolLevels {
@@ -169,17 +201,14 @@ function poolLevels(
   opts: HybridSearchOpts,
 ): PoolLevels {
   const scored = new Map<string, { level: number; coverage: number; cosine: number }>();
-  // Only the sweep sink wants term statistics for a pool with nothing to score,
-  // so an empty pool skips both reads unless one is attached.
-  if (pool.length === 0 && !opts.onGateWindow) {
-    return { scored, documentCount: 0, documentFrequencies: new Map() };
-  }
   const documentCount = opts.repos.termStatistics.adminDocumentCount();
   // The index's own terms, not the application's: a term the tokenizer would
   // never have produced has no entry to find and would take the weight of a term
   // the corpus has never seen.
   const documentFrequencies = opts.repos.termStatistics.adminQueryTermFrequencies(opts.query);
   const queryTokens = new Set(documentFrequencies.keys());
+  // An empty pool reaches here only from the sweep sink, which wants the term
+  // statistics behind a pool with nothing to score.
   if (pool.length === 0) return { scored, documentCount, documentFrequencies };
   const weightOf = termWeightsFor(documentCount, documentFrequencies);
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
