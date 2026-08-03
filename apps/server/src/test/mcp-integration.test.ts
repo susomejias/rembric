@@ -306,6 +306,24 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('project.list description says the per-project count covers active memories', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const list = tools.find((t) => t.name === 'project.list');
+    expect(list, 'project.list missing from tools/list').toBeDefined();
+    const desc = list?.description ?? '';
+    expect(desc.length).toBeGreaterThan(0);
+    expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+
+    // The field name alone does not say which statuses count, so the
+    // description the model reads has to.
+    expect(desc).toContain('activeMemoryCount');
+    expect(desc).toMatch(/active/i);
+    expect(desc).toMatch(/archived/i);
+
+    await client.close();
+  });
+
   it('the relations_limit parameter publishes the bounded-ask recipe on both reading tools', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
@@ -1580,6 +1598,106 @@ describe('MCP protocol conformance', () => {
 
     await projA.close();
     await projB.close();
+  });
+
+  it("project.list's activeMemoryCount drops when a memory is archived, and is per-project", async () => {
+    // Two never-before-used slugs: the shared server accumulates rows across
+    // every `it()` in this file, so an exact count is only assertable in a
+    // scope nothing else has written to.
+    const P = 'active-count-proj-p';
+    const Q = 'active-count-proj-q';
+    const pClient = await connect({ projectSlug: P });
+    const qClient = await connect({ projectSlug: Q });
+    for (const [client, slug] of [
+      [pClient, P],
+      [qClient, Q],
+    ] as const) {
+      const used = (await client.callTool({
+        name: 'project.use',
+        arguments: { slug, autocreate: true },
+      })) as ToolResult;
+      expect(used.isError, `project.use ${slug}`).toBeFalsy();
+    }
+
+    interface ListEntry {
+      slug: string;
+      activeMemoryCount: number;
+    }
+    const listProjects = async (): Promise<ListEntry[]> => {
+      const r = (await pClient.callTool({ name: 'project.list', arguments: {} })) as ToolResult;
+      expect(r.isError, 'project.list').toBeFalsy();
+      return (readJson(r) as { projects: ListEntry[] }).projects;
+    };
+    const entryFor = (projects: ListEntry[], slug: string): ListEntry => {
+      const entry = projects.find((e) => e.slug === slug);
+      // A missing entry makes every count assertion below vacuous.
+      expect(entry, `project.list has no entry for ${slug}`).toBeDefined();
+      return entry as ListEntry;
+    };
+    const save = async (client: Client, title: string): Promise<string> => {
+      const r = (await client.callTool({
+        name: 'memory.save',
+        arguments: { type: 'feedback', title, content: `${title} body` },
+      })) as ToolResult;
+      expect(r.isError, `memory.save ${title}`).toBeFalsy();
+      return (readJson(r) as { id: string }).id;
+    };
+
+    const pMemoryId = await save(pClient, 'active count p only row');
+    await save(qClient, 'active count q first row');
+    await save(qClient, 'active count q second row');
+
+    const before = await listProjects();
+    // Non-zero before the archive: without this the post-archive `0` below
+    // would also pass on an empty corpus.
+    expect(entryFor(before, P).activeMemoryCount).toBe(1);
+    expect(entryFor(before, Q).activeMemoryCount).toBe(2);
+    // The old key must be gone from every entry, not merely absent on P.
+    for (const entry of before) expect('memoryCount' in entry).toBe(false);
+
+    const archived = (await pClient.callTool({
+      name: 'memory.archive',
+      arguments: { id: pMemoryId },
+    })) as ToolResult;
+    expect(archived.isError, 'memory.archive').toBeFalsy();
+
+    const after = await listProjects();
+    expect(entryFor(after, P).activeMemoryCount).toBe(0);
+    // Control: the archive in P moves no number in Q.
+    expect(entryFor(after, Q).activeMemoryCount).toBe(2);
+
+    // An active global row must not be counted into any project's entry.
+    const globalClient = await connect();
+    const globalSave = (await globalClient.callTool({
+      name: 'memory.save',
+      arguments: {
+        scope: 'global',
+        type: 'feedback',
+        title: 'active count global row',
+        content: 'active-count-global-row',
+      },
+    })) as ToolResult;
+    expect(globalSave.isError, 'global memory.save').toBeFalsy();
+    const withGlobal = await listProjects();
+    expect(entryFor(withGlobal, P).activeMemoryCount).toBe(0);
+    expect(entryFor(withGlobal, Q).activeMemoryCount).toBe(2);
+    await globalClient.close();
+
+    // P now holds one active and one archived row, so the status filter is
+    // observable: the count must equal what the same scope reports as active
+    // and must be strictly below P's total row count.
+    await save(pClient, 'active count p replacement row');
+    const stats = (await pClient.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
+    expect(stats.isError, 'memory.stats').toBeFalsy();
+    const byStatus = (readJson(stats) as { memoriesByStatus: Record<string, number> })
+      .memoriesByStatus;
+    const totalRows = Object.values(byStatus).reduce((a, b) => a + b, 0);
+    const pCount = entryFor(await listProjects(), P).activeMemoryCount;
+    expect(pCount).toBe(byStatus.active ?? 0);
+    expect(pCount).toBeLessThan(totalRows);
+
+    await pClient.close();
+    await qClient.close();
   });
 
   // Regression coverage for enforce-mcp-authorization: every scope-sensitive

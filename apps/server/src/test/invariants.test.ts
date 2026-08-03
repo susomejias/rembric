@@ -723,7 +723,6 @@ const UNSCOPED_UNPREFIXED_READS = [
   'agent-sessions-repository.ts::findPurgeableEmptyIds',
   'agent-sessions-repository.ts::list',
   'entities-repository.ts::findMissingScans',
-  'memory-repository.ts::countByProject', // known violation: reached from mcp/project-tools.ts, to be fixed separately
   'memory-repository.ts::countPurgeableDisconnectedArchived',
   'memory-repository.ts::countRowsByStatus',
   'memory-repository.ts::findPurgeableDisconnectedArchivedIds',

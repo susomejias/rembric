@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
@@ -249,15 +249,14 @@ export class MemoryRepository {
     return { byStatus, byType };
   }
 
-  /** Per-project active+total memory counts for the project list tool. */
-  countByProject(): { projectId: string; n: number }[] {
-    return this.db
-      .select({ projectId: memory.projectId, n: count() })
+  /** project.list: memories in one scope whose `status` is `active`; other statuses do not count. */
+  countActiveInScope(scope: MemoryScope, projectId: string | null): number {
+    const row = this.db
+      .select({ value: count() })
       .from(memory)
-      .where(isNotNull(memory.projectId))
-      .groupBy(memory.projectId)
-      .all()
-      .filter((r): r is { projectId: string; n: number } => r.projectId !== null);
+      .where(and(scopeCondition(scope, projectId), eq(memory.status, 'active')))
+      .get();
+    return row?.value ?? 0;
   }
 
   /**

@@ -431,7 +431,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'project.list',
     {
       description:
-        'List existing projects and their memory counts. Use when the user references a project that may not be active in this session.',
+        'List existing projects. Each entry carries activeMemoryCount — how many memories in that project are still active; archived and superseded rows are not counted. Use when the user references a project that may not be active in this session.',
       inputSchema: projectListSchema,
       outputSchema: projectListOutput,
       annotations: READ_ANNOTATIONS('List projects'),

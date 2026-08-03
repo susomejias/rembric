@@ -52,7 +52,7 @@ export const projectListOutput = {
       slug: z.string(),
       displayName: z.string().nullable(),
       archived: z.boolean(),
-      memoryCount: z.number(),
+      activeMemoryCount: z.number(),
     }),
   ),
 };
@@ -198,18 +198,13 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
   const rows = deps.projects
     .list(includeArchived)
     .filter((p) => isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: p.id }));
-  // Memory counts per project — one extra query, batched.
-  const counts = deps.repos.memory.countByProject().reduce<Record<string, number>>((acc, r) => {
-    acc[r.projectId] = r.n;
-    return acc;
-  }, {});
 
   return ok({
     projects: rows.map((p) => ({
       slug: p.slug,
       displayName: p.displayName ?? null,
       archived: p.archivedAt !== null,
-      memoryCount: counts[p.id] ?? 0,
+      activeMemoryCount: deps.repos.memory.countActiveInScope('project', p.id),
     })),
   });
 }

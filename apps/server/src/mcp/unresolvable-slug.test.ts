@@ -234,8 +234,22 @@ describe('the refusal does not brick the connection', () => {
     const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
     const current = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.current({})));
     expect(decode(current).isError).toBe(false);
+    // A project row with content, so the count below is non-zero and the
+    // assertion is not satisfied by an empty corpus.
+    memory.save(
+      { type: 'project', title: 'row in the real project', content: 'row in the real project' },
+      projectScope(realProject.id),
+    );
     const listed = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.list({})));
     expect(decode(listed).isError).toBe(false);
+    // The count is produced without resolving an effective scope, so it must
+    // still be reported for every project the token may read.
+    const entries = decode(listed).body.projects as
+      | { slug: string; activeMemoryCount: number }[]
+      | undefined;
+    const real = entries?.find((e) => e.slug === realProject.slug);
+    expect(real, `project.list has no entry for ${realProject.slug}`).toBeDefined();
+    expect(real?.activeMemoryCount).toBe(1);
 
     const used = await runWithContext(ctxFor(), () =>
       Promise.resolve(projectTools.use({ slug: UNRESOLVABLE, autocreate: true })),

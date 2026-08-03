@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import type { Project } from '../db/schema/projects.js';
@@ -83,6 +83,17 @@ function ctxFor(scope: TokenScope, overrides: Partial<RequestContext> = {}): Req
   };
 }
 
+/** The `<scope>:<projectId>` pairs the per-project count read is invoked for; real behaviour preserved. */
+function spyOnCountActiveInScope(): string[] {
+  const seen: string[] = [];
+  const real = repos.memory.countActiveInScope.bind(repos.memory);
+  vi.spyOn(repos.memory, 'countActiveInScope').mockImplementation((scope, projectId) => {
+    seen.push(`${scope}:${projectId ?? 'null'}`);
+    return real(scope, projectId);
+  });
+  return seen;
+}
+
 interface McpResp {
   content: { type: 'text'; text: string }[];
   isError?: boolean;
@@ -127,7 +138,10 @@ beforeEach(() => {
   relationsHandlers = buildRelationsHandlers(sharedDeps);
 });
 
-afterEach(() => db.cleanup());
+afterEach(() => {
+  vi.restoreAllMocks();
+  db.cleanup();
+});
 
 describe('read-restricted token cannot invoke a write-classified tool', () => {
   it('memory.capture_passive rejects a read:* token with forbidden; nothing is saved', async () => {
@@ -346,38 +360,77 @@ describe('full-access token is never rejected by authorization', () => {
 });
 
 describe('project.list is filtered by token scope', () => {
-  it('a `*` token sees every project', async () => {
+  /** A holds 2 active + 1 archived, B holds 1 active — distinct, and neither equals its row count. */
+  function seedCounts(): void {
+    for (const title of ['a-one', 'a-two']) {
+      memory.save(
+        { type: 'project', title, content: title },
+        { kind: 'project', projectId: projectA.id },
+      );
+    }
+    const retired = memory.save(
+      { type: 'project', title: 'a-retired', content: 'a-retired' },
+      { kind: 'project', projectId: projectA.id },
+    );
+    memory.archive(retired.id, { kind: 'project', projectId: projectA.id });
+    memory.save(
+      { type: 'project', title: 'b-one', content: 'b-one' },
+      { kind: 'project', projectId: projectB.id },
+    );
+  }
+
+  function entries(
+    payload: Record<string, unknown>,
+  ): { slug: string; activeMemoryCount: number }[] {
+    return payload.projects as { slug: string; activeMemoryCount: number }[];
+  }
+
+  beforeEach(() => seedCounts());
+
+  it('a `*` token sees every project with its own count', async () => {
     const r = await runWithContext(ctxFor('*'), () => Promise.resolve(projectHandlers.list({})));
     const { payload } = decode(r);
-    const slugs = (payload.projects as { slug: string }[]).map((p) => p.slug).sort();
-    expect(slugs).toEqual([projectA.slug, projectB.slug].sort());
+    expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
+      { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
+      { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+    ]);
   });
 
-  it('a `read:*` token sees every project', async () => {
+  it('a `read:*` token sees every project with its own count', async () => {
     const r = await runWithContext(ctxFor('read:*'), () =>
       Promise.resolve(projectHandlers.list({})),
     );
     const { payload } = decode(r);
-    const slugs = (payload.projects as { slug: string }[]).map((p) => p.slug).sort();
-    expect(slugs).toEqual([projectA.slug, projectB.slug].sort());
+    expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
+      { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
+      { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+    ]);
   });
 
-  it('a `project:<id>` token sees only that project', async () => {
+  it('a `project:<id>` token sees only that project, and no count is taken for the other', async () => {
+    const scopesRead = spyOnCountActiveInScope();
     const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
       Promise.resolve(projectHandlers.list({})),
     );
     const { payload } = decode(r);
-    const slugs = (payload.projects as { slug: string }[]).map((p) => p.slug);
-    expect(slugs).toEqual([projectA.slug]);
+    expect(entries(payload)).toEqual([
+      { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
+    ]);
+    // The handler names its own scope per row, so the authorization filter has
+    // to run first: B's scope must never reach the read.
+    expect(scopesRead).toEqual([`project:${projectA.id}`]);
   });
 
-  it('a `read:project:<id>` token sees only that project', async () => {
+  it('a `read:project:<id>` token sees only that project, and no count is taken for the other', async () => {
+    const scopesRead = spyOnCountActiveInScope();
     const r = await runWithContext(ctxFor(`read:project:${projectB.id}`), () =>
       Promise.resolve(projectHandlers.list({})),
     );
     const { payload } = decode(r);
-    const slugs = (payload.projects as { slug: string }[]).map((p) => p.slug);
-    expect(slugs).toEqual([projectB.slug]);
+    expect(entries(payload)).toEqual([
+      { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+    ]);
+    expect(scopesRead).toEqual([`project:${projectB.id}`]);
   });
 });
 
