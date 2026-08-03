@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { isAuthorized, TokensService } from './tokens.js';
+import { isAuthorized, TokensService, type CreateTokenInput } from './tokens.js';
 
 let db: TestDb;
 let tokens: TokensService;
@@ -32,6 +32,19 @@ describe('TokensService.create', () => {
   it('rejects duplicate names', () => {
     tokens.create({ name: 'dup', scope: '*' });
     expect(() => tokens.create({ name: 'dup', scope: '*' })).toThrow(/already exists/);
+  });
+
+  it('does not admit a project scope string as caller-supplied input', () => {
+    // Enforced by `tsc`, not by this assertion: widening `CreateTokenInput.scope`
+    // to an arbitrary string makes the directives below unused and reds the build
+    // (openspec/specs/auth/spec.md "The project segment cannot be supplied as a slug").
+    const rejected: CreateTokenInput[] = [
+      // @ts-expect-error `project:<id>` must be composed from a resolved project row, never accepted here
+      { name: 'slug-write', scope: 'project:alpha' },
+      // @ts-expect-error same for the read arm, `read:project:<id>`
+      { name: 'slug-read', scope: 'read:project:alpha' },
+    ];
+    expect(rejected).toHaveLength(2);
   });
 });
 
