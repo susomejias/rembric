@@ -679,7 +679,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     // about an empty pool (that case abstains, below).
     expect(result.ids.length).toBeGreaterThan(0);
     expect(result.abstained).toBe(false);
-    expect(result.reason).toBeUndefined();
+    expect(result.abstainReason).toBeUndefined();
   });
 
   it('abstains with the empty-pool reason when both branches return nothing, gates untouched', async () => {
@@ -699,7 +699,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     });
     expect(result.abstained).toBe(true);
     expect(result.ids).toEqual([]);
-    expect(result.reason).toBe(EMPTY_POOL_REASON);
+    expect(result.abstainReason).toBe(EMPTY_POOL_REASON);
     expect(result.gateShortened).toBeUndefined();
   });
 
@@ -783,7 +783,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     const filtered = await hybridSearch({ ...shared, type: 'procedural' });
     expect(filtered.ids).toEqual([]);
     expect(filtered.abstained).toBe(true);
-    expect(filtered.reason).toBe(EMPTY_POOL_REASON);
+    expect(filtered.abstainReason).toBe(EMPTY_POOL_REASON);
   });
 
   it('abstains with the empty-pool reason in an empty scope', async () => {
@@ -800,7 +800,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     });
     expect(result.ids).toEqual([]);
     expect(result.abstained).toBe(true);
-    expect(result.reason).toBe(EMPTY_POOL_REASON);
+    expect(result.abstainReason).toBe(EMPTY_POOL_REASON);
   });
 });
 
@@ -947,59 +947,26 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
   });
 
   it('a page shortened by the relative filter reports abstained:false', async () => {
-    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
-    for (let i = 0; i < 3; i++) {
-      mem.save(
-        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
-        projectScope(projectId),
-      );
-    }
+    const { strong, cuts } = fourRowPool();
 
-    // leaderLevel is the strong row's 1.0, so the cut IS the ratio. Both ratios
-    // are placed around the weak rows' live level rather than around a constant.
-    const weak = liveLevel({ title: 'Weak 0', content: WEAK.content });
-    expect(liveLevel(STRONG)).toBe(1);
-    expect(weak).toBeGreaterThan(0.05);
-    expect(weak).toBeLessThan(0.95);
-
-    const result = await search({ relativeLevelRatio: weak + 0.05 });
+    const result = await search({ relativeLevelRatio: cuts.removes });
     expect(result.abstained).toBe(false);
     expect(result.ids).toEqual([strong.id]);
 
     // The same pool is returned whole at a ratio under the weak rows' level.
-    const loose = await search({ relativeLevelRatio: weak - 0.05 });
+    const loose = await search({ relativeLevelRatio: cuts.keepsAll });
     expect(loose.ids).toHaveLength(4);
   });
 
   it('only the floor sets abstained:true — the relative filter never does, even at ratio 1', async () => {
-    mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
-    for (let i = 0; i < 3; i++) {
-      mem.save(
-        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
-        projectScope(projectId),
-      );
-    }
+    fourRowPool();
     const result = await search({ relativeLevelRatio: 1 });
     expect(result.abstained).toBe(false);
     expect(result.ids).toHaveLength(1);
   });
 
   it('filters before the page slice, so page 2 can be empty while page 1 was full — and that is not an abstention', async () => {
-    const survivors = [
-      mem.save({ type: 'project', ...STRONG }, projectScope(projectId)).id,
-      mem.save(
-        { type: 'project', title: STRONG.title, content: STRONG.content },
-        projectScope(projectId),
-      ).id,
-    ];
-    for (let i = 0; i < 3; i++) {
-      mem.save(
-        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
-        projectScope(projectId),
-      );
-    }
-
-    const cut = liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05;
+    const { survivors, cut } = twoSurvivorPool();
     const page1 = await search({ relativeLevelRatio: cut, limit: 2, offset: 0 });
     expect(page1.ids).toHaveLength(2); // full
     expect(new Set(page1.ids)).toEqual(new Set(survivors));
@@ -1020,21 +987,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
   });
 
   describe('gateShortened fires on cause AND effect, never on one alone', () => {
-    /** STRONG at level 1.0 plus three weak rows, so a ratio can be placed between them. */
-    const fourRowPool = () => {
-      const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
-      for (let i = 0; i < 3; i++) {
-        mem.save(
-          { type: 'project', title: `Weak ${i}`, content: WEAK.content },
-          projectScope(projectId),
-        );
-      }
-      const weak = liveLevel({ title: 'Weak 0', content: WEAK.content });
-      expect(weak).toBeGreaterThan(0.05);
-      expect(weak).toBeLessThan(0.95);
-      return { strong, cuts: { removes: weak + 0.05, keepsAll: weak - 0.05 } };
-    };
-
     it('the filter removed rows and the page is short — the flag fires', async () => {
       const { strong, cuts } = fourRowPool();
       const result = await search({ relativeLevelRatio: cuts.removes, limit: 8 });
@@ -1072,20 +1024,7 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     });
 
     it('survives the service layer, including on an empty page past the survivors', async () => {
-      const survivors = [
-        mem.save({ type: 'project', ...STRONG }, projectScope(projectId)).id,
-        mem.save(
-          { type: 'project', title: STRONG.title, content: STRONG.content },
-          projectScope(projectId),
-        ).id,
-      ];
-      for (let i = 0; i < 3; i++) {
-        mem.save(
-          { type: 'project', title: `Weak ${i}`, content: WEAK.content },
-          projectScope(projectId),
-        );
-      }
-      const cut = liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05;
+      const { survivors, cut } = twoSurvivorPool();
 
       const page1 = await mem.searchWithAbstention(
         { query: QUERY, limit: 2, offset: 0 },
@@ -1123,14 +1062,52 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
     const floor = await search({ abstentionFloor: liveLevel(WEAK) + 0.05 });
     expect(floor.abstained).toBe(true);
-    expect(floor.reason).toBe(ABSTAIN_REASON);
+    expect(floor.abstainReason).toBe(ABSTAIN_REASON);
 
     const emptyPool = await search({ query: 'zzzqqq wwwvvv' });
     expect(emptyPool.abstained).toBe(true);
-    expect(emptyPool.reason).toBe(EMPTY_POOL_REASON);
+    expect(emptyPool.abstainReason).toBe(EMPTY_POOL_REASON);
 
-    expect(emptyPool.reason).not.toBe(floor.reason);
+    expect(emptyPool.abstainReason).not.toBe(floor.abstainReason);
   });
+
+  const saveWeakRows = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      mem.save(
+        { type: 'project', title: `Weak ${i}`, content: WEAK.content },
+        projectScope(projectId),
+      );
+    }
+  };
+
+  /**
+   * STRONG at level 1.0 plus three weak rows, so a ratio can be placed between
+   * them. leaderLevel is the strong row's 1.0, so a cut IS the ratio — and both
+   * cuts are placed around the weak rows' LIVE level rather than a constant, so
+   * they follow the level function instead of having to be retuned with it.
+   */
+  const fourRowPool = () => {
+    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
+    saveWeakRows(3);
+    const weak = liveLevel({ title: 'Weak 0', content: WEAK.content });
+    expect(liveLevel(STRONG)).toBe(1);
+    expect(weak).toBeGreaterThan(0.05);
+    expect(weak).toBeLessThan(0.95);
+    return { strong, cuts: { removes: weak + 0.05, keepsAll: weak - 0.05 } };
+  };
+
+  /** Two rows at the leader's level plus three weak ones, so `cut` leaves exactly two. */
+  const twoSurvivorPool = () => {
+    const survivors = [
+      mem.save({ type: 'project', ...STRONG }, projectScope(projectId)).id,
+      mem.save(
+        { type: 'project', title: STRONG.title, content: STRONG.content },
+        projectScope(projectId),
+      ).id,
+    ];
+    saveWeakRows(3);
+    return { survivors, cut: liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05 };
+  };
 
   // The gate levels the WHOLE fused pool. Asserted on the row set actually read
   // rather than on a verdict, because the two are only loosely coupled: a

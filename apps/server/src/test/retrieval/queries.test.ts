@@ -62,7 +62,7 @@ describe('the abstention query set exercises the gate, not an empty candidate se
     expect(result.abstained).toBe(true);
     // The empty pool's reason, not the floor's: the floor ships disabled and
     // never ran here.
-    expect(result.reason).toBe(EMPTY_POOL_REASON);
-    expect(result.reason).not.toBe(ABSTAIN_REASON);
+    expect(result.abstainReason).toBe(EMPTY_POOL_REASON);
+    expect(result.abstainReason).not.toBe(ABSTAIN_REASON);
   });
 });

@@ -61,11 +61,7 @@ describe('checkAbstentionFlags enforces one direction only', () => {
 
   it('names every offending outcome, not just the first', () => {
     const failures = checkAbstentionFlags('hybrid', [
-      outcome({
-        query: { ...outcome({}).query, id: 'q1' },
-        reportedAbstained: true,
-        retrieved: ['a'],
-      }),
+      outcome({ reportedAbstained: true, retrieved: ['a'] }),
       outcome({
         query: { ...outcome({}).query, id: 'q2' },
         reportedAbstained: true,

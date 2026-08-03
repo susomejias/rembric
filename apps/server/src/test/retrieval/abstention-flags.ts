@@ -14,7 +14,7 @@ export function checkAbstentionFlags(retriever: string, outcomes: RawOutcome[]):
   for (const o of outcomes) {
     if (o.reportedAbstained === true && o.retrieved.length > 0) {
       failures.push(
-        `${retriever} '${o.query.id}' reported abstained=${o.reportedAbstained} while returning ${o.retrieved.length} result(s) — the flag disagrees with the behaviour it describes`,
+        `${retriever} '${o.query.id}' reported abstained=true while returning ${o.retrieved.length} result(s) — the flag disagrees with the behaviour it describes`,
       );
     }
   }

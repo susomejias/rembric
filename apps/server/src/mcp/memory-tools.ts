@@ -13,7 +13,7 @@ import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
 import { DomainError } from '../services/errors.js';
-import { RANK_WINDOW_CEILING } from '../services/hybrid-search.js';
+import { RANK_WINDOW_CEILING, type SearchVerdict } from '../services/hybrid-search.js';
 import {
   DEFAULT_SEARCH_LIMIT,
   type MemoryService,
@@ -360,18 +360,22 @@ const expandedMemoryRow = memoryRow.extend({
   relationKind: z.string(),
 });
 
+/**
+ * `SearchVerdict` in zod — the one declaration both surfaces that publish it
+ * are built from, so `memory.search`'s wire names and `memory.context`'s cannot
+ * drift apart. `z.literal(true)` mirrors the TS type: never emitted as `false`.
+ */
+const searchVerdict = {
+  abstained: z.boolean(),
+  abstainReason: z.string().optional(),
+  gateShortened: z.literal(true).optional(),
+};
+
 export const memorySearchOutput = {
   count: z.number(),
   memories: z.array(memoryRow),
   expanded: z.array(expandedMemoryRow).optional(),
-  abstained: z.boolean(),
-  abstainReason: z.string().optional(),
-  /**
-   * Present only when the relevance filter removed candidates AND the page came
-   * back short of `limit`: the short page is the gate's doing, not the corpus
-   * running out.
-   */
-  gateShortened: z.boolean().optional(),
+  ...searchVerdict,
   /** True when `entity` drove retrieval (exact-address, not ranked). */
   viaEntity: z.boolean().optional(),
   /**
@@ -497,20 +501,13 @@ export const contextOutput = {
     }),
   ),
   /**
-   * The ranked pass's own verdict, with `memory.search`'s field names. ABSENT
-   * when that pass never ran (no derivable seed, or the entity pre-pass already
-   * filled the channel) — reporting `abstained: false` for a search that never
-   * happened would assert a verdict the server never measured. `gateShortened`
-   * is measured against the limit THAT pass requested, so the channel can be
-   * full while it is set.
+   * The ranked pass's own verdict. ABSENT when that pass never ran (no derivable
+   * seed, or the entity pre-pass already filled the channel) — reporting
+   * `abstained: false` for a search that never happened would assert a verdict
+   * the server never measured. `gateShortened` is measured against the limit
+   * THAT pass requested, so the channel can be full while it is set.
    */
-  rankedPass: z
-    .object({
-      abstained: z.boolean(),
-      reason: z.string().optional(),
-      gateShortened: z.boolean().optional(),
-    })
-    .optional(),
+  rankedPass: z.object(searchVerdict).optional(),
   pendingJudgments: z.array(
     z.object({
       judgmentId: z.string(),
@@ -978,7 +975,7 @@ async function handleSearch(
   if (searchBudget) return searchBudget;
 
   try {
-    const { memories, abstained, reason, gateShortened, viaEntity, entityIndexDraining } =
+    const { memories, abstained, abstainReason, gateShortened, viaEntity, entityIndexDraining } =
       await deps.memory.searchWithAbstention(input, scope);
     const entitiesByMemory = deps.repos
       ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
@@ -1070,7 +1067,7 @@ async function handleSearch(
       }),
       ...(expanded ? { expanded } : {}),
       abstained,
-      ...(reason ? { abstainReason: reason } : {}),
+      ...(abstainReason ? { abstainReason } : {}),
       ...(gateShortened ? { gateShortened } : {}),
       ...(viaEntity ? { viaEntity } : {}),
       ...(entityIndexDraining ? { entityIndexDraining } : {}),
@@ -1401,7 +1398,7 @@ async function handleContext(
     topicKey: string | null;
     via: 'entity' | 'ranked';
   }[] = [];
-  let rankedPass: { abstained: boolean; reason?: string; gateShortened?: true } | undefined;
+  let rankedPass: SearchVerdict | undefined;
   if (focusText) {
     // Entity-derived results are folded into this one channel rather than
     // exposed separately (design.md's resolved open question 3: "leaning
@@ -1437,8 +1434,8 @@ async function handleContext(
       );
       rankedPass = {
         abstained: pass.abstained,
-        ...(pass.reason ? { reason: pass.reason } : {}),
-        ...(pass.gateShortened ? { gateShortened: pass.gateShortened } : {}),
+        abstainReason: pass.abstainReason,
+        gateShortened: pass.gateShortened,
       };
       for (const r of pass.memories) {
         if (byId.size >= RELEVANCE_LIMIT) break;

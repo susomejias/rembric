@@ -7,7 +7,13 @@ import type { ConsolidationOpType } from '../db/schema/consolidation.js';
 import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
-import { hybridSearch, type HybridSearchOpts, RANK_WINDOW_CEILING } from './hybrid-search.js';
+import {
+  hybridSearch,
+  type HybridSearchOpts,
+  type HybridSearchResult,
+  RANK_WINDOW_CEILING,
+  type SearchVerdict,
+} from './hybrid-search.js';
 import {
   deriveReviewState,
   REFUTED_PRIORITY_MS,
@@ -437,24 +443,18 @@ export class MemoryService {
     return (await this.searchWithAbstention(input, scope)).memories;
   }
 
-  /**
-   * Same as `search`, plus the ranked branch's two verdicts: `abstained` (the
-   * floor's, or an empty fused pool's) and `gateShortened`, which is what lets a
-   * caller tell "nothing relevant exists" from "fewer than `limit` rows were
-   * relevant" — `abstained: false` alone cannot make that distinction.
-   */
+  /** Same as `search`, plus the ranked branch's `SearchVerdict`. */
   async searchWithAbstention(
     input: SearchMemoriesInput,
     scope: Scope,
     gates?: GateOverrides,
-  ): Promise<{
-    memories: Memory[];
-    abstained: boolean;
-    reason?: string;
-    gateShortened?: true;
-    viaEntity?: boolean;
-    entityIndexDraining?: boolean;
-  }> {
+  ): Promise<
+    Omit<HybridSearchResult, 'ids'> & {
+      memories: Memory[];
+      viaEntity?: boolean;
+      entityIndexDraining?: boolean;
+    }
+  > {
     // Ranked-branch default only. A `topic_key` filter addresses a convergent
     // topic's whole history, and every row in that slot but the newest is
     // `superseded` — so an absent `status` means "any but archived" there
@@ -514,15 +514,31 @@ export class MemoryService {
       };
     }
 
-    let ids: string[];
-    let abstained = false;
-    let reason: string | undefined;
-    let gateShortened: true | undefined;
-    if (query) {
-      const result = await hybridSearch({
-        repos: this.repos,
-        embedQuery: this.embedQuery,
-        query,
+    const ranked = query
+      ? await hybridSearch({
+          repos: this.repos,
+          embedQuery: this.embedQuery,
+          query,
+          scope: memScope,
+          projectId,
+          status,
+          type: input.type,
+          tag: input.tag,
+          topicKey: input.topicKey,
+          limit,
+          offset,
+          includeGlobal: input.includeGlobal,
+          ...gates,
+        })
+      : undefined;
+    const verdict: SearchVerdict = {
+      abstained: ranked?.abstained ?? false,
+      abstainReason: ranked?.abstainReason,
+      gateShortened: ranked?.gateShortened,
+    };
+    const ids =
+      ranked?.ids ??
+      this.repos.memory.searchMemoryIds({
         scope: memScope,
         projectId,
         status,
@@ -532,29 +548,8 @@ export class MemoryService {
         limit,
         offset,
         includeGlobal: input.includeGlobal,
-        ...gates,
       });
-      ids = result.ids;
-      abstained = result.abstained;
-      reason = result.reason;
-      gateShortened = result.gateShortened;
-    } else {
-      ids = this.repos.memory.searchMemoryIds({
-        scope: memScope,
-        projectId,
-        status,
-        type: input.type,
-        tag: input.tag,
-        topicKey: input.topicKey,
-        limit,
-        offset,
-        includeGlobal: input.includeGlobal,
-      });
-    }
-    // An empty page can still be gate-shortened: the filter runs before the page
-    // slice, so a `limit + offset` past the survivors is the gate's doing.
-    if (ids.length === 0)
-      return { memories: [], abstained, reason, ...(gateShortened ? { gateShortened } : {}) };
+    if (ids.length === 0) return { memories: [], ...verdict };
 
     const raw = this.repos.memory.unsafeGetByIds(ids);
     const byId = new Map(raw.map((m) => [m.id, m]));
@@ -567,7 +562,7 @@ export class MemoryService {
       if (m && (status === undefined ? m.status !== 'archived' : m.status === status))
         ordered.push(m);
     }
-    return { memories: ordered, abstained, reason, ...(gateShortened ? { gateShortened } : {}) };
+    return { memories: ordered, ...verdict };
   }
 
   /**

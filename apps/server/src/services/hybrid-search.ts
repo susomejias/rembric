@@ -93,15 +93,19 @@ export interface HybridSearchOpts {
   onGateWindow?: (leader: GateLeader) => void;
 }
 
-export interface HybridSearchResult {
-  ids: string[];
+/**
+ * The ranked branch's verdict on the page it returned. `memory.search` publishes
+ * these three names on the wire, so every layer between here and there carries
+ * this same shape rather than re-declaring (and drifting from) it.
+ */
+export interface SearchVerdict {
   abstained: boolean;
-  reason?: string;
-  /**
-   * Set only when the relative filter removed rows AND the page came back
-   * short: the caller's question is whether anything is behind a short page.
-   */
+  abstainReason?: string;
   gateShortened?: true;
+}
+
+export interface HybridSearchResult extends SearchVerdict {
+  ids: string[];
 }
 
 export const ABSTAIN_REASON = 'no candidate cleared the relevance floor';
@@ -151,7 +155,7 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
         documentFrequencies,
       });
     }
-    return { ids: [], abstained: true, reason: EMPTY_POOL_REASON };
+    return { ids: [], abstained: true, abstainReason: EMPTY_POOL_REASON };
   }
 
   // Pre-boost: the boost is a ranking multiplier, not a relevance measure.
@@ -169,7 +173,7 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
       documentFrequencies,
     });
     if (abstentionFloor !== null && leader.level < abstentionFloor) {
-      return { ids: [], abstained: true, reason: ABSTAIN_REASON };
+      return { ids: [], abstained: true, abstainReason: ABSTAIN_REASON };
     }
     if (relativeLevelRatio !== null) {
       gated = applyRelativeLevelFilter(leveled, leader.level, relativeLevelRatio);
@@ -182,6 +186,8 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
 
   const ids = diversified.map((r) => r.id);
   const page = ids.slice(opts.offset, opts.offset + opts.limit);
+  // Cause AND effect: without a removal a short page is ordinary corpus
+  // exhaustion, and with a full page nothing was withheld from this caller.
   return {
     ids: page,
     abstained: false,
@@ -207,9 +213,6 @@ function poolLevels(
   // the corpus has never seen.
   const documentFrequencies = opts.repos.termStatistics.adminQueryTermFrequencies(opts.query);
   const queryTokens = new Set(documentFrequencies.keys());
-  // An empty pool reaches here only from the sweep sink, which wants the term
-  // statistics behind a pool with nothing to score.
-  if (pool.length === 0) return { scored, documentCount, documentFrequencies };
   const weightOf = termWeightsFor(documentCount, documentFrequencies);
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
   const rows = opts.repos.memory.textByIds({

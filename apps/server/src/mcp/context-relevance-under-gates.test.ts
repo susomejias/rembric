@@ -9,6 +9,7 @@ import {
   RELATIVE_LEVEL_RATIO,
   ABSTENTION_FLOOR,
   EMPTY_POOL_REASON,
+  type SearchVerdict,
 } from '../services/hybrid-search.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -44,12 +45,39 @@ function ctx(): RequestContext {
 
 interface ContextPayload {
   relevantMemories: { id: string; via: string }[];
-  rankedPass?: { abstained: boolean; reason?: string; gateShortened?: boolean };
+  rankedPass?: SearchVerdict;
 }
 
 function payload(resp: unknown): ContextPayload {
   return JSON.parse((resp as { content: { text: string }[] }).content[0]!.text) as ContextPayload;
 }
+
+/** The row every focus below is meant to find, and the only one carrying every query term. */
+const RUNBOOK = {
+  type: 'project',
+  title: 'Scheduler restart runbook',
+  content: 'restart the nimbus scheduler by draining the queue first',
+} as const;
+
+/** Rows sharing one query term, so the shipped ratio cuts them from the pool. */
+const saveFillers = (n: number) => {
+  for (let i = 0; i < n; i++)
+    memory.save(
+      { type: 'project', title: `Filler ${i}`, content: `the nimbus notes row ${i}` },
+      SCOPE_GLOBAL,
+    );
+};
+
+/** Rows the entity pre-pass can reach by `path`, and that no focus text matches. */
+const saveLinked = (n: number, path: string) => {
+  for (let i = 0; i < n; i++) {
+    const row = memory.save(
+      { type: 'project', title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
+      SCOPE_GLOBAL,
+    );
+    repos.entities.linkMemory(row.id, 'global', null, [{ kind: 'path', value: path }], new Date());
+  }
+};
 
 beforeEach(() => {
   db = createTestDb();
@@ -77,19 +105,8 @@ describe('memory.context relevance channel under the shipped gates', () => {
   });
 
   it('still returns the best-matching rows, and never empties on a matching focus', async () => {
-    const answer = memory.save(
-      {
-        type: 'project',
-        title: 'Scheduler restart runbook',
-        content: 'restart the nimbus scheduler by draining the queue first',
-      },
-      SCOPE_GLOBAL,
-    );
-    for (let i = 0; i < 12; i++)
-      memory.save(
-        { type: 'project', title: `Filler ${i}`, content: `the nimbus notes row ${i}` },
-        SCOPE_GLOBAL,
-      );
+    const answer = memory.save(RUNBOOK, SCOPE_GLOBAL);
+    saveFillers(12);
 
     const focused = payload(
       await runWithContext(ctx(), () =>
@@ -113,24 +130,13 @@ describe('memory.context relevance channel under the shipped gates', () => {
     const body = payload(resp);
     expect(body.relevantMemories).toEqual([]);
     expect(body.rankedPass?.abstained).toBe(true);
-    expect(body.rankedPass?.reason).toBe(EMPTY_POOL_REASON);
+    expect(body.rankedPass?.abstainReason).toBe(EMPTY_POOL_REASON);
     expect(body.rankedPass?.gateShortened).toBeUndefined();
   });
 
   it('reports the ranked pass as shortened when the shipped ratio cuts its page', async () => {
-    const answer = memory.save(
-      {
-        type: 'project',
-        title: 'Scheduler restart runbook',
-        content: 'restart the nimbus scheduler by draining the queue first',
-      },
-      SCOPE_GLOBAL,
-    );
-    for (let i = 0; i < 12; i++)
-      memory.save(
-        { type: 'project', title: `Filler ${i}`, content: `the nimbus notes row ${i}` },
-        SCOPE_GLOBAL,
-      );
+    const answer = memory.save(RUNBOOK, SCOPE_GLOBAL);
+    saveFillers(12);
     const focus = 'how do we restart the nimbus scheduler';
 
     // Control at the service layer, since the gates are deliberately unreachable
@@ -159,27 +165,8 @@ describe('memory.context relevance channel under the shipped gates', () => {
 
   it('omits the ranked pass when the entity pre-pass already filled the channel', async () => {
     const path = 'apps/server/src/db/migrate.ts';
-    for (let i = 0; i < RELEVANCE_LIMIT; i++) {
-      const row = memory.save(
-        { type: 'project', title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
-        SCOPE_GLOBAL,
-      );
-      repos.entities.linkMemory(
-        row.id,
-        'global',
-        null,
-        [{ kind: 'path', value: path }],
-        new Date(),
-      );
-    }
-    memory.save(
-      {
-        type: 'project',
-        title: 'Scheduler restart runbook',
-        content: 'restart the nimbus scheduler by draining the queue first',
-      },
-      SCOPE_GLOBAL,
-    );
+    saveLinked(RELEVANCE_LIMIT, path);
+    memory.save(RUNBOOK, SCOPE_GLOBAL);
 
     const body = payload(
       await runWithContext(ctx(), () =>
@@ -193,34 +180,11 @@ describe('memory.context relevance channel under the shipped gates', () => {
 
   it('reports a shortened ranked pass even when the channel came out full', async () => {
     const path = 'apps/server/src/db/migrate.ts';
-    for (let i = 0; i < 3; i++) {
-      const row = memory.save(
-        { type: 'project', title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
-        SCOPE_GLOBAL,
-      );
-      repos.entities.linkMemory(
-        row.id,
-        'global',
-        null,
-        [{ kind: 'path', value: path }],
-        new Date(),
-      );
-    }
+    saveLinked(3, path);
     const strong = [0, 1].map((i) =>
-      memory.save(
-        {
-          type: 'project',
-          title: `Scheduler restart runbook ${i}`,
-          content: 'restart the nimbus scheduler by draining the queue first',
-        },
-        SCOPE_GLOBAL,
-      ),
+      memory.save({ ...RUNBOOK, title: `${RUNBOOK.title} ${i}` }, SCOPE_GLOBAL),
     );
-    for (let i = 0; i < 6; i++)
-      memory.save(
-        { type: 'project', title: `Filler ${i}`, content: `the nimbus notes row ${i}` },
-        SCOPE_GLOBAL,
-      );
+    saveFillers(6);
 
     const body = payload(
       await runWithContext(ctx(), () =>
