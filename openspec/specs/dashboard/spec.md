@@ -1331,7 +1331,7 @@ The tokens list (`/dashboard/tokens`) already reports the true count because its
 
 - **WHEN** a contributor inspects the dashboard handlers and runs the data-access confinement invariant test
 - **THEN** all counting SQL for these totals SHALL reside under `apps/server/src/db/repositories/`
-- **AND** every count method SHALL carry the `admin*` prefix and be called only from `apps/server/src/dashboard/`
+- **AND** every count method SHALL carry the `admin*` prefix and be called only from a call site the `data-access` allow-list names as a `(file, method)` pair — for these totals `apps/server/src/dashboard/` plus `apps/server/src/server/dashboard-router.ts`, which renders the operator overview directly
 
 #### Scenario: Tokens list is unchanged
 

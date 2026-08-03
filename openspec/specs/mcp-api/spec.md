@@ -1761,7 +1761,7 @@ Returning `{saved: 0}` as a success response for text whose learnings header did
 
 ### Requirement: `memory.stats` counts MUST all be scoped to the request context
 
-`memory.stats` is documented as returning counts scoped to the request context. Every counter it returns SHALL therefore be computed against the resolved `Scope`, including `sessionsByStatus`, which once aggregated every non-soft-deleted session row on the server regardless of project. The scoped guarantee SHALL be enforced by the counting method **requiring** a `Scope` parameter rather than by a naming convention, so a future unscoped call cannot pass review by omission. The unscoped variant SHALL carry the `admin` prefix that confines it to the dashboard.
+`memory.stats` is documented as returning counts scoped to the request context. Every counter it returns SHALL therefore be computed against the resolved `Scope`, including `sessionsByStatus`, which once aggregated every non-soft-deleted session row on the server regardless of project. The scoped guarantee SHALL be enforced by the counting method **requiring** a `Scope` parameter rather than by a naming convention, so a future unscoped call cannot pass review by omission. The unscoped variant SHALL carry the `admin` prefix that confines it to the allow-listed `(file, method)` pairs — which for this read are the dashboard router, the `memory.doctor` closure and the service pass-through between them, not the dashboard alone (see the `data-access` capability, "Scoped, unsafe, and admin method families").
 
 The documented output contract SHALL be corrected to enumerate exactly the counters the tool returns.
 
