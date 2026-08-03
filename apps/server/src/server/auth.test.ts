@@ -41,7 +41,7 @@ describe('authenticate — static + OAuth coexistence', () => {
   }
 
   it('authenticates a static token (unchanged behavior)', async () => {
-    const created = tokens.create({ name: 'static', scope: '*', projectId: null });
+    const created = tokens.create({ name: 'static', scope: '*' });
     const ctx = await authenticate({
       authorization: `Bearer ${created.plaintext}`,
       pathSlug: undefined,
@@ -121,7 +121,7 @@ describe('authenticate — static + OAuth coexistence', () => {
   });
 
   it('does not retry a revoked static token against OAuth', async () => {
-    const created = tokens.create({ name: 'revokeme', scope: '*', projectId: null });
+    const created = tokens.create({ name: 'revokeme', scope: '*' });
     tokens.revoke('revokeme');
     try {
       await authenticate({

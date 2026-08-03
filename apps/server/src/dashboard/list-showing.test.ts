@@ -44,7 +44,7 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
     repos = createRepositories(t.handle.db);
     sessions = new SessionsService(repos, randomBytes(32));
     const tokensSvc = new TokensService(repos);
-    const admin = tokensSvc.create({ name: 'admin', scope: '*', projectId: null });
+    const admin = tokensSvc.create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     session = { session: created.session, sessions, tokenId: admin.token.id };
   });

@@ -29,7 +29,7 @@ describe('dashboard FTS search robustness (#258)', () => {
     const repos = createRepositories(t.handle.db);
     const sessions = new SessionsService(repos, randomBytes(32));
     const tokensSvc = new TokensService(repos);
-    const admin = tokensSvc.create({ name: 'admin', scope: '*', projectId: null });
+    const admin = tokensSvc.create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     session = { session: created.session, sessions, tokenId: admin.token.id };
 

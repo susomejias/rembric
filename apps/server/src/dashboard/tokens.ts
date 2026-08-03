@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 
+import type { Project } from '../db/schema/projects.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
-import { type TokensService, type TokenScope } from '../services/tokens.js';
+import { pinnedProjectId, type TokensService, type TokenScope } from '../services/tokens.js';
 
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
@@ -23,22 +24,36 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const justCreated = new URL(c.req.url).searchParams.get('created');
+    const params = new URL(c.req.url).searchParams;
+    const justCreated = params.get('created');
     const tokens = deps.tokens.list();
     const now = Date.now();
+
+    // Archived included: a token pinned to an archived project keeps
+    // authorizing, so hiding the slug would misreport what it reaches.
+    const projects = deps.projects.list(true);
+    const slugById = new Map(projects.map((p) => [p.id, p.slug]));
+
+    const unresolvable = (scope: TokenScope): boolean => {
+      const pinned = pinnedProjectId(scope);
+      return pinned !== null && !slugById.has(pinned);
+    };
 
     const stateOf = (t: (typeof tokens)[number]): { label: string; cls: string } => {
       if (t.revokedAt) return { label: 'revoked', cls: 'archived' };
       if (t.expiresAt && t.expiresAt.getTime() <= now) return { label: 'expired', cls: 'archived' };
+      if (unresolvable(t.scope as TokenScope)) return { label: 'inert', cls: 'legacy' };
       return { label: 'active', cls: 'active' };
     };
 
     const rows = tokens.map((t) => {
       const s = stateOf(t);
+      const slug = t.projectId === null ? null : (slugById.get(t.projectId) ?? null);
       return html`
         <tr>
           <td>${t.name}</td>
           <td class="mono small">${scopeBadge(t.scope as TokenScope)}</td>
+          <td>${slug ?? raw('<span class="muted">—</span>')}</td>
           <td class="muted">${formatTs(t.createdAt)}</td>
           <td class="muted">${formatTs(t.expiresAt)}</td>
           <td><span class="pill ${s.cls}">${s.label}</span></td>
@@ -63,7 +78,13 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       `;
     });
 
-    const projects = deps.projects.list();
+    const selectable = projects.filter((p) => !p.archivedAt);
+
+    // Read back off the persisted row, not off the query string: the panel
+    // states what was minted, not what the caller asked for.
+    const mintedName = params.get('name');
+    const minted = mintedName === null ? undefined : tokens.find((t) => t.name === mintedName);
+    const mintedSlug = minted?.projectId == null ? null : (slugById.get(minted.projectId) ?? null);
 
     const oneShot = justCreated
       ? html`
@@ -71,6 +92,16 @@ export function createTokensRouter(deps: TokensDeps): Hono {
             <strong>New token created.</strong>
             This is the only time the plaintext is shown — copy it now:
             <pre>${justCreated}</pre>
+            ${minted
+              ? html`
+                  <p class="small">
+                    Scope <code>${minted.scope}</code> —
+                    ${mintedSlug
+                      ? html`bound to project <strong>${mintedSlug}</strong>.`
+                      : raw('bound to no project.')}
+                  </p>
+                `
+              : raw('')}
             <p class="small">
               Paste into your agent's MCP config under
               <code>headers.Authorization: "Bearer ${justCreated.slice(0, 6)}…"</code>.
@@ -98,6 +129,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
                   <tr>
                     <th>name</th>
                     <th>scope</th>
+                    <th>project</th>
                     <th>created</th>
                     <th>expires</th>
                     <th>state</th>
@@ -121,18 +153,17 @@ export function createTokensRouter(deps: TokensDeps): Hono {
         <label
           >Project (optional)
           <select name="project">
-            <option value="">— none (admin / global) —</option>
-            ${projects.map((p) =>
+            <option value="">— none: ADMIN, every project + dashboard login —</option>
+            ${selectable.map((p) =>
               raw(`<option value="${escape(p.slug)}">${escape(p.slug)}</option>`),
             )}
           </select>
         </label>
         <label
-          >Scope override (advanced)
-          <select name="scope">
-            <option value="">— derive from project —</option>
-            <option value="*">* (admin, full access)</option>
-            <option value="read:*">read:* (read-only across all)</option>
+          >Access
+          <select name="access">
+            <option value="write" selected>write (read and write)</option>
+            <option value="read">read (read only)</option>
           </select>
         </label>
         <label
@@ -153,38 +184,46 @@ export function createTokensRouter(deps: TokensDeps): Hono {
 
     const name = readStringField(form, 'name').trim();
     const projectInput = readStringField(form, 'project').trim();
-    const scopeOverride = readStringField(form, 'scope').trim();
+    const accessInput = readStringField(form, 'access').trim();
     const expiresInput = readStringField(form, 'expires').trim();
 
     const view = { title: 'Tokens', activeNav: 'tokens' } as const;
 
+    if (form.has('scope')) {
+      return flashErrorPage(
+        c,
+        deps.sessions,
+        "The 'scope' field was retired. Reach comes from 'project' (empty = every project) " +
+          "and the verb from 'access' ('write' or 'read'): scope=* is access=write, " +
+          'scope=read:* is access=read.',
+        view,
+      );
+    }
+
     if (!name) return flashErrorPage(c, deps.sessions, 'Name is required.', view);
 
-    let projectSlug: string | null = null;
+    // Refused rather than defaulted: an omitted `access` resolving to `write`
+    // silently picks the more privileged verb, and with no project that is `*`,
+    // the only scope the dashboard login accepts.
+    if (accessInput !== 'read' && accessInput !== 'write') {
+      return flashErrorPage(c, deps.sessions, "Access must be 'write' or 'read'.", view);
+    }
+    const access = accessInput;
+
+    let project: Project | null = null;
     if (projectInput) {
       // Operator-initiated token creation: autocreate the project row if
       // the slug is new. The slug must still satisfy the strict regex,
       // which `ProjectsService.create` enforces.
       try {
-        let p = deps.projects.findBySlug(projectInput);
-        p ??= deps.projects.create({ slug: projectInput });
-        projectSlug = p.slug;
+        project =
+          deps.projects.findBySlug(projectInput) ?? deps.projects.create({ slug: projectInput });
       } catch (err) {
         if (err instanceof DomainError) {
           return flashErrorPage(c, deps.sessions, err.message, view);
         }
         throw err;
       }
-    }
-
-    let scope: TokenScope;
-    if (scopeOverride) {
-      if (scopeOverride !== '*' && scopeOverride !== 'read:*') {
-        return flashErrorPage(c, deps.sessions, "Override scope must be '*' or 'read:*'.", view);
-      }
-      scope = scopeOverride;
-    } else {
-      scope = projectSlug ? `project:${projectSlug}` : '*';
     }
 
     let expiresAt: Date | null = null;
@@ -202,14 +241,12 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     }
 
     try {
-      const { plaintext } = deps.tokens.create({
-        name,
-        scope,
-        projectId: null,
-        expiresAt,
-      });
+      const { plaintext } = project
+        ? deps.tokens.create({ name, project, access, expiresAt })
+        : deps.tokens.create({ name, scope: access === 'read' ? 'read:*' : '*', expiresAt });
       const url = new URL('/dashboard/tokens', c.req.url);
       url.searchParams.set('created', plaintext);
+      url.searchParams.set('name', name);
       return c.redirect(url.pathname + url.search);
     } catch (err) {
       if (err instanceof DomainError) {

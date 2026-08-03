@@ -32,7 +32,7 @@ describe('memory detail hub', () => {
     relationsSvc = new RelationsService(repos, t.handle.db);
     sessions = new SessionsService(repos, randomBytes(32));
     const tokensSvc = new TokensService(repos);
-    const admin = tokensSvc.create({ name: 'admin', scope: '*', projectId: null });
+    const admin = tokensSvc.create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     const session: ResolvedSession = {
       session: created.session,

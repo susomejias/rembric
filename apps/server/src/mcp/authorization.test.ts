@@ -10,7 +10,7 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { TokensService, type TokenScope } from '../services/tokens.js';
+import { pinnedProjectId, TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
@@ -53,7 +53,21 @@ let relationsHandlers: ReturnType<typeof buildRelationsHandlers>;
 function tokenFor(scope: TokenScope): Token {
   const existing = tokenByScope.get(scope);
   if (existing) return existing;
-  const { token } = tokens.create({ name: `token-${tokenByScope.size}`, scope });
+  const name = `token-${tokenByScope.size}`;
+  const pinned = pinnedProjectId(scope);
+  const project = [projectA, projectB].find((p) => p.id === pinned);
+  let token: Token;
+  if (project) {
+    token = tokens.create({
+      name,
+      project,
+      access: scope.startsWith('read:') ? 'read' : 'write',
+    }).token;
+  } else if (scope === '*' || scope === 'read:*') {
+    token = tokens.create({ name, scope }).token;
+  } else {
+    throw new Error(`tokenFor: scope '${scope}' names no project this suite created`);
+  }
   tokenByScope.set(scope, token);
   return token;
 }

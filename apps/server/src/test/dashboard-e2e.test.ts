@@ -1,9 +1,12 @@
 import { createServer as createNetServer } from 'node:net';
 
+import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { DbHandle } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
+import { ProjectsService } from '../services/projects.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createTestDb } from './db.js';
@@ -103,6 +106,76 @@ function extractCsrf(html: string, action: string): string | null {
   if (!m) return null;
   const c = /<input[^>]*name="csrf"[^>]*value="([^"]+)"/.exec(m[0]);
   return c?.[1] ?? null;
+}
+
+interface MintedToken {
+  status: number;
+  plaintext: string | null;
+  /** The tokens page as rendered after the redirect, or the error page body. */
+  body: string;
+}
+
+async function mintTokenViaForm(
+  baseUrl: string,
+  jar: CookieJar,
+  fields: Record<string, string>,
+): Promise<MintedToken> {
+  const page = await get(baseUrl, '/dashboard/tokens', jar);
+  const csrf = extractCsrf(await page.text(), '/dashboard/tokens');
+  const res = await postForm(baseUrl, '/dashboard/tokens', jar, {
+    expires: '',
+    ...fields,
+    csrf: csrf ?? '',
+  });
+  if (res.status !== 302) {
+    return { status: res.status, plaintext: null, body: await res.text() };
+  }
+  const location = res.headers.get('location') ?? '';
+  const plaintext = new URL(location, baseUrl).searchParams.get('created');
+  const after = await get(baseUrl, location, jar);
+  return { status: res.status, plaintext, body: await after.text() };
+}
+
+async function apiPost(
+  baseUrl: string,
+  path: string,
+  bearer: string,
+  body: unknown,
+): Promise<{ status: number; body: { ok: boolean; code?: string; message?: string } }> {
+  const res = await fetch(baseUrl + path, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: res.status,
+    body: (await res.json()) as { ok: boolean; code?: string; message?: string },
+  };
+}
+
+function tokenRow(html: string, name: string): string | null {
+  const re = new RegExp(`<tr>\\s*<td>${name}</td>[\\s\\S]*?</tr>`);
+  return re.exec(html)?.[0] ?? null;
+}
+
+/** Cell contents of a rendered `<tr>`, in column order, markup included. */
+function cellsOf(row: string): string[] {
+  return [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => (m[1] ?? '').trim());
+}
+
+function textOf(cell: string): string {
+  return cell.replace(/<[^>]*>/g, '').trim();
+}
+
+/** Second connection onto the running server's data dir, for fixtures and assertions. */
+async function withDataDb<T>(dataDir: string, fn: (handle: DbHandle) => T): Promise<T> {
+  const { createDb } = await import('../db/index.js');
+  const handle = createDb({ dataDir });
+  try {
+    return fn(handle);
+  } finally {
+    handle.close();
+  }
 }
 
 describe('dashboard E2E', () => {
@@ -210,7 +283,7 @@ describe('dashboard E2E', () => {
       csrf: csrf!,
       name: 'e2e-test-token',
       project: '',
-      scope: '*',
+      access: 'write',
       expires: '',
     });
     expect(created.status).toBe(302);
@@ -576,7 +649,7 @@ describe('dashboard E2E', () => {
     const res = await postForm(baseUrl, '/dashboard/tokens', jar, {
       name: 'no-csrf',
       project: '',
-      scope: '*',
+      access: 'write',
       expires: '',
     });
     expect(res.status).toBe(403);
@@ -783,6 +856,327 @@ describe('dashboard E2E', () => {
     // No-TTL reference: detail omits the review card entirely.
     const refDetail = await get(baseUrl, `/dashboard/memories/${ref.id}`, jar);
     expect(await refDetail.text()).not.toContain('pill needs_review');
+  });
+
+  describe('token create → authorize', () => {
+    const ALPHA = 'alpha';
+    const NEVER = 'never-selected';
+
+    async function project(slug: string) {
+      return withDataDb(server.config.dataDir, (handle) => {
+        const svc = new ProjectsService(createRepositories(handle.db));
+        return svc.findBySlug(slug) ?? svc.create({ slug });
+      });
+    }
+
+    async function persisted(name: string) {
+      return withDataDb(server.config.dataDir, (handle) =>
+        createRepositories(handle.db).tokens.findByName(name),
+      );
+    }
+
+    async function tokenCount() {
+      return withDataDb(
+        server.config.dataDir,
+        (handle) => createRepositories(handle.db).tokens.listAll().length,
+      );
+    }
+
+    async function loggedIn(): Promise<CookieJar> {
+      const jar: CookieJar = { cookie: null };
+      await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
+      return jar;
+    }
+
+    it('mints a project-scoped token that authorizes that project and no other', async () => {
+      const jar = await loggedIn();
+      const alpha = await project(ALPHA);
+      await project(NEVER);
+
+      const minted = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-alpha-write',
+        project: ALPHA,
+        access: 'write',
+      });
+      expect(minted.status).toBe(302);
+      expect(minted.plaintext).toBeTruthy();
+
+      // Control: without it a 403 below could be a misconfigured endpoint.
+      const admin = await apiPost(baseUrl, `/api/${ALPHA}/memory/recall`, ADMIN_TOKEN, {
+        query: 'anything',
+      });
+      expect(admin.status).toBe(200);
+
+      const own = await apiPost(baseUrl, `/api/${ALPHA}/memory/recall`, minted.plaintext!, {
+        query: 'anything',
+      });
+      expect(own.status).toBe(200);
+
+      // Control: a fix making `isAuthorized` unconditionally true fails here.
+      const elsewhere = await apiPost(baseUrl, `/api/${NEVER}/memory/recall`, minted.plaintext!, {
+        query: 'anything',
+      });
+      expect(elsewhere.status).toBe(403);
+      expect(elsewhere.body.code).toBe('forbidden');
+
+      const row = await persisted('e2e-alpha-write');
+      expect(row?.scope).toBe(`project:${alpha.id}`);
+      expect(row?.projectId).toBe(alpha.id);
+    });
+
+    it('mints a read-access project token that authorizes reads on that project only', async () => {
+      const jar = await loggedIn();
+      const alpha = await project(ALPHA);
+      await project(NEVER);
+
+      const minted = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-alpha-read',
+        project: ALPHA,
+        access: 'read',
+      });
+      expect(minted.status).toBe(302);
+
+      const read = await apiPost(baseUrl, `/api/${ALPHA}/memory/recall`, minted.plaintext!, {
+        query: 'anything',
+      });
+      expect(read.status).toBe(200);
+
+      const elsewhere = await apiPost(baseUrl, `/api/${NEVER}/memory/recall`, minted.plaintext!, {
+        query: 'anything',
+      });
+      expect(elsewhere.status).toBe(403);
+      expect(elsewhere.body.code).toBe('forbidden');
+
+      const write = await apiPost(baseUrl, `/api/${ALPHA}/sessions`, minted.plaintext!, {
+        id: 'e2e-read-arm-denied-session',
+        agent: 'e2e',
+      });
+      expect(write.status).toBe(403);
+      expect(write.body.code).toBe('forbidden');
+
+      // Control: the write endpoint itself answers 200 for an admin token.
+      const adminWrite = await apiPost(baseUrl, `/api/${ALPHA}/sessions`, ADMIN_TOKEN, {
+        id: 'e2e-read-arm-control-session',
+        agent: 'e2e',
+      });
+      expect(adminWrite.status).toBe(200);
+
+      const row = await persisted('e2e-alpha-read');
+      expect(row?.scope).toBe(`read:project:${alpha.id}`);
+      expect(row?.projectId).toBe(alpha.id);
+    });
+
+    it('still mints the global arms when no project is selected', async () => {
+      const jar = await loggedIn();
+
+      const write = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-global-write',
+        project: '',
+        access: 'write',
+      });
+      expect(write.status).toBe(302);
+      const writeRow = await persisted('e2e-global-write');
+      expect(writeRow?.scope).toBe('*');
+      expect(writeRow?.projectId).toBeNull();
+
+      const read = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-global-read',
+        project: '',
+        access: 'read',
+      });
+      expect(read.status).toBe(302);
+      const readRow = await persisted('e2e-global-read');
+      expect(readRow?.scope).toBe('read:*');
+      expect(readRow?.projectId).toBeNull();
+
+      const row = tokenRow(read.body, 'e2e-global-read');
+      expect(row).toBeTruthy();
+      expect(textOf(cellsOf(row!)[2]!)).toBe('—');
+    });
+
+    it('lists the project as a slug, never as an id', async () => {
+      const jar = await loggedIn();
+      const alpha = await project(ALPHA);
+
+      const minted = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-list-project-cell',
+        project: ALPHA,
+        access: 'write',
+      });
+      expect(minted.status).toBe(302);
+      expect(minted.body).toContain('<th>project</th>');
+
+      const row = tokenRow(minted.body, 'e2e-list-project-cell');
+      expect(row).toBeTruthy();
+      const cells = cellsOf(row!);
+      expect(textOf(cells[2]!)).toBe(ALPHA);
+      expect(textOf(cells[2]!)).not.toBe(alpha.id);
+      expect(minted.body).not.toMatch(/<td>project:01[A-Z0-9]+<\/td>/);
+    });
+
+    it('keeps showing the slug of a token bound to a project that was archived', async () => {
+      const jar = await loggedIn();
+      const proj = await project('archived-token-proj');
+
+      const minted = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-archived-proj-token',
+        project: proj.slug,
+        access: 'write',
+      });
+      expect(minted.status).toBe(302);
+
+      await withDataDb(server.config.dataDir, (handle) =>
+        new ProjectsService(createRepositories(handle.db)).archive(proj.id),
+      );
+
+      const list = await get(baseUrl, '/dashboard/tokens', jar);
+      const row = tokenRow(await list.text(), 'e2e-archived-proj-token');
+      expect(row).toBeTruthy();
+      expect(textOf(cellsOf(row!)[2]!)).toBe(proj.slug);
+    });
+
+    it('marks a token whose project binding does not resolve as neither active nor revoked', async () => {
+      const jar = await loggedIn();
+      const alpha = await project(ALPHA);
+
+      // Legacy shape: the scope names a project by slug and nothing binds
+      // it to a row. The service can no longer produce this, so it is
+      // inserted through the repository.
+      await withDataDb(server.config.dataDir, (handle) => {
+        const repos = createRepositories(handle.db);
+        for (const [name, revokedAt] of [
+          ['e2e-legacy-inert', null],
+          ['e2e-legacy-inert-revoked', new Date()],
+        ] as const) {
+          repos.tokens.insert({
+            id: ulid(),
+            name,
+            hash: 's1$00$00',
+            scope: `project:${ALPHA}`,
+            projectId: null,
+            createdAt: new Date(),
+            expiresAt: null,
+            revokedAt,
+          });
+        }
+      });
+
+      const healthy = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-resolvable-bound',
+        project: ALPHA,
+        access: 'write',
+      });
+      expect(healthy.status).toBe(302);
+      const unbound = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-resolvable-global',
+        project: '',
+        access: 'write',
+      });
+      expect(unbound.status).toBe(302);
+
+      const body = unbound.body;
+
+      const inert = cellsOf(tokenRow(body, 'e2e-legacy-inert')!);
+      expect(inert[1]).toContain(`project:${ALPHA}`);
+      expect(textOf(inert[2]!)).toBe('—');
+      expect(inert[5]).toContain('inert');
+      expect(inert[5]).not.toContain('active');
+      expect(inert[5]).not.toContain('revoked');
+
+      expect(cellsOf(tokenRow(body, 'e2e-legacy-inert-revoked')!)[5]).toContain('revoked');
+      expect(cellsOf(tokenRow(body, 'e2e-legacy-inert-revoked')!)[5]).not.toContain('inert');
+
+      // A resolvable project binding, and no binding at all, both stay active.
+      const bound = cellsOf(tokenRow(body, 'e2e-resolvable-bound')!);
+      expect(bound[1]).toContain(`project:${alpha.id}`);
+      expect(bound[5]).toContain('active');
+      expect(bound[5]).not.toContain('inert');
+      expect(cellsOf(tokenRow(body, 'e2e-resolvable-global')!)[5]).toContain('active');
+      expect(cellsOf(tokenRow(body, 'e2e-resolvable-global')!)[5]).not.toContain('inert');
+    });
+
+    it('states the minted scope and bound project in the one-time view', async () => {
+      const jar = await loggedIn();
+      const alpha = await project(ALPHA);
+
+      const minted = await mintTokenViaForm(baseUrl, jar, {
+        name: 'e2e-one-shot-scope',
+        project: ALPHA,
+        access: 'read',
+      });
+      expect(minted.status).toBe(302);
+
+      const panel = /<div class="one-shot">[\s\S]*?<\/div>/.exec(minted.body)?.[0];
+      expect(panel).toBeTruthy();
+      expect(panel).toContain(minted.plaintext!);
+      expect(panel).toContain(`read:project:${alpha.id}`);
+      expect(panel).toContain(ALPHA);
+    });
+
+    it('refuses a create request carrying the retired scope field', async () => {
+      const jar = await loggedIn();
+      const before = await tokenCount();
+
+      const page = await get(baseUrl, '/dashboard/tokens', jar);
+      const csrf = extractCsrf(await page.text(), '/dashboard/tokens');
+      const res = await postForm(baseUrl, '/dashboard/tokens', jar, {
+        csrf: csrf ?? '',
+        name: 'e2e-retired-scope-field',
+        project: '',
+        access: 'write',
+        scope: '*',
+        expires: '',
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('access');
+      expect(await persisted('e2e-retired-scope-field')).toBeUndefined();
+      expect(await tokenCount()).toBe(before);
+    });
+
+    // Refused, not defaulted: with no project selected, `write` composes `*`,
+    // which is the only scope the dashboard login accepts — so a silent default
+    // hands out an admin credential to a request that never asked for a verb.
+    for (const [label, access] of [
+      ['empty', ''],
+      ['absent', undefined],
+    ] as const) {
+      it(`refuses a create request whose access field is ${label}`, async () => {
+        const jar = await loggedIn();
+        const before = await tokenCount();
+        const name = `e2e-access-${label}`;
+
+        const page = await get(baseUrl, '/dashboard/tokens', jar);
+        const csrf = extractCsrf(await page.text(), '/dashboard/tokens');
+        const res = await postForm(baseUrl, '/dashboard/tokens', jar, {
+          csrf: csrf ?? '',
+          name,
+          project: '',
+          ...(access === undefined ? {} : { access }),
+          expires: '',
+        });
+
+        expect(res.status).toBe(400);
+        expect(await persisted(name)).toBeUndefined();
+        expect(await tokenCount()).toBe(before);
+      });
+    }
+
+    it('CONTROL: an explicit access still mints', async () => {
+      const jar = await loggedIn();
+      const page = await get(baseUrl, '/dashboard/tokens', jar);
+      const csrf = extractCsrf(await page.text(), '/dashboard/tokens');
+      const res = await postForm(baseUrl, '/dashboard/tokens', jar, {
+        csrf: csrf ?? '',
+        name: 'e2e-access-explicit',
+        project: '',
+        access: 'write',
+        expires: '',
+      });
+
+      expect(res.status).toBe(302);
+      expect((await persisted('e2e-access-explicit'))?.scope).toBe('*');
+    });
   });
 });
 

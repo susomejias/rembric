@@ -365,7 +365,7 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
   <img src="./docs/screenshots/dashboard-tokens.png" alt="Tokens" width="100%">
 </p>
 
-<p align="center"><i>Tokens · scope-bound (<code>*</code> or <code>project:&lt;slug&gt;</code>), revocable, expirable.</i></p>
+<p align="center"><i>Tokens · scope-bound (<code>*</code> or <code>project:&lt;id&gt;</code>), revocable, expirable.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-updates.png" alt="Updates" width="100%">

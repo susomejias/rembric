@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 import type { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import type { OAuthAuthorizationCode, OAuthClient, OAuthToken } from '../db/schema/oauth.js';
 
-import type { TokenScope } from './tokens.js';
+import { projectScopedGrant, type TokenScope } from './tokens.js';
 
 /**
  * OAuth 2.1 authorization-server logic: Dynamic Client Registration,
@@ -331,16 +331,6 @@ export function resolveGrantedScope(requestedScope: string | undefined): TokenSc
     (t) => t === '*' || t === 'mcp' || t === 'mcp:write' || t.endsWith(':write'),
   );
   return wantsWrite ? '*' : 'read:*';
-}
-
-/**
- * Narrow a global grant scope to a single project when the grant was consented
- * for one (finding #3): `*` → `project:<id>`, `read:*` → `read:project:<id>`.
- * A null project leaves the global scope unchanged.
- */
-export function projectScopedGrant(base: TokenScope, projectId: string | null): TokenScope {
-  if (!projectId) return base;
-  return base === '*' ? `project:${projectId}` : `read:project:${projectId}`;
 }
 
 /** OAuth scopes advertised in the metadata and grantable at consent. */

@@ -10,7 +10,6 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
-import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
@@ -26,7 +25,7 @@ import { buildRelationsHandlers } from './relations-tools.js';
  */
 
 const MCP_SESSION_ID = 'mcp-sess-pending-judgments';
-const SCOPE: TokenScope = '*';
+const SCOPE = '*' as const;
 const ORPHAN_AFTER_MS = 86_400_000;
 
 let db: TestDb;
@@ -95,7 +94,7 @@ beforeEach(() => {
   repos = createRepositories(db.handle.db);
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
-  adminToken = mintTestToken(db.handle, SCOPE).token;
+  adminToken = mintTestToken(db.handle, { scope: SCOPE }).token;
   const agentSessions = new AgentSessionsService(repos, db.handle.db);
   const router = new SessionRouter();
   relations = new RelationsService(repos, db.handle.db);

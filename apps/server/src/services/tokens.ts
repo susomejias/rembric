@@ -11,6 +11,7 @@ import {
 import { ulid } from 'ulid';
 
 import type { Repositories } from '../db/repositories/index.js';
+import type { Project } from '../db/schema/projects.js';
 import { type Token } from '../db/schema/tokens.js';
 
 import { DomainError } from './errors.js';
@@ -36,6 +37,10 @@ import { DomainError } from './errors.js';
  *   - `read:*`                  → read across all scopes
  *   - `project:<id>`            → write to that single project
  *   - `read:project:<id>`       → read that single project
+ *
+ * The two project arms are composed by `create` from a resolved project
+ * row, never accepted from a caller: `<id>` is compared against
+ * `projects.id`, and a caller-supplied string could name a slug instead.
  */
 
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keylen: 64 } as const;
@@ -46,12 +51,16 @@ const VERIFIED_CACHE_MAX = 64;
 
 export type TokenScope = '*' | 'read:*' | `project:${string}` | `read:project:${string}`;
 
-export interface CreateTokenInput {
-  name: string;
-  scope: TokenScope;
-  projectId?: string | null;
-  expiresAt?: Date | null;
-}
+/**
+ * Reach is either global (the caller names the scope literal) or a single
+ * project (the caller hands over the resolved row and an access verb). A
+ * bare project id would re-admit a slug, so the row itself is required.
+ */
+export type TokenGrant =
+  | { scope: '*' | 'read:*'; project?: never; access?: never }
+  | { project: Project; access: 'read' | 'write'; scope?: never };
+
+export type CreateTokenInput = { name: string; expiresAt?: Date | null } & TokenGrant;
 
 export interface CreatedToken {
   /** The plaintext secret. Shown to the operator exactly once. */
@@ -90,12 +99,13 @@ export class TokensService {
     const plaintext = generatePlaintextToken();
     const hash = hashToken(plaintext);
     const ts = this.now();
+    const { scope, projectId } = composeGrant(input);
     const row = this.repos.tokens.insert({
       id: ulid(ts.getTime()),
       name: input.name,
       hash,
-      scope: input.scope,
-      projectId: input.projectId ?? null,
+      scope,
+      projectId,
       createdAt: ts,
       expiresAt: input.expiresAt ?? null,
       revokedAt: null,
@@ -201,6 +211,15 @@ export class TokensService {
   }
 }
 
+function composeGrant(grant: TokenGrant): { scope: TokenScope; projectId: string | null } {
+  if (!grant.project) return { scope: grant.scope, projectId: null };
+  const base = grant.access === 'read' ? 'read:*' : '*';
+  return {
+    scope: projectScopedGrant(base, grant.project.id),
+    projectId: grant.project.id,
+  };
+}
+
 function generatePlaintextToken(): string {
   return randomBytes(TOKEN_BYTES).toString('base64url');
 }
@@ -271,10 +290,22 @@ export function isAuthorized(
 }
 
 /**
- * The single project a token is pinned to, or null for `*` / `read:*`. Derived
- * from the scope string rather than `tokens.project_id`, which the only
- * production creation path leaves NULL — the scope string is what
- * `isAuthorized` compares against.
+ * Narrow a global scope to a single project: `*` → `project:<id>`, `read:*` →
+ * `read:project:<id>`. A null project leaves the scope unchanged. Lives beside
+ * its inverse `pinnedProjectId` so the grammar has one writer and one reader;
+ * the OAuth grant path and `composeGrant` are both callers.
+ */
+export function projectScopedGrant(base: TokenScope, projectId: string | null): TokenScope {
+  if (!projectId) return base;
+  return base === '*' ? `project:${projectId}` : `read:project:${projectId}`;
+}
+
+/**
+ * The single project a token is pinned to, or null for `*` / `read:*`.
+ * Parses the scope string rather than reading `tokens.project_id` because
+ * its caller holds a `TokenScope`, not a row — and the string is what
+ * `isAuthorized` compares against. Legacy rows predating the enforced
+ * binding still carry a slug here, and resolve to no project.
  */
 export function pinnedProjectId(scope: TokenScope): string | null {
   if (scope.startsWith('read:project:')) return scope.slice('read:project:'.length);

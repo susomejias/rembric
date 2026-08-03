@@ -29,7 +29,7 @@ describe('dashboard sessions XSS regression (#252)', () => {
     const repos = createRepositories(t.handle.db);
     const sessions = new SessionsService(repos, randomBytes(32));
     const tokensSvc = new TokensService(repos);
-    const admin = tokensSvc.create({ name: 'admin', scope: '*', projectId: null });
+    const admin = tokensSvc.create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     const session: ResolvedSession = {
       session: created.session,

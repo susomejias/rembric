@@ -69,7 +69,7 @@ beforeEach(() => {
   projectSlug = proj.slug;
   projectId = proj.id;
 
-  const created = tokens.create({ name: 'proj-scoped', scope: `project:${proj.id}` });
+  const created = tokens.create({ name: 'proj-scoped', project: proj, access: 'write' });
   projectScopedToken = { id: created.token.id, plaintext: created.plaintext };
 });
 
@@ -797,7 +797,7 @@ describe('createApiRouter', () => {
       expect(unknownSlug.body.code).toBe('project_not_found');
 
       const otherProj = projects.create({ slug: 'other-recall-proj' });
-      const otherToken = tokens.create({ name: 'other', scope: `project:${otherProj.id}` });
+      const otherToken = tokens.create({ name: 'other', project: otherProj, access: 'write' });
       const forbidden = await call(app, 'POST', `/${projectSlug}/memory/recall`, {
         token: otherToken.plaintext,
         body: { query: 'x' },

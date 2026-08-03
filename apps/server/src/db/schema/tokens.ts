@@ -1,4 +1,5 @@
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { projects } from './projects.js';
 
@@ -11,6 +12,10 @@ import { projects } from './projects.js';
  *   - `read:*`         → read-only across all scopes
  *   - `project:<id>`   → write access scoped to a single project
  *   - `read:project:<id>` → read-only scoped to a single project
+ *
+ * For the two project arms `project_id` is the enforced binding: the FK
+ * proves it names a real project and the CHECK proves the scope string
+ * names the same one.
  */
 export const tokens = sqliteTable(
   'tokens',
@@ -27,6 +32,13 @@ export const tokens = sqliteTable(
   },
   (table) => ({
     nameUnique: uniqueIndex('tokens_name_unique').on(table.name),
+    // Deliberately one-directional: rows predating the enforced binding
+    // carry a slug in the scope string and NULL here, and must stay
+    // storable — asserting the converse would reject them.
+    projectScopeCheck: check(
+      'tokens_project_scope_check',
+      sql`project_id IS NULL OR scope = 'project:' || project_id OR scope = 'read:project:' || project_id`,
+    ),
   }),
 );
 

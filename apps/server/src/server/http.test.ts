@@ -73,7 +73,7 @@ describe('GET /healthz', () => {
   });
 
   it('returns 200 with version on a valid admin token + healthy DB', async () => {
-    const adminTok = mintTestToken(db.handle, '*');
+    const adminTok = mintTestToken(db.handle, { scope: '*' });
     const r = await call(adminTok.plaintext);
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ ok: true, version: REMBRIC_VERSION });
@@ -81,14 +81,14 @@ describe('GET /healthz', () => {
 
   it('accepts a project-scoped token (availability is not project-scoped)', async () => {
     const proj = projects.create({ slug: 'health-proj' });
-    const projTok = tokens.create({ name: 'proj-tok', scope: `project:${proj.id}` });
+    const projTok = tokens.create({ name: 'proj-tok', project: proj, access: 'write' });
     const r = await call(projTok.plaintext);
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ ok: true, version: REMBRIC_VERSION });
   });
 
   it('returns 503 when the database is unavailable', async () => {
-    const adminTok = mintTestToken(db.handle, '*');
+    const adminTok = mintTestToken(db.handle, { scope: '*' });
     db.handle.raw.close();
     const r = await call(adminTok.plaintext);
     expect(r.status).toBe(503);
@@ -97,7 +97,7 @@ describe('GET /healthz', () => {
   });
 
   it('returns 401 when a revoked token is used', async () => {
-    const tok = mintTestToken(db.handle, '*', 'will-be-revoked');
+    const tok = mintTestToken(db.handle, { scope: '*' }, 'will-be-revoked');
     tokens.revoke('will-be-revoked');
     const r = await call(tok.plaintext);
     expect(r.status).toBe(401);

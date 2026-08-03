@@ -381,7 +381,7 @@ describe('flashErrorPage + domainErrorPage', () => {
     const repos = createRepositories(t.handle.db);
     const sessions = new SessionsService(repos, randomBytes(32));
     const tokens = new TokensService(repos);
-    const admin = tokens.create({ name: 'admin', scope: '*', projectId: null });
+    const admin = tokens.create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     const resolved: ResolvedSession = {
       session: created.session,

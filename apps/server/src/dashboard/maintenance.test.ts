@@ -46,7 +46,7 @@ describe('maintenance — on-demand backup', () => {
   }
 
   function sessionFor(scope: '*' | 'read:*'): ResolvedSession {
-    const token = tokensSvc.create({ name: 'test', scope, projectId: null });
+    const token = tokensSvc.create({ name: 'test', scope });
     const created = sessions.create(token.token.id);
     return { session: created.session, sessions, tokenId: token.token.id };
   }

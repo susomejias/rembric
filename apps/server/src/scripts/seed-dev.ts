@@ -128,16 +128,8 @@ export function runSeed(deps: SeedDeps): SeedResult {
 
   // 2b. Two project-scoped tokens. Plaintext printed every boot — these
   // are dev-only ephemeral tokens regenerated on every `--reset`.
-  const readerTok = tokensSvc.create({
-    name: 'demo-reader',
-    scope: `read:project:${proj.id}`,
-    projectId: proj.id,
-  });
-  const writerTok = tokensSvc.create({
-    name: 'demo-writer',
-    scope: `project:${proj.id}`,
-    projectId: proj.id,
-  });
+  const readerTok = tokensSvc.create({ name: 'demo-reader', project: proj, access: 'read' });
+  const writerTok = tokensSvc.create({ name: 'demo-writer', project: proj, access: 'write' });
 
   // 3. Memories — 5 topic_key clusters × 4 memories each = 20 rows.
   const scope = projectScope(proj.id);

@@ -1,6 +1,6 @@
 import type { DbHandle } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
-import { TokensService, type CreatedToken, type TokenScope } from '../services/tokens.js';
+import { TokensService, type CreatedToken, type TokenGrant } from '../services/tokens.js';
 
 /**
  * Helper to mint a token quickly inside a test. Returns the plaintext so
@@ -8,8 +8,11 @@ import { TokensService, type CreatedToken, type TokenScope } from '../services/t
  */
 export function mintTestToken(
   handle: DbHandle,
-  scope: TokenScope = '*',
+  grant: TokenGrant = { scope: '*' },
   name = `test-${Math.random().toString(36).slice(2, 10)}`,
 ): CreatedToken {
-  return new TokensService(createRepositories(handle.db)).create({ name, scope, projectId: null });
+  const tokens = new TokensService(createRepositories(handle.db));
+  return grant.project
+    ? tokens.create({ name, project: grant.project, access: grant.access })
+    : tokens.create({ name, scope: grant.scope });
 }

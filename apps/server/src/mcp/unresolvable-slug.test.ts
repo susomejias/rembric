@@ -15,7 +15,6 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
-import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildInstructions } from './instructions.js';
@@ -34,7 +33,7 @@ import { buildSessionHandlers } from './session-tools.js';
  */
 
 const UNRESOLVABLE = 'no-such-project';
-const ADMIN: TokenScope = '*';
+const ADMIN = '*' as const;
 
 let db: TestDb;
 let repos: Repositories;
@@ -67,7 +66,7 @@ beforeEach(() => {
   prompts = new PromptsService(repos, db.handle.db);
   relations = new RelationsService(repos, db.handle.db);
   router = new SessionRouter();
-  adminToken = mintTestToken(db.handle, ADMIN).token;
+  adminToken = mintTestToken(db.handle, { scope: ADMIN }).token;
   realProject = projects.create({ slug: 'rembric' });
   globalMemoryId = memory.save(
     { type: 'user', title: 'user-wide row', content: 'user-wide row about tabs' },
@@ -295,7 +294,7 @@ describe('error messages name only reachable remedies', () => {
   });
 
   it('a project-pinned token denied a global read is told to activate that project', async () => {
-    const pinned = mintTestToken(db.handle, `project:${realProject.id}`).token;
+    const pinned = mintTestToken(db.handle, { project: realProject, access: 'write' }).token;
     const r = await runWithContext(
       ctxFor({
         token: pinned,
@@ -316,7 +315,7 @@ describe('error messages name only reachable remedies', () => {
   // Control for the clause above: a token with no project pin has nothing to
   // activate, so the hint must be absent.
   it('a read:* token denied a write is not told to call project.use', async () => {
-    const readOnly = mintTestToken(db.handle, 'read:*').token;
+    const readOnly = mintTestToken(db.handle, { scope: 'read:*' }).token;
     const r = await runWithContext(
       ctxFor({
         token: readOnly,
@@ -341,7 +340,7 @@ describe('error messages name only reachable remedies', () => {
   // while the connection itself carries no slug.
   it('a token pinned to another project is not told to activate it on a project-scope denial', async () => {
     const other = projects.create({ slug: 'other-project' });
-    const pinned = mintTestToken(db.handle, `read:project:${other.id}`).token;
+    const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
     router.setActiveProject(pinned.id, 'mcp-sess-cross', realProject.id, 'tool-explicit');
     const r = await runWithContext(
       ctxFor({
@@ -364,7 +363,7 @@ describe('error messages name only reachable remedies', () => {
   // whenever the slug differs from the path slug (`project-tools.ts`), so the
   // hint would name a remedy this caller cannot reach.
   it('a pinned token denied a global read on a path-scoped connection is not told to call project.use', async () => {
-    const pinned = mintTestToken(db.handle, `project:${realProject.id}`).token;
+    const pinned = mintTestToken(db.handle, { project: realProject, access: 'write' }).token;
     const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
     const r = await runWithContext(
       ctxFor({ token: pinned, scope: `project:${realProject.id}` }),
