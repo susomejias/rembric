@@ -1,5 +1,6 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
+import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
 import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 /**
@@ -37,8 +38,8 @@ export function computeRankWindowSize(limit: number, offset: number): number {
 }
 
 /**
- * Absolute floor on the highest relevance level in the gate window (see
- * `computeRelevanceLevel`). `null` ships this disabled: an uncalibrated floor
+ * Absolute floor on the highest relevance level in the whole fused pool (see
+ * `relevanceComponents`). `null` ships this disabled: an uncalibrated floor
  * silently destroys recall. Enabling it requires a committed
  * `pnpm run eval --sweep-abstention` grid meeting the bar in memory/spec.md
  * ("Retrieval and lifecycle constants MUST be named and bounded in one place").
@@ -46,10 +47,13 @@ export function computeRankWindowSize(limit: number, offset: number): number {
 export const ABSTENTION_FLOOR: number | null = null;
 /**
  * Relative-filter ratio: a pool row survives only while its relevance level is
- * at or above `ratio × leaderLevel`. Enabled at 0.40 on the committed sweep in
- * `archive/2026-07-28-rescore-relevance-abstention/measurements/sweep.txt`,
- * which is plateau-interior with two admissible steps either side. `ABSTENTION_FLOOR`
- * stays `null` — its two level distributions overlap and no value separates them.
+ * at or above `ratio × leaderLevel`. Enabled at 0.40, re-derived from the
+ * committed `--sweep-abstention` grid over the IDF-weighted level: a value
+ * calibrated against a different level function is uncalibrated, so it is never
+ * carried forward. That grid's admissible band is [0.30, 0.60] and 0.40 sits
+ * inside it with an admissible measured point 0.10 either side.
+ * `ABSTENTION_FLOOR` stays `null` — the two level distributions still overlap,
+ * now only on [0.296, 0.307].
  */
 export const RELATIVE_LEVEL_RATIO: number | null = 0.4;
 /**
@@ -64,7 +68,7 @@ export const RELATIVE_LEVEL_RATIO: number | null = 0.4;
 export const DIVERSITY_CAP: number | null = null;
 
 export interface HybridSearchOpts {
-  repos: Pick<Repositories, 'memory' | 'vectors'>;
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'termStatistics'>;
   embedQuery?: (text: string) => Promise<Float32Array>;
   query: string;
   scope: MemoryScope;
@@ -97,12 +101,19 @@ export interface HybridSearchResult {
 
 const ABSTAIN_REASON = 'no candidate cleared the relevance floor';
 
-/** The pool leader's level and the two components of that same row, so a per-branch split can be decided on evidence. */
+/**
+ * The pool leader's level and the two components of that same row, so a
+ * per-branch split can be decided on evidence, plus the term statistics the
+ * lexical component was weighted by so the level is recomputable by hand.
+ * Reaches the calibration sweep only: no response payload carries it.
+ */
 export interface GateLeader {
   level: number;
   coverage: number;
   cosine: number;
   poolSize: number;
+  documentCount: number;
+  documentFrequencies: QueryTermFrequencies;
 }
 
 export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearchResult> {
@@ -122,10 +133,15 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   const gatesEnabled = abstentionFloor !== null || relativeLevelRatio !== null;
   let gated: { id: string; score: number }[] = fused;
   if (gatesEnabled || opts.onGateWindow) {
-    const scored = poolLevels(fused, dense, opts);
+    const { scored, documentCount, documentFrequencies } = poolLevels(fused, dense, opts);
     const leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
     const leader = poolLeader(leveled, scored);
-    opts.onGateWindow?.({ ...leader, poolSize: fused.length });
+    opts.onGateWindow?.({
+      ...leader,
+      poolSize: fused.length,
+      documentCount,
+      documentFrequencies,
+    });
     if (abstentionFloor !== null && (leveled.length === 0 || leader.level < abstentionFloor)) {
       return { ids: [], abstained: true, reason: ABSTAIN_REASON };
     }
@@ -141,14 +157,31 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   return { ids: ids.slice(opts.offset, opts.offset + opts.limit), abstained: false };
 }
 
+interface PoolLevels {
+  scored: Map<string, { level: number; coverage: number; cosine: number }>;
+  documentCount: number;
+  documentFrequencies: QueryTermFrequencies;
+}
+
 function poolLevels(
   pool: readonly { id: string }[],
   dense: readonly { id: string; score: number }[],
   opts: HybridSearchOpts,
-): Map<string, { level: number; coverage: number; cosine: number }> {
+): PoolLevels {
   const scored = new Map<string, { level: number; coverage: number; cosine: number }>();
-  if (pool.length === 0) return scored;
-  const queryTokens = tokenSet(opts.query);
+  // Only the sweep sink wants term statistics for a pool with nothing to score,
+  // so an empty pool skips both reads unless one is attached.
+  if (pool.length === 0 && !opts.onGateWindow) {
+    return { scored, documentCount: 0, documentFrequencies: new Map() };
+  }
+  const documentCount = opts.repos.termStatistics.adminDocumentCount();
+  // The index's own terms, not the application's: a term the tokenizer would
+  // never have produced has no entry to find and would take the weight of a term
+  // the corpus has never seen.
+  const documentFrequencies = opts.repos.termStatistics.adminQueryTermFrequencies(opts.query);
+  const queryTokens = new Set(documentFrequencies.keys());
+  if (pool.length === 0) return { scored, documentCount, documentFrequencies };
+  const weightOf = termWeightsFor(documentCount, documentFrequencies);
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
   const rows = opts.repos.memory.textByIds({
     ids: pool.map((r) => r.id),
@@ -157,9 +190,9 @@ function poolLevels(
     includeGlobal: opts.includeGlobal,
   });
   for (const r of rows) {
-    scored.set(r.id, relevanceComponents(queryTokens, r, cosineById.get(r.id)));
+    scored.set(r.id, relevanceComponents(queryTokens, r, cosineById.get(r.id), weightOf));
   }
-  return scored;
+  return { scored, documentCount, documentFrequencies };
 }
 
 /**
@@ -185,20 +218,97 @@ export function poolLeader(
 }
 
 /**
- * Per-row relevance level in `[0,1]`: the greater of the query's token coverage
- * in the row's text and the row's dense cosine. Both are bounded and read only
- * the query and the row, so a calibrated threshold means the same thing at 40
- * rows and at 5,000. A row the dense branch never returned scores on coverage
- * alone.
+ * Per-row relevance level in `[0,1]`: the greater of the IDF-weighted share of
+ * the query's terms present in the row's text and the row's dense cosine. Both
+ * are bounded. The lexical side depends on corpus-wide term statistics but
+ * never on the result list it is used to filter, on the page requested, or on
+ * the order the branches fused in. A row the dense branch never returned scores
+ * on coverage alone.
  */
 export function relevanceComponents(
   queryTokens: ReadonlySet<string>,
   row: { title: string; content: string },
   denseCosine: number | undefined,
+  weightOf: TermWeightLookup,
 ): { level: number; coverage: number; cosine: number } {
-  const coverage = tokenContainment(queryTokens, tokenSet(`${row.title}\n\n${row.content}`));
+  const coverage = weightedCoverage(
+    queryTokens,
+    tokenSet(`${row.title}\n\n${row.content}`),
+    weightOf,
+  );
   const cosine = denseCosine ?? 0;
   return { level: Math.max(coverage, cosine), coverage, cosine };
+}
+
+export type TermWeightLookup = (term: string) => number;
+
+/**
+ * BM25's non-negative smoothed IDF, `ln(1 + (N − df + 0.5) / (df + 0.5))`.
+ * Strictly positive at every document frequency — at `df = N` it is
+ * `ln(1 + 0.5/(N + 0.5))`, small but never zero — so a query of ubiquitous
+ * terms still has a non-zero denominator and a defined level. The classic
+ * `ln(N/df)` is exactly zero there, and the probabilistic form goes negative
+ * above `df > N/2`, which would let a weighted fraction leave `[0,1]`.
+ */
+export function termWeight(documentCount: number, documentFrequency: number): number {
+  const n = Math.max(0, documentCount);
+  const df = Math.min(Math.max(0, documentFrequency), n);
+  return Math.log(1 + (n - df + 0.5) / (df + 0.5));
+}
+
+/**
+ * A term the index REPORTED absent carries `df = 0`, the maximum weight: the
+ * corpus cannot answer a query term it does not hold, and the abstention gate
+ * exists to say so. A term the read never mentioned is a different thing — a
+ * fabricated lookup key — and is refused rather than given that same weight.
+ * The lookup memoises because it runs once per query term per pool row — up to
+ * `RANK_WINDOW_CEILING` rows — while its result depends only on the term.
+ */
+export function termWeightsFor(
+  documentCount: number,
+  documentFrequencies: QueryTermFrequencies,
+): TermWeightLookup {
+  const memo = new Map<string, number>();
+  return (term) => {
+    const hit = memo.get(term);
+    if (hit !== undefined) return hit;
+    const reported = documentFrequencies.get(term);
+    if (reported === undefined) {
+      throw new Error(`no term statistic was read for '${term}'`);
+    }
+    const w = termWeight(documentCount, reported ?? 0);
+    memo.set(term, w);
+    return w;
+  };
+}
+
+/**
+ * The share of the query's INFORMATION a row carries: summed weight of the
+ * query terms it contains over summed weight of all the query's distinct terms.
+ * Bounded `[0,1]` by construction, being a weighted fraction of a
+ * positive-weight set, and equal to `tokenContainment` whenever every query
+ * term weighs the same — which is what an empty index and a corpus too small to
+ * discriminate both degenerate to.
+ *
+ * The two halves are sourced differently on purpose: `queryTokens` and their
+ * weights come from the index (`adminQueryTermFrequencies`), `candidateTokens` from
+ * `indexTerms`. Where those disagree a term the row does contain is counted as
+ * not covered, which can only LOWER this number — never fabricate a weight, and
+ * never touch the cosine `relevanceComponents` maxes it against.
+ */
+export function weightedCoverage(
+  queryTokens: ReadonlySet<string>,
+  candidateTokens: ReadonlySet<string>,
+  weightOf: TermWeightLookup,
+): number {
+  let covered = 0;
+  let total = 0;
+  for (const t of queryTokens) {
+    const w = weightOf(t);
+    total += w;
+    if (candidateTokens.has(t)) covered += w;
+  }
+  return total === 0 ? 0 : covered / total;
 }
 
 /** Keeps a row iff `level >= ratio × leaderLevel`, in fused order. */
@@ -424,13 +534,17 @@ export function fuseRRF(rankedLists: string[][], rankConstant = RANK_CONSTANT): 
 }
 
 /**
- * Split text into whole Unicode word/number tokens: splits on whitespace,
- * strips stray quotes, and drops tokens with no letter/number in any script
- * (does NOT split at non-ASCII chars or drop accented/CJK tokens, unlike a
- * naive ASCII-only tokenizer) — a quoted phrase of pure punctuation
- * tokenizes to nothing and is useless (and risks an empty-phrase parse
- * edge). Shared by `sanitizeFtsQuery` and the save-time candidate
- * detector's token-containment similarity, so both use one tokenization rule.
+ * Whole whitespace-delimited words, for building an FTS5 MATCH expression:
+ * strips stray quotes and drops words with no letter/number in any script (does
+ * NOT split at non-ASCII chars or drop accented/CJK words, unlike a naive
+ * ASCII-only tokenizer) — a quoted phrase of pure punctuation matches nothing
+ * and risks an empty-phrase parse edge.
+ *
+ * Deliberately NOT `indexTerms`. Quoting one whole word makes FTS5 parse its
+ * parts as a PHRASE, so `"rate-limit"` requires `rate` adjacent to `limit`;
+ * splitting the word here would OR the parts instead and silently widen every
+ * lexical read. The two functions serve different jobs — sanitising a query
+ * versus comparing token sets — and must not be collapsed back together.
  */
 export function tokenizeWords(text: string): string[] {
   const tokens: string[] = [];
@@ -441,14 +555,44 @@ export function tokenizeWords(text: string): string[] {
   return tokens;
 }
 
+/**
+ * An approximation of FTS5's `unicode61` tokenizer: break at every character
+ * that is neither a Unicode letter nor a digit, fold diacritics (NFD, so a
+ * combining mark is stripped rather than treated as a separator), lowercase.
+ *
+ * It agrees on English and Spanish and DISAGREES outside single-diacritic Latin
+ * — `unicode61` does not fold Greek accents or the Cyrillic breve, folds case
+ * per codepoint, and treats a combining mark as a separator. That is why it is
+ * used only to decide which of the query's terms a candidate row contains, where
+ * a disagreement can only under-count that row. It is NOT what the term
+ * statistics are keyed on; see `TermStatisticsRepository.adminQueryTermFrequencies`.
+ */
+export function indexTerms(text: string): string[] {
+  const terms: string[] = [];
+  for (const raw of text.normalize('NFD').split(/[^\p{L}\p{N}\p{M}]+/u)) {
+    const t = raw.replace(/\p{M}/gu, '').toLowerCase();
+    if (t) terms.push(t);
+  }
+  return terms;
+}
+
+/**
+ * The one application-side token vocabulary both token-set comparisons use — the
+ * relevance level's row-membership test and the save-time candidate detector's
+ * containment — so those two cannot disagree about what a token is.
+ */
 export function tokenSet(text: string): Set<string> {
-  return new Set(tokenizeWords(text).map((t) => t.toLowerCase()));
+  return new Set(indexTerms(text));
 }
 
 /**
  * Corpus-independent lexical overlap: the fraction of `queryTokens` present in
  * `candidateTokens`. Bounded [0,1], unlike raw bm25 (unbounded, corpus-size
  * dependent, and inverted: see fix-retrieval-ranking-math).
+ *
+ * Save-time candidate `similarity` only. It stays UNWEIGHTED where the search
+ * path's level does not: memory/spec.md requires the reported number be
+ * corpus-independent, and IDF is corpus-dependent by construction.
  */
 export function tokenContainment(
   queryTokens: ReadonlySet<string>,

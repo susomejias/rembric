@@ -9,6 +9,7 @@ import { OAuthRepository } from './oauth-repository.js';
 import { ProjectsRepository } from './projects-repository.js';
 import { PromptsRepository } from './prompts-repository.js';
 import { RelationsRepository } from './relations-repository.js';
+import { TermStatisticsRepository } from './term-statistics-repository.js';
 import { TokensRepository } from './tokens-repository.js';
 import { VectorsRepository } from './vectors-repository.js';
 
@@ -44,6 +45,7 @@ export {
   type AdminRelationFilters,
   type AdminRelationWithContent,
 } from './relations-repository.js';
+export { TermStatisticsRepository } from './term-statistics-repository.js';
 export { TokensRepository } from './tokens-repository.js';
 export { VectorsRepository } from './vectors-repository.js';
 
@@ -59,6 +61,7 @@ export interface Repositories {
   vectors: VectorsRepository;
   dashboardSessions: DashboardSessionsRepository;
   entities: EntitiesRepository;
+  termStatistics: TermStatisticsRepository;
 }
 
 export function createRepositories(db: Db): Repositories {
@@ -74,5 +77,6 @@ export function createRepositories(db: Db): Repositories {
     vectors: new VectorsRepository(db),
     dashboardSessions: new DashboardSessionsRepository(db),
     entities: new EntitiesRepository(db),
+    termStatistics: new TermStatisticsRepository(db),
   };
 }

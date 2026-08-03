@@ -96,6 +96,11 @@ export async function bootstrap(
   }
 
   const dbHandle = createDb({ dataDir: config.dataDir });
+  logger.info(
+    `query tokenizer inherited from memory_fts: ${
+      dbHandle.queryTokenizer.length > 0 ? dbHandle.queryTokenizer.join(', ') : 'fts5 defaults'
+    }`,
+  );
   const repos = createRepositories(dbHandle.db);
   const dbDiagnostics = createDiagnostics(dbHandle);
 

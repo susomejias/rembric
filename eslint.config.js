@@ -17,6 +17,7 @@ export default tseslint.config(
       'apps/plugin/*/**',
       '!apps/plugin/bin/**',
       'plugin/**',
+      'openspec/**',
       'apps/server/src/dashboard/public/**',
       'apps/landing/public/**',
       '**/*.d.ts',

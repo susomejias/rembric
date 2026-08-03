@@ -7,6 +7,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as sqliteVec from 'sqlite-vec';
 
 import { migrate } from './migrate.js';
+import { createQueryTokenizerTables } from './query-tokenizer.js';
 import * as schema from './schema/index.js';
 
 export type Schema = typeof schema;
@@ -35,6 +36,8 @@ export interface CreateDbOptions {
 export interface DbHandle {
   db: Db;
   raw: Database.Database;
+  /** fts5 arguments the query-tokenising table inherited from `memory_fts`. */
+  queryTokenizer: string[];
   close: () => void;
 }
 
@@ -78,11 +81,16 @@ export function createDb(opts: CreateDbOptions): DbHandle {
     sqlite.exec('ANALYZE');
   }
 
+  // After the migrations: the declaration it derives from is whatever they left
+  // behind (see query-tokenizer.ts).
+  const queryTokenizer = createQueryTokenizerTables(sqlite);
+
   const db = drizzle(sqlite, { schema });
 
   return {
     db,
     raw: sqlite,
+    queryTokenizer,
     close: () => {
       // Update statistics for tables touched this run before closing.
       if (!opts.readonly) sqlite.pragma('optimize');

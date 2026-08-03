@@ -179,7 +179,7 @@ export class MemoryService {
   constructor(
     private readonly repos: Pick<
       Repositories,
-      'memory' | 'consolidation' | 'vectors' | 'entities' | 'relations'
+      'memory' | 'consolidation' | 'vectors' | 'entities' | 'relations' | 'termStatistics'
     >,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),

@@ -587,6 +587,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0027_tune_hot_query_paths.sql',
       '0028_drop_unusable_indexes.sql',
       '0029_tokens_project_binding.sql',
+      '0030_memory_fts_vocab.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1006,5 +1007,111 @@ describe('fresh install vs staged upgrade', () => {
         `upgrade stopping before ${cut} diverges from a fresh install`,
       ).toEqual(fresh);
     }
+  });
+});
+
+describe('migration 0030_memory_fts_vocab over a database populated before it', () => {
+  let dataDir: string;
+  let slicedDir: string;
+  let raw: Database.Database;
+
+  const MEMORIES = 300;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rembric-mig30-data-'));
+    slicedDir = mkdtempSync(join(tmpdir(), 'rembric-mig30-slice-'));
+    for (const f of readdirSync(fullMigrationsDir)
+      .filter((name) => name.endsWith('.sql'))
+      .sort()) {
+      if (f.startsWith('0030_')) break;
+      copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
+    }
+    raw = new Database(join(dataDir, 'data.db'));
+    sqliteVec.load(raw);
+    raw.pragma('foreign_keys = ON');
+    migrate(raw, { migrationsDir: slicedDir });
+
+    const insert = raw.prepare(
+      `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)
+       VALUES (?, 'global', NULL, 'reference', ?, ?, 'active', 0)`,
+    );
+    for (let i = 0; i < MEMORIES; i++) {
+      insert.run(`m${i}`, `title ${i}`, `ubiquitousterm body ${i} rareterm${i}`);
+    }
+  });
+
+  afterEach(() => {
+    try {
+      raw.close();
+    } catch {
+      // ignore
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(slicedDir, { recursive: true, force: true });
+  });
+
+  const df = (term: string): number | undefined =>
+    (
+      raw.prepare('SELECT doc FROM memory_fts_vocab WHERE term = ?').get(term) as
+        | { doc: number }
+        | undefined
+    )?.doc;
+
+  it('is populated the moment it exists, with no backfill step', () => {
+    expect(() => df('ubiquitousterm')).toThrow(); // the table does not exist yet
+
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(result.applied).toEqual(['0030_memory_fts_vocab.sql']);
+
+    expect(df('ubiquitousterm')).toBe(MEMORIES);
+    expect(df('rareterm7')).toBe(1);
+    expect(df('atermthecorpushasneverseen')).toBeUndefined();
+  });
+
+  it('leaves foreign keys and integrity intact', () => {
+    migrate(raw, { migrationsDir: fullMigrationsDir });
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(raw.prepare('PRAGMA integrity_check').all()).toEqual([{ integrity_check: 'ok' }]);
+  });
+
+  it('reflects an FTS rebuild without any DDL', () => {
+    migrate(raw, { migrationsDir: fullMigrationsDir });
+    raw
+      .prepare(
+        `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)
+         VALUES ('extra', 'global', NULL, 'reference', 'extra title', 'ubiquitousterm extra', 'active', 0)`,
+      )
+      .run();
+    expect(df('ubiquitousterm')).toBe(MEMORIES + 1);
+
+    raw.exec(`INSERT INTO memory_fts(memory_fts) VALUES('rebuild')`);
+    expect(df('ubiquitousterm')).toBe(MEMORIES + 1);
+  });
+
+  it('survives a drop-and-recreate of memory_fts without being redeclared', () => {
+    migrate(raw, { migrationsDir: fullMigrationsDir });
+    const declaredBefore = raw
+      .prepare<[], { sql: string }>(`SELECT sql FROM sqlite_master WHERE name = 'memory_fts_vocab'`)
+      .get()!.sql;
+
+    raw.exec(`DROP TABLE memory_fts`);
+    // The window between the drop and the recreate is unreachable by a serving
+    // request — migrations run before the server serves — but it is real.
+    expect(() => df('ubiquitousterm')).toThrow(/no such fts5 table/);
+
+    raw.exec(
+      `CREATE VIRTUAL TABLE memory_fts USING fts5(content, tags, title, content='memory', content_rowid='rowid')`,
+    );
+    raw.exec(`INSERT INTO memory_fts(memory_fts) VALUES('rebuild')`);
+
+    expect(df('ubiquitousterm')).toBe(MEMORIES);
+    expect(
+      raw
+        .prepare<
+          [],
+          { sql: string }
+        >(`SELECT sql FROM sqlite_master WHERE name = 'memory_fts_vocab'`)
+        .get()!.sql,
+    ).toBe(declaredBefore);
   });
 });

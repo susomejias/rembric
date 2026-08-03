@@ -616,30 +616,43 @@ describe('data-access confinement invariant', () => {
 });
 
 /**
- * Admin-method confinement invariant.
- *
- * `admin*`-prefixed repository reads are unscoped (they bypass the
- * `(scope, project_id)` filter) and exist solely for the operator dashboard.
- * Calling them anywhere else would leak cross-scope rows into agent-facing
- * paths. Repository definitions and tests are exempt.
+ * Admin-method confinement invariant. `admin*` marks an unscoped repository
+ * read; the allow-list below is what makes it callable. Spec: data-access,
+ * "Scoped, unsafe, and admin method families".
  */
-const ADMIN_CALL_PATTERN = /\.admin[A-Z]\w*\(/;
+const ADMIN_CALL_PATTERN = /\.(admin[A-Z]\w*)\(/g;
+
+const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
+  'server/dashboard-router.ts': [
+    'adminCountArchived',
+    'adminCountByStatus',
+    'adminCountCreatedByDay',
+    'adminFindById',
+    'adminListRuns',
+    'adminOpCounts',
+    'adminRecent',
+    'adminRecentJudged',
+  ],
+  'server/bootstrap.ts': [
+    'adminBacklogCount',
+    'adminCountByStatus',
+    'adminCountEntities',
+    'adminCountNeedsReview',
+    'adminLatestRun',
+  ],
+  'services/agent-sessions.ts': ['adminCountByStatus'],
+  'services/hybrid-search.ts': ['adminDocumentCount', 'adminQueryTermFrequencies'],
+};
 
 describe('admin-method confinement invariant', () => {
   const files = listSourceFiles(srcRoot);
 
-  it('admin* repository methods are called only from src/dashboard/', () => {
-    const offenders: { file: string; line: number; text: string }[] = [];
+  it('every admin* call site is allow-listed by file AND method name', () => {
+    const offenders: { file: string; line: number; method: string; text: string }[] = [];
     for (const file of files) {
       const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
-      if (rel.startsWith('dashboard/')) continue;
-      // The dashboard router renders the operator overview page directly.
-      if (rel === 'server/dashboard-router.ts') continue;
-      // Doctor report + dashboard stats card — same class of operator-facing aggregation.
-      if (rel === 'server/bootstrap.ts') continue;
-      // Service-layer admin wrapper; its own callers are confined above.
-      if (rel === 'services/agent-sessions.ts') continue;
-      if (rel.startsWith('db/repositories/')) continue;
+      if (rel.startsWith('dashboard/') || rel.startsWith('db/repositories/')) continue;
+      const allowed = new Set(ADMIN_CALL_SITES[rel] ?? []);
       const lines = readFileSync(file, 'utf8').split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
@@ -647,15 +660,145 @@ describe('admin-method confinement invariant', () => {
         if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
           continue;
         }
-        if (ADMIN_CALL_PATTERN.test(line)) {
-          offenders.push({ file: rel, line: i + 1, text: trimmed });
+        for (const m of line.matchAll(ADMIN_CALL_PATTERN)) {
+          const method = m[1]!;
+          if (!allowed.has(method)) {
+            offenders.push({ file: rel, line: i + 1, method, text: trimmed });
+          }
         }
       }
     }
     if (offenders.length > 0) {
-      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
-      throw new Error(`admin* repository method called outside src/dashboard/.\n${formatted}`);
+      const formatted = offenders
+        .map((o) => `  ${o.file}:${o.line}  ${o.method}  ${o.text}`)
+        .join('\n');
+      throw new Error(
+        `admin* repository method called from a call site the (file, method) allow-list does not name.\n${formatted}`,
+      );
     }
+  });
+
+  it('allow-list anchors: every named (file, method) pair is still called there', () => {
+    const stale: string[] = [];
+    for (const [rel, methods] of Object.entries(ADMIN_CALL_SITES)) {
+      const src = readFileSync(join(srcRoot, rel), 'utf8');
+      for (const method of methods) {
+        if (!new RegExp(`\\.${method}\\(`).test(src)) stale.push(`${rel}::${method}`);
+      }
+    }
+    expect(stale).toEqual([]);
+  });
+});
+
+/**
+ * Closed inventory of unscoped, un-keyed, unprefixed repository reads. Spec:
+ * data-access, "Scoped, unsafe, and admin method families". Set equality, so
+ * both directions fail: an unlisted read, and a listed read that is gone.
+ */
+const REPOSITORIES_DIR = join(srcRoot, 'db/repositories');
+
+const SCOPED_CONTENT_REPOSITORIES = [
+  'agent-sessions-repository.ts',
+  'entities-repository.ts',
+  'memory-repository.ts',
+  'prompts-repository.ts',
+  'relations-repository.ts',
+  'term-statistics-repository.ts',
+  'vectors-repository.ts',
+] as const;
+
+const CONTROL_PLANE_REPOSITORIES = [
+  'consolidation-repository.ts',
+  'dashboard-sessions-repository.ts',
+  'oauth-repository.ts',
+  'projects-repository.ts',
+  'tokens-repository.ts',
+] as const;
+
+const REPOSITORY_WRITE_VERBS =
+  /^(insert|update|set|mark|touch|purge|delete|truncate|revoke|consume|reactivate|archive|abandon|finish|link|reset)/;
+
+const UNSCOPED_UNPREFIXED_READS = [
+  'agent-sessions-repository.ts::countPurgeableEmpty',
+  'agent-sessions-repository.ts::findPurgeableEmptyIds',
+  'agent-sessions-repository.ts::list',
+  'entities-repository.ts::findMissingScans',
+  'memory-repository.ts::countByProject', // known violation: reached from mcp/project-tools.ts, to be fixed separately
+  'memory-repository.ts::countPurgeableDisconnectedArchived',
+  'memory-repository.ts::countRowsByStatus',
+  'memory-repository.ts::findPurgeableDisconnectedArchivedIds',
+  'prompts-repository.ts::countDeleted',
+  'prompts-repository.ts::findDeletedIds',
+  'relations-repository.ts::countRowsByStatus',
+  'vectors-repository.ts::count',
+  'vectors-repository.ts::findMissingEmbeddings',
+] as const;
+
+/** The text between `open` and its matching close, exclusive. */
+function balancedSpan(src: string, open: number, openCh: string, closeCh: string): string {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === openCh) depth++;
+    else if (src[i] === closeCh) {
+      depth--;
+      if (depth === 0) return src.slice(open + 1, i);
+    }
+  }
+  return '';
+}
+
+/** A method's parameter text with the bodies of same-file `Opts` types folded in. */
+function parameterTextWithLocalTypes(src: string, params: string): string {
+  let text = params;
+  for (const name of new Set(params.match(/\b[A-Z]\w+\b/g) ?? [])) {
+    const decl = new RegExp(`\\b(?:interface|type)\\s+${name}\\b[^{]*\\{`).exec(src);
+    if (decl) text += ` ${balancedSpan(src, decl.index + decl[0].length - 1, '{', '}')}`;
+  }
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+}
+
+function unscopedUnprefixedReads(src: string): string[] {
+  const classStart = src.search(/^export class /m);
+  if (classStart === -1) return [];
+  const found: string[] = [];
+  for (const m of src.matchAll(/^ {2}(private |protected |static )?([A-Za-z_]\w*)\(/gm)) {
+    if (m.index < classStart) continue;
+    const [, modifier, name] = m;
+    if (modifier || name === 'constructor') continue;
+    if (/^(admin|unsafe)/.test(name!) || REPOSITORY_WRITE_VERBS.test(name!)) continue;
+    const params = parameterTextWithLocalTypes(
+      src,
+      balancedSpan(src, m.index + m[0].length - 1, '(', ')'),
+    );
+    // `partition_key` is `memory_vec`'s scope column.
+    if (/\b(scope|projectId|partitionKey)\b/.test(params)) continue;
+    if (/\b\w*[Ii]ds?\b/.test(params)) continue;
+    found.push(name!);
+  }
+  return found;
+}
+
+describe('unscoped repository read inventory', () => {
+  it('every repository file is classified as scoped-content or control-plane', () => {
+    const actual = readdirSync(REPOSITORIES_DIR)
+      .filter(
+        (f) =>
+          f.endsWith('.ts') &&
+          !f.endsWith('.test.ts') &&
+          f !== 'index.ts' &&
+          f !== 'scope-clause.ts',
+      )
+      .sort();
+    expect(actual).toEqual([...SCOPED_CONTENT_REPOSITORIES, ...CONTROL_PLANE_REPOSITORIES].sort());
+  });
+
+  it('the unscoped, un-keyed, unprefixed reads are exactly the inventory', () => {
+    const found: string[] = [];
+    for (const file of SCOPED_CONTENT_REPOSITORIES) {
+      const src = readFileSync(join(REPOSITORIES_DIR, file), 'utf8');
+      for (const name of unscopedUnprefixedReads(src)) found.push(`${file}::${name}`);
+    }
+    expect(found.sort()).toEqual([...UNSCOPED_UNPREFIXED_READS].sort());
   });
 });
 

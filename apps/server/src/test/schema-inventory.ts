@@ -47,17 +47,28 @@ export type DerivedEntry =
       triggers: readonly string[];
       rebuild?: never;
       markers?: never;
+      contentless?: never;
     }
   | {
       derivesFrom: string;
       rebuild: { module: string; entryPoint: string };
       markers: readonly string[];
       triggers?: never;
+      contentless?: never;
+    }
+  | {
+      derivesFrom: string;
+      /** Stores nothing — the DDL is the whole recipe, so there is no marker and nothing to invalidate. */
+      contentless: true;
+      triggers?: never;
+      rebuild?: never;
+      markers?: never;
     };
 
 /** Recomputable in full from source tables plus a recipe pinned in the image. */
 export const DERIVED_TABLES: Record<string, DerivedEntry> = {
   memory_fts: { derivesFrom: 'memory', triggers: ['memory_ai', 'memory_au', 'memory_ad'] },
+  memory_fts_vocab: { derivesFrom: 'memory_fts', contentless: true },
   prompts_fts: { derivesFrom: 'prompts', triggers: ['prompts_ai', 'prompts_au', 'prompts_ad'] },
   memory_replaces: {
     derivesFrom: 'memory.replaces',

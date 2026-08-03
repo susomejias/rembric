@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
-import type { GateLeader } from '../../services/hybrid-search.js';
+import { type GateLeader } from '../../services/hybrid-search.js';
 
 import { CORPUS } from './corpus.js';
 import {
@@ -320,9 +320,11 @@ function checkFloors(reports: RetrieverReport[]): string[] {
  */
 const SWEEP_FLOORS: (number | null)[] = [null, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6];
 /**
- * `0` is not a degenerate duplicate of `null`: it keeps every row the filter
- * sees, so it isolates the OTHER effect of enabling the ratio — the pool the
- * ranking boost sorts narrows from the rank window to the gate window.
+ * `0` keeps every row the filter sees, so it is the control that separates "the
+ * ratio changed the page" from "levelling the pool at all did". The gate now
+ * levels the WHOLE fused pool, so `0` and `null` must agree on every metric;
+ * a row where they do not is a defect in the level path, not a calibration
+ * finding.
  */
 const SWEEP_RATIOS: (number | null)[] = [null, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 
@@ -338,9 +340,12 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
   if (!hybrid) throw new Error('the sweep needs the hybrid retriever');
 
   console.log('\n=== pool leader components, per query (gates disabled) ===');
-  console.log('query'.padEnd(38), 'gold', ' pool', 'level', 'coverage', 'cosine');
+  console.log('query'.padEnd(38), 'gold', ' pool', 'level', 'coverage', 'cosine', '   N');
   const state = await hybrid.init(corpus);
   const leaders: { id: string; hasGold: boolean; level: number; poolSize: number }[] = [];
+  // The weights, not just the levels: without them a reader cannot tell a level
+  // that moved because the row changed from one that moved because the corpus did.
+  const termStats: string[] = [];
   for (const q of QUERIES) {
     const scope = resolveScope(corpus, q.scope);
     let leader: GateLeader | undefined;
@@ -360,8 +365,23 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
       fmt(leader?.level ?? 0),
       fmt(leader?.coverage ?? 0).padStart(8),
       fmt(leader?.cosine ?? 0).padStart(6),
+      String(leader?.documentCount ?? 0).padStart(4),
     );
+    // The index's own terms, in the order the read reported them: printing a
+    // JS-tokenised list here would show terms the weighting never looked up.
+    const dfs = [...(leader?.documentFrequencies.entries() ?? [])]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      // `—`, not 0: the index reported no such term, which carries the MAXIMUM
+      // weight — a corpus cannot answer a term it does not hold.
+      .map(([term, df]) => `${term}=${df ?? '—'}`)
+      .join(' ');
+    termStats.push(`${q.id.padEnd(38)} N=${leader?.documentCount ?? 0}  df: ${dfs}`);
   }
+  console.log('\n=== term statistics behind each leading level ===');
+  console.log(
+    'df is the document count over the WHOLE index; `—` means the index does not hold the term.',
+  );
+  for (const line of termStats) console.log(line);
   // The gate covers the whole fused pool, so every query observes both
   // mechanisms regardless of page size — the grid below is evidence for all of
   // them, not just for the ones whose pool outgrew a prefix.

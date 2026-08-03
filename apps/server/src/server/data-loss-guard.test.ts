@@ -9,6 +9,7 @@ import { createTestDb, type TestDb } from '../test/index.js';
 import {
   assertDataLossGuard,
   DataLossGuardError,
+  queryCounts,
   readStateMarker,
   writeStateMarker,
 } from './data-loss-guard.js';
@@ -186,5 +187,21 @@ describe('data-loss guard', () => {
     expect(thrown).toBeInstanceOf(DataLossGuardError);
     const e = thrown as DataLossGuardError;
     expect(e.shrunkTables.map((s) => s.table)).toEqual(['memory']);
+  });
+});
+
+describe('the guarded population is operator data, not derived vocabulary', () => {
+  it('does not count `memory_fts_vocab`, whose row count is a term count', () => {
+    const counted = Object.keys(queryCounts(createDiagnostics(db.handle)));
+    expect(counted).toEqual(['memory', 'projects', 'sessions', 'tokens', 'prompts']);
+    // Control: the table exists, so its absence here is a decision and not a miss.
+    expect(
+      db.handle.raw
+        .prepare<
+          [],
+          { n: number }
+        >(`SELECT count(*) AS n FROM sqlite_master WHERE name = 'memory_fts_vocab'`)
+        .get()!.n,
+    ).toBe(1);
   });
 });

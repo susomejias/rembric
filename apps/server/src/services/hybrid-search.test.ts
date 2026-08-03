@@ -18,7 +18,9 @@ import {
   RANK_CONSTANT,
   RANK_WINDOW_CEILING,
   sanitizeFtsQuery,
+  termWeightsFor,
   tokenSet,
+  type TermWeightLookup,
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
@@ -284,6 +286,9 @@ describe('applyRelativeLevelFilter', () => {
   });
 });
 
+/** Every term equal — the degenerate case the weighted fraction must reduce to. */
+const EQUAL_WEIGHTS: TermWeightLookup = () => 1;
+
 describe('relevanceComponents', () => {
   const query = tokenSet('alpha beta gamma delta epsilon zeta eta theta');
   const level = (...args: Parameters<typeof relevanceComponents>) =>
@@ -295,22 +300,27 @@ describe('relevanceComponents', () => {
         query,
         { title: 'alpha beta gamma delta', content: 'epsilon zeta eta theta' },
         undefined,
+        EQUAL_WEIGHTS,
       ),
     ).toBe(1);
   });
 
   it('scores one shared token of eight at exactly 0.125', () => {
-    expect(level(query, { title: 'unrelated', content: 'alpha only here' }, undefined)).toBe(0.125);
+    expect(
+      level(query, { title: 'unrelated', content: 'alpha only here' }, undefined, EQUAL_WEIGHTS),
+    ).toBe(0.125);
   });
 
   it('scores 0 with no shared token and no dense cosine', () => {
-    expect(level(query, { title: 'nothing', content: 'in common at all' }, undefined)).toBe(0);
+    expect(
+      level(query, { title: 'nothing', content: 'in common at all' }, undefined, EQUAL_WEIGHTS),
+    ).toBe(0);
   });
 
   it('takes the dense cosine when it exceeds coverage, and coverage when it does not', () => {
     const row = { title: 'unrelated', content: 'alpha only here' }; // coverage 0.125
-    expect(level(query, row, 0.82)).toBe(0.82);
-    expect(level(query, row, 0.05)).toBe(0.125);
+    expect(level(query, row, 0.82, EQUAL_WEIGHTS)).toBe(0.82);
+    expect(level(query, row, 0.05, EQUAL_WEIGHTS)).toBe(0.125);
   });
 
   it('is bounded above by 1 even for a row far longer than the query', () => {
@@ -318,7 +328,7 @@ describe('relevanceComponents', () => {
       title: 'alpha beta gamma delta',
       content: `epsilon zeta eta theta ${'x '.repeat(5000)}`,
     };
-    expect(level(query, padded, undefined)).toBe(1);
+    expect(level(query, padded, undefined, EQUAL_WEIGHTS)).toBe(1);
   });
 });
 
@@ -687,13 +697,15 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
 
 /**
  * The gate decision itself, with a non-empty candidate set on BOTH sides of
- * every assertion — no embedder is wired, so `level` is pure token coverage
- * and each expected value is arithmetic the test states outright.
+ * every assertion. No embedder is wired, so `level` is the lexical component
+ * alone; it is IDF-weighted against the live index, so each threshold below is
+ * placed relative to a level READ from that index rather than to a memorised
+ * constant that only held while coverage was unweighted.
  */
 const relevanceLevel = (...args: Parameters<typeof relevanceComponents>) =>
   relevanceComponents(...args).level;
 
-describe('the relevance gates discriminate (no embedder — level is pure coverage)', () => {
+describe('the relevance gates discriminate (no embedder — level is the lexical component)', () => {
   const QUERY = 'kubernetes autoscaling threshold for the nimbus scheduler'; // 7 distinct tokens
   const WEAK = { title: 'The nimbus scheduler', content: 'the nimbus scheduler runs jobs' }; // 3/7
   const STRONG = {
@@ -727,21 +739,43 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
       ...over,
     });
 
+  /** The level the search itself would compute: same terms and weights, read from the live index. */
+  const liveLevel = (row: { title: string; content: string }, query = QUERY): number => {
+    const frequencies = repos.termStatistics.adminQueryTermFrequencies(query);
+    return relevanceLevel(
+      new Set(frequencies.keys()),
+      row,
+      undefined,
+      termWeightsFor(repos.termStatistics.adminDocumentCount(), frequencies),
+    );
+  };
+
   it('pins the two levels the thresholds below are placed around', () => {
     const q = tokenSet(QUERY);
-    expect(relevanceLevel(q, WEAK, undefined)).toBeCloseTo(3 / 7, 10);
-    expect(relevanceLevel(q, STRONG, undefined)).toBe(1);
+    // Degenerate case: with every term equally weighted the level is the plain
+    // token fraction, which is what the thresholds below used to be placed around.
+    expect(relevanceLevel(q, WEAK, undefined, EQUAL_WEIGHTS)).toBeCloseTo(3 / 7, 10);
+    expect(relevanceLevel(q, STRONG, undefined, EQUAL_WEIGHTS)).toBe(1);
+
+    // Against the live (here empty) index every term is `df = 0`, so the two
+    // agree — and the tests below still read the live value rather than these.
+    mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    expect(liveLevel(STRONG)).toBe(1);
+    expect(liveLevel(WEAK)).toBeLessThan(1);
   });
 
   it('abstains on a weak leader and returns it at a floor below that same level', async () => {
     mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
+    const weakLevel = liveLevel(WEAK);
+    expect(weakLevel).toBeGreaterThan(0.05);
+    expect(weakLevel).toBeLessThan(0.95);
 
-    const above = await search({ abstentionFloor: 0.6 }); // 3/7 = 0.4286 < 0.6
+    const above = await search({ abstentionFloor: weakLevel + 0.05 });
     expect(above.abstained).toBe(true);
     expect(above.ids).toEqual([]);
 
     // Same corpus, same query, same non-empty candidate set — only the floor moved.
-    const below = await search({ abstentionFloor: 0.4 });
+    const below = await search({ abstentionFloor: weakLevel - 0.05 });
     expect(below.abstained).toBe(false);
     expect(below.ids).toHaveLength(1);
   });
@@ -750,32 +784,27 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
     mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
     const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
 
-    const result = await search({ abstentionFloor: 0.6 });
+    // Above the weak row's level and at/below the strong row's 1.0.
+    const result = await search({ abstentionFloor: liveLevel(WEAK) + 0.05 });
     expect(result.abstained).toBe(false);
     expect(result.ids).toContain(strong.id);
   });
 
   it('passes a leader whose level exactly equals the floor', async () => {
-    // 2 of the 4 distinct query tokens = 0.5 exactly, so this pins the
-    // comparison as `level < floor` and not `<=`.
+    // Pins the comparison as `level < floor` and not `<=`, at whatever level
+    // the live index gives this row.
     const query = 'alpha beta gamma delta';
-    mem.save(
-      { type: 'project', title: 'Alpha notes', content: 'alpha and beta only' },
-      projectScope(projectId),
-    );
-    expect(
-      relevanceLevel(
-        tokenSet(query),
-        { title: 'Alpha notes', content: 'alpha and beta only' },
-        undefined,
-      ),
-    ).toBe(0.5);
+    const row = { title: 'Alpha notes', content: 'alpha and beta only' };
+    mem.save({ type: 'project', ...row }, projectScope(projectId));
+    const level = liveLevel(row, query);
+    expect(level).toBeGreaterThan(0);
+    expect(level).toBeLessThan(1);
 
-    const atFloor = await search({ query, abstentionFloor: 0.5 });
+    const atFloor = await search({ query, abstentionFloor: level });
     expect(atFloor.abstained).toBe(false);
     expect(atFloor.ids).toHaveLength(1);
 
-    const justAbove = await search({ query, abstentionFloor: 0.5000001 });
+    const justAbove = await search({ query, abstentionFloor: level * (1 + 1e-9) });
     expect(justAbove.abstained).toBe(true);
   });
 
@@ -793,8 +822,8 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
     }
 
     const q = tokenSet(QUERY);
-    expect(relevanceLevel(q, weakText, undefined)).toBeCloseTo(1 / 7, 10);
-    expect(relevanceLevel(q, STRONG, undefined)).toBe(1);
+    expect(relevanceLevel(q, weakText, undefined, EQUAL_WEIGHTS)).toBeCloseTo(1 / 7, 10);
+    expect(relevanceLevel(q, STRONG, undefined, EQUAL_WEIGHTS)).toBe(1);
 
     const embedQuery = (t: string) => fake.embed(t);
     // `relativeLevelRatio: null` is explicit: this test isolates the FLOOR, and
@@ -817,13 +846,19 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
       );
     }
 
-    // leaderLevel = 1.0, cut = 0.5; the three 3/7 = 0.4286 rows fall below it.
-    const result = await search({ relativeLevelRatio: 0.5 });
+    // leaderLevel is the strong row's 1.0, so the cut IS the ratio. Both ratios
+    // are placed around the weak rows' live level rather than around a constant.
+    const weak = liveLevel({ title: 'Weak 0', content: WEAK.content });
+    expect(liveLevel(STRONG)).toBe(1);
+    expect(weak).toBeGreaterThan(0.05);
+    expect(weak).toBeLessThan(0.95);
+
+    const result = await search({ relativeLevelRatio: weak + 0.05 });
     expect(result.abstained).toBe(false);
     expect(result.ids).toEqual([strong.id]);
 
     // The same pool is returned whole at a ratio under the weak rows' level.
-    const loose = await search({ relativeLevelRatio: 0.4 });
+    const loose = await search({ relativeLevelRatio: weak - 0.05 });
     expect(loose.ids).toHaveLength(4);
   });
 
@@ -855,17 +890,19 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
       );
     }
 
-    const page1 = await search({ relativeLevelRatio: 0.5, limit: 2, offset: 0 });
+    const cut = liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05;
+    const page1 = await search({ relativeLevelRatio: cut, limit: 2, offset: 0 });
     expect(page1.ids).toHaveLength(2); // full
     expect(new Set(page1.ids)).toEqual(new Set(survivors));
 
-    const page2 = await search({ relativeLevelRatio: 0.5, limit: 2, offset: 2 });
+    const page2 = await search({ relativeLevelRatio: cut, limit: 2, offset: 2 });
     expect(page2.ids).toEqual([]); // short/empty because only two rows were relevant
     expect(page2.abstained).toBe(false);
 
     // Without the filter the same page 2 is populated, so the emptiness is the
-    // filter's doing and not corpus exhaustion.
-    const page2Ungated = await search({ limit: 2, offset: 2 });
+    // filter's doing and not corpus exhaustion. `null` explicitly: inheriting
+    // the shipped ratio would leave the filter on and make this no control.
+    const page2Ungated = await search({ relativeLevelRatio: null, limit: 2, offset: 2 });
     expect(page2Ungated.ids).toHaveLength(2);
   });
 
@@ -923,7 +960,7 @@ describe('the relevance gates discriminate (no embedder — level is pure covera
 
   it('reaches the same gate decision after 500 unrelated rows, where the replaced quantity has no range at all', async () => {
     mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
-    const level = () => relevanceLevel(tokenSet(QUERY), WEAK, undefined);
+    const level = () => relevanceLevel(tokenSet(QUERY), WEAK, undefined, EQUAL_WEIGHTS);
     /** The deleted `normalizeLexicalScore`, recomputed here to show what it could not express. */
     const normalizedLexicalLeader = () => {
       const rank = repos.memory.searchBm25Ids({
@@ -998,17 +1035,25 @@ describe('the disabled path does no gate work', () => {
   /** Records every `repos.memory` method name `hybridSearch` reaches for. */
   function countingRepos(): { repos: Repositories; calls: string[] } {
     const calls: string[] = [];
-    const memoryProxy = new Proxy(repos.memory, {
-      get(target, prop, receiver) {
-        const value = Reflect.get(target, prop, receiver) as unknown;
-        if (typeof value !== 'function') return value;
-        return (...args: unknown[]) => {
-          calls.push(String(prop));
-          return (value as (...a: unknown[]) => unknown).apply(target, args);
-        };
+    const counting = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        get(t, prop, receiver) {
+          const value = Reflect.get(t, prop, receiver) as unknown;
+          if (typeof value !== 'function') return value;
+          return (...args: unknown[]) => {
+            calls.push(String(prop));
+            return (value as (...a: unknown[]) => unknown).apply(t, args);
+          };
+        },
+      });
+    return {
+      repos: {
+        ...repos,
+        memory: counting(repos.memory),
+        termStatistics: counting(repos.termStatistics),
       },
-    });
-    return { repos: { ...repos, memory: memoryProxy }, calls };
+      calls,
+    };
   }
 
   it('issues exactly the pre-change reads and never the gate window text read', async () => {
@@ -1039,9 +1084,33 @@ describe('the disabled path does no gate work', () => {
       relativeLevelRatio: null,
     });
     // One lexical read plus the boost's two metadata reads. An exact list, not a
-    // `not.toContain`, so a second new read added later fails here too.
+    // `not.toContain`, so a second new read added later fails here too. The
+    // proxy covers `termStatistics` as well as `memory`, so the level's term
+    // lookups would show up here if the disabled path reached them.
     expect(calls).toEqual(['searchBm25Ids', 'rankingMetadataByIds', 'confirmationCountsByIds']);
-    expect(calls).not.toContain('textByIds');
+    for (const read of ['textByIds', 'adminDocumentCount', 'adminQueryTermFrequencies'])
+      expect(calls).not.toContain(read);
+  });
+
+  it('issues both of them the moment either gate is enabled — so the list above is a decision', async () => {
+    mem.save(
+      { type: 'project', title: 'Rollout 0', content: 'rollout note on timezone rotation' },
+      projectScope(projectId),
+    );
+    const { repos: counting, calls } = countingRepos();
+    await hybridSearch({
+      repos: counting,
+      query: 'rollout timezone rotation',
+      scope: 'project',
+      projectId,
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      abstentionFloor: null,
+      relativeLevelRatio: 0.4,
+    });
+    for (const read of ['textByIds', 'adminDocumentCount', 'adminQueryTermFrequencies'])
+      expect(calls).toContain(read);
   });
 
   it('returns the ids the pre-gate pipeline produces, reconstructed from its surviving parts', async () => {
