@@ -29,13 +29,14 @@ The `memory.search` description SHALL state what an abstaining response means an
 - **GIVEN** a scope in which the relevance filter removes candidates from the fused pool for a given query
 - **WHEN** an MCP client calls `memory.search` with a `limit` larger than the number of surviving rows
 - **THEN** the response SHALL carry `gateShortened: true` alongside `abstained: false`
-- **AND** the same client calling with an `offset` past the end of a non-empty pool SHALL receive `abstained: false` with no `gateShortened` field
+- **AND** the same client calling with an `offset` past the end of the surviving rows SHALL also receive `gateShortened: true` alongside `abstained: false` — the gate is why the page ran out, and a non-empty pool is not abstention
 
 #### Scenario: The shortening flag is absent rather than false
 
 - **WHEN** `memory.search` returns a page the relevance filter did not shorten
 - **THEN** the response object SHALL NOT contain a `gateShortened` key
 - **AND** the response SHALL still validate against the tool's declared `outputSchema`
+- **AND** this SHALL hold for an `offset` past the end of a non-empty pool the filter removed nothing from — an empty page whose cause is the offset, not the gate, is the control that keeps the flag's two conjuncts honest
 
 #### Scenario: The description steers against confabulation
 

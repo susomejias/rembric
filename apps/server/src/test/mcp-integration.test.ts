@@ -411,7 +411,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('marks a gate-shortened page over the MCP boundary, and a deep offset as not shortened', async () => {
+  it('marks a gate-shortened page over the MCP boundary, including past the survivors, and leaves an unfiltered deep offset unmarked', async () => {
     const projects = new ProjectsService(createRepositories(server.dbHandle.db));
     const shortened =
       projects.findBySlug('integration-gate-short') ??
@@ -439,11 +439,27 @@ describe('MCP protocol conformance', () => {
         arguments: { query: 'quetzal ledger obsidian marmot tessellate', limit: 8 },
       })) as ToolResult,
     ) as { count: number; abstained: boolean; gateShortened?: boolean };
-    await shortClient.close();
     expect(gated.count).toBeGreaterThan(0);
     expect(gated.count).toBeLessThan(8);
     expect(gated.abstained).toBe(false);
     expect(gated.gateShortened).toBe(true);
+
+    // Same gated pool, paged past the survivors: still the gate's doing, so the
+    // flag holds. Empty here is not abstention — the pool was never empty.
+    const gatedDeep = readJson(
+      (await shortClient.callTool({
+        name: 'memory.search',
+        arguments: {
+          query: 'quetzal ledger obsidian marmot tessellate',
+          limit: 2,
+          offset: 5,
+        },
+      })) as ToolResult,
+    ) as Record<string, unknown>;
+    await shortClient.close();
+    expect(gatedDeep.count).toBe(0);
+    expect(gatedDeep.abstained).toBe(false);
+    expect(gatedDeep.gateShortened).toBe(true);
 
     // Control: three equally-relevant rows, so the filter removes nothing. The
     // page past the end is empty because the caller paged past the pool, and
