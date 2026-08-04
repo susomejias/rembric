@@ -37,7 +37,7 @@ The MCP server emits a short `instructions` block at handshake teaching the proa
 
 ## Reading prior context
 
-`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, pending judgments, and memories needing review for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
+`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, memories relevant to the work at hand (`relevantMemories[]`, ranked against `focus` or a server-derived seed), pending judgments, and memories needing review for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
 
 Two of its lists ask the agent to act, and they are deliberately different shapes:
 
