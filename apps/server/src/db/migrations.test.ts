@@ -187,8 +187,13 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
         { memory_id: string; partition_key: string; status: string; type: string }
       >('SELECT memory_id, partition_key, status, type FROM memory_vec ORDER BY memory_id')
       .all();
+    // `g1` was global, so 0031 has since repointed its vector into the default
+    // project — the blob identity below is what 0014 is on the hook for.
+    const defaultId = raw
+      .prepare<[], { id: string }>('SELECT id FROM projects WHERE is_default = 1')
+      .get()!.id;
     expect(rows).toEqual([
-      { memory_id: 'g1', partition_key: '__global__', status: 'active', type: 'user' },
+      { memory_id: 'g1', partition_key: defaultId, status: 'active', type: 'user' },
       { memory_id: 'p1', partition_key: 'proj1', status: 'superseded', type: 'project' },
     ]);
 
@@ -335,8 +340,15 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
         { id: string; scope: string }
       >('SELECT id, scope FROM consolidation_runs ORDER BY id')
       .all();
+    // `run-a` has no `finished_at`, so 0031 repointed it onto the default
+    // project; a finished run would have kept 'global'.
     expect(runs).toEqual([
-      { id: 'run-a', scope: 'global' },
+      {
+        id: 'run-a',
+        scope: raw
+          .prepare<[], { id: string }>('SELECT id FROM projects WHERE is_default = 1')
+          .get()!.id,
+      },
       { id: 'run-legacy', scope: 'unknown' },
     ]);
 
@@ -447,8 +459,8 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
     expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
-    // No row vanished from any table.
-    expect(countAll()).toEqual(before);
+    // No row vanished from any table; 0031 adds the default project.
+    expect(countAll()).toEqual({ ...before, projects: before['projects']! + 1 });
 
     // Unrelated tables are byte-identical (0015 must not touch them).
     expect(
@@ -588,6 +600,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0028_drop_unusable_indexes.sql',
       '0029_tokens_project_binding.sql',
       '0030_memory_fts_vocab.sql',
+      '0031_default_project.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1061,7 +1074,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
     expect(() => df('ubiquitousterm')).toThrow(); // the table does not exist yet
 
     const result = migrate(raw, { migrationsDir: fullMigrationsDir });
-    expect(result.applied).toEqual(['0030_memory_fts_vocab.sql']);
+    expect(result.applied).toEqual(['0030_memory_fts_vocab.sql', '0031_default_project.sql']);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);
     expect(df('rareterm7')).toBe(1);

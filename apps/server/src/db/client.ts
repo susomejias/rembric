@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 
-import { migrate } from './migrate.js';
+import { migrate, type MigrateResult } from './migrate.js';
 import { createQueryTokenizerTables } from './query-tokenizer.js';
 import * as schema from './schema/index.js';
 
@@ -31,6 +31,8 @@ export interface CreateDbOptions {
    * subcommand against a running server's data dir.
    */
   readonly?: boolean;
+  /** Migration progress sink; defaults to stderr. See `migrate.ts`. */
+  onMigrationProgress?: (line: string) => void;
 }
 
 export interface DbHandle {
@@ -38,6 +40,8 @@ export interface DbHandle {
   raw: Database.Database;
   /** fts5 arguments the query-tokenising table inherited from `memory_fts`. */
   queryTokenizer: string[];
+  /** What the migration runner did on this open — empty on a read-only handle. */
+  migrations: MigrateResult;
   close: () => void;
 }
 
@@ -62,6 +66,8 @@ export function createDb(opts: CreateDbOptions): DbHandle {
   sqlite.pragma('mmap_size = 268435456'); // 256 MB
   sqlite.pragma('temp_store = MEMORY');
 
+  let migrations: MigrateResult = { applied: [], skipped: [], reports: [] };
+
   if (!opts.readonly) {
     // Write pragmas: journal_mode=WAL allows concurrent readers while a writer
     // is active; synchronous=NORMAL is the recommended pairing for WAL.
@@ -69,8 +75,9 @@ export function createDb(opts: CreateDbOptions): DbHandle {
     sqlite.pragma('synchronous = NORMAL');
     sqlite.pragma('foreign_keys = ON');
 
-    migrate(sqlite, {
+    migrations = migrate(sqlite, {
       migrationsDir: opts.migrationsDir ?? defaultMigrationsDir(),
+      onProgress: opts.onMigrationProgress,
     });
 
     // ANALYZE, not `PRAGMA optimize`: optimize re-analyzes only on a ~10x row-count
@@ -91,6 +98,7 @@ export function createDb(opts: CreateDbOptions): DbHandle {
     db,
     raw: sqlite,
     queryTokenizer,
+    migrations,
     close: () => {
       // Update statistics for tables touched this run before closing.
       if (!opts.readonly) sqlite.pragma('optimize');

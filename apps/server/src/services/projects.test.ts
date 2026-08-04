@@ -61,7 +61,8 @@ describe('ProjectsService.list / rename / archive', () => {
     projects.archive(archived.id);
 
     const active = projects.list();
-    expect(active.map((p) => p.slug).sort()).toEqual(['a', 'b']);
+    // `default` is the system default project: an ordinary listed project.
+    expect(active.map((p) => p.slug).sort()).toEqual(['a', 'b', 'default']);
   });
 
   it('lists archived when requested', () => {

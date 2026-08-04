@@ -4,7 +4,13 @@ import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../conf
 import { ConsolidationRunner } from '../consolidation/index.js';
 import { undoOp, undoRun } from '../consolidation/operations.js';
 import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
-import { createDb, createRepositories, type DbHandle, type Repositories } from '../db/index.js';
+import {
+  createDb,
+  createRepositories,
+  type DbHandle,
+  type MigrateResult,
+  type Repositories,
+} from '../db/index.js';
 import {
   EMBEDDING_MODEL_ID,
   embeddingQueryInput,
@@ -383,7 +389,7 @@ export async function bootstrap(
     throw err;
   }
 
-  printBootstrapBanner(config, queryCounts(dbDiagnostics));
+  printBootstrapBanner(config, queryCounts(dbDiagnostics), dbHandle.migrations);
 
   const markerTimer = setInterval(() => {
     try {
@@ -484,12 +490,18 @@ function printStartupBanner(config: Config): void {
   console.error(lines.join('\n'));
 }
 
-function printBootstrapBanner(config: Config, counts: DataCounts): void {
+function printBootstrapBanner(config: Config, counts: DataCounts, migrations: MigrateResult): void {
   console.error(`[bootstrap] rembric v${REMBRIC_VERSION} ready`);
   console.error(`[bootstrap] data_dir=${config.dataDir}`);
   console.error(
     `[bootstrap] counts: memory=${counts.memory} projects=${counts.projects} sessions=${counts.sessions} tokens=${counts.tokens} prompts=${counts.prompts}`,
   );
+  if (migrations.applied.length > 0) {
+    console.error(`[bootstrap] migrations applied: ${migrations.applied.join(' ')}`);
+  }
+  // An upgrade that moved rows between projects owes the operator the
+  // destination and the count; a boot that moved nothing says nothing.
+  for (const report of migrations.reports) console.error(`[bootstrap] ${report}`);
   if (config.oauth.enabled) {
     console.error(`[bootstrap] oauth: enabled, issuer=${config.oauth.issuer}`);
   }

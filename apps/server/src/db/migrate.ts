@@ -36,13 +36,33 @@ const MIGRATIONS_TABLE = `
 
 const STATEMENT_BREAKPOINT = '--> statement-breakpoint';
 
+/**
+ * A migration announces its own slow steps: `-- progress: <text>` on a statement
+ * emits `<text>` before that statement runs, and a statement headed `-- report:`
+ * is a SELECT of one text value emitted instead of being executed. Both fire
+ * inside the open write transaction, which is the only place they are useful —
+ * a data-moving migration is the whole of the first boot after an upgrade (203 s
+ * at 200 000 repointed rows, measured), and a summary printed after it is
+ * precisely what is missing when an operator or an orchestrator kills the wait.
+ */
+const PROGRESS_MARKER = /^--\s*progress:\s*(\S.*)$/;
+const REPORT_MARKER = /^--\s*report:\s*$/;
+
 export interface MigrateOptions {
   migrationsDir: string;
+  /**
+   * Sink for the lines above. Defaults to stderr, which reaches a pipe
+   * synchronously on POSIX even while a migration blocks the event loop
+   * (measured); tests silence it.
+   */
+  onProgress?: (line: string) => void;
 }
 
 export interface MigrateResult {
   applied: string[];
   skipped: string[];
+  /** One line per `-- report:` statement in an applied migration. */
+  reports: string[];
 }
 
 interface AppliedRow {
@@ -50,6 +70,7 @@ interface AppliedRow {
 }
 
 export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
+  const emit = opts.onProgress ?? ((line: string) => console.error(`[migrate] ${line}`));
   db.exec(MIGRATIONS_TABLE);
 
   const files = readdirSync(opts.migrationsDir)
@@ -65,6 +86,7 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
 
   const applied: string[] = [];
   const skipped: string[] = [];
+  const reports: string[] = [];
   const recordStmt = db.prepare('INSERT INTO _migrations (filename, applied_at) VALUES (?, ?)');
 
   for (const file of files) {
@@ -77,7 +99,13 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
     const statements = sql
       .split(STATEMENT_BREAKPOINT)
       .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !isCommentOnly(s));
+      .filter((s) => s.length > 0 && !isCommentOnly(s))
+      .map(readMarkers);
+
+    // Only a migration that announces something announces itself: without this
+    // every boot would narrate all thirty-odd files to say nothing.
+    const announces = statements.some((s) => s.progress !== null || s.report);
+    if (announces) emit(`applying ${file}`);
 
     // Snapshot FK enforcement, disable around the migration (see note above),
     // restore afterwards. Setting pragmas outside a transaction is what SQLite
@@ -87,9 +115,19 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
     if (fkWasOn) db.exec('PRAGMA foreign_keys = OFF');
 
     try {
+      const fileReports: string[] = [];
       const apply = db.transaction(() => {
         for (const stmt of statements) {
-          db.exec(stmt);
+          if (stmt.report) {
+            const line = db.prepare(stmt.sql).pluck().get();
+            if (typeof line === 'string') {
+              fileReports.push(line);
+              emit(line);
+            }
+            continue;
+          }
+          if (stmt.progress !== null) emit(stmt.progress);
+          db.exec(stmt.sql);
         }
         // Pre-commit FK integrity gate. `foreign_key_check` returns one
         // row per dangling reference; non-empty means the migration left
@@ -110,12 +148,31 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
 
       apply.immediate();
       applied.push(file);
+      reports.push(...fileReports);
     } finally {
       if (fkWasOn) db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
-  return { applied, skipped };
+  return { applied, skipped, reports };
+}
+
+interface Statement {
+  sql: string;
+  progress: string | null;
+  report: boolean;
+}
+
+function readMarkers(stmt: string): Statement {
+  let progress: string | null = null;
+  let report = false;
+  for (const line of stmt.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('--')) break;
+    progress = PROGRESS_MARKER.exec(trimmed)?.[1] ?? progress;
+    report = report || REPORT_MARKER.test(trimmed);
+  }
+  return { sql: stmt, progress, report };
 }
 
 function isCommentOnly(stmt: string): boolean {

@@ -393,6 +393,8 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+      // The system default project is listed on the same terms as any other.
+      { slug: 'default', displayName: 'Default', archived: false, activeMemoryCount: 0 },
     ]);
   });
 
@@ -404,6 +406,8 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+      // The system default project is listed on the same terms as any other.
+      { slug: 'default', displayName: 'Default', archived: false, activeMemoryCount: 0 },
     ]);
   });
 

@@ -189,6 +189,10 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX projects_archived_idx ON projects (archived_at)',
   },
   {
+    name: 'projects_is_default_uidx',
+    sql: 'CREATE UNIQUE INDEX projects_is_default_uidx ON projects(is_default) WHERE is_default = 1',
+  },
+  {
     name: 'projects_slug_unique',
     sql: 'CREATE UNIQUE INDEX projects_slug_unique ON projects (slug)',
   },
@@ -298,6 +302,7 @@ const EXPECTED_COLUMNS: Record<
     { name: 'display_name', type: 'TEXT', notnull: 0, pk: 0 },
     { name: 'archived_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'is_default', type: 'INTEGER', notnull: 1, pk: 0 },
   ],
   tokens: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },

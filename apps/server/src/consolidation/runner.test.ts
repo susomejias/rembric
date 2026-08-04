@@ -64,14 +64,15 @@ describe('ConsolidationRunner sweep', () => {
   it('records one consolidation_runs row per scope with null llm columns', () => {
     projects.create({ slug: 'proj-a' });
     const summary = runner.runAll({ force: true });
-    expect(summary.runs.length).toBe(2); // global + proj-a
+    // global + proj-a + the default project every installation carries
+    expect(summary.runs.length).toBe(3);
 
     const rows = db.handle.db
       .select()
       .from(consolidationRuns)
       .orderBy(desc(consolidationRuns.startedAt))
       .all();
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(3);
     for (const row of rows) {
       expect(row.scope).not.toBeNull();
       expect(row.finishedAt).not.toBeNull();

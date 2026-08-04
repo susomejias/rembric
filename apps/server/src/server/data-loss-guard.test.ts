@@ -42,7 +42,8 @@ describe('data-loss guard', () => {
     expect(marker!.version).toBe(1);
     expect(marker!.counts).toEqual({
       memory: 0,
-      projects: 0,
+      // The default project, created by migration on every installation.
+      projects: 1,
       sessions: 0,
       tokens: 0,
       prompts: 0,

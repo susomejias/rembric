@@ -77,6 +77,18 @@ const FORBIDDEN: ForbiddenRule[] = [
     description: 'raw `UPDATE memory SET title = …` is forbidden — title is immutable',
   },
   {
+    pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*projectId\s*:/i,
+    description:
+      '`db.update(memory).set({ projectId: … })` is forbidden — only a schema migration may move a memory between projects',
+  },
+  {
+    // Migrations are exempt by construction: `listSourceFiles` skips the
+    // directory and the runner reads `.sql`, which is not scanned at all.
+    pattern: /UPDATE\s+memory\b[^;]*\bSET\s+project_id\s*=/i,
+    description:
+      'raw `UPDATE memory SET project_id = …` is forbidden outside db/migrations/ — the append-only carve-out is a migration-only one',
+  },
+  {
     pattern: /delete\s*\(\s*agentSessions\s*\)/i,
     description: 'Drizzle `db.delete(agentSessions)` is forbidden — agent sessions are append-only',
   },
