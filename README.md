@@ -266,7 +266,7 @@ Applied to every bearer-authenticated surface (`/mcp`, `/api`, `/healthz`, `/adm
 | `REMBRIC_MCP_ALLOWED_HOSTS`   | _unset_   | Comma-separated `Host` allow-list (incl. port) for opt-in DNS-rebinding protection on the MCP transport. When set, requests with an unlisted `Host` are rejected.               |
 | `REMBRIC_MCP_ALLOWED_ORIGINS` | _unset_   | Comma-separated `Origin` allow-list. When set, a request whose `Origin` is present and unlisted is rejected. Setting either allow-list enables the transport's rebinding check. |
 
-**OAuth token confinement.** An OAuth grant is bound to the project it was consented for (the connector's `/mcp/<slug>` path, carried as the RFC 8707 resource indicator): the minted token authorizes only that project (`project:<id>` / `read:project:<id>`), or global scope for a path-less `/mcp` grant. Deploying this version **revokes all previously-issued OAuth tokens**, so existing OAuth clients re-authorize once (static tokens are unaffected). The dashboard session cookie is marked `Secure` when `REMBRIC_PUBLIC_URL` is `https`.
+**OAuth token confinement.** An OAuth grant is bound to the project it was consented for (the connector's `/mcp/<slug>` path, carried as the RFC 8707 resource indicator): the minted token authorizes only that project (`project:<id>` / `read:project:<id>`), and stays unbound (`*` / `read:*`) for a path-less `/mcp` grant, whose consent screen named no project. Deploying this version **revokes all previously-issued OAuth tokens**, so existing OAuth clients re-authorize once (static tokens are unaffected). The dashboard session cookie is marked `Secure` when `REMBRIC_PUBLIC_URL` is `https`.
 
 ### Sessions
 
@@ -409,7 +409,7 @@ Single Node process, single SQLite file, packaged as a multi-arch Docker image (
 Four load-bearing invariants:
 
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
-- **Project scoping by construction**: every memory is `global` or attached to one `project_id`. Consolidation and relations never cross scope.
+- **Project scoping by construction**: every memory is attached to exactly one `project_id`. Consolidation and relations never cross scope.
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 

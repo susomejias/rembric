@@ -34,10 +34,13 @@ describe('MCP initialize instructions', () => {
     expect(text).not.toMatch(/global|user-wide/i);
   });
 
-  it('points unscoped connections at project.use / roots auto-detection', () => {
+  it('tells an unscoped connection a project is always active, names the default project, and names no retired scope', () => {
     const text = buildInstructions({ requestedSlug: null });
+    expect(text).toContain('always active');
+    expect(text).toContain('default project');
     expect(text).toContain('project.use');
     expect(text).toContain('roots');
+    expect(text).not.toMatch(/global|user-wide/i);
   });
 
   it('does not reference the removed X-Rembric-Project header', () => {

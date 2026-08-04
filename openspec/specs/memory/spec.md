@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the core memory model: append-only semantics, scope isolation (global vs project), supersedes chains, confirmations, retrieval with history, and in-process always-on embeddings.
+Defines the core memory model: append-only semantics, per-project scope isolation, supersedes chains, confirmations, retrieval with history, and in-process always-on embeddings.
 
 ## Requirements
 

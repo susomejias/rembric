@@ -145,3 +145,37 @@ The dashboard and CLI SHALL allow operators to rename a project (changing its di
 
 - **WHEN** the operator attempts to archive the project holding `is_default = 1`
 - **THEN** the attempt SHALL be refused and the row SHALL remain unarchived
+
+### Requirement: Project auto-detection via MCP `roots` MUST be read-only
+
+When a client advertises `capabilities.roots` at `initialize` and the URL path is `/mcp` (no slug), the server SHALL call `roots/list` once after `initialized`, derive a candidate slug from the basename of the first root (lowercase ASCII, non-`[a-z0-9-]` characters replaced with `-`, trimmed of leading/trailing `-`), and activate an _existing_ project with that slug. Auto-detection SHALL NOT create new projects.
+
+#### Scenario: Roots resolves to an existing slug
+
+- **GIVEN** the client returns `[{uri: 'file:///home/me/rembric'}]` from `roots/list`
+- **AND** a project with `slug = 'rembric'` exists
+- **WHEN** the auto-detection step runs
+- **THEN** the session SHALL be scoped to that project with `source = 'roots'`
+
+#### Scenario: Roots resolves to a slug that does not exist
+
+- **GIVEN** the client returns `[{uri: 'file:///tmp/quick-test'}]` from `roots/list`
+- **AND** no project with `slug = 'quick-test'` exists
+- **WHEN** the auto-detection step runs
+- **THEN** the session SHALL remain in the default project and the derived `'quick-test'` SHALL appear in `project.current.suggestedSlugs`
+
+#### Scenario: Client does not support roots
+
+- **WHEN** the `initialize` request advertises no `roots` capability
+- **THEN** the server SHALL NOT issue `roots/list` and the session SHALL remain in the default project until an explicit `project.use` call
+
+#### Scenario: `roots/list` times out or errors
+
+- **WHEN** the server's `roots/list` request does not return within 2 seconds, or returns a JSON-RPC error
+- **THEN** the auto-detection SHALL silently fall through to the default project; the connection SHALL NOT be failed
+
+#### Scenario: Roots changes mid-session via `notifications/roots/list_changed`
+
+- **GIVEN** a session has been auto-scoped to project `'rembric'` via the initial `roots/list`
+- **WHEN** the client emits `notifications/roots/list_changed` with new roots resolving to slug `'api'`
+- **THEN** the server SHALL update `project.current.suggestedSlugs` to `['api']` but SHALL NOT switch the active project; the agent must explicitly call `project.use({slug: 'api', confirmSwitch: true})` to switch (which itself requires the active session to be ended first per the sessions capability)
