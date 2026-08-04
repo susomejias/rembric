@@ -1,0 +1,140 @@
+## 0. Settle the open questions and the ordering before writing code
+
+- [ ] 0.1 **Ordering gate (design D1).** Confirm `retire-the-global-scope` has landed on this branch's base. If it has not, **stop**: hazard 2 (both changes rewrite `isAuthorized` in different dimensions) and hazard 3 (the `Scope`/`TokenScope` 1:1 breaks here while the predecessor changes `Scope`'s shape) make the merge order load-bearing. Record the base commit in the commit body.
+- [ ] 0.2 **Assign the migration number last, not first (design D1).** `db/migrate.ts:55-57` is `readdirSync().filter(…).sort()` keyed on filename with **no duplicate-prefix detection** — measured, two `0030_*` files both applied, ordered by the alphabetical suffix. Take the next unused prefix after the predecessor's migration exists on the base. Verify by listing `apps/server/src/db/migrations/` and confirming no other file shares the chosen prefix.
+- [ ] 0.3 **Operator decision — OQ1, the shape.** `design.md` D3 records **option 1** (new `projects` / `read:projects` literal; `auth/spec.md:41`'s enumeration is amended). Default if unanswered: **option 1 as specified.** If the owner picks option 1b (keep `scope = project:<primary-id>`, extras in the join table), delete the `auth` delta's `MODIFIED` requirement, keep every `ADDED` one, and add a scenario stating that the `project` column under-reports reach — do not leave the column silently misreporting.
+- [ ] 0.4 **Operator decision — OQ2, does `auth/spec.md:69` cover "which projects".** Default if unanswered: **yes** — the membership set is authorization state and is re-read per request (design D7). If the owner reads `:69` as an exhaustive list and permits caching, amend `auth/spec.md:69` in the same change to say so explicitly, and delete the `auth` delta requirement "A token's project membership set MUST be authorization state…" rather than leaving it unimplemented.
+- [ ] 0.5 **Operator decision — OQ3, one verb or per-project verbs.** Default if unanswered: **one verb** (design D5). If per-project verbs are wanted now, the `dashboard` delta's 2×N table is replaced rather than extended and needs its own scenarios for the split refusal (`project.use` gates only on `'read'` at `project-tools.ts:128`, so a read-only member would open a connection and be refused later at `memory.save`).
+- [ ] 0.6 **Operator decisions — OQ4 (autocreate) and OQ5 (multi-project OAuth).** Defaults: autocreate **refused** for a set token, multi-project OAuth an explicit **non-goal**. Both are already what the code does; the deltas record them so they are not rediscovered.
+- [ ] 0.7 Pick the state label for a memberless set token. It MUST be distinct in the rendered HTML from `active`, `revoked` and the existing unresolvable label (`inert`), per the `dashboard` delta, and MUST reuse an existing pill class so no design token is added. **Do not reuse `inert`** — that label carries `auth/spec.md:268`'s never-repair contract, and an empty set is repairable.
+- [ ] 0.8 Confirm OQ6 stays out: `dashboard/spec.md:710`'s project-scope dashboard session is vacuous today (login requires `*`, `dashboard-router.ts:156`) for reasons predating this change. It is **not** reconciled here. Record it as a follow-up so it is not silently lost.
+
+## 1. Commit the pre-change authorization baseline — before touching a line
+
+The whole change rests on "no existing token's behaviour moves". That is only provable against a baseline captured on the real boundaries **before** the change. Committed as a measurement fixture under `openspec/changes/grant-tokens-multiple-projects/measurements/`.
+
+Instruments, each named — do **not** mix them in one table:
+
+- the dashboard mint form (`POST /dashboard/tokens`) for minting, so the scope string is the one the real producer writes;
+- `POST /dashboard/login` for the admin gate;
+- the MCP SDK `StreamableHTTPClientTransport` against `/mcp` and `/mcp/<slug>` — **not** a direct handler call, which bypasses the zod schema and proves nothing about the tool;
+- `POST /api/<slug>/sessions` for the HTTP surface.
+
+- [ ] 1.1 Seed two projects, `alpha` and `home`, and mint one token of each existing shape. Record the exact scope string persisted for each.
+- [ ] 1.2 Capture the matrix. The expected pre-change values, to be reproduced not assumed:
+
+| token                        | `POST /dashboard/login` | `/mcp` (path-less) read / write | `/mcp/alpha` read / write | `/mcp/home` read / write | `POST /api/alpha/sessions` | `POST /api/home/sessions` |
+| ---------------------------- | ----------------------- | ------------------------------- | ------------------------- | ------------------------ | -------------------------- | ------------------------- |
+| `*`                          | 302 to the dashboard    | OK / OK                         | OK / OK                   | OK / OK                  | 200                        | 200                       |
+| `read:*`                     | 401                     | OK / forbidden                  | OK / forbidden            | OK / forbidden           | 403                        | 403                       |
+| `project:<id of alpha>`      | 401                     | forbidden / forbidden           | OK / OK                   | forbidden / forbidden    | 200                        | 403                       |
+| `read:project:<id of alpha>` | 401                     | forbidden / forbidden           | OK / forbidden            | forbidden / forbidden    | 403                        | 403                       |
+| invalid bearer               | 401                     | 401                             | 401                       | 401                      | 401                        | 401                       |
+
+- [ ] 1.3 Record **both** the HTTP status and the structured error `code` for every cell. A change that turns `forbidden` into `project_required` is a behaviour change even at the same status.
+- [ ] 1.4 Assert the non-vacuity of the baseline itself: count the cells that are a **success**, and record the count. A later "identical" diff over an all-refused matrix would prove nothing.
+- [ ] 1.5 Commit the matrix and the script that produced it, so the after-run is a re-run rather than a re-derivation.
+
+## 2. Failing tests first
+
+Every test in this group MUST be observed **failing** before any production line changes, and the three mandatory controls MUST be observed **green** at the same moment. A control that is red here means the harness is wrong, not the code.
+
+- [ ] 2.1 **Control (MUST be green before and after):** the admin `*` token succeeds on `/mcp/alpha` read and write, on `POST /api/alpha/sessions`, and on `POST /dashboard/login`.
+- [ ] 2.2 **Control (MUST be green before and after):** a token minted for `alpha` is **denied** on `/mcp/home` and `POST /api/home/sessions`. Without this denial control, an `isAuthorized` rewritten to return `true` unconditionally passes every other test in this file.
+- [ ] 2.3 **Control (MUST be green before and after):** an invalid bearer is 401 on every surface in 1.2.
+- [ ] 2.4 **Failing:** minting through the form with two projects selected persists `scope = 'projects'`, `project_id IS NULL`, and exactly two `token_projects` rows. Observe it fail — the form has a single `<select name="project">` today (`dashboard/tokens.ts:155`) and `TokenScope` has no set arm (`services/tokens.ts:52`).
+- [ ] 2.5 **Failing:** that token is authorized on `/mcp/alpha` and `/mcp/gamma` for read and write, and on `POST /api/alpha/sessions`.
+- [ ] 2.6 **New control specific to this change (b):** the same set token, naming `{alpha, gamma}`, is **denied** on `/mcp/beta`, on the path-less `/mcp`, and on `POST /api/beta/sessions`. Assert it in the same test as 2.5, not a separate one that could be skipped.
+- [ ] 2.7 **New control specific to this change (a) — the escalation control:** a set token naming **every** existing project is **denied** `POST /dashboard/login` and every `/admin/*` route, while the `*` control succeeds on both. Without this, reach has silently become admin and nothing else in the suite notices. (`auth` delta, "A token reaching every project MUST NOT be an admin token".)
+- [ ] 2.8 **Failing:** a `read:projects` token over `{alpha}` is authorized for a read-classified tool on `alpha` and refused a write-classified one, with nothing persisted.
+- [ ] 2.9 **Failing:** creating a set token then removing one member makes the next request against that member `forbidden`, while the remaining member still succeeds — asserted with the credential-lookup cache **warm** (the same plaintext already verified once), which is the case `auth/spec.md:69` exists to cover. (`auth` delta, both membership-freshness scenarios.)
+- [ ] 2.10 **Failing:** a `projects` token with **zero** members is refused on every surface in 1.2, and the `*` control succeeds on the same. (`auth` delta, "The set scope string alone denies every target".)
+- [ ] 2.11 **Failing:** `project.use({ slug: 'brand-new', autocreate: true })` from a set token is refused with `forbidden` and creates no `projects` row, while the `*` control creates it.
+- [ ] 2.12 **Failing (dashboard):** the tokens list renders every member slug of a set token in slug-ascending order, no ULID, and state `active`; a memberless set token renders the label from 0.7, distinct from `inert`; a revoked memberless set token renders `revoked`.
+- [ ] 2.13 **Failing (dashboard):** the one-time-view panel after minting over `{alpha, gamma}` contains `projects` and both slugs — not a count.
+- [ ] 2.14 **Failing (dashboard):** a single-project selection still mints `project:<id>` with `project_id` set and **zero** `token_projects` rows. This is the "a single selection does not become a one-member set" scenario and it is what keeps the FK binding on the common case.
+- [ ] 2.15 **Failing (dashboard):** a multi-project submission containing one regex-violating value is refused with a flash error, and **both** the `tokens` and `token_projects` row counts are unchanged. Assert the counts, not just the absence of the new row.
+- [ ] 2.16 Record in the commit body which of 2.4-2.15 failed and with what, and confirm 2.1, 2.2, 2.3 were green before any production change.
+
+## 3. Schema and migration
+
+- [ ] 3.1 Add `apps/server/src/db/schema/token-projects.ts`: `token_projects` with `token_id` / `project_id`, both real FKs, `PRIMARY KEY (token_id, project_id)`, `WITHOUT ROWID`. No secondary index — every read is keyed by the leading primary-key column.
+- [ ] 3.2 Add the migration at the prefix from 0.2: **exactly one `CREATE TABLE`**. No `_new` table, no `INSERT … SELECT`, no `DROP TABLE`, no index or trigger recreation, no pragma. `tokens` is **not** rebuilt — `tokens_project_scope_check`'s `project_id IS NULL` disjunct (`db/schema/tokens.ts:40`) already admits `scope = 'projects'` with a NULL binding, measured.
+- [ ] 3.3 Run the suite and **observe `test/schema-drift.test.ts:377` go red first** (`expect(tables).toEqual([...EXPECTED_TABLES].sort())`). Its going red is the proof the migration created the table. Record the failure output in the commit body.
+- [ ] 3.4 Add `token_projects` to the pinned inventory so 3.3 goes green again, **in the same commit** as 3.2.
+- [ ] 3.5 Update `apps/server/src/db/schema/tokens.ts:6-19`'s scope-semantics docstring for the two new arms. One line per non-obvious fact; no banner, no restatement of the type.
+
+## 4. Repository — all new SQL lives under `db/`
+
+- [ ] 4.1 Add the membership reads/writes to the tokens repository under `apps/server/src/db/repositories/`. Per `data-access/spec.md:23` and `:37`: the authorization-path read is keyed by token id and is not scope-parameterised (it _produces_ reach rather than filtering by it); the dashboard's "which slugs does this token reach" read carries the `admin*` prefix and is callable only from `src/dashboard/`.
+- [ ] 4.2 Confirm `test/invariants.test.ts`'s data-access confinement grep passes — no SQL outside `db/`, no `admin*` call from outside `src/dashboard/`.
+- [ ] 4.3 Insert membership rows inside the same `db.transaction()` as the `tokens` insert, opened by the **service** (`data-access/spec.md:105`); the repository opens no transaction.
+
+## 5. Service layer — the union point
+
+- [ ] 5.1 Extend `TokenScope` (`services/tokens.ts:52`) with `'projects' | 'read:projects'`. Verify by compiling that `pinnedProjectId('projects')` returns `null` and `projectScopedGrant` is unreachable for the new arms.
+- [ ] 5.2 Extend `TokenGrant` / `CreateTokenInput` (`:59-63`) with a third arm carrying `projects: Project[]` and one `access: 'read' | 'write'` — **never `string[]`**. The existing comment at `:56-57` ("A bare project id would re-admit a slug, so the row itself is required") is the reason, and it carries to the set. Confirm with a throwaway (uncommitted) file that `projects: ['alpha']` is a compile error.
+- [ ] 5.3 Extend `composeGrant` (`:214-221`) to return the set literal plus the rows to insert. A one-element `projects` array MUST compose the **single-project** arm (`project:<id>` + `project_id`), per task 2.14 — the set arm starts at two.
+- [ ] 5.4 Rewrite `isAuthorized` (`:268-290`) as `legacy(scope, action, target) || membership(token, action, target)`. **Additive only**: no membership branch may turn a `true` into a `false`. The two new literals fall through to the existing `return false` by string alone — verify that explicitly rather than assuming it.
+- [ ] 5.5 Wire membership into the authorization path as a **fresh read per authenticated request** (design D7). Do **not** put it in `verifiedCache` (`:149-156`) — its permission to live forever rests on never substituting for the fresh check. Either a `LEFT JOIN` in `findById` or a second indexed read; both measured negligible (D11).
+- [ ] 5.6 Correct `pinnedProjectId`'s docstring (`:303-308`): "The single project a token is pinned to" is no longer the whole truth. Keep the function and its signature — `null` for the set arm is the correct fail-closed answer. One line documenting the non-obvious why.
+- [ ] 5.7 Update the scope-grammar docstring (`:33-43`) and the `TokenGrant` comment (`:54-58`, currently "either global … or a **single** project"). Same one-line discipline.
+- [ ] 5.8 Leave `projectScopedGrant` (`:298-301`) untouched — still the single-project writer, still the OAuth path's. Note in the commit body that it was checked, not overlooked.
+- [ ] 5.9 Leave the three literal admin gates literal: `server/dashboard-router.ts:156`, `server/http.ts:489`, `dashboard/maintenance.ts:143`. None of them starts consulting `isAuthorized`. Note in the commit body that all three were checked (design D8).
+- [ ] 5.10 Extend `projectPinRemedy` (`mcp/_shared.ts:108-121`) to name every member of a set, or to stay empty. Under-reporting here is fail-closed-looking rather than a security bug, so an empty remedy is acceptable; a remedy naming one arbitrary member is not.
+- [ ] 5.11 Confirm `mcp/project-tools.ts:200` (`project.list`'s filter) and `:128` (`project.use`'s read gate) need **no edit** — both are already `isAuthorized`-driven and become correct for free. Assert it with a test rather than by reading.
+
+## 6. Dashboard
+
+- [ ] 6.1 Replace the single `<select name="project">` (`dashboard/tokens.ts:153-161`) with a multi-selection control. Use a checkbox list, not `<select multiple>`: measured, `<select multiple>` inherits `.main select`'s `appearance: none` plus arrow art and `min-height` (`styles/core/content.css:260-272`), cosmetically wrong for a listbox.
+- [ ] 6.2 Extend the `input[type='checkbox']` rule from `.filters .group` (`styles/core/patterns.css:253-269`) to the form scope. **A new selector reusing `--lime` and `--fg-faint` only** — no new `:root` token, so `dashboard/spec.md:565-572` stays untouched and `:210`'s "introduces no new design tokens" stays true. Verify by diffing the `:root` block: it must be byte-identical.
+- [ ] 6.3 Rewrite the create handler's grant decision per the `dashboard` delta's table: zero selections → literal arm; one → single-project arm; two or more → set arm.
+- [ ] 6.4 Extend `unresolvable` / `stateOf` (`:37-47`) for the memberless-set state with the label from 0.7, and set precedence to `revoked` → `expired` → unresolvable → empty-set → `active`. `pinnedProjectId('projects')` returns `null`, so `unresolvable` already short-circuits correctly at `:38-39` — do not "fix" that.
+- [ ] 6.5 Extend the project cell (`:56`) to render every member slug in slug-ascending order, archived members included (`deps.projects.list(true)` at `:34` already includes them, for the reason its comment at `:32-33` gives).
+- [ ] 6.6 Extend `scopeBadge` (`:286-290`) for the two new literals.
+- [ ] 6.7 Extend the one-time-view panel to enumerate every member slug — not a count.
+- [ ] 6.8 No `data-confirm` modal is added (creating a token is not destructive, `dashboard/spec.md:210`); the revoke action keeps its danger-tone modal. Timestamps already go through `formatTs`. Confirm both by inspection and note it.
+- [ ] 6.9 Validate the rendered form and list headless (Playwright screenshot, no GUI available) at desktop and mobile widths, and confirm the checkbox list is legible in both.
+
+## 7. Mutation — the union has two arms and a test can be green with either one broken
+
+Use `node scripts/mutate.mjs --file … --spec … --mutation … --with …` for each. This repo has had three tests in one session pass while proving nothing; a test green on both sides of a change is the default outcome, not the exception.
+
+- [ ] 7.1 **Drop the legacy arm** (make `legacy(...)` always `false`). The tests naming the pre-existing shapes — 2.1, 2.2, and the 1.2 matrix rows for `*`, `read:*`, `project:<id>`, `read:project:<id>` — MUST go red.
+- [ ] 7.2 **Drop the membership arm** (make `membership(...)` always `false`). Tasks 2.5, 2.8, 2.9 MUST go red. 2.6 and 2.10 will stay green — they assert refusals — which is exactly why 2.5 exists.
+- [ ] 7.3 **Make membership unconditional** (`membership(...)` always `true`). Tasks 2.6, 2.7 and 2.10 MUST go red. If 2.7 stays green, the escalation control is not doing its job and must be fixed before proceeding.
+- [ ] 7.4 **Remove the per-request freshness** (cache the membership read). Task 2.9 MUST go red. If it stays green, the test is not exercising a warm cache.
+- [ ] 7.5 **Make the set arm's base permissive** (`'projects'` treated as `'*'`). Tasks 2.6, 2.7, 2.10 MUST go red — this is the measured `read:*`-base leak, and it must be a red test rather than a design note.
+- [ ] 7.6 Record each mutation, the tests that went red, and any that unexpectedly stayed green.
+
+## 8. Re-run the baseline and diff it cell by cell
+
+- [ ] 8.1 Re-run the exact script from 1.5 against the changed server. Diff the matrix **cell by cell**, comparing HTTP status **and** structured error code.
+- [ ] 8.2 Every pre-existing-shape cell MUST be byte-identical. Any divergence is a stop-and-explain, not a baseline to update.
+- [ ] 8.3 Re-assert the non-vacuity count from 1.4: the number of successful cells MUST be unchanged and non-zero. An "identical" diff over two empty or all-refused sets proves nothing.
+- [ ] 8.4 Append the new rows (set token over `{alpha, gamma}`, set token over every project, memberless set token) to the committed matrix, clearly separated from the pre-existing rows.
+
+## 9. Migration proof on populated data — real Docker, pre-existing seeded data
+
+Standing requirement for anything touching migrations, MCP, HTTP or production behaviour. This change touches all four. Use the `rembric-smoke-tests` playbook; note that `dev:docker:up` reseeds with `--reset` on every boot, so the "pre-existing" corpus must be created **before** the upgrade boot and preserved across it.
+
+- [ ] 9.1 Bring up the **pre-change** image against a seeded database. Mint one token of each pre-existing shape, including a deliberately malformed legacy row (`scope = 'project:<slug>'`, `project_id IS NULL`) inserted through the repository. Record `SELECT count(*) FROM tokens` and a digest of every `tokens` row.
+- [ ] 9.2 Upgrade in place to the changed image. Assert: every `tokens` row byte-identical, **with the non-empty row count asserted** — a digest match over two empty sets is vacuous.
+- [ ] 9.3 `PRAGMA foreign_key_check` returns no rows; `PRAGMA integrity_check` returns `ok`.
+- [ ] 9.4 The legacy inert row's first-boot behaviour is unchanged: still `forbidden` against its named project, still `inert` in the dashboard, every column unchanged — `auth/spec.md:274-283` verbatim.
+- [ ] 9.5 Confirm no derived data was invalidated: `memory_fts`, `memory_vec` and the three entity tables are functions of `memory`, and no memory row is touched. Assert row counts unchanged rather than asserting the absence of a rebuild.
+- [ ] 9.6 Mint a set token through the real dashboard form in Docker and exercise it over the MCP SDK transport on two `/mcp/<slug>` endpoints and one it must not reach, plus `POST /api/<slug>/sessions`. This is the boundary the real caller uses; a direct handler call bypasses the zod schema and proves nothing about the tool.
+- [ ] 9.7 **Rollback rehearsal.** Downgrade to the pre-change image with the set token in place and confirm it authorizes **nothing** — `pinnedProjectId('projects')` is `null` and `isAuthorized('projects', …)` is false everywhere, so the older binary strips it of all reach. Confirm it is fail-**closed**, and that pre-existing tokens still work.
+
+## 10. Verification and release
+
+- [ ] 10.1 `pnpm run typecheck`
+- [ ] 10.2 `pnpm run lint`
+- [ ] 10.3 `pnpm test`
+- [ ] 10.4 **`pnpm run eval` is deliberately NOT run.** No retrieval code path, ranking weight, corpus or query is touched, and no memory row is read or written. Recorded so the omission is a decision rather than an oversight. (Design D13 also records why the harness could not settle a widening question even if it were run: `archive/2026-08-03-weight-relevance-levels-by-idf/design.md:256` shows `P@8` and `R@8` both pinned at their ceilings.)
+- [ ] 10.5 **No performance gate is added.** Design D11 records the two instruments separately — isolated statements (marginal ~1.2–2.2 µs) and end-to-end HTTP (the whole warm auth step is ≤332 µs of a 1.687 ms request). Anyone later claiming a cost here owes **both** numbers, named. Do not add a threshold test over a µs-scale statement timing.
+- [ ] 10.6 **Release note MUST state the rollback behaviour** (design D-risk, task 9.7): a downgraded server silently strips set-scoped tokens of all reach, because it never reads `token_projects` and the `projects` literal authorizes nothing on its own. Fail-closed, but silent — operators rolling back must re-mint deliberately rather than discover it from failing agents.
+- [ ] 10.7 **Release note MUST state the deferred capability** (design D5, OQ3): read-shared/write-own is not expressible with one verb, and not expressible as two tokens either because a client install has one credential slot (`rembric-bridge.mjs:43-44`). The upgrade path is `ALTER TABLE token_projects ADD COLUMN access TEXT NOT NULL DEFAULT 'write'`, measured rebuild-free.
+- [ ] 10.8 Record the explicitly-rejected items so they are not silently lost: option 1b (D3), the delimited-list scope string (D4), deriving admin from breadth (D8), multi-project OAuth (D10), and `all_projects` — related but **not** unblocked by this change (D13), including the counter-argument that set tokens make cross-project reads common and therefore make `all_projects` harder, not easier.
+- [ ] 10.9 Open the follow-up for OQ6 (`dashboard/spec.md:710`'s vacuous project-scope dashboard session), pre-existing and deliberately not folded in.
+- [ ] 10.10 No `apps/plugin/` change is expected. Confirm with `git status apps/plugin/` that the tree is clean — nothing in the plugin parses a token scope, the bridge only forwards the credential. If a plugin file did change, remember it ships to FOUR clients as ONE shared resource.
