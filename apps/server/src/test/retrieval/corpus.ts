@@ -279,6 +279,16 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 220,
   },
   {
+    id: 'atlas-test-colocation-convention',
+    type: 'user',
+    title: 'User wants atlas tests co-located with source, never a separate /tests dir',
+    content:
+      'In atlas the user wants test files co-located next to the source file they cover (e.g. foo.ts + foo.test.ts in the same directory), not gathered into a top-level /tests tree.',
+    scope: 'project',
+    project: 'atlas',
+    daysAgo: 218,
+  },
+  {
     id: 'atlas-test-colocation-instance',
     type: 'project',
     title: 'Added invoice.test.ts next to invoice.ts in atlas',
@@ -299,6 +309,18 @@ export const CORPUS: CorpusItem[] = [
     project: 'atlas',
     daysAgo: 38,
   },
+  // Isolation control for q-isolation-test-colocation: same vocabulary, other
+  // project, opposite answer — a widened scope shows up as a wrong hit here.
+  {
+    id: 'nimbus-test-layout-cross-project',
+    type: 'project',
+    title: 'Nimbus keeps its test files in a top-level tests/ tree',
+    content:
+      "Nimbus's test files live in a top-level tests/ tree mirroring the package layout, not co-located next to the module they cover, because the runner discovers them from that root.",
+    scope: 'project',
+    project: 'nimbus',
+    daysAgo: 42,
+  },
   {
     id: 'global-conventional-commits',
     type: 'user',
@@ -307,6 +329,16 @@ export const CORPUS: CorpusItem[] = [
       'Every project the user works on should use Conventional Commits (feat:, fix:, chore:, etc.) for commit messages, enforced by commitlint where possible.',
     scope: 'global',
     daysAgo: 210,
+  },
+  {
+    id: 'nimbus-conventional-commits-convention',
+    type: 'user',
+    title: 'User wants Conventional Commits for nimbus commit messages',
+    content:
+      'Commit messages in nimbus should use Conventional Commits (feat:, fix:, chore:, etc.), enforced by commitlint where possible.',
+    scope: 'project',
+    project: 'nimbus',
+    daysAgo: 208,
   },
   {
     id: 'nimbus-conventional-commits-instance',
@@ -328,6 +360,17 @@ export const CORPUS: CorpusItem[] = [
     scope: 'project',
     project: 'nimbus',
     daysAgo: 49,
+  },
+  // Isolation control for q-isolation-commit-convention, as above.
+  {
+    id: 'atlas-commit-convention-cross-project',
+    type: 'project',
+    title: 'Atlas commit messages carry a leading Jira key, not a Conventional Commits type',
+    content:
+      "Atlas's commit message convention is a leading Jira issue key (e.g. `ATL-1423: widen the dunning window`) rather than a Conventional Commits type prefix, because its release notes are generated from Jira.",
+    scope: 'project',
+    project: 'atlas',
+    daysAgo: 55,
   },
 
   {

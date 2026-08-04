@@ -90,17 +90,20 @@ export const QUERIES: QueryItem[] = [
   },
 
   {
-    id: 'q-cross-scope-test-colocation',
+    id: 'q-isolation-test-colocation',
     text: 'where should test files live in atlas',
-    type: 'cross-scope',
-    goldStableIds: ['global-test-colocation', 'atlas-test-colocation-instance'],
+    type: 'cross-project-isolation',
+    goldStableIds: ['atlas-test-colocation-convention', 'atlas-test-colocation-instance'],
     scope: project('atlas'),
   },
   {
-    id: 'q-cross-scope-commit-convention',
+    id: 'q-isolation-commit-convention',
     text: 'what commit message convention should nimbus follow',
-    type: 'cross-scope',
-    goldStableIds: ['global-conventional-commits', 'nimbus-conventional-commits-instance'],
+    type: 'cross-project-isolation',
+    goldStableIds: [
+      'nimbus-conventional-commits-convention',
+      'nimbus-conventional-commits-instance',
+    ],
     scope: project('nimbus'),
   },
 

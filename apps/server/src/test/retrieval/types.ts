@@ -57,7 +57,7 @@ export type QueryType =
   | 'temporal'
   | 'preference'
   | 'multi-session-causal'
-  | 'cross-scope'
+  | 'cross-project-isolation'
   | 'abstention';
 
 /** A single query fixture row. See `queries.ts`. */
