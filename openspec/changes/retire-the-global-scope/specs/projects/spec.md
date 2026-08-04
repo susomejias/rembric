@@ -127,7 +127,7 @@ A path slug that names no project is NOT resolved to the default project. An ope
 
 - **WHEN** the agent calls `memory.save` on a `/mcp` connection without having called `project.use` and without `roots`-based discovery resolving to a project
 - **THEN** the call SHALL succeed against the default project
-- **AND** it SHALL NOT be rejected with `project_required`, which survives only for the unresolvable-slug and archived-project paths
+- **AND** it SHALL NOT be rejected with `project_required`, which is retired from the MCP surface entirely: no emitting site remains, because the two paths that leave a connection unusable emit their own codes — `project_not_found` for an unresolvable slug and `project_archived` for an archived project
 
 ### Requirement: Projects MUST support archive and rename
 

@@ -1,8 +1,9 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   RootsListChangedNotificationSchema,
   type ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+import { z, type ZodObject, type ZodRawShape } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryScope } from '../db/schema/memory.js';
@@ -176,6 +177,25 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
   );
 
+  // Registers strict: a raw shape becomes a plain `z.object()`, which strips
+  // unknown keys instead of refusing them.
+  const registerTool = <InputArgs extends ZodRawShape, OutputArgs extends ZodRawShape>(
+    name: string,
+    config: {
+      description: string;
+      inputSchema: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations: ToolAnnotations;
+    },
+    cb: ToolCallback<InputArgs>,
+  ): void => {
+    server.registerTool<OutputArgs, ZodObject<InputArgs, 'strict'>>(
+      name,
+      { ...config, inputSchema: z.object(config.inputSchema).strict() },
+      cb,
+    );
+  };
+
   // ── Memory tools: save / search / get / confirm + context / timeline ─
   const memoryHandlers = buildMemoryHandlers({
     memory: opts.memory,
@@ -190,7 +210,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     orphanAfterMs: opts.orphanAfterMs,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'memory.save',
     {
       description: SAVE_DESCRIPTION,
@@ -200,7 +220,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.save,
   );
-  server.registerTool(
+  registerTool(
     'memory.search',
     {
       description: SEARCH_DESCRIPTION,
@@ -210,7 +230,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.search,
   );
-  server.registerTool(
+  registerTool(
     'memory.get',
     {
       description: GET_DESCRIPTION,
@@ -220,7 +240,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.get,
   );
-  server.registerTool(
+  registerTool(
     'memory.confirm',
     {
       description: CONFIRM_DESCRIPTION,
@@ -230,7 +250,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.confirm,
   );
-  server.registerTool(
+  registerTool(
     'memory.archive',
     {
       description: ARCHIVE_DESCRIPTION,
@@ -273,7 +293,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     getServer: () => server,
   });
 
-  server.registerTool(
+  registerTool(
     'memory.session_start',
     {
       description:
@@ -284,7 +304,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionStart,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_end',
     {
       description:
@@ -295,7 +315,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionEnd,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_summary',
     {
       description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Keep it concise but include useful handoff detail. Body: ${SUMMARY_SECTIONS}. Does NOT end the session — use memory.session_end for that.`,
@@ -305,7 +325,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionSummary,
   );
-  server.registerTool(
+  registerTool(
     'memory.context',
     {
       description:
@@ -316,7 +336,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.context,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_get',
     {
       description:
@@ -327,7 +347,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionGet,
   );
-  server.registerTool(
+  registerTool(
     'memory.timeline',
     {
       description:
@@ -338,7 +358,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.timeline,
   );
-  server.registerTool(
+  registerTool(
     'memory.capture_passive',
     {
       description:
@@ -349,7 +369,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     observabilityHandlers.capturePassive,
   );
-  server.registerTool(
+  registerTool(
     'memory.save_prompt',
     {
       description:
@@ -360,7 +380,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     promptHandlers.savePrompt,
   );
-  server.registerTool(
+  registerTool(
     'memory.search_prompts',
     {
       description:
@@ -371,7 +391,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     promptHandlers.searchPrompts,
   );
-  server.registerTool(
+  registerTool(
     'memory.doctor',
     {
       description:
@@ -382,7 +402,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     observabilityHandlers.doctor,
   );
-  server.registerTool(
+  registerTool(
     'memory.about',
     {
       description:
@@ -393,7 +413,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     handleAbout,
   );
-  server.registerTool(
+  registerTool(
     'memory.stats',
     {
       description:
@@ -416,7 +436,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     router: opts.router,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'project.use',
     {
       description:
@@ -427,7 +447,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     projectHandlers.use,
   );
-  server.registerTool(
+  registerTool(
     'project.list',
     {
       description:
@@ -438,7 +458,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     projectHandlers.list,
   );
-  server.registerTool(
+  registerTool(
     'project.current',
     {
       description:
@@ -458,7 +478,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     repos: opts.repos,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'memory.suggest_topic_key',
     {
       description:
@@ -469,7 +489,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     relationsHandlers.suggestTopicKey,
   );
-  server.registerTool(
+  registerTool(
     'memory.judge',
     {
       description:
@@ -480,7 +500,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     relationsHandlers.judge,
   );
-  server.registerTool(
+  registerTool(
     'memory.compare',
     {
       description:

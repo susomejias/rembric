@@ -202,7 +202,7 @@ Measured from the constant at `apps/server/src/mcp/server.ts:130`: **length 1874
 
 The false sentence is `" Path-scoped connections see only that project; unscoped see globals only."` — **74** characters including the leading space, confirmed present in the shipped string. The true replacement is shorter, so this is a net **reclaim**, not a spend: `" Every connection sees exactly one project's memories."` — **54**. Net **−20**, landing at **1854/1900 with 46 of headroom**.
 
-That is the reclaimed clause `mcp-api/spec.md:479` requires a change to name, and it is the only reclaim needed: `memory.save` (`server.ts:127`) deletes its 213-character tail and adds nothing mandated, and `memory.doctor` (`:378`) and `memory.stats` (`:400`) each shorten by a parenthetical.
+That is the reclaimed clause `mcp-api/spec.md:479` requires a change to name, and it is the only reclaim needed: `memory.save` (`server.ts:127`) deletes its **188**-character tail and adds nothing mandated, and `memory.doctor` (`:378`) and `memory.stats` (`:400`) each shorten by a parenthetical. (188, not the 213 first written here: 213 counts the escapes as they appear in the source literal, and the figure that matters is the one a client reads — measured `1737 → 1549` from a live `tools/list`.)
 
 **Every figure above is measured from the description CONSTANT and MUST be re-measured from a real `tools/list` response** before the change lands — the boundary `mcp-api/spec.md:505` mandates and `mcp-integration.test.ts` asserts over. A mismatch means the wording drifted; fix the wording, not the expectation.
 

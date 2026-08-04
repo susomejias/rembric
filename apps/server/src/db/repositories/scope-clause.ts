@@ -8,26 +8,18 @@ export const GLOBAL_PARTITION_KEY = '__global__';
 /**
  * Shared `(scope, project_id)` WHERE fragment for scoped reads over the
  * `memory` table. `alias` qualifies the columns (e.g. `'m'`); pass a
- * controlled literal, never user input. `includeGlobal` widens a `project`
- * scope to also match `global` rows without ever admitting another
- * `project_id` (memory spec: strict scope isolation); no-op for `global`.
+ * controlled literal, never user input. No argument widens a scope past the
+ * one it is given (memory spec: strict scope isolation).
  */
-export function scopeWhere(
-  scope: MemoryScope,
-  projectId: string | null,
-  alias?: string,
-  includeGlobal?: boolean,
-): SQL {
+export function scopeWhere(scope: MemoryScope, projectId: string | null, alias?: string): SQL {
   const p = sql.raw(alias ? `${alias}.` : '');
   if (scope === 'project') {
-    return includeGlobal
-      ? sql`((${p}scope = 'project' AND ${p}project_id = ${projectId}) OR (${p}scope = 'global' AND ${p}project_id IS NULL))`
-      : sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`;
+    return sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`;
   }
   return sql`${p}scope = 'global' AND ${p}project_id IS NULL`;
 }
 
-/** Drizzle-builder sibling of `scopeWhere` for builder call sites; no `includeGlobal` — none widen scope. */
+/** Drizzle-builder sibling of `scopeWhere` for builder call sites. */
 export function scopeCondition(scope: MemoryScope, projectId: string | null): SQL {
   return scope === 'project'
     ? (and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? '')) as SQL)

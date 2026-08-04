@@ -463,7 +463,7 @@ describe('error messages name only reachable remedies', () => {
  * instead of silently inheriting a scope fallback.
  */
 const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
-  'memory.save': { scope: 'project', type: 'user', title: 't', content: 'c' },
+  'memory.save': { type: 'user', title: 't', content: 'c' },
   'memory.search': {},
   'memory.get': { id: 'placeholder' },
   'memory.confirm': { id: 'placeholder' },

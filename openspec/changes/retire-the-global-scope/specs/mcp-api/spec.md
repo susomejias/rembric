@@ -67,6 +67,40 @@ The test SHALL fail on a reintroduction rather than merely reporting it, and SHA
 - **WHEN** the refusals a path-less and a path-scoped connection can produce are enumerated
 - **THEN** none SHALL instruct the caller to set a scope, to save user-wide, or to add a path-less `/mcp` entry for user-wide memory
 
+### Requirement: Every MCP tool input schema MUST refuse an unknown property rather than ignore it
+
+Every registered tool SHALL validate its arguments against a **strict** object schema: a property the tool does not declare SHALL be refused, naming both the tool and the offending property, and the call SHALL NOT reach the handler.
+
+The reason is retirement, not tidiness. MCP has no version negotiation (see the release-sequencing decision that splits this change across two releases), so a client pinned to an older plugin keeps sending the arguments it was built against, and the server cannot detect that it is old. Under a schema that silently drops unknown properties, a retired argument keeps parsing forever and quietly means something different from what the caller intends — `include_global: true` on a connection that can no longer widen anything reads as consent to a result set the caller did not ask for. A refusal that names the property tells the operator to upgrade; a silent drop tells them nothing. It is also the only way the published manifest becomes true: `tools/list` already advertises `additionalProperties: false` for every tool, so a server that strips instead of refusing publishes a constraint it does not enforce.
+
+Strictness SHALL apply uniformly to the whole tool surface and SHALL NOT carry a per-tool exception list — an exempt tool is where the next retired argument goes on meaning something. It SHALL be applied at the single seam where tool input shapes are registered, so a tool added later inherits it rather than opting in, and SHALL reach nested object properties as well as top-level ones.
+
+A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single async scope resolver", whose subject is the refusal a resolver produces.
+
+#### Scenario: A retired argument is refused, not dropped
+
+- **GIVEN** any connection with a valid token
+- **WHEN** the client calls `memory.search` with `include_global`, or `memory.save` with `scope`
+- **THEN** the call SHALL be refused with the transport's invalid-parameters error, the message SHALL name the tool and the offending property, and no memory SHALL be written or returned
+
+#### Scenario: An unknown property is refused on every registered tool
+
+- **WHEN** every tool in a real `tools/list` response is called with a property no tool declares
+- **THEN** every call SHALL be refused and each message SHALL name that property
+- **AND** the number of tools examined SHALL be asserted to be non-zero, so an empty manifest cannot pass
+
+#### Scenario: A legitimate call still succeeds
+
+- **GIVEN** a connection resolved to a project the token may read and write
+- **WHEN** the client calls `memory.save`, `memory.search`, `memory.get`, `memory.context`, `project.use` and `memory.session_start` with every argument each of them declares
+- **THEN** every call SHALL succeed
+- **AND** this scenario is the non-vacuity control for the two above: without it a server that refused everything would satisfy them
+
+#### Scenario: A wrong-typed declared argument fails as it did before
+
+- **WHEN** the client calls a tool with a declared property carrying the wrong type
+- **THEN** the call SHALL be refused exactly as it was before strictness, so the pre-existing failure mode is unchanged and the new refusal is attributable to the unknown property alone
+
 ## MODIFIED Requirements
 
 ### Requirement: Path-scoped connections MUST enforce strict project isolation
@@ -172,7 +206,7 @@ The `X-Rembric-Project` header SHALL NOT be consulted in scope resolution (see t
 - **WHEN** an MCP client connects to `/mcp` without a slug
 - **THEN** the request SHALL be accepted with the default project as its scope, and every tool that resolves scope SHALL operate in it
 - **AND** no tool SHALL respond with `project_required` on such a connection, because a project is always active
-- **AND** the scenario title predates this change: a path-less connection is no longer "global", and `project_required` survives only for the unresolvable-slug and archived-project paths, where its message SHALL name no scope
+- **AND** the scenario title predates this change: a path-less connection is no longer "global", and `project_required` is retired from the MCP surface entirely rather than surviving on a narrower path — the two paths that leave a connection unusable emit their own codes, `project_not_found` for an unresolvable slug and `project_archived` for an archived project, and neither message SHALL name a scope
 
 ### Requirement: MCP error messages MUST NOT instruct the agent to perform an action it cannot perform
 

@@ -387,7 +387,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'relations_limit over-ask probe',
         content: 'relations-limit-over-ask-probe',
@@ -435,7 +434,6 @@ describe('MCP protocol conformance', () => {
       const res = (await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'project',
           type: 'procedural',
           title,
           content: `batch-parity ${title}`,
@@ -861,7 +859,7 @@ describe('MCP protocol conformance', () => {
     const save = async (title: string, content: string): Promise<string> => {
       const res = (await client.callTool({
         name: 'memory.save',
-        arguments: { scope: 'project', type: 'feedback', title, content },
+        arguments: { type: 'feedback', title, content },
       })) as ToolResult;
       const body = readJson(res) as { id: string; candidates?: unknown[] };
       expect(body.candidates ?? [], `${title} detected candidates`).toEqual([]);
@@ -1006,7 +1004,6 @@ describe('MCP protocol conformance', () => {
     it('rejects an over-budget memory.timeline window and names the remedy', async () => {
       const client = await connect();
       const saved = await callWith(client, 'memory.save', {
-        scope: 'global',
         type: 'project',
         title: 'timeline window probe',
         content: 'timeline-window-probe',
@@ -1145,13 +1142,12 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('round-trips save → search → get → confirm against /mcp (global scope)', async () => {
+  it('round-trips save → search → get → confirm against a path-less /mcp', async () => {
     const client = await connect();
 
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'roundtrip marker indicator',
         content: 'roundtripmarkeraaa indicator',
@@ -1198,7 +1194,6 @@ describe('MCP protocol conformance', () => {
       (await scoped.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'project',
           type: 'reference',
           title: 'default project marker row',
           content: 'defaultprojectmarkerbbb row',
@@ -1324,7 +1319,7 @@ describe('MCP protocol conformance', () => {
     await scoped.close();
   });
 
-  it('memory.save publishes no scope argument, and one sent anyway cannot redirect the write', async () => {
+  it('memory.save publishes no scope argument, and one sent anyway is rejected', async () => {
     const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
     const own = projectsSvc.create({ slug: 'no-scope-arg-proj' });
     const client = await connect({ projectSlug: own.slug });
@@ -1338,10 +1333,7 @@ describe('MCP protocol conformance', () => {
     expect(Object.keys(properties)).toContain('type');
     expect(Object.keys(properties)).not.toContain('scope');
 
-    // MEASURED, and deliberately asserted rather than assumed: zod v3 `z.object`
-    // strips unknown keys, and the SDK builds the tool schema with it, so a
-    // client still sending `scope` gets no error and no second destination.
-    const result = (await client.callTool({
+    const rejected = (await client.callTool({
       name: 'memory.save',
       arguments: {
         scope: 'global',
@@ -1350,8 +1342,24 @@ describe('MCP protocol conformance', () => {
         content: 'sentaretiredargumentaaa',
       },
     })) as ToolResult;
-    expect(result.isError).toBeFalsy();
-    const saved = readJson(result) as { id: string };
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('memory.save');
+    expect(message).toContain('scope');
+
+    // Control: the same call without the retired argument succeeds, so the
+    // rejection above is the unknown key and not a broken save path.
+    const accepted = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'reference',
+        title: 'sent no retired argument',
+        content: 'sentnoretiredargumentaaa',
+      },
+    })) as ToolResult;
+    expect(accepted.isError).toBeFalsy();
+    const saved = readJson(accepted) as { id: string };
     const row = new MemoryService(
       createRepositories(server.dbHandle.db),
       server.dbHandle.db,
@@ -1361,7 +1369,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.search publishes no include_global, and one sent anyway widens nothing', async () => {
+  it('memory.search publishes no include_global, and one sent anyway is rejected', async () => {
     const dflt = defaultProject(server.dbHandle);
     const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
     const own = projectsSvc.create({ slug: 'no-widen-arg-proj' });
@@ -1382,18 +1390,31 @@ describe('MCP protocol conformance', () => {
     expect(Object.keys(properties)).toContain('query');
     expect(Object.keys(properties)).not.toContain('include_global');
 
-    const widened = (await client.callTool({
+    const rejected = (await client.callTool({
       name: 'memory.search',
       arguments: { query: 'widenprobeaaa', include_global: true, limit: 20 },
     })) as ToolResult;
-    expect(widened.isError).toBeFalsy();
-    const ids = (readJson(widened) as { memories: { id: string }[] }).memories.map((m) => m.id);
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('memory.search');
+    expect(message).toContain('include_global');
+
+    // Control: the same query without the retired argument is accepted, sees
+    // the in-scope row and not the other project's — so the rejection above is
+    // the unknown key, and the scope closure it used to prove still holds.
+    const accepted = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', limit: 20 },
+    })) as ToolResult;
+    expect(accepted.isError).toBeFalsy();
+    const ids = (readJson(accepted) as { memories: { id: string }[] }).memories.map((m) => m.id);
     expect(ids).toContain(inside.id);
     expect(ids).not.toContain(outside.id);
     await client.close();
 
-    // The control: the excluded row is findable by the same query on the
-    // connection that owns it, so the exclusion is the scope, not the index.
+    // The excluded row is findable by the same query on the connection that
+    // owns it, so the exclusion is the scope, not the index.
     const pathless = await connect();
     const own2 = (await pathless.callTool({
       name: 'memory.search',
@@ -1403,6 +1424,97 @@ describe('MCP protocol conformance', () => {
       outside.id,
     );
     await pathless.close();
+  });
+
+  it('refuses an unknown property on every registered tool', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    // Without this the loop below would pass over an empty manifest.
+    expect(tools.length).toBeGreaterThan(15);
+
+    for (const tool of tools) {
+      const rejected = (await client.callTool({
+        name: tool.name,
+        arguments: { rembric_unknown_probe: 1 },
+      })) as ToolResult;
+      const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(rejected.isError, `${tool.name} accepted an unknown property`).toBe(true);
+      expect(message, tool.name).toContain('rembric_unknown_probe');
+      expect(message, tool.name).toContain(tool.name);
+    }
+    await client.close();
+  });
+
+  it('accepts a maximal legitimate argument set on the tools strictness most affects', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const target = projectsSvc.create({ slug: 'strictness-controls-proj' });
+    const client = await connect();
+    const call = async (name: string, args: Record<string, unknown>): Promise<ToolResult> => {
+      const r = (await client.callTool({ name, arguments: args })) as ToolResult;
+      expect(r.isError, `${name}: ${JSON.stringify(readJson(r))}`).toBeFalsy();
+      return r;
+    };
+
+    const used = readJson(await call('project.use', { slug: target.slug, autocreate: false })) as {
+      projectId: string;
+    };
+    expect(used.projectId).toBe(target.id);
+
+    const started = readJson(
+      await call('memory.session_start', {
+        agent: 'strictness-probe',
+        description: 'maximal legitimate argument set',
+        project: target.slug,
+      }),
+    ) as { sessionId: string };
+
+    const saved = readJson(
+      await call('memory.save', {
+        type: 'project',
+        title: 'strictness control row',
+        content: 'strictnesscontrolaaa row body',
+        tags: ['strictness', 'control'],
+        topic_key: 'strictness-control',
+        sessionId: started.sessionId,
+      }),
+    ) as { id: string };
+
+    await call('memory.search', {
+      query: 'strictnesscontrolaaa',
+      type: 'project',
+      tag: 'strictness',
+      status: 'active',
+      topic_key: 'strictness-control',
+      include_relations: true,
+      limit: 20,
+      offset: 0,
+    });
+    await call('memory.search', { entity: 'strictnesscontrolaaa' });
+    await call('memory.get', { id: saved.id, relations_limit: 5 });
+    await call('memory.get', { ids: [saved.id] });
+    await call('memory.context', {
+      sessions: 2,
+      prompts: 2,
+      memories: 5,
+      judgments: 5,
+      includeArchived: true,
+      focus: 'strictnesscontrolaaa',
+    });
+    await client.close();
+  });
+
+  it('still rejects a wrong-typed declared argument, as it did before strictness', async () => {
+    const client = await connect();
+    const rejected = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything', limit: 'not-a-number' },
+    })) as ToolResult;
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('limit');
+    expect(message).not.toContain('rembric_unknown_probe');
+    await client.close();
   });
 
   it('a path-less memory.save with only type, title and content lands in the default project', async () => {
@@ -1484,7 +1596,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'lifecycle saved row',
         content: 'lifecycle-saved-row',
@@ -1561,7 +1672,6 @@ describe('MCP protocol conformance', () => {
       await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'global',
           type: 'project',
           title: `ctx default cap marker ${i}`,
           content: `ctx-default-cap-marker-${i}`,
@@ -1586,7 +1696,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'backfill useful row',
         content: 'backfill-useful-row',
@@ -1699,7 +1808,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, no session summary',
         content: 'anchor row, no session summary',
@@ -1763,7 +1871,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, placeholder title',
         content: 'anchor row, placeholder title',
@@ -1797,7 +1904,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, raw summary',
         content: 'anchor row, raw summary',
@@ -1939,7 +2045,6 @@ describe('MCP protocol conformance', () => {
     const first = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'auth model: JWT',
         content: 'auth model: JWT',
@@ -1952,7 +2057,6 @@ describe('MCP protocol conformance', () => {
     const second = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'auth model: opaque tokens',
         content: 'auth model: opaque tokens',
@@ -2009,7 +2113,6 @@ describe('MCP protocol conformance', () => {
       await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'global',
           type: 'feedback',
           title: 'fruitcake bicycle aluminum',
           content: 'fruitcake bicycle aluminum windowpane horizon',
@@ -2020,7 +2123,6 @@ describe('MCP protocol conformance', () => {
     const second = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'fruitcake bicycle aluminum',
         content: 'fruitcake bicycle aluminum windowpane horizon',
@@ -2063,7 +2165,6 @@ describe('MCP protocol conformance', () => {
     const a = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'compare test aaa',
         content: 'compare-test-aaa',
@@ -2072,7 +2173,6 @@ describe('MCP protocol conformance', () => {
     const b = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'compare test bbb',
         content: 'compare-test-bbb',
@@ -2170,7 +2270,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'doctor after archive',
         content: 'doctor-after-archive-marker',
@@ -2207,7 +2306,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'no session row marker',
         content: 'no-session-row-marker',
@@ -2257,7 +2355,6 @@ describe('MCP protocol conformance', () => {
     const saveOne = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'pending source marker',
         content: 'pending-source-marker',
@@ -2266,7 +2363,6 @@ describe('MCP protocol conformance', () => {
     const saveTwo = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'pending target marker',
         content: 'pending-target-marker',
@@ -2352,7 +2448,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'needs review marker goal',
         content: 'needsreviewmarkeraaa goal',
@@ -2543,22 +2638,22 @@ describe('MCP protocol conformance', () => {
     // Control: the archive in P moves no number in Q.
     expect(entryFor(after, Q).activeMemoryCount).toBe(2);
 
-    // An active global row must not be counted into any project's entry.
-    const globalClient = await connect();
-    const globalSave = (await globalClient.callTool({
+    // A row written on a path-less connection lands in the default project, so
+    // it must move neither P's nor Q's number.
+    const defaultClient = await connect();
+    const defaultSave = (await defaultClient.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
-        title: 'active count global row',
-        content: 'active-count-global-row',
+        title: 'active count default project row',
+        content: 'active-count-default-project-row',
       },
     })) as ToolResult;
-    expect(globalSave.isError, 'global memory.save').toBeFalsy();
-    const withGlobal = await listProjects();
-    expect(entryFor(withGlobal, P).activeMemoryCount).toBe(0);
-    expect(entryFor(withGlobal, Q).activeMemoryCount).toBe(2);
-    await globalClient.close();
+    expect(defaultSave.isError, 'path-less memory.save').toBeFalsy();
+    const withDefault = await listProjects();
+    expect(entryFor(withDefault, P).activeMemoryCount).toBe(0);
+    expect(entryFor(withDefault, Q).activeMemoryCount).toBe(2);
+    await defaultClient.close();
 
     // P now holds one active and one archived row, so the status filter is
     // observable: the count must equal what the same scope reports as active

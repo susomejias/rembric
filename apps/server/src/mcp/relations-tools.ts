@@ -50,13 +50,16 @@ export const judgeSchema = {
   evidence: z.unknown().optional(),
   judgments: z
     .array(
-      z.object({
-        judgmentId: z.string().min(1),
-        relation: z.enum(JUDGE_RELATIONS),
-        reason: z.string().max(2000).optional(),
-        confidence: z.number().min(0).max(1).optional(),
-        evidence: z.unknown().optional(),
-      }),
+      // By hand: the registrar's `.strict()` reaches only the top-level shape.
+      z
+        .object({
+          judgmentId: z.string().min(1),
+          relation: z.enum(JUDGE_RELATIONS),
+          reason: z.string().max(2000).optional(),
+          confidence: z.number().min(0).max(1).optional(),
+          evidence: z.unknown().optional(),
+        })
+        .strict(),
     )
     .min(1)
     .max(25)
