@@ -300,6 +300,7 @@ export async function bootstrap(
     repos,
     tx: dbHandle.db,
     relations: relationsSvc,
+    projects,
     agentSessions: agentSessionsSvc,
     orphanDeadlineMs: config.judgments.orphanDeadlineMs,
   });

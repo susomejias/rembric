@@ -7,8 +7,8 @@ import { memoryRelations } from '../db/schema/memory-relations.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { projectScope } from '../services/scope.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { undoRun } from './operations.js';
 import { ConsolidationRunner } from './runner.js';
@@ -31,17 +31,21 @@ let db: TestDb;
 let memory: MemoryService;
 let relations: RelationsService;
 let runner: ConsolidationRunner;
+/** The scope every session start sweeps, so `runAll` reaches these fixtures. */
+let dfltScope: ReturnType<typeof projectScope>;
 
 const orphanDeadlineMs = 60_000;
 
 beforeEach(() => {
   db = createTestDb();
+  dfltScope = projectScope(defaultProject(db.handle).id);
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
   runner = new ConsolidationRunner({
     repos: createRepositories(db.handle.db),
     tx: db.handle.db,
     relations,
+    projects: new ProjectsService(createRepositories(db.handle.db)),
     agentSessions: { purgeEmpty: () => ({ deletedIds: [] }) },
     orphanDeadlineMs,
   });
@@ -57,14 +61,8 @@ function backdate(judgmentId: string, msAgo: number): void {
 
 describe('deadline orphaning', () => {
   it('orphans a pending row older than the deadline and journals it', () => {
-    const a = memory.save(
-      { type: 'feedback', title: 'old fact', content: 'old fact' },
-      SCOPE_GLOBAL,
-    );
-    const b = memory.save(
-      { type: 'feedback', title: 'new fact', content: 'new fact' },
-      SCOPE_GLOBAL,
-    );
+    const a = memory.save({ type: 'feedback', title: 'old fact', content: 'old fact' }, dfltScope);
+    const b = memory.save({ type: 'feedback', title: 'new fact', content: 'new fact' }, dfltScope);
     const pending = relations.createPending({ sourceId: b.id, targetId: a.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 
@@ -91,8 +89,8 @@ describe('deadline orphaning', () => {
   });
 
   it('does not touch pending rows younger than the deadline', () => {
-    const a = memory.save({ type: 'feedback', title: 'a', content: 'a' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', title: 'b', content: 'b' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'a', content: 'a' }, dfltScope);
+    const b = memory.save({ type: 'feedback', title: 'b', content: 'b' }, dfltScope);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     // No backdate — well within the window.
 
@@ -107,8 +105,8 @@ describe('deadline orphaning', () => {
   });
 
   it('undoRun restores an orphaned row to pending', () => {
-    const a = memory.save({ type: 'feedback', title: 'x', content: 'x' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', title: 'y', content: 'y' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'x', content: 'x' }, dfltScope);
+    const b = memory.save({ type: 'feedback', title: 'y', content: 'y' }, dfltScope);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 
@@ -185,17 +183,14 @@ describe('deadline orphaning', () => {
   it('orphans a pending row whose source was superseded on its topic_key', () => {
     const a = memory.saveWithTopicKey(
       { type: 'feedback', title: 'first take', content: 'first take', topicKey: 't' },
-      SCOPE_GLOBAL,
+      dfltScope,
     ).memory;
-    const target = memory.save(
-      { type: 'feedback', title: 'other', content: 'other' },
-      SCOPE_GLOBAL,
-    );
+    const target = memory.save({ type: 'feedback', title: 'other', content: 'other' }, dfltScope);
     const pending = relations.createPending({ sourceId: a.id, targetId: target.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
     memory.saveWithTopicKey(
       { type: 'feedback', title: 'second take', content: 'second take', topicKey: 't' },
-      SCOPE_GLOBAL,
+      dfltScope,
     );
 
     expect(memory.unsafeGetById(a.id)?.status).toBe('superseded');
@@ -219,8 +214,8 @@ describe('deadline orphaning', () => {
   });
 
   it('is idempotent: a second forced run orphans nothing new', () => {
-    const a = memory.save({ type: 'feedback', title: 'p', content: 'p' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'feedback', title: 'q', content: 'q' }, SCOPE_GLOBAL);
+    const a = memory.save({ type: 'feedback', title: 'p', content: 'p' }, dfltScope);
+    const b = memory.save({ type: 'feedback', title: 'q', content: 'q' }, dfltScope);
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
 
