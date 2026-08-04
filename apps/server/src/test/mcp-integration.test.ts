@@ -22,6 +22,7 @@ import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
+import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
@@ -224,7 +225,7 @@ describe('MCP protocol conformance', () => {
 
     // Measured at the boundary the client reads, not off the constant.
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the budget recorded in design.md D5').toBe(1874);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1854);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {
@@ -299,7 +300,6 @@ describe('MCP protocol conformance', () => {
 
     expect(desc).toMatch(/server-wide/i);
     expect(desc).toMatch(/all projects/i);
-    expect(desc).toMatch(/global/i);
     expect(desc).toContain('memory.stats');
     expect(desc).toMatch(/differ/i);
 
@@ -732,8 +732,10 @@ describe('MCP protocol conformance', () => {
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
       ['memory.session_start', 624],
-      ['memory.doctor', 612],
+      ['memory.doctor', 603],
       ['memory.timeline', 395],
+      ['memory.save', 1549],
+      ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
       expect(desc, `${name} missing from tools/list`).toBeDefined();
@@ -1322,24 +1324,144 @@ describe('MCP protocol conformance', () => {
     await scoped.close();
   });
 
-  it('rejects scope=global on a path-scoped /mcp/<slug> connection', async () => {
-    const client = await connect({ projectSlug: 'integration-proj' });
+  it('memory.save publishes no scope argument, and one sent anyway cannot redirect the write', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'no-scope-arg-proj' });
+    const client = await connect({ projectSlug: own.slug });
 
+    const { tools } = await client.listTools();
+    const save = tools.find((t) => t.name === 'memory.save');
+    expect(save, 'memory.save missing from tools/list').toBeDefined();
+    const properties = (save?.inputSchema.properties ?? {}) as Record<string, unknown>;
+    // Non-vacuity: the schema IS published, so the absence below is a removed
+    // property rather than an empty manifest.
+    expect(Object.keys(properties)).toContain('type');
+    expect(Object.keys(properties)).not.toContain('scope');
+
+    // MEASURED, and deliberately asserted rather than assumed: zod v3 `z.object`
+    // strips unknown keys, and the SDK builds the tool schema with it, so a
+    // client still sending `scope` gets no error and no second destination.
     const result = (await client.callTool({
       name: 'memory.save',
       arguments: {
         scope: 'global',
         type: 'reference',
-        title: 'should be rejected',
-        content: 'should-be-rejected',
+        title: 'sent a retired argument',
+        content: 'sentaretiredargumentaaa',
       },
     })) as ToolResult;
-
-    expect(result.isError).toBe(true);
-    const payload = readJson(result) as { code?: string };
-    expect(payload.code).toBe('scope_locked');
-
+    expect(result.isError).toBeFalsy();
+    const saved = readJson(result) as { id: string };
+    const row = new MemoryService(
+      createRepositories(server.dbHandle.db),
+      server.dbHandle.db,
+    ).unsafeGetById(saved.id);
+    expect(row?.projectId).toBe(own.id);
+    expect(row?.scope).toBe('project');
     await client.close();
+  });
+
+  it('memory.search publishes no include_global, and one sent anyway widens nothing', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'no-widen-arg-proj' });
+    const memorySvc = new MemoryService(createRepositories(server.dbHandle.db), server.dbHandle.db);
+    const outside = memorySvc.save(
+      { type: 'user', title: 'widenprobe outside row', content: 'widenprobeaaa outside row' },
+      { kind: 'project', projectId: dflt.id },
+    );
+    const inside = memorySvc.save(
+      { type: 'user', title: 'widenprobe inside row', content: 'widenprobeaaa inside row' },
+      { kind: 'project', projectId: own.id },
+    );
+
+    const client = await connect({ projectSlug: own.slug });
+    const { tools } = await client.listTools();
+    const search = tools.find((t) => t.name === 'memory.search');
+    const properties = (search?.inputSchema.properties ?? {}) as Record<string, unknown>;
+    expect(Object.keys(properties)).toContain('query');
+    expect(Object.keys(properties)).not.toContain('include_global');
+
+    const widened = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', include_global: true, limit: 20 },
+    })) as ToolResult;
+    expect(widened.isError).toBeFalsy();
+    const ids = (readJson(widened) as { memories: { id: string }[] }).memories.map((m) => m.id);
+    expect(ids).toContain(inside.id);
+    expect(ids).not.toContain(outside.id);
+    await client.close();
+
+    // The control: the excluded row is findable by the same query on the
+    // connection that owns it, so the exclusion is the scope, not the index.
+    const pathless = await connect();
+    const own2 = (await pathless.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', limit: 20 },
+    })) as ToolResult;
+    expect((readJson(own2) as { memories: { id: string }[] }).memories.map((m) => m.id)).toContain(
+      outside.id,
+    );
+    await pathless.close();
+  });
+
+  it('a path-less memory.save with only type, title and content lands in the default project', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const client = await connect();
+    const result = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'reference',
+        title: 'no arguments beyond the required three',
+        content: 'norequiredargumentsbeyondaaa',
+      },
+    })) as ToolResult;
+    if (result.isError) {
+      throw new Error(`path-less save refused: ${JSON.stringify(readJson(result))}`);
+    }
+    const saved = readJson(result) as { id: string };
+    const row = new MemoryService(
+      createRepositories(server.dbHandle.db),
+      server.dbHandle.db,
+    ).unsafeGetById(saved.id);
+    expect(row?.projectId).toBe(dflt.id);
+    await client.close();
+  });
+
+  it('the five surfaces that named a retired scope no longer do, read from tools/list', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const desc = (name: string): string => {
+      const t = tools.find((x) => x.name === name);
+      expect(t, `${name} missing from tools/list`).toBeDefined();
+      const d = t?.description ?? '';
+      expect(d.length).toBeGreaterThan(0);
+      return d;
+    };
+
+    const save = desc('memory.save');
+    expect(save).not.toContain('scope_locked');
+    expect(save).not.toMatch(/scope=global|user-wide/i);
+
+    const search = desc('memory.search');
+    // The reclaimed clause `mcp-api` requires a change to name, verbatim.
+    expect(search).toContain("Every connection sees exactly one project's memories.");
+    expect(search).not.toContain('unscoped see globals only');
+    expect(search).toBeTruthy();
+
+    expect(desc('memory.doctor')).not.toMatch(/global/i);
+    expect(desc('memory.stats')).not.toMatch(/global/i);
+
+    const instructions = client.getInstructions() ?? '';
+    expect(instructions.length).toBeGreaterThan(0);
+    expect(instructions).not.toMatch(/global|include_global|user-wide/i);
+    await client.close();
+
+    const scoped = await connect({ projectSlug: defaultProject(server.dbHandle).slug });
+    const scopedInstructions = scoped.getInstructions() ?? '';
+    expect(scopedInstructions.length).toBeGreaterThan(0);
+    expect(scopedInstructions).not.toMatch(/global|include_global|user-wide/i);
+    await scoped.close();
   });
 
   it('rejects an invalid token before reaching tool dispatch', async () => {

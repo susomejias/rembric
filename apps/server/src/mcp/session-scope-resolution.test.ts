@@ -546,7 +546,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -571,7 +570,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project: projectA, requestedSlug: projectA.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -596,7 +594,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -620,7 +617,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',

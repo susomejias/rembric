@@ -1,4 +1,4 @@
-import { and, eq, getTableColumns, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import type { Db } from '../client.js';
@@ -35,22 +35,11 @@ export interface MemoryEntityView {
   value: string;
 }
 
-/**
- * `includeGlobal` widens a `project` scope to also match `global` entities
- * without ever admitting another `project_id` — the entity-side sibling of
- * `scopeWhere`'s flag. No-op for `global` scope.
- */
-function entityScopeCondition(
-  scope: MemoryScope,
-  projectId: string | null,
-  includeGlobal?: boolean,
-) {
-  const own = and(
+function entityScopeCondition(scope: MemoryScope, projectId: string | null) {
+  return and(
     eq(memoryEntities.scope, scope),
     projectId === null ? isNull(memoryEntities.projectId) : eq(memoryEntities.projectId, projectId),
   );
-  if (scope !== 'project' || !includeGlobal) return own;
-  return or(own, and(eq(memoryEntities.scope, 'global'), isNull(memoryEntities.projectId)));
 }
 
 /** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
@@ -148,11 +137,10 @@ export class EntitiesRepository {
     type?: MemoryType;
     tag?: string;
     topicKey?: string;
-    includeGlobal?: boolean;
     limit: number;
   }): Memory[] {
     const conditions = [
-      entityScopeCondition(opts.scope, opts.projectId, opts.includeGlobal),
+      entityScopeCondition(opts.scope, opts.projectId),
       eq(memoryEntities.value, opts.value),
     ];
     if (opts.kind) conditions.push(eq(memoryEntities.kind, opts.kind));
@@ -379,21 +367,13 @@ export class EntitiesRepository {
    * In-scope memories still awaiting their first entity scan. Distinguishes
    * "this entity is not in the index" from "the index has not caught up",
    * which an empty entity lookup cannot do on its own. Scoped, so it is safe
-   * on an agent-facing read; `includeGlobal` widens exactly as the lookup does.
+   * on an agent-facing read.
    */
-  countPendingScans(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
-    includeGlobal?: boolean;
-  }): number {
-    const own = and(
+  countPendingScans(opts: { scope: MemoryScope; projectId: string | null }): number {
+    const scoped = and(
       eq(memory.scope, opts.scope),
       opts.projectId === null ? isNull(memory.projectId) : eq(memory.projectId, opts.projectId),
     );
-    const scoped =
-      opts.scope === 'project' && opts.includeGlobal
-        ? or(own, and(eq(memory.scope, 'global'), isNull(memory.projectId)))
-        : own;
     return (
       this.db
         .select({ n: sql<number>`count(*)` })

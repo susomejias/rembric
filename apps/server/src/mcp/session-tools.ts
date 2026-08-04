@@ -17,7 +17,6 @@ import {
   unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
-import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
 
 /**
@@ -144,21 +143,6 @@ async function handleSessionStart(
     }
   }
   const projectId = scope.kind === 'project' ? scope.projectId : null;
-
-  // When the agent did not pin a project and roots-based discovery
-  // surfaced pending suggestions, refuse to silently open a scopeless
-  // session — make the choice explicit.
-  if (args.project === undefined && projectId === null) {
-    const pending = pendingSuggestionGate(ctx, {
-      router: deps.router,
-      projects: deps.projects,
-    });
-    if (pending) {
-      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
-        suggestedSlugs: pending,
-      });
-    }
-  }
 
   try {
     assertAuthorized('write', scope, deps);

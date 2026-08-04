@@ -103,7 +103,6 @@ describe('term statistics are not a response channel', () => {
       text(
         await runWithContext(context(), () =>
           handlers.save({
-            scope: 'global',
             type: 'project',
             title: 'A fourth note',
             content: 'rareterm pipeline',

@@ -14,7 +14,6 @@ export const hybridRetriever: Retriever<IngestedCorpus> = {
       {
         query: text,
         limit: k,
-        includeGlobal: scope.includeGlobal,
       },
       scope.scope === 'global'
         ? { kind: 'global' }

@@ -299,28 +299,38 @@ describe('the refusal does not brick the connection', () => {
 });
 
 describe('error messages name only reachable remedies', () => {
-  it('scope_locked names the project and does not promise a second connection', async () => {
+  it('a path-scoped save is not refused at all, so no message can name a retired scope', async () => {
     const r = await runWithContext(
       ctxFor({ project: realProject, requestedSlug: realProject.slug }),
-      () =>
-        Promise.resolve(
-          memoryHandlers().save({ scope: 'global', type: 'user', title: 't', content: 'c' }),
-        ),
+      () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
+    );
+    const { isError, body } = decode(r);
+    expect(isError).toBe(false);
+    expect(memory.unsafeGetById(body.id as string)?.projectId).toBe(realProject.id);
+  });
+
+  it('the refusal a path-scoped connection can still produce names no scope', async () => {
+    // `project.use` for another slug is the surviving `scope_locked`: a lock on
+    // switching, not on a scope, so its message may not name one.
+    const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
+    const r = await runWithContext(
+      ctxFor({ project: realProject, requestedSlug: realProject.slug }),
+      () => Promise.resolve(projectTools.use({ slug: 'somewhere-else', autocreate: true })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
-    expect(body.code).toBe('scope_locked');
     const message = body.message as string;
     expect(message).toContain('rembric');
+    expect(message).not.toMatch(/global|user-wide/i);
     expect(message).not.toMatch(/separate MCP connection|second connection/i);
-    expect(message).toMatch(/user-wide memory is not reachable/i);
   });
 
   it('agrees with the path-scoped instructions block about reachability', () => {
-    // Two surfaces of the same connection: neither may claim user-wide memory
-    // is reachable from it.
+    // Two surfaces of the same connection: neither may name a scope the server
+    // does not have, and neither may promise a second connection.
     const instructions = buildInstructions({ requestedSlug: realProject.slug });
-    expect(instructions).toMatch(/User-wide memory is not reachable here/);
+    expect(instructions).toContain(realProject.slug);
+    expect(instructions).not.toMatch(/global|user-wide/i);
     expect(instructions).not.toMatch(/separate MCP connection|second connection/i);
   });
 
@@ -354,10 +364,7 @@ describe('error messages name only reachable remedies', () => {
         requestedSlug: null,
         mcpSessionId: 'mcp-sess-readonly',
       }),
-      () =>
-        Promise.resolve(
-          memoryHandlers().save({ scope: 'global', type: 'user', title: 't', content: 'c' }),
-        ),
+      () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
@@ -401,10 +408,7 @@ describe('error messages name only reachable remedies', () => {
         requestedSlug: null,
         mcpSessionId: 'mcp-sess-own',
       }),
-      () =>
-        Promise.resolve(
-          memoryHandlers().save({ scope: 'project', type: 'user', title: 't', content: 'c' }),
-        ),
+      () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
@@ -422,10 +426,7 @@ describe('error messages name only reachable remedies', () => {
         requestedSlug: null,
         mcpSessionId: 'mcp-sess-legacy',
       }),
-      () =>
-        Promise.resolve(
-          memoryHandlers().save({ scope: 'project', type: 'user', title: 't', content: 'c' }),
-        ),
+      () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);

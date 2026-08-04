@@ -567,7 +567,7 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     expect(bounded).toHaveLength(3);
   });
 
-  it('includeGlobal admits a global memory sharing the entity, and only when asked', async () => {
+  it('an entity shared with another scope returns only the read scope, on every branch', async () => {
     const repos = createRepositories(db.handle.db);
     const globalMem = memory.save(
       { type: 'user', title: 'Global', content: 'user-wide convention' },
@@ -595,11 +595,11 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     expect(
       (await memory.search({ entity: 'src/both.ts' }, projectScope(projectId))).map((m) => m.id),
     ).toEqual([projectMem.id]);
-    expect(
-      (await memory.search({ entity: 'src/both.ts', includeGlobal: true }, projectScope(projectId)))
-        .map((m) => m.id)
-        .sort(),
-    ).toEqual([globalMem.id, projectMem.id].sort());
+    // The control: the excluded memory IS linked to the same entity and is
+    // returned in its own scope, so the exclusion is the scope predicate.
+    expect((await memory.search({ entity: 'src/both.ts' }, SCOPE_GLOBAL)).map((m) => m.id)).toEqual(
+      [globalMem.id],
+    );
   });
 });
 

@@ -343,7 +343,7 @@ describe('full-access token is never rejected by authorization', () => {
     const ctx = ctxFor('*');
 
     const write = await runWithContext(ctx, () =>
-      memoryHandlers.save({ scope: 'global', type: 'user', title: 'admin note', content: 'x' }),
+      memoryHandlers.save({ type: 'user', title: 'admin note', content: 'x' }),
     );
     expect(decode(write).isError).toBeFalsy();
 

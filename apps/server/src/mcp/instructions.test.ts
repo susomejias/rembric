@@ -27,10 +27,11 @@ describe('MCP initialize instructions', () => {
     }
   });
 
-  it('mentions the path-scoped slug in the path-scoped variant', () => {
+  it('mentions the path-scoped slug in the path-scoped variant, and names no retired scope', () => {
     const text = buildInstructions({ requestedSlug: 'rembric-api' });
     expect(text).toContain("'rembric-api'");
-    expect(text).toContain('scope=');
+    expect(text).toContain('project');
+    expect(text).not.toMatch(/global|user-wide/i);
   });
 
   it('points unscoped connections at project.use / roots auto-detection', () => {

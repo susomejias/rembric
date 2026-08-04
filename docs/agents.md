@@ -367,25 +367,13 @@ Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Stre
 
 If your client is stdio-only, use `mcp-remote` (the same package the Rembric plugin's bridge wraps) as a stdio↔HTTP shim. See its README for the exact spawn command; the Rembric plugin's `bin/rembric-bridge.mjs` is a working reference.
 
-## `project_suggestion_pending`
+## Roots-discovered slugs that name no project
 
-When you connect to `/mcp` (path-less) and roots-based discovery surfaces a slug that does not yet exist as a project, write tools refuse to silently fall through to global. They return:
+When you connect to `/mcp` (path-less) and roots-based discovery surfaces a slug that does not yet exist as a project, writes land in the default project rather than being refused. Nothing is lost and nothing leaks: the destination is an ordinary project, `project.current` names it, and the corpus is append-only, so a misfiled memory is re-saved under the right project.
 
-```json
-{
-  "ok": false,
-  "code": "project_suggestion_pending",
-  "message": "...",
-  "suggestedSlugs": ["acme-research"]
-}
-```
+To file the work under its own project, `project.use({slug, autocreate: true})` first. Never autocreate or autopin silently — minting a project is the user's call.
 
-Two resolutions, both belong to the user:
-
-- **Stay global**: re-issue passing `scope: 'global'` explicitly.
-- **Mint the project**: `project.use({slug, autocreate: true})`, then re-issue.
-
-Never autocreate or autopin silently.
+Earlier releases refused these writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
 
 ## Surviving compaction
 

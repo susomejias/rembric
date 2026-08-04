@@ -47,16 +47,12 @@ export interface SearchMemoryIdsOpts {
   topicKey?: string;
   limit: number;
   offset: number;
-  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
-  includeGlobal?: boolean;
 }
 
 export interface TextByIdsOpts {
   ids: readonly string[];
   scope: MemoryScope;
   projectId: string | null;
-  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
-  includeGlobal?: boolean;
 }
 
 export interface SearchBm25IdsOpts {
@@ -72,8 +68,6 @@ export interface SearchBm25IdsOpts {
   topicKey?: string;
   /** Bounded rank window depth (no OFFSET — fusion paginates in memory). */
   limit: number;
-  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
-  includeGlobal?: boolean;
 }
 
 export interface AdminListMemoriesOpts {
@@ -277,7 +271,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
+        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -310,7 +304,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
+          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -345,7 +339,7 @@ export class MemoryRepository {
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
         CROSS JOIN memory m ON m.id = je.value
-      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm', opts.includeGlobal)}
+      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
     `);
   }
 

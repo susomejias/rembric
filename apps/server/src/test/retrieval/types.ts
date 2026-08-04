@@ -39,18 +39,16 @@ export interface IngestedCorpus {
   projectIdBySlug: Map<string, string>;
 }
 
-/** The scope + widening a query is issued under, resolved to a real project id. */
+/** The scope a query is issued under, resolved to a real project id. */
 export interface QueryScope {
   scope: MemoryScope;
   projectId: string | null;
-  includeGlobal?: boolean;
 }
 
 /** Same shape, but `project` is a fixture slug (see `corpus.ts::PROJECTS`) — resolved to a `QueryScope` at eval time. */
 export interface QueryScopeFixture {
   scope: MemoryScope;
   project?: string;
-  includeGlobal?: boolean;
 }
 
 export type QueryType =
@@ -111,12 +109,11 @@ export interface Retriever<TState = unknown> {
   teardown?(state: TState): void | Promise<void>;
 }
 
-/** Scope match for an in-memory retriever (`grep`, `memory-md-dump`) — the non-SQL sibling of `services/scope.ts::memoryMatchesScope`, `includeGlobal`-aware like `db/repositories/scope-clause.ts::scopeWhere`. */
+/** Scope match for an in-memory retriever (`grep`, `memory-md-dump`) — the non-SQL sibling of `services/scope.ts::memoryMatchesScope`. */
 export function inScope(
   item: { scope: MemoryScope; projectId: string | null },
   scope: QueryScope,
 ): boolean {
   if (scope.scope === 'global') return item.scope === 'global';
-  if (item.scope === 'project') return item.projectId === scope.projectId;
-  return scope.includeGlobal === true;
+  return item.scope === 'project' && item.projectId === scope.projectId;
 }

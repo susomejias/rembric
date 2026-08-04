@@ -272,7 +272,7 @@ describe('MemoryRepository', () => {
       expect(rows).toEqual([{ id: '09P1', title: 'P1 row', content: 'p1 body' }]);
     });
 
-    it('drops another project and the global partition unless includeGlobal is set', () => {
+    it('drops another project and the retired partition, with no argument that admits them', () => {
       const strict = repo.textByIds({
         ids: ['09G', '09P1', '09P2'],
         scope: 'project',
@@ -280,24 +280,18 @@ describe('MemoryRepository', () => {
       });
       expect(strict.map((r) => r.id)).toEqual(['09P1']);
 
-      const widened = repo.textByIds({
-        ids: ['09G', '09P1', '09P2'],
-        scope: 'project',
-        projectId: 'p1',
-        includeGlobal: true,
-      });
-      expect(widened.map((r) => r.id).sort()).toEqual(['09G', '09P1']);
-      expect(widened).toHaveLength(2);
-    });
-
-    it('a global scope never sees a project row, even with includeGlobal', () => {
-      const rows = repo.textByIds({
-        ids: ['09G', '09P1', '09P2'],
-        scope: 'global',
-        projectId: null,
-        includeGlobal: true,
-      });
-      expect(rows.map((r) => r.id)).toEqual(['09G']);
+      // The control: both excluded ids are readable in their own scope, so the
+      // assertion above is about the predicate, not about missing rows.
+      expect(
+        repo
+          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: 'project', projectId: 'p2' })
+          .map((r) => r.id),
+      ).toEqual(['09P2']);
+      expect(
+        repo
+          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: 'global', projectId: null })
+          .map((r) => r.id),
+      ).toEqual(['09G']);
     });
 
     it('reads nothing for an empty id list', () => {

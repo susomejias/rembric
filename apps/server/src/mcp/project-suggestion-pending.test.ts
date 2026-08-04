@@ -21,6 +21,12 @@ import { buildSessionHandlers } from './session-tools.js';
  * project can no longer satisfy. These tests pin that it stays retired — a write
  * with unminted roots suggestions pending succeeds into the default project.
  *
+ * What the gate actually protected, since its own docstring claimed otherwise:
+ * NOT `memory.save`, whose `scope` argument defaulted to `project` so a
+ * path-less save was refused loudly rather than falling through. It was
+ * load-bearing for `memory.session_start`, `memory.save_prompt` and
+ * `memory.capture_passive`, which without it wrote user-wide rows silently.
+ *
  * The handlers are driven via `runWithContext` with the SessionRouter seeded
  * with the suggestion list roots discovery would produce in production.
  */
@@ -101,9 +107,7 @@ describe('memory.save — the retired project_suggestion_pending gate', () => {
   it('saves into the default project while an unminted suggestion is pending', async () => {
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
     const r = await runWithContext(makeContext(), () =>
-      Promise.resolve(
-        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
-      ),
+      Promise.resolve(saveHandlers.save({ type: 'project', title: 'x', content: 'x' })),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
@@ -115,9 +119,7 @@ describe('memory.save — the retired project_suggestion_pending gate', () => {
     projects.create({ slug: 'acme-research' });
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
     const r = await runWithContext(makeContext(), () =>
-      Promise.resolve(
-        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
-      ),
+      Promise.resolve(saveHandlers.save({ type: 'project', title: 'x', content: 'x' })),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
@@ -128,9 +130,7 @@ describe('memory.save — the retired project_suggestion_pending gate', () => {
     const proj = projects.create({ slug: 'path-proj' });
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['unrelated-suggestion']);
     const r = await runWithContext(makeContext({ project: proj, requestedSlug: 'path-proj' }), () =>
-      Promise.resolve(
-        saveHandlers.save({ scope: 'project', type: 'project', title: 'x', content: 'x' }),
-      ),
+      Promise.resolve(saveHandlers.save({ type: 'project', title: 'x', content: 'x' })),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();

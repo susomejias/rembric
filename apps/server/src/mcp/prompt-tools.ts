@@ -15,8 +15,7 @@ import {
   resolveEffectiveScope,
   resolveSessionId,
 } from './_shared.js';
-import { errToMcp, mcpError } from './errors.js';
-import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
+import { errToMcp } from './errors.js';
 import { ok } from './result.js';
 
 /**
@@ -101,18 +100,7 @@ async function handleSavePrompt(
   const ctx = getRequestContext();
   let scope: Scope;
   try {
-    const resolved = await resolveEffectiveScope(deps);
-    scope = resolved.scope;
-    // Same gate as memory.save: an unscoped connection with pending
-    // roots-derived suggestions must not silently write to global.
-    if (!resolved.project) {
-      const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
-      if (pending) {
-        return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
-          suggestedSlugs: pending,
-        });
-      }
-    }
+    scope = (await resolveEffectiveScope(deps)).scope;
     assertAuthorized('write', scope, deps);
   } catch (err) {
     return errToMcp(err);
