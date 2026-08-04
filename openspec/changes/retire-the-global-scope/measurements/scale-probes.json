@@ -1,0 +1,457 @@
+{
+  "bootControl": {
+    "1000": {
+      "assertions": [
+        {
+          "name": "fixture still holds global rows (nothing was migrated)",
+          "ok": true
+        },
+        {
+          "name": "memory non-empty",
+          "ok": true
+        }
+      ],
+      "boot1Ms": 12.9,
+      "boot2Ms": 9.8,
+      "dbBytes": 22761472,
+      "fixture": "/root/rembric-scale-fixtures/scale-1000",
+      "globalRows": 1000,
+      "instrument": "I3-CONTROL FULL-BOOT with no migration to apply",
+      "memoryRows": 1100,
+      "migrationsAlreadyApplied": 31
+    },
+    "10000": {
+      "assertions": [
+        {
+          "name": "fixture still holds global rows (nothing was migrated)",
+          "ok": true
+        },
+        {
+          "name": "memory non-empty",
+          "ok": true
+        }
+      ],
+      "boot1Ms": 14.2,
+      "boot2Ms": 35.5,
+      "dbBytes": 134492160,
+      "fixture": "/root/rembric-scale-fixtures/scale-10000",
+      "globalRows": 10000,
+      "instrument": "I3-CONTROL FULL-BOOT with no migration to apply",
+      "memoryRows": 11000,
+      "migrationsAlreadyApplied": 31
+    },
+    "200000": {
+      "assertions": [
+        {
+          "name": "fixture still holds global rows (nothing was migrated)",
+          "ok": true
+        },
+        {
+          "name": "memory non-empty",
+          "ok": true
+        }
+      ],
+      "boot1Ms": 2557.6,
+      "boot2Ms": 324.7,
+      "dbBytes": 2449108992,
+      "fixture": "/root/rembric-scale-fixtures/scale-200000",
+      "globalRows": 200000,
+      "instrument": "I3-CONTROL FULL-BOOT with no migration to apply",
+      "memoryRows": 220000,
+      "migrationsAlreadyApplied": 31
+    },
+    "50000": {
+      "assertions": [
+        {
+          "name": "fixture still holds global rows (nothing was migrated)",
+          "ok": true
+        },
+        {
+          "name": "memory non-empty",
+          "ok": true
+        }
+      ],
+      "boot1Ms": 66.9,
+      "boot2Ms": 80.1,
+      "dbBytes": 625614848,
+      "fixture": "/root/rembric-scale-fixtures/scale-50000",
+      "globalRows": 50000,
+      "instrument": "I3-CONTROL FULL-BOOT with no migration to apply",
+      "memoryRows": 55000,
+      "migrationsAlreadyApplied": 31
+    }
+  },
+  "crash": {
+    "10000": {
+      "afterCrash": {
+        "confirmations": 16500,
+        "memory": 11000,
+        "memoryGlobal": 10000,
+        "memory_entities": 134245,
+        "memory_entities_global": 120300,
+        "memory_entity_links": 198000,
+        "memory_vec": 11000,
+        "memory_vec_global": 10000,
+        "migrations": 31,
+        "projects": 3
+      },
+      "afterRetry": {
+        "confirmations": 16500,
+        "memory": 11000,
+        "memoryGlobal": 0,
+        "memory_entities": 134245,
+        "memory_entities_global": 0,
+        "memory_entity_links": 198000,
+        "memory_vec": 11000,
+        "memory_vec_global": 0,
+        "migrations": 32,
+        "projects": 4
+      },
+      "assertions": [
+        {
+          "name": "fixture was non-empty",
+          "ok": true
+        },
+        {
+          "name": "the child was actually SIGKILLed",
+          "ok": true
+        },
+        {
+          "name": "the kill landed mid-body (migration was not recorded)",
+          "ok": true
+        },
+        {
+          "name": "every counted total is unchanged after the crash",
+          "ok": true
+        },
+        {
+          "name": "global rows still present after the crash (nothing half-moved)",
+          "ok": true
+        },
+        {
+          "name": "integrity_check ok after the crash",
+          "ok": true
+        },
+        {
+          "name": "boot 2 applies the migration",
+          "ok": true
+        },
+        {
+          "name": "boot 2 leaves zero global rows",
+          "ok": true
+        },
+        {
+          "name": "boot 2 conserves the memory total, non-zero",
+          "ok": true
+        },
+        {
+          "name": "boot 2 leaves the global vec partition empty, total conserved and non-zero",
+          "ok": true
+        },
+        {
+          "name": "integrity_check ok after boot 2",
+          "ok": true
+        }
+      ],
+      "before": {
+        "confirmations": 16500,
+        "memory": 11000,
+        "memoryGlobal": 10000,
+        "memory_entities": 134245,
+        "memory_entities_global": 120300,
+        "memory_entity_links": 198000,
+        "memory_vec": 11000,
+        "memory_vec_global": 10000,
+        "migrations": 31,
+        "projects": 3
+      },
+      "child": {
+        "exitCode": null,
+        "killSent": true,
+        "signal": "SIGKILL",
+        "stderrTail": ""
+      },
+      "failures": [],
+      "fixture": "/root/rembric-scale-fixtures/scale-10000",
+      "integrityAfterCrash": ["ok"],
+      "integrityAfterRetry": ["ok"],
+      "killAfterMs": 500,
+      "ledgerRowsForMigration": 0,
+      "retryMs": 1801.5,
+      "walBytesLeftBehind": 44071672
+    },
+    "50000": {
+      "afterCrash": {
+        "confirmations": 82500,
+        "memory": 55000,
+        "memoryGlobal": 50000,
+        "memory_entities": 579674,
+        "memory_entities_global": 513113,
+        "memory_entity_links": 990000,
+        "memory_vec": 55000,
+        "memory_vec_global": 50000,
+        "migrations": 31,
+        "projects": 3
+      },
+      "afterRetry": {
+        "confirmations": 82500,
+        "memory": 55000,
+        "memoryGlobal": 0,
+        "memory_entities": 579674,
+        "memory_entities_global": 0,
+        "memory_entity_links": 990000,
+        "memory_vec": 55000,
+        "memory_vec_global": 0,
+        "migrations": 32,
+        "projects": 4
+      },
+      "assertions": [
+        {
+          "name": "fixture was non-empty",
+          "ok": true
+        },
+        {
+          "name": "the child was actually SIGKILLed",
+          "ok": true
+        },
+        {
+          "name": "the kill landed mid-body (migration was not recorded)",
+          "ok": true
+        },
+        {
+          "name": "every counted total is unchanged after the crash",
+          "ok": true
+        },
+        {
+          "name": "global rows still present after the crash (nothing half-moved)",
+          "ok": true
+        },
+        {
+          "name": "integrity_check ok after the crash",
+          "ok": true
+        },
+        {
+          "name": "boot 2 applies the migration",
+          "ok": true
+        },
+        {
+          "name": "boot 2 leaves zero global rows",
+          "ok": true
+        },
+        {
+          "name": "boot 2 conserves the memory total, non-zero",
+          "ok": true
+        },
+        {
+          "name": "boot 2 leaves the global vec partition empty, total conserved and non-zero",
+          "ok": true
+        },
+        {
+          "name": "integrity_check ok after boot 2",
+          "ok": true
+        }
+      ],
+      "before": {
+        "confirmations": 82500,
+        "memory": 55000,
+        "memoryGlobal": 50000,
+        "memory_entities": 579674,
+        "memory_entities_global": 513113,
+        "memory_entity_links": 990000,
+        "memory_vec": 55000,
+        "memory_vec_global": 50000,
+        "migrations": 31,
+        "projects": 3
+      },
+      "child": {
+        "exitCode": null,
+        "killSent": true,
+        "signal": "SIGKILL",
+        "stderrTail": ""
+      },
+      "failures": [],
+      "fixture": "/root/rembric-scale-fixtures/scale-50000",
+      "integrityAfterCrash": ["ok"],
+      "integrityAfterRetry": ["ok"],
+      "killAfterMs": 4000,
+      "ledgerRowsForMigration": 0,
+      "retryMs": 12678,
+      "walBytesLeftBehind": 216625512
+    }
+  },
+  "fixtures": {
+    "1000": {
+      "dir": "/root/rembric-scale-fixtures/scale-1000",
+      "elapsedMs": 1969,
+      "embeddingDims": 768,
+      "relationsCreated": 53,
+      "requested": {
+        "globalCount": 1000,
+        "projectCount": 100
+      },
+      "rows": {
+        "confirmations": 1650,
+        "consolidation_runs": 2,
+        "memory": 1100,
+        "memoryGlobal": 1000,
+        "memoryProject": 100,
+        "memory_entities": 15106,
+        "memory_entities_global": 13581,
+        "memory_entity_links": 19800,
+        "memory_fts": 1100,
+        "memory_relations": 452,
+        "memory_vec": 1100,
+        "memory_vec_global": 1000,
+        "projects": 3,
+        "sessions": 6,
+        "sessions_null_project": 5
+      },
+      "seed": 1,
+      "vectorCaveat": "deterministic pseudo-random unit vectors, NOT embeddings"
+    },
+    "10000": {
+      "dir": "/root/rembric-scale-fixtures/scale-10000",
+      "elapsedMs": 16452,
+      "embeddingDims": 768,
+      "relationsCreated": 548,
+      "requested": {
+        "globalCount": 10000,
+        "projectCount": 1000
+      },
+      "rows": {
+        "confirmations": 16500,
+        "consolidation_runs": 2,
+        "memory": 11000,
+        "memoryGlobal": 10000,
+        "memoryProject": 1000,
+        "memory_entities": 134245,
+        "memory_entities_global": 120300,
+        "memory_entity_links": 198000,
+        "memory_fts": 11000,
+        "memory_relations": 4517,
+        "memory_vec": 11000,
+        "memory_vec_global": 10000,
+        "projects": 3,
+        "sessions": 55,
+        "sessions_null_project": 50
+      },
+      "seed": 1,
+      "vectorCaveat": "deterministic pseudo-random unit vectors, NOT embeddings"
+    },
+    "200000": {
+      "dir": "/root/rembric-scale-fixtures/scale-200000",
+      "elapsedMs": 983664,
+      "embeddingDims": 768,
+      "relationsCreated": 10999,
+      "requested": {
+        "globalCount": 200000,
+        "projectCount": 20000
+      },
+      "rows": {
+        "confirmations": 330000,
+        "consolidation_runs": 2,
+        "memory": 220000,
+        "memoryGlobal": 200000,
+        "memoryProject": 20000,
+        "memory_entities": 2051891,
+        "memory_entities_global": 1804057,
+        "memory_entity_links": 3960000,
+        "memory_fts": 220000,
+        "memory_relations": 90337,
+        "memory_vec": 220000,
+        "memory_vec_global": 200000,
+        "projects": 3,
+        "sessions": 1100,
+        "sessions_null_project": 1000
+      },
+      "seed": 1,
+      "vectorCaveat": "deterministic pseudo-random unit vectors, NOT embeddings"
+    },
+    "50000": {
+      "dir": "/root/rembric-scale-fixtures/scale-50000",
+      "elapsedMs": 109119,
+      "embeddingDims": 768,
+      "relationsCreated": 2749,
+      "requested": {
+        "globalCount": 50000,
+        "projectCount": 5000
+      },
+      "rows": {
+        "confirmations": 82500,
+        "consolidation_runs": 2,
+        "memory": 55000,
+        "memoryGlobal": 50000,
+        "memoryProject": 5000,
+        "memory_entities": 579674,
+        "memory_entities_global": 513113,
+        "memory_entity_links": 990000,
+        "memory_fts": 55000,
+        "memory_relations": 22587,
+        "memory_vec": 55000,
+        "memory_vec_global": 50000,
+        "projects": 3,
+        "sessions": 275,
+        "sessions_null_project": 250
+      },
+      "seed": 1,
+      "vectorCaveat": "deterministic pseudo-random unit vectors, NOT embeddings"
+    }
+  },
+  "note": "the yes/no probes: interruption (scale-crash.mjs), the rollback read-shape comparison (scale-rollback.mjs), and the boot control with the migration removed (scale-boot-control.mjs).",
+  "rollback": {
+    "assertions": [
+      {
+        "name": "control: the shipped shape still serves a dense read in the new partition",
+        "ok": true
+      },
+      {
+        "name": "control: the alternative still serves a dense read in the new partition",
+        "ok": true
+      },
+      {
+        "name": "shipped shape reproduces design.md D5's measured 0 on the old dense global read",
+        "ok": true
+      },
+      {
+        "name": "both shapes leave zero rows readable by the old sparse global read",
+        "ok": true
+      },
+      {
+        "name": "the alternative does NOT reproduce it \u2014 the old dense global read returns rows",
+        "ok": true
+      },
+      {
+        "name": "and those rows hydrate as project-scoped rows through a global read",
+        "ok": true
+      }
+    ],
+    "failures": [],
+    "fixture": "/root/rembric-scale-fixtures/scale-10000",
+    "results": {
+      "id-is-partition": {
+        "defaultProject": {
+          "id": "__global__",
+          "slug": "default"
+        },
+        "hydratedProjectIsDefault": true,
+        "hydratedRows": 10,
+        "hydratedScopes": ["project"],
+        "newPartitionDenseRows": 10,
+        "oldGlobalDenseRows": 10,
+        "oldGlobalSparseRows": 0
+      },
+      "set": {
+        "defaultProject": {
+          "id": "7c58967932e1c2e62a8f23412c",
+          "slug": "default"
+        },
+        "hydratedProjectIsDefault": true,
+        "hydratedRows": 0,
+        "hydratedScopes": [],
+        "newPartitionDenseRows": 10,
+        "oldGlobalDenseRows": 0,
+        "oldGlobalSparseRows": 0
+      }
+    }
+  }
+}
