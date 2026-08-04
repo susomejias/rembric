@@ -294,9 +294,15 @@ The `memory.search` description SHALL state what an abstaining response means an
 
 For an `active` memory, the response SHALL additionally include the derived review metadata (see the `memory` capability): `reviewState` (`'fresh'` | `'needs_review'`), `reviewAfter` when non-null, and `reviewEscalated`. For non-`active` memories these fields SHALL be omitted.
 
-`memory.get` SHALL additionally accept an OPTIONAL `ids` array as a back-compatible batch form. Exactly one of `id` or `ids` SHALL be supplied; supplying both, or neither, SHALL be an `invalid_input` error. When `id` is supplied, the response shape SHALL be unchanged from the single-memory form above. When `ids` is supplied, the response SHALL contain an ordered `memories` array — one per id that resolves to an in-scope, token-authorized memory, in the same order the ids were requested, each entry carrying the same per-memory shape as the single-`id` form — plus a `notFound` array listing the requested ids that did not resolve. The batch form SHALL be scope-enforced via a scoped service read: an id outside the connection's effective scope SHALL be reported in `notFound` and SHALL NOT leak the memory's content or existence, identically to how the single-`id` form treats an out-of-scope id as not found. The `ids` array SHALL be bounded by a maximum length; a request exceeding it SHALL be an `invalid_input` error.
+`memory.get` SHALL additionally accept an OPTIONAL `ids` array as a back-compatible batch form. Exactly one of `id` or `ids` SHALL be supplied; supplying both, or neither, SHALL be an `invalid_input` error. When `id` is supplied, the response shape SHALL be unchanged from the single-memory form above. When `ids` is supplied, the response SHALL contain an ordered `memories` array — one per id that resolves to an in-scope, token-authorized memory, in the same order the ids were requested, each entry carrying the per-memory shape enumerated below — plus a `notFound` array listing the requested ids that did not resolve. The batch form SHALL be scope-enforced via a scoped service read: an id outside the connection's effective scope SHALL be reported in `notFound` and SHALL NOT leak the memory's content or existence, identically to how the single-`id` form treats an out-of-scope id as not found. The `ids` array SHALL be bounded by a maximum length; a request exceeding it SHALL be an `invalid_input` error.
 
-The two forms differ deliberately in one respect: the single-`id` form dereferences ONE memory and advances its access signal, while the batch form is a pure read and advances nothing, so a bulk pull cannot reshuffle decay eligibility or context recency for every id it names (see the `memory` capability, "A dereferenced memory is treated as accessed").
+A batch entry SHALL carry: the memory's own columns (`id`, `scope`, `projectId`, `type`, `title`, `content`, `tags`, `status`, `replaces`, `createdAt`, `topicKey`), `lastSeenAt`, the bounded `relations`/`relationsTotal` projection, the bounded `entities`/`entitiesTotal` projection, and the derived review metadata (`reviewState`, `reviewAfter`, `reviewEscalated`) on exactly the same terms as the single-`id` form — present for an `active` memory, omitted otherwise. The review metadata SHALL be derived in ONE batched lookup for the whole page rather than per row, matching how the search surface already derives it; a batch read SHALL NOT omit it, because `memory.context.needsReview` hands the agent a list of ids and the taught follow-up is a batch read, so an omission there tells the agent that nothing needs review.
+
+The two forms differ deliberately in the following respects, and ONLY these. Each difference SHALL be enumerated here rather than implied by a parity claim, because a claim of identical shape that the payloads do not honour is undetectable by any scenario written against it:
+
+- The single-`id` form dereferences ONE memory and advances its access signal, while the batch form is a pure read and advances nothing, so a bulk pull cannot reshuffle decay eligibility or context recency for every id it names (see the `memory` capability, "A dereferenced memory is treated as accessed").
+- The single-`id` form carries the ancestry projection — `head`, `predecessors`, `predecessorCount`, `truncated`, `headTruncated` — and `confirmationCount`; the batch form SHALL NOT. Those are per-target walks, and performing one per id would turn a bulk read into N ancestry queries. A caller needing history for a specific row SHALL use the single-`id` form, and the `memory.get` description SHALL NOT promise ancestry on the batch form.
+- `lastSeenAt` is carried by the batch form only. The single-`id` form advances the very signal it would be reporting, so the value it could return is the timestamp its own call just wrote — tautological rather than informative.
 
 #### Scenario: Retrieve a merged memory
 
@@ -318,7 +324,7 @@ The two forms differ deliberately in one respect: the single-`id` form dereferen
 
 - **GIVEN** in-scope memories M1, M2, M3 all readable by the calling token
 - **WHEN** an authenticated client calls `memory.get({ ids: ['M2', 'M1', 'M3'] })`
-- **THEN** the response SHALL include `memories` ordered `[M2, M1, M3]`, each carrying the single-`id` per-memory shape, and `notFound: []`
+- **THEN** the response SHALL include `memories` ordered `[M2, M1, M3]`, each carrying the enumerated batch per-memory shape, and `notFound: []`
 
 #### Scenario: The batch form advances no access signal
 
@@ -337,6 +343,27 @@ The two forms differ deliberately in one respect: the single-`id` form dereferen
 
 - **WHEN** an authenticated client calls `memory.get` with BOTH `id` and `ids` set, or with NEITHER set
 - **THEN** the server SHALL return an `invalid_input` error and SHALL NOT return any memory
+
+#### Scenario: The batch form carries the review metadata, verified against the single form
+
+- **GIVEN** one `active` in-scope memory M whose derived `reviewState` is `'needs_review'`
+- **WHEN** an authenticated client calls `memory.get({ id: 'M' })` and `memory.get({ ids: ['M'] })` on the same connection, adjacent in time
+- **THEN** both responses SHALL carry `reviewState`, `reviewAfter` and `reviewEscalated` for M, with equal values
+- **AND** a `superseded` or `archived` id in the same batch SHALL carry none of the three, so the omission remains status-driven rather than form-driven
+- **AND** the two calls SHALL be the control for each other: a test asserting only the batch form cannot distinguish a correct batch from a scope in which no row needs review
+
+#### Scenario: The batch form carries `replaces`
+
+- **GIVEN** an in-scope memory M that superseded a predecessor, so `M.replaces` is non-empty
+- **WHEN** an authenticated client calls `memory.get({ ids: ['M'] })`
+- **THEN** the entry for M SHALL carry `replaces` with the same value the single-`id` form returns for M
+- **AND** the entry SHALL NOT carry `head`, `predecessors`, `predecessorCount`, `truncated`, `headTruncated` or `confirmationCount` — `replaces` is a column on the row, the ancestry projection is a walk
+
+#### Scenario: `lastSeenAt` is a deliberate asymmetry, not a drift
+
+- **WHEN** an authenticated client calls `memory.get({ ids: ['M'] })` and `memory.get({ id: 'M' })`
+- **THEN** the batch entry SHALL carry `lastSeenAt` and the single-`id` response SHALL NOT
+- **AND** the single-`id` call SHALL still advance M's access signal, which is why it does not report it
 
 ### Requirement: Memory-returning MCP reads MUST expose the title
 
@@ -486,6 +513,8 @@ Every content obligation in this requirement SHALL be satisfied within `DESCRIPT
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, and `memory.session_summary` with the following contracts. The tools are split by responsibility: `memory.session_start` opens a session, `memory.session_summary` writes summary/title without transitioning, `memory.session_end` is the sole state transition. This is a behaviour change from the prior contract where `memory.session_summary` ended the session as a side effect.
 
+`memory.session_start` SHALL NOT always insert a row. When an `active` session already exists for the caller's `(tokenId, projectId)` on this transport — the ordinary case, because every supported host registers the session over HTTP before the agent runs — the call SHALL adopt that row instead of minting a second one, and SHALL report which of the two happened in a REQUIRED `reused` field: `true` when an existing row was adopted, `false` when a row was inserted. `reused` is the only signal distinguishing "you are now attached to the host's session" from "you just created a parallel session", which is the question a defensive `memory.session_start` call is asking. Its `outputSchema` SHALL mark it required, and the tool's description SHALL name it and state what `true` means (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"): a required field the description omits from a closed-form `Returns: { … }` list is undocumented surface on the one channel the model reads.
+
 `memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
 
 `memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the four clients) before the agent gets there.
@@ -497,7 +526,7 @@ Session resolution is unchanged and SHALL remain status-aware where it already i
 #### Scenario: `memory.session_start` opens a new session
 
 - **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
-- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, startedAt, title }`
+- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, projectId, startedAt, title, reused }`
 
 #### Scenario: `memory.session_end` ends a session without summary
 
@@ -578,6 +607,21 @@ Session resolution is unchanged and SHALL remain status-aware where it already i
 - **WHEN** any of the three tools is called with a `sessionId` whose `token_id` does not match the caller's token
 - **THEN** the call SHALL be rejected with code `session_not_found` (never `forbidden`, to avoid information disclosure)
 
+#### Scenario: A second `memory.session_start` adopts the first session and says so
+
+- **GIVEN** a connection with no active session for its `(tokenId, projectId)`
+- **WHEN** an MCP client calls `memory.session_start` twice in a row on that connection
+- **THEN** the first response SHALL carry `reused: false` and the second SHALL carry `reused: true`
+- **AND** both responses SHALL carry the SAME `sessionId` — the second call SHALL NOT insert a second `sessions` row
+- **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be 1 after both calls, which is the control that `reused: true` describes adoption rather than a coincidence of ids
+
+#### Scenario: `memory.session_start`'s description names every required output field
+
+- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
+- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `title` and `reused`
+- **AND** the description SHALL state that `reused: true` means the call adopted the host's already-active session rather than starting one
+- **AND** a CI test SHALL compare the description against the `outputSchema`'s required list, so a field added to the schema without a description update fails the build
+
 ### Requirement: The MCP server MUST expose three research tools
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.context`, `memory.timeline`, and `memory.capture_passive` with the following contracts. Note that `memory.save_prompt` (write side) and `memory.search_prompts` (read side) are registered in their own dedicated requirements; this requirement scopes the research/context tools only.
@@ -586,10 +630,12 @@ Both of `memory.context`'s queue channels SHALL be returned with the scoped TOTA
 
 Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pending relation whose source AND target are both `status = 'active'` (see the `memory` capability, "A pending judgment MUST be withheld from the agent queue once either endpoint is retired"). The list and the total SHALL apply that restriction identically, so the total remains the depth of the queue the list pages rather than a depth the list can never reach.
 
+`memory.context`'s four size arguments are bounded by its declared input schema — `sessions` 25, `prompts` 50, `memories` 100, `judgments` 50 — and a value above a maximum SHALL be REJECTED as an invalid argument rather than silently clamped, consistent with every other numeric bound on this surface (see "`memory.search` and `memory.get` MUST expose the annotation bound and its true total"). Because no clamping can occur over the transport, the response SHALL NOT carry a field reporting that an argument was clamped (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"). The handler MAY retain an in-process clamp as a defensive bound for a future direct caller that bypasses the input schema; such a clamp is unobservable over the transport and SHALL NOT be reported in the response.
+
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, judgments?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ scope, recentSessions, recentPrompts, recentMemories, relevantMemories, pendingJudgments, pendingJudgmentsTotal, needsReview, needsReviewTotal, clamped }` — where `scope` is the resolved scope label, as on `memory.stats` — plus `rankedPass` when the ranked pass executed (see "`memory.context` MUST offer a relevance channel alongside recency"), with each list scoped to the request context (global vs path-scoped project)
+- **THEN** the server SHALL return `{ scope, recentSessions, recentPrompts, recentMemories, relevantMemories, pendingJudgments, pendingJudgmentsTotal, needsReview, needsReviewTotal }` — where `scope` is the resolved scope label, as on `memory.stats` — plus `rankedPass` when the ranked pass executed (see "`memory.context` MUST offer a relevance channel alongside recency"), with each list scoped to the request context (global vs path-scoped project)
 - **AND** when a size argument is omitted the default SHALL be `sessions = 3`, `memories = 10`, `prompts = 5`, `judgments = 5` (kept small because the snapshot is read every session start; callers needing more pass explicit args, still bounded by the maxima below)
 - **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 3`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
@@ -639,7 +685,7 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 - **GIVEN** a scope with more than 10 active memories, more than 5 non-deleted prompts, and more than 3 content-bearing sessions
 - **WHEN** an MCP client calls `memory.context` with no size arguments
 - **THEN** `recentMemories` SHALL contain at most 10 rows, `recentPrompts` at most 5, and `recentSessions` at most 3
-- **AND** `clamped` SHALL be `false` (defaults are not clamping)
+- **AND** the response SHALL contain no clamp-reporting field — the defaults are inside every maximum, and no admissible argument value can produce clamping
 
 #### Scenario: `memory.context.recentSessions` backfills past empty sessions
 
@@ -655,10 +701,14 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 
 #### Scenario: `memory.context` arguments exceed clamps
 
-- **WHEN** the caller passes `sessions > 25`, `prompts > 50`, `memories > 100`, or `judgments > 50`
-- **THEN** the server SHALL silently clamp to the maximum and SHALL include a `clamped: true` field in the response
-- **AND** `judgments` SHALL be bounded on the same terms as its three siblings — including the declared input-schema maximum, which over the MCP transport rejects an out-of-range value with `invalid_input` BEFORE the handler's clamp is reached, so the `clamped` flag is the in-process defence rather than the wire behaviour. This layering is pre-existing and identical for all four arguments; `judgments` SHALL NOT introduce a different one
-- **AND** a `judgments` value at or below 50 that exceeds the number of pending relations in scope SHALL return every one that exists, with `clamped` false — asking for more than the queue holds is not an error
+The title predates the behaviour: nothing is clamped, and the scenario pins the rejection that happens instead.
+
+- **WHEN** the caller passes `sessions: 26`, `prompts: 51`, `memories: 101`, or `judgments: 51`, each in its own call
+- **THEN** each call SHALL be rejected as an invalid argument and SHALL NOT return a context payload
+- **AND** the same argument AT its maximum — `sessions: 25`, `prompts: 50`, `memories: 100`, `judgments: 50` — SHALL succeed, which is the control that distinguishes a real rejection from a broken probe
+- **AND** all four arguments SHALL be bounded on identical terms; `judgments` SHALL NOT introduce a different layering from its three siblings
+- **AND** a `judgments` value at or below 50 that exceeds the number of pending relations in scope SHALL return every one that exists — asking for more than the queue holds is not an error
+- **AND** no response SHALL carry a field reporting that any argument was clamped
 
 #### Scenario: `memory.context` excludes soft-deleted prompts
 
@@ -714,6 +764,8 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 
 - **WHEN** an MCP client retrieves the tool description for `memory.context` via `tools/list`
 - **THEN** the description SHALL name `pendingJudgmentsTotal` and the `judgments` argument, and SHALL state that passing a size lifts the age filter — a caller cannot guess that a size argument changes which rows qualify
+- **AND** the description SHALL name the maximum of EACH of the four size arguments — `sessions` 25, `prompts` 50, `memories` 100, `judgments` 50 — and SHALL state that a value above a maximum is rejected rather than clamped. Declaring a maximum only as an input-schema `maximum` keyword SHALL NOT satisfy this clause, since some clients do not surface per-property schema descriptions to the model, leaving the tool rejecting a bound it never taught
+- **AND** the description SHALL NOT state that the response carries a flag reporting a clamp
 - **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"); if the clause does not fit, prose SHALL be cut from the description rather than the constant raised
 
 #### Scenario: `memory.timeline` returns chronological neighbors within a session
@@ -725,6 +777,13 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 
 - **WHEN** the target memory has `session_id = NULL`
 - **THEN** the server SHALL return neighbors selected by `created_at` within ±2 hours of the target's `created_at`, scoped to the same `(scope, project_id)`, and the response SHALL include `fallback: 'time_window'`
+
+#### Scenario: `memory.timeline`'s description names its arguments and its bound
+
+- **WHEN** an MCP client retrieves the tool description for `memory.timeline` via `tools/list`
+- **THEN** the description SHALL name the `before` and `after` arguments and their defaults, SHALL state that their SUM may not exceed the combined maximum, and SHALL state that a larger window is rejected rather than clamped
+- **AND** it SHALL name the remedy the handler's own error message already names — a wider window is served by `memory.search` — so the description and the error agree
+- **AND** a tool whose handler rejects a bound its description never mentions SHALL be treated as a defect (see "A tool's description and its response MUST agree, and neither may promise an unreachable state")
 
 #### Scenario: `memory.timeline` combined window exceeds 50
 
@@ -835,10 +894,12 @@ When `focus` is absent, the server SHALL derive a seed from signals it already h
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memory.stats`. Both output contracts SHALL enumerate exactly the fields the tools return: a documented field the tool does not return misleads a client into treating its absence as a fault, and a returned field the contract omits is undocumented surface (the two counters added for queue-depth observability were both in the second category).
 
+The `db` block SHALL NOT carry an `open` flag. Producing the report requires a database read to authenticate the request, so a report that exists is proof the database was open, and the flag's `false` value is reachable only in a state where the tool returns no report at all — the unreachable-state defect (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"). Database trouble that does NOT prevent the call SHALL continue to be reported where it varies: `integrity` from the integrity check, and `warnings` for a pragma read that failed. **BREAKING** on the published output contract, accepted because a field with one reachable value cannot be depended upon for anything.
+
 #### Scenario: `memory.doctor` returns an operational report
 
 - **WHEN** an MCP client calls `memory.doctor`
-- **THEN** the server SHALL return `{ db: { open, journalMode, integrity, sizeBytes }, embeddings: { model, backlog }, entities: { backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, review: { needsReview, pendingJudgments }, warnings: string[] }` — the report SHALL NOT contain an `llm` block, and the `embeddings` block SHALL NOT contain `enabled` (embeddings are always on); `model` SHALL identify the compiled-in embedding model
+- **THEN** the server SHALL return `{ db: { journalMode, integrity, sizeBytes }, embeddings: { model, backlog }, entities: { backlog }, consolidation: { lastRunAt, lastRunOps }, sessions: { active }, review: { needsReview, pendingJudgments }, warnings: string[] }` — the report SHALL NOT contain an `llm` block, and the `embeddings` block SHALL NOT contain `enabled` (embeddings are always on); `model` SHALL identify the compiled-in embedding model
 - **AND** `entities.backlog` and `review` SHALL be server-wide, matching `sessions.active`
 
 #### Scenario: `memory.stats` returns counters by scope and status
@@ -853,6 +914,19 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memor
 - **WHEN** the caller's scope is `read:project:<id>` and the connection's effective scope resolves to global or to a different project
 - **THEN** the call SHALL be rejected with code `forbidden`
 
+#### Scenario: The report carries no `db.open` flag
+
+- **WHEN** an MCP client calls `memory.doctor`
+- **THEN** the `db` block SHALL contain `journalMode`, `integrity` and `sizeBytes` and SHALL NOT contain `open`
+- **AND** the declared `outputSchema` SHALL NOT mark `open` required, nor declare it at all
+
+#### Scenario: A database fault that still permits the call is reported where it varies
+
+- **GIVEN** a database whose pragma reads fail while the connection still authenticates the request
+- **WHEN** an MCP client calls `memory.doctor`
+- **THEN** the call SHALL succeed, `warnings` SHALL name the failed pragma read, and `integrity` SHALL report `unknown` rather than `ok`
+- **AND** no field SHALL claim the database is healthy
+
 ### Requirement: The observability tool descriptions MUST disclose which population their counters cover
 
 `memory.doctor` and `memory.stats` return counters under colliding names over two different populations: doctor's are server-wide (all projects plus global), stats' are resolved against the request context. `memory.stats` carries a top-level `scope` field and `memory.doctor` carries none, but a client SHALL NOT be expected to infer one tool's semantics from the ABSENCE of a field in another. The counters therefore differ in value with nothing on the wire to explain it, and two readers of this codebase have already drawn a wrong conclusion from the collision. The tool description is the surface the model reads before deciding to call, so the disclosure belongs there.
@@ -861,6 +935,7 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `memory.doctor` and `memor
 
 - state that the report is SERVER-WIDE, covering all projects and the global scope;
 - state that `memory.stats` carries the scoped equivalents and that the two sets of numbers WILL differ, so a mismatch reads as intent rather than as one of them being stale;
+- name EVERY cause of that divergence, not only the population. `review.needsReview` diverges from `memory.stats`' `needsReviewTotal` by population alone, but `review.pendingJudgments` diverges by population AND by filtering: doctor's counter is an unfiltered count of pending rows while the scoped totals count only ADJUDICABLE pairs, both endpoints still `active` (see the `memory` capability, "that field SHALL remain an unfiltered count of pending rows"). Naming only the population is worse than naming no cause, because a reader who verifies that both calls resolve to one project — where the population cannot explain anything — is left concluding that one of the two numbers is stale. The divergence is measurable inside a single project: archiving one endpoint of a pending pair drops the scoped totals and leaves doctor's count unchanged;
 - name the blocks the report actually returns, including `entities`, `sessions` and `review`, the three the description omitted before this requirement existed;
 - NOT advertise an `llm` block or any other field the output contract forbids (see "The MCP server MUST expose two observability tools", which requires the report to contain no `llm` block). A description that promises a field the tool cannot return misleads a client into treating its absence as a fault — the same hazard that requirement addresses for the output contract, on the surface the model actually reads.
 
@@ -909,6 +984,19 @@ This requirement constrains description prose only. It SHALL NOT be read as re-s
 - **GIVEN** a scope holding one adjudicable pending pair and three pairs with a retired endpoint
 - **WHEN** `memory.doctor` and `memory.stats` are both called from a connection resolving to that scope
 - **THEN** `memory.doctor`'s `review.pendingJudgments` SHALL remain the unfiltered server-wide count and `memory.stats`' `pendingJudgmentsTotal` SHALL remain 1, exactly as before this change
+
+#### Scenario: `memory.doctor`'s description names the filter as well as the population
+
+- **WHEN** an MCP client retrieves the tool description for `memory.doctor` via `tools/list`
+- **THEN** the description SHALL convey that `pendingJudgments` is an unfiltered count of pending rows while the scoped totals count only adjudicable pairs
+- **AND** it SHALL remain true that the description also conveys the server-wide population, which explains the `sessions`, `entities` and `needsReview` divergences
+
+#### Scenario: The named causes account for a divergence inside one project
+
+- **GIVEN** a single project holding one pending pair, and both tools called from a connection resolving to that project
+- **WHEN** one endpoint of the pair is archived and both tools are called again
+- **THEN** `memory.doctor`'s `review.pendingJudgments` SHALL still report 1 while `memory.stats`' `pendingJudgmentsTotal` SHALL report 0
+- **AND** the `memory.doctor` description SHALL contain a cause that accounts for that difference, since the population cannot: both calls resolved to the same project
 
 ### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace
 
@@ -1310,7 +1398,7 @@ The gate SHALL be a no-op (the call proceeds with the previous behavior) when AN
 
 `memory.session_end` and `memory.session_summary` SHALL resolve the target row before performing any state transition. When the resolved row has `deleted_at IS NOT NULL`, the call SHALL be rejected with a structured MCP error containing `code: 'session_deleted'` and a message naming the deleted-at timestamp. No state mutation SHALL be performed. The cross-token check that already protects these calls SHALL continue to run first; only when the cross-token check passes does the `session_deleted` gate apply.
 
-`memory.session_start` is unaffected — every call opens a brand-new session row and never touches a deleted one.
+`memory.session_start` is unaffected: it never resolves an existing row by id, and the row it may adopt is found by an active-session lookup that excludes soft-deleted rows, so it can neither target nor revive a deleted session. It does NOT always insert a new row — see "The MCP server MUST expose three session-lifecycle tools", which specifies the adoption path and its `reused` flag — and this requirement SHALL NOT be read as promising that it does.
 
 #### Scenario: memory.session_end targets a soft-deleted session
 
@@ -1414,7 +1502,7 @@ Input schema:
 - `sessionId?: string` — restrict to prompts whose `session_id = <sessionId>`.
 - `agent?: string` — restrict to prompts whose `agent = <agent>`.
 - `includeDeleted?: boolean` — default `false`; when `true`, soft-deleted prompts SHALL be included.
-- `limit?: number` — default `25`, clamped to `[1, 100]`.
+- `limit?: number` — default `25`, bounded to `[1, 100]` by the declared input schema. A value outside that range SHALL be REJECTED as an invalid argument rather than clamped.
 - `offset?: number` — default `0`.
 
 Response shape:
@@ -1436,12 +1524,13 @@ Response shape:
       "createdAt": "<iso timestamp>"
     }
   ],
-  "total": <count>,
-  "clamped": true | false
+  "total": <count>
 }
 ```
 
 The tool SHALL resolve effective project via the existing `scopeFromContext` precedence (path-scoped `ctx.project` → `SessionRouter` pin → global). It SHALL NOT leak prompts from any other scope.
+
+Because the input schema's bound exactly brackets the service's own range, no clamping can occur over the transport, and the response SHALL NOT carry a field reporting that `limit` was clamped (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"). The service MAY retain an in-process clamp over the same range as a defensive bound for a direct caller; it is unobservable over the transport and SHALL NOT be reported in the response. The tool's description SHALL name `limit`'s default and its maximum and SHALL state that a larger value is rejected rather than clamped — a rejection the caller was not told how to avoid is not a safe bound.
 
 #### Scenario: `memory.search_prompts` returns FTS5 matches scoped to the active project
 
@@ -1470,9 +1559,20 @@ The tool SHALL resolve effective project via the existing `scopeFromContext` pre
 
 #### Scenario: `memory.search_prompts` clamps limit and reports it
 
+The title predates the behaviour: `limit` is NOT clamped and nothing is reported, and the scenario pins the rejection that happens instead.
+
 - **WHEN** the caller passes `limit: 500`
-- **THEN** the server SHALL silently clamp `limit` to `100`
-- **AND** the response SHALL include `clamped: true`
+- **THEN** the call SHALL be rejected as an invalid argument and SHALL NOT return a prompt page
+- **AND** `limit: 0` SHALL be rejected on the same terms — the bound is two-sided
+- **AND** `limit: 100` SHALL succeed, which is the control that makes the rejection a finding rather than a broken probe, and proves the bound the description teaches is usable
+- **AND** no response SHALL carry a field reporting that `limit` was clamped
+
+#### Scenario: `memory.search_prompts`' description teaches its bound
+
+- **WHEN** an MCP client retrieves the tool description for `memory.search_prompts` via `tools/list`
+- **THEN** the description SHALL state `limit`'s default and its maximum, and that a larger value is rejected rather than clamped
+- **AND** the response shape the description advertises SHALL NOT list a clamp-reporting field
+- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling")
 
 #### Scenario: `memory.search_prompts` from a path-scoped connection rejects cross-scope leakage
 
@@ -2550,3 +2650,83 @@ Two consequences are normative:
 - **GIVEN** a path-less `/mcp` connection with a token whose scope is `read:*`
 - **WHEN** the client calls a write-classified tool
 - **THEN** the refusal SHALL carry `code: 'forbidden'` and the message SHALL NOT suggest `project.use`, since no project pin exists to activate
+
+### Requirement: A tool's description and its response MUST agree, and neither may promise an unreachable state
+
+An MCP tool description is read by the model on every call and is the only contract most agents ever see. It SHALL NOT teach a state the tool cannot produce, SHALL NOT present as closed an enumeration of the response that omits a field the tool always returns, and SHALL NOT offer a cause for an observable divergence that is not the actual cause. Equivalently: the description, the declared `outputSchema` and the emitted payload SHALL agree, and where they disagree the disagreement is a defect regardless of which of the three is wrong.
+
+Three failure modes are in scope, and an instance SHALL be classified as one of them before it is fixed, because the correct remedy differs:
+
+1. **A field reporting an unreachable state.** Where a tool's declared input schema REJECTS an out-of-range argument, the response SHALL NOT carry a field whose purpose is to report the out-of-range handling that therefore never occurs; likewise a field SHALL NOT be published whose only other value is reachable solely in a state where the tool cannot answer at all. A field that can hold one value forever carries no information and costs a line of the model's attention on every call.
+2. **A description that misstates the response.** A closed-form enumeration ("Returns: { … }") SHALL name every field the `outputSchema` marks required. Where a required field answers the question the tool exists to answer, omitting it from the description is the more severe form of this defect, not the milder one.
+3. **A description whose stated cause is not the actual cause.** Where a description explains why two surfaces report different numbers, it SHALL name every cause that can produce the divergence. Naming one of two causes is worse than naming none, because a reader who checks the named cause and finds it inapplicable concludes that one of the two numbers is stale.
+
+An instance SHALL be closed in ONE of exactly three ways, and the change closing it SHALL state which:
+
+- **Remove the field or claim** — appropriate when no reachable meaning exists that does not require relaxing the bound the input schema enforces. Relaxing a bound in order to make a clamp-receipt field reachable SHALL NOT be treated as an available option; rejection rather than clamping is the surface-wide rule (see "`memory.search` and `memory.get` MUST expose the annotation bound and its true total").
+- **Correct the description** — appropriate when the payload is right and the text is wrong.
+- **Correct the CODE** — appropriate when the description states the intended contract and a code path fails to honour it. A description SHALL NOT be weakened to match a defective implementation; where the two disagree, which one moves is a decision the change SHALL record.
+
+Where the remedy is removing a field, the change SHALL take it out of the tool's declared `outputSchema` AND out of the emitted payload together, because the MCP SDK validates `structuredContent` against the schema published at registration: dropping only the key fails output validation, and dropping only the schema entry publishes an undeclared key.
+
+Where the boundary rejects, the tool description SHALL teach the bound rather than promise a receipt. It SHALL name the maximum of every bounded numeric argument it accepts and SHALL state that a larger value is rejected rather than clamped — the same safety condition the annotation-bound requirement states as "Rejection is only safe if the caller is told how to stay inside the bound". `memory.timeline` is the model to match: its handler rejects an over-budget combined window AND names the remedy in the error message, referring the caller to `memory.search`.
+
+Every obligation in this requirement SHALL be discharged in the tool's top-level description text and SHALL NOT be expressed only in a per-argument zod `describe()`, which some clients do not surface to the model. Every obligation SHALL be satisfied within `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"); where content must be reclaimed, the reclaimed clause SHALL be named by the change that removes it.
+
+An in-process bound sitting behind the rejecting boundary MAY be retained as a defensive clamp for a future direct caller that bypasses the input schema. Retaining it SHALL NOT be treated as a violation: a bound with nothing reporting on it makes no claim to the agent. What this requirement forbids is the CLAIM, not the clamp.
+
+#### Scenario: `memory.get`'s two forms carry the same review signal
+
+- **GIVEN** one `active` in-scope memory whose derived `reviewState` is `'needs_review'`
+- **WHEN** an MCP client calls `memory.get({ id })` and `memory.get({ ids: [id] })` on the same connection for that same row
+- **THEN** both responses SHALL carry `reviewState`, `reviewAfter` and `reviewEscalated` for it, with equal values
+- **AND** the `memory.get` description's unconditional promise of that metadata SHALL hold for both forms, since it distinguishes neither
+- **AND** the remedy for a divergence here SHALL be to compute the metadata on the deficient path, NOT to qualify the description
+
+#### Scenario: `memory.session_start`'s description names every required output field
+
+- **WHEN** an MCP client reads the `memory.session_start` description from a real `tools/list` response and its declared `outputSchema`
+- **THEN** every field the `outputSchema` marks required SHALL be named in the description
+- **AND** the description SHALL state what `reused` means, because it is the field that answers whether the call adopted the host's session or started a second one
+
+#### Scenario: `memory.doctor`'s description names both causes of the divergence
+
+- **WHEN** an MCP client reads the `memory.doctor` description from a real `tools/list` response
+- **THEN** it SHALL name both causes by which its counters diverge from `memory.stats`': the population, and — for the pending-judgment counter specifically — the adjudicability filter
+- **AND** naming only the population SHALL NOT satisfy this scenario, because a reader who confirms both calls resolve to one project would then conclude a number is stale
+
+#### Scenario: `memory.context` and `memory.search_prompts` publish no clamp receipt
+
+- **GIVEN** every bounded numeric argument of both tools is rejected above its maximum by the declared input schema
+- **WHEN** an MCP client reads each tool's `outputSchema` from `tools/list` and then calls it
+- **THEN** neither `outputSchema`'s `required` list SHALL contain `clamped`, and neither returned `structuredContent` SHALL contain a `clamped` key
+- **AND** this SHALL hold for a call with no arguments and for a call passing every bounded argument at its maximum
+
+#### Scenario: `memory.doctor` publishes no field whose false value is unreachable
+
+- **GIVEN** the report can only be produced on a request that already read the database to authenticate
+- **WHEN** an MCP client calls `memory.doctor`
+- **THEN** the report SHALL NOT carry a `db.open` field, whose `false` value is reachable only in a state where the call cannot be served at all
+- **AND** a database fault that does not prevent the call SHALL be reported through `warnings` and `db.integrity`, which do vary
+
+#### Scenario: The over-max argument is rejected and the maximum itself is accepted
+
+- **WHEN** each bounded numeric argument of `memory.context`, `memory.search_prompts` and `memory.timeline` is passed above its maximum, each in its own call
+- **THEN** every such call SHALL be rejected as an invalid argument and SHALL NOT return a payload
+- **AND** the same argument passed AT its maximum SHALL succeed — without that control a rejection cannot be distinguished from a broken probe
+
+#### Scenario: Each description teaches every bound its tool enforces
+
+- **WHEN** the descriptions of `memory.context`, `memory.search_prompts` and `memory.timeline` are read from a real `tools/list` response
+- **THEN** each SHALL name the maximum of every bounded numeric argument it accepts
+- **AND** each SHALL state that a value above a maximum is rejected rather than clamped
+- **AND** none SHALL state that the response carries a flag reporting a clamp, nor list such a field in the response shape it advertises
+- **AND** a CI test SHALL assert these substrings against the live `tools/list` string, so a reintroduction fails the build
+
+#### Scenario: A newly found instance is closed by one of the three remedies
+
+- **GIVEN** a tool is found whose description, `outputSchema` and payload do not agree
+- **WHEN** the defect is addressed
+- **THEN** the change SHALL classify it as one of the three failure modes and apply the corresponding remedy
+- **AND** keeping the disagreement SHALL NOT satisfy this requirement, whether or not the description is partially corrected
+- **AND** the closing change SHALL be recorded as a scenario of this requirement rather than as a new requirement, so the rule stays stated once
