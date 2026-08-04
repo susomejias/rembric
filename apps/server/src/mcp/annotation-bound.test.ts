@@ -63,8 +63,9 @@ beforeEach(() => {
   const clock = () => new Date((now += 1));
   memory = new MemoryService(repos, db.handle.db, clock);
   relations = new RelationsService(repos, db.handle.db, clock);
-  project = new ProjectsService(repos, clock).create({ slug: 'proj', displayName: 'P' });
-  handlers = buildMemoryHandlers({ memory, relations, repos });
+  const projects = new ProjectsService(repos, clock);
+  project = projects.create({ slug: 'proj', displayName: 'P' });
+  handlers = buildMemoryHandlers({ memory, relations, repos, projects });
 });
 
 afterEach(() => {

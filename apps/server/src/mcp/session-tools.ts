@@ -2,14 +2,15 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { getRequestContext } from '../server/request-context.js';
-import type { SessionRouter } from '../server/session-router.js';
+import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import { type ProjectsService } from '../services/projects.js';
-import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import { projectScope, type Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
   requireScope,
+  resolveEffectiveScope,
   resolveSessionId,
   routerKey,
   unresolvableSlugError,
@@ -17,7 +18,6 @@ import {
 import { errToMcp, mcpError } from './errors.js';
 import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
-import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Session-lifecycle MCP tools: session_start / session_end / session_summary
@@ -104,47 +104,17 @@ async function handleSessionStart(
 ) {
   const ctx = getRequestContext();
 
-  // This handler resolves the session's project itself rather than through
-  // `resolveEffectiveScope`, so it needs the unresolvable-slug refusal
-  // explicitly or it opens a global-scope session on a path-scoped connection.
+  // `args.project` is resolved here rather than by the shared resolver, which
+  // knows nothing about it, so the unresolvable-slug refusal is needed
+  // explicitly for the argument path.
   if (ctx.requestedSlug !== null && !ctx.project) {
     return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
   }
 
-  // Await any eager (or in-flight) roots discovery; trigger it lazily
-  // if no eager run happened. The agent may then end up scoped via the
-  // derived slug.
-  const key = routerKey();
-  if (!args.project && key && deps.getServer) {
-    await ensureRootsDiscoveryRun(
-      { server: deps.getServer(), router: deps.router, projects: deps.projects },
-      { tokenId: key.tokenId, mcpSessionId: key.mcpSessionId, pathSlug: ctx.requestedSlug },
-    );
-  }
-
-  // Resolve the project id this session attaches to, in order of
-  // precedence: (1) explicit args.project (validated below), (2) URL
-  // path scope, (3) router entry from a prior `project.use` or roots
-  // discovery, (4) null (global).
-  let projectId: string | null = ctx.project?.id ?? null;
-  if (projectId === null && key) {
-    const routerEntry = deps.router.get(key.tokenId, key.mcpSessionId);
-    projectId = routerEntry?.projectId ?? null;
-  }
-  // When the agent did not pin a project and roots-based discovery
-  // surfaced pending suggestions, refuse to silently open a global-scope
-  // session — make the choice explicit.
-  if (args.project === undefined && projectId === null) {
-    const pending = pendingSuggestionGate(ctx, {
-      router: deps.router,
-      projects: deps.projects,
-    });
-    if (pending) {
-      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
-        suggestedSlugs: pending,
-      });
-    }
-  }
+  // The scope this session attaches to: an explicit `args.project` wins,
+  // otherwise the shared resolver decides (URL path → router pin → default
+  // project), awaiting roots discovery on a path-less connection.
+  let scope: Scope;
   if (args.project !== undefined) {
     if (ctx.requestedSlug && ctx.requestedSlug !== args.project) {
       return mcpError(
@@ -161,11 +131,33 @@ async function handleSessionStart(
     if (found.archivedAt) {
       return mcpError('project_archived', `project '${found.slug}' is archived`);
     }
-    projectId = found.id;
+    scope = projectScope(found.id);
+  } else {
+    try {
+      scope = (await resolveEffectiveScope(deps)).scope;
+    } catch (err) {
+      return errToMcp(err);
+    }
+  }
+  const projectId = scope.kind === 'project' ? scope.projectId : null;
+
+  // When the agent did not pin a project and roots-based discovery
+  // surfaced pending suggestions, refuse to silently open a scopeless
+  // session — make the choice explicit.
+  if (args.project === undefined && projectId === null) {
+    const pending = pendingSuggestionGate(ctx, {
+      router: deps.router,
+      projects: deps.projects,
+    });
+    if (pending) {
+      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
+        suggestedSlugs: pending,
+      });
+    }
   }
 
   try {
-    assertAuthorized('write', projectId ? projectScope(projectId) : SCOPE_GLOBAL, deps);
+    assertAuthorized('write', scope, deps);
   } catch (err) {
     return errToMcp(err);
   }
@@ -204,16 +196,19 @@ async function handleSessionStart(
 
   deps.sweep?.(projectId);
 
+  const key = routerKey();
   if (key) {
     deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
     if (projectId !== null) {
-      // Preserve the existing resolution source (e.g. 'roots') unless the
-      // agent explicitly supplied a project slug, which is always
-      // 'tool-explicit'.
+      // Preserve the recorded source (e.g. 'roots') only while it describes the
+      // SAME project: `setActiveSession` above mints a fresh entry carrying
+      // 'none', which would otherwise outrank the provenance we just resolved.
       const existing = deps.router.get(key.tokenId, key.mcpSessionId);
-      const source = args.project
-        ? 'tool-explicit'
-        : (existing?.projectResolutionSource ?? (ctx.requestedSlug ? 'url-path' : 'tool-explicit'));
+      let source: ProjectResolutionSource;
+      if (args.project) source = 'tool-explicit';
+      else if (existing && existing.projectId === projectId)
+        source = existing.projectResolutionSource;
+      else source = ctx.requestedSlug !== null ? 'url-path' : 'default';
       deps.router.setActiveProject(key.tokenId, key.mcpSessionId, projectId, source);
     }
   }

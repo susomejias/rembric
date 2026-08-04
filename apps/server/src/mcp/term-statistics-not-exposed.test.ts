@@ -9,8 +9,8 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
+import { projectScope, type Scope } from '../services/scope.js';
+import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -33,6 +33,8 @@ const FORBIDDEN = [
 ];
 
 let db: TestDb;
+/** The scope a path-less connection resolves to: the default project. */
+let defaultScope: Scope;
 let repos: Repositories;
 let memory: MemoryService;
 let handlers: ReturnType<typeof buildMemoryHandlers>;
@@ -55,6 +57,7 @@ function text(resp: unknown): string {
 
 beforeEach(() => {
   db = createTestDb();
+  defaultScope = projectScope(defaultProject(db.handle).id);
   repos = createRepositories(db.handle.db);
   const projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
@@ -88,7 +91,7 @@ describe('term statistics are not a response channel', () => {
       { title: 'Ubiquitous scheduler note', content: 'ubiquitousterm scheduler cron pipeline' },
       { title: 'Rare deploy note', content: 'ubiquitousterm rareterm deploy pipeline' },
       { title: 'Third note', content: 'ubiquitousterm retry backoff' },
-    ].map((r) => memory.save({ type: 'project', ...r }, SCOPE_GLOBAL));
+    ].map((r) => memory.save({ type: 'project', ...r }, defaultScope));
 
     const payloads = [
       text(

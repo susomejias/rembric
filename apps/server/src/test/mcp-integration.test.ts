@@ -27,6 +27,7 @@ import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
+import { defaultProject } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
 /** Probe the OS for a free TCP port and release it. */
@@ -1183,6 +1184,56 @@ describe('MCP protocol conformance', () => {
     expect(confirmed.isError).toBeFalsy();
 
     await client.close();
+  });
+
+  it('reads the default project from a path-less /mcp, with the path-scoped read as control', async () => {
+    const dflt = defaultProject(server.dbHandle);
+
+    // Write through a path-scoped connection, so the row lands in the default
+    // project exactly where the migration leaves the previously-global corpus.
+    const scoped = await connect({ projectSlug: dflt.slug });
+    const saved = readJson(
+      (await scoped.callTool({
+        name: 'memory.save',
+        arguments: {
+          scope: 'project',
+          type: 'reference',
+          title: 'default project marker row',
+          content: 'defaultprojectmarkerbbb row',
+        },
+      })) as ToolResult,
+    ) as { id: string };
+    expect(saved.id).toMatch(/^[0-9A-Z]+$/);
+
+    // Control — must hold on both sides of the resolver change.
+    const scopedCtx = readJson(
+      (await scoped.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
+    ) as { scope: string; recentMemories: { id: string }[] };
+    expect(scopedCtx.scope).toBe(`project:${dflt.id}`);
+    expect(scopedCtx.recentMemories.map((m) => m.id)).toContain(saved.id);
+    await scoped.close();
+
+    // Subject: the same corpus, read from `/mcp` with no slug.
+    const pathless = await connect();
+    const pathlessCtx = readJson(
+      (await pathless.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
+    ) as { scope: string; recentMemories: { id: string }[] };
+    expect(pathlessCtx.scope).toBe(`project:${dflt.id}`);
+    expect(pathlessCtx.recentMemories.length).toBeGreaterThan(0);
+
+    const found = readJson(
+      (await pathless.callTool({
+        name: 'memory.search',
+        arguments: { query: 'defaultprojectmarkerbbb', limit: 5 },
+      })) as ToolResult,
+    ) as { memories: { id: string }[] };
+    expect(found.memories.map((m) => m.id)).toContain(saved.id);
+
+    const current = readJson(
+      (await pathless.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    ) as { slug: string | null; projectId: string | null; source: string };
+    expect(current).toMatchObject({ slug: dflt.slug, projectId: dflt.id, source: 'default' });
+    await pathless.close();
   });
 
   it('rejects scope=global on a path-scoped /mcp/<slug> connection', async () => {
@@ -2368,19 +2419,29 @@ describe('MCP protocol conformance', () => {
   );
 
   // retry: same async roots-discovery round-trip dependency as the test above.
+  // Premise changed: an unminted roots suggestion no longer blocks the write —
+  // the connection has a project (the default one), so the gate that refused a
+  // scopeless write has no state left to fire in. `project.current` still
+  // surfaces the suggestion, so the agent can move the row with `project.use`.
   it(
-    'memory.capture_passive rejects with project_suggestion_pending when roots surface an unminted slug',
+    'memory.capture_passive writes to the default project when roots surface an unminted slug',
     { retry: 3 },
     async () => {
+      const dflt = defaultProject(server.dbHandle);
       const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
       const result = (await client.callTool({
         name: 'memory.capture_passive',
-        arguments: { text: '## Key Learnings:\n- must not be saved silently to global\n' },
+        arguments: { text: '## Key Learnings:\n- captured against the default project\n' },
       })) as ToolResult;
-      expect(result.isError).toBe(true);
-      const payload = readJson(result) as { code?: string; suggestedSlugs?: string[] };
-      expect(payload.code).toBe('project_suggestion_pending');
-      expect(payload.suggestedSlugs).toEqual(['integration-unminted-slug']);
+      expect(result.isError).toBeFalsy();
+      const saved = readJson(result) as { saved: number; ids: string[] };
+      expect(saved.saved).toBeGreaterThan(0);
+
+      const current = readJson(
+        (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+      ) as { projectId: string | null; suggestedSlugs: string[] };
+      expect(current.projectId).toBe(dflt.id);
+      expect(current.suggestedSlugs).toEqual(['integration-unminted-slug']);
 
       await client.close();
     },

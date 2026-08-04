@@ -587,8 +587,8 @@ export interface MemoryToolDeps {
   ) => Promise<boolean>;
   /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
   router?: SessionRouter;
-  /** Optional — required to evaluate the project-suggestion gate on save. */
-  projects?: ProjectsService;
+  /** Every connection resolves to a project, so scope resolution cannot proceed without this. */
+  projects: ProjectsService;
   /**
    * Optional — when present, `memory.save` attaches the most-recently-
    * active session row for `(tokenId, projectId)` to the memory when the

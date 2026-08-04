@@ -13,7 +13,7 @@ import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
 import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 
@@ -29,6 +29,8 @@ let memory: MemoryService;
 let handlers: ReturnType<typeof buildMemoryHandlers>;
 let projectA: Project;
 let projectB: Project;
+/** The project a path-less connection resolves to when nothing else named one. */
+let defaultProjectId: string;
 
 const ADMIN_TOKEN_SCOPE: TokenScope = '*';
 
@@ -69,9 +71,10 @@ function isErrorResponse(resp: unknown): boolean {
 
 beforeEach(() => {
   db = createTestDb();
+  defaultProjectId = defaultProject(db.handle).id;
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  handlers = buildMemoryHandlers({ memory });
+  handlers = buildMemoryHandlers({ memory, projects });
   projectA = projects.create({ slug: 'test-rembric' });
   projectB = projects.create({ slug: 'other-project' });
 });
@@ -98,12 +101,16 @@ describe('memory.save — strict path scoping', () => {
     expect(payload.message).toContain('test-rembric');
   });
 
-  it("rejects scope='project' on an unscoped connection with code 'project_required'", async () => {
+  // Premise changed: an unscoped connection resolves to the default project, so
+  // there is no scopeless state left for `project_required` to describe.
+  it('saves into the default project on an unscoped connection', async () => {
     const r = await runWithContext(fakeContext(null), () =>
       Promise.resolve(handlers.save({ scope: 'project', type: 'user', title: 'x', content: 'x' })),
     );
-    expect(isErrorResponse(r)).toBe(true);
-    expect(parseText<{ code: string }>(r).code).toBe('project_required');
+    expect(isErrorResponse(r)).toBeFalsy();
+    const persisted = memory.unsafeGetById(parseText<{ id: string }>(r).id);
+    expect(persisted?.scope).toBe('project');
+    expect(persisted?.projectId).toBe(defaultProjectId);
   });
 
   it('saves under the bound project regardless of the input scope', async () => {
@@ -142,7 +149,9 @@ describe('memory.save — strict path scoping', () => {
     expect(parseText<{ code: string }>(r).code).toBe('project_archived');
   });
 
-  it('on unscoped connections still saves globals normally', async () => {
+  // Premise changed: the destination is the resolved scope, and no connection
+  // resolves to a global one — the input scope cannot send a row anywhere else.
+  it('writes to the default project on an unscoped connection whatever the input scope', async () => {
     const r = await runWithContext(fakeContext(null), () =>
       Promise.resolve(
         handlers.save({ scope: 'global', type: 'user', title: 'dark mode', content: 'dark mode' }),
@@ -151,8 +160,8 @@ describe('memory.save — strict path scoping', () => {
     expect(isErrorResponse(r)).toBeFalsy();
     const { id } = parseText<{ id: string }>(r);
     const persisted = memory.unsafeGetById(id);
-    expect(persisted?.scope).toBe('global');
-    expect(persisted?.projectId).toBeNull();
+    expect(persisted?.scope).toBe('project');
+    expect(persisted?.projectId).toBe(defaultProjectId);
   });
 
   it('rejects an empty title with code invalid_input', async () => {
@@ -169,7 +178,7 @@ describe('memory.save — strict path scoping', () => {
 describe('memory.save — entity extraction and linking (add-entity-index)', () => {
   it('extracts and links entities from title+content on save, independent of candidate detection', async () => {
     const repos = createRepositories(db.handle.db);
-    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    const entityHandlers = buildMemoryHandlers({ memory, repos, projects });
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
         entityHandlers.save({
@@ -191,6 +200,7 @@ describe('memory.save — entity extraction and linking (add-entity-index)', () 
     const entityHandlers = buildMemoryHandlers({
       memory,
       repos,
+      projects,
       relations,
       candidates: { perSaveMax: 5 },
     });
@@ -250,6 +260,7 @@ describe('memory.save — candidatesDetected', () => {
     return buildMemoryHandlers({
       memory,
       repos,
+      projects,
       relations: new RelationsService(repos, db.handle.db),
       candidates: { perSaveMax },
     });
@@ -370,7 +381,7 @@ describe('memory.get / memory.search — entitiesTotal', () => {
 
   async function readAllThreeSurfaces(id: string) {
     const repos = createRepositories(db.handle.db);
-    const h = buildMemoryHandlers({ memory, repos });
+    const h = buildMemoryHandlers({ memory, repos, projects });
     return runWithContext(fakeContext(projectA), async () => ({
       single: parseText<EntityView>(await h.get({ id })),
       batch: parseText<{ memories: EntityView[] }>(await h.get({ ids: [id] })).memories[0]!,
@@ -495,7 +506,7 @@ describe('memory.get / memory.search — entitiesTotal', () => {
       projectScope(projectA.id),
     );
     linkMixed(repos, m.id);
-    const h = buildMemoryHandlers({ memory, repos });
+    const h = buildMemoryHandlers({ memory, repos, projects });
 
     const projected = await runWithContext(fakeContext(projectA), async () =>
       parseText<{ memories: EntityView[] }>(await h.search({ fields: ['entities'] })),
@@ -539,7 +550,7 @@ describe('memory.get / memory.search — entitiesTotal', () => {
       projectScope(projectA.id),
     );
     linkPaths(repos, m.id, 27);
-    const h = buildMemoryHandlers({ memory, repos });
+    const h = buildMemoryHandlers({ memory, repos, projects });
     const raw = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(h.get({ id: m.id })),
     );
@@ -612,8 +623,12 @@ describe('memory.title — read payloads expose the saved title', () => {
 describe('memory.search — strict path scoping', () => {
   beforeEach(() => {
     memory.save(
-      { type: 'user', title: 'global preference one', content: 'global preference one' },
-      SCOPE_GLOBAL,
+      {
+        type: 'user',
+        title: 'a default-project preference',
+        content: 'a default-project preference',
+      },
+      projectScope(defaultProjectId),
     );
     memory.save(
       { type: 'user', title: 'project-A specific', content: 'project-A specific' },
@@ -642,18 +657,18 @@ describe('memory.search — strict path scoping', () => {
     expect(memories.every((m) => m.projectId === projectA.id)).toBe(true);
   });
 
-  it('unscoped: returns globals only', async () => {
+  it("unscoped: returns the default project's memories only", async () => {
     const r = await runWithContext(fakeContext(null), () => Promise.resolve(handlers.search({})));
-    const { memories } = parseText<{ memories: { scope: string }[] }>(r);
+    const { memories } = parseText<{ memories: { projectId: string | null }[] }>(r);
     expect(memories.length).toBeGreaterThan(0);
-    expect(memories.every((m) => m.scope === 'global')).toBe(true);
+    expect(memories.every((m) => m.projectId === defaultProjectId)).toBe(true);
   });
 });
 
 describe('memory.search — entity filter (add-entity-index)', () => {
   it('exact-address retrieval finds a memory a text query cannot, and reports viaEntity', async () => {
     const repos = createRepositories(db.handle.db);
-    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    const entityHandlers = buildMemoryHandlers({ memory, repos, projects });
     const saved = memory.save(
       { type: 'project', title: 'X', content: 'entirely unrelated wording, no shared terms' },
       projectScope(projectA.id),
@@ -680,7 +695,7 @@ describe('memory.search — entity filter (add-entity-index)', () => {
 
   it('an unknown entity returns empty, not a degraded text search', async () => {
     const repos = createRepositories(db.handle.db);
-    const entityHandlers = buildMemoryHandlers({ memory, repos });
+    const entityHandlers = buildMemoryHandlers({ memory, repos, projects });
     memory.save(
       { type: 'project', title: 'X', content: 'never linked' },
       projectScope(projectA.id),
@@ -708,12 +723,15 @@ describe('memory.search — entity filter (add-entity-index)', () => {
 });
 
 describe('memory.get / memory.confirm — strict path scoping', () => {
-  let globalId: string;
+  let defaultId: string;
   let projectAId: string;
   let projectBId: string;
 
   beforeEach(() => {
-    globalId = memory.save({ type: 'user', title: 'global', content: 'global' }, SCOPE_GLOBAL).id;
+    defaultId = memory.save(
+      { type: 'user', title: 'in the default project', content: 'in the default project' },
+      projectScope(defaultProjectId),
+    ).id;
     projectAId = memory.save(
       { type: 'user', title: 'A', content: 'A' },
       projectScope(projectA.id),
@@ -724,9 +742,9 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
     ).id;
   });
 
-  it('path-scoped: get(global id) → not_found', async () => {
+  it('path-scoped: get(default-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: globalId })),
+      Promise.resolve(handlers.get({ id: defaultId })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -757,16 +775,16 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
   });
 
-  it('unscoped /mcp: get(global id) → ok', async () => {
+  it('unscoped /mcp: get(default-project id) → ok', async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.get({ id: globalId })),
+      Promise.resolve(handlers.get({ id: defaultId })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
   });
 
-  it('path-scoped: confirm(global id) → not_found', async () => {
+  it('path-scoped: confirm(default-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: globalId })),
+      Promise.resolve(handlers.confirm({ id: defaultId })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -958,7 +976,7 @@ describe('memory.search — projection (snippet / fields)', () => {
 describe('memory.search — relation expansion (include_relations)', () => {
   it('caps expansion at 5 entries even when more conflicts_with counterparts exist', async () => {
     const relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
-    const expandedHandlers = buildMemoryHandlers({ memory, relations });
+    const expandedHandlers = buildMemoryHandlers({ memory, relations, projects });
 
     // No token shared between source and targets, or FTS would pull the targets into the primary results.
     const source = memory.save(
@@ -1041,7 +1059,7 @@ describe('memory.search / memory.get — relation annotations', () => {
 
   beforeEach(() => {
     relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
-    relHandlers = buildMemoryHandlers({ memory, relations });
+    relHandlers = buildMemoryHandlers({ memory, relations, projects });
     floodedId = memory.save(
       { type: 'user', title: MARKER, content: MARKER },
       projectScope(projectA.id),
@@ -1256,23 +1274,26 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(persisted?.projectId).toBe(projectA.id);
   });
 
-  it('memory.save without router activation still returns project_required', async () => {
+  it('memory.save without router activation lands in the default project', async () => {
     const r = await runWithContext(unscopedContextWithSession(), () =>
       Promise.resolve(
         routerHandlers.save({
           scope: 'project',
           type: 'user',
-          title: 'no project',
-          content: 'no project',
+          title: 'no project pinned',
+          content: 'no project pinned',
         }),
       ),
     );
-    expect(isErrorResponse(r)).toBe(true);
-    expect(parseText<{ code: string }>(r).code).toBe('project_required');
+    expect(isErrorResponse(r)).toBeFalsy();
+    expect(memory.unsafeGetById(parseText<{ id: string }>(r).id)?.projectId).toBe(defaultProjectId);
   });
 
-  it('memory.search returns the router-activated project memories, not globals', async () => {
-    memory.save({ type: 'user', title: 'global only', content: 'global only' }, SCOPE_GLOBAL);
+  it("memory.search returns the router-activated project's memories, not the default one's", async () => {
+    memory.save(
+      { type: 'user', title: 'default project only', content: 'default project only' },
+      projectScope(defaultProjectId),
+    );
     const saved = memory.save(
       { type: 'user', title: 'in project A', content: 'in project A' },
       projectScope(projectA.id),

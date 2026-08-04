@@ -14,8 +14,8 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
-import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
+import { projectScope } from '../services/scope.js';
+import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildInstructions } from './instructions.js';
 import { buildMemoryHandlers } from './memory-tools.js';
@@ -45,7 +45,9 @@ let relations: RelationsService;
 let router: SessionRouter;
 let adminToken: Token;
 let realProject: Project;
-let globalMemoryId: string;
+let defaultProjectId: string;
+/** A row a path-LESS connection would see, which this one must not fall back to. */
+let defaultMemoryId: string;
 
 const DOCTOR: DoctorReport = {
   db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
@@ -68,9 +70,10 @@ beforeEach(() => {
   router = new SessionRouter();
   adminToken = mintTestToken(db.handle, { scope: ADMIN }).token;
   realProject = projects.create({ slug: 'rembric' });
-  globalMemoryId = memory.save(
-    { type: 'user', title: 'user-wide row', content: 'user-wide row about tabs' },
-    SCOPE_GLOBAL,
+  defaultProjectId = defaultProject(db.handle).id;
+  defaultMemoryId = memory.save(
+    { type: 'user', title: 'default-project row', content: 'default-project row about tabs' },
+    projectScope(defaultProjectId),
   ).id;
 });
 
@@ -118,15 +121,15 @@ function countRows(): { memories: number; prompts: number } {
 }
 
 describe('reads on an unresolvable slug refuse rather than widen', () => {
-  it('memory.get on a global id returns project_not_found and no content', async () => {
+  it('memory.get on a default-project id returns project_not_found and no content', async () => {
     const r = await runWithContext(ctxFor(), () =>
-      Promise.resolve(memoryHandlers().get({ id: globalMemoryId })),
+      Promise.resolve(memoryHandlers().get({ id: defaultMemoryId })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('project_not_found');
     expect(body.memory).toBeUndefined();
-    expect(JSON.stringify(body)).not.toContain('user-wide row about tabs');
+    expect(JSON.stringify(body)).not.toContain('default-project row about tabs');
   });
 
   it('memory.get with neither id nor ids reports the unusable connection, not invalid_input', async () => {
@@ -195,7 +198,7 @@ describe('writes on an unresolvable slug insert nothing', () => {
     expect(countRows().prompts).toBe(before.prompts);
   });
 
-  it('memory.session_start is refused and opens no global session', async () => {
+  it('memory.session_start is refused and opens no session in the default project', async () => {
     const handlers = buildSessionHandlers({ agentSessions, projects, router });
     const r = await runWithContext(ctxFor(), () =>
       Promise.resolve(handlers.sessionStart({ agent: 'probe' })),
@@ -203,7 +206,7 @@ describe('writes on an unresolvable slug insert nothing', () => {
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('project_not_found');
-    expect(agentSessions.countByStatus(SCOPE_GLOBAL).active).toBe(0);
+    expect(agentSessions.countByStatus(projectScope(defaultProjectId)).active).toBe(0);
   });
 });
 
@@ -216,16 +219,6 @@ describe('the refusal names candidate slugs', () => {
     expect(isError).toBe(true);
     expect(body.code).toBe('project_not_found');
     expect(body.suggestedSlugs).toContain('rembric');
-  });
-
-  it('carries an empty list rather than resolving when no ProjectsService is wired', async () => {
-    const r = await runWithContext(ctxFor({ requestedSlug: 'rembic' }), () =>
-      Promise.resolve(buildMemoryHandlers({ memory }).search({ query: 'tabs' })),
-    );
-    const { isError, body } = decode(r);
-    expect(isError).toBe(true);
-    expect(body.code).toBe('project_not_found');
-    expect(body.suggestedSlugs).toEqual([]);
   });
 });
 
@@ -307,7 +300,7 @@ describe('error messages name only reachable remedies', () => {
     expect(instructions).not.toMatch(/separate MCP connection|second connection/i);
   });
 
-  it('a project-pinned token denied a global read is told to activate that project', async () => {
+  it('a project-pinned token denied a read on the default project is told to activate its own', async () => {
     const pinned = mintTestToken(db.handle, { project: realProject, access: 'write' }).token;
     const r = await runWithContext(
       ctxFor({
@@ -348,11 +341,10 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).not.toContain('project.use');
   });
 
-  // Second control: the denied target is another PROJECT, not the global scope,
-  // so activating the pinned project would not make this call succeed. Path-less
-  // with a router pin, which is the only way to reach a project-scope denial
-  // while the connection itself carries no slug.
-  it('a token pinned to another project is not told to activate it on a project-scope denial', async () => {
+  // The remedy's condition is "the resolved scope differs from the token's pin",
+  // not "the resolved scope is global": a router pin on a path-less connection is
+  // switchable with `project.use`, so the way out is real here too.
+  it('a token pinned to another project IS told to activate it on a project-scope denial', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
     router.setActiveProject(pinned.id, 'mcp-sess-cross', realProject.id, 'tool-explicit');
@@ -368,20 +360,48 @@ describe('error messages name only reachable remedies', () => {
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    // The denial names the project it refused, not the token's own pin.
+    // The denial names the project it refused; the remedy names the token's pin.
     expect(body.message as string).toContain(realProject.id);
+    expect(body.message as string).toContain("project.use({slug: 'other-project'})");
+  });
+
+  // Second control: the denied scope IS the token's pin, so re-activating it
+  // changes nothing — a `read:` token refused a write cannot fix that by moving.
+  it('a token denied an action on its OWN pinned project is not told to activate it', async () => {
+    const pinned = mintTestToken(db.handle, { project: realProject, access: 'read' }).token;
+    router.setActiveProject(pinned.id, 'mcp-sess-own', realProject.id, 'tool-explicit');
+    const r = await runWithContext(
+      ctxFor({
+        token: pinned,
+        scope: `read:project:${realProject.id}`,
+        requestedSlug: null,
+        mcpSessionId: 'mcp-sess-own',
+      }),
+      () =>
+        Promise.resolve(
+          memoryHandlers().save({ scope: 'project', type: 'user', title: 't', content: 'c' }),
+        ),
+    );
+    const { isError, body } = decode(r);
+    expect(isError).toBe(true);
+    expect(body.code).toBe('forbidden');
     expect(body.message as string).not.toContain('project.use');
   });
 
   // Third control: on a path-scoped connection `project.use({slug})` is rejected
   // whenever the slug differs from the path slug (`project-tools.ts`), so the
   // hint would name a remedy this caller cannot reach.
-  it('a pinned token denied a global read on a path-scoped connection is not told to call project.use', async () => {
-    const pinned = mintTestToken(db.handle, { project: realProject, access: 'write' }).token;
-    const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
+  it('a pinned token denied a read on a path-scoped connection is not told to call project.use', async () => {
+    const other = projects.create({ slug: 'other-project' });
+    const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
     const r = await runWithContext(
-      ctxFor({ token: pinned, scope: `project:${realProject.id}` }),
-      () => Promise.resolve(projectTools.current({})),
+      ctxFor({
+        token: pinned,
+        scope: `read:project:${other.id}`,
+        project: realProject,
+        requestedSlug: realProject.slug,
+      }),
+      () => Promise.resolve(memoryHandlers().search({ query: 'tabs' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
@@ -469,8 +489,8 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
 
   it.each(Object.keys(MINIMAL_ARGS))('%s returns the structured refusal', async (name) => {
     const args = { ...MINIMAL_ARGS[name] };
-    if ('id' in args) args.id = globalMemoryId;
-    if ('memoryId' in args) args.memoryId = globalMemoryId;
+    if ('id' in args) args.id = defaultMemoryId;
+    if ('memoryId' in args) args.memoryId = defaultMemoryId;
 
     const result = await runWithContext(ctxFor(), () => client.callTool({ name, arguments: args }));
     const { isError, body } = decode(result);
