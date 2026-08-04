@@ -211,7 +211,6 @@ describe('PromptsService.searchByScope', () => {
     });
     expect(result.prompts.map((p) => p.content)).toEqual(['deploy via docker compose']);
     expect(result.total).toBe(1);
-    expect(result.clamped).toBe(false);
   });
 
   it('FTS5 match over tags', () => {
@@ -283,16 +282,6 @@ describe('PromptsService.searchByScope', () => {
 
     const result = prompts.searchByScope({ scope: SCOPE_GLOBAL });
     expect(result.prompts.map((p) => p.content)).toEqual(['global']);
-  });
-
-  it('clamps limit and reports clamped:true', () => {
-    prompts.save({ content: 'x', title: 'x', projectId });
-
-    const result = prompts.searchByScope({
-      scope: projectScope(projectId),
-      limit: 500,
-    });
-    expect(result.clamped).toBe(true);
   });
 
   it('honours agent filter', () => {

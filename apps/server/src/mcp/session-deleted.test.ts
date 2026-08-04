@@ -82,7 +82,7 @@ beforeEach(() => {
     prompts,
     router,
     doctor: () => ({
-      db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
+      db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },
       consolidation: { lastRunAt: null, lastRunOps: {} },
       sessions: { active: 0 },

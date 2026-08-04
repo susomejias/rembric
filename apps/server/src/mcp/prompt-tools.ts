@@ -70,7 +70,6 @@ export const searchPromptsOutput = {
   scope: z.string(),
   prompts: z.array(promptRow),
   total: z.number(),
-  clamped: z.boolean(),
 };
 
 export interface PromptToolDeps {
@@ -194,7 +193,6 @@ async function handleSearchPrompts(
         createdAt: p.createdAt,
       })),
       total: result.total,
-      clamped: result.clamped,
     });
   } catch (err) {
     return errToMcp(err);

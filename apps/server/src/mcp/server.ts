@@ -277,7 +277,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_start',
     {
       description:
-        'Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode providers POST to the sessions endpoint on startup). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt }.',
+        "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode providers POST to the sessions endpoint on startup). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session.",
       inputSchema: sessionStartSchema,
       outputSchema: sessionStartOutput,
       annotations: WRITE_ANNOTATIONS('Start session'),
@@ -309,7 +309,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.context',
     {
       description:
-        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small; the response includes a `clamped:true` flag if you asked for too much.',
+        'Get recent context for this scope: recentSessions (with summaries), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.',
       inputSchema: contextSchema,
       outputSchema: contextOutput,
       annotations: READ_ANNOTATIONS('Recent context'),
@@ -331,7 +331,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.timeline',
     {
       description:
-        'Drill into chronological neighbors of a specific memory. Returns memories before and after the target within the same session (or, when the target has no session, a ±2h time window with fallback:"time_window").',
+        'Drill into chronological neighbors of a specific memory. Args: { memoryId, before? (default 5), after? (default 5) }; before + after must not exceed 50 — a larger window is rejected with invalid_input, not clamped; use memory.search instead. Returns memories before and after the target within the same session (or, when the target has no session, a ±2h time window with fallback:"time_window").',
       inputSchema: timelineSchema,
       outputSchema: timelineOutput,
       annotations: READ_ANNOTATIONS('Memory timeline'),
@@ -364,7 +364,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.search_prompts',
     {
       description:
-        'Search curated prompts in the active scope. With `query`, runs an FTS5 MATCH over `content + tags` (token-aware); without it, falls back to recency. Filters: `sessionId`, `agent`, `includeDeleted` (default false). Returns `{ scope, prompts[], total, clamped }`. Use when the user references a prior goal/directive and you need to retrieve the exact wording.',
+        'Search curated prompts in the active scope. With `query`, runs an FTS5 MATCH over `content + tags` (token-aware); without it, falls back to recency. Filters: `sessionId`, `agent`, `includeDeleted` (default false). Returns `{ scope, prompts[], total }`. `limit` defaults to 25, max 100 — above that the call is rejected, not clamped. Use when the user references a prior goal/directive and you need to retrieve the exact wording.',
       inputSchema: searchPromptsSchema,
       outputSchema: searchPromptsOutput,
       annotations: READ_ANNOTATIONS('Search prompts'),
@@ -375,7 +375,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.doctor',
     {
       description:
-        'Read-only operational diagnostics, SERVER-WIDE (all projects + global): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ. Use at session start when behavior seems off.',
+        'Read-only operational diagnostics, SERVER-WIDE (all projects + global): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ — for two reasons: population (server-wide vs scoped) and, for `pendingJudgments` only, filtering (doctor counts every pending row; the scoped totals count only adjudicable pairs, both endpoints still active). Use at session start when behavior seems off.',
       inputSchema: {},
       outputSchema: doctorOutput,
       annotations: READ_ANNOTATIONS('Diagnostics'),

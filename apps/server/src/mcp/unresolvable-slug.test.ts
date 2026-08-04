@@ -48,7 +48,7 @@ let realProject: Project;
 let globalMemoryId: string;
 
 const DOCTOR: DoctorReport = {
-  db: { open: true, journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
+  db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
   embeddings: { model: 'test', backlog: 0 },
   entities: { backlog: 0 },
   consolidation: { lastRunAt: null, lastRunOps: {} },

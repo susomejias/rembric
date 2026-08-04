@@ -182,14 +182,13 @@ describe('memory.context `judgments` size lifts the age filter', () => {
     expect(payload.pendingJudgmentsTotal).toBe(2);
   });
 
-  it('an explicit size bounds the page and `clamped` stays false within the max', async () => {
+  it('an explicit size bounds the page within the max', async () => {
     for (let i = 0; i < 8; i += 1) seedPending(`fresh-${i}`, 0);
 
     const { payload } = decode(await callContext({ judgments: 3 }));
 
     expect(payload.pendingJudgments).toHaveLength(3);
     expect(payload.pendingJudgmentsTotal).toBe(8);
-    expect(payload.clamped).toBe(false);
   });
 
   it('asking for more than exists returns what exists rather than erroring', async () => {
@@ -199,20 +198,6 @@ describe('memory.context `judgments` size lifts the age filter', () => {
 
     expect(isError).toBe(false);
     expect(payload.pendingJudgments).toHaveLength(1);
-    expect(payload.clamped).toBe(false);
-  });
-
-  // Handler-level defence only. Over MCP the input schema's `.max()` rejects
-  // `judgments: 999` with invalid_input before this runs, so `clamped` is not
-  // observable on the wire — same layering as the three sibling size args.
-  it('the in-process clamp bounds a size over the max instead of throwing', async () => {
-    for (let i = 0; i < 3; i += 1) seedPending(`fresh-${i}`, 0);
-
-    const { isError, payload } = decode(await callContext({ judgments: 999 }));
-
-    expect(isError).toBe(false);
-    expect(payload.pendingJudgments).toHaveLength(3);
-    expect(payload.clamped).toBe(true);
   });
 
   it('`judgments: 0` returns no rows but still reports the total', async () => {

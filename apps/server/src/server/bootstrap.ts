@@ -512,7 +512,7 @@ function printReadyBanner(url: string, firstRun: boolean): void {
  * Build a one-shot operational report for `memory.doctor`. The closure
  * captures the live services so this can be called inside any handler.
  */
-function buildDoctorReportFactory(deps: {
+export function buildDoctorReportFactory(deps: {
   diagnostics: DbDiagnostics;
   repos: Repositories;
   agentSessions: AgentSessionsService;
@@ -568,7 +568,7 @@ function buildDoctorReportFactory(deps: {
     const pendingJudgments = deps.repos.relations.adminCountByStatus('pending');
 
     return {
-      db: { open: true, journalMode, integrity, sizeBytes },
+      db: { journalMode, integrity, sizeBytes },
       embeddings: { model: EMBEDDING_MODEL_ID, backlog },
       entities: { backlog: entitiesBacklog },
       consolidation: {

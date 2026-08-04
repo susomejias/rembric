@@ -15,6 +15,7 @@ import {
   type SearchVerdict,
 } from './hybrid-search.js';
 import {
+  type DerivedReview,
   deriveReviewState,
   REFUTED_PRIORITY_MS,
   reviewTtlEntries,
@@ -350,19 +351,23 @@ export class MemoryService {
 
   /**
    * Derive the read-time review state for a batch of memories (used by
-   * `memory.search`). Confirmation timestamps are fetched in one grouped
-   * query; non-active rows map to a null state. Read-only.
+   * `memory.search` and `memory.get`'s batch form). Confirmation timestamps
+   * are fetched in one grouped query; non-active rows map to a null state.
+   * Read-only.
    */
   reviewStateForMemories(
     memories: readonly Memory[],
-  ): Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }> {
-    const out = new Map<string, { reviewState: ReviewState | null; reviewAfter: Date | null }>();
+  ): Map<string, Pick<DerivedReview, 'reviewState' | 'reviewAfter' | 'reviewEscalated'>> {
+    const out = new Map<
+      string,
+      Pick<DerivedReview, 'reviewState' | 'reviewAfter' | 'reviewEscalated'>
+    >();
     if (memories.length === 0) return out;
     const now = this.now();
     const ids = memories.map((m) => m.id);
     const reviewTs = this.repos.memory.reviewTimestampsByIds(ids);
     for (const m of memories) {
-      const { reviewState, reviewAfter } = deriveReviewState(
+      const { reviewState, reviewAfter, reviewEscalated } = deriveReviewState(
         {
           type: m.type,
           createdAt: m.createdAt,
@@ -372,7 +377,7 @@ export class MemoryService {
         },
         now,
       );
-      out.set(m.id, { reviewState, reviewAfter });
+      out.set(m.id, { reviewState, reviewAfter, reviewEscalated });
     }
     return out;
   }

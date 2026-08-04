@@ -12,6 +12,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { agentSessions } from '../db/schema/agent-sessions.js';
+import {
+  CONTEXT_MEMORIES_MAX,
+  CONTEXT_PROMPTS_MAX,
+  CONTEXT_SESSIONS_MAX,
+  TIMELINE_WINDOW_MAX,
+} from '../mcp/memory-tools.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
@@ -412,6 +418,100 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it("memory.get's batch form reports the same review metadata and replaces as the single-id form", async () => {
+    // Its own project: a refuted row is `needs_review`, which would otherwise
+    // show up in the global scope's needsReview channel other tests assert on.
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-batch-parity') ??
+      projects.create({ slug: 'integration-batch-parity' });
+    const client = await connect({ projectSlug: project.slug });
+    // listTools primes the SDK's output-schema validator, so every callTool
+    // below also asserts the payload against the published outputSchema.
+    await client.listTools();
+    const topicKey = 'batch-parity-topic';
+    const save = async (title: string): Promise<string> => {
+      const res = (await client.callTool({
+        name: 'memory.save',
+        arguments: {
+          scope: 'project',
+          type: 'procedural',
+          title,
+          content: `batch-parity ${title}`,
+          topic_key: topicKey,
+        },
+      })) as ToolResult;
+      return (readJson(res) as { id: string }).id;
+    };
+    const predecessorId = await save('batch parity predecessor');
+    const headId = await save('batch parity head');
+
+    // A refutation forces `needs_review` immediately, whatever the type's TTL.
+    const refuted = (await client.callTool({
+      name: 'memory.confirm',
+      arguments: { id: headId, verdict: 'refute', reason: 'batch parity probe' },
+    })) as ToolResult;
+    expect(refuted.isError).toBeFalsy();
+
+    const single = (await client.callTool({
+      name: 'memory.get',
+      arguments: { id: headId },
+    })) as ToolResult;
+    const batch = (await client.callTool({
+      name: 'memory.get',
+      arguments: { ids: [headId, predecessorId] },
+    })) as ToolResult;
+    expect(single.isError).toBeFalsy();
+    expect(batch.isError).toBeFalsy();
+
+    const singleBody = readJson(single) as {
+      reviewState?: string;
+      reviewAfter?: string | null;
+      reviewEscalated?: boolean;
+      lastSeenAt?: unknown;
+      memory: { replaces: string[] };
+    };
+    const entries = (readJson(batch) as { memories: Record<string, unknown>[] }).memories;
+    const head = entries.find((m) => m.id === headId);
+    const predecessor = entries.find((m) => m.id === predecessorId);
+    expect(head, 'head missing from the batch page').toBeDefined();
+    expect(predecessor, 'predecessor missing from the batch page').toBeDefined();
+
+    // The single-id call is the control: without it a batch carrying nothing
+    // is indistinguishable from a scope where no row needs review.
+    expect(singleBody.reviewState).toBe('needs_review');
+    expect(singleBody.reviewAfter).toEqual(expect.any(String));
+    expect(singleBody.reviewEscalated).toBe(false);
+    expect(head!.reviewState).toBe(singleBody.reviewState);
+    expect(head!.reviewAfter).toBe(singleBody.reviewAfter);
+    expect(head!.reviewEscalated).toBe(singleBody.reviewEscalated);
+    expect(head!.replaces).toEqual([predecessorId]);
+    expect(head!.replaces).toEqual(singleBody.memory.replaces);
+
+    // Status-driven, not form-driven: the superseded row in the same page
+    // carries none of the three.
+    expect(predecessor!.status).toBe('superseded');
+    for (const field of ['reviewState', 'reviewAfter', 'reviewEscalated']) {
+      expect(field in predecessor!, `${field} on a superseded batch entry`).toBe(false);
+    }
+
+    // The two deliberate asymmetries.
+    expect('lastSeenAt' in head!).toBe(true);
+    expect('lastSeenAt' in singleBody).toBe(false);
+    for (const field of [
+      'head',
+      'predecessors',
+      'predecessorCount',
+      'truncated',
+      'headTruncated',
+      'confirmationCount',
+    ]) {
+      expect(field in head!, `${field} on a batch entry`).toBe(false);
+    }
+
+    await client.close();
+  });
+
   it('marks a gate-shortened page over the MCP boundary inside the pool, and leaves both a past-the-pool offset and an unfiltered deep offset unmarked', async () => {
     const projects = new ProjectsService(createRepositories(server.dbHandle.db));
     const shortened =
@@ -608,6 +708,328 @@ describe('MCP protocol conformance', () => {
     // not send the agent at one — the defect this repo already shipped once.
     expect(save).not.toMatch(/pass\s+`?candidatesDetected/i);
     expect(save).not.toMatch(/candidates_limit|candidates_max/i);
+  });
+
+  describe('descriptions agree with what the tools do', () => {
+    let descriptions: Map<string, string>;
+    let requiredBySchema: Map<string, string[]>;
+
+    beforeAll(async () => {
+      const client = await connect();
+      const { tools } = await client.listTools();
+      await client.close();
+      descriptions = new Map(tools.map((t) => [t.name, t.description ?? '']));
+      requiredBySchema = new Map(
+        tools.map((t) => [t.name, (t.outputSchema as { required?: string[] })?.required ?? []]),
+      );
+      expect(descriptions.size).toBeGreaterThanOrEqual(23);
+    });
+
+    // Measured from the live `tools/list` string, never from the source
+    // constant — the boundary an external client truncates at.
+    it.each([
+      ['memory.context', 1432],
+      ['memory.search_prompts', 428],
+      ['memory.session_start', 624],
+      ['memory.doctor', 612],
+      ['memory.timeline', 395],
+    ])('%s is %i chars, inside the ceiling', (name, expected) => {
+      const desc = descriptions.get(name);
+      expect(desc, `${name} missing from tools/list`).toBeDefined();
+      expect(desc!.length, `${name} length`).toBe(expected);
+      expect(DESCRIPTION_MAX_LENGTH - desc!.length, `${name} headroom`).toBeGreaterThan(0);
+    });
+
+    it('memory.context names every one of its four maxima and the reject rule', () => {
+      const desc = descriptions.get('memory.context') ?? '';
+      expect(desc).toContain(`sessions ${CONTEXT_SESSIONS_MAX}`);
+      expect(desc).toContain(`prompts ${CONTEXT_PROMPTS_MAX}`);
+      expect(desc).toContain(`memories ${CONTEXT_MEMORIES_MAX}`);
+      expect(desc).toMatch(/judgments 50/);
+      expect(desc).toMatch(/rejected, not clamped/i);
+    });
+
+    it('memory.timeline names both window arguments, its bound and the remedy', () => {
+      const desc = descriptions.get('memory.timeline') ?? '';
+      expect(desc).toContain('before');
+      expect(desc).toContain('after');
+      expect(desc).toContain('memory.search');
+      expect(desc).toMatch(/not clamped/i);
+      // The description's literal is a fourth copy of the handler's bound; a
+      // bound change that misses the prose fails here.
+      expect(desc).toContain(`must not exceed ${TIMELINE_WINDOW_MAX}`);
+    });
+
+    it('memory.search_prompts teaches limit’s default and maximum', () => {
+      const desc = descriptions.get('memory.search_prompts') ?? '';
+      expect(desc).toMatch(/`limit` defaults to 25/);
+      expect(desc).toMatch(/max 100/);
+      expect(desc).toMatch(/rejected, not clamped/i);
+    });
+
+    it('memory.doctor names the filtering cause as well as the population', () => {
+      const desc = descriptions.get('memory.doctor') ?? '';
+      expect(desc).toMatch(/server-wide/i);
+      expect(desc).toContain('memory.stats');
+      expect(desc).toMatch(/unfiltered|every pending row/i);
+      expect(desc).toMatch(/adjudicable/i);
+      // Scope alone is not the whole story, so it must not read as the only cause.
+      expect(desc).not.toMatch(/and they will differ\.\s/);
+      // `:856` — truncation is a tail cut, so the disclosure precedes the hint.
+      expect(desc.indexOf('SERVER-WIDE')).toBeLessThan(desc.indexOf('Use at session start'));
+    });
+
+    it('memory.session_start names every field its outputSchema requires', () => {
+      const desc = descriptions.get('memory.session_start') ?? '';
+      const required = requiredBySchema.get('memory.session_start') ?? [];
+      expect(required.sort()).toEqual([
+        'projectId',
+        'reused',
+        'scope',
+        'sessionId',
+        'startedAt',
+        'title',
+      ]);
+      for (const field of required) {
+        expect(desc, `${field} unnamed in the description`).toContain(field);
+      }
+      expect(desc).toMatch(/reused:true.*ADOPTED/i);
+    });
+
+    it('no description promises a clamp receipt, and none lists one in its return shape', () => {
+      for (const [name, desc] of descriptions) {
+        expect(desc, name).not.toMatch(/clamped\s*:\s*true/i);
+        expect(desc, name).not.toMatch(/,\s*clamped\s*\}/);
+      }
+    });
+
+    it('clamped is absent from both output schemas that published it', () => {
+      for (const name of ['memory.context', 'memory.search_prompts']) {
+        expect(requiredBySchema.get(name), name).not.toContain('clamped');
+      }
+    });
+  });
+
+  it('a second memory.session_start adopts the first session and says so', async () => {
+    // Its own project, so no other test's active session can be adopted here.
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-session-reuse') ??
+      projects.create({ slug: 'integration-session-reuse' });
+    const client = await connect({ projectSlug: project.slug });
+
+    const first = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test' },
+    })) as ToolResult;
+    const second = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test' },
+    })) as ToolResult;
+    const a = readJson(first) as { sessionId: string; reused: boolean };
+    const b = readJson(second) as { sessionId: string; reused: boolean };
+
+    expect(a.reused).toBe(false);
+    expect(b.reused).toBe(true);
+    expect(b.sessionId).toBe(a.sessionId);
+
+    // The control: adoption, not a coincidence of ids — only one row exists.
+    const rows = server.dbHandle.db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(eq(agentSessions.projectId, project.id))
+      .all();
+    expect(rows.map((r) => r.id)).toEqual([a.sessionId]);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it("memory.doctor's pending count diverges from the scoped totals inside one project", async () => {
+    // One project for every call, so the population cannot explain the gap.
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-doctor-divergence') ??
+      projects.create({ slug: 'integration-doctor-divergence' });
+    const client = await connect({ projectSlug: project.slug });
+
+    // Deliberately unalike, so save-time candidate detection adds no second
+    // pending pair and the counts below are the one this test seeds.
+    const save = async (title: string, content: string): Promise<string> => {
+      const res = (await client.callTool({
+        name: 'memory.save',
+        arguments: { scope: 'project', type: 'feedback', title, content },
+      })) as ToolResult;
+      const body = readJson(res) as { id: string; candidates?: unknown[] };
+      expect(body.candidates ?? [], `${title} detected candidates`).toEqual([]);
+      return body.id;
+    };
+    const doctorPending = async (): Promise<number> => {
+      const res = (await client.callTool({ name: 'memory.doctor', arguments: {} })) as ToolResult;
+      return (readJson(res) as { review: { pendingJudgments: number } }).review.pendingJudgments;
+    };
+    const statsPending = async (): Promise<number> => {
+      const res = (await client.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
+      return (readJson(res) as { pendingJudgmentsTotal: number }).pendingJudgmentsTotal;
+    };
+    const contextPending = async (): Promise<number> => {
+      const res = (await client.callTool({
+        name: 'memory.context',
+        arguments: { judgments: 50 },
+      })) as ToolResult;
+      return (readJson(res) as { pendingJudgmentsTotal: number }).pendingJudgmentsTotal;
+    };
+
+    const sourceId = await save('quartzite ledger', 'quartzite ledger obsidian marmot');
+    const targetId = await save('bramble cistern', 'bramble cistern verdigris palimpsest');
+    server.dbHandle.raw
+      .prepare(
+        `INSERT INTO memory_relations (id, judgment_id, source_id, target_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'pending', ?)`,
+      )
+      .run('01TESTRELDIVERGENCE000001', 'jdg-divergence-itest', sourceId, targetId, Date.now());
+
+    // doctor's counter is server-wide, so only its DELTA is meaningful here.
+    const doctorWithPair = await doctorPending();
+    expect(doctorWithPair).toBeGreaterThanOrEqual(1);
+    expect(await statsPending()).toBe(1);
+    expect(await contextPending()).toBe(1);
+
+    const archived = (await client.callTool({
+      name: 'memory.archive',
+      arguments: { id: targetId },
+    })) as ToolResult;
+    expect(archived.isError).toBeFalsy();
+
+    // Same project, same connection: the scoped totals drop because the pair is
+    // no longer adjudicable, doctor's unfiltered inventory count does not move.
+    expect(await doctorPending()).toBe(doctorWithPair);
+    expect(await statsPending()).toBe(0);
+    expect(await contextPending()).toBe(0);
+
+    await client.close();
+  });
+
+  describe('the bounds reject over the wire, and the maximum itself is accepted', () => {
+    async function callWith(
+      client: Client,
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<ToolResult> {
+      return (await client.callTool({ name, arguments: args })) as ToolResult;
+    }
+
+    // One test per argument, so a bound weakened by one constant reddens only
+    // the test that names it. The probe values are LITERAL: deriving max+1 from
+    // the constant under test would move with it and detect nothing.
+    it.each([
+      ['sessions', 25],
+      ['prompts', 50],
+      ['memories', 100],
+      ['judgments', 50],
+    ])('rejects memory.context %s above %i', async (arg, max) => {
+      const client = await connect();
+      const { tools } = await client.listTools();
+      const published = (
+        tools.find((t) => t.name === 'memory.context')?.inputSchema as
+          | { properties?: Record<string, { maximum?: number }> }
+          | undefined
+      )?.properties?.[arg]?.maximum;
+      expect(published, `${arg} published maximum`).toBe(max);
+
+      const rejected = await callWith(client, 'memory.context', { [arg]: max + 1 });
+      expect(rejected.isError, arg).toBe(true);
+      const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(text, arg).toContain('-32602');
+      expect(text, arg).toContain(arg);
+      // No payload rides along with the rejection.
+      expect(text, arg).not.toContain('pendingJudgmentsTotal');
+      expect(rejected.structuredContent, arg).toBeUndefined();
+      await client.close();
+    });
+
+    it('accepts all four memory.context maxima and returns no clamp receipt', async () => {
+      const client = await connect();
+      // The control: without it a rejection above the maximum cannot be told
+      // from a broken probe.
+      const atMax = await callWith(client, 'memory.context', {
+        sessions: 25,
+        prompts: 50,
+        memories: 100,
+        judgments: 50,
+      });
+      expect(atMax.isError).toBeFalsy();
+      expect(atMax.structuredContent).not.toHaveProperty('clamped');
+      // The nine remaining keys; `rankedPass` is the one conditional addition.
+      const keys = Object.keys(atMax.structuredContent ?? {}).sort();
+      expect(keys.filter((k) => k !== 'rankedPass')).toEqual([
+        'needsReview',
+        'needsReviewTotal',
+        'pendingJudgments',
+        'pendingJudgmentsTotal',
+        'recentMemories',
+        'recentPrompts',
+        'recentSessions',
+        'relevantMemories',
+        'scope',
+      ]);
+      await client.close();
+    });
+
+    // Two-sided, and split so weakening `.max` and weakening `.min` redden
+    // different tests.
+    it.each([
+      ['above its maximum', 101],
+      ['below its minimum', 0],
+    ])('rejects memory.search_prompts limit %s', async (_label, limit) => {
+      const client = await connect();
+      const rejected = await callWith(client, 'memory.search_prompts', { limit });
+      expect(rejected.isError, `limit ${limit}`).toBe(true);
+      const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(text, `limit ${limit}`).toContain('-32602');
+      expect(text, `limit ${limit}`).toContain('limit');
+      await client.close();
+    });
+
+    it('accepts memory.search_prompts at its maximum and returns no clamp receipt', async () => {
+      const client = await connect();
+      const atMax = await callWith(client, 'memory.search_prompts', { limit: 100 });
+      expect(atMax.isError).toBeFalsy();
+      expect(atMax.structuredContent).not.toHaveProperty('clamped');
+      expect(atMax.structuredContent).toHaveProperty('total');
+      await client.close();
+    });
+
+    it('rejects an over-budget memory.timeline window and names the remedy', async () => {
+      const client = await connect();
+      const saved = await callWith(client, 'memory.save', {
+        scope: 'global',
+        type: 'project',
+        title: 'timeline window probe',
+        content: 'timeline-window-probe',
+      });
+      const { id } = readJson(saved) as { id: string };
+
+      const rejected = await callWith(client, 'memory.timeline', {
+        memoryId: id,
+        before: 30,
+        after: 30,
+      });
+      expect(rejected.isError).toBe(true);
+      const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(text).toContain('invalid_input');
+      expect(text).toContain(String(TIMELINE_WINDOW_MAX));
+      // The remedy the description names too, so the two stay in step.
+      expect(text).toContain('memory.search');
+
+      const control = await callWith(client, 'memory.timeline', {
+        memoryId: id,
+        before: 25,
+        after: 25,
+      });
+      expect(control.isError).toBeFalsy();
+      await client.close();
+    });
   });
 
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
@@ -888,9 +1310,8 @@ describe('MCP protocol conformance', () => {
       });
     }
     const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
-    const payload = readJson(ctx) as { recentMemories: unknown[]; clamped: boolean };
+    const payload = readJson(ctx) as { recentMemories: unknown[] };
     expect(payload.recentMemories.length).toBeLessThanOrEqual(10);
-    expect(payload.clamped).toBe(false);
     await client.close();
   });
 
@@ -1440,7 +1861,7 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     expect(result.isError).toBeFalsy();
     const payload = readJson(result) as {
-      db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
+      db: { journalMode: string; integrity: string; sizeBytes: number };
       embeddings: { model: string; backlog: number };
       entities: { backlog: number };
       consolidation: { lastRunAt: string | null; lastRunOps: Record<string, number> };
@@ -1448,7 +1869,21 @@ describe('MCP protocol conformance', () => {
       review: { needsReview: number; pendingJudgments: number };
       warnings: string[];
     };
-    expect(payload.db.open).toBe(true);
+    // `open` had one reachable value: the report cannot be produced without a
+    // database read, so its `false` was never observable.
+    expect(Object.keys(payload.db).sort()).toEqual(['integrity', 'journalMode', 'sizeBytes']);
+    const { tools } = await client.listTools();
+    const dbSchema = (
+      tools.find((t) => t.name === 'memory.doctor')?.outputSchema as
+        | { properties?: { db?: { properties?: Record<string, unknown>; required?: string[] } } }
+        | undefined
+    )?.properties?.db;
+    expect(Object.keys(dbSchema?.properties ?? {}).sort()).toEqual([
+      'integrity',
+      'journalMode',
+      'sizeBytes',
+    ]);
+    expect(dbSchema?.required ?? []).not.toContain('open');
     expect(payload.db.journalMode).toMatch(/wal/i);
     expect(payload.db.integrity).toMatch(/ok/i);
     expect(typeof payload.db.sizeBytes).toBe('number');
@@ -1627,12 +2062,10 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const inventoryPayload = readJson(inventory) as {
       pendingJudgments: { judgmentId: string }[];
-      clamped: boolean;
     };
     const inventoryIds = inventoryPayload.pendingJudgments.map((r) => r.judgmentId);
     expect(inventoryIds).toContain('jdg-aged-itest');
     expect(inventoryIds).toContain('jdg-fresh-itest');
-    expect(inventoryPayload.clamped).toBe(false);
 
     const judged = (await client.callTool({
       name: 'memory.judge',

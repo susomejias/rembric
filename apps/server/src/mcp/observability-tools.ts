@@ -79,7 +79,7 @@ export function parseRunSummary(raw: string): ConsolidationRunSummary {
 }
 
 export interface DoctorReport {
-  db: { open: boolean; journalMode: string; integrity: string; sizeBytes: number };
+  db: { journalMode: string; integrity: string; sizeBytes: number };
   embeddings: { model: string; backlog: number };
   /** Memories not yet scanned for entities — a derived-index drift signal, same shape as `embeddings.backlog`. */
   entities: { backlog: number };
@@ -92,7 +92,6 @@ export interface DoctorReport {
 
 export const doctorOutput = {
   db: z.object({
-    open: z.boolean(),
     journalMode: z.string(),
     integrity: z.string(),
     sizeBytes: z.number(),

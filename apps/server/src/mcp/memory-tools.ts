@@ -85,6 +85,16 @@ const PENDING_JUDGMENTS_MAX = 50;
 /** A queue-depth warning, not a page of an inventory — the caller asks for inventory by passing a size. */
 const PENDING_JUDGMENTS_DEFAULT = 5;
 
+export const CONTEXT_SESSIONS_MAX = 25;
+export const CONTEXT_PROMPTS_MAX = 50;
+export const CONTEXT_MEMORIES_MAX = 100;
+/**
+ * A combined budget across `before` and `after`, not a per-argument page cap —
+ * deliberately its own bound rather than sharing a value with the context page
+ * maxima it happens to collide with.
+ */
+export const TIMELINE_WINDOW_MAX = 50;
+
 /** Per-surface `relations` defaults; the maximum and the multi-row default are shared. */
 const RELATION_ANNOTATION_DEFAULT = MULTI_ROW_ANNOTATION_DEFAULT;
 /** Single-id `memory.get` is the deliberate deep read, so it defaults to the maximum. */
@@ -257,9 +267,9 @@ export const memoryArchiveSchema = {
 };
 
 export const contextSchema = {
-  sessions: z.number().int().min(0).max(25).optional(),
-  prompts: z.number().int().min(0).max(50).optional(),
-  memories: z.number().int().min(0).max(100).optional(),
+  sessions: z.number().int().min(0).max(CONTEXT_SESSIONS_MAX).optional(),
+  prompts: z.number().int().min(0).max(CONTEXT_PROMPTS_MAX).optional(),
+  memories: z.number().int().min(0).max(CONTEXT_MEMORIES_MAX).optional(),
   judgments: z
     .number()
     .int()
@@ -280,8 +290,8 @@ export const contextSchema = {
 
 export const timelineSchema = {
   memoryId: z.string().min(1),
-  before: z.number().int().min(0).max(50).optional(),
-  after: z.number().int().min(0).max(50).optional(),
+  before: z.number().int().min(0).max(TIMELINE_WINDOW_MAX).optional(),
+  after: z.number().int().min(0).max(TIMELINE_WINDOW_MAX).optional(),
 };
 
 const relationView = z.object({
@@ -318,6 +328,7 @@ const memoryRow = z.object({
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
   status: z.string().optional(),
+  replaces: z.array(z.string()).optional(),
   createdAt: z.string().optional(),
   lastSeenAt: z.string().nullable().optional(),
   topicKey: z.string().nullable().optional(),
@@ -330,6 +341,7 @@ const memoryRow = z.object({
   relationsTotal: z.number().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
+  reviewEscalated: z.boolean().optional(),
   entities: z.array(entityRef).optional(),
   /** Pre-bound count, exact (the reads carry no LIMIT). Truncation is `entitiesTotal > entities.length`. */
   entitiesTotal: z.number().optional(),
@@ -545,7 +557,6 @@ export const contextOutput = {
    * collapsing one and batch-confirm via `memory.confirm({ids})` when deep.
    */
   needsReviewTotal: z.number(),
-  clamped: z.boolean(),
 };
 
 export const timelineOutput = {
@@ -1110,11 +1121,14 @@ async function handleGet(
       const entitiesByMemory = deps.repos
         ? deps.repos.entities.findEntitiesForMemories(rows.map((m) => m.id))
         : new Map<string, { kind: string; value: string }[]>();
+      // One batched confirmation lookup for the whole page, never per row.
+      const review = deps.memory.reviewStateForMemories(rows);
       const found = new Set(rows.map((m) => m.id));
       return ok({
         memories: rows.map((m) => {
           const ents = entitiesByMemory.get(m.id) ?? [];
           const annotations = relations?.get(m.id);
+          const r = review.get(m.id);
           return {
             id: m.id,
             scope: m.scope,
@@ -1124,12 +1138,20 @@ async function handleGet(
             content: m.content,
             tags: m.tags,
             status: m.status,
+            replaces: m.replaces,
             createdAt: m.createdAt,
             lastSeenAt: m.lastSeenAt,
             topicKey: m.topicKey,
             relations: boundAnnotationReasons(annotations?.views ?? [], ANNOTATION_REASON_CHARS),
             relationsTotal: annotations?.total ?? 0,
             ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
+            ...(r && r.reviewState !== null
+              ? {
+                  reviewState: r.reviewState,
+                  reviewAfter: r.reviewAfter ?? null,
+                  reviewEscalated: r.reviewEscalated,
+                }
+              : {}),
           };
         }),
         notFound: args.ids.filter((id) => !found.has(id)),
@@ -1329,13 +1351,8 @@ async function handleContext(
   } catch (err) {
     return errToMcp(err);
   }
-  const sessionsLimit = clamp(args.sessions ?? 3, 0, 25);
-  const memoriesLimit = clamp(args.memories ?? 10, 0, 100);
-  const clamped =
-    (args.sessions ?? 0) > 25 ||
-    (args.prompts ?? 0) > 50 ||
-    (args.memories ?? 0) > 100 ||
-    (args.judgments ?? 0) > PENDING_JUDGMENTS_MAX;
+  const sessionsLimit = clamp(args.sessions ?? 3, 0, CONTEXT_SESSIONS_MAX);
+  const memoriesLimit = clamp(args.memories ?? 10, 0, CONTEXT_MEMORIES_MAX);
   const includeArchived = args.includeArchived === true;
 
   const recentSessions = deps.agentSessions
@@ -1370,7 +1387,7 @@ async function handleContext(
       topicKey: m.topicKey,
     }));
 
-  const promptsLimit = clamp(args.prompts ?? 5, 0, 50);
+  const promptsLimit = clamp(args.prompts ?? 5, 0, CONTEXT_PROMPTS_MAX);
   const recentPrompts = deps.prompts
     .recentForContext({
       projectId: scope.kind === 'project' ? scope.projectId : null,
@@ -1512,7 +1529,6 @@ async function handleContext(
     pendingJudgmentsTotal,
     needsReview,
     needsReviewTotal,
-    clamped,
   });
 }
 
@@ -1526,12 +1542,12 @@ async function handleTimeline(
       'memory.timeline is not wired with its required dependencies',
     );
   }
-  const before = clamp(args.before ?? 5, 0, 50);
-  const after = clamp(args.after ?? 5, 0, 50);
-  if (before + after > 50) {
+  const before = clamp(args.before ?? 5, 0, TIMELINE_WINDOW_MAX);
+  const after = clamp(args.after ?? 5, 0, TIMELINE_WINDOW_MAX);
+  if (before + after > TIMELINE_WINDOW_MAX) {
     return mcpError(
       'invalid_input',
-      'memory.timeline: before + after exceeds 50; for larger windows use memory.search',
+      `memory.timeline: before + after exceeds ${TIMELINE_WINDOW_MAX}; for larger windows use memory.search`,
     );
   }
   let scope: Scope;
