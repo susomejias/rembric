@@ -95,6 +95,8 @@ describe('sessions filter bar', () => {
     // and read as an empty-ish table the operator cannot explain.
     expect(html).toContain('<b>TOTAL</b> 4');
     expect(html).toContain('data-href="/dashboard/sessions/S3"');
+    // Covers the filter bar only: this fixture has four rows, so no pager
+    // renders. The generated-href half is asserted in the pager test below.
     expect(html).not.toContain('__global__');
     expect(html).not.toContain('global only');
   });
@@ -113,5 +115,12 @@ describe('sessions filter bar', () => {
 
     const html = await (await app.request('/?agent=claude-code&status=ended')).text();
     expect(html).toMatch(/href="\/\?agent=claude-code&(?:amp;)?status=ended&(?:amp;)?page=1"/);
+
+    // The retired sentinel is read as "no filter", so it must not come back out
+    // in a generated href either. This arm is where a pager actually renders —
+    // the bookmarked-sentinel test above has four rows and none.
+    const sentinel = await (await app.request('/?project=__global__')).text();
+    expect(sentinel).toMatch(/href="\/\?page=1"/);
+    expect(sentinel).not.toContain('__global__');
   });
 });

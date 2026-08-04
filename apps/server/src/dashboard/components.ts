@@ -581,6 +581,8 @@ export function projectOptions(
   ];
 }
 
+const RETIRED_PROJECT_FILTER = '__global__';
+
 /**
  * Read the `project` filter, normalising the retired `__global__` sentinel to
  * "no filter": a bookmarked URL carrying it must not filter to a scope that no
@@ -588,7 +590,34 @@ export function projectOptions(
  */
 export function projectFilterParam(url: URL): string {
   const value = url.searchParams.get('project') ?? '';
-  return value === '__global__' ? '' : value;
+  return value === RETIRED_PROJECT_FILTER ? '' : value;
+}
+
+export interface ResolvedProjectFilter {
+  /** The `project` param with the retired sentinel normalised away. */
+  slug: string;
+  /** Set when `slug` names a live project. */
+  projectId?: string;
+  /** `slug` is present but names no project, so the listing filters to nothing. */
+  unknown: boolean;
+}
+
+/**
+ * Resolve the `project` filter for every list view, so the four of them cannot
+ * disagree about a slug that resolves to nothing. A present-but-unresolvable
+ * slug filters to NOTHING rather than silently dropping the filter: it is a
+ * stale or hand-edited URL and the operator should see the emptiness. (The
+ * retired `__global__` sentinel is a value we once shipped, so
+ * `projectFilterParam` drops it before this ever sees it.)
+ */
+export function resolveProjectFilter(
+  url: URL,
+  projectRows: readonly { id: string; slug: string }[],
+): ResolvedProjectFilter {
+  const slug = projectFilterParam(url);
+  if (slug === '') return { slug, unknown: false };
+  const row = projectRows.find((p) => p.slug === slug);
+  return row ? { slug, projectId: row.id, unknown: false } : { slug, unknown: true };
 }
 
 /* ── pager ─────────────────────────────────────────────────────────── */
@@ -640,6 +669,9 @@ export function pageParam(url: URL): number {
  */
 export function urlWithPage(currentUrl: string, page: number): string {
   const u = new URL(currentUrl);
+  // Rebuilt from the raw query string, so the retired sentinel would survive
+  // into every pager href even though `projectFilterParam` reads it as absent.
+  if (u.searchParams.get('project') === RETIRED_PROJECT_FILTER) u.searchParams.delete('project');
   if (page <= 0) u.searchParams.delete('page');
   else u.searchParams.set('page', String(page));
   return u.pathname + (u.search ? u.search : '');

@@ -121,8 +121,8 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 
 - **GIVEN** a path-scoped connection at `/mcp/foo` with a valid token
 - **WHEN** the client calls `memory.save` with an argument named `scope`
-- **THEN** the call SHALL be rejected by the input schema as an unrecognized argument, and no `scope_locked` code SHALL be emitted by any path
-- **AND** the scenario title predates this change: the argument it names has been removed, and the retired `scope_locked` code is not reintroduced under any condition
+- **THEN** the call SHALL be rejected by the input schema as an unrecognized argument, and no refusal SHALL name the scope the argument used to request
+- **AND** the scenario title predates this change: the argument it names has been removed, so no call can ask for a scope and be refused one. `scope_locked` survives only as a refusal of a project **switch** (see "the surviving `scope_locked` refusals lock a switch, not a scope"); it SHALL NOT be reintroduced as a refusal of a scope
 
 #### Scenario: search on a path-scoped connection does not leak globals
 
@@ -143,12 +143,14 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 - **WHEN** the client calls `memory.search`
 - **THEN** the response SHALL be an MCP error with `code: 'project_not_found'`
 - **AND** the response SHALL contain no memory, in particular none from the default project
+- **AND** the scenario title predates this change: there is no global memory to read, and the refusal it pins is unchanged
 
 #### Scenario: get on a global id from an unresolvable slug refuses
 
 - **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and a memory M in the default project
 - **WHEN** the client calls `memory.get({id: M})`
 - **THEN** the response SHALL be an MCP error with `code: 'project_not_found'` and SHALL NOT return M's `content`
+- **AND** the scenario title predates this change: M is a memory in the default project, not a global one, which is what its body already says
 
 #### Scenario: writes on an unresolvable slug do not land in global memory
 
@@ -156,6 +158,7 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 - **WHEN** the client calls `memory.capture_passive` with text containing a well-formed Key Learnings section, or calls `memory.save_prompt`
 - **THEN** each call SHALL be refused with `code: 'project_not_found'`
 - **AND** no row SHALL be inserted into `memory` or `prompts`, in the default project or any other
+- **AND** the scenario title predates this change: there is no global memory to land in, and the refusal it pins is unchanged
 
 #### Scenario: a session is not opened in the global scope from an unresolvable slug
 
@@ -163,6 +166,7 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 - **WHEN** the client calls `memory.session_start`
 - **THEN** the call SHALL be refused with `code: 'project_not_found'`
 - **AND** no `agent_sessions` row SHALL be inserted, in the default project or any other
+- **AND** the scenario title predates this change: there is no global scope to open a session in, and the refusal it pins is unchanged
 
 #### Scenario: the refusal names candidate slugs
 
@@ -216,14 +220,24 @@ One consequence is normative:
 
 - The `forbidden` message returned when a token pinned to exactly one project is denied an action on a connection whose resolved scope is a DIFFERENT project — including the default project on a path-less connection — SHALL name the way out: activating the pinned project with `project.use({slug})`, or reconnecting at `/mcp/<slug>`. Naming only the token scope and the denied target reads as a misconfigured token and hides a one-call fix. This requirement changes no authorization outcome: the denial itself is correct and unchanged. The remedy's condition SHALL be expressed in terms of the resolved scope differing from the token's pin, NOT in terms of the resolved scope being global — a global-scope condition becomes permanently false when a path-less connection resolves to a project, which would silently stop the remedy being emitted and regress this requirement to a bare identifier with no next step.
 
-The previously-normative consequence about `scope_locked` is retired with the argument that produced it. `memory.save` accepts no `scope` argument, so no call can request a scope the connection forbids, and no message can promise a user-wide destination. A change SHALL NOT reintroduce a message naming user-wide memory or instructing the operator to add a path-less `/mcp` entry for it.
+The previously-normative consequence about `scope_locked` as a **scope** refusal is retired with the argument that produced it. `memory.save` accepts no `scope` argument, so no call can request a scope the connection forbids, and no message can promise a user-wide destination. A change SHALL NOT reintroduce a message naming a scope or user-wide memory, nor one instructing the operator to add a path-less `/mcp` entry for user-wide memory.
+
+The `scope_locked` code itself is NOT retired: it survives as the refusal for a **switch** a path-scoped connection cannot perform — `project.use({slug})` or `memory.session_start({project})` naming a project the URL contradicts. That refusal names the bound slug and no scope, so it is outside what the paragraph above forbids, and it is the only refusal for "this connection is fixed by its URL, you cannot change it from a tool". Its message SHALL keep that shape.
 
 #### Scenario: `scope_locked` does not promise a second connection
 
 - **GIVEN** a path-scoped connection at `/mcp/foo`
 - **WHEN** every refusal the connection can produce is enumerated
-- **THEN** no message SHALL contain `scope_locked`, SHALL instruct opening or connecting to a second MCP connection, or SHALL mention user-wide memory
-- **AND** the scenario title predates this change: the code it names is retired, and this scenario now pins that it stays retired
+- **THEN** no message SHALL name a scope, SHALL instruct opening or connecting to a second MCP connection, or SHALL mention user-wide memory
+- **AND** each enumerated message SHALL be pinned verbatim, not screened against a list of prohibited words — a paraphrase of a prohibited instruction carries none of its words, so only the verbatim pin makes a change to a refusal message visible
+- **AND** the scenario title predates this change: `scope_locked` is retired as a scope refusal, and this scenario pins that it does not come back as one
+
+#### Scenario: the surviving `scope_locked` refusals lock a switch, not a scope
+
+- **GIVEN** a path-scoped connection at `/mcp/foo`
+- **WHEN** the client calls `project.use({slug: 'bar'})` or `memory.session_start({project: 'bar'})`
+- **THEN** each call SHALL be refused with `code: 'scope_locked'`
+- **AND** each message SHALL name the bound slug `foo`, and SHALL name no scope, promise no second connection and mention no user-wide memory
 
 #### Scenario: `scope_locked` agrees with the connection's own instructions
 

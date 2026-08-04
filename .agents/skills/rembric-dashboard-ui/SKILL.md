@@ -72,7 +72,7 @@ Before touching any UI code, do this in order:
 
 4. **Check `src/dashboard/templates.ts`** for the shell + scripts:
    `shell`, `html`, `raw`, `escape`, `formatTs`, `statusPill`,
-   `scopePill`, `shortId`, plus the inline scripts `TS_UPGRADER`,
+   `defaultProjectPill`, `shortId`, plus the inline scripts `TS_UPGRADER`,
    `MOB_TOGGLE`, `SB_COLLAPSE`, `ROW_LINK`, `CONFIRM`.
 
 5. **Check `src/dashboard/page-shell.ts`** — `renderPage(c, sessions,
@@ -197,7 +197,7 @@ urlWithPage(currentUrl: string, page: number)
 formatTs(d: Date|string|number|null|undefined)
 shortId(id: string|null|undefined)
 statusPill(status: string)
-scopePill(scope: string)
+defaultProjectPill()
 renderPage(c, sessions, body, { title, activeNav, view?, counters?, flash? })
 ```
 

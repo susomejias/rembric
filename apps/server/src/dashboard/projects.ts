@@ -62,8 +62,7 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
                       action="/dashboard/projects/${p.id}/archive"
                       method="post"
                       class="inline"
-                      data-confirm='Archive project "${p.displayName ??
-                      p.slug}"? New writes will be rejected; existing memories stay queryable. You can unarchive later.'
+                      data-confirm='Archive project "${p.label}"? New writes will be rejected; existing memories stay queryable. You can unarchive later.'
                       data-confirm-label="ARCHIVE PROJECT"
                       data-confirm-tone="warn"
                     >

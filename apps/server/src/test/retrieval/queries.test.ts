@@ -7,6 +7,7 @@ import { CORPUS, PROJECTS } from './corpus.js';
 import { ingestCorpus, type Ingested } from './ingest.js';
 import { QUERIES } from './queries.js';
 import { resolveGold, resolveScope } from './resolve.js';
+import { hybridRetriever } from './retrievers/hybrid.js';
 import type { QueryScopeFixture } from './types.js';
 
 const ABSTENTION_QUERIES = QUERIES.filter((q) => q.type === 'abstention');
@@ -75,11 +76,18 @@ describe('the abstention query set exercises the gate, not an empty candidate se
  * a vocabulary-sharing row that must stay out.
  */
 describe('the cross-project-isolation queries keep their control in a second project', () => {
-  function search(text: string, projectId: string) {
-    return corpus.memory.searchWithAbstention(
-      { query: text, limit: 8 },
-      { kind: 'project', projectId },
-    );
+  // Through `hybridRetriever` — the instrument the eval scores — rather than a
+  // second call into `searchWithAbstention`: a change to the scored retriever
+  // would otherwise leave this guard measuring the old path. `pnpm run eval` is
+  // NOT a guard for isolation (design.md: the harness rewards over-widening),
+  // so these assertions are the only thing holding it.
+  async function search(text: string, projectId: string): Promise<string[]> {
+    const state = await hybridRetriever.init(corpus);
+    const { ids } = await hybridRetriever.query(text, state, 8, {
+      scope: 'project',
+      projectId,
+    });
+    return ids;
   }
 
   it('commits at least one cross-project-isolation query', () => {
@@ -95,9 +103,9 @@ describe('the cross-project-isolation queries keep their control in a second pro
       expect(goldIds.length).toBeGreaterThan(1);
       for (const id of goldIds) expect(projectById.get(id)).toBe(projectId);
 
-      const { memories } = await search(q.text, projectId!);
-      expect(memories.filter((m) => goldIds.includes(m.id)).length).toBeGreaterThan(0);
-      for (const m of memories) expect(m.projectId).toBe(projectId);
+      const ids = await search(q.text, projectId!);
+      expect(ids.filter((id) => goldIds.includes(id)).length).toBeGreaterThan(0);
+      for (const id of ids) expect(projectById.get(id)).toBe(projectId);
 
       // Non-vacuity: this query DOES retrieve the second project's control row
       // when asked there, so its absence above is the closed scope rather than
@@ -109,9 +117,8 @@ describe('the cross-project-isolation queries keep their control in a second pro
       );
       expect(control).toHaveLength(1);
       const controlId = corpus.idByStableId.get(control[0]!.id)!;
-      expect(memories.map((m) => m.id)).not.toContain(controlId);
-      const elsewhere = await search(q.text, otherId);
-      expect(elsewhere.memories.map((m) => m.id)).toContain(controlId);
+      expect(ids).not.toContain(controlId);
+      expect(await search(q.text, otherId)).toContain(controlId);
     },
   );
 });

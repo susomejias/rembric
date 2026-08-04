@@ -104,6 +104,15 @@ describe('ProjectsService.list / rename / archive', () => {
     expect(projects.archive(other.id).archivedAt).not.toBeNull();
   });
 
+  it('refuses to archive at all when no row carries is_default', () => {
+    const def = defaultProject(db.handle);
+    db.handle.raw.prepare('UPDATE projects SET is_default = 0').run();
+    // Fail closed: a database with no default is the state the guard's own
+    // reason argues from, so it must refuse rather than compare against nothing.
+    expect(() => projects.archive(def.id)).toThrow(/missing its default/);
+    expect(projects.getById(def.id)?.archivedAt).toBeNull();
+  });
+
   it('renames the default project without touching its slug or its flag', () => {
     const def = defaultProject(db.handle);
     const renamed = projects.rename(def.id, 'operator-renamed');

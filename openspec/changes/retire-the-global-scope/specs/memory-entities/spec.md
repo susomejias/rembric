@@ -34,6 +34,7 @@ Either way the derived state SHALL drain to zero after the migration: the operat
 - **WHEN** entity retrieval is performed on a connection scoped to project A, with any argument
 - **THEN** the third project's memory SHALL NOT be returned
 - **AND** no argument on any branch SHALL admit a second project's entity rows
+- **AND** the scenario title predates this change: the widening it names is retired, and what survives is the project-to-project closure its body asserts
 
 #### Scenario: The entity tables drain to zero after the migration
 

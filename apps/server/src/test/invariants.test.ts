@@ -597,7 +597,6 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminCountArchived',
     'adminCountByStatus',
     'adminCountCreatedByDay',
-    'adminFindById',
     'adminListRuns',
     'adminOpCounts',
     'adminRecent',

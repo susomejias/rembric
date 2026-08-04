@@ -1785,7 +1785,7 @@ describe('MCP protocol conformance', () => {
       access: 'read',
     });
 
-    const refusals: { where: string; body: string }[] = [];
+    const refusals: { where: string; code: unknown; message: unknown; body: string }[] = [];
     const record = async (
       where: string,
       client: Client,
@@ -1794,7 +1794,13 @@ describe('MCP protocol conformance', () => {
     ) => {
       const result = (await client.callTool({ name, arguments: args })) as ToolResult;
       expect(result.isError, `${where} was expected to refuse`).toBe(true);
-      refusals.push({ where, body: JSON.stringify(readJson(result)) });
+      const payload = readJson(result) as { code?: unknown; message?: unknown };
+      refusals.push({
+        where,
+        code: payload?.code,
+        message: payload?.message,
+        body: JSON.stringify(payload),
+      });
     };
 
     const unresolvable = await connect({ projectSlug: 'no-such-project-here' });
@@ -1822,6 +1828,56 @@ describe('MCP protocol conformance', () => {
     await denied.close();
 
     expect(refusals.length).toBe(7);
+
+    // Verbatim pins, not a deny-list of prohibited words. Measured: a deny-list
+    // stays green on `Open a second connection with no project in the URL to
+    // store this for every project at once.`, which is the prohibited
+    // instruction paraphrased. Pinning the whole message means any edit to a
+    // refusal reds this test and a human re-approves it, which is what
+    // `mcp-api`'s no-false-remedy requirement actually needs.
+    const expected: Record<string, { code: string; message: string }> = {
+      'unresolvable slug / save': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'unresolvable slug / search': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'unresolvable slug / context': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'path-scoped / switch away': {
+        code: 'scope_locked',
+        message: `connection is path-scoped to '${dflt.slug}'; cannot switch via tool`,
+      },
+      'path-scoped / session_start elsewhere': {
+        code: 'scope_locked',
+        message: `connection is path-scoped to '${dflt.slug}'; cannot start a session for project 'somewhere-else'`,
+      },
+      'path-scoped / cross-project get': {
+        code: 'not_found',
+        message: "memory '01JJJJJJJJJJJJJJJJJJJJJJJJ' not found",
+      },
+      'path-less / token denied the default project': {
+        code: 'forbidden',
+        message:
+          `token scope 'read:project:${elsewhere.id}' does not authorize read on project '${dflt.id}'` +
+          `; this token is pinned to project 'refusal-enum-proj' — ` +
+          `call project.use({slug: 'refusal-enum-proj'}) or reconnect at '/mcp/refusal-enum-proj'`,
+      },
+    };
+    expect(refusals.map((r) => r.where).sort()).toEqual(Object.keys(expected).sort());
+    for (const { where, code, message } of refusals) {
+      expect({ where, code, message }).toEqual({ where, ...expected[where] });
+    }
+
+    // Cheap second layer over the whole payload, which the pins above cover
+    // only for `code` and `message`.
     for (const { where, body } of refusals) {
       expect(body, `${where}: names a scope`).not.toMatch(/global|user-wide/i);
       expect(body, `${where}: offers a path-less entry`).not.toMatch(
@@ -1830,13 +1886,11 @@ describe('MCP protocol conformance', () => {
       expect(body, `${where}: tells the agent to set a scope`).not.toMatch(/set scope|scope=/i);
     }
     // `scope_locked` survives on the two switch paths and is deliberately kept:
-    // it locks switching, not a scope. Pinned here so it stays that way — the
-    // message names the slug and nothing else.
-    const locked = refusals.filter((r) => /"code":"scope_locked"/.test(r.body));
-    expect(locked.length).toBe(2);
-    for (const { where, body } of locked) {
-      expect(body, `${where}: names the bound slug`).toContain('path-scoped');
-    }
+    // it locks switching, not a scope.
+    expect(refusals.filter((r) => r.code === 'scope_locked').map((r) => r.where)).toEqual([
+      'path-scoped / switch away',
+      'path-scoped / session_start elsewhere',
+    ]);
     // Control: the remedy that IS reachable is still offered where it applies,
     // so the loop above is not passing over messages stripped of everything.
     expect(refusals.some((r) => /project\.use\(\{slug/.test(r.body))).toBe(true);

@@ -100,15 +100,6 @@
   color: var(--danger);
   border-color: color-mix(in oklab, var(--danger), transparent 70%);
 }
-.pill.global::before {
-  background: var(--fg);
-}
-.pill.scope::before {
-  background: var(--lime);
-}
-.pill.project::before {
-  background: var(--lime);
-}
 .pill.legacy::before {
   background: var(--warn);
 }

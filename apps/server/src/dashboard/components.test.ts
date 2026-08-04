@@ -74,6 +74,16 @@ describe('urlWithPage', () => {
       '/dashboard/memories?status=active',
     );
   });
+
+  it('drops the retired project sentinel instead of echoing it into the href', () => {
+    expect(urlWithPage('http://x/dashboard/sessions?project=__global__&status=active', 1)).toBe(
+      '/dashboard/sessions?status=active&page=1',
+    );
+    // Control: a real slug is preserved, so the rule is narrow.
+    expect(urlWithPage('http://x/dashboard/sessions?project=demo', 1)).toBe(
+      '/dashboard/sessions?project=demo&page=1',
+    );
+  });
 });
 
 describe('viewHead', () => {
