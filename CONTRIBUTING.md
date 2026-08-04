@@ -115,7 +115,9 @@ document. If you're proposing a behavior change, open a new change with
 **`openspec/specs/` is edit-gated in CI.** A diff that changes a published
 `openspec/specs/<capability>/spec.md` must also add the archived change folder
 that carries the delta for that same capability — which is what archiving does,
-so following the workflow satisfies it automatically. Check before pushing:
+so following the workflow satisfies it automatically. Check before pushing — the
+local run covers `origin/main...HEAD` only, and errors out over an empty range
+rather than reporting `ok`:
 
 ```bash
 pnpm run check:spec-provenance

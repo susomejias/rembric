@@ -144,6 +144,10 @@ export function resolveRange(base, head, cwd) {
   return { ok: true };
 }
 
+export function isEmptyRange(base, head, cwd) {
+  return git(['rev-list', '--count', `${base}..${head}`], cwd).trim() === '0';
+}
+
 export function gitDiffEntries(base, head, cwd) {
   return parseNameStatus(
     // core.quotepath=false, or git octal-escapes non-ASCII paths and wraps them
@@ -187,6 +191,18 @@ function main(argv) {
     // as a pass. A force-push to main leaves `before` unreachable and lands here.
     console.log(`::warning::spec-provenance: range unresolvable, skipping — ${range.reason}`);
     return 0;
+  }
+
+  // A usage error, not a pass: over an empty range every predicate below is
+  // trivially satisfied, so `ok` would mean "nothing was examined" — the one
+  // verdict indistinguishable from "nothing violated the gate".
+  if (isEmptyRange(base, head, process.cwd())) {
+    console.error(`spec-provenance: "${base}..${head}" holds no commits, so nothing was examined.`);
+    console.error(
+      'Pass a range that holds the commits to check — from main, --base origin/main (the',
+    );
+    console.error('commits you are about to push) or --base HEAD~1 for the tip commit alone.');
+    return 2;
   }
 
   const entries = gitDiffEntries(base, head, process.cwd());

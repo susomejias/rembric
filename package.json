@@ -22,7 +22,7 @@
     "eval": "pnpm --filter @rembric/server run eval",
     "corpus:build": "pnpm --filter @rembric/server exec tsx src/scripts/seed-volumetric.ts",
     "e2e:installer": "for f in install.sh apps/plugin/install.sh apps/plugin/.hermes-plugin/install.sh apps/plugin/.hermes-plugin/uninstall.sh apps/plugin/.opencode-plugin/install.sh apps/plugin/.opencode-plugin/uninstall.sh; do sh -n \"$f\" || exit 1; done && pnpm --filter @rembric/server exec vitest run ../../install.test.ts",
-    "check:spec-provenance": "node scripts/check-spec-provenance.mjs --base main --head HEAD",
+    "check:spec-provenance": "node scripts/check-spec-provenance.mjs --base origin/main --head HEAD",
     "check:delta-freshness": "node scripts/check-delta-freshness.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

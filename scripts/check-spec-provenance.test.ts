@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   affectedCapabilities,
   checkProvenance,
+  isEmptyRange,
   parseNameStatus,
   resolveRange,
 } from './check-spec-provenance.mjs';
@@ -312,6 +313,34 @@ describe('CLI', () => {
       const run = repo.cli();
       expect(run.status).toBe(1);
       expect(run.stdout).toContain('mcp-api: openspec/specs/mcp-api/spec.md has no paired archive');
+    } finally {
+      rmSync(repo.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 2 on an empty range instead of passing over a diff it never examined', () => {
+    const repo = scratchRepo();
+    try {
+      repo.write('openspec/specs/mcp-api/spec.md', 'edited\n');
+      repo.git('commit', '-qam', 'fix: an unpaired spec edit');
+
+      const empty = spawnSync(process.execPath, [SCRIPT, '--base', 'HEAD', '--head', 'HEAD'], {
+        cwd: repo.dir,
+        encoding: 'utf8',
+      });
+      expect(empty.status, empty.stdout + empty.stderr).toBe(2);
+      expect(empty.stderr).toContain('"HEAD..HEAD" holds no commits');
+      expect(empty.stdout).not.toContain('spec-provenance: ok');
+      expect(isEmptyRange('HEAD', 'HEAD', repo.dir)).toBe(true);
+
+      // Control: the same violation over a range that does hold the commit still
+      // exits 1, so the exit 2 above is the empty range and not a broken probe.
+      const held = spawnSync(process.execPath, [SCRIPT, '--base', 'HEAD~1', '--head', 'HEAD'], {
+        cwd: repo.dir,
+        encoding: 'utf8',
+      });
+      expect(held.status, held.stdout).toBe(1);
+      expect(isEmptyRange('HEAD~1', 'HEAD', repo.dir)).toBe(false);
     } finally {
       rmSync(repo.dir, { recursive: true, force: true });
     }

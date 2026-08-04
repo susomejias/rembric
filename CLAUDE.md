@@ -4,15 +4,15 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 
 ## Quick reference
 
-| Need             | Command / path                                                         |
-| ---------------- | ---------------------------------------------------------------------- |
-| Install          | `pnpm install` (run `corepack enable` first)                           |
-| Typecheck / lint | `pnpm run typecheck` · `pnpm run lint`                                 |
-| Tests            | `pnpm test` (single file: `pnpm vitest run path/to/file.test.ts`)      |
-| Dev stack        | `pnpm run dev:docker:up` (foreground, wipes+reseeds; `docs/docker.md`) |
-| OpenSpec         | `/opsx:propose` · `/opsx:explore` · `/opsx:apply` · `/opsx:archive`    |
-| Spec provenance  | `pnpm run check:spec-provenance` (CI-gated; see below)                 |
-| Mutation check   | `node scripts/mutate.mjs --file … --spec … --mutation … --with …`      |
+| Need             | Command / path                                                               |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Install          | `pnpm install` (run `corepack enable` first)                                 |
+| Typecheck / lint | `pnpm run typecheck` · `pnpm run lint`                                       |
+| Tests            | `pnpm test` (single file: `pnpm vitest run path/to/file.test.ts`)            |
+| Dev stack        | `pnpm run dev:docker:up` (foreground, wipes+reseeds; `docs/docker.md`)       |
+| OpenSpec         | `/opsx:propose` · `/opsx:explore` · `/opsx:apply` · `/opsx:archive`          |
+| Spec provenance  | `pnpm run check:spec-provenance` (only `origin/main...HEAD`; CI is the gate) |
+| Mutation check   | `node scripts/mutate.mjs --file … --spec … --mutation … --with …`            |
 
 Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --noEmit --incremental`. Pre-push = `pnpm test`. Never bypass git hooks with `--no-verify`.
 
