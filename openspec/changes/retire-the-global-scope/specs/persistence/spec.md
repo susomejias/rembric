@@ -4,7 +4,11 @@
 
 The schema SHALL add `is_default INTEGER NOT NULL DEFAULT 0` to `projects`. Exactly one row SHALL hold `1`. The column is the default project's identity; the slug is not (see the `projects` capability).
 
-The column is added by `ALTER TABLE … ADD COLUMN`, which requires no table rebuild. It SHALL NOT carry a partial UNIQUE index in this release: the one-row invariant is enforced by the migration's own guard and by the service layer, and adding an index over a column with one `1` and N `0`s buys nothing a read cannot get from the boolean.
+The column is added by `ALTER TABLE … ADD COLUMN`, which requires no table rebuild.
+
+The one-row invariant SHALL be enforced by the database, not only by the migration's guard and the service layer: the migration SHALL create a partial unique index `CREATE UNIQUE INDEX projects_is_default_uidx ON projects(is_default) WHERE is_default = 1`, so a second row holding `1` is rejected by SQLite rather than admitted. The index's value here is as a CONSTRAINT, not as a read path — a read gets nothing from it that the boolean does not already give, which is why an earlier draft of this requirement wrongly declined it on read-performance grounds. Two rows marked default would make path-less `/mcp` resolution non-deterministic, and a guard in the migration cannot prevent what a later bug, a manual `UPDATE`, or a restored snapshot can produce. `projects` already carries `projects_slug_unique`, so a unique index on this table is not a new pattern.
+
+Adding the index means `apps/server/src/test/schema-drift.test.ts`'s pinned index set must gain it in the same commit; its going red first is the proof the index landed.
 
 #### Scenario: The column is added without a table rebuild
 
@@ -15,6 +19,13 @@ The column is added by `ALTER TABLE … ADD COLUMN`, which requires no table reb
 
 - **WHEN** the database is inspected after the migration
 - **THEN** `SELECT count(*) FROM projects WHERE is_default = 1` SHALL be exactly 1
+
+#### Scenario: A second default project is rejected by the database
+
+- **GIVEN** a migrated database whose one default project is marked
+- **WHEN** any writer — a later migration, the service layer, or a manual statement — attempts to set `is_default = 1` on a second row
+- **THEN** SQLite SHALL reject the write on `projects_is_default_uidx`, and the existing default SHALL be unchanged
+- **AND** a test SHALL assert that rejection directly, so the invariant is covered by the constraint rather than by the absence of a caller that violates it
 
 ### Requirement: A migration that repoints rows between scopes MUST be idempotent, crash-safe and reported
 
