@@ -18,7 +18,7 @@ export const projects = sqliteTable(
     slug: text('slug').notNull(),
     /** Optional display name; falls back to slug at read time. */
     displayName: text('display_name'),
-    /** Archived projects reject new writes but still surface their memories. */
+    /** Archived projects are closed to agents entirely: `auth.ts` refuses at authentication, so reads fail too. Rows are retained. */
     archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },

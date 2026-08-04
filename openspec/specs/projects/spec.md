@@ -62,12 +62,13 @@ When neither mechanism has fired, the connection SHALL be in _global_ scope. The
 
 ### Requirement: Projects MUST support archive and rename
 
-The dashboard and CLI SHALL allow operators to rename a project (changing its display name without losing memory associations) and to archive a project (preventing new memories from being saved against it while preserving existing ones).
+The dashboard SHALL allow operators to rename a project (changing its display name without losing memory associations) and to archive a project. Archiving closes the project to agents entirely: its rows are retained, not served. A rename changes only `display_name` — the slug is immutable, so nothing durable that names the project by slug is invalidated.
 
 #### Scenario: Archiving a project
 
 - **WHEN** the operator archives project `P`
-- **THEN** subsequent `memory.save` calls scoped to `P` SHALL reject, but `memory.search` and `memory.get` SHALL continue to return its existing memories
+- **THEN** every MCP connection whose effective scope is `P` SHALL be refused with code `project_archived`, at authentication and therefore before any tool dispatch, for reads as well as writes and irrespective of the token's reach
+- **AND** `P`'s memory rows SHALL be retained unchanged, reachable again if the operator unarchives it
 
 ### Requirement: Project auto-detection via MCP `roots` MUST be read-only
 

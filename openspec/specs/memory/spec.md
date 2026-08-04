@@ -343,7 +343,8 @@ When `memory.search` is called WITHOUT an explicit `limit`, the system SHALL app
 #### Scenario: An explicit limit overrides the default in both directions
 
 - **WHEN** `memory.search` is called with an explicit `limit` of 3, or of 50
-- **THEN** the result count SHALL be governed by the explicit `limit` (clamped to `[1, 200]`), not by `DEFAULT_SEARCH_LIMIT`
+- **THEN** the result count SHALL be governed by the explicit `limit`, not by `DEFAULT_SEARCH_LIMIT`
+- **AND** a `limit` outside `[1, 200]` SHALL be REJECTED as an invalid argument rather than clamped — the declared input schema bounds it, so the in-process clamp is never reached over the transport
 
 ### Requirement: Recall MUST be able to return nothing
 
