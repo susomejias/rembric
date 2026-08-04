@@ -6,12 +6,14 @@ Each entity SHALL be scoped exactly as memories are — belonging to exactly one
 
 **No widening exists.** The previous allowance for a project-scoped read to also admit global entities is retired with the global scope itself: there is no second scope to widen into, and the widening argument it mirrored (`include_global`) is removed from the published tool contract. An entity lookup returns the caller's project and nothing else, on every branch.
 
-**The entity tables SHALL be repointed or rebuilt by the migration that retires the global scope**, and the choice is bounded by the identity index. Because `memory_entity_links` holds foreign-key references into `memory_entities`, and because the identity index is UNIQUE over `(scope, project_id, kind, value)`, a repointing collides in general. Two conforming options:
+**The entity tables SHALL be repointed in place by the migration that retires the global scope**, and the repointing SHALL collapse duplicate source rows first. Because `memory_entity_links` holds foreign-key references into `memory_entities`, and because the identity index is UNIQUE over `(scope, project_id, kind, value)`, a repointing collides in general — on both sides of the move, and the two sides are guarded differently:
 
-1. **Rebuild** — the supported operator path already documented for restores: delete the entity-state recipe marker so the server wipes and re-derives the entity tables from `memory`. Preferred, because it needs no new SQL and its failure mode (a temporary backlog) is visible in `memory.doctor`.
-2. **Repoint in place** — conforming ONLY because the destination project is newly created by the same migration (see the `projects` capability), so its only entity rows are the repointed ones and a collision is impossible by construction. This option SHALL NOT be taken if the destination is ever an existing project.
+- **Destination side**: impossible by construction, because the destination project is newly created by the same migration (see the `projects` capability), so its only entity rows are the repointed ones. Repointing in place SHALL NOT be taken if the destination is ever an existing project.
+- **Source side**: NOT impossible, and the identity index is what makes it invisible. The index is UNIQUE over PLAIN columns, and every previously-global row has `project_id IS NULL`, which SQLite treats as distinct — so the pre-migration database does not enforce uniqueness among previously-global entities at all, and the move turns any two rows sharing `(kind, value)` into a live collision. The migration SHALL therefore collapse such rows onto one survivor and remap their links before repointing. Entities are derived state, so collapsing them loses nothing; the alternative is a failure that aborts the boot, writes no ledger row, and therefore recurs on every boot from then on. This mirrors `memory_topic_key_active_uidx`, which keys on `COALESCE(project_id, '')` for exactly this reason.
 
-Either way the derived state SHALL drain to zero after the migration: the operator-visible entity backlog SHALL reach `0` and the scan cursor SHALL cover every `memory` row. A rebuild that stalls part-way leaves entities keyed to a project that no longer addresses them, with no error and no counter that moves.
+**Rebuild — deleting the entity-state recipe marker so the server wipes and re-derives the entity tables — SHALL NOT be used for this migration**, for two measured reasons. Its trigger is deleting a file OUTSIDE the database, which a `.sql` migration cannot do, so taking it would put a data-file deletion keyed to a migration name on the boot path. And it is not the cheaper option: at 10 000 previously-global rows the wipe is 375 ms of synchronous boot over 343 245 rows and the drain then re-extracts EVERY memory, including those that were never global, in 10.1 s — against 311.8 ms to repoint in place — while leaving every project's entity lookups empty until the drain finishes. The cost argument for rebuild counted the removed `UPDATE` but neither the wipe nor the re-extraction it buys.
+
+Either way the derived state SHALL drain to zero after the migration: the operator-visible entity backlog SHALL reach `0` and the scan cursor SHALL cover every `memory` row. A repoint or rebuild that stalls part-way leaves entities keyed to a project that no longer addresses them, with no error and no counter that moves.
 
 #### Scenario: The same path in two projects does not join them
 
@@ -38,6 +40,13 @@ Either way the derived state SHALL drain to zero after the migration: the operat
 - **GIVEN** a populated database whose entity rows were repointed or rebuilt by the retiring migration
 - **WHEN** the derived-state drain completes after boot
 - **THEN** the operator-visible entity backlog SHALL be `0`, the scan cursor SHALL cover every `memory` row, and an entity lookup in the default project SHALL return its repointed memories
+
+#### Scenario: Two previously-global entity rows sharing an identity are collapsed, not collided
+
+- **GIVEN** two previously-global entity rows carrying the same `kind` and `value`, which the identity index admits because `project_id IS NULL`
+- **WHEN** the retiring migration repoints them onto the default project
+- **THEN** one row SHALL survive, every link to the other SHALL address the survivor, and the boot SHALL succeed
+- **AND** every memory that either row addressed SHALL still be returned by an entity lookup in the default project
 
 ### Requirement: Retrieval by entity MUST bypass ranking
 

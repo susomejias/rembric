@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { Database } from 'better-sqlite3';
 
@@ -37,16 +37,23 @@ const MIGRATIONS_TABLE = `
 const STATEMENT_BREAKPOINT = '--> statement-breakpoint';
 
 /**
- * A migration announces its own slow steps: `-- progress: <text>` on a statement
- * emits `<text>` before that statement runs, and a statement headed `-- report:`
- * is a SELECT of one text value emitted instead of being executed. Both fire
- * inside the open write transaction, which is the only place they are useful —
- * a data-moving migration is the whole of the first boot after an upgrade (203 s
- * at 200 000 repointed rows, measured), and a summary printed after it is
- * precisely what is missing when an operator or an orchestrator kills the wait.
+ * A migration announces its own slow steps in the runner's directive namespace,
+ * alongside the breakpoint above: `--> progress: <text>` on a statement emits
+ * `<text>` before that statement runs, and a statement headed `--> report:` is a
+ * SELECT of one text value emitted after the transaction commits. `-->` rather
+ * than a bare `--` so a prose comment that happens to read like a directive is
+ * not one.
+ *
+ * The progress lines fire inside the open write transaction, which is the only
+ * place they are useful — a data-moving migration is the whole of the first boot
+ * after an upgrade (203 s at 200 000 repointed rows, measured), and a summary
+ * printed after it is precisely what is missing when an operator or an
+ * orchestrator kills the wait. A report is post-hoc by definition, so it is held
+ * until the COMMIT succeeds: the pre-commit integrity gate below can still veto
+ * a body whose report already read as done.
  */
-const PROGRESS_MARKER = /^--\s*progress:\s*(\S.*)$/;
-const REPORT_MARKER = /^--\s*report:\s*$/;
+const PROGRESS_MARKER = /^-->\s*progress:\s*(\S[^\r\n]*)$/m;
+const REPORT_MARKER = /^-->\s*report:\s*$/m;
 
 export interface MigrateOptions {
   migrationsDir: string;
@@ -60,13 +67,25 @@ export interface MigrateOptions {
 
 export interface MigrateResult {
   applied: string[];
-  skipped: string[];
-  /** One line per `-- report:` statement in an applied migration. */
-  reports: string[];
 }
 
 interface AppliedRow {
   filename: string;
+}
+
+/**
+ * The statements the runner will apply, in order. Exported so a test reasoning
+ * about a migration's statements uses the runner's own rule rather than a second
+ * implementation of it that can disagree.
+ *
+ * A chunk carrying nothing but a directive is kept: dropping it here is how a
+ * marker gets silently discarded. Executing it is a no-op, comments and all.
+ */
+export function splitStatements(sql: string): string[] {
+  return sql
+    .split(STATEMENT_BREAKPOINT)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && (!isCommentOnly(s) || hasDirective(s)));
 }
 
 export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
@@ -85,27 +104,13 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
   );
 
   const applied: string[] = [];
-  const skipped: string[] = [];
-  const reports: string[] = [];
   const recordStmt = db.prepare('INSERT INTO _migrations (filename, applied_at) VALUES (?, ?)');
 
   for (const file of files) {
-    if (seen.has(file)) {
-      skipped.push(file);
-      continue;
-    }
+    if (seen.has(file)) continue;
 
-    const sql = readFileSync(join(opts.migrationsDir, file), 'utf8');
-    const statements = sql
-      .split(STATEMENT_BREAKPOINT)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !isCommentOnly(s))
-      .map(readMarkers);
-
-    // Only a migration that announces something announces itself: without this
-    // every boot would narrate all thirty-odd files to say nothing.
-    const announces = statements.some((s) => s.progress !== null || s.report);
-    if (announces) emit(`applying ${file}`);
+    const statements = splitStatements(readFileSync(join(opts.migrationsDir, file), 'utf8'));
+    emit(`applying ${file}`);
 
     // Snapshot FK enforcement, disable around the migration (see note above),
     // restore afterwards. Setting pragmas outside a transaction is what SQLite
@@ -113,25 +118,35 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
     const fkRow = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     const fkWasOn = fkRow?.foreign_keys === 1;
     if (fkWasOn) db.exec('PRAGMA foreign_keys = OFF');
+    const restoreTemp = useDiskForTempStore(db);
 
     try {
-      const fileReports: string[] = [];
+      const reports: string[] = [];
       const apply = db.transaction(() => {
         for (const stmt of statements) {
-          if (stmt.report) {
-            const line = db.prepare(stmt.sql).pluck().get();
-            if (typeof line === 'string') {
-              fileReports.push(line);
-              emit(line);
+          const progress = PROGRESS_MARKER.exec(stmt)?.[1];
+          if (progress !== undefined) emit(progress);
+          if (REPORT_MARKER.test(stmt)) {
+            const line = db.prepare(stmt).pluck().get();
+            if (typeof line !== 'string') {
+              // A report that reads as nothing is the silent-absence failure the
+              // reports exist to prevent. The SQL is static text, so this fires
+              // in the author's test run rather than on an operator's upgrade.
+              throw new Error(
+                `Migration ${file} has a '--> report:' statement returning ${
+                  line === undefined ? 'no rows' : JSON.stringify(line)
+                } instead of one text value`,
+              );
             }
+            reports.push(line);
             continue;
           }
-          if (stmt.progress !== null) emit(stmt.progress);
-          db.exec(stmt.sql);
+          db.exec(stmt);
         }
         // Pre-commit FK integrity gate. `foreign_key_check` returns one
         // row per dangling reference; non-empty means the migration left
         // the DB in an inconsistent state and we abort the transaction.
+        emit('checking foreign keys');
         const violations = db
           .prepare<
             [],
@@ -144,35 +159,49 @@ export function migrate(db: Database, opts: MigrateOptions): MigrateResult {
           );
         }
         recordStmt.run(file, Date.now());
+        emit('committing');
       });
 
       apply.immediate();
       applied.push(file);
-      reports.push(...fileReports);
+      for (const line of reports) emit(line);
     } finally {
+      restoreTemp();
       if (fkWasOn) db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
-  return { applied, skipped, reports };
+  return { applied };
 }
 
-interface Statement {
-  sql: string;
-  progress: string | null;
-  report: boolean;
+/**
+ * A migration's scratch tables are `CREATE TEMP TABLE`, and `db/client.ts` pins
+ * `temp_store = MEMORY` process-wide — which would turn a repointing migration's
+ * stash into resident memory (measured: 477 MB of blobs, 1585 MB peak RSS at
+ * 200 000 rows). Spilling to disk instead costs ~12 s and keeps the ceiling off
+ * the heap, because the worst case this runs in is a memory-capped container.
+ *
+ * The directory is the database's own, not SQLite's default `/var/tmp`: that is
+ * the filesystem the upgrade's disk requirement is stated against, and the one
+ * the process has already proved it can write. `sqlite3_temp_directory` is a
+ * process-global, hence the restore.
+ */
+function useDiskForTempStore(db: Database): () => void {
+  const store = db.prepare<[], { temp_store: number }>('PRAGMA temp_store').get()?.temp_store ?? 0;
+  const dir = db
+    .prepare<[], { temp_store_directory: string | null }>('PRAGMA temp_store_directory')
+    .get()?.temp_store_directory;
+  db.exec('PRAGMA temp_store = FILE');
+  if (!db.memory)
+    db.exec(`PRAGMA temp_store_directory = '${dirname(db.name).replace(/'/g, "''")}'`);
+  return () => {
+    db.exec(`PRAGMA temp_store = ${store}`);
+    db.exec(`PRAGMA temp_store_directory = '${(dir ?? '').replace(/'/g, "''")}'`);
+  };
 }
 
-function readMarkers(stmt: string): Statement {
-  let progress: string | null = null;
-  let report = false;
-  for (const line of stmt.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('--')) break;
-    progress = PROGRESS_MARKER.exec(trimmed)?.[1] ?? progress;
-    report = report || REPORT_MARKER.test(trimmed);
-  }
-  return { sql: stmt, progress, report };
+function hasDirective(stmt: string): boolean {
+  return PROGRESS_MARKER.test(stmt) || REPORT_MARKER.test(stmt);
 }
 
 function isCommentOnly(stmt: string): boolean {

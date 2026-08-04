@@ -6,6 +6,7 @@
 export { agentSessionRow } from './agent-sessions.js';
 export { createTestDb } from './db.js';
 export type { TestDb } from './db.js';
+export { defaultProject } from './default-project.js';
 export { TestClock } from './clock.js';
 export { FakeEmbedder } from './embedder.js';
 export { mintTestToken } from './tokens.js';

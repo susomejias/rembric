@@ -10,8 +10,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { migrate } from './migrate.js';
+import { partitionKeyFor } from './repositories/scope-clause.js';
+import type { MemoryScope } from './schema/memory.js';
 
 const fullMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
+
+/** Every test here migrates, so the runner would narrate every file once per test. */
+const SILENT = { onProgress: () => {} };
 
 describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () => {
   let db: TestDb;
@@ -133,7 +138,7 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
     raw.pragma('synchronous = NORMAL');
     raw.pragma('foreign_keys = ON');
     raw.pragma('busy_timeout = 5000');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -170,7 +175,7 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
     raw.prepare('INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)').run('p1', embP);
 
     // Apply 0014 (and anything after) over the populated 2-column table.
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
 
     // No FK damage and the rebuild scratch table is gone.
@@ -184,18 +189,29 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
     const rows = raw
       .prepare<
         [],
-        { memory_id: string; partition_key: string; status: string; type: string }
-      >('SELECT memory_id, partition_key, status, type FROM memory_vec ORDER BY memory_id')
+        {
+          memory_id: string;
+          partition_key: string;
+          status: string;
+          type: string;
+          scope: MemoryScope;
+          project_id: string | null;
+        }
+      >(
+        `SELECT v.memory_id, v.partition_key, v.status, v.type, m.scope, m.project_id
+           FROM memory_vec v JOIN memory m ON m.id = v.memory_id ORDER BY v.memory_id`,
+      )
       .all();
-    // `g1` was global, so 0031 has since repointed its vector into the default
-    // project — the blob identity below is what 0014 is on the hook for.
-    const defaultId = raw
-      .prepare<[], { id: string }>('SELECT id FROM projects WHERE is_default = 1')
-      .get()!.id;
-    expect(rows).toEqual([
-      { memory_id: 'g1', partition_key: defaultId, status: 'active', type: 'user' },
-      { memory_id: 'p1', partition_key: 'proj1', status: 'superseded', type: 'project' },
+    expect(rows.map((r) => ({ memory_id: r.memory_id, status: r.status, type: r.type }))).toEqual([
+      { memory_id: 'g1', status: 'active', type: 'user' },
+      { memory_id: 'p1', status: 'superseded', type: 'project' },
     ]);
+    // The invariant, not the value: each vector sits at ITS memory's partition
+    // key. A later migration that moves a memory between scopes moves the
+    // vector with it and this assertion needs no edit.
+    for (const r of rows) {
+      expect(r.partition_key).toBe(partitionKeyFor(r.scope, r.project_id));
+    }
 
     // Embeddings are byte-identical (no re-embedding, no precision loss).
     const backG = raw
@@ -225,7 +241,7 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   });
 
   it('is a no-op-safe rebuild when memory_vec is empty', () => {
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     // Fresh inserts use the new 5-column shape.
@@ -265,7 +281,7 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
     raw.pragma('synchronous = NORMAL');
     raw.pragma('foreign_keys = ON');
     raw.pragma('busy_timeout = 5000');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -304,7 +320,7 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       )
       .run();
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
@@ -340,17 +356,22 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
         { id: string; scope: string }
       >('SELECT id, scope FROM consolidation_runs ORDER BY id')
       .all();
-    // `run-a` has no `finished_at`, so 0031 repointed it onto the default
-    // project; a finished run would have kept 'global'.
-    expect(runs).toEqual([
-      {
-        id: 'run-a',
-        scope: raw
-          .prepare<[], { id: string }>('SELECT id FROM projects WHERE is_default = 1')
-          .get()!.id,
-      },
-      { id: 'run-legacy', scope: 'unknown' },
-    ]);
+    expect(runs.map((r) => r.id)).toEqual(['run-a', 'run-legacy']);
+    expect(runs.find((r) => r.id === 'run-legacy')!.scope).toBe('unknown');
+    // `run-a` had a scope, so the backfill must not have touched it. Which scope
+    // it carries is a later migration's business — what holds for every one of
+    // them is that a project-scoped run names a project that exists, which is
+    // the string every reader parses.
+    const runA = runs.find((r) => r.id === 'run-a')!.scope;
+    expect(runA).not.toBe('unknown');
+    if (runA !== 'global') {
+      expect(runA).toMatch(/^project:/);
+      expect(
+        raw
+          .prepare<[string], { n: number }>('SELECT count(*) AS n FROM projects WHERE id = ?')
+          .get(runA.slice('project:'.length))!.n,
+      ).toBe(1);
+    }
 
     // Every op row preserved with its run_id intact (historical merge included).
     const ops = raw
@@ -452,15 +473,17 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       );
     const before = countAll();
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
 
     // No corruption anywhere in the file, and no dangling foreign keys.
     expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
-    // No row vanished from any table; 0031 adds the default project.
-    expect(countAll()).toEqual({ ...before, projects: before['projects']! + 1 });
+    // No row vanished from any table — stated as the invariant, so a later
+    // migration that legitimately ADDS a row does not edit this expectation.
+    const after = countAll();
+    expect(Object.keys(after).filter((t) => after[t]! < before[t]!)).toEqual([]);
 
     // Unrelated tables are byte-identical (0015 must not touch them).
     expect(
@@ -522,7 +545,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
     raw.pragma('foreign_keys = ON');
     raw.pragma('busy_timeout = 5000');
 
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -578,7 +601,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
     // Re-run migrations against the FULL dir → 0011 and 0012 are new and run.
     // Both rebuild `sessions` while it is a populated FK parent, so this
     // exercises the FK-safe dance for both migrations.
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toEqual([
       '0011_summary_length_check.sql',
       '0012_drop_summary_length_check.sql',
@@ -658,7 +681,7 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
     raw = new Database(join(dataDir, 'data.db'));
     sqliteVec.load(raw);
     raw.pragma('foreign_keys = ON');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -687,7 +710,7 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
     );
     for (const r of rows) ins.run(r.id, r.content);
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0016_add_memory_title.sql');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
@@ -736,7 +759,7 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
     raw.pragma('synchronous = NORMAL');
     raw.pragma('foreign_keys = ON');
     raw.pragma('busy_timeout = 5000');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -780,7 +803,7 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
       )
       .run();
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0026_confirmation_verdict_check.sql');
     expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -842,7 +865,7 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
 
   it('closes the verdict domain against a direct INSERT and UPDATE', () => {
     seed();
-    migrate(raw, { migrationsDir: fullMigrationsDir });
+    migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
 
     expect(() =>
       raw
@@ -872,7 +895,7 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
       )
       .run();
 
-    expect(() => migrate(raw, { migrationsDir: fullMigrationsDir })).not.toThrow();
+    expect(() => migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT })).not.toThrow();
     expect(
       raw
         .prepare<[], { verdict: string }>("SELECT verdict FROM confirmations WHERE id = 'c-legacy'")
@@ -904,7 +927,7 @@ describe('migration 0017_oauth_project_binding', () => {
     raw.pragma('journal_mode = WAL');
     raw.pragma('foreign_keys = ON');
     raw.pragma('busy_timeout = 5000');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
   });
 
   afterEach(() => {
@@ -924,7 +947,7 @@ describe('migration 0017_oauth_project_binding', () => {
       )
       .run();
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toContain('0017_oauth_project_binding.sql');
 
     // The additive column exists...
@@ -996,7 +1019,7 @@ describe('fresh install vs staged upgrade', () => {
     const fresh = schemaObjects(
       (() => {
         const raw = open(tempDir('rembric-fresh-'));
-        migrate(raw, { migrationsDir: fullMigrationsDir });
+        migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
         return raw;
       })(),
     );
@@ -1012,8 +1035,8 @@ describe('fresh install vs staged upgrade', () => {
         copyFileSync(join(fullMigrationsDir, f), join(slicedDir, f));
       }
       const raw = open(tempDir('rembric-upgraded-'));
-      migrate(raw, { migrationsDir: slicedDir });
-      migrate(raw, { migrationsDir: fullMigrationsDir });
+      migrate(raw, { migrationsDir: slicedDir, ...SILENT });
+      migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
 
       expect(
         schemaObjects(raw),
@@ -1042,7 +1065,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
     raw = new Database(join(dataDir, 'data.db'));
     sqliteVec.load(raw);
     raw.pragma('foreign_keys = ON');
-    migrate(raw, { migrationsDir: slicedDir });
+    migrate(raw, { migrationsDir: slicedDir, ...SILENT });
 
     const insert = raw.prepare(
       `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)
@@ -1073,7 +1096,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
   it('is populated the moment it exists, with no backfill step', () => {
     expect(() => df('ubiquitousterm')).toThrow(); // the table does not exist yet
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir });
+    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toEqual(['0030_memory_fts_vocab.sql', '0031_default_project.sql']);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);
@@ -1082,13 +1105,13 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
   });
 
   it('leaves foreign keys and integrity intact', () => {
-    migrate(raw, { migrationsDir: fullMigrationsDir });
+    migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     expect(raw.prepare('PRAGMA integrity_check').all()).toEqual([{ integrity_check: 'ok' }]);
   });
 
   it('reflects an FTS rebuild without any DDL', () => {
-    migrate(raw, { migrationsDir: fullMigrationsDir });
+    migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     raw
       .prepare(
         `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)
@@ -1102,7 +1125,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
   });
 
   it('survives a drop-and-recreate of memory_fts without being redeclared', () => {
-    migrate(raw, { migrationsDir: fullMigrationsDir });
+    migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     const declaredBefore = raw
       .prepare<[], { sql: string }>(`SELECT sql FROM sqlite_master WHERE name = 'memory_fts_vocab'`)
       .get()!.sql;

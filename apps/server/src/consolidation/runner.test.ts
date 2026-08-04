@@ -10,7 +10,7 @@ import { deriveTitle } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { type DecayThresholds } from './decay.js';
 import { ConsolidationRunner } from './runner.js';
@@ -62,19 +62,21 @@ describe('ConsolidationRunner sweep', () => {
   });
 
   it('records one consolidation_runs row per scope with null llm columns', () => {
-    projects.create({ slug: 'proj-a' });
+    const projA = projects.create({ slug: 'proj-a' });
     const summary = runner.runAll({ force: true });
-    // global + proj-a + the default project every installation carries
-    expect(summary.runs.length).toBe(3);
 
     const rows = db.handle.db
       .select()
       .from(consolidationRuns)
       .orderBy(desc(consolidationRuns.startedAt))
       .all();
-    expect(rows.length).toBe(3);
+    // The SET, not the count: three rows cannot tell one scope swept twice with
+    // another never swept from one row per scope.
+    expect([...rows.map((r) => r.scope)].sort()).toEqual(
+      ['global', `project:${projA.id}`, `project:${defaultProject(db.handle).id}`].sort(),
+    );
+    expect(rows.length).toBe(summary.runs.length);
     for (const row of rows) {
-      expect(row.scope).not.toBeNull();
       expect(row.finishedAt).not.toBeNull();
     }
   });

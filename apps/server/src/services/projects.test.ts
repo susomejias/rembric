@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { ProjectsService, SLUG_REGEX } from './projects.js';
 
@@ -61,8 +61,11 @@ describe('ProjectsService.list / rename / archive', () => {
     projects.archive(archived.id);
 
     const active = projects.list();
-    // `default` is the system default project: an ordinary listed project.
-    expect(active.map((p) => p.slug).sort()).toEqual(['a', 'b', 'default']);
+    // The system default project is an ordinary listed project, resolved by the
+    // boolean that identifies it rather than by the spelling of its slug.
+    expect(active.map((p) => p.slug).sort()).toEqual(
+      ['a', 'b', defaultProject(db.handle).slug].sort(),
+    );
   });
 
   it('lists archived when requested', () => {

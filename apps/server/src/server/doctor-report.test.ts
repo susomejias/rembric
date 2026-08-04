@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
-import { createRepositories } from '../db/repositories/index.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
+import { doctorReport } from '../test/doctor.js';
 import { createTestDb, type TestDb } from '../test/index.js';
-
-import { buildDoctorReportFactory } from './bootstrap.js';
 
 let db: TestDb;
 
@@ -16,13 +13,7 @@ beforeEach(() => {
 afterEach(() => db.cleanup());
 
 function report(diagnostics: DbDiagnostics) {
-  const repos = createRepositories(db.handle.db);
-  return buildDoctorReportFactory({
-    diagnostics,
-    repos,
-    agentSessions: new AgentSessionsService(repos, db.handle.db),
-    dataDir: db.dataDir,
-  })();
+  return doctorReport(db.handle, db.dataDir, diagnostics);
 }
 
 describe('memory.doctor db block', () => {

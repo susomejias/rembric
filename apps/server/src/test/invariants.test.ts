@@ -77,7 +77,10 @@ const FORBIDDEN: ForbiddenRule[] = [
     description: 'raw `UPDATE memory SET title = …` is forbidden — title is immutable',
   },
   {
-    pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*projectId\s*:/i,
+    // `[^;]*` rather than `[^)]*`: the narrower form cannot cross a `)`, so a
+    // call anywhere in the object literal (`.set({ status: f(), projectId: x })`)
+    // slipped past it — measured.
+    pattern: /\bupdate\(\s*memory\s*\)[^;]*\.set\([^;]*\bprojectId\s*:/i,
     description:
       '`db.update(memory).set({ projectId: … })` is forbidden — only a schema migration may move a memory between projects',
   },
@@ -214,6 +217,39 @@ describe('append-only invariants (static grep)', () => {
     const file = join(srcRoot, 'db/repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
+  });
+
+  /**
+   * The DELETE-FROM rules are anchored by their allow-listed files, which must
+   * still contain the statement. The two `project_id` rules allow-list nothing —
+   * their exemption is `db/migrations/`, which `listSourceFiles` does not scan at
+   * all — so with no file to anchor against, a pattern that matches nothing
+   * anywhere is indistinguishable from a pattern that is doing its job. Both
+   * were measured NOT CAUGHT by a mutation before this existed.
+   */
+  it('grep anchors: the memory.project_id rules match a known-bad line and not a near miss', () => {
+    const rule = (needle: string): ForbiddenRule => {
+      const found = FORBIDDEN.filter((r) => r.description.includes(needle));
+      expect(found, `no forbidden rule mentions ${needle}`).toHaveLength(1);
+      return found[0]!;
+    };
+
+    const drizzle = rule('db.update(memory).set({ projectId');
+    expect(drizzle.pattern.test('db.update(memory).set({ projectId: id }).run();')).toBe(true);
+    expect(
+      drizzle.pattern.test('db.update(memory).set({ status: pick(), projectId: id }).run();'),
+    ).toBe(true);
+    expect(drizzle.pattern.test('db.update(memoryRelations).set({ projectId: id }).run();')).toBe(
+      false,
+    );
+
+    const raw = rule('raw `UPDATE memory SET project_id');
+    expect(raw.pattern.test('sql`UPDATE memory SET project_id = ${id} WHERE id = ${m}`')).toBe(
+      true,
+    );
+    expect(raw.pattern.test('sql`UPDATE memory SET last_seen_at = ${now} WHERE id = ${m}`')).toBe(
+      false,
+    );
   });
 
   it('allow-list anchors: db/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
