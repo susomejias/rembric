@@ -1,0 +1,143 @@
+# Retire the global scope
+
+Closes **#299**.
+
+## Why
+
+Rembric has two kinds of scope, and one of them exists only to be widened out of. `global` is not a place agents work; it is a fallback the server falls into when it cannot tell which project it is in, and every feature built on top of it has been a mechanism for escaping it again — `include_global`, `memory.save({scope})`, `scopeWhere`'s widening branch, `partitionKeyFor`'s sentinel, `project_suggestion_pending`, `projectPinRemedy`. The cost is not theoretical:
+
+**The widening axis has produced a published security advisory and a follow-up debt ticket in the last three days.** `openspec/specs/auth/spec.md:192` exists because `include_global` admitted rows a project-restricted token was never authorized to read — **GHSA-cc4j-ch4r-9pf5**, closed by `archive/2026-08-01-gate-global-widening-on-authorization`. The structural reason it was possible is recorded verbatim in the invariant test that closed the follow-up (#304, `apps/server/src/test/invariants.test.ts:495-498`):
+
+> `includeGlobal` is the one value that relaxes the scope guarantee the compiler otherwise enforces: it widens a project-scoped read to also admit `global` rows. It travels BESIDE `Scope` as a bare boolean, so no layer that carries it can tell whether anyone was authorized to set it.
+
+That invariant — a three-assertion CI gate whose only job is to keep one boolean from being constructed outside one file — is the price of keeping a second scope. Deleting the second scope deletes the gate.
+
+**A path-less `/mcp` connection with no `.rembric` file cannot save a project memory at all.** Measured: `memory.save` on `/mcp` with `scope` omitted returns `project_required`, because `scope` defaults to `'project'` (`apps/server/src/mcp/memory-tools.ts:828-835`) and no project is active. The remedy the message offers is `"(c) set scope='global' to save as a user-wide memory instead"` — i.e. the tool's advice for "I don't know which project this is" is "file it somewhere nothing will look for it".
+
+**Two prose statements about that path are simply false today, and both are load-bearing for agent behaviour.** `apps/server/src/mcp/project-suggestion-gate.ts:6-8` says the gate "protects against the silent fallback to `scope='global'`" and `docs/agents.md:372` says "write tools refuse to silently fall through to global". Measured: `memory.save` has **never** silently fallen back — its `scope` defaults to `'project'`, so with no roots capability it returns `project_required`, loudly. The gate IS load-bearing, but for three OTHER tools (`memory.session_start`, `memory.search_prompts`' siblings in `prompt-tools.ts:108`, `memory.doctor`'s neighbour in `observability-tools.ts:195`), which without it write global-scope rows silently.
+
+**And `global` is invisible to the operator in the one place it accumulates.** `apps/server/src/dashboard/sessions.ts:115` renders a session with no project as the pill `GLOBAL`; `entities.ts:105` labels an entity row `global`; `components.ts:581` offers a `global only` filter. None of them names a destination an operator can reason about, because there is no row in `projects` to open.
+
+The direction is therefore to make every scope closed, by making the fallback an ordinary place: a **default project**. It is a real `projects` row with a collision-proof slug and one boolean column marking it as the system default. The only special thing about it is that a path-less `/mcp` connection resolves to it. `include_global` and `memory.save`'s `scope` are then arguments with nothing to say, and they are deleted.
+
+All measurements below were executed — against a copy of the real corpus for the migration, inside the migration runner's exact envelope, and through the real MCP boundary for the tool surface. The exploration is cited, not repeated.
+
+## What Changes
+
+### The default project (the whole mechanism)
+
+- **`projects` gains one boolean column, `is_default`.** Chosen over a `settings` row holding the default project's id, and over inferring the default from a reserved slug. A column is queryable in the same read that resolves the project (`resolveEffectiveScope` already does a `projects` lookup), needs no second table, and `SELECT … WHERE is_default = 1` is the idempotency guard the migration body needs anyway. A reserved slug was rejected because the slug is operator-visible and the reserved value can already be taken — measured, see below.
+- **The migration ALWAYS creates a NEW project row for the default. It NEVER adopts, reuses or re-designates an existing project — not even one whose slug is already `default`.** This is a data-integrity requirement, not a naming preference, and it has two reasons in order of severity. **(1) The merge would be irreversible.** Repointing the ex-global corpus into a project the operator created and populated merges two distinct populations, and because memory is append-only the rows survive while their `project_id` no longer records which population they came from — nothing can unpick it later. **(2) It would re-admit two collision classes that are impossible ONLY when the destination is brand new**: `memory_topic_key_active_uidx` = `UNIQUE (scope, COALESCE(project_id, ''), topic_key) WHERE status = 'active' AND topic_key IS NOT NULL` (`apps/server/src/test/schema-drift.test.ts:172-173`) and `memory_entities_identity_idx` = `UNIQUE (scope, project_id, kind, value)` (`:111-112`). A fresh destination holds nothing, so no key can already be occupied; a populated one makes both a live UNIQUE violation, on real data, at boot. Adoption was rejected **on integrity grounds, not on cost** — it is the cheaper option and it is still wrong.
+- **The slug is picked by a `SELECT`-then-choose probe at migration time, never guessed, and a collision is not cosmetic.** `projects.slug` carries a UNIQUE index — `apps/server/src/db/schema/projects.ts:26`, `slugUnique: uniqueIndex('projects_slug_unique').on(table.slug)` — so a taken slug makes the `INSERT` fail, aborts the migration inside `BEGIN IMMEDIATE`, and **the server does not boot**. The picker takes the first free value in `default`, `default-2`, `default-3`, … Measured: with `default`/`demo`/`global`/`user` occupied → `default-2`; with `default`, `global`, `personal`, `default-2`, `default-3`, `demo`, `user` occupied → `default-4`. Both runs: no UNIQUE failure, exactly one `is_default`, no duplicate slugs, no existing project renamed or re-designated.
+- **The operator can tell the system default from a same-named project of their own**, because an installation may hold both `default` (theirs) and `default-2` (the system's). `/dashboard/projects` renders a `default` pill on the row holding `is_default = 1` and on no other row — driven by the **boolean, never by the slug's spelling**, since the slug is not the identity and cannot be changed. `display_name` names the role too, advisory only. On the agent side `project.current` answers the same question.
+- **Zero global rows still creates the default project**, and that is correct rather than wasteful — it is what a path-less `/mcp` resolves to on a brand-new install.
+- **The default project is an ordinary project: listable via `project.list`, activatable via `project.use`.** Authorization is unchanged and still gates it — `project.use` checks `assertAuthorized('read', projectScope(project.id))` at `apps/server/src/mcp/project-tools.ts:128` (`:107` gates autocreate, not access) and `project.list` filters by `isAuthorized(ctx.scope, 'read', …)` at `:200`.
+- **Archiving the default project is FORBIDDEN**, at the service layer and by suppressing the form. Rename needs no guard: the slug is provably immutable (`ProjectsService.rename` writes only `display_name`, and no `updateSlug` exists anywhere), so the identity to protect is the boolean column, not the slug.
+
+### Deletions — **BREAKING** on the MCP input surface
+
+- **`include_global` is deleted outright** from `memory.search`'s input schema, from `SearchMemoriesInput`, `HybridSearchOpts` and three repository option bags, from `resolveIncludeGlobal`, and from the entity-lookup widening `memory-entities` defines as mirroring it. Not deprecated: with one kind of scope there is nothing to widen into, and a retained-but-inert argument is exactly the unreachable-state claim `openspec/specs/mcp-api/spec.md:2654` forbids.
+- **`memory.save`'s `scope` argument is deleted outright.** It is an input property on exactly one tool, `enum ['global','project']` with `.default('project')`. With one kind of scope the argument carries no information, so leaving it leaves something dangling. The mitigation that makes deletion safe rather than merely tidy: **without the argument the destination is determined by the connection URL the operator configured**, so an agent can no longer misdirect a write by omitting an argument — which is what happens today.
+- **The `project_suggestion_pending` gate is retired** — because its precondition cannot hold, not as a policy preference. Four call sites (`memory-tools.ts:818`, `session-tools.ts:137`, `prompt-tools.ts:108`, `observability-tools.ts:195`) all reduce to "no project is active", and `project-suggestion-gate.ts:33` returns `null` as soon as a project is pinned. With `/mcp` always resolving to the default project the gate is unreachable on every path. Under `mcp-api/spec.md:2664` ("An instance SHALL be closed in ONE of exactly three ways, and the change closing it SHALL state which") the remedy applied is **remove the field or claim**.
+- **The `includeGlobal` construction invariant is DELETED**, not extended. `apps/server/src/test/invariants.test.ts:493-568`, three assertions added on 2026-08-02 to close #304, exist solely to keep one boolean constructible in one file. This change **retires a guard** rather than adding one — worth stating plainly, because it is the opposite of the usual direction. Two of its assertions are self-guarding (`expect(inDecider.length).toBeGreaterThan(0)`) and will fail loudly once the decider is gone, which is what forces the removal rather than leaving a vacuous test behind.
+
+### Every false promise, corrected
+
+`mcp-api/spec.md:2654` requires a tool's description, its declared `outputSchema` and its emitted payload to agree, and `:2619` forbids an error message naming a remedy the addressee cannot perform. Without the corrections below this change would violate those two requirements about twenty times. Each is enumerated with its `file:line` in `design.md` D9 and driven by task §9; the load-bearing ones:
+
+- **`memory-tools.ts:794-801` (`scope_locked`) goes**, together with its remedy `"ask your operator to add a path-less '/mcp' entry for user-wide memory"` — a remedy that names a destination which will not exist. `mcp-api/spec.md:2625` normatively forbids exactly this sentence class.
+- **`memory-tools.ts:829-835` (`project_required`) loses remedy (c)**, `"or (c) set scope='global' to save as a user-wide memory instead"`. On a path-less connection the error itself becomes unreachable — the default project is always active — but the message survives for the unresolvable-slug path and must not name a scope.
+- **`projectPinRemedy` (`_shared.ts:113`) is RETARGETED, not deleted.** Its first guard is `if (scope.kind !== 'global' || ctx.requestedSlug !== null) return ''`, so once `/mcp` resolves to a project the remedy silently stops being emitted and the pinned-token `forbidden` error degrades to a bare ULID with no next step — a regression against `mcp-api/spec.md:2626` and its scenario at `:2641`, added two days ago by `archive/2026-08-02-tell-the-truth-about-unresolvable-scopes`. It is retargeted at the default project.
+- **Four tool descriptions name global** (`server.ts:127` `memory.save`, `:130` `memory.search`, `:378` `memory.doctor`, `:400` `memory.stats`). `memory.search` is at **1874/1900 characters — 26 of headroom** (measured from the constant) — so its reword is budgeted explicitly in `design.md` D10, which is a net **−20** reclaim landing at 1854/46, with the reclaimed clause named as `mcp-api/spec.md:479` requires. `memory.save`'s false clause is its literal **tail**, which is the first text a truncating client loses.
+- **`mcp/instructions.ts:33`'s path-scoped note** (`"scope='global' is rejected and include_global is inert. User-wide memory is not reachable here."`) becomes false in all three clauses.
+- **Docs**: `docs/agents.md:18,19,29,30,57,128,372,385`; `docs/troubleshooting.md:118,124`; `README.md:269,412`.
+- **Dashboard**: the `__global__` filter option (`components.ts:581`, `sessions.ts:191`), `scopePill` and its three call sites (`templates.ts:518-520` ← `sessions.ts:115`, `memories.ts:207,531`), `sessions.ts:390`'s `'— (global)'`, `entities.ts:105`'s `'global'` label.
+
+### Two silent regressions this change causes and must fix in the same release
+
+- **`consolidation/runner.ts:87-90` sweeps `global` unconditionally** because "global hygiene would otherwise starve — the HTTP session path is always project-scoped". Once the default is an ordinary project it starves exactly as global would have, **and the migrated rows are the ones losing their lazy sweep**. Re-anchored on the default project.
+- **`runner.ts:103-104` gates `purgeEmpty` on `runs.some((r) => r.scope.scope === 'global')`**, which becomes **permanently false**. Empty-session purge would never run again and nothing would error. Re-anchored on the same run.
+
+### The retrieval floor
+
+- **The two `cross-scope` eval queries are rewritten, not the floor lowered.** The change **fails CI without this**: measured, the end state gives R@8 = **0.9375** against the committed k=8 floor of **0.95** (`apps/server/src/test/retrieval/baselines/hybrid.json`, `floors["8"]`) — **0.0125 short**, a deficit smaller than one query's own contribution. Arithmetic: 16 gold-bearing queries; `q-cross-scope-test-colocation` and `q-cross-scope-commit-convention` (`queries.ts:92-105`) each lose half their gold, −1.0/16 = −0.0625. The same value **passes at k=5**, whose committed floor is 0.91875, so this is specifically a k=8 failure. `ratchetFloors` will not paper over it: lowering requires `--lower-floors` and prints the lowering (`floor-ratchet.ts:52-61`).
+
+## Capabilities
+
+### New Capabilities
+
+None. The default project is a requirement added to the existing `projects` capability, not a new capability — it is an ordinary project row plus one resolution rule.
+
+### Modified Capabilities
+
+Twelve. Every one carries requirement TEXT that becomes false, not merely implementation detail.
+
+- `memory`: the scope requirement (`:61`, "Memories MUST be scoped to either global or a project") collapses to project-only; **append-only** (`:9-11`) gains one narrowly scoped migration carve-out (a schema migration MAY rewrite `project_id` where doing so preserves a row that would otherwise become unreachable; no runtime path may) with `content`/`title` immutability untouched; `memory_vec`'s partition-key requirement (`:591`) loses its "fixed sentinel … for global scope" clause and gains the DELETE+re-INSERT rule.
+- `mcp-api`: `include_global` and `memory.save({scope})` removed from the published tool contracts; `scope_locked` retired; `project_required`'s remedy set corrected; the `instructions` variants rewritten; four tool descriptions corrected within `DESCRIPTION_MAX_LENGTH`; `project.current`'s authorization target changed; `projectPinRemedy` retargeted; the suggestion-gate error code retired; a new **`tools/list` truthfulness** scenario added under `:2654` so the whole false-promise class becomes non-recurrable.
+- `auth`: the **GHSA-cc4j-ch4r-9pf5** requirement (`:192-210`) is **generalised, not deleted** — its scope-agnostic principle at `:194` survives; its first two scenarios (which name `include_global`) become false and are replaced; its third (`:212-215`, the write-escalation control) survives verbatim. `:64`'s "or global" becomes vacuous and is trimmed without dropping the scenario. `:259`'s title ("A global token carries no project binding") becomes misleading while its body stays true — `tokens.project_id IS NULL` for a `*` token is an **unbound** token, not a global-scoped one, and it stays.
+- `projects`: the default project — creation, `is_default`, path-less `/mcp` resolution, non-archivability, ordinary listability/usability. `:70`'s pre-existing falsehood is named for separate reconciliation, not folded in.
+- `persistence`: the migration and its envelope; `is_default`; the `memory_vec` DELETE+re-INSERT rule; the `COALESCE(project_id, '')` UNIQUE index requirement (`:181`, `:203-206`) whose global scenario becomes unreachable; the boot-time migration report, which does not exist today.
+- `consolidation`: the lazy sweep's second scope and `purgeEmpty`'s trigger both re-anchored on the default project.
+- `dashboard`: the `global only` filter option, `scopePill`, the "or globally when no project is selected" prose at `:384` and `:877`, the entity view's `global` label (`:1397`, `:1414-1418`), and `:242`'s title. `:160`'s "falling back to the raw scope string otherwise" is **kept and relied upon**: `consolidation_runs.scope` is append-only text, so historical `'global'` rows keep rendering — `global` never fully leaves the operator surface, stated on purpose.
+- `memory-entities`: `:269`'s scope definition collapses; `:271`'s widening requirement and its two scenarios (`:281-292`) are retired with `include_global`; `:295`'s filter list loses the widening.
+- `sessions`: `:189`'s "`project_id` SHALL be null and the session is global-scope" becomes false; `:402`, `:411-424` and `:665`'s scope-resolution requirements lose their global arm.
+- `retrieval-evaluation`: the two `cross-scope` queries and the `cross-scope` query type.
+- `http-api`: `:42`'s response `scope: 'project'|'global'` enum; `:386`'s "`include_global` NOT set" note.
+- `mcp-oauth`: `:150` and `:182-186` — a path-less grant is currently "global (`*` or `read:*`)"; it now binds to the default project.
+
+**Checked and deliberately given NO delta**, so the archive step does not look for one:
+
+- `claude-code-plugin` — its two false lines (`:35`, `:621`, both "the session continues with global scope") sit in the document's narrative prose (`## MCP bridge contract`, `## Project slug selection`), **outside any `### Requirement:` block**. The delta mechanism merges requirements, not prose, so a delta file cannot carry them. They are corrected as a direct edit to the published spec prose, recorded in `tasks.md` §9 rather than smuggled into a delta that the merge would silently drop.
+- `data-access`, `consolidation`'s "single global threshold" (`:117`) and `development-environment`'s "pnpm globally installed" (`:573`) — measured false positives on the word `global`, unrelated to scope.
+
+## Impact
+
+### Load-bearing invariants crossed
+
+- **Append-only memory: crossed, narrowly, with an amendment.** The migration `UPDATE`s `memory.project_id` and `memory.scope` on existing rows. The invariant is narrower than it looks — `apps/server/src/test/invariants.test.ts:149` exempts migrations explicitly (`if (entry === 'migrations') continue; // raw SQL migrations are exempt`) and its regexes pin only `content`/`title`. And this is **not** the first migration to mutate memory rows: `0010`, `0011`, `0017`, `0018` and `0022` all `UPDATE`, and `0018_unique_topic_key_active_index.sql:5-21` does `UPDATE memory SET status = 'superseded'`. It **is** the first to mutate a row's **partition identity**, which is why the spec amendment is scoped to exactly that (`memory` delta).
+- **Scope enforced at the service layer: strengthened.** Every scope becomes closed; `resolveEffectiveScope` still resolves it once and passes it down. The widening axis that made the service-layer guarantee conditional is removed.
+- **`topic_key` convergence: preserved by construction.** A fresh default project means `memory_topic_key_active_uidx` cannot collide.
+- **Review state derived, never stored: untouched.** No new column on `memory`, no sweep change to the review axis.
+- **SQL confined to `db/`: preserved.** One new migration file under `db/migrations/`; no SQL enters services, dashboard, MCP or server.
+- **No new MCP tool.** Two input properties and one error code are removed.
+- **Dashboard design tokens: untouched.** `scopePill`'s CSS class disappears with the helper; no token value changes.
+
+### Blast radius, re-measured on this tree
+
+Instrument: `git grep -o <term> -- apps/server/src`, production and test partitioned by `*.test.ts` / `__tests__/`. These differ slightly from the exploration brief's figures (which counted lines, not occurrences); the figures below are the ones to check against.
+
+| Term                   | Production    | Tests              |
+| ---------------------- | ------------- | ------------------ |
+| `SCOPE_GLOBAL`         | 8 files / 17  | 27 files / **253** |
+| `includeGlobal`        | 10 files / 44 | 6 files / 21       |
+| `include_global`       | 3 files / 6   | 4 files / 11       |
+| `GLOBAL_PARTITION_KEY` | 1 file / 2    | 0                  |
+| `scope_locked`         | 6 files / 7   | 3 files / 5        |
+
+The test tree is the bulk — 253 `SCOPE_GLOBAL` occurrences across 27 files. **The whole is-global decision surface, by contrast, is two return statements**: `apps/server/src/mcp/_shared.ts:71` and `:81`.
+
+### Plugin tree — documentation only, but a release
+
+Three prose files reference Rembric's global scope: `apps/plugin/README.md:139`, `apps/plugin/.opencode-plugin/README.md:69`, `apps/plugin/.hermes-plugin/__init__.py:206`, plus the comment at `apps/plugin/bin/rembric-bridge.mjs:18`. **No client branches on scope** — the bridge derives a URL path and nothing more — so the plugin cost is documentation. (`.opencode-plugin/README.md:49`'s "**Global**" is the opencode config-file location, not Rembric scope; it is a false positive and stays.) Three prose files still bump the single unified `plugin` version, which is one shared resource, not four copies.
+
+### Existing installations
+
+- **A migration is required**, and it is backward-safe on a populated table: measured against a copy of the real corpus enriched to 16 global rows, inside the runner's exact envelope (`PRAGMA foreign_keys = OFF` → `BEGIN IMMEDIATE` → body → `PRAGMA foreign_key_check` → `COMMIT`): **51 → 51 memory rows**, 18/18 assertions, `foreign_key_check` **0** violations, `integrity_check` **ok**, per-table deltas conserved. No table rebuild: one `INSERT`, one `ALTER TABLE … ADD COLUMN`, three `UPDATE`s, and a DELETE/re-INSERT pass over the ex-global `memory_vec` rows.
+- **`memory_vec` is the highest-consequence detail in the change.** `UPDATE memory_vec SET partition_key = …` is **REJECTED** by sqlite-vec: _"UPDATE on partition key columns are not supported yet."_ Control: updating a different column on the same row succeeds. The only move is DELETE + re-INSERT carrying the same blob, verified byte-identical (`Buffer.compare === 0`; `vec_distance_cosine` to the original blob = 0). **If it is forgotten the failure is silent and permanent**: `findMissingEmbeddings` (`vectors-repository.ts:154-165`) is a `LEFT JOIN … WHERE v.memory_id IS NULL` anti-join that detects **absence**, not a wrong partition, so the row is never re-embedded, `memory.doctor` reports zero backlog, `knnByQueryVector` filters `AND partition_key = ?` so the row is invisible to the dense branch forever — while FTS still returns it, so search returns _something_. It gets its own task and its own mutation check.
+- **Derived data.** `memory_fts` needs nothing (external-content, keyed by rowid, and no rowid moves). The three entity tables carry their own `scope` + `project_id` and a `UNIQUE (scope, project_id, kind, value)`, with `memory_entity_links` holding FK references: the recommendation is **rebuild** via the already-documented supported path (`docs/backup.md:42-44` — delete `entity-state.json` so the server wipes and re-derives), with in-place migration named as the alternative that is safe **only** because the default project is newly created (D2).
+- **First boot after upgrade** runs the migration, then the entity rebuild drains in the background. There is **no migration logging at all today** — `migrate()` returns `{applied, skipped}` and `client.ts:72` discards it — so this change creates that surface (`printBootstrapBanner`, `bootstrap.ts:487`, is the natural home). Given the change's own justification is truthfulness, moving rows silently is not acceptable: the chosen slug and the repointed count are logged.
+- **The data-loss guard does not fire, and that is measured, not assumed.** `assertDataLossGuard` (`server/data-loss-guard.ts:86`, called at `bootstrap.ts:377`) compares five **table totals** with no scope dimension and trips only below 50%; the migration conserves every total. Control: deleting 60% of `memory` correctly refuses the boot.
+- **Crash mid-migration is safe.** Measured: the DB is byte-identical in every counted dimension and the `_migrations` row is unwritten, so boot 2 retries — because `migrate.ts:108` writes the ledger row inside the same transaction. **Idempotency is not free**: the body must guard (`SELECT … WHERE is_default = 1` first, `INSERT` only if absent) or a re-run creates a second default project.
+- **Rollback is survivable, not transparent.** Measured with the old binary's query shapes against the migrated DB: the old global read returns **0** where it returned 12; the default-project read returns **12**; the old dense read on `__global__` returns **0**; `SELECT memory.scope` still resolves; Drizzle's explicit column lists make `is_default` invisible. No rows lost, no crash. This is why **release N keeps `memory.scope` present and written as `'project'`** — an old binary that finds the column missing fails on _every_ query, not just the global ones. `docs/updates.md:70` already states the DB is deliberately not restored on rollback, so the release note must say that a rolled-back server shows an **empty global partition** and the rows live under the default slug.
+
+### Expand/contract
+
+**Release N (this change)** does everything above and **keeps `memory.scope`**. **Release N+1 (a follow-up change, named in `design.md` D20, not written here)** drops the five scope-bearing indexes (`memory_topic_key_active_idx`, `memory_topic_key_active_uidx`, `memory_scope_seen_idx`, `memory_scope_project_status_created_idx`, `memory_type_in_scope_idx`, plus `memory_entities_identity_idx`), runs `DROP COLUMN scope`, recreates them without it, collapses `Scope` to a project id, and deletes `scopeWhere`'s branch and `GLOBAL_PARTITION_KEY`. Release N is fully functional with a vestigial column; if N+1 never ships, the "wiring is gone" goal is only partly met — recorded as a decision, not left implicit.
+
+### Explicit non-goals
+
+- **`all_projects`.** Its blocker is the harness, not authorization: the eval **cannot detect over-widening**. A probe that dissolved scope isolation entirely showed MRR@8 _rising_ 0.031 with no gated metric regressing, so the harness would report the loss as an improvement.
+- **Multi-project tokens** — a sibling change (`grant-tokens-multiple-projects`), concurrently proposed.
+- **`tokens.project_id IS NULL`** stays. A `*` token is **unbound**, not global-scoped (`auth/spec.md:259-262`); the `CHECK` at `db/schema/tokens.ts:40` depends on it.
+
+Related: `openspec/changes/archive/2026-08-01-gate-global-widening-on-authorization` (the GHSA this change makes structurally impossible), `archive/2026-08-02-tell-the-truth-about-unresolvable-scopes` (the requirement `projectPinRemedy` must not regress), `archive/2026-08-04-stop-promising-a-clamp-that-never-happens` (the description/response agreement rule and its three-remedy duty), `archive/2026-08-03-scope-and-name-the-project-memory-count` (D5, why removal beats a compatibility shim).
