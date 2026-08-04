@@ -73,10 +73,9 @@ export class ProjectsService {
   }
 
   /**
-   * The project a path-less `/mcp` connection resolves to. Every scope
-   * resolution on such a connection ends here, so its absence is not a
-   * recoverable request-level condition: migration `0031` creates the row and
-   * `projects_is_default_uidx` keeps it single.
+   * The project a path-less `/mcp` connection resolves to. Throws rather than
+   * returning undefined: migration `0031` creates the row, so its absence is a
+   * broken database and not a recoverable request-level condition.
    */
   getDefault(): Project {
     const row = this.repos.projects.findDefault();

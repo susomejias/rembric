@@ -45,6 +45,7 @@ import {
   routerKey,
   serializeMemory,
   snippet,
+  unresolvableSlug,
   unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
@@ -802,8 +803,9 @@ async function handleSave(
   }
 
   // Path-scoped to a slug that doesn't exist: writes need an existing project.
-  if (ctx.requestedSlug !== null && !ctx.project && args.scope === 'project') {
-    return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
+  const deadSlug = unresolvableSlug();
+  if (deadSlug !== null && args.scope === 'project') {
+    return errToMcp(unresolvableSlugError(deadSlug, deps.projects));
   }
 
   // Pick up the project the agent already activated via `project.use` on
@@ -815,7 +817,7 @@ async function handleSave(
   // When roots-based discovery surfaced suggestions the agent has not yet
   // acted on, refuse the silent fallback to global. The agent must either
   // pass scope='global' explicitly, or call project.use({slug, autocreate}).
-  if (!activeProject && args.scope === 'project' && deps.router && deps.projects) {
+  if (!activeProject && args.scope === 'project' && deps.router) {
     const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
     if (pending) {
       return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
@@ -868,7 +870,7 @@ async function handleSave(
     // Archived projects reject new writes (projects spec, "Archiving a
     // project"). Enforced here rather than in resolveEffectiveScope so the
     // read paths (search/get) keep returning an archived project's memories.
-    if (activeProject) deps.projects?.assertWritable(activeProject.id);
+    if (activeProject) deps.projects.assertWritable(activeProject.id);
 
     const {
       memory: m,
@@ -1307,7 +1309,7 @@ function deriveFocusSeed(
 ): string | undefined {
   const parts: string[] = [];
   const projectId = scope.kind === 'project' ? scope.projectId : null;
-  const project = projectId ? deps.projects?.getById(projectId) : undefined;
+  const project = projectId ? deps.projects.getById(projectId) : undefined;
   if (project) parts.push(project.displayName ?? project.slug);
 
   if (deps.router && deps.agentSessions) {

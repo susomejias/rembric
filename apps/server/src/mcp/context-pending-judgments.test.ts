@@ -10,7 +10,7 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { projectScope, type Scope } from '../services/scope.js';
-import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -29,7 +29,6 @@ const SCOPE = '*' as const;
 const ORPHAN_AFTER_MS = 86_400_000;
 
 let db: TestDb;
-/** The scope a path-less connection resolves to: the default project. */
 let defaultScope: Scope;
 let repos: Repositories;
 let projects: ProjectsService;
@@ -93,7 +92,7 @@ function pendingBetween(sourceId: string, targetId: string, ageMs: number): stri
 
 beforeEach(() => {
   db = createTestDb();
-  defaultScope = projectScope(defaultProject(db.handle).id);
+  defaultScope = defaultProjectScope(db.handle);
   repos = createRepositories(db.handle.db);
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);

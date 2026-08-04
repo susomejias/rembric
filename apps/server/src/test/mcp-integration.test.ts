@@ -1236,6 +1236,92 @@ describe('MCP protocol conformance', () => {
     await pathless.close();
   });
 
+  it('project.use pins after a path-less memory.session_start, and the switch gates still refuse a real pin', async () => {
+    const client = await connect();
+
+    const started = readJson(
+      (await client.callTool({
+        name: 'memory.session_start',
+        arguments: { agent: 'pin-after-start' },
+      })) as ToolResult,
+    ) as { sessionId: string };
+    expect(started.sessionId).toMatch(/^[0-9A-Z]+$/);
+
+    // The flow `instructions.ts` documents verbatim: pin (and create) after the
+    // session is open. A default-project resolution is not an activation, so it
+    // must not make this look like a project switch.
+    const used = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-a', autocreate: true },
+    })) as ToolResult;
+    if (used.isError) throw new Error(`project.use refused: ${JSON.stringify(readJson(used))}`);
+    expect(readJson(used)).toMatchObject({
+      slug: 'pin-after-start-a',
+      created: true,
+      switched: false,
+      source: 'tool-explicit',
+    });
+
+    // Control — the gates are not globally weakened: moving off a DELIBERATE
+    // pin still demands confirmation.
+    const unconfirmed = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-b', autocreate: true },
+    })) as ToolResult;
+    expect(unconfirmed.isError).toBe(true);
+    expect(readJson(unconfirmed)).toMatchObject({
+      code: 'project_switch_requires_confirm',
+      currentSlug: 'pin-after-start-a',
+      targetSlug: 'pin-after-start-b',
+    });
+
+    // Control — and with a session open, a confirmed switch away from a
+    // deliberate pin is still refused.
+    const confirmed = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-b', autocreate: true, confirmSwitch: true },
+    })) as ToolResult;
+    expect(confirmed.isError).toBe(true);
+    expect(readJson(confirmed)).toMatchObject({
+      code: 'session_active_must_end',
+      activeSessionId: started.sessionId,
+      currentSlug: 'pin-after-start-a',
+      targetSlug: 'pin-after-start-b',
+    });
+
+    await client.close();
+  });
+
+  it('a project-pinned token denied the default project is told how to reach its own, at the wire', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'pinned-remedy-proj' });
+    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db));
+    const pinned = tokensSvc.create({ name: 'pinned-remedy', project: own, access: 'write' });
+
+    const pathless = await connect({ token: pinned.plaintext });
+    const refused = (await pathless.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything' },
+    })) as ToolResult;
+    expect(refused.isError).toBe(true);
+    const body = readJson(refused) as { code: string; message: string };
+    expect(body.code).toBe('forbidden');
+    expect(body.message).toContain(`project '${defaultProject(server.dbHandle).id}'`);
+    expect(body.message).toContain("project.use({slug: 'pinned-remedy-proj'})");
+    expect(body.message).toContain("reconnect at '/mcp/pinned-remedy-proj'");
+    await pathless.close();
+
+    // Control — the remedy names a reachable path: the same token on its own
+    // slug is authorized.
+    const scoped = await connect({ token: pinned.plaintext, projectSlug: own.slug });
+    const allowed = (await scoped.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything' },
+    })) as ToolResult;
+    expect(allowed.isError).toBeFalsy();
+    await scoped.close();
+  });
+
   it('rejects scope=global on a path-scoped /mcp/<slug> connection', async () => {
     const client = await connect({ projectSlug: 'integration-proj' });
 

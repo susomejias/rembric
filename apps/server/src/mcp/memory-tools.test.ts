@@ -29,7 +29,6 @@ let memory: MemoryService;
 let handlers: ReturnType<typeof buildMemoryHandlers>;
 let projectA: Project;
 let projectB: Project;
-/** The project a path-less connection resolves to when nothing else named one. */
 let defaultProjectId: string;
 
 const ADMIN_TOKEN_SCOPE: TokenScope = '*';

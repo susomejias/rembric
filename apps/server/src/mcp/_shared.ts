@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext, type RequestContext } from '../server/request-context.js';
-import type { SessionRouter } from '../server/session-router.js';
+import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -28,6 +28,12 @@ export interface ScopeResolutionDeps {
 export interface EffectiveScope {
   scope: Scope;
   project: { id: string; slug: string } | null;
+  /**
+   * Which branch below resolved the project. `'default'` is a fallback rather
+   * than an activation, and callers that record or report provenance MUST
+   * treat it as one.
+   */
+  source: ProjectResolutionSource;
 }
 
 /**
@@ -66,7 +72,8 @@ export function unresolvableSlugError(slug: string, projects: ProjectsService): 
  */
 export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
   const ctx = getRequestContext();
-  if (ctx.project) return { scope: projectScope(ctx.project.id), project: ctx.project };
+  if (ctx.project)
+    return { scope: projectScope(ctx.project.id), project: ctx.project, source: 'url-path' };
   if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, deps.projects);
   if (!ctx.mcpSessionId || !deps.router) return defaultProjectScope(deps.projects);
   if (deps.getServer) {
@@ -77,8 +84,12 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
   }
   const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
   const project = entry?.projectId ? (deps.projects.getById(entry.projectId) ?? null) : null;
-  if (!project) return defaultProjectScope(deps.projects);
-  return { scope: projectScope(project.id), project };
+  if (!entry || !project) return defaultProjectScope(deps.projects);
+  return {
+    scope: projectScope(project.id),
+    project,
+    source: entry.projectResolutionSource,
+  };
 }
 
 /**
@@ -88,7 +99,7 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
  */
 function defaultProjectScope(projects: ProjectsService): EffectiveScope {
   const project = projects.getDefault();
-  return { scope: projectScope(project.id), project };
+  return { scope: projectScope(project.id), project, source: 'default' };
 }
 
 /**
@@ -99,8 +110,7 @@ function defaultProjectScope(projects: ProjectsService): EffectiveScope {
 export async function resolveEffectiveScopeOrNull(
   deps: ScopeResolutionDeps,
 ): Promise<EffectiveScope | null> {
-  const ctx = getRequestContext();
-  if (ctx.requestedSlug !== null && !ctx.project) return null;
+  if (unresolvableSlug() !== null) return null;
   return resolveEffectiveScope(deps);
 }
 
@@ -110,6 +120,15 @@ export async function resolveEffectiveScopeOrNull(
  */
 export function isPathScoped(): boolean {
   return getRequestContext().requestedSlug !== null;
+}
+
+/**
+ * The URL slug when it named no project, else null. The narrower half of
+ * `isPathScoped`, which cannot distinguish the two.
+ */
+export function unresolvableSlug(): string | null {
+  const ctx = getRequestContext();
+  return ctx.project ? null : ctx.requestedSlug;
 }
 
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
@@ -122,24 +141,20 @@ export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean
 }
 
 /**
- * A token pinned to one project, denied an action on a path-less connection
- * that resolved to a DIFFERENT project — the default project, when nothing
- * else named one — is refused a scope it never asked for, and has a one-call
- * way in. Empty in every other case: a token with no pin (`read:*`) has
- * nothing to activate, a path-scoped connection would have `project.use`
- * refused as `scope_locked`, and a token denied an action on its OWN pinned
- * project cannot fix that by re-activating what is already active.
+ * The one-call way in for a token pinned to one project and denied an action on
+ * a path-less connection that resolved to a DIFFERENT one. Empty otherwise.
  */
-function projectPinRemedy(
-  ctx: RequestContext,
-  scope: Scope,
-  projects: ProjectsService | undefined,
-): string {
+function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
+  // A path-scoped connection would have `project.use` refused as `scope_locked`.
   if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
   if (pinned === null) return '';
+  // Re-activating the scope already active cannot change the answer.
   if (scope.kind === 'project' && scope.projectId === pinned) return '';
-  const slug = projects?.getById(pinned)?.slug ?? pinned;
+  // A token row predating the enforced project binding carries a SLUG here
+  // rather than an id (`db/schema/tokens.ts:35-37`), so it resolves to no
+  // project row and the string itself is already the slug to name.
+  const slug = projects.getById(pinned)?.slug ?? pinned;
   return (
     `; this token is pinned to project '${slug}' — call project.use({slug: '${slug}'}) ` +
     `or reconnect at '/mcp/${slug}'`
@@ -151,14 +166,11 @@ function projectPinRemedy(
  * passes through: checks the request token's scope against the tool's
  * read/write classification and the target scope, throwing
  * `DomainError('forbidden')` on failure.
- *
- * `deps` is optional only so callers without a `ProjectsService` keep working;
- * supplying it resolves the pinned project id in the remedy hint to its slug.
  */
 export function assertAuthorized(
   action: 'read' | 'write',
   scope: Scope,
-  deps?: Pick<ScopeResolutionDeps, 'projects'>,
+  deps: Pick<ScopeResolutionDeps, 'projects'>,
 ): void {
   const ctx = getRequestContext();
   if (!isAuthorizedFor(action, scope)) {
@@ -166,7 +178,7 @@ export function assertAuthorized(
     throw new DomainError(
       'forbidden',
       `token scope '${ctx.scope}' does not authorize ${action} on ${target}` +
-        projectPinRemedy(ctx, scope, deps?.projects),
+        projectPinRemedy(ctx, scope, deps.projects),
     );
   }
 }

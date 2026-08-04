@@ -215,40 +215,26 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
 
 async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>) {
   void _args;
-  const ctx = getRequestContext();
 
   // The resolver awaits (or lazily triggers) roots discovery, so the router
-  // entry read below is populated by the time we report its provenance.
+  // entry read below is populated by the time we read its suggestion list.
   let resolved: EffectiveScope | null;
   try {
     resolved = await resolveEffectiveScopeOrNull(deps);
+    if (resolved) assertAuthorized('read', resolved.scope, deps);
   } catch (err) {
     return errToMcp(err);
-  }
-  if (resolved) {
-    try {
-      assertAuthorized('read', resolved.scope, deps);
-    } catch (err) {
-      return errToMcp(err);
-    }
   }
 
   const key = routerKey();
   const entry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
-  // Provenance of what was actually resolved: a router entry the resolver did
-  // not use (a stale pin on a path-scoped connection, or one naming a deleted
-  // project) must not be reported as the source.
-  const source =
-    ctx.requestedSlug !== null
-      ? 'url-path'
-      : resolved?.project && entry?.projectId === resolved.project.id
-        ? entry.projectResolutionSource
-        : 'default';
 
   return ok({
     slug: resolved?.project?.slug ?? null,
     projectId: resolved?.project?.id ?? null,
-    source,
+    // Null only when a URL slug named no project, which is the one case the
+    // resolver declines to answer.
+    source: resolved?.source ?? 'url-path',
     suggestedSlugs: entry?.pendingSuggestedSlugs ?? [],
   });
 }

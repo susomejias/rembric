@@ -15,8 +15,14 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope, type Scope } from '../services/scope.js';
-import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
+import type { Scope } from '../services/scope.js';
+import {
+  createTestDb,
+  defaultProject,
+  defaultProjectScope,
+  mintTestToken,
+  type TestDb,
+} from '../test/index.js';
 
 import { buildMemoryHandlers, RELEVANCE_LIMIT } from './memory-tools.js';
 
@@ -28,7 +34,6 @@ import { buildMemoryHandlers, RELEVANCE_LIMIT } from './memory-tools.js';
  */
 
 let db: TestDb;
-/** The scope a path-less connection resolves to: the default project. */
 let defaultScope: Scope;
 let defaultProjectId: string;
 let repos: Repositories;
@@ -91,7 +96,7 @@ const saveLinked = (n: number, path: string) => {
 beforeEach(() => {
   db = createTestDb();
   defaultProjectId = defaultProject(db.handle).id;
-  defaultScope = projectScope(defaultProjectId);
+  defaultScope = defaultProjectScope(db.handle);
   repos = createRepositories(db.handle.db);
   memory = new MemoryService(repos, db.handle.db);
   token = mintTestToken(db.handle, { scope: '*' }).token;

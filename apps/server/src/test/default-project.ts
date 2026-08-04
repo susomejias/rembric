@@ -1,4 +1,5 @@
 import type { DbHandle } from '../db/index.js';
+import { projectScope, type Scope } from '../services/scope.js';
 
 /**
  * The system default project, resolved by the boolean that IS its identity.
@@ -14,4 +15,9 @@ export function defaultProject(handle: DbHandle): { id: string; slug: string } {
     .get();
   if (!row) throw new Error('no project carries is_default = 1');
   return row;
+}
+
+/** The `Scope` a path-less connection resolves to. */
+export function defaultProjectScope(handle: DbHandle): Scope {
+  return projectScope(defaultProject(handle).id);
 }

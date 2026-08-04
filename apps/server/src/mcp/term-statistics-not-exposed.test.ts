@@ -9,8 +9,8 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope, type Scope } from '../services/scope.js';
-import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
+import type { Scope } from '../services/scope.js';
+import { createTestDb, defaultProjectScope, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -33,7 +33,6 @@ const FORBIDDEN = [
 ];
 
 let db: TestDb;
-/** The scope a path-less connection resolves to: the default project. */
 let defaultScope: Scope;
 let repos: Repositories;
 let memory: MemoryService;
@@ -57,7 +56,7 @@ function text(resp: unknown): string {
 
 beforeEach(() => {
   db = createTestDb();
-  defaultScope = projectScope(defaultProject(db.handle).id);
+  defaultScope = defaultProjectScope(db.handle);
   repos = createRepositories(db.handle.db);
   const projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);

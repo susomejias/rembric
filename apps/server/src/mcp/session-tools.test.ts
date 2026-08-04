@@ -29,7 +29,6 @@ let agentSessions: AgentSessionsService;
 let tokens: TokensService;
 let adminToken: Token;
 let handlers: ReturnType<typeof buildSessionHandlers>;
-/** A session opened on a path-less connection belongs to the default project. */
 let defaultProjectId: string;
 let router: SessionRouter;
 
@@ -70,14 +69,14 @@ beforeEach(() => {
 });
 
 afterEach(() => db.cleanup());
+/** The default-project session every test in this file starts from. */
+function startSession(agent = 'a') {
+  return agentSessions.start({ tokenId: adminToken.id, projectId: defaultProjectId, agent });
+}
 
 describe('memory.session_start — reuse vs. mint under (tokenId, projectId) ambiguity', () => {
   it('reuses the sole existing active session for the pair', async () => {
-    const existing = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
+    const existing = startSession();
 
     const r = await runWithContext(makeContext(), () => handlers.sessionStart({}));
     const out = parseText<{ sessionId: string; reused: boolean }>(r);
@@ -86,16 +85,8 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
   });
 
   it('mints a fresh session instead of adopting one of two ambiguous active sessions', async () => {
-    const a = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
-    const b = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'b',
-    });
+    const a = startSession();
+    const b = startSession('b');
 
     const r = await runWithContext(makeContext(), () => handlers.sessionStart({}));
     const out = parseText<{ sessionId: string; reused: boolean }>(r);
@@ -107,11 +98,7 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
 
 describe('memory.session_summary on a session the sweep already abandoned', () => {
   it('succeeds with an explicit sessionId and leaves the lifecycle columns alone', async () => {
-    const s = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
+    const s = startSession();
     agentSessions.markAbandoned(s.id, { adminBypass: true });
     const before = agentSessions.getById(s.id);
 
@@ -138,11 +125,7 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
   // clearing it would drop every later save on this transport to session_id NULL.
   it('session_end on an abandoned row keeps the transport binding', async () => {
     const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-1' };
-    const s = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
+    const s = startSession();
     router.setActiveSession(adminToken.id, 'transport-1', s.id);
     agentSessions.markAbandoned(s.id, { adminBypass: true });
 
@@ -154,11 +137,7 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
 
   it('session_end on an active row still clears the binding', async () => {
     const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-2' };
-    const s = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
+    const s = startSession();
     router.setActiveSession(adminToken.id, 'transport-2', s.id);
 
     await runWithContext(ctx, () => handlers.sessionEnd({ sessionId: s.id }));
@@ -198,11 +177,7 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
   });
 
   it('still reports session_not_found (never attaches) when the only candidate is abandoned and no id was passed', async () => {
-    const s = agentSessions.start({
-      tokenId: adminToken.id,
-      projectId: defaultProjectId,
-      agent: 'a',
-    });
+    const s = startSession();
     agentSessions.markAbandoned(s.id, { adminBypass: true });
 
     const r = await runWithContext(makeContext(), () =>

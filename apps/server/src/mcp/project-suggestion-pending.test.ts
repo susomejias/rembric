@@ -12,6 +12,7 @@ import { TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
+import { buildProjectHandlers } from './project-tools.js';
 import { buildSessionHandlers } from './session-tools.js';
 
 /**
@@ -36,6 +37,7 @@ let tokens: TokensService;
 let adminToken: Token;
 let saveHandlers: ReturnType<typeof buildMemoryHandlers>;
 let sessionHandlers: ReturnType<typeof buildSessionHandlers>;
+let projectHandlers: ReturnType<typeof buildProjectHandlers>;
 let defaultProjectId: string;
 
 function makeContext(overrides: Partial<RequestContext> = {}): RequestContext {
@@ -83,6 +85,12 @@ beforeEach(() => {
   sessionHandlers = buildSessionHandlers({
     agentSessions,
     projects,
+    router,
+  });
+  projectHandlers = buildProjectHandlers({
+    repos: createRepositories(db.handle.db),
+    projects,
+    agentSessions,
     router,
   });
 });
@@ -159,22 +167,36 @@ describe('memory.session_start — the retired project_suggestion_pending gate',
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
     expect(payload.sessionId).toBeDefined();
-    // A suggestion is not a pin: only `project.use` (or roots auto-activation)
-    // moves the connection off the default project.
     expect(payload.projectId).toBe(defaultProjectId);
   });
 
   it('follows the router pin once the suggestion has been minted and activated', async () => {
     router.setSuggestedSlugs(adminToken.id, MCP_SESSION_ID, ['acme-research']);
 
-    // Simulate `project.use({slug, autocreate:true})` minting the project.
-    const proj = projects.create({ slug: 'acme-research' });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, proj.id, 'tool-explicit');
+    const use = await runWithContext(makeContext(), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'acme-research', autocreate: true })),
+    );
+    expect(decode(use).isError).toBe(false);
 
     const r = await runWithContext(makeContext(), () => sessionHandlers.sessionStart({}));
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
     expect(payload.scope).toBe('project');
-    expect(payload.projectId).toBe(proj.id);
+    expect(payload.projectId).toBe(projects.findBySlug('acme-research')?.id);
+  });
+
+  it('lets the agent mint and pin a project AFTER the session is open', async () => {
+    const started = await runWithContext(makeContext(), () => sessionHandlers.sessionStart({}));
+    expect(decode(started).payload.projectId).toBe(defaultProjectId);
+
+    const use = await runWithContext(makeContext(), () =>
+      Promise.resolve(projectHandlers.use({ slug: 'acme-research', autocreate: true })),
+    );
+    const { isError, payload } = decode(use);
+    expect(isError).toBe(false);
+    expect(payload).toMatchObject({ slug: 'acme-research', created: true, switched: false });
+    // A default-project resolution is not a project the agent was in, so there
+    // is nothing it switched away from (`mcp-api/spec.md:1045`).
+    expect(payload.previousSlug).toBeNull();
   });
 });

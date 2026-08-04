@@ -13,6 +13,7 @@ import {
   resolveEffectiveScope,
   resolveSessionId,
   routerKey,
+  unresolvableSlug,
   unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
@@ -107,14 +108,16 @@ async function handleSessionStart(
   // `args.project` is resolved here rather than by the shared resolver, which
   // knows nothing about it, so the unresolvable-slug refusal is needed
   // explicitly for the argument path.
-  if (ctx.requestedSlug !== null && !ctx.project) {
-    return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
+  const deadSlug = unresolvableSlug();
+  if (deadSlug !== null) {
+    return errToMcp(unresolvableSlugError(deadSlug, deps.projects));
   }
 
   // The scope this session attaches to: an explicit `args.project` wins,
   // otherwise the shared resolver decides (URL path → router pin → default
   // project), awaiting roots discovery on a path-less connection.
   let scope: Scope;
+  let source: ProjectResolutionSource;
   if (args.project !== undefined) {
     if (ctx.requestedSlug && ctx.requestedSlug !== args.project) {
       return mcpError(
@@ -132,9 +135,10 @@ async function handleSessionStart(
       return mcpError('project_archived', `project '${found.slug}' is archived`);
     }
     scope = projectScope(found.id);
+    source = 'tool-explicit';
   } else {
     try {
-      scope = (await resolveEffectiveScope(deps)).scope;
+      ({ scope, source } = await resolveEffectiveScope(deps));
     } catch (err) {
       return errToMcp(err);
     }
@@ -199,16 +203,11 @@ async function handleSessionStart(
   const key = routerKey();
   if (key) {
     deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
-    if (projectId !== null) {
-      // Preserve the recorded source (e.g. 'roots') only while it describes the
-      // SAME project: `setActiveSession` above mints a fresh entry carrying
-      // 'none', which would otherwise outrank the provenance we just resolved.
-      const existing = deps.router.get(key.tokenId, key.mcpSessionId);
-      let source: ProjectResolutionSource;
-      if (args.project) source = 'tool-explicit';
-      else if (existing && existing.projectId === projectId)
-        source = existing.projectResolutionSource;
-      else source = ctx.requestedSlug !== null ? 'url-path' : 'default';
+    // A router entry means the agent deliberately activated this project, which
+    // `project.use`'s switch gates then treat as a project to be switched away
+    // from. A `'default'` resolution is a fallback, not an activation, so
+    // pinning it would make the documented `project.use` remedy unreachable.
+    if (projectId !== null && source !== 'default') {
       deps.router.setActiveProject(key.tokenId, key.mcpSessionId, projectId, source);
     }
   }

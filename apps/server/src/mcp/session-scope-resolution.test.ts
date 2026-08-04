@@ -43,7 +43,6 @@ let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
 let otherToken: Token;
-/** The project a path-less connection resolves to when nothing else named one. */
 let defaultProjectId: string;
 let handlers: ReturnType<typeof buildMemoryHandlers> &
   ReturnType<typeof buildPromptHandlers> &

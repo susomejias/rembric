@@ -252,6 +252,30 @@ describe('the refusal does not brick the connection', () => {
     expect(body.created).toBe(true);
   });
 
+  // `project.current` is the one tool that answers without resolving a scope,
+  // so it is also the one that skips `assertAuthorized`. The exemption is only
+  // defensible while the payload carries no data about any project — pinned
+  // here so a change that starts projecting real data has to face it.
+  it('project.current on an unresolvable slug projects no project data at all', async () => {
+    const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
+    const pinnedToOther = mintTestToken(db.handle, {
+      project: realProject,
+      access: 'read',
+    }).token;
+    const r = await runWithContext(
+      ctxFor({ token: pinnedToOther, scope: `read:project:${realProject.id}` }),
+      () => Promise.resolve(projectTools.current({})),
+    );
+    const { isError, body } = decode(r);
+    expect(isError).toBe(false);
+    expect(body).toEqual({
+      slug: null,
+      projectId: null,
+      source: 'url-path',
+      suggestedSlugs: [],
+    });
+  });
+
   it('a scope-resolving tool succeeds in the new project after that project.use', async () => {
     const projectTools = buildProjectHandlers({ repos, projects, agentSessions, router });
     await runWithContext(ctxFor(), () =>
@@ -386,6 +410,28 @@ describe('error messages name only reachable remedies', () => {
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
     expect(body.message as string).not.toContain('project.use');
+  });
+
+  // A token row predating the enforced project binding carries a SLUG in its
+  // scope string rather than an id (`db/schema/tokens.ts:35-37`), so the remedy
+  // cannot resolve it to a project row and must name the string it already has.
+  it('a legacy token whose scope carries a slug is told to activate that slug', async () => {
+    const r = await runWithContext(
+      ctxFor({
+        scope: 'read:project:legacy-slug',
+        requestedSlug: null,
+        mcpSessionId: 'mcp-sess-legacy',
+      }),
+      () =>
+        Promise.resolve(
+          memoryHandlers().save({ scope: 'project', type: 'user', title: 't', content: 'c' }),
+        ),
+    );
+    const { isError, body } = decode(r);
+    expect(isError).toBe(true);
+    expect(body.code).toBe('forbidden');
+    expect(body.message as string).toContain("project.use({slug: 'legacy-slug'})");
+    expect(body.message as string).not.toContain('undefined');
   });
 
   // Third control: on a path-scoped connection `project.use({slug})` is rejected

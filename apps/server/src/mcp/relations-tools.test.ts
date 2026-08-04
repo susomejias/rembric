@@ -9,6 +9,7 @@ import { SessionRouter } from '../server/session-router.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
+import { projectScope } from '../services/scope.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildRelationsHandlers } from './relations-tools.js';
@@ -19,7 +20,6 @@ let repos: Repositories;
 let relations: RelationsService;
 let memorySvc: MemoryService;
 let handlers: ReturnType<typeof buildRelationsHandlers>;
-/** Rows a path-less connection can reach live in the default project. */
 let defaultProjectId: string;
 
 function fakeContext(project: Project | null = null): RequestContext {
@@ -235,7 +235,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
     const suggestion = suggestTopicKey({ type: 'project', title }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title, content: 'x', topicKey: suggestion },
-      { kind: 'project', projectId: defaultProjectId },
+      projectScope(defaultProjectId),
     ).memory;
 
     const r = await runWithContext(fakeContext(), () =>
@@ -275,7 +275,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
     const heldKey = suggestTopicKey({ type: 'project', title: heldTitle }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title: heldTitle, content: 'x', topicKey: heldKey },
-      { kind: 'project', projectId: defaultProjectId },
+      projectScope(defaultProjectId),
     ).memory;
 
     const r = await runWithContext(fakeContext(), () =>
@@ -303,7 +303,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
         content: 'x',
         topicKey: suggestTopicKey({ type: 'project', title }).topicKey!,
       },
-      { kind: 'project', projectId: projectB.id },
+      projectScope(projectB.id),
     );
 
     const r = await runWithContext(fakeContext(projectA), () =>
