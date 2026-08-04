@@ -18,6 +18,7 @@ import {
   PAGE_SIZE,
   pageParam,
   pager,
+  projectFilterParam,
   mdBody,
   sel,
   tblEmpty,
@@ -27,16 +28,7 @@ import {
 } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import {
-  escape,
-  formatTs,
-  html,
-  raw,
-  rawPill,
-  scopePill,
-  shortId,
-  statusPill,
-} from './templates.js';
+import { escape, formatTs, html, raw, rawPill, shortId, statusPill } from './templates.js';
 
 export interface SessionsDeps {
   repos: Repositories;
@@ -56,7 +48,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const justRestored = url.searchParams.get('restored');
     const justAbandoned = url.searchParams.get('abandoned');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
-    const projectFilter = url.searchParams.get('project') ?? '';
+    const projectFilter = projectFilterParam(url);
     const agentFilter = url.searchParams.get('agent') ?? '';
     const statusFilterRaw = url.searchParams.get('status') ?? '';
     const statusFilter = (AGENT_SESSION_STATUSES as readonly string[]).includes(statusFilterRaw)
@@ -68,10 +60,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const projectRows = deps.repos.projects.adminListAll();
     const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
 
-    let projectId: string | null | undefined;
-    if (projectFilter === '__global__') {
-      projectId = null;
-    } else if (projectFilter) {
+    let projectId: string | undefined;
+    if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
       if (p) projectId = p.id;
     }
@@ -111,9 +101,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             <a href="/dashboard/sessions/${r.id}">${displayTitle}</a>
           </td>
           <td>${r.agent}</td>
-          <td>
-            ${r.projectSlug ? raw(`<code>${escape(r.projectSlug)}</code>`) : scopePill('global')}
-          </td>
+          <td>${r.projectSlug ? raw(`<code>${escape(r.projectSlug)}</code>`) : raw('—')}</td>
           <td class="small">
             ${r.tokenName ?? '—'}
             ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
@@ -188,7 +176,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
     const projectOptionsList = [
       { value: '', label: 'all scopes', selected: projectFilter === '' },
-      { value: '__global__', label: 'global only', selected: projectFilter === '__global__' },
       ...projectRows.map((p) => ({
         value: p.slug,
         label: p.slug,
@@ -387,7 +374,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       ${kvGrid([
         kv({ k: 'Status', v: statusPill(row.status) }),
         kv({ k: 'Agent', v: row.agent }),
-        kv({ k: 'Project', v: row.projectSlug ?? '— (global)' }),
+        kv({ k: 'Project', v: row.projectSlug ?? '—' }),
         kv({
           k: 'Token',
           v: html`${row.tokenName ?? '—'}${row.tokenRevokedAt

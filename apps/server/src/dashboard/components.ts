@@ -569,8 +569,7 @@ export function filterGroup(
 
 /**
  * Shared `<select>` option set for the project/scope filter used by the
- * memories and prompts list views: "all scopes" · "global only" · one
- * entry per project slug.
+ * memories and prompts list views: "all scopes" · one entry per project slug.
  */
 export function projectOptions(
   projectRows: readonly { slug: string }[],
@@ -578,9 +577,18 @@ export function projectOptions(
 ): SelOption[] {
   return [
     { value: '', label: 'all scopes', selected: selected === '' },
-    { value: '__global__', label: 'global only', selected: selected === '__global__' },
     ...projectRows.map((p) => ({ value: p.slug, label: p.slug, selected: selected === p.slug })),
   ];
+}
+
+/**
+ * Read the `project` filter, normalising the retired `__global__` sentinel to
+ * "no filter": a bookmarked URL carrying it must not filter to a scope that no
+ * longer exists, which reads as an empty table rather than as a stale link.
+ */
+export function projectFilterParam(url: URL): string {
+  const value = url.searchParams.get('project') ?? '';
+  return value === '__global__' ? '' : value;
 }
 
 /* ── pager ─────────────────────────────────────────────────────────── */

@@ -102,7 +102,7 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
     const renderRow = (r: (typeof rows)[number]) => {
       const projectLabel = r.projectId
         ? (projectById.get(r.projectId)?.slug ?? shortId(r.projectId))
-        : 'global';
+        : '—';
       return html`
         <tr>
           <td><span class="pill">${r.kind}</span></td>
@@ -168,7 +168,7 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
                   <tr>
                     <th>kind</th>
                     <th>value</th>
-                    <th>scope</th>
+                    <th>project</th>
                     <th>links</th>
                     <th>actions</th>
                   </tr>

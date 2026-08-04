@@ -17,6 +17,7 @@ import {
   PAGE_SIZE,
   pageParam,
   pager,
+  projectFilterParam,
   projectOptions,
   sel,
   tblEmpty,
@@ -45,7 +46,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const justDeleted = url.searchParams.get('deleted');
     const justUndeleted = url.searchParams.get('undeleted');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
-    const projectFilter = url.searchParams.get('project') ?? '';
+    const projectFilter = projectFilterParam(url);
     const agentFilter = url.searchParams.get('agent') ?? '';
     const sessionFilter = url.searchParams.get('session') ?? '';
     const rawQuery = url.searchParams.get('q') ?? '';
@@ -62,9 +63,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
     let project: AdminListPromptsOpts['project'];
-    if (projectFilter === '__global__') {
-      project = { kind: 'global' };
-    } else if (projectFilter) {
+    if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
       if (p) project = { kind: 'project', projectId: p.id };
     }
@@ -340,8 +339,7 @@ function matchesFilters(
   sessionFilter: string,
 ): boolean {
   if (!includeDeleted && p.deletedAt != null) return false;
-  if (projectFilter === '__global__' && p.projectId != null) return false;
-  if (projectFilter && projectFilter !== '__global__') {
+  if (projectFilter) {
     const proj = projectBySlug.get(projectFilter);
     if (!proj || p.projectId !== proj.id) return false;
   }

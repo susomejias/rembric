@@ -103,6 +103,16 @@ export class ProjectsService {
   }
 
   archive(id: string): Project {
+    // No fallback scope sits behind the default project, so archiving it would
+    // leave a path-less connection with no resolution and refuse every write it
+    // routes. Guarded here rather than in the template: the dashboard's archive
+    // endpoint is reachable with a crafted request carrying a valid CSRF token.
+    if (this.repos.projects.findDefault()?.id === id) {
+      throw new DomainError(
+        'conflict',
+        `projects.archive: id=${id} is the default project and cannot be archived`,
+      );
+    }
     const updated = this.repos.projects.setArchivedAt(id, this.now(), true);
     if (!updated) {
       const existing = this.getById(id);

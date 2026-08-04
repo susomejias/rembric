@@ -87,10 +87,16 @@ describe('sessions filter bar', () => {
     expect(html).toContain('data-href="/dashboard/sessions/S3"');
   });
 
-  it('global-only scope filter excludes project-scoped rows', async () => {
-    const html = await (await app.request('/?project=__global__')).text();
-    expect(html).toContain('<b>TOTAL</b> 3');
-    expect(html).not.toContain('data-href="/dashboard/sessions/S3"');
+  it('a bookmarked ?project=__global__ renders every row rather than a dead scope', async () => {
+    const res = await app.request('/?project=__global__');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // Not filtered to the retired scope, which would report a total of 3 here
+    // and read as an empty-ish table the operator cannot explain.
+    expect(html).toContain('<b>TOTAL</b> 4');
+    expect(html).toContain('data-href="/dashboard/sessions/S3"');
+    expect(html).not.toContain('__global__');
+    expect(html).not.toContain('global only');
   });
 
   it('unfiltered list reports the true total across all non-deleted rows', async () => {

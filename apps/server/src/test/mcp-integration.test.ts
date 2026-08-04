@@ -1233,6 +1233,177 @@ describe('MCP protocol conformance', () => {
     await pathless.close();
   });
 
+  it('project.list returns the default project as an ordinary entry, and project.use activates it', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    // Own sibling, so the "listed alongside others" control does not depend on
+    // which other tests in this file happened to run first. Minted on its own
+    // connection: a pinned router entry would make the `project.use` below a
+    // switch, which is a different gate from the one under test.
+    const sibling = await connect();
+    await sibling.callTool({
+      name: 'project.use',
+      arguments: { slug: 'listed-sibling', autocreate: true },
+    });
+    await sibling.close();
+
+    const client = await connect();
+    const listed = readJson(
+      (await client.callTool({ name: 'project.list', arguments: {} })) as ToolResult,
+    ) as {
+      projects: {
+        slug: string;
+        displayName: string | null;
+        archived: boolean;
+        activeMemoryCount: number;
+      }[];
+    };
+    const entry = listed.projects.find((p) => p.slug === dflt.slug);
+    expect(entry, 'the default project is missing from project.list').toBeDefined();
+    expect(Object.keys(entry!).sort()).toEqual([
+      'activeMemoryCount',
+      'archived',
+      'displayName',
+      'slug',
+    ]);
+    expect(entry!.archived).toBe(false);
+    expect(typeof entry!.displayName).toBe('string');
+    expect(typeof entry!.activeMemoryCount).toBe('number');
+    // Non-vacuity: it is listed alongside others, not the only entry.
+    expect(listed.projects.length).toBeGreaterThan(1);
+
+    const used = readJson(
+      (await client.callTool({
+        name: 'project.use',
+        arguments: { slug: dflt.slug },
+      })) as ToolResult,
+    ) as { slug: string; created: boolean };
+    expect(used).toMatchObject({ slug: dflt.slug, created: false });
+
+    const stats = readJson(
+      (await client.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult,
+    ) as { scope: string };
+    expect(stats.scope).toBe(`project:${dflt.id}`);
+    await client.close();
+  });
+
+  it('seven read surfaces stay closed across a two-step project.use', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const ENTITY = 'src/closed-scope-probe.ts';
+    const seed = async (slug: string | undefined, marker: string) => {
+      const c = await connect({ projectSlug: slug });
+      const saved = readJson(
+        (await c.callTool({
+          name: 'memory.save',
+          arguments: {
+            type: 'reference',
+            title: `closed scope ${marker}`,
+            content: `closedscopeprobe ${marker} touches ${ENTITY} once`,
+          },
+        })) as ToolResult,
+      ) as { id: string };
+      await c.close();
+      return saved.id;
+    };
+
+    const a = await connect();
+    readJson(
+      (await a.callTool({
+        name: 'project.use',
+        arguments: { slug: 'closed-a', autocreate: true },
+      })) as ToolResult,
+    );
+    await a.close();
+    const b = await connect();
+    readJson(
+      (await b.callTool({
+        name: 'project.use',
+        arguments: { slug: 'closed-b', autocreate: true },
+      })) as ToolResult,
+    );
+    await b.close();
+
+    const defaultId = await seed(dflt.slug, 'in-default');
+    const aId = await seed('closed-a', 'in-a');
+    const bId = await seed('closed-b', 'in-b');
+
+    const client = await connect();
+    // Step one, then the confirmed switch: `project.use` moves the single closed
+    // scope, so the reads below must see project B alone at the end of it.
+    expect(
+      readJson(
+        (await client.callTool({
+          name: 'project.use',
+          arguments: { slug: 'closed-a' },
+        })) as ToolResult,
+      ),
+    ).toMatchObject({ slug: 'closed-a' });
+    expect(
+      readJson(
+        (await client.callTool({
+          name: 'project.use',
+          arguments: { slug: 'closed-b', confirmSwitch: true },
+        })) as ToolResult,
+      ),
+    ).toMatchObject({ slug: 'closed-b', switched: true });
+
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = (await client.callTool({ name, arguments: args })) as ToolResult;
+      return { result, body: readJson(result) };
+    };
+    const outsiders = [defaultId, aId];
+
+    const search = (await call('memory.search', { query: 'closedscopeprobe', limit: 20 })).body as {
+      memories: { id: string }[];
+    };
+    expect(search.memories.map((m) => m.id)).toEqual([bId]);
+
+    const byEntity = (await call('memory.search', { entity: ENTITY })).body as {
+      memories: { id: string }[];
+    };
+    expect(byEntity.memories.map((m) => m.id)).toEqual([bId]);
+
+    const bProjectId = (
+      (await call('project.current', {})).body as { slug: string; projectId: string }
+    ).projectId;
+
+    const ctx = (await call('memory.context', { memories: 50 })).body as {
+      scope: string;
+      recentMemories: { id: string }[];
+    };
+    expect(ctx.scope).toBe(`project:${bProjectId}`);
+    expect(ctx.recentMemories.map((m) => m.id)).toEqual([bId]);
+
+    const stats = (await call('memory.stats', {})).body as {
+      memoriesByStatus: Record<string, number>;
+    };
+    expect(stats.memoriesByStatus).toEqual({ active: 1 });
+
+    const batch = (await call('memory.get', { ids: [bId, ...outsiders] })).body as {
+      memories: { id: string }[];
+      notFound: string[];
+    };
+    expect(batch.memories.map((m) => m.id)).toEqual([bId]);
+    expect(batch.notFound.sort()).toEqual([...outsiders].sort());
+
+    expect((await call('memory.get', { id: bId })).result.isError).toBeFalsy();
+    for (const outside of outsiders) {
+      const denied = await call('memory.get', { id: outside });
+      expect(denied.result.isError).toBe(true);
+      expect(JSON.stringify(denied.body)).toContain('not_found');
+    }
+
+    const timeline = (await call('memory.timeline', { memoryId: bId, before: 25, after: 25 }))
+      .body as { before: { id: string }[]; after: { id: string }[] };
+    const neighbors = [...timeline.before, ...timeline.after].map((m) => m.id);
+    for (const outside of outsiders) expect(neighbors).not.toContain(outside);
+    for (const outside of outsiders) {
+      const denied = await call('memory.timeline', { memoryId: outside });
+      expect(denied.result.isError).toBe(true);
+    }
+
+    await client.close();
+  });
+
   it('project.use pins after a path-less memory.session_start, and the switch gates still refuse a real pin', async () => {
     const client = await connect();
 
@@ -1574,6 +1745,101 @@ describe('MCP protocol conformance', () => {
     expect(scopedInstructions.length).toBeGreaterThan(0);
     expect(scopedInstructions).not.toMatch(/global|include_global|user-wide/i);
     await scoped.close();
+  });
+
+  it('no registered tool names a retired scope anywhere in the manifest', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    await client.close();
+
+    // Without this the negative assertions below all pass over an empty
+    // manifest, which is the only way this test can lie.
+    expect(tools.length).toBeGreaterThanOrEqual(23);
+
+    const RETIRED = /global|include_global|user-wide/i;
+    let propertiesChecked = 0;
+    for (const tool of tools) {
+      expect(tool.description ?? '', `${tool.name} description`).not.toMatch(RETIRED);
+      const schema = tool.inputSchema as {
+        properties?: Record<string, { description?: string }>;
+      };
+      for (const [property, spec] of Object.entries(schema.properties ?? {})) {
+        propertiesChecked += 1;
+        expect(property, `${tool.name} property name`).not.toMatch(RETIRED);
+        // `describe()` lands here, the only place a per-argument string reaches
+        // the model.
+        expect(spec.description ?? '', `${tool.name}.${property} describe()`).not.toMatch(RETIRED);
+      }
+    }
+    // Second non-vacuity control: the property loop ran over real properties.
+    expect(propertiesChecked).toBeGreaterThan(20);
+  });
+
+  it('no refusal a path-less or a path-scoped connection can produce points at a scope', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const repos = createRepositories(server.dbHandle.db);
+    const elsewhere = new ProjectsService(repos).create({ slug: 'refusal-enum-proj' });
+    const pinned = new TokensService(repos).create({
+      name: 'refusal-enum',
+      project: elsewhere,
+      access: 'read',
+    });
+
+    const refusals: { where: string; body: string }[] = [];
+    const record = async (
+      where: string,
+      client: Client,
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      const result = (await client.callTool({ name, arguments: args })) as ToolResult;
+      expect(result.isError, `${where} was expected to refuse`).toBe(true);
+      refusals.push({ where, body: JSON.stringify(readJson(result)) });
+    };
+
+    const unresolvable = await connect({ projectSlug: 'no-such-project-here' });
+    await record('unresolvable slug / save', unresolvable, 'memory.save', {
+      type: 'reference',
+      title: 'refusal enumeration',
+      content: 'refusal enumeration content',
+    });
+    await record('unresolvable slug / search', unresolvable, 'memory.search', { query: 'x' });
+    await record('unresolvable slug / context', unresolvable, 'memory.context', {});
+    await unresolvable.close();
+
+    const scoped = await connect({ projectSlug: dflt.slug });
+    await record('path-scoped / switch away', scoped, 'project.use', { slug: 'somewhere-else' });
+    await record('path-scoped / session_start elsewhere', scoped, 'memory.session_start', {
+      project: 'somewhere-else',
+    });
+    await record('path-scoped / cross-project get', scoped, 'memory.get', {
+      id: '01JJJJJJJJJJJJJJJJJJJJJJJJ',
+    });
+    await scoped.close();
+
+    const denied = await connect({ token: pinned.plaintext });
+    await record('path-less / token denied the default project', denied, 'memory.context', {});
+    await denied.close();
+
+    expect(refusals.length).toBe(7);
+    for (const { where, body } of refusals) {
+      expect(body, `${where}: names a scope`).not.toMatch(/global|user-wide/i);
+      expect(body, `${where}: offers a path-less entry`).not.toMatch(
+        /path-less|second, path-less|add a .*\/mcp.* entry/i,
+      );
+      expect(body, `${where}: tells the agent to set a scope`).not.toMatch(/set scope|scope=/i);
+    }
+    // `scope_locked` survives on the two switch paths and is deliberately kept:
+    // it locks switching, not a scope. Pinned here so it stays that way — the
+    // message names the slug and nothing else.
+    const locked = refusals.filter((r) => /"code":"scope_locked"/.test(r.body));
+    expect(locked.length).toBe(2);
+    for (const { where, body } of locked) {
+      expect(body, `${where}: names the bound slug`).toContain('path-scoped');
+    }
+    // Control: the remedy that IS reachable is still offered where it applies,
+    // so the loop above is not passing over messages stripped of everything.
+    expect(refusals.some((r) => /project\.use\(\{slug/.test(r.body))).toBe(true);
   });
 
   it('rejects an invalid token before reaching tool dispatch', async () => {

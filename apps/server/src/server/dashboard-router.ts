@@ -474,9 +474,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <span class="sub"
             >${lastRun
               ? html`${relTime(lastRun.finishedAt ?? lastRun.startedAt)} ·
-                ${lastRun.scope === 'global'
-                  ? 'global'
-                  : (lastRun.scopeSlug ?? lastRun.scope ?? 'global')}`
+                ${lastRun.scopeSlug ?? lastRun.scope ?? '—'}`
               : 'NEVER'}</span
           >
         </div>

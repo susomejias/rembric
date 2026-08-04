@@ -515,10 +515,9 @@ export function rawPill(): SafeHtml {
   return raw('<span class="pill raw">RAW</span>');
 }
 
-export function scopePill(scope: string): SafeHtml {
-  const cls = escape(scope);
-  const label = scope === 'global' ? 'GLOBAL' : 'PROJECT';
-  return raw(`<span class="pill ${cls}">${label}</span>`);
+/** Badge for the one project a path-less `/mcp` connection resolves to. */
+export function defaultProjectPill(): SafeHtml {
+  return raw('<span class="pill default">default</span>');
 }
 
 const VERDICT_KINDS = new Set([

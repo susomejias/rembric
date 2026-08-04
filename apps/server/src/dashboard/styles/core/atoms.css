@@ -79,6 +79,13 @@
 .pill.raw::before {
   background: var(--warn);
 }
+.pill.default::before {
+  background: var(--lime);
+}
+.pill.default {
+  color: var(--lime);
+  border-color: color-mix(in oklab, var(--lime), transparent 70%);
+}
 .pill.judged::before {
   background: var(--lime);
 }

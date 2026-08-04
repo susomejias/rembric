@@ -29,6 +29,7 @@ import {
   pager,
   mdBody,
   backLink,
+  projectFilterParam,
   projectOptions,
   sel,
   tblEmpty,
@@ -44,7 +45,6 @@ import {
   html,
   raw,
   reviewPill,
-  scopePill,
   shortId,
   statusPill,
   verdictPill,
@@ -73,7 +73,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     if (!session) return c.redirect('/dashboard/login');
 
     const url = new URL(c.req.url);
-    const projectFilter = url.searchParams.get('project') ?? '';
+    const projectFilter = projectFilterParam(url);
     const statusFilter = url.searchParams.get('status') ?? 'active';
     const typeFilter = url.searchParams.get('type') ?? '';
     const reviewFilter = url.searchParams.get('review') ?? '';
@@ -95,9 +95,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     // A present-but-unresolvable slug (stale/hand-edited URL) must yield an
     // empty list, not silently drop the filter and show every scope.
     let unknownProject = false;
-    if (projectFilter === '__global__') {
-      project = { kind: 'global' };
-    } else if (projectFilter) {
+    if (projectFilter) {
       const p = projectBySlug.get(projectFilter);
       if (p) project = { kind: 'project', projectId: p.id };
       else unknownProject = true;
@@ -204,7 +202,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         : '—';
       return html`
         <tr data-href="/dashboard/memories/${m.id}">
-          <td>${scopePill(m.scope)}</td>
           <td>${projectLabel}</td>
           <td>${m.type}</td>
           <td><a href="/dashboard/memories/${m.id}">${truncate(m.title, 100)}</a></td>
@@ -290,7 +287,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
                 <table>
                   <thead>
                     <tr>
-                      <th>scope</th>
                       <th>project</th>
                       <th>type</th>
                       <th>title</th>
@@ -521,14 +517,13 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         meta: [
           { k: 'ID', v: shortId(row.id) },
           { k: 'STATUS', v: row.status.toUpperCase() },
-          { k: 'SCOPE', v: row.scope.toUpperCase() },
+          { k: 'PROJECT', v: project?.slug ?? '—' },
         ],
       })}
       ${backLink({ href: '/dashboard/memories', label: 'BACK TO MEMORIES' })} ${confirmedFlash}
       ${reviewNotice}
       ${kvGrid([
         kv({ k: 'Status', v: statusPill(row.status) }),
-        kv({ k: 'Scope', v: scopePill(row.scope) }),
         kv({ k: 'Project', v: project?.slug ?? '—' }),
         kv({ k: 'Type', v: row.type }),
         kv({ k: 'Confirms', v: confirmCount }),

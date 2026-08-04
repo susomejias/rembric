@@ -92,6 +92,25 @@ describe('ProjectsService.list / rename / archive', () => {
     projects.archive(p.id);
     expect(() => projects.assertWritable(p.id)).toThrow(/archived/);
   });
+
+  it('refuses to archive the default project, and the row is untouched', () => {
+    const def = defaultProject(db.handle);
+    expect(() => projects.archive(def.id)).toThrow(/default project and cannot be archived/);
+    const after = projects.getById(def.id);
+    expect(after?.archivedAt).toBeNull();
+    expect(after?.isDefault).toBe(true);
+    // Control: every other project still archives, so the guard is narrow.
+    const other = projects.create({ slug: 'pnotdefault' });
+    expect(projects.archive(other.id).archivedAt).not.toBeNull();
+  });
+
+  it('renames the default project without touching its slug or its flag', () => {
+    const def = defaultProject(db.handle);
+    const renamed = projects.rename(def.id, 'operator-renamed');
+    expect(renamed.slug).toBe(def.slug);
+    expect(renamed.isDefault).toBe(true);
+    expect(renamed.displayName).toBe('operator-renamed');
+  });
 });
 
 describe('ProjectsService.findSimilarSlugs', () => {
