@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from 'drizzle-orm';
 
-import { projectScope, type Scope } from '../../services/scope.js';
+import { homeScope, projectScope, type SearchScope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
@@ -38,7 +38,7 @@ export interface ReviewTimestamps {
 }
 
 export interface SearchMemoryIdsOpts {
-  scope: Scope;
+  scope: SearchScope;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -51,13 +51,13 @@ export interface SearchMemoryIdsOpts {
 
 export interface TextByIdsOpts {
   ids: readonly string[];
-  scope: Scope;
+  scope: SearchScope;
 }
 
 export interface SearchBm25IdsOpts {
   /** Pre-sanitized FTS5 MATCH expression (see services/hybrid-search.ts). */
   matchExpr: string;
-  scope: Scope;
+  scope: SearchScope;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -254,7 +254,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(opts.scope, 'm')}
+        WHERE ${scopeWhere(homeScope(opts.scope), 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -287,7 +287,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(opts.scope, 'm')}
+          AND ${scopeWhere(homeScope(opts.scope), 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -322,7 +322,7 @@ export class MemoryRepository {
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
         CROSS JOIN memory m ON m.id = je.value
-      WHERE ${scopeWhere(opts.scope, 'm')}
+      WHERE ${scopeWhere(homeScope(opts.scope), 'm')}
     `);
   }
 

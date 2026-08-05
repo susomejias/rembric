@@ -21,7 +21,7 @@ import {
   reviewTtlEntries,
   type ReviewState,
 } from './review.js';
-import { memoryMatchesScope, type Scope } from './scope.js';
+import { homeScope, memoryMatchesScope, type Scope, type SearchScope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
@@ -439,14 +439,14 @@ export class MemoryService {
    * Does NOT advance `last_seen_at`: being returned in a page is not evidence
    * a row was useful. Only `memory.get` touches.
    */
-  async search(input: SearchMemoriesInput, scope: Scope): Promise<Memory[]> {
+  async search(input: SearchMemoriesInput, scope: SearchScope): Promise<Memory[]> {
     return (await this.searchWithAbstention(input, scope)).memories;
   }
 
   /** Same as `search`, plus the ranked branch's `SearchVerdict`. */
   async searchWithAbstention(
     input: SearchMemoriesInput,
-    scope: Scope,
+    scope: SearchScope,
     gates?: GateOverrides,
   ): Promise<
     Omit<HybridSearchResult, 'ids'> & {
@@ -464,7 +464,7 @@ export class MemoryService {
     const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
-    const projectId = scope.projectId;
+    const projectId = homeScope(scope).projectId;
 
     const query = input.query?.trim();
     const entity = input.entity?.trim();
@@ -480,7 +480,7 @@ export class MemoryService {
       // within scope and the 8-row ranked default would truncate that.
       const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
-        scope,
+        scope: homeScope(scope),
         value: entity,
         status: input.status,
         type: input.type,
