@@ -1,0 +1,323 @@
+{
+  "instruments": {
+    "I2": "SHIPPED END-TO-END (MemoryService on the real repositories)",
+    "I3": "SHADOW END-TO-END (same service, three reads overlaid with IN (…))"
+  },
+  "label": "1000/vol-shared/rep2",
+  "dataDir": "/root/corpora/skew-1000",
+  "home": {
+    "slug": "vol-shared",
+    "id": "01JGFJJZ000VKV26AFGCXMWH25",
+    "memories": 20,
+    "vectors": 20
+  },
+  "projects": [
+    {
+      "slug": "vol-0",
+      "memories": 600,
+      "vectors": 600
+    },
+    {
+      "slug": "vol-1",
+      "memories": 200,
+      "vectors": 200
+    },
+    {
+      "slug": "vol-2",
+      "memories": 100,
+      "vectors": 100
+    },
+    {
+      "slug": "vol-3",
+      "memories": 50,
+      "vectors": 50
+    },
+    {
+      "slug": "vol-4",
+      "memories": 30,
+      "vectors": 30
+    },
+    {
+      "slug": "vol-shared",
+      "memories": 20,
+      "vectors": 20
+    },
+    {
+      "slug": "default",
+      "memories": 0,
+      "vectors": 0
+    }
+  ],
+  "corpusMemories": 1000,
+  "warmupQueries": 5,
+  "timedQueries": 40,
+  "node": "v22.23.1",
+  "arms": [
+    {
+      "name": "shipped-narrow",
+      "projects": 1,
+      "divideWindow": false,
+      "p50Ms": 2.101,
+      "p90Ms": 2.911,
+      "minMs": 1.556,
+      "maxMs": 4.332,
+      "rowsReturnedTotal": 316,
+      "rowsReturnedMin": 7,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 1,
+      "foreignScopeRows": 0,
+      "samplesMs": [
+        2.124, 2.623, 2.804, 2.101, 2.061, 2.911, 2.422, 1.919, 2.539, 2.113, 1.878, 2.152, 2.064,
+        2.067, 1.805, 1.766, 1.891, 1.898, 2.579, 1.74, 1.81, 2.59, 2.05, 4.332, 2.578, 1.556,
+        1.703, 2.742, 2.968, 2.934, 2.816, 3.206, 2.557, 1.693, 1.965, 1.666, 2.546, 2.691, 1.76,
+        1.666
+      ]
+    },
+    {
+      "name": "overlay-passthrough",
+      "projects": 1,
+      "divideWindow": false,
+      "p50Ms": 1.895,
+      "p90Ms": 3.148,
+      "minMs": 1.413,
+      "maxMs": 3.718,
+      "rowsReturnedTotal": 316,
+      "rowsReturnedMin": 7,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 1,
+      "foreignScopeRows": 0,
+      "samplesMs": [
+        1.831, 1.89, 2.639, 1.709, 1.912, 3.072, 3.718, 1.776, 2.569, 1.802, 1.898, 1.974, 1.887,
+        1.858, 1.576, 1.591, 2.021, 1.827, 2.577, 2.696, 1.702, 3.165, 1.769, 3.353, 1.654, 1.413,
+        1.577, 2.023, 1.925, 2.532, 3.714, 3.148, 2.409, 1.422, 1.507, 1.604, 2.461, 1.895, 2.217,
+        1.7
+      ]
+    },
+    {
+      "name": "shadow-1",
+      "projects": 1,
+      "divideWindow": false,
+      "p50Ms": 1.841,
+      "p90Ms": 2.94,
+      "minMs": 1.422,
+      "maxMs": 3.946,
+      "rowsReturnedTotal": 316,
+      "rowsReturnedMin": 7,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 1,
+      "foreignScopeRows": 0,
+      "samplesMs": [
+        2.227, 2.152, 1.835, 1.702, 2.212, 2.742, 2.894, 1.749, 2.783, 1.841, 2.019, 1.6, 1.819,
+        3.129, 1.543, 1.522, 1.742, 1.683, 2.539, 2.668, 1.547, 1.889, 1.8, 3.946, 1.836, 1.437,
+        1.6, 1.88, 2.292, 3.083, 3.611, 2.94, 2.507, 1.422, 1.689, 1.523, 2.357, 1.623, 2.515, 1.512
+      ]
+    },
+    {
+      "name": "shadow-2",
+      "projects": 2,
+      "divideWindow": false,
+      "p50Ms": 7.874,
+      "p90Ms": 11.64,
+      "minMs": 6.492,
+      "maxMs": 16.452,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 2,
+      "foreignScopeRows": 312,
+      "samplesMs": [
+        7.886, 7.178, 7.561, 12.51, 7.373, 10.226, 10.92, 7.248, 11.254, 7.5, 7.874, 6.492, 7.996,
+        11.816, 7.258, 6.728, 7.126, 7.682, 9.599, 11.718, 7.236, 6.751, 7.47, 16.452, 7.202, 7.183,
+        7.749, 11.592, 10.807, 11.45, 11.526, 11.64, 10.912, 6.86, 6.893, 9.503, 9.742, 7.255,
+        9.474, 11.439
+      ]
+    },
+    {
+      "name": "shadow-2-divided",
+      "projects": 2,
+      "divideWindow": true,
+      "p50Ms": 7.455,
+      "p90Ms": 10.107,
+      "minMs": 6.259,
+      "maxMs": 16.312,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 2,
+      "foreignScopeRows": 256,
+      "samplesMs": [
+        7.613, 6.533, 7.073, 9.301, 6.8, 8.751, 8.185, 8.135, 8.438, 7.618, 7.345, 6.368, 8.023,
+        7.639, 6.515, 6.815, 7.297, 6.847, 7.677, 9.773, 6.259, 6.673, 6.37, 16.312, 6.98, 6.579,
+        6.565, 10.376, 9.972, 11.538, 10.107, 9.895, 9.583, 6.617, 6.927, 10.301, 6.789, 7.005,
+        10.078, 7.455
+      ]
+    },
+    {
+      "name": "shadow-4",
+      "projects": 4,
+      "divideWindow": false,
+      "p50Ms": 9.288,
+      "p90Ms": 12.405,
+      "minMs": 7.798,
+      "maxMs": 14.414,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 4,
+      "foreignScopeRows": 315,
+      "samplesMs": [
+        11.78, 8.99, 8.975, 9.066, 10.216, 9.212, 9.99, 9.747, 9.38, 9.362, 11.2, 7.798, 9.508,
+        9.288, 11.294, 8.618, 8.282, 10.745, 9.067, 11.843, 8.94, 8.103, 8.481, 10.709, 8.108,
+        8.263, 8.68, 14.414, 11.338, 12.894, 13.337, 12.405, 8.832, 8.879, 8.334, 12.826, 9.215,
+        11.456, 11.692, 8.741
+      ]
+    },
+    {
+      "name": "shadow-4-divided",
+      "projects": 4,
+      "divideWindow": true,
+      "p50Ms": 9.251,
+      "p90Ms": 12.791,
+      "minMs": 7.839,
+      "maxMs": 18.906,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 4,
+      "foreignScopeRows": 283,
+      "samplesMs": [
+        12.791, 8.664, 8.477, 9.128, 10.15, 9.301, 9.487, 9.988, 8.991, 8.89, 13.627, 8.49, 9.781,
+        9.251, 9.213, 8.296, 8.344, 11.37, 12.288, 8.48, 8.37, 9.48, 8.48, 18.906, 14.718, 8.257,
+        7.984, 10.798, 8.568, 13.183, 12.257, 11.723, 8.948, 9.336, 8.246, 12.162, 9.715, 12.143,
+        9.023, 7.839
+      ]
+    },
+    {
+      "name": "shadow-all",
+      "projects": 7,
+      "divideWindow": false,
+      "p50Ms": 10.549,
+      "p90Ms": 13.963,
+      "minMs": 8.813,
+      "maxMs": 22.891,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 6,
+      "foreignScopeRows": 316,
+      "samplesMs": [
+        13.203, 9.555, 13.384, 10.549, 15.665, 11.419, 10.258, 9.836, 10.667, 10.527, 13.01, 9.178,
+        10.197, 10.92, 8.865, 8.813, 9.433, 13.202, 13.963, 9.624, 9.568, 13.002, 10.379, 22.891,
+        15.759, 9.202, 12.274, 10.006, 8.886, 11.605, 13.992, 13.777, 12.042, 9.004, 9.684, 13.274,
+        10.179, 12.967, 9.158, 10.984
+      ]
+    },
+    {
+      "name": "shadow-all-divided",
+      "projects": 7,
+      "divideWindow": true,
+      "p50Ms": 9.386,
+      "p90Ms": 12.981,
+      "minMs": 8.045,
+      "maxMs": 22.262,
+      "rowsReturnedTotal": 320,
+      "rowsReturnedMin": 8,
+      "queriesReturningZeroRows": 0,
+      "distinctProjectsInResults": 6,
+      "foreignScopeRows": 296,
+      "samplesMs": [
+        8.913, 8.614, 12.981, 9.698, 11.11, 12.081, 9.242, 9.563, 12.814, 8.613, 11.891, 9.603,
+        9.332, 9.696, 8.899, 8.58, 8.337, 8.471, 13.007, 8.073, 8.727, 12.515, 11.627, 22.262,
+        10.347, 8.054, 8.045, 10.151, 8.715, 13.328, 13.766, 10.979, 12.26, 8.392, 8.119, 8.389,
+        8.539, 12.513, 9.386, 9.046
+      ]
+    }
+  ],
+  "densePoolComposition": [
+    {
+      "arm": "shadow-1",
+      "kPerPartition": 64,
+      "candidatesPerQuery": 16,
+      "homeShare": 1,
+      "perProjectPerQuery": [["vol-shared", 16]]
+    },
+    {
+      "arm": "shadow-2",
+      "kPerPartition": 64,
+      "candidatesPerQuery": 80,
+      "homeShare": 0.2,
+      "perProjectPerQuery": [
+        ["vol-0", 64],
+        ["vol-shared", 16]
+      ]
+    },
+    {
+      "arm": "shadow-2-divided",
+      "kPerPartition": 32,
+      "candidatesPerQuery": 48,
+      "homeShare": 0.333,
+      "perProjectPerQuery": [
+        ["vol-0", 32],
+        ["vol-shared", 16]
+      ]
+    },
+    {
+      "arm": "shadow-4",
+      "kPerPartition": 64,
+      "candidatesPerQuery": 208,
+      "homeShare": 0.077,
+      "perProjectPerQuery": [
+        ["vol-2", 64],
+        ["vol-0", 64],
+        ["vol-1", 64],
+        ["vol-shared", 16]
+      ]
+    },
+    {
+      "arm": "shadow-4-divided",
+      "kPerPartition": 16,
+      "candidatesPerQuery": 64,
+      "homeShare": 0.25,
+      "perProjectPerQuery": [
+        ["vol-shared", 16],
+        ["vol-2", 16],
+        ["vol-0", 16],
+        ["vol-1", 16]
+      ]
+    },
+    {
+      "arm": "shadow-all",
+      "kPerPartition": 64,
+      "candidatesPerQuery": 272,
+      "homeShare": 0.059,
+      "perProjectPerQuery": [
+        ["vol-2", 64],
+        ["vol-0", 64],
+        ["vol-1", 64],
+        ["vol-3", 40],
+        ["vol-4", 24],
+        ["vol-shared", 16]
+      ]
+    },
+    {
+      "arm": "shadow-all-divided",
+      "kPerPartition": 10,
+      "candidatesPerQuery": 60,
+      "homeShare": 0.167,
+      "perProjectPerQuery": [
+        ["vol-shared", 10],
+        ["vol-3", 10],
+        ["vol-2", 10],
+        ["vol-0", 10],
+        ["vol-4", 10],
+        ["vol-1", 10]
+      ]
+    }
+  ],
+  "singleElementInControl": {
+    "idsIdentical": true,
+    "passthroughIdsIdentical": true,
+    "comparedQueries": 40,
+    "nonEmptyPages": 40
+  }
+}
