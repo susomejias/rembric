@@ -1,7 +1,7 @@
-import { and, eq, getTableColumns, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
-import { projectScope, type Scope } from '../../services/scope.js';
+import { projectScope, type SearchScope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import {
   type EntityKind,
@@ -31,8 +31,13 @@ export interface MemoryEntityView {
   value: string;
 }
 
-function entityScopeCondition(projectId: string) {
-  return and(eq(memoryEntities.scope, 'project'), eq(memoryEntities.projectId, projectId));
+function entityScopeCondition(scope: SearchScope) {
+  const projectIds = scope.kind === 'project' ? [scope.projectId] : scope.projectIds;
+  if (projectIds.length === 0) throw new Error('scope addresses no project');
+  return and(
+    eq(memoryEntities.scope, 'project'),
+    inArray(memoryEntities.projectId, [...projectIds]),
+  );
 }
 
 /** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
@@ -61,7 +66,7 @@ export class EntitiesRepository {
         const existing = this.db.all<{ id: string; kind: EntityKind; value: string }>(sql`
           SELECT id, kind, value
           FROM ${memoryEntities}
-          WHERE ${entityScopeCondition(projectId)}
+          WHERE ${entityScopeCondition(projectScope(projectId))}
             AND (kind, value) IN (VALUES ${sql.join(
               chunk.map((e) => sql`(${e.kind}, ${e.value})`),
               sql`, `,
@@ -114,9 +119,12 @@ export class EntitiesRepository {
    * ranked branches apply, so `memory.search`'s documented filters mean the
    * same thing on both paths. An omitted `status` means "any but archived",
    * not "active" — the entity path is specified as complete within scope.
+   *
+   * Widened, `limit` stays a bound on the RESPONSE rather than a per-project
+   * quota, and the chronological order is taken over the union.
    */
   findMemoriesByEntity(opts: {
-    scope: Scope;
+    scope: SearchScope;
     kind?: EntityKind;
     value: string;
     status?: MemoryStatus;
@@ -125,10 +133,7 @@ export class EntitiesRepository {
     topicKey?: string;
     limit: number;
   }): Memory[] {
-    const conditions = [
-      entityScopeCondition(opts.scope.projectId),
-      eq(memoryEntities.value, opts.value),
-    ];
+    const conditions = [entityScopeCondition(opts.scope), eq(memoryEntities.value, opts.value)];
     if (opts.kind) conditions.push(eq(memoryEntities.kind, opts.kind));
     conditions.push(
       opts.status ? eq(memory.status, opts.status) : sql`${memory.status} != 'archived'`,
@@ -235,7 +240,7 @@ export class EntitiesRepository {
     excludeMemoryId?: string;
   }): number {
     const conditions = [
-      entityScopeCondition(opts.projectId),
+      entityScopeCondition(projectScope(opts.projectId)),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
       eq(memory.status, 'active'),
@@ -266,7 +271,7 @@ export class EntitiesRepository {
     limit: number;
   }): Memory[] {
     const conditions = [
-      entityScopeCondition(opts.projectId),
+      entityScopeCondition(projectScope(opts.projectId)),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
       eq(memory.status, 'active'),
@@ -336,8 +341,8 @@ export class EntitiesRepository {
    * which an empty entity lookup cannot do on its own. Scoped, so it is safe
    * on an agent-facing read.
    */
-  countPendingScans(opts: { projectId: string }): number {
-    const scoped = scopeCondition(projectScope(opts.projectId));
+  countPendingScans(opts: { scope: SearchScope }): number {
+    const scoped = scopeCondition(opts.scope);
     return (
       this.db
         .select({ n: sql<number>`count(*)` })
