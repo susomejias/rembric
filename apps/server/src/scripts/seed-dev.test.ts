@@ -28,7 +28,7 @@ describe('runSeed', () => {
 
     expect(result.skipped).toBe(false);
     expect(result.counts).toEqual({
-      projects: 1,
+      projects: 2,
       tokens: 3,
       memories: 35,
       endedSessions: 3,
@@ -70,7 +70,7 @@ describe('runSeed', () => {
 
     expect(result.skipped).toBe(false);
     expect(result.refused).toBeUndefined();
-    expect(result.counts!.projects).toBe(1);
+    expect(result.counts!.projects).toBe(2);
     expect(result.counts!.tokens).toBe(3);
     expect(result.counts!.memories).toBe(35);
     expect(result.counts!.pendingJudgments).toBe(1);
@@ -197,5 +197,43 @@ describe('runSeed', () => {
     expect(adminCount).toBe(1);
     expect(readerCount).toBe(1);
     expect(writerCount).toBe(1);
+  });
+
+  it('a --reset always leaves exactly one default project, including on a database that lost it', () => {
+    const projects = new ProjectsService(createRepositories(db.handle.db));
+    const before = db.handle.raw
+      .prepare('SELECT count(*) AS n FROM projects WHERE is_default = 1')
+      .get() as { n: number };
+    expect(before.n).toBe(1); // migration 0031's row, the control for the next line
+
+    const reset = runSeed({
+      handle: db.handle,
+      reset: true,
+      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      log: () => {},
+    });
+    expect(reset.refused).toBeUndefined(); // without the env gate the wipe never runs and this test measures nothing
+
+    const kept = db.handle.raw.prepare('SELECT slug FROM projects WHERE is_default = 1').all() as {
+      slug: string;
+    }[];
+    expect(kept).toHaveLength(1);
+    expect(projects.list().length).toBeGreaterThan(1); // the demo project too, so the wipe was not a no-op
+
+    // A dev stack seeded between 0031 landing and this fix has no is_default at
+    // all, and --reset is the command a developer reaches for to get unstuck.
+    // Strip the flag to reproduce that state, then reset: it must come back.
+    db.handle.raw.exec('UPDATE projects SET is_default = 0');
+    const healRun = runSeed({
+      handle: db.handle,
+      reset: true,
+      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      log: () => {},
+    });
+    expect(healRun.refused).toBeUndefined();
+    const healed = db.handle.raw
+      .prepare('SELECT count(*) AS n FROM projects WHERE is_default = 1')
+      .get() as { n: number };
+    expect(healed.n).toBe(1);
   });
 });

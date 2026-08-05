@@ -14,6 +14,8 @@
  * layer permitted to emit DELETEs against the protected tables.
  */
 
+import { ulid } from 'ulid';
+
 import { type DbHandle, createDb } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -420,7 +422,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const result: SeedResult = {
     skipped: false,
     counts: {
-      projects: 1,
+      projects: projectsSvc.list().length,
       tokens: 3,
       memories: memoryCount,
       endedSessions: endedSessions.length,
@@ -498,7 +500,23 @@ function wipe(handle: DbHandle): void {
     // check fires at COMMIT and would abort the whole reset over one set token.
     handle.raw.exec('DELETE FROM token_projects');
     handle.raw.exec('DELETE FROM tokens');
+    // Every project EXCEPT the default one. Migration 0031 creates that row and
+    // the schema keeps exactly one via a partial unique index; deleting it left
+    // the database with no `is_default`, so every path-less `/mcp` tool call
+    // threw `internal_error` — for every token, admin included — until the next
+    // migration run, which never comes because 0031 is already in the ledger.
     handle.raw.exec('DELETE FROM projects');
+    // Migration 0031 creates the one project carrying `is_default`, and the wipe
+    // above removes it along with everything else. Without putting one back, the
+    // database has no default at all and every path-less `/mcp` tool call throws
+    // `internal_error` — for every token, admin included — because the resolver
+    // has nothing to resolve to. The migration will not re-run: its ledger row
+    // survives the wipe.
+    handle.raw
+      .prepare(
+        "INSERT INTO projects (id, slug, display_name, is_default, created_at) VALUES (?, 'default', 'Default', 1, ?)",
+      )
+      .run(ulid(), Date.now());
   })();
 }
 
