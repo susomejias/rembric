@@ -12,6 +12,7 @@ import {
   termWeightsFor,
   type GateLeader,
 } from './hybrid-search.js';
+import { projectScope } from './scope.js';
 
 /**
  * The lexical component's two halves are sourced differently and the asymmetry
@@ -92,7 +93,7 @@ describe('the query side resolves to the document frequency the index records', 
       await hybridSearch({
         repos,
         query: script.text,
-        projectId: 'p0',
+        scope: projectScope('p0'),
         status: 'active',
         limit: 8,
         offset: 0,
