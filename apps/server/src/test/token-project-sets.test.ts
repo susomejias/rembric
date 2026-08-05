@@ -3,6 +3,7 @@ import { createServer as createNetServer } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
+import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
@@ -352,6 +353,52 @@ describe('token project sets', () => {
     return row!.id;
   }
 
+  function countRows(table: 'tokens' | 'token_projects'): number {
+    const row = server.dbHandle.raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {
+      n: number;
+    };
+    return row.n;
+  }
+
+  function tableExists(name: string): boolean {
+    return (
+      server.dbHandle.raw
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+        .get(name) !== undefined
+    );
+  }
+
+  /** A row the service can no longer compose, inserted for its rendering alone. */
+  function insertTokenRow(values: { name: string; scope: string; revoked?: boolean }): void {
+    createRepositories(server.dbHandle.db).tokens.insert({
+      id: ulid(),
+      name: values.name,
+      hash: 's1$00$00',
+      scope: values.scope,
+      projectId: null,
+      createdAt: new Date(),
+      expiresAt: null,
+      revokedAt: values.revoked === true ? new Date() : null,
+    });
+  }
+
+  function tokenRow(html: string, name: string): string {
+    const row = new RegExp(`<tr>\\s*<td>${name}</td>[\\s\\S]*?</tr>`).exec(html)?.[0];
+    expect(row, `no token row named ${name}`).toBeTruthy();
+    return row!;
+  }
+
+  function cellsOf(row: string): string[] {
+    return [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => (m[1] ?? '').trim());
+  }
+
+  function textOf(cell: string): string {
+    return cell
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function memoryCount(projectId: string): number {
     return server.dbHandle.db
       .select({ id: memory.id })
@@ -645,6 +692,101 @@ describe('token project sets', () => {
 
       const row = persisted('set-autocreate');
       expect(row!.scope).toBe('projects');
+    });
+  });
+
+  describe('the dashboard states what a set token reaches', () => {
+    it('lists every member slug, and marks a memberless set apart from an unresolvable row', async () => {
+      const jar = await loggedIn();
+      // Submitted out of order, so the ascending assertion is about the render
+      // rather than about the submission.
+      const minted = await mint(jar, {
+        name: 'list-set',
+        projects: [gamma.slug, alpha.slug],
+        access: 'write',
+      });
+      expect(minted.status).toBe(302);
+
+      insertTokenRow({ name: 'list-empty-set', scope: 'projects' });
+      insertTokenRow({ name: 'list-empty-set-revoked', scope: 'projects', revoked: true });
+      // The legacy shape: a scope naming a project by slug with nothing bound.
+      insertTokenRow({ name: 'list-unresolvable', scope: `project:${alpha.slug}` });
+
+      const body = await (await get('/dashboard/tokens', jar)).text();
+
+      const set = cellsOf(tokenRow(body, 'list-set'));
+      const project = textOf(set[2]!);
+      expect(project).toContain(alpha.slug);
+      expect(project).toContain(gamma.slug);
+      expect(project.indexOf(alpha.slug), 'members are not slug-ascending').toBeLessThan(
+        project.indexOf(gamma.slug),
+      );
+      expect(set[2]).not.toContain(alpha.id);
+      expect(set[2]).not.toContain(gamma.id);
+      expect(set[5]).toContain('active');
+
+      const empty = cellsOf(tokenRow(body, 'list-empty-set'));
+      const unresolvable = cellsOf(tokenRow(body, 'list-unresolvable'));
+      expect(textOf(empty[2]!)).toBe('—');
+      expect(textOf(unresolvable[2]!)).toBe('—');
+      expect(textOf(empty[5]!)).toBe('no projects');
+      expect(textOf(unresolvable[5]!)).toBe('inert');
+      expect(textOf(empty[5]!)).not.toBe(textOf(unresolvable[5]!));
+
+      expect(textOf(cellsOf(tokenRow(body, 'list-empty-set-revoked'))[5]!)).toBe('revoked');
+    });
+
+    it('names the minted scope and every project in the one-time view', async () => {
+      const jar = await loggedIn();
+      const minted = await mint(jar, {
+        name: 'one-shot-set',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+      expect(minted.status).toBe(302);
+
+      const panel = /<div class="one-shot">[\s\S]*?<\/div>/.exec(minted.body)?.[0];
+      expect(panel, 'no one-time-view panel').toBeTruthy();
+      expect(panel).toContain(minted.plaintext!);
+      expect(panel).toContain('<code>projects</code>');
+      expect(panel).toContain(alpha.slug);
+      expect(panel).toContain(gamma.slug);
+      expect(panel, 'the panel reports a count instead of the members').not.toMatch(
+        /\b2 projects\b/i,
+      );
+    });
+
+    it('keeps a single selection on the single-project arm rather than a one-member set', async () => {
+      const jar = await loggedIn();
+      await mintPlaintext(jar, {
+        name: 'single-selection',
+        projects: [beta.slug],
+        access: 'write',
+      });
+
+      const row = persisted('single-selection');
+      expect(row!.scope).toBe(`project:${beta.id}`);
+      expect(row!.projectId).toBe(beta.id);
+      expect(tableExists('token_projects'), 'token_projects does not exist').toBe(true);
+      expect(memberIds(row!.id), 'a single selection became a one-member set').toEqual([]);
+    });
+
+    it('creates neither a token nor a membership row when one selected slug is invalid', async () => {
+      const jar = await loggedIn();
+      expect(tableExists('token_projects'), 'token_projects does not exist').toBe(true);
+      const before = { tokens: countRows('tokens'), members: countRows('token_projects') };
+
+      const res = await mint(jar, {
+        name: 'invalid-member-slug',
+        projects: [alpha.slug, 'INVALID Slug!'],
+        access: 'write',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toContain('flash error');
+      expect(persisted('invalid-member-slug')).toBeUndefined();
+      expect(countRows('tokens')).toBe(before.tokens);
+      expect(countRows('token_projects')).toBe(before.members);
     });
   });
 });
