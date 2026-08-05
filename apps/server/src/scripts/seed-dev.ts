@@ -494,6 +494,9 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('DELETE FROM memory');
     handle.raw.exec('DELETE FROM sessions'); // agent_sessions table is named `sessions`
     handle.raw.exec('DELETE FROM dashboard_sessions'); // dashboard login cookies → tokens
+    // References both tokens and projects, so it precedes both: the deferred
+    // check fires at COMMIT and would abort the whole reset over one set token.
+    handle.raw.exec('DELETE FROM token_projects');
     handle.raw.exec('DELETE FROM tokens');
     handle.raw.exec('DELETE FROM projects');
   })();
