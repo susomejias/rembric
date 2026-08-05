@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
@@ -37,8 +37,7 @@ export interface ReviewTimestamps {
 }
 
 export interface SearchMemoryIdsOpts {
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -51,15 +50,13 @@ export interface SearchMemoryIdsOpts {
 
 export interface TextByIdsOpts {
   ids: readonly string[];
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
 }
 
 export interface SearchBm25IdsOpts {
   /** Pre-sanitized FTS5 MATCH expression (see services/hybrid-search.ts). */
   matchExpr: string;
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -73,7 +70,7 @@ export interface SearchBm25IdsOpts {
 export interface AdminListMemoriesOpts {
   status: MemoryStatus;
   type?: MemoryType;
-  project?: { kind: 'global' } | { kind: 'project'; projectId: string };
+  projectId?: string;
   limit: number;
   offset: number;
 }
@@ -81,16 +78,12 @@ export interface AdminListMemoriesOpts {
 export class MemoryRepository {
   constructor(private readonly db: Db) {}
 
-  findActiveByTopicKey(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
-    topicKey: string;
-  }): Memory | undefined {
+  findActiveByTopicKey(opts: { projectId: string; topicKey: string }): Memory | undefined {
     return this.db
       .select()
       .from(memory)
       .where(
-        sql`${scopeWhere(opts.scope, opts.projectId)} AND topic_key = ${opts.topicKey} AND status = 'active'`,
+        sql`${scopeWhere(opts.projectId)} AND topic_key = ${opts.topicKey} AND status = 'active'`,
       )
       .limit(1)
       .get();
@@ -111,8 +104,7 @@ export class MemoryRepository {
   searchBm25Candidates(opts: {
     matchExpr: string;
     excludeId: string;
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     excludeIds: string[];
     limit: number;
   }): { id: string; rank: number; title: string; content: string; topicKey: string | null }[] {
@@ -130,7 +122,7 @@ export class MemoryRepository {
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
           AND m.id != ${opts.excludeId}
-          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
+          AND ${scopeWhere(opts.projectId, 'm')}
           AND m.status = 'active'
           AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
         ORDER BY rank
@@ -140,13 +132,8 @@ export class MemoryRepository {
   }
 
   /** Recent in-scope memories (memory.context), newest by last-seen/created. */
-  recentForContext(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
-    includeArchived: boolean;
-    limit: number;
-  }): Memory[] {
-    const conditions: SQL[] = [scopeCondition(opts.scope, opts.projectId)];
+  recentForContext(opts: { projectId: string; includeArchived: boolean; limit: number }): Memory[] {
+    const conditions: SQL[] = [scopeCondition(opts.projectId)];
     if (!opts.includeArchived) conditions.push(sql`${memory.status} != 'archived'`);
     return this.db
       .select()
@@ -159,15 +146,14 @@ export class MemoryRepository {
 
   /** Timeline neighbors within the same session, before/after a pivot. */
   sessionNeighbors(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     sessionId: string;
     pivotCreatedAt: Date;
     pivotId: string;
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
-    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
+    const scopeFilter = scopeCondition(opts.projectId);
     const cmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} < ${opts.pivotCreatedAt.getTime()}`
@@ -191,8 +177,7 @@ export class MemoryRepository {
 
   /** Timeline fallback: in-scope neighbors within a created_at window. */
   windowNeighbors(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     pivotId: string;
     loMs: number;
     hiMs: number;
@@ -200,7 +185,7 @@ export class MemoryRepository {
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
-    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
+    const scopeFilter = scopeCondition(opts.projectId);
     const windowCmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} >= ${opts.loMs} AND ${memory.createdAt} < ${opts.pivotMs}`
@@ -216,14 +201,11 @@ export class MemoryRepository {
   }
 
   /** memory.stats: counts grouped by `status` and by `type` within scope. */
-  countByStatusAndTypeInScope(
-    scope: MemoryScope,
-    projectId: string | null,
-  ): {
+  countByStatusAndTypeInScope(projectId: string): {
     byStatus: Record<string, number>;
     byType: Record<string, number>;
   } {
-    const scopeFilter = scopeCondition(scope, projectId);
+    const scopeFilter = scopeCondition(projectId);
     const statusRows = this.db
       .select({ status: memory.status, n: count() })
       .from(memory)
@@ -244,11 +226,11 @@ export class MemoryRepository {
   }
 
   /** project.list: memories in one scope whose `status` is `active`; other statuses do not count. */
-  countActiveInScope(scope: MemoryScope, projectId: string | null): number {
+  countActiveInScope(projectId: string): number {
     const row = this.db
       .select({ value: count() })
       .from(memory)
-      .where(and(scopeCondition(scope, projectId), eq(memory.status, 'active')))
+      .where(and(scopeCondition(projectId), eq(memory.status, 'active')))
       .get();
     return row?.value ?? 0;
   }
@@ -271,7 +253,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+        WHERE ${scopeWhere(opts.projectId, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -304,7 +286,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(opts.scope, opts.projectId, 'm')}
+          AND ${scopeWhere(opts.projectId, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -339,7 +321,7 @@ export class MemoryRepository {
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
         CROSS JOIN memory m ON m.id = je.value
-      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+      WHERE ${scopeWhere(opts.projectId, 'm')}
     `);
   }
 
@@ -361,8 +343,7 @@ export class MemoryRepository {
    * (surfaced separately as `occupied`). Bounded, alphabetical.
    */
   listNearbyTopicKeys(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     prefix: string;
     excludeExact: string;
     limit: number;
@@ -371,7 +352,7 @@ export class MemoryRepository {
     return this.db.all<{ topicKey: string; title: string }>(sql`
       SELECT m.topic_key AS topicKey, m.title AS title
       FROM memory m
-      WHERE ${scopeWhere(opts.scope, opts.projectId, 'm')}
+      WHERE ${scopeWhere(opts.projectId, 'm')}
         AND m.status = 'active'
         AND m.topic_key IS NOT NULL
         AND m.topic_key != ${opts.excludeExact}
@@ -396,7 +377,12 @@ export class MemoryRepository {
       .all();
   }
 
-  /** Minimal scope tuple for same-scope assertions; no content leaks. */
+  /**
+   * Minimal scope tuple for same-scope assertions; no content leaks. Reports
+   * the row's STORED `scope` and nullable `project_id`, not a `Scope`: a row
+   * left behind by an older image can still carry the retired pair, and the
+   * same-scope guard has to see it rather than read it as a project row.
+   */
   findScopeTupleById(id: string):
     | {
         scope: MemoryScope;
@@ -598,14 +584,13 @@ export class MemoryRepository {
   }
 
   findDecayCandidateIds(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     nowMs: number;
     thresholdByType: ReadonlyArray<readonly [MemoryType, number]>;
     defaultThresholdMs: number;
     confidenceFloor: number;
   }): string[] {
-    const scopeFilter = scopeCondition(opts.scope, opts.projectId);
+    const scopeFilter = scopeCondition(opts.projectId);
     // Per-type inactivity window: a row decays once last_seen_at predates
     // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
     const thresholdExpr =
@@ -704,8 +689,7 @@ export class MemoryRepository {
    * type absent from `ttlByType` has no TTL and is excluded. Read-only.
    */
   findNeedsReview(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     nowMs: number;
     limit: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
@@ -713,7 +697,7 @@ export class MemoryRepository {
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
     return this.runNeedsReview(
-      scopeCondition(opts.scope, opts.projectId),
+      scopeCondition(opts.projectId),
       opts.ttlByType,
       opts.nowMs,
       opts.limit,
@@ -724,17 +708,12 @@ export class MemoryRepository {
 
   /** Scoped needs-review total; `adminCountNeedsReview` is the unscoped twin. */
   countNeedsReview(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     nowMs: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): number {
     if (opts.ttlByType.length === 0) return 0;
-    return this.runCountNeedsReview(
-      scopeCondition(opts.scope, opts.projectId),
-      opts.ttlByType,
-      opts.nowMs,
-    );
+    return this.runCountNeedsReview(scopeCondition(opts.projectId), opts.ttlByType, opts.nowMs);
   }
 
   private runCountNeedsReview(
@@ -758,7 +737,7 @@ export class MemoryRepository {
    * with limit/offset so the dashboard `review=needs_review` filter is correct.
    */
   adminFindNeedsReview(opts: {
-    project?: AdminListMemoriesOpts['project'];
+    projectId?: string;
     nowMs: number;
     limit: number;
     offset: number;
@@ -766,12 +745,7 @@ export class MemoryRepository {
     refutedPriorityMs: number;
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
-    let scopeFilter: SQL | undefined;
-    if (opts.project?.kind === 'global') {
-      scopeFilter = scopeCondition('global', null);
-    } else if (opts.project?.kind === 'project') {
-      scopeFilter = scopeCondition('project', opts.project.projectId);
-    }
+    const scopeFilter = opts.projectId ? scopeCondition(opts.projectId) : undefined;
     return this.runNeedsReview(
       scopeFilter,
       opts.ttlByType,
@@ -915,15 +889,11 @@ export class MemoryRepository {
   /** Shared by `adminSearchFts` + `adminCountFts` so the list and its total filter the same set. */
   private adminFtsConds(
     query: string,
-    opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'project'>,
+    opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'projectId'>,
   ): SQL[] {
     const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
     if (opts.type) conds.push(sql`m.type = ${opts.type}`);
-    if (opts.project?.kind === 'global') {
-      conds.push(scopeWhere('global', null, 'm'));
-    } else if (opts.project?.kind === 'project') {
-      conds.push(scopeWhere('project', opts.project.projectId, 'm'));
-    }
+    if (opts.projectId) conds.push(scopeWhere(opts.projectId, 'm'));
     return conds;
   }
 
@@ -947,11 +917,7 @@ export class MemoryRepository {
   adminList(opts: AdminListMemoriesOpts): Memory[] {
     const conditions: SQL[] = [eq(memory.status, opts.status)];
     if (opts.type) conditions.push(eq(memory.type, opts.type));
-    if (opts.project?.kind === 'global') {
-      conditions.push(eq(memory.scope, 'global'), isNull(memory.projectId));
-    } else if (opts.project?.kind === 'project') {
-      conditions.push(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
-    }
+    if (opts.projectId) conditions.push(scopeCondition(opts.projectId));
     return this.db
       .select()
       .from(memory)
@@ -965,11 +931,7 @@ export class MemoryRepository {
   adminCount(opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
     const conditions: SQL[] = [eq(memory.status, opts.status)];
     if (opts.type) conditions.push(eq(memory.type, opts.type));
-    if (opts.project?.kind === 'global') {
-      conditions.push(eq(memory.scope, 'global'), isNull(memory.projectId));
-    } else if (opts.project?.kind === 'project') {
-      conditions.push(eq(memory.scope, 'project'), eq(memory.projectId, opts.project.projectId));
-    }
+    if (opts.projectId) conditions.push(scopeCondition(opts.projectId));
     const row = this.db
       .select({ value: count() })
       .from(memory)
@@ -990,17 +952,12 @@ export class MemoryRepository {
   }
 
   adminCountNeedsReview(opts: {
-    project?: AdminListMemoriesOpts['project'];
+    projectId?: string;
     nowMs: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): number {
     if (opts.ttlByType.length === 0) return 0;
-    let scopeFilter: SQL | undefined;
-    if (opts.project?.kind === 'global') {
-      scopeFilter = scopeCondition('global', null);
-    } else if (opts.project?.kind === 'project') {
-      scopeFilter = scopeCondition('project', opts.project.projectId);
-    }
+    const scopeFilter = opts.projectId ? scopeCondition(opts.projectId) : undefined;
     return this.runCountNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs);
   }
 

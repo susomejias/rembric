@@ -139,6 +139,11 @@ export function findSaveTimeCandidates(
   extractedEntities: ExtractedEntity[] = [],
 ): SaveCandidateResult {
   const poolSize = opts.poolSize ?? CANDIDATE_POOL_SIZE;
+  // Candidate detection is a scoped read, and a row with no project is in no
+  // scope. Unreachable for anything this image wrote; possible for a row an
+  // older one left behind.
+  const projectId = saved.projectId;
+  if (projectId === null) return { candidates: [], detected: 0 };
 
   // Suppress targets the new memory's ancestry already judged `not_conflict`,
   // so a re-save never re-surfaces an already-dismissed pair. `saved.replaces`
@@ -157,8 +162,7 @@ export function findSaveTimeCandidates(
   // picks up the slack.
   const vecRows = repos.vectors.knnCandidates({
     memoryId: saved.id,
-    scope: saved.scope,
-    projectId: saved.projectId,
+    projectId,
     excludeIds,
     limit: poolSize,
   });
@@ -186,8 +190,7 @@ export function findSaveTimeCandidates(
     const ftsRows = repos.memory.searchBm25Candidates({
       matchExpr,
       excludeId: saved.id,
-      scope: saved.scope,
-      projectId: saved.projectId,
+      projectId,
       excludeIds,
       limit: poolSize,
     });
@@ -217,16 +220,14 @@ export function findSaveTimeCandidates(
     // structurally even though the caller already sequences linking after
     // candidate detection (see `saveMemoryWithCandidates`).
     const scopeMemoryCount = repos.entities.scopeActiveMemoryCount({
-      scope: saved.scope,
-      projectId: saved.projectId,
+      projectId,
       excludeMemoryId: saved.id,
     });
 
     for (const e of extractedEntities) {
       if (scopeMemoryCount === 0) continue;
       const linkCount = repos.entities.entityLinkCount({
-        scope: saved.scope,
-        projectId: saved.projectId,
+        projectId,
         kind: e.kind,
         value: e.value,
         excludeMemoryId: saved.id,
@@ -242,8 +243,7 @@ export function findSaveTimeCandidates(
         continue;
 
       const rows = repos.entities.findOtherMemoriesForEntity({
-        scope: saved.scope,
-        projectId: saved.projectId,
+        projectId,
         kind: e.kind,
         value: e.value,
         excludeMemoryId: saved.id,

@@ -19,7 +19,7 @@ import { idJsonSet } from './scope-clause.js';
 
 export interface AdminPromptFilters {
   includeDeleted: boolean;
-  project?: { kind: 'global' } | { kind: 'project'; projectId: string };
+  projectId?: string;
   agent?: string;
   sessionIdPrefix?: string;
 }
@@ -30,7 +30,7 @@ export interface AdminListPromptsOpts extends AdminPromptFilters {
 }
 
 export interface SearchPromptsOpts {
-  projectId: string | null;
+  projectId: string;
   query?: string;
   sessionId?: string;
   agent?: string;
@@ -55,13 +55,11 @@ export class PromptsRepository {
   }
 
   /** N most recent non-deleted prompts in the given scope, newest first. */
-  recentForContext(projectId: string | null, limit: number): Prompt[] {
-    const scopeCondition =
-      projectId === null ? isNull(prompts.projectId) : eq(prompts.projectId, projectId);
+  recentForContext(projectId: string, limit: number): Prompt[] {
     return this.db
       .select()
       .from(prompts)
-      .where(and(scopeCondition, isNull(prompts.deletedAt)))
+      .where(and(eq(prompts.projectId, projectId), isNull(prompts.deletedAt)))
       .orderBy(desc(prompts.createdAt))
       .limit(limit)
       .all();
@@ -77,9 +75,7 @@ export class PromptsRepository {
 
     if (useFts) {
       const ftsFilters: SQL[] = [];
-      ftsFilters.push(
-        opts.projectId === null ? sql`p.project_id IS NULL` : sql`p.project_id = ${opts.projectId}`,
-      );
+      ftsFilters.push(sql`p.project_id = ${opts.projectId}`);
       if (!opts.includeDeleted) ftsFilters.push(sql`p.deleted_at IS NULL`);
       if (opts.sessionId) ftsFilters.push(sql`p.session_id = ${opts.sessionId}`);
       if (opts.agent) ftsFilters.push(sql`p.agent = ${opts.agent}`);
@@ -119,9 +115,7 @@ export class PromptsRepository {
       return { prompts: rows, total };
     }
 
-    const conditions: SQL[] = [
-      opts.projectId === null ? isNull(prompts.projectId) : eq(prompts.projectId, opts.projectId),
-    ];
+    const conditions: SQL[] = [eq(prompts.projectId, opts.projectId)];
     if (!opts.includeDeleted) conditions.push(isNull(prompts.deletedAt));
     if (opts.sessionId) conditions.push(eq(prompts.sessionId, opts.sessionId));
     if (opts.agent) conditions.push(eq(prompts.agent, opts.agent));
@@ -191,11 +185,7 @@ export class PromptsRepository {
   private adminFilterConditions(opts: AdminPromptFilters): SQL[] {
     const conditions: SQL[] = [];
     if (!opts.includeDeleted) conditions.push(isNull(prompts.deletedAt));
-    if (opts.project?.kind === 'global') {
-      conditions.push(isNull(prompts.projectId));
-    } else if (opts.project?.kind === 'project') {
-      conditions.push(eq(prompts.projectId, opts.project.projectId));
-    }
+    if (opts.projectId) conditions.push(eq(prompts.projectId, opts.projectId));
     if (opts.agent) conditions.push(eq(prompts.agent, opts.agent));
     if (opts.sessionIdPrefix) {
       // Range, not LIKE: LIKE needs NOCASE and this column collates BINARY.

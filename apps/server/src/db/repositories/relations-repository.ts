@@ -22,7 +22,7 @@ import {
   type RelationKind,
   type RelationStatus,
 } from '../schema/memory-relations.js';
-import { memory, type Memory, type MemoryScope } from '../schema/memory.js';
+import { memory, type Memory } from '../schema/memory.js';
 
 export interface JudgedVerdict {
   relation: RelationKind;
@@ -65,21 +65,14 @@ export type AdminRelationWithContent = Pick<
 const sourceMemory = aliasedTable(memory, 'ms');
 const targetMemory = aliasedTable(memory, 'mt');
 
-/** Source AND target both lie in `(scope, projectId)` (aliased-join filter). */
-function endpointsInScope(scope: MemoryScope, projectId: string | null): SQL {
-  return scope === 'project'
-    ? (and(
-        eq(sourceMemory.scope, 'project'),
-        eq(sourceMemory.projectId, projectId ?? ''),
-        eq(targetMemory.scope, 'project'),
-        eq(targetMemory.projectId, projectId ?? ''),
-      ) as SQL)
-    : (and(
-        eq(sourceMemory.scope, 'global'),
-        isNull(sourceMemory.projectId),
-        eq(targetMemory.scope, 'global'),
-        isNull(targetMemory.projectId),
-      ) as SQL);
+/** Source AND target both lie in the project (aliased-join filter). */
+function endpointsInScope(projectId: string): SQL {
+  return and(
+    eq(sourceMemory.scope, 'project'),
+    eq(sourceMemory.projectId, projectId),
+    eq(targetMemory.scope, 'project'),
+    eq(targetMemory.projectId, projectId),
+  ) as SQL;
 }
 
 /** Requires both aliases to be joined already. */
@@ -126,22 +119,9 @@ export class RelationsRepository {
   /** Relation row by `judgmentId` whose source AND target both lie in the scope. */
   findByJudgmentIdInScope(
     judgmentId: string,
-    scope: { scope: MemoryScope; projectId: string | null },
+    scope: { projectId: string },
   ): MemoryRelation | undefined {
-    const scopeFilter =
-      scope.scope === 'project'
-        ? and(
-            eq(sourceMemory.scope, 'project'),
-            eq(sourceMemory.projectId, scope.projectId ?? ''),
-            eq(targetMemory.scope, 'project'),
-            eq(targetMemory.projectId, scope.projectId ?? ''),
-          )
-        : and(
-            eq(sourceMemory.scope, 'global'),
-            isNull(sourceMemory.projectId),
-            eq(targetMemory.scope, 'global'),
-            isNull(targetMemory.projectId),
-          );
+    const scopeFilter = endpointsInScope(scope.projectId);
     return this.db
       .select(getTableColumns(memoryRelations))
       .from(memoryRelations)
@@ -267,8 +247,7 @@ export class RelationsRepository {
    * batch-bounded, so one scope's backlog never starves another's).
    */
   findPendingOlderThanInScope(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     cutoffMs: number;
     limit: number;
   }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
@@ -285,7 +264,7 @@ export class RelationsRepository {
         and(
           eq(memoryRelations.status, 'pending'),
           lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
-          endpointsInScope(opts.scope, opts.projectId),
+          endpointsInScope(opts.projectId),
         ),
       )
       .orderBy(memoryRelations.createdAt)
@@ -380,8 +359,7 @@ export class RelationsRepository {
    * for inventory rather than the aged queue-depth warning.
    */
   listPendingInScope(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     cutoffMs: number | null;
     limit: number;
   }): AdminRelationWithContent[] {
@@ -396,7 +374,7 @@ export class RelationsRepository {
           opts.cutoffMs === null
             ? undefined
             : lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
-          endpointsInScope(opts.scope, opts.projectId),
+          endpointsInScope(opts.projectId),
           endpointsActive,
         ),
       )
@@ -406,7 +384,7 @@ export class RelationsRepository {
   }
 
   /** Scoped total pending-judgment count. */
-  countPendingInScope(opts: { scope: MemoryScope; projectId: string | null }): number {
+  countPendingInScope(opts: { projectId: string }): number {
     const row = this.db
       .select({ value: count() })
       .from(memoryRelations)
@@ -415,7 +393,7 @@ export class RelationsRepository {
       .where(
         and(
           eq(memoryRelations.status, 'pending'),
-          endpointsInScope(opts.scope, opts.projectId),
+          endpointsInScope(opts.projectId),
           endpointsActive,
         ),
       )

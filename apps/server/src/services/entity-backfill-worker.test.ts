@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories, type EntitiesRepository } from '../db/repositories/index.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { MemoryService } from './memory.js';
-import { SCOPE_GLOBAL } from './scope.js';
 
 let db: TestDb;
 let mem: MemoryService;
@@ -26,11 +25,11 @@ describe('EntityBackfillWorker', () => {
   it('backfills every active memory exactly once, including ones with zero entities', () => {
     const withEntity = mem.save(
       { type: 'project', title: 'Fix', content: 'fixed apps/server/src/db/migrate.ts' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const withoutEntity = mem.save(
       { type: 'project', title: 'No entities here', content: 'just plain prose' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const result = worker.processBatch();
@@ -43,8 +42,8 @@ describe('EntityBackfillWorker', () => {
   });
 
   it('resumes correctly after a restart (a fresh worker instance sees the same backlog)', () => {
-    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
-    mem.save({ type: 'project', title: 'B', content: 'apps/b.ts' }, SCOPE_GLOBAL);
+    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, defaultProjectScope(db.handle));
+    mem.save({ type: 'project', title: 'B', content: 'apps/b.ts' }, defaultProjectScope(db.handle));
     const repos = createRepositories(db.handle.db);
     new EntityBackfillWorker({ repos, tx: db.handle.db, batchSize: 1 }).processBatch();
     expect(repos.entities.adminBacklogCount()).toBe(1);
@@ -61,23 +60,25 @@ describe('EntityBackfillWorker', () => {
   });
 
   it('is idempotent — a second call with nothing pending processes zero', () => {
-    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, defaultProjectScope(db.handle));
     worker.processBatch();
     const second = worker.processBatch();
     expect(second).toEqual({ processed: 0, failed: 0 });
   });
 
   it('backfills archived memories too, so status-archived entity lookups can resolve', () => {
-    const m = mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
-    mem.archive(m.id, SCOPE_GLOBAL);
+    const m = mem.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(db.handle),
+    );
+    mem.archive(m.id, defaultProjectScope(db.handle));
     const result = worker.processBatch();
     expect(result.processed).toBe(1);
     expect(entities.findEntitiesForMemory(m.id)).toEqual([{ kind: 'path', value: 'apps/a.ts' }]);
     expect(
       entities
         .findMemoriesByEntity({
-          scope: 'global',
-          projectId: null,
+          projectId: defaultProjectScope(db.handle).projectId,
           value: 'apps/a.ts',
           status: 'archived',
           limit: 10,
@@ -92,7 +93,7 @@ describe('EntityBackfillWorker', () => {
   });
 
   it('force re-scans even when the pending flag has already drained', () => {
-    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    mem.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, defaultProjectScope(db.handle));
     worker.processBatch();
     expect(worker.processBatch()).toEqual({ processed: 0, failed: 0 });
     // Forcing re-checks the backlog query even though the flag says drained.

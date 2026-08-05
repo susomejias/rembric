@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TransactionRunner } from '../db/client.js';
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
 import { EntityBackfillWorker } from './entity-backfill-worker.js';
@@ -16,7 +16,7 @@ import {
 } from './entity-state.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope, SCOPE_GLOBAL } from './scope.js';
+import { projectScope } from './scope.js';
 
 let db: TestDb;
 let repos: Repositories;
@@ -77,7 +77,6 @@ describe('ensureEntityExtractor', () => {
     expect(scanCount()).toBe(1);
     expect(
       repos.entities.findMemoriesByEntity({
-        scope: 'project',
         projectId,
         kind: 'ip_address',
         value: '192.168.1.50',
@@ -216,7 +215,10 @@ describe('entityIndexResetWarning', () => {
       return repos.entities.adminCountEntities({});
     };
 
-    memory.save({ type: 'project', title: 'note', content: 'host nas.local is up' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'project', title: 'note', content: 'host nas.local is up' },
+      defaultProjectScope(db.handle),
+    );
     ensureEntityExtractor(repos, db.dataDir, db.handle.db);
     new EntityBackfillWorker({ repos, tx: db.handle.db }).processBatch({ force: true });
     expect(repos.entities.adminCountEntities({})).toBeGreaterThan(0);

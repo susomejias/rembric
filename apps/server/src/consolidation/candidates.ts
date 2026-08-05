@@ -13,6 +13,5 @@
  */
 
 export interface ScopeKey {
-  scope: 'global' | 'project';
-  projectId: string | null;
+  projectId: string;
 }

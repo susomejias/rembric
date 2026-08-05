@@ -2,11 +2,10 @@ import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
-import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
 import { MemoryService } from './memory.js';
-import { SCOPE_GLOBAL } from './scope.js';
 
 /**
  * 13.19 — embedding worker behavior (in-process embedder).
@@ -46,9 +45,12 @@ function vecCount(): number {
 
 describe('EmbeddingWorker', () => {
   it('backfills every active memory exactly once', async () => {
-    mem.save({ type: 'feedback', title: 'One', content: 'one' }, SCOPE_GLOBAL);
-    mem.save({ type: 'feedback', title: 'Two', content: 'two' }, SCOPE_GLOBAL);
-    mem.save({ type: 'feedback', title: 'Three', content: 'three' }, SCOPE_GLOBAL);
+    mem.save({ type: 'feedback', title: 'One', content: 'one' }, defaultProjectScope(db.handle));
+    mem.save({ type: 'feedback', title: 'Two', content: 'two' }, defaultProjectScope(db.handle));
+    mem.save(
+      { type: 'feedback', title: 'Three', content: 'three' },
+      defaultProjectScope(db.handle),
+    );
 
     const { processed, failed } = await worker.processBatch();
     expect(processed).toBe(3);
@@ -63,9 +65,12 @@ describe('EmbeddingWorker', () => {
   });
 
   it('skips archived memories', async () => {
-    mem.save({ type: 'feedback', title: 'Live', content: 'live' }, SCOPE_GLOBAL);
-    const dead = mem.save({ type: 'feedback', title: 'Dead', content: 'dead' }, SCOPE_GLOBAL);
-    mem.archive(dead.id, SCOPE_GLOBAL);
+    mem.save({ type: 'feedback', title: 'Live', content: 'live' }, defaultProjectScope(db.handle));
+    const dead = mem.save(
+      { type: 'feedback', title: 'Dead', content: 'dead' },
+      defaultProjectScope(db.handle),
+    );
+    mem.archive(dead.id, defaultProjectScope(db.handle));
 
     const { processed } = await worker.processBatch();
     expect(processed).toBe(1);
@@ -81,9 +86,9 @@ describe('EmbeddingWorker', () => {
   it('embedNow inserts inline when the embedder is warm', async () => {
     const row = mem.save(
       { type: 'feedback', title: 'Inline row', content: 'inline row' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
-    const ok = await worker.embedNow(row.id, row.title, row.content, row.scope, row.projectId);
+    const ok = await worker.embedNow(row.id, row.title, row.content, row.projectId!);
     expect(ok).toBe(true);
     expect(vecCount()).toBe(1);
     // The drain has nothing left for this row.
@@ -92,8 +97,14 @@ describe('EmbeddingWorker', () => {
   });
 
   it('counts and continues past failures, retrying on the next call', async () => {
-    mem.save({ type: 'feedback', title: 'Fail row 1', content: 'fail-row-1' }, SCOPE_GLOBAL);
-    mem.save({ type: 'feedback', title: 'Fail row 2', content: 'fail-row-2' }, SCOPE_GLOBAL);
+    mem.save(
+      { type: 'feedback', title: 'Fail row 1', content: 'fail-row-1' },
+      defaultProjectScope(db.handle),
+    );
+    mem.save(
+      { type: 'feedback', title: 'Fail row 2', content: 'fail-row-2' },
+      defaultProjectScope(db.handle),
+    );
     embedder.failOnce(new Error('transient inference blip'));
 
     const { processed, failed } = await worker.processBatch();
@@ -129,9 +140,12 @@ describe('EmbeddingWorker — possiblyPending gate (#267)', () => {
     await gated.processBatch(); // drains to empty, flag flips false
     expect(spy).toHaveBeenCalledTimes(1);
 
-    const row = memSvc.save({ type: 'feedback', title: 'x', content: 'x' }, SCOPE_GLOBAL);
+    const row = memSvc.save(
+      { type: 'feedback', title: 'x', content: 'x' },
+      defaultProjectScope(db.handle),
+    );
     embedder.failOnce(new Error('inference blip'));
-    const ok = await gated.embedNow(row.id, row.title, row.content, row.scope, row.projectId);
+    const ok = await gated.embedNow(row.id, row.title, row.content, row.projectId!);
     expect(ok).toBe(false);
 
     await gated.processBatch(); // failure should have flipped possiblyPending back to true

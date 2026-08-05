@@ -1,4 +1,4 @@
-import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import type { Db } from '../client.js';
@@ -9,13 +9,7 @@ import {
   memoryEntityLinks,
   memoryEntityScan,
 } from '../schema/entities.js';
-import {
-  memory,
-  type Memory,
-  type MemoryScope,
-  type MemoryStatus,
-  type MemoryType,
-} from '../schema/memory.js';
+import { memory, type Memory, type MemoryStatus, type MemoryType } from '../schema/memory.js';
 
 export interface EntityRef {
   kind: EntityKind;
@@ -24,8 +18,7 @@ export interface EntityRef {
 
 export interface PendingEntityScan {
   id: string;
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   title: string;
   content: string;
 }
@@ -35,11 +28,8 @@ export interface MemoryEntityView {
   value: string;
 }
 
-function entityScopeCondition(scope: MemoryScope, projectId: string | null) {
-  return and(
-    eq(memoryEntities.scope, scope),
-    projectId === null ? isNull(memoryEntities.projectId) : eq(memoryEntities.projectId, projectId),
-  );
+function entityScopeCondition(projectId: string) {
+  return and(eq(memoryEntities.scope, 'project'), eq(memoryEntities.projectId, projectId));
 }
 
 /** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
@@ -59,13 +49,7 @@ export class EntitiesRepository {
    * O(1) round trips regardless of how many entities a memory has, matching
    * `findEntitiesForMemories`'s "no N+1" bar.
    */
-  linkMemory(
-    memoryId: string,
-    scope: MemoryScope,
-    projectId: string | null,
-    entities: EntityRef[],
-    scannedAt: Date,
-  ): void {
+  linkMemory(memoryId: string, projectId: string, entities: EntityRef[], scannedAt: Date): void {
     if (entities.length > 0) {
       const idByKey = new Map<string, string>();
       for (let i = 0; i < entities.length; i += LOOKUP_CHUNK) {
@@ -74,7 +58,7 @@ export class EntitiesRepository {
         const existing = this.db.all<{ id: string; kind: EntityKind; value: string }>(sql`
           SELECT id, kind, value
           FROM ${memoryEntities}
-          WHERE ${entityScopeCondition(scope, projectId)}
+          WHERE ${entityScopeCondition(projectId)}
             AND (kind, value) IN (VALUES ${sql.join(
               chunk.map((e) => sql`(${e.kind}, ${e.value})`),
               sql`, `,
@@ -93,7 +77,7 @@ export class EntitiesRepository {
           idByKey.set(key, id);
           toInsert.push({
             id,
-            scope,
+            scope: 'project',
             projectId,
             kind: e.kind,
             value: e.value,
@@ -129,8 +113,7 @@ export class EntitiesRepository {
    * not "active" — the entity path is specified as complete within scope.
    */
   findMemoriesByEntity(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     kind?: EntityKind;
     value: string;
     status?: MemoryStatus;
@@ -139,10 +122,7 @@ export class EntitiesRepository {
     topicKey?: string;
     limit: number;
   }): Memory[] {
-    const conditions = [
-      entityScopeCondition(opts.scope, opts.projectId),
-      eq(memoryEntities.value, opts.value),
-    ];
+    const conditions = [entityScopeCondition(opts.projectId), eq(memoryEntities.value, opts.value)];
     if (opts.kind) conditions.push(eq(memoryEntities.kind, opts.kind));
     conditions.push(
       opts.status ? eq(memory.status, opts.status) : sql`${memory.status} != 'archived'`,
@@ -229,14 +209,10 @@ export class EntitiesRepository {
    * `excludeMemoryId` lets a caller exclude the memory it just saved even if
    * linking has already run, rather than relying solely on call order.
    */
-  scopeActiveMemoryCount(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
-    excludeMemoryId?: string;
-  }): number {
+  scopeActiveMemoryCount(opts: { projectId: string; excludeMemoryId?: string }): number {
     const conditions = [
-      eq(memory.scope, opts.scope),
-      opts.projectId === null ? isNull(memory.projectId) : eq(memory.projectId, opts.projectId),
+      eq(memory.scope, 'project'),
+      eq(memory.projectId, opts.projectId),
       eq(memory.status, 'active'),
     ];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
@@ -251,14 +227,13 @@ export class EntitiesRepository {
 
   /** Current active-memory link count for one entity — the numerator of the rarity gate. */
   entityLinkCount(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     kind: EntityKind;
     value: string;
     excludeMemoryId?: string;
   }): number {
     const conditions = [
-      entityScopeCondition(opts.scope, opts.projectId),
+      entityScopeCondition(opts.projectId),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
       eq(memory.status, 'active'),
@@ -281,8 +256,7 @@ export class EntitiesRepository {
    * (the memory just saved) and anything in `excludeIds`.
    */
   findOtherMemoriesForEntity(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     kind: EntityKind;
     value: string;
     excludeMemoryId: string;
@@ -290,7 +264,7 @@ export class EntitiesRepository {
     limit: number;
   }): Memory[] {
     const conditions = [
-      entityScopeCondition(opts.scope, opts.projectId),
+      entityScopeCondition(opts.projectId),
       eq(memoryEntities.kind, opts.kind),
       eq(memoryEntities.value, opts.value),
       eq(memory.status, 'active'),
@@ -323,14 +297,13 @@ export class EntitiesRepository {
     return this.db
       .select({
         id: memory.id,
-        scope: memory.scope,
-        projectId: memory.projectId,
+        projectId: sql<string>`${memory.projectId}`,
         title: memory.title,
         content: memory.content,
       })
       .from(memory)
       .leftJoin(memoryEntityScan, eq(memoryEntityScan.memoryId, memory.id))
-      .where(isNull(memoryEntityScan.memoryId))
+      .where(and(isNull(memoryEntityScan.memoryId), isNotNull(memory.projectId)))
       .orderBy(memory.createdAt)
       .limit(limit)
       .all();
@@ -348,7 +321,7 @@ export class EntitiesRepository {
     // with `foreign_keys = OFF`), so fall back rather than show the operator a
     // negative backlog.
     const row = this.db.get<{ v: number }>(sql`
-      SELECT (SELECT COUNT(*) FROM ${memory})
+      SELECT (SELECT COUNT(*) FROM ${memory} WHERE project_id IS NOT NULL)
            - (SELECT COUNT(*) FROM ${memoryEntityScan}) AS v
     `) as { v: number } | undefined;
     const diff = row?.v ?? 0;
@@ -358,7 +331,7 @@ export class EntitiesRepository {
         .select({ n: sql<number>`count(*)` })
         .from(memory)
         .leftJoin(memoryEntityScan, eq(memoryEntityScan.memoryId, memory.id))
-        .where(isNull(memoryEntityScan.memoryId))
+        .where(and(isNull(memoryEntityScan.memoryId), isNotNull(memory.projectId)))
         .get()?.n ?? 0
     );
   }
@@ -369,11 +342,8 @@ export class EntitiesRepository {
    * which an empty entity lookup cannot do on its own. Scoped, so it is safe
    * on an agent-facing read.
    */
-  countPendingScans(opts: { scope: MemoryScope; projectId: string | null }): number {
-    const scoped = and(
-      eq(memory.scope, opts.scope),
-      opts.projectId === null ? isNull(memory.projectId) : eq(memory.projectId, opts.projectId),
-    );
+  countPendingScans(opts: { projectId: string }): number {
+    const scoped = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId));
     return (
       this.db
         .select({ n: sql<number>`count(*)` })

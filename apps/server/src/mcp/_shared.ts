@@ -134,10 +134,7 @@ export function unresolvableSlug(): string | null {
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
 export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean {
   const ctx = getRequestContext();
-  return isAuthorized(ctx, action, {
-    scope: scope.kind,
-    projectId: scope.kind === 'project' ? scope.projectId : null,
-  });
+  return isAuthorized(ctx, action, { scope: 'project', projectId: scope.projectId });
 }
 
 /**
@@ -207,7 +204,7 @@ export function assertAuthorized(
 ): void {
   const ctx = getRequestContext();
   if (!isAuthorizedFor(action, scope)) {
-    const target = scope.kind === 'project' ? `project '${scope.projectId}'` : 'global scope';
+    const target = `project '${scope.projectId}'`;
     throw new DomainError(
       'forbidden',
       `token scope '${ctx.scope}' does not authorize ${action} on ${target}` +

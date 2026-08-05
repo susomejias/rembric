@@ -11,9 +11,9 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
-import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 
@@ -334,7 +334,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
   function linkPaths(repos: ReturnType<typeof createRepositories>, id: string, n: number): void {
     repos.entities.linkMemory(
       id,
-      'project',
       projectA.id,
       Array.from({ length: n }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
       new Date(),
@@ -374,7 +373,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     // — the two that address exactly one thing each — are evicted.
     repos.entities.linkMemory(
       id,
-      'project',
       projectA.id,
       [
         ...Array.from({ length: 21 }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
@@ -540,7 +538,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     // Same values, other project: a leak would show up as a larger count.
     repos.entities.linkMemory(
       theirs.id,
-      'project',
       projectB.id,
       Array.from({ length: 20 }, (_, i) => ({ kind: 'path' as const, value: `src/f${i}.ts` })),
       new Date(),
@@ -637,7 +634,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       saved.id,
-      'project',
       projectA.id,
       [{ kind: 'error_code', value: 'ENOENT' }],
       new Date(),
@@ -1677,7 +1673,7 @@ describe('memory.search — no argument widens the resolved scope', () => {
         title: 'other-scope convention',
         content: 'other-scope convention about tabs',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     memory.save(
       { type: 'user', title: 'project-A convention', content: 'project-A convention about tabs' },
@@ -1709,14 +1705,14 @@ describe('memory.search — no argument widens the resolved scope', () => {
     const ENT = [{ kind: 'path' as const, value: 'src/gate-probe.ts' }];
     const g = memory.save(
       { type: 'reference', title: 'other note on file', content: 'see the probe file for this' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const p = memory.save(
       { type: 'reference', title: 'project note on file', content: 'see the probe file here too' },
       projectScope(projectA.id),
     );
-    repos.entities.linkMemory(g.id, 'global', null, ENT, new Date());
-    repos.entities.linkMemory(p.id, 'project', projectA.id, ENT, new Date());
+    repos.entities.linkMemory(g.id, defaultProject(db.handle).id, ENT, new Date());
+    repos.entities.linkMemory(p.id, projectA.id, ENT, new Date());
     const r = await runWithContext(scopedCtx(ADMIN_TOKEN_SCOPE, { project: projectA }), () =>
       Promise.resolve(gateHandlers.search({ entity: 'src/gate-probe.ts' })),
     );
@@ -1729,11 +1725,14 @@ describe('memory.search — no argument widens the resolved scope', () => {
 
 describe('an unresolvable path slug establishes no scope', () => {
   // The inverted characterization test for the leak this suite used to
-  // document: a slug naming no project used to resolve to SCOPE_GLOBAL, so the
+  // document: a slug naming no project used to resolve to defaultProjectScope(db.handle), so the
   // connection read user-wide memory while presenting as path-scoped. It now
   // resolves to nothing and the call is refused, reads included.
   it('refuses a `*` token at /mcp/<unknown-slug> instead of serving global memories', async () => {
-    memory.save({ type: 'user', title: 'user-wide row', content: 'user-wide row' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'user', title: 'user-wide row', content: 'user-wide row' },
+      defaultProjectScope(db.handle),
+    );
     const token: Token = {
       id: 'tk_test',
       name: 'test-token',

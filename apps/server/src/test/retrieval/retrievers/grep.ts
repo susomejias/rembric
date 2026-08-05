@@ -1,7 +1,7 @@
 import { inScope, type IngestedCorpus, type Retriever } from '../types.js';
 
 interface GrepState {
-  items: { id: string; haystack: string; scope: 'global' | 'project'; projectId: string | null }[];
+  items: { id: string; haystack: string; projectId: string }[];
 }
 
 function tokenize(text: string): string[] {
@@ -24,7 +24,6 @@ export const grepRetriever: Retriever<GrepState> = {
     items: corpus.items.map((m) => ({
       id: m.id,
       haystack: `${m.title}\n\n${m.content}`.toLowerCase(),
-      scope: m.scope,
       projectId: m.projectId,
     })),
   }),

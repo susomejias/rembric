@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import { ProjectsService } from './projects.js';
-import { projectScope, SCOPE_GLOBAL } from './scope.js';
+import { projectScope } from './scope.js';
 import { TokensService } from './tokens.js';
 
 let db: TestDb;
@@ -307,12 +307,14 @@ describe('AgentSessionsService', () => {
     expect(counts.active).toBe(1);
   });
 
-  it('countByStatus(SCOPE_GLOBAL) does not count project-scoped sessions', () => {
-    sessions.start({ tokenId, projectId: null, agent: 'global-agent' });
+  it('countByStatus reaches no session without a project — no scope addresses one', () => {
+    sessions.start({ tokenId, projectId: null, agent: 'project-less-agent' });
     sessions.start({ tokenId, projectId, agent: 'project-agent' });
 
-    const counts = sessions.countByStatus(SCOPE_GLOBAL);
-    expect(counts.active).toBe(1);
+    // Control: the project-scoped session IS counted, so the zero below is the
+    // predicate rather than an empty table.
+    expect(sessions.countByStatus(projectScope(projectId)).active).toBe(1);
+    expect(sessions.countByStatus(defaultProjectScope(db.handle)).active).toBe(0);
   });
 
   it('adminCountByStatus is server-wide, unlike the scoped countByStatus', () => {

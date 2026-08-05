@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { AdminListMemoriesOpts, Repositories } from '../db/repositories/index.js';
+import type { Repositories } from '../db/repositories/index.js';
 import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
@@ -12,7 +12,7 @@ import {
   REVIEW_TTL_MS,
   type ReviewState,
 } from '../services/review.js';
-import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import {
@@ -94,10 +94,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       projectId,
       unknown: unknownProject,
     } = resolveProjectFilter(url, projectRows);
-    const project: AdminListMemoriesOpts['project'] = projectId
-      ? { kind: 'project', projectId }
-      : undefined;
-
     const nowMs = Date.now();
 
     let rows: Memory[];
@@ -107,14 +103,14 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       rows = deps.repos.memory.adminSearchFts(query, {
         status: statusFilter as Memory['status'],
         type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-        project,
+        projectId,
         limit: PAGE_SIZE + 1,
         offset,
       });
     } else if (wantNeedsReview) {
       // needs_review implies active; the SQL path filters + paginates correctly.
       rows = deps.repos.memory.adminFindNeedsReview({
-        project,
+        projectId,
         nowMs,
         limit: PAGE_SIZE + 1,
         offset,
@@ -125,7 +121,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       rows = deps.repos.memory.adminList({
         status: statusFilter as Memory['status'],
         type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-        project,
+        projectId,
         limit: PAGE_SIZE + 1,
         offset,
       });
@@ -176,11 +172,11 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       totalCount = deps.repos.memory.adminCountFts(query, {
         status: statusFilter as Memory['status'],
         type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-        project,
+        projectId,
       });
     } else if (wantNeedsReview) {
       totalCount = deps.repos.memory.adminCountNeedsReview({
-        project,
+        projectId,
         nowMs,
         ttlByType: TTL_BY_TYPE,
       });
@@ -188,7 +184,7 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       totalCount = deps.repos.memory.adminCount({
         status: statusFilter as Memory['status'],
         type: typeFilter ? (typeFilter as Memory['type']) : undefined,
-        project,
+        projectId,
       });
     }
     const total = totalCount === undefined ? `${visible.length}+` : String(totalCount);
@@ -581,12 +577,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const id = c.req.param('id');
     const row = deps.memory.unsafeGetById(id);
-    if (!row) return c.redirect('/dashboard/memories');
+    // A row with no project is unaddressable — there is no scope to act in —
+    // so it behaves like a missing one rather than falling back to a wider one.
+    if (!row?.projectId) return c.redirect('/dashboard/memories');
 
-    const scope =
-      row.scope === 'project' && row.projectId ? projectScope(row.projectId) : SCOPE_GLOBAL;
     try {
-      deps.memory.archive(id, scope);
+      deps.memory.archive(id, projectScope(row.projectId));
     } catch (err) {
       if (err instanceof DomainError) {
         return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });
@@ -605,12 +601,12 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const id = c.req.param('id');
     const row = deps.memory.unsafeGetById(id);
-    if (!row) return c.redirect('/dashboard/memories');
+    if (!row?.projectId) return c.redirect('/dashboard/memories');
 
-    const scope =
-      row.scope === 'project' && row.projectId ? projectScope(row.projectId) : SCOPE_GLOBAL;
     try {
-      deps.memory.confirm(id, scope, { source: { agent: 'dashboard-operator' } });
+      deps.memory.confirm(id, projectScope(row.projectId), {
+        source: { agent: 'dashboard-operator' },
+      });
     } catch (err) {
       if (err instanceof DomainError) {
         return domainErrorPage(c, deps.sessions, err, { title: 'Memory', activeNav: 'memories' });

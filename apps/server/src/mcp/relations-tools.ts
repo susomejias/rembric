@@ -170,16 +170,13 @@ async function handleSuggestTopicKey(
     // suggestion with no scope awareness (should not happen in production).
     return ok({ topic_key: topicKey, occupied: false, nearby: [] });
   }
-  const memScope = scope.kind === 'project' ? ('project' as const) : ('global' as const);
-  const projectId = scope.kind === 'project' ? scope.projectId : null;
+  const projectId = scope.projectId;
 
   const occupant = deps.repos.memory.findActiveByTopicKey({
-    scope: memScope,
     projectId,
     topicKey,
   });
   const nearbyRows = deps.repos.memory.listNearbyTopicKeys({
-    scope: memScope,
     projectId,
     prefix: topicKeyPrefix(topicKey),
     excludeExact: topicKey,

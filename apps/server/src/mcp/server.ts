@@ -6,7 +6,6 @@ import {
 import { z, type ZodObject, type ZodRawShape } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryScope } from '../db/schema/memory.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
 import type { MemoryService } from '../services/memory.js';
@@ -102,8 +101,7 @@ export interface CreateMcpServerOptions {
     memoryId: string,
     title: string,
     content: string,
-    scope: MemoryScope,
-    projectId: string | null,
+    projectId: string,
   ) => Promise<boolean>;
   router: SessionRouter;
   repos: Repositories;

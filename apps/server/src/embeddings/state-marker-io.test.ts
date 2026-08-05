@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EMBEDDING_INPUT_VERSION, EMBEDDING_MODEL_ID } from './embedder.js';
 import {
@@ -62,7 +61,10 @@ function drain(): Promise<unknown> {
 
 async function seedVectors(count: number): Promise<void> {
   for (let i = 0; i < count; i += 1) {
-    mem.save({ type: 'feedback', title: `row-${i}`, content: `row-${i}` }, SCOPE_GLOBAL);
+    mem.save(
+      { type: 'feedback', title: `row-${i}`, content: `row-${i}` },
+      defaultProjectScope(db.handle),
+    );
   }
   await drain();
   expect(repos.vectors.count()).toBe(count);

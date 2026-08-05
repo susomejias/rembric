@@ -2,7 +2,7 @@ import { type PROJECTS } from './corpus.js';
 import type { QueryItem, QueryScopeFixture } from './types.js';
 
 function project(slug: (typeof PROJECTS)[number]['slug']): QueryScopeFixture {
-  return { scope: 'project', project: slug };
+  return { project: slug };
 }
 
 export const QUERIES: QueryItem[] = [

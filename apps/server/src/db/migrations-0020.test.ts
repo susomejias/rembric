@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createTestDb, type TestDb } from '../test/db.js';
+import { seedProject } from '../test/default-project.js';
 
 import { MemoryRepository } from './repositories/memory-repository.js';
 import { PromptsRepository } from './repositories/prompts-repository.js';
@@ -15,8 +16,8 @@ function mem(overrides: Partial<NewMemory> & { id: string }): NewMemory {
   return {
     title: 't',
     content: 'c',
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -45,6 +46,7 @@ function ftsMatchCount(t: TestDb, table: 'memory_fts' | 'prompts_fts', term: str
 describe('migration 0020_fix_fts_delete_triggers', () => {
   it('a physical purge of a tagged archived memory leaves no dangling FTS posting', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(memory)
@@ -62,6 +64,7 @@ describe('migration 0020_fix_fts_delete_triggers', () => {
 
   it('rowid reuse after a purge does not resurrect the old tag as a phantom match', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(memory)
@@ -85,6 +88,7 @@ describe('migration 0020_fix_fts_delete_triggers', () => {
 
   it('a last_seen_at-only touch does not rewrite the memory_fts postings', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(memory)
@@ -103,6 +107,7 @@ describe('migration 0020_fix_fts_delete_triggers', () => {
 
   it('a real tags change still re-indexes memory_fts correctly', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(memory)
@@ -118,6 +123,7 @@ describe('migration 0020_fix_fts_delete_triggers', () => {
 
   it('a physical purge of a tagged prompt leaves no dangling FTS posting', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(prompts)
@@ -135,6 +141,7 @@ describe('migration 0020_fix_fts_delete_triggers', () => {
 
   it('a deleted_at-only flip still leaves the prompt discoverable in prompts_fts (spec-required)', () => {
     const t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     try {
       t.handle.db
         .insert(prompts)

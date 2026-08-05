@@ -1,6 +1,5 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
-import type { MemoryScope } from '../db/schema/memory.js';
 import { type Embedder, embeddingInput } from '../embeddings/embedder.js';
 
 /**
@@ -55,15 +54,14 @@ export class EmbeddingWorker {
     memoryId: string,
     title: string,
     content: string,
-    scope: MemoryScope,
-    projectId: string | null,
+    projectId: string,
   ): Promise<boolean> {
     try {
       const vector = await this.opts.embedder.embed(embeddingInput(title, content));
       this.opts.repos.vectors.insertEmbedding(
         memoryId,
         Buffer.from(vector.buffer),
-        partitionKeyFor(scope, projectId),
+        partitionKeyFor(projectId),
       );
       return true;
     } catch (err) {
@@ -112,7 +110,7 @@ export class EmbeddingWorker {
         this.opts.repos.vectors.insertEmbedding(
           row.id,
           Buffer.from(vector.buffer),
-          partitionKeyFor(row.scope, row.projectId),
+          partitionKeyFor(row.projectId),
         );
         processed++;
       } catch {

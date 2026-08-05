@@ -330,8 +330,8 @@ export async function bootstrap(
         candidates: {
           perSaveMax: config.candidates.perSaveMax,
         },
-        embedNow: (memoryId, title, content, scope, projectId) =>
-          embeddingWorker.embedNow(memoryId, title, content, scope, projectId),
+        embedNow: (memoryId, title, content, projectId) =>
+          embeddingWorker.embedNow(memoryId, title, content, projectId),
         router: sessionRouter,
         repos,
         doctor: buildDoctorReport,

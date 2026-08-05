@@ -206,11 +206,15 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
       { memory_id: 'g1', status: 'active', type: 'user' },
       { memory_id: 'p1', status: 'superseded', type: 'project' },
     ]);
-    // The invariant, not the value: each vector sits at ITS memory's partition
-    // key. A later migration that moves a memory between scopes moves the
-    // vector with it and this assertion needs no edit.
+    // The invariant, not the value: each vector sits at ITS memory's project.
+    // A later migration that moves a memory between projects moves the vector
+    // with it and this assertion needs no edit.
     for (const r of rows) {
-      expect(r.partition_key).toBe(partitionKeyFor(r.scope, r.project_id));
+      // 0031 repointed every row onto a project, so this is never null after
+      // the full chain — asserted rather than assumed, which is also what
+      // licenses the non-null below.
+      expect(r.project_id).not.toBeNull();
+      expect(r.partition_key).toBe(partitionKeyFor(r.project_id!));
     }
 
     // Embeddings are byte-identical (no re-embedding, no precision loss).

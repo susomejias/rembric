@@ -15,9 +15,7 @@ export const hybridRetriever: Retriever<IngestedCorpus> = {
         query: text,
         limit: k,
       },
-      scope.scope === 'global'
-        ? { kind: 'global' }
-        : { kind: 'project', projectId: scope.projectId! },
+      { kind: 'project', projectId: scope.projectId },
       gates,
     );
     return { ids: memories.map((m) => m.id), abstained };

@@ -1,6 +1,7 @@
 import { ulid } from 'ulid';
 
 import { MemoryRepository } from '../../db/repositories/memory-repository.js';
+import { ProjectsRepository } from '../../db/repositories/projects-repository.js';
 import type { EntityKind } from '../../db/schema/entities.js';
 import { memory } from '../../db/schema/memory.js';
 import { sanitizeFtsQuery } from '../../services/hybrid-search.js';
@@ -47,6 +48,7 @@ function runProbe(probe: NoiseProbe): ProbeResult {
   const t = createTestDb();
   try {
     const repo = new MemoryRepository(t.handle.db);
+    const projectId = new ProjectsRepository(t.handle.db).findDefault()!.id;
     const truthId = ulid();
     const rows = [
       { id: truthId, content: probe.truth },
@@ -57,8 +59,8 @@ function runProbe(probe: NoiseProbe): ProbeResult {
       .values(
         rows.map((r) => ({
           id: r.id,
-          scope: 'global' as const,
-          projectId: null,
+          scope: 'project' as const,
+          projectId,
           type: 'reference' as const,
           title: r.content.slice(0, 100),
           content: r.content,
@@ -75,8 +77,7 @@ function runProbe(probe: NoiseProbe): ProbeResult {
     const hits = matchExpr
       ? repo.searchBm25Ids({
           matchExpr,
-          scope: 'global',
-          projectId: null,
+          projectId,
           status: 'active',
           limit: rows.length + 1,
         })

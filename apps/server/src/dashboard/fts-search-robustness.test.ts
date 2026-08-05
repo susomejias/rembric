@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { MemoryService } from '../services/memory.js';
 import { PromptsService } from '../services/prompts.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { defaultProjectScope } from '../test/default-project.js';
 
 import { createMemoriesRouter } from './memories.js';
 import { createPromptsRouter } from './prompts.js';
@@ -35,7 +35,7 @@ describe('dashboard FTS search robustness (#258)', () => {
 
     new MemoryService(repos, t.handle.db).save(
       { type: 'project', title: 'deploy plan', content: 'deploy via docker-compose' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     new PromptsService(repos, t.handle.db).save({
       content: "what's the deploy plan?",

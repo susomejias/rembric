@@ -33,7 +33,7 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL, projectScope, type Scope } from '../services/scope.js';
+import { projectScope, type Scope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 
 export const SYNTHETIC_VECTOR_CAVEAT =
@@ -185,9 +185,9 @@ export function refuseTarget(dataDir: string): string | null {
  * with its provenance: reproduced from `tune`, or a harness choice.
  */
 export const VOLUMETRIC_SHAPE = {
-  /** `tune`: "6 scopes" — read here as the global scope plus five projects. */
+  /** `tune`: "6 scopes" — read here as six projects, one per scope slot. */
   scopeCount: 6,
-  projectCount: 5,
+  projectCount: 6,
   /** `tune`: "realistic ~1.3KB bodies". Median of the generated distribution. */
   bodyBytesP50: 1300,
   /** The long tail D3 asks for: p90 at roughly twice the median. */
@@ -521,12 +521,18 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
 
   clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS;
-  const projects = Array.from({ length: VOLUMETRIC_SHAPE.projectCount }, (_, i) =>
-    projectsSvc.create({ slug: `vol-${i}`, displayName: `Volumetric ${i}` }),
-  );
+  // Slot 0 held the global scope until that scope was retired. It is a project
+  // now, and it keeps slot 0 with a slug of its own so that `vol-0`..`vol-4`
+  // stay on slots 1..5: a corpus's numbered projects hold the same rows before
+  // and after the move, which is what the narrow-path baseline is measured on.
+  const projects = [
+    projectsSvc.create({ slug: 'vol-shared', displayName: 'Volumetric shared' }),
+    ...Array.from({ length: VOLUMETRIC_SHAPE.projectCount - 1 }, (_, i) =>
+      projectsSvc.create({ slug: `vol-${i}`, displayName: `Volumetric ${i}` }),
+    ),
+  ];
   const token = tokensSvc.create({ name: 'volumetric-harness', scope: '*' });
-  // Scope slot 0 is global; 1..5 are the projects. Six in all, per `tune`.
-  const scopes: Scope[] = [SCOPE_GLOBAL, ...projects.map((p) => projectScope(p.id))];
+  const scopes: Scope[] = projects.map((p) => projectScope(p.id));
 
   const result: BuildResult = {
     memories: 0,
@@ -628,13 +634,12 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
       repos.vectors.insertEmbedding(
         row.id,
         Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
-        partitionKeyFor(row.scope, row.projectId),
+        partitionKeyFor(scope.projectId),
       );
 
       repos.entities.linkMemory(
         row.id,
-        row.scope,
-        row.projectId,
+        scope.projectId,
         extractEntities(row.title, row.content),
         row.createdAt,
       );
@@ -728,7 +733,7 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     `  relations:     ${result.relations} (${result.pendingRelations} pending, ${result.orphanedRelations} orphaned)`,
   );
   log(`  prompts:       ${result.prompts} (${result.deletedPrompts} soft-deleted)`);
-  log(`  projects:      ${result.projects} (+ the global scope = ${VOLUMETRIC_SHAPE.scopeCount})`);
+  log(`  projects:      ${result.projects} (one per scope slot)`);
   log(
     `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --seed ${args.seed}`,
   );

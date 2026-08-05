@@ -11,6 +11,7 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { projectScope } from '../services/scope.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
+import { seedProject } from '../test/default-project.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
@@ -73,6 +74,7 @@ function decode(resp: unknown): { isError: boolean; payload: Record<string, unkn
 
 beforeEach(() => {
   db = createTestDb();
+  seedProject(db.handle, 'p0', 'project-zero');
   defaultProjectId = defaultProject(db.handle).id;
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
@@ -677,8 +679,8 @@ describe('memory.timeline neighbors are scope-filtered', () => {
     });
     repos.memory.insert({
       id: 'tl-global-neighbor',
-      scope: 'global',
-      projectId: null,
+      scope: 'project',
+      projectId: 'p0',
       type: 'reference',
       title: 'GLOBAL neighbor leak',
       content: 'GLOBAL neighbor leak',
@@ -801,7 +803,6 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
     );
     repos.entities.linkMemory(
       known.id,
-      'project',
       defaultProjectId,
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       new Date(),

@@ -160,7 +160,7 @@ describe('deadline orphaning', () => {
     const bPending = relations.createPending({ sourceId: b1.id, targetId: b2.id });
     backdate(bPending.judgmentId, orphanDeadlineMs + 10_000);
 
-    const result = runner.runScope({ scope: 'project', projectId: projB.id });
+    const result = runner.runScope({ projectId: projB.id });
     expect(result.ops.orphaned).toBe(1);
 
     const bRow = db.handle.db

@@ -9,6 +9,7 @@ import { deriveTitle, MemoryService } from '../services/memory.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { seedProject } from '../test/default-project.js';
 
 import { PAGE_SIZE } from './components.js';
 import { createMemoriesRouter } from './memories.js';
@@ -21,8 +22,8 @@ function widget(id: string): NewMemory {
     id,
     title: deriveTitle(`widget number ${id}`),
     content: `widget number ${id}`,
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -39,6 +40,7 @@ describe('memories dashboard TOTAL meta', () => {
 
   beforeEach(() => {
     t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     const repos = createRepositories(t.handle.db);
     const memorySvc = new MemoryService(repos, t.handle.db);
     const sessions = new SessionsService(repos, randomBytes(32));

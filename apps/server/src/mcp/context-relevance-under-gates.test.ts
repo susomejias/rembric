@@ -86,7 +86,6 @@ const saveLinked = (n: number, path: string) => {
     );
     repos.entities.linkMemory(
       row.id,
-      'project',
       defaultProjectId,
       [{ kind: 'path', value: path }],
       new Date(),

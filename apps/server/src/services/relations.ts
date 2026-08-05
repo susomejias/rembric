@@ -7,7 +7,6 @@ import {
   type MarkedByKind,
   type RelationKind,
 } from '../db/schema/memory-relations.js';
-import type { MemoryScope } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
 import { RANK_WINDOW_CEILING } from './hybrid-search.js';
@@ -245,8 +244,7 @@ export class RelationsService {
    */
   judgeInScope(judgmentId: string, scope: Scope, input: JudgeInput): MemoryRelation {
     const existing = this.repos.relations.findByJudgmentIdInScope(judgmentId, {
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
     });
     if (!existing) {
       throw new DomainError(
@@ -487,13 +485,11 @@ export class RelationsService {
    * per-scope orphan-promotion pass.
    */
   findPendingOlderThanInScope(opts: {
-    scope: MemoryScope;
-    projectId: string | null;
+    projectId: string;
     cutoffMs: number;
     limit: number;
   }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
     return this.repos.relations.findPendingOlderThanInScope({
-      scope: opts.scope,
       projectId: opts.projectId,
       cutoffMs: this.now().getTime() - opts.cutoffMs,
       limit: opts.limit,
@@ -502,10 +498,7 @@ export class RelationsService {
 
   /** Scoped pending-judgment total — the queue-depth signal `memory.context`/`memory.stats` surface. */
   countPendingInScope(scope: Scope): number {
-    return this.repos.relations.countPendingInScope({
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
-    });
+    return this.repos.relations.countPendingInScope({ projectId: scope.projectId });
   }
 
   /** Count rows by status. Used by `memory.stats` and the dashboard. */

@@ -231,8 +231,7 @@ export class MemoryService {
       let replacesPrefix: string[] = [];
       if (topicKey !== null) {
         const prior = this.repos.memory.findActiveByTopicKey({
-          scope: scope.kind === 'global' ? 'global' : 'project',
-          projectId: scope.kind === 'project' ? scope.projectId : null,
+          projectId: scope.projectId,
           topicKey,
         });
         if (prior) {
@@ -247,8 +246,8 @@ export class MemoryService {
 
       const inserted = this.repos.memory.insert({
         id,
-        scope: scope.kind === 'global' ? 'global' : 'project',
-        projectId: scope.kind === 'project' ? scope.projectId : null,
+        scope: 'project',
+        projectId: scope.projectId,
         type: input.type,
         title,
         content: input.content,
@@ -389,8 +388,7 @@ export class MemoryService {
     if (limit <= 0) return [];
     const now = this.now();
     const rows = this.repos.memory.findNeedsReview({
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       nowMs: now.getTime(),
       limit,
       ttlByType: reviewTtlEntries(),
@@ -426,8 +424,7 @@ export class MemoryService {
    */
   countNeedsReview(scope: Scope): number {
     return this.repos.memory.countNeedsReview({
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       nowMs: this.now().getTime(),
       ttlByType: reviewTtlEntries(),
     });
@@ -467,8 +464,7 @@ export class MemoryService {
     const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
-    const memScope = scope.kind === 'global' ? 'global' : 'project';
-    const projectId = scope.kind === 'project' ? scope.projectId : null;
+    const projectId = scope.projectId;
 
     const query = input.query?.trim();
     const entity = input.entity?.trim();
@@ -484,7 +480,6 @@ export class MemoryService {
       // within scope and the 8-row ranked default would truncate that.
       const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
-        scope: memScope,
         projectId,
         value: entity,
         status: input.status,
@@ -504,7 +499,6 @@ export class MemoryService {
       const draining =
         rows.length === 0 &&
         this.repos.entities.countPendingScans({
-          scope: memScope,
           projectId,
         }) > 0;
       return {
@@ -520,7 +514,6 @@ export class MemoryService {
           repos: this.repos,
           embedQuery: this.embedQuery,
           query,
-          scope: memScope,
           projectId,
           status,
           type: input.type,
@@ -539,7 +532,6 @@ export class MemoryService {
     const ids =
       ranked?.ids ??
       this.repos.memory.searchMemoryIds({
-        scope: memScope,
         projectId,
         status,
         type: input.type,

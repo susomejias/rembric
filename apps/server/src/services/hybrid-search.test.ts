@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { loadEmbedder, type Embedder } from '../embeddings/embedder.js';
-import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';
 import {
@@ -27,7 +27,7 @@ import {
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope, SCOPE_GLOBAL } from './scope.js';
+import { projectScope } from './scope.js';
 
 describe('fuseRRF', () => {
   it('ranks an item present in both lists above single-list items', () => {
@@ -573,7 +573,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     );
     const otherRow = mem.save(
       { type: 'user', title: 'Widget other note', content: 'widget other note' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     await embedAll();
 
@@ -583,7 +583,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
 
     // The control: the excluded row is retrievable in its own scope, so the
     // exclusion above is the scope predicate rather than a failed index.
-    const own = await mem.search({ query: 'widget note' }, SCOPE_GLOBAL);
+    const own = await mem.search({ query: 'widget note' }, defaultProjectScope(db.handle));
     expect(own.map((m) => m.id)).toContain(otherRow.id);
   });
 
@@ -594,14 +594,14 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     );
     const otherRow = mem.save(
       { type: 'user', title: 'Listing other row', content: 'listing other row' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const scoped = await mem.search({}, projectScope(projectId));
     expect(scoped.map((m) => m.id)).toContain(projectRow.id);
     expect(scoped.map((m) => m.id)).not.toContain(otherRow.id);
 
-    const own = await mem.search({}, SCOPE_GLOBAL);
+    const own = await mem.search({}, defaultProjectScope(db.handle));
     expect(own.map((m) => m.id)).toContain(otherRow.id);
   });
 
@@ -648,7 +648,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       repos,
       embedQuery: (t) => fake.embed(t),
       query: 'completely unrelated zzz query',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -671,7 +670,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     const result = await hybridSearch({
       repos,
       query: 'zzzqqq wwwvvv',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -694,7 +692,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     const result = await hybridSearch({
       repos,
       query: 'zzzqqq wwwvvv',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -720,7 +717,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     const result = await hybridSearch({
       repos,
       query: 'zzzqqq wwwvvv',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -772,7 +768,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       repos,
       embedQuery: (t) => fake.embed(t),
       query: 'anything at all',
-      scope: 'project',
       projectId: emptyProject,
       status: 'active',
       limit: 8,
@@ -820,7 +815,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     hybridSearch({
       repos,
       query: QUERY,
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -1148,7 +1142,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     const normalizedLexicalLeader = () => {
       const rank = repos.memory.searchBm25Ids({
         matchExpr: sanitizeFtsQuery(QUERY),
-        scope: 'project',
         projectId,
         status: 'active',
         limit: 400,
@@ -1258,7 +1251,6 @@ describe('the disabled path does no gate work', () => {
     await hybridSearch({
       repos: counting,
       query: 'rollout timezone rotation',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -1284,7 +1276,6 @@ describe('the disabled path does no gate work', () => {
     await hybridSearch({
       repos: counting,
       query: 'rollout timezone rotation',
-      scope: 'project',
       projectId,
       status: 'active',
       limit: 8,
@@ -1332,7 +1323,6 @@ describe('the disabled path does no gate work', () => {
     const lexicalIds = repos.memory
       .searchBm25Ids({
         matchExpr: sanitizeFtsQuery(opts.query),
-        scope: 'project',
         projectId,
         status: 'active',
         limit: computeRankWindowSize(opts.limit, opts.offset),
@@ -1377,7 +1367,7 @@ describe('hybrid search cross-lingual recall (real embedder)', () => {
         title: 'User prefers black coffee, no sugar',
         content: 'user prefers black coffee, no sugar',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     mem.save(
       {
@@ -1385,13 +1375,13 @@ describe('hybrid search cross-lingual recall (real embedder)', () => {
         title: 'Deploys on Fridays after standup',
         content: 'deploys on Fridays after standup',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const worker = new EmbeddingWorker({ repos, embedder });
     await worker.processBatch();
 
     // No lexical overlap + punctuation/accents that would crash a naive FTS query.
-    const res = await mem.search({ query: '¿cómo toma el café?' }, SCOPE_GLOBAL);
+    const res = await mem.search({ query: '¿cómo toma el café?' }, defaultProjectScope(db.handle));
     expect(res.some((m) => m.content.includes('black coffee'))).toBe(true);
   }, 30_000);
 });
@@ -1419,12 +1409,15 @@ describe('confirm the exclusion holds (add-entity-index Decision 1 / task 8.1)',
             title: `Rollout note ${i}`,
             content: `rollout note ${i} covers timezone rotation and on-call handoff for cycle ${i}`,
           },
-          SCOPE_GLOBAL,
+          defaultProjectScope(db.handle),
         ),
       );
     }
 
-    const before = await mem.search({ query: 'rollout timezone rotation' }, SCOPE_GLOBAL);
+    const before = await mem.search(
+      { query: 'rollout timezone rotation' },
+      defaultProjectScope(db.handle),
+    );
 
     // Link every row to entities — the entity index now exists, fully
     // populated — but no fusion stream reads it, so a plain text query
@@ -1432,14 +1425,16 @@ describe('confirm the exclusion holds (add-entity-index Decision 1 / task 8.1)',
     for (const r of rows) {
       repos.entities.linkMemory(
         r.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'ticket', value: 'PROJ-1' }],
         new Date(),
       );
     }
 
-    const after = await mem.search({ query: 'rollout timezone rotation' }, SCOPE_GLOBAL);
+    const after = await mem.search(
+      { query: 'rollout timezone rotation' },
+      defaultProjectScope(db.handle),
+    );
     expect(after.map((m) => m.id)).toEqual(before.map((m) => m.id));
   });
 });

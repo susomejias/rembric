@@ -256,7 +256,6 @@ describe('the aggregate annotation budget', () => {
     );
     repos.entities.linkMemory(
       m.id,
-      'project',
       project.id,
       [{ kind: 'error_code', value: 'ENOENT' }],
       new Date(),

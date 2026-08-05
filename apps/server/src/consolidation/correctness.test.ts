@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope } from '../test/index.js';
 
 /**
  * 13.18 — concurrency invariant for the new save path (topic-key
@@ -32,7 +31,10 @@ describe('13.18 concurrency — 100 concurrent memory.save calls leave DB consis
       for (let i = 0; i < N; i++) {
         operations.push(
           Promise.resolve(
-            svc.save({ type: 'feedback', title: `c-${i}`, content: `c-${i}` }, SCOPE_GLOBAL),
+            svc.save(
+              { type: 'feedback', title: `c-${i}`, content: `c-${i}` },
+              defaultProjectScope(test.handle),
+            ),
           ),
         );
       }
@@ -47,7 +49,7 @@ describe('13.18 concurrency — 100 concurrent memory.save calls leave DB consis
       const active = test.handle.db
         .select({ v: sql<number>`count(*)` })
         .from(memory)
-        .where(sql`status = 'active' AND scope = 'global'`)
+        .where(sql`status = 'active' AND scope = 'project'`)
         .get();
       expect(active?.v).toBe(N);
     } finally {

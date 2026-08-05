@@ -10,6 +10,7 @@ import { ProjectsService } from '../services/projects.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createTestDb } from './db.js';
+import { defaultProjectScope } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
 /**
@@ -710,17 +711,16 @@ describe('dashboard E2E', () => {
     const { createDb } = await import('../db/index.js');
     const { MemoryService } = await import('../services/memory.js');
     const { RelationsService } = await import('../services/relations.js');
-    const { SCOPE_GLOBAL } = await import('../services/scope.js');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
     const memSvc = new MemoryService(createRepositories(handle.db), handle.db);
     const a = memSvc.save(
       { type: 'feedback', title: 'judged-row-source-title', content: 'judged-row-source-content' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     const b = memSvc.save(
       { type: 'feedback', title: 'judged-row-target-title', content: 'judged-row-target-content' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     const rel = new RelationsService(createRepositories(handle.db), handle.db).compare({
       sourceId: a.id,
@@ -802,7 +802,6 @@ describe('dashboard E2E', () => {
 
     const { createDb } = await import('../db/index.js');
     const { MemoryService } = await import('../services/memory.js');
-    const { SCOPE_GLOBAL } = await import('../services/scope.js');
     const handle = createDb({ dataDir: server.config.dataDir });
     const DAY = 24 * 60 * 60 * 1000;
     // `project` TTL is 3 months → 120d-old + unaffirmed = needs_review.
@@ -814,11 +813,11 @@ describe('dashboard E2E', () => {
     const freshSvc = new MemoryService(createRepositories(handle.db), handle.db);
     const stale = staleSvc.save(
       { type: 'project', title: 'reviewbadge-stale-marker', content: 'reviewbadge-stale-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     const fresh = freshSvc.save(
       { type: 'project', title: 'reviewbadge-fresh-marker', content: 'reviewbadge-fresh-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     // `reference` has no TTL → never needs review even when ancient.
     const ref = staleSvc.save(
@@ -827,7 +826,7 @@ describe('dashboard E2E', () => {
         title: 'reviewbadge-reference-marker',
         content: 'reviewbadge-reference-marker',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     handle.close();
 

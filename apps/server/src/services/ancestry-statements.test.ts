@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb } from '../db/client.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { defaultProjectScope } from '../test/default-project.js';
 
 import { MemoryService, PREDECESSOR_CAP } from './memory.js';
 import { DISMISSAL_ANCESTRY_CAP, findSaveTimeCandidates } from './save-time-candidates.js';
+import type { Scope } from './scope.js';
 
 /**
  * Statement counts for the two ancestry walks, before and after the recursive CTE.
@@ -57,9 +59,11 @@ function countStatements<T>(t: TestDb, run: (repos: ReturnType<typeof createRepo
 }
 
 let t: TestDb;
+let scope: Scope;
 
 beforeEach(() => {
   t = createTestDb();
+  scope = defaultProjectScope(t.handle);
 });
 
 afterEach(() => {
@@ -81,7 +85,7 @@ function seedChain(depth: number): { headId: string; tailId: string } {
         content: `body of revision ${i}, long enough to be worth not reading`.repeat(20),
         topicKey: 'chain/under-test',
       },
-      { kind: 'global' },
+      scope,
     );
     first ??= saved.id;
     previous = saved.id;
@@ -101,7 +105,7 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
         content: 'next body',
         topicKey: 'chain/under-test',
       },
-      { kind: 'global' },
+      scope,
     );
     expect(saved.replaces).toEqual([headId]);
 
@@ -129,7 +133,7 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
   it('save-time detection on a plain save issues NO ancestry statement at all', () => {
     const repos0 = createRepositories(t.handle.db);
     const svc = new MemoryService(repos0, t.handle.db);
-    const saved = svc.save({ type: 'project', title: 'lone', content: 'body' }, { kind: 'global' });
+    const saved = svc.save({ type: 'project', title: 'lone', content: 'body' }, scope);
 
     const { statements } = countStatements(t, (repos) =>
       findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }),
@@ -144,7 +148,7 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
 
     const { result, statements } = countStatements(t, (repos) => {
       const svc = new MemoryService(repos, t.handle.db);
-      return svc.get(headId, { kind: 'global' });
+      return svc.get(headId, scope);
     });
 
     expect(result?.predecessors).toHaveLength(PREDECESSOR_CAP);
@@ -227,25 +231,27 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
     const t = createTestDb();
     const repos = createRepositories(t.handle.db);
     const svc = new MemoryService(repos, t.handle.db);
+    const chainScope = defaultProjectScope(t.handle);
     const ids: string[] = [];
     for (let i = 0; i < depth; i += 1) {
       const { memory: m } = svc.saveWithTopicKey(
         { type: 'project', title: `rev ${i}`, content: `body ${i}`, topicKey: 'chain/eq' },
-        { kind: 'global' },
+        chainScope,
       );
       ids.push(m.id);
     }
-    return { t, repos, svc, ids };
+    return { t, repos, svc, ids, scope: chainScope };
   }
 
   const compare = (
     repos: ReturnType<typeof createRepositories>,
     svc: MemoryService,
     id: string,
+    chainScope: Scope,
   ) => {
     const start = repos.memory.unsafeGetById(id)!;
     const expected = oracleGetPredecessors(repos, start);
-    const got = svc.get(id, { kind: 'global' })!;
+    const got = svc.get(id, chainScope)!;
     // Order, count and the truncation flag — the three things the response
     // publishes and the three the CTE had to preserve.
     expect(got.predecessors.map((p) => p.id)).toEqual(expected.ids);
@@ -255,8 +261,8 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
   };
 
   it('below the bound: order preserved, count exact, not truncated', () => {
-    const { t, repos, svc, ids } = chain(4);
-    const got = compare(repos, svc, ids[3]!);
+    const { t, repos, svc, ids, scope: chainScope } = chain(4);
+    const got = compare(repos, svc, ids[3]!, chainScope);
     expect(got.predecessorCount).toBe(3);
     expect(got.truncated).toBe(false);
     expect(got.predecessors.map((p) => p.title)).toEqual(['rev 2', 'rev 1', 'rev 0']);
@@ -264,16 +270,16 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
   });
 
   it('at the bound: truncated, and the count is the bound', () => {
-    const { t, repos, svc, ids } = chain(14);
-    const got = compare(repos, svc, ids[13]!);
+    const { t, repos, svc, ids, scope: chainScope } = chain(14);
+    const got = compare(repos, svc, ids[13]!, chainScope);
     expect(got.predecessorCount).toBe(PREDECESSOR_CAP);
     expect(got.truncated).toBe(true);
     t.cleanup();
   });
 
   it('exactly at the boundary: cap predecessors is NOT truncation', () => {
-    const { t, repos, svc, ids } = chain(PREDECESSOR_CAP + 1);
-    const got = compare(repos, svc, ids[PREDECESSOR_CAP]!);
+    const { t, repos, svc, ids, scope: chainScope } = chain(PREDECESSOR_CAP + 1);
+    const got = compare(repos, svc, ids[PREDECESSOR_CAP]!, chainScope);
     expect(got.predecessorCount).toBe(PREDECESSOR_CAP);
     expect(got.truncated).toBe(false);
     t.cleanup();
@@ -284,19 +290,19 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
     // so a reachable start id pushed the real eleventh ancestor out and
     // `truncated` came back false with ancestry unreached. Found by review, not
     // by this suite — which is why the oracle comparison now covers this path.
-    const { t, repos, svc, ids } = chain(12);
+    const { t, repos, svc, ids, scope: chainScope } = chain(12);
     const head = ids[11]!;
     t.handle.raw
       .prepare(`UPDATE memory SET replaces = ? WHERE id = ?`)
       .run(JSON.stringify([ids[9], head]), ids[10]!);
-    const got = compare(repos, svc, head);
+    const got = compare(repos, svc, head, chainScope);
     expect(got.truncated).toBe(true);
     expect(got.predecessors.map((p) => p.id)).not.toContain(head);
     t.cleanup();
   });
 
   it('a dangling ancestor id consumes the bound — the one intended divergence', () => {
-    const { t, svc, ids } = chain(14);
+    const { t, svc, ids, scope: chainScope } = chain(14);
     // Chain kept INTACT and a dangling id added beside it, so the graph is still
     // deep enough to truncate. Purge cannot produce this state (it refuses to
     // purge a row another row's `replaces` references), so the fixture is
@@ -304,7 +310,7 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
     t.handle.raw
       .prepare(`UPDATE memory SET replaces = ? WHERE id = ?`)
       .run(JSON.stringify([ids[10], 'ghost-id']), ids[11]!);
-    const got = svc.get(ids[13]!, { kind: 'global' })!;
+    const got = svc.get(ids[13]!, chainScope)!;
     // The bound now counts ancestor IDS, so the dangling id occupies one and the
     // projection comes back one short of the cap while truncation still holds.
     expect(got.predecessorCount).toBeLessThan(PREDECESSOR_CAP);
@@ -313,8 +319,8 @@ describe('memory.get predecessors — equivalence with the walk it replaces', ()
   });
 
   it('predecessors carry no content, by construction', () => {
-    const { t, svc, ids } = chain(3);
-    const got = svc.get(ids[2]!, { kind: 'global' })!;
+    const { t, svc, ids, scope: chainScope } = chain(3);
+    const got = svc.get(ids[2]!, chainScope)!;
     expect(got.predecessors.length).toBeGreaterThan(0);
     for (const p of got.predecessors) {
       expect(Object.keys(p).sort()).toEqual(['createdAt', 'id', 'status', 'title']);

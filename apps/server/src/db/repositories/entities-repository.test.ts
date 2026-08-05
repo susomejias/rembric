@@ -11,8 +11,8 @@ import { EntitiesRepository } from './entities-repository.js';
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {
   return {
     title: deriveTitle(overrides.content),
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -32,7 +32,10 @@ describe('EntitiesRepository', () => {
     repo = new EntitiesRepository(t.handle.db);
     t.handle.db
       .insert(projects)
-      .values([{ id: 'p1', slug: 'project-one', createdAt: new Date(500) }])
+      .values([
+        { id: 'p0', slug: 'project-zero', createdAt: new Date(500) },
+        { id: 'p1', slug: 'project-one', createdAt: new Date(500) },
+      ])
       .run();
   });
 
@@ -52,15 +55,13 @@ describe('EntitiesRepository', () => {
       insertMemory('m1', { content: 'apps/server/src/db/migrate.ts' });
       repo.linkMemory(
         'm1',
-        'global',
-        null,
+        'p0',
         [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
         new Date(),
       );
 
       const found = repo.findMemoriesByEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         value: 'apps/server/src/db/migrate.ts',
         limit: 10,
       });
@@ -68,12 +69,11 @@ describe('EntitiesRepository', () => {
     });
 
     it('the same path in two projects does not join them', () => {
-      insertMemory('m1', { scope: 'project', projectId: 'p1' });
-      repo.linkMemory('m1', 'project', 'p1', [{ kind: 'path', value: 'src/x.ts' }], new Date());
+      insertMemory('m1', { projectId: 'p1' });
+      repo.linkMemory('m1', 'p1', [{ kind: 'path', value: 'src/x.ts' }], new Date());
 
       const foundGlobal = repo.findMemoriesByEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         value: 'src/x.ts',
         limit: 10,
       });
@@ -83,17 +83,10 @@ describe('EntitiesRepository', () => {
     it('twenty linked memories all return, ordered chronologically', () => {
       for (let i = 0; i < 20; i++) {
         insertMemory(`m${i}`, { createdAt: new Date(1000 + i) });
-        repo.linkMemory(
-          `m${i}`,
-          'global',
-          null,
-          [{ kind: 'error_code', value: 'ENOENT' }],
-          new Date(),
-        );
+        repo.linkMemory(`m${i}`, 'p0', [{ kind: 'error_code', value: 'ENOENT' }], new Date());
       }
       const found = repo.findMemoriesByEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         value: 'ENOENT',
         limit: 100,
       });
@@ -104,8 +97,7 @@ describe('EntitiesRepository', () => {
 
     it('an unknown entity returns empty', () => {
       const found = repo.findMemoriesByEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         value: 'never-linked',
         limit: 10,
       });
@@ -114,19 +106,17 @@ describe('EntitiesRepository', () => {
 
     it('excludes archived memories by default', () => {
       insertMemory('m1', { status: 'archived' });
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       expect(
         repo.findMemoriesByEntity({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           value: 'x.ts',
           limit: 10,
         }),
       ).toEqual([]);
       expect(
         repo.findMemoriesByEntity({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           value: 'x.ts',
           status: 'archived',
           limit: 10,
@@ -138,9 +128,9 @@ describe('EntitiesRepository', () => {
       insertMemory('active-user', { type: 'user', tags: ['ops'], topicKey: 'topic/a' });
       insertMemory('superseded-project', { type: 'project', tags: [], status: 'superseded' });
       for (const id of ['active-user', 'superseded-project']) {
-        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       }
-      const base = { scope: 'global', projectId: null, value: 'x.ts', limit: 10 } as const;
+      const base = { projectId: 'p0', value: 'x.ts', limit: 10 } as const;
 
       expect(
         repo
@@ -168,13 +158,13 @@ describe('EntitiesRepository', () => {
         .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
         .run();
       insertMemory('g1');
-      insertMemory('p1m', { scope: 'project', projectId: 'p1' });
-      insertMemory('p2m', { scope: 'project', projectId: 'p2' });
-      repo.linkMemory('g1', 'global', null, [{ kind: 'path', value: 'shared.ts' }], new Date());
-      repo.linkMemory('p1m', 'project', 'p1', [{ kind: 'path', value: 'shared.ts' }], new Date());
-      repo.linkMemory('p2m', 'project', 'p2', [{ kind: 'path', value: 'shared.ts' }], new Date());
+      insertMemory('p1m', { projectId: 'p1' });
+      insertMemory('p2m', { projectId: 'p2' });
+      repo.linkMemory('g1', 'p0', [{ kind: 'path', value: 'shared.ts' }], new Date());
+      repo.linkMemory('p1m', 'p1', [{ kind: 'path', value: 'shared.ts' }], new Date());
+      repo.linkMemory('p2m', 'p2', [{ kind: 'path', value: 'shared.ts' }], new Date());
 
-      const scoped = { scope: 'project', projectId: 'p1', value: 'shared.ts', limit: 10 } as const;
+      const scoped = { projectId: 'p1', value: 'shared.ts', limit: 10 } as const;
       expect(repo.findMemoriesByEntity(scoped).map((m) => m.id)).toEqual(['p1m']);
       // The non-vacuity control: the rows excluded above are reachable, so the
       // assertion is about the scope predicate rather than about an empty index.
@@ -185,11 +175,10 @@ describe('EntitiesRepository', () => {
 
     it('is idempotent — linking the same memory twice does not duplicate', () => {
       insertMemory('m1');
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       const found = repo.findMemoriesByEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         value: 'x.ts',
         limit: 10,
       });
@@ -202,8 +191,7 @@ describe('EntitiesRepository', () => {
       insertMemory('m1');
       repo.linkMemory(
         'm1',
-        'global',
-        null,
+        'p0',
         [
           { kind: 'path', value: 'x.ts' },
           { kind: 'error_code', value: 'ENOENT' },
@@ -229,25 +217,22 @@ describe('EntitiesRepository', () => {
       insertMemory('m4', { status: 'superseded' });
       insertMemory('m5', { status: 'archived' });
       for (const id of ['m1', 'm2', 'm3', 'm4', 'm5']) {
-        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       }
 
-      expect(repo.scopeActiveMemoryCount({ scope: 'global', projectId: null })).toBe(2);
-      expect(
-        repo.entityLinkCount({ scope: 'global', projectId: null, kind: 'path', value: 'x.ts' }),
-      ).toBe(2);
+      expect(repo.scopeActiveMemoryCount({ projectId: 'p0' })).toBe(2);
+      expect(repo.entityLinkCount({ projectId: 'p0', kind: 'path', value: 'x.ts' })).toBe(2);
     });
 
     it('blocks what the non-archived population admitted: 2/4 active is over 0.15, 2/20 non-archived is under', () => {
       for (const id of ['a1', 'a2', 'a3', 'a4']) insertMemory(id);
       for (let i = 0; i < 16; i++) insertMemory(`s${i}`, { status: 'superseded' });
-      repo.linkMemory('a1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
-      repo.linkMemory('a2', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('a1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('a2', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
 
-      const scopeTotal = repo.scopeActiveMemoryCount({ scope: 'global', projectId: null });
+      const scopeTotal = repo.scopeActiveMemoryCount({ projectId: 'p0' });
       const links = repo.entityLinkCount({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         kind: 'path',
         value: 'x.ts',
       });
@@ -258,16 +243,13 @@ describe('EntitiesRepository', () => {
     it('excludeMemoryId excludes a given memory from both counts', () => {
       insertMemory('m1');
       insertMemory('m2');
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
-      repo.linkMemory('m2', 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
+      repo.linkMemory('m2', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
 
-      expect(
-        repo.scopeActiveMemoryCount({ scope: 'global', projectId: null, excludeMemoryId: 'm1' }),
-      ).toBe(1);
+      expect(repo.scopeActiveMemoryCount({ projectId: 'p0', excludeMemoryId: 'm1' })).toBe(1);
       expect(
         repo.entityLinkCount({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           kind: 'path',
           value: 'x.ts',
           excludeMemoryId: 'm1',
@@ -282,11 +264,10 @@ describe('EntitiesRepository', () => {
       insertMemory('m2');
       insertMemory('m3');
       for (const id of ['m1', 'm2', 'm3']) {
-        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       }
       const found = repo.findOtherMemoriesForEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         kind: 'path',
         value: 'x.ts',
         excludeMemoryId: 'm1',
@@ -305,12 +286,11 @@ describe('EntitiesRepository', () => {
       insertMemory('m_archived', { status: 'archived', createdAt: new Date(3_000) });
       insertMemory('m_new', { createdAt: new Date(4_000) });
       for (const id of ['m_active', 'm_superseded', 'm_archived', 'm_new']) {
-        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'x.ts' }], new Date());
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       }
 
       const found = repo.findOtherMemoriesForEntity({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         kind: 'path',
         value: 'x.ts',
         excludeMemoryId: 'm_new',
@@ -332,7 +312,7 @@ describe('EntitiesRepository', () => {
 
     it('excludes a memory once it has been scanned, even with zero entities found', () => {
       insertMemory('m1');
-      repo.linkMemory('m1', 'global', null, [], new Date());
+      repo.linkMemory('m1', 'p0', [], new Date());
       expect(repo.findMissingScans(10)).toEqual([]);
     });
   });
@@ -342,7 +322,7 @@ describe('EntitiesRepository', () => {
       insertMemory('m1');
       insertMemory('m2');
       insertMemory('m3', { status: 'archived' });
-      repo.linkMemory('m1', 'global', null, [], new Date());
+      repo.linkMemory('m1', 'p0', [], new Date());
       expect(repo.adminBacklogCount()).toBe(2);
       expect(repo.adminBacklogCount()).toBe(repo.findMissingScans(100).length);
     });
@@ -355,19 +335,19 @@ describe('EntitiesRepository', () => {
         .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
         .run();
       insertMemory('g1');
-      insertMemory('m-p1', { scope: 'project', projectId: 'p1' });
-      insertMemory('m-p2', { scope: 'project', projectId: 'p2' });
+      insertMemory('m-p1', { projectId: 'p1' });
+      insertMemory('m-p2', { projectId: 'p2' });
 
-      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(1);
-      expect(repo.countPendingScans({ scope: 'project', projectId: 'p1' })).toBe(1);
-      expect(repo.countPendingScans({ scope: 'project', projectId: 'p2' })).toBe(1);
+      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(1);
+      expect(repo.countPendingScans({ projectId: 'p1' })).toBe(1);
+      expect(repo.countPendingScans({ projectId: 'p2' })).toBe(1);
     });
 
     it('reaches zero once the scope is drained', () => {
       insertMemory('g1');
-      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(1);
-      repo.linkMemory('g1', 'global', null, [], new Date());
-      expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(0);
+      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(1);
+      repo.linkMemory('g1', 'p0', [], new Date());
+      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(0);
     });
   });
 
@@ -377,15 +357,14 @@ describe('EntitiesRepository', () => {
       insertMemory('m2');
       repo.linkMemory(
         'm1',
-        'global',
-        null,
+        'p0',
         [
           { kind: 'path', value: 'a.ts' },
           { kind: 'path', value: 'b.ts' },
         ],
         new Date(),
       );
-      repo.linkMemory('m2', 'global', null, [{ kind: 'path', value: 'a.ts' }], new Date());
+      repo.linkMemory('m2', 'p0', [{ kind: 'path', value: 'a.ts' }], new Date());
 
       const byKind = repo.adminCountsByKind();
       expect(byKind).toEqual([{ kind: 'path', count: 2 }]);
@@ -395,7 +374,7 @@ describe('EntitiesRepository', () => {
   describe('truncateAll', () => {
     it('wipes all derived rows and leaves memory untouched', () => {
       insertMemory('m1');
-      repo.linkMemory('m1', 'global', null, [{ kind: 'path', value: 'a.ts' }], new Date());
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'a.ts' }], new Date());
       repo.truncateAll();
       expect(repo.findEntitiesForMemory('m1')).toEqual([]);
       expect(repo.adminBacklogCount()).toBe(1);
@@ -431,10 +410,10 @@ describe('EntitiesRepository', () => {
       const tied = new Date(5_000);
       for (const id of ['m-a', 'm-b', 'm-c', 'm-d']) {
         insertMemory(id, { createdAt: tied, content: 'apps/tied.ts' });
-        repo.linkMemory(id, 'global', null, [{ kind: 'path', value: 'apps/tied.ts' }], tied);
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'apps/tied.ts' }], tied);
       }
 
-      const base = { scope: 'global' as const, projectId: null, value: 'apps/tied.ts' };
+      const base = { projectId: 'p0', value: 'apps/tied.ts' };
       const all = repo.findMemoriesByEntity({ ...base, limit: 10 }).map((m) => m.id);
       expect(all).toEqual(['m-d', 'm-c', 'm-b', 'm-a']);
 
