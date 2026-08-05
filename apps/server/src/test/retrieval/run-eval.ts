@@ -42,13 +42,14 @@ async function runRetriever(
   const state = await retriever.init(corpus);
   const outcomes: RawOutcome[] = [];
   for (const q of QUERIES) {
-    const scope = resolveScope(corpus, q.scope);
+    const scope = resolveScope(corpus, q);
     const goldIds = resolveGold(corpus, q.goldStableIds);
     const start = performance.now();
     const outcome = await retriever.query(q.text, state, MAX_K, scope, gates);
     outcomes.push({
       query: q,
       retrieved: outcome.ids,
+      scope,
       reportedAbstained: outcome.abstained,
       latencyMs: performance.now() - start,
       goldIds,
@@ -76,6 +77,11 @@ function scoreOutcomes(
         type: o.query.type,
         k,
         retrieved: o.retrieved.slice(0, k),
+        // A retrieved id the corpus does not know is not silently treated as
+        // home: it is the shape a leak from outside the corpus would take.
+        retrievedProjectIds: o.retrieved.slice(0, k).map((id) => byId.get(id)?.projectId ?? id),
+        scopeProjectId: o.scope.projectId,
+        widened: o.query.widened === true,
         goldIds: o.goldIds,
         latencyMs: o.latencyMs,
         tokensReturned: tokensReturned(o.retrieved.slice(0, k), byId),
@@ -135,6 +141,18 @@ function checkSanity(corpus: IngestedCorpus, reports: RetrieverReport[]): string
       failures.push(
         `scope '${scope}' has only ${count} memories, want > k=${MAX_K} so the rank window binds`,
       );
+  }
+
+  // A cap of 0 is satisfied by an empty result set, so the denominator is
+  // asserted beside it — the same non-vacuity control the widening tests carry.
+  for (const report of reports) {
+    for (const k of K_VALUES) {
+      const rows = report.aggregateByK[k]!.nForeignScopeRows;
+      if (rows === 0)
+        failures.push(
+          `${report.retriever}@${k} scored foreignScopeRate over 0 returned rows — the cap would pass vacuously`,
+        );
+    }
   }
 
   const hybrid = reports.find((r) => r.retriever === 'hybrid');
@@ -215,6 +233,7 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     measuredCapsByK[k] = {
       abstentionFalsePositiveRate: a.abstentionFalsePositiveRate ?? 0,
       overAbstentionRate: a.overAbstentionRate ?? 0,
+      foreignScopeRate: a.foreignScopeRate ?? 0,
     };
     ceilings[k] = {
       precisionAtK: a.ceilingPrecisionAtK,
@@ -240,6 +259,11 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     headroomByMetric: {
       abstentionFalsePositiveRate: anyK.nAbstention > 0 ? 1 / anyK.nAbstention : 0,
       overAbstentionRate: anyK.n > 0 ? 1 / anyK.n : 0,
+      // Zero, not one row's worth of its own denominator (1/nForeignScopeRows):
+      // the other two are tuning bounds where one query going the wrong way is
+      // measurement noise, and this one is an isolation gate where one row is
+      // the defect.
+      foreignScopeRate: 0,
     },
     allowLoosening: opts.allowLowering,
   });
@@ -317,7 +341,7 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
   // that moved because the row changed from one that moved because the corpus did.
   const termStats: string[] = [];
   for (const q of QUERIES) {
-    const scope = resolveScope(corpus, q.scope);
+    const scope = resolveScope(corpus, q);
     let leader: GateLeader | undefined;
     await hybrid.query(q.text, state, MAX_K, scope, {
       abstentionFloor: null,
@@ -482,7 +506,7 @@ async function main(): Promise<void> {
   for (const report of reports) {
     const p8 = report.aggregateByK[MAX_K]!;
     console.log(
-      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'} overAbstain=${p8.overAbstentionRate?.toFixed(2) ?? 'n/a'}`,
+      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'} overAbstain=${p8.overAbstentionRate?.toFixed(2) ?? 'n/a'} foreignScope=${p8.foreignScopeRate?.toFixed(3) ?? 'n/a'} (over ${p8.nForeignScopeRows} rows)`,
     );
   }
 

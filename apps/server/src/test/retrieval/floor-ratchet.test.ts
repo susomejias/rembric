@@ -74,16 +74,29 @@ describe('ratchetFloors', () => {
   });
 });
 
-const HEADROOM = { abstentionFalsePositiveRate: 0.125, overAbstentionRate: 0.0625 };
+const HEADROOM = {
+  abstentionFalsePositiveRate: 0.125,
+  overAbstentionRate: 0.0625,
+  // An isolation gate, not a tuning bound: zero rows of tolerance.
+  foreignScopeRate: 0,
+};
 
 function runCaps(measured: number, previous: number | undefined, allowLoosening = false) {
   return ratchetCaps({
     label: 'hybrid',
-    measuredByK: { 8: { abstentionFalsePositiveRate: measured, overAbstentionRate: 0 } },
+    measuredByK: {
+      8: { abstentionFalsePositiveRate: measured, overAbstentionRate: 0, foreignScopeRate: 0 },
+    },
     previousByK:
       previous === undefined
         ? undefined
-        : { 8: { abstentionFalsePositiveRate: previous, overAbstentionRate: 0.125 } },
+        : {
+            8: {
+              abstentionFalsePositiveRate: previous,
+              overAbstentionRate: 0.125,
+              foreignScopeRate: 0,
+            },
+          },
     headroomByMetric: HEADROOM,
     allowLoosening,
   });
@@ -127,8 +140,12 @@ describe('ratchetCaps', () => {
     for (let i = 0; i < 5; i++) {
       cap = ratchetCaps({
         label: 'hybrid',
-        measuredByK: { 8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0 } },
-        previousByK: { 8: { abstentionFalsePositiveRate: cap, overAbstentionRate: 0.125 } },
+        measuredByK: {
+          8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0, foreignScopeRate: 0 },
+        },
+        previousByK: {
+          8: { abstentionFalsePositiveRate: cap, overAbstentionRate: 0.125, foreignScopeRate: 0 },
+        },
         headroomByMetric: HEADROOM,
         allowLoosening: false,
       }).caps[8]!.abstentionFalsePositiveRate;
@@ -139,8 +156,12 @@ describe('ratchetCaps', () => {
   it('ratchets each cap metric independently', () => {
     const { caps, notes } = ratchetCaps({
       label: 'hybrid',
-      measuredByK: { 8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0.25 } },
-      previousByK: { 8: { abstentionFalsePositiveRate: 0.5, overAbstentionRate: 0.125 } },
+      measuredByK: {
+        8: { abstentionFalsePositiveRate: 0.25, overAbstentionRate: 0.25, foreignScopeRate: 0 },
+      },
+      previousByK: {
+        8: { abstentionFalsePositiveRate: 0.5, overAbstentionRate: 0.125, foreignScopeRate: 0 },
+      },
       headroomByMetric: HEADROOM,
       allowLoosening: false,
     });
@@ -150,9 +171,86 @@ describe('ratchetCaps', () => {
   });
 });
 
+/**
+ * The new cap carries the same three properties as the other two, plus the one
+ * that is only true of it: zero headroom, so a measurement of zero commits a
+ * bound of zero and a single foreign row is over it.
+ */
+describe('the foreign-scope cap', () => {
+  function foreignCaps(measured: number, previous: number | undefined, allowLoosening = false) {
+    return ratchetCaps({
+      label: 'hybrid',
+      measuredByK: {
+        8: { abstentionFalsePositiveRate: 0, overAbstentionRate: 0, foreignScopeRate: measured },
+      },
+      previousByK:
+        previous === undefined
+          ? undefined
+          : {
+              8: {
+                abstentionFalsePositiveRate: 1,
+                overAbstentionRate: 1,
+                foreignScopeRate: previous,
+              },
+            },
+      headroomByMetric: HEADROOM,
+      allowLoosening,
+    });
+  }
+
+  it('commits exactly zero from a clean measurement, with no headroom added', () => {
+    expect(foreignCaps(0, undefined).caps[8]!.foreignScopeRate).toBe(0);
+  });
+
+  it('holds at zero when a rewrite after a leak would raise it, and says so', () => {
+    const { caps, notes } = foreignCaps(0.125, 0);
+    expect(caps[8]!.foreignScopeRate).toBe(0);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('foreignScopeRate cap held at 0.000');
+  });
+
+  it('raises it only when explicitly permitted, and names it in the output', () => {
+    const { caps, notes } = foreignCaps(0.125, 0, true);
+    expect(caps[8]!.foreignScopeRate).toBeCloseTo(0.125, 10);
+    expect(notes.map((n) => n.split(' ')[1])).toEqual(['foreignScopeRate']);
+    expect(notes[0]).toContain('LOOSENED');
+  });
+
+  it('cannot drift up across repeated regeneration at a flat measurement', () => {
+    let cap = foreignCaps(0, undefined).caps[8]!.foreignScopeRate;
+    for (let i = 0; i < 5; i++) cap = foreignCaps(0, cap).caps[8]!.foreignScopeRate;
+    expect(cap).toBe(0);
+  });
+
+  it('fails a run in which one row of many came from another project', () => {
+    const failures = checkBounds({
+      label: 'hybrid',
+      ks: [8],
+      measuredByK: {
+        8: {
+          precisionAtK: 1,
+          recallAtK: 1,
+          mrr: 1,
+          abstentionFalsePositiveRate: 0,
+          overAbstentionRate: 0,
+          foreignScopeRate: 1 / 160,
+        },
+      },
+      floorsByK: { 8: { precisionAtK: 0.1, recallAtK: 0.95, mrr: 0.6 } },
+      capsByK: {
+        8: { abstentionFalsePositiveRate: 1, overAbstentionRate: 1, foreignScopeRate: 0 },
+      },
+    });
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain('foreignScopeRate regressed');
+  });
+});
+
 describe('checkBounds', () => {
   const FLOORS = { 8: { precisionAtK: 0.1, recallAtK: 0.95, mrr: 0.6 } };
-  const CAPS = { 8: { abstentionFalsePositiveRate: 0.375, overAbstentionRate: 0.0625 } };
+  const CAPS = {
+    8: { abstentionFalsePositiveRate: 0.375, overAbstentionRate: 0.0625, foreignScopeRate: 0 },
+  };
 
   function check(over: Partial<Record<string, number | null>>) {
     return checkBounds({
@@ -165,6 +263,7 @@ describe('checkBounds', () => {
           mrr: 0.7,
           abstentionFalsePositiveRate: 0.25,
           overAbstentionRate: 0,
+          foreignScopeRate: 0,
           ...over,
         },
       },
@@ -202,7 +301,13 @@ describe('checkBounds', () => {
   });
 
   it('skips a cap metric whose axis had no queries', () => {
-    expect(check({ overAbstentionRate: null, abstentionFalsePositiveRate: null })).toEqual([]);
+    expect(
+      check({
+        overAbstentionRate: null,
+        abstentionFalsePositiveRate: null,
+        foreignScopeRate: null,
+      }),
+    ).toEqual([]);
   });
 
   it('gates nothing when the baseline carries no caps block, rather than throwing', () => {
@@ -217,6 +322,7 @@ describe('checkBounds', () => {
             mrr: 0.7,
             abstentionFalsePositiveRate: 1,
             overAbstentionRate: 1,
+            foreignScopeRate: 1,
           },
         },
         floorsByK: FLOORS,

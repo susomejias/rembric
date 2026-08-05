@@ -440,4 +440,269 @@ export const CORPUS: CorpusItem[] = [
     project: 'nimbus',
     daysAgo: 33,
   },
+
+  // The eight steps of one atlas checklist, gold for a single query, so that a
+  // gold set reaches the largest gated k and a row filling a slot displaces an
+  // answer instead of an empty one. Older than everything above by design: the
+  // recency-ordered control retriever's page for every pre-existing query is
+  // then unchanged, which is what attributes any movement in its score to the
+  // queries added rather than to the corpus growing.
+  {
+    id: 'atlas-release-step-migration-dryrun',
+    type: 'procedural',
+    title: 'Atlas release checklist: run the migration dry-run against a staging snapshot',
+    content:
+      'Step in the atlas release checklist: before shipping a build, run every pending migration against a restored staging snapshot and diff the resulting schema, so a destructive statement is caught off production.',
+    project: 'atlas',
+    daysAgo: 400,
+  },
+  {
+    id: 'atlas-release-step-staging-soak',
+    type: 'procedural',
+    title: 'Atlas release checklist: soak the candidate build on staging for one hour',
+    content:
+      'Step in the atlas release checklist: the candidate build sits on staging under synthetic traffic for a full hour before shipping, long enough for a slow connection-pool leak to show up in the dashboards.',
+    project: 'atlas',
+    daysAgo: 398,
+  },
+  {
+    id: 'atlas-release-step-smoke',
+    type: 'procedural',
+    title: 'Atlas release checklist: run the billing smoke suite against staging',
+    content:
+      'Step in the atlas release checklist: run the billing smoke suite — checkout, invoice generation, refund — against the staged build before shipping, and treat a failure as a blocker rather than as a flake to retry.',
+    project: 'atlas',
+    daysAgo: 396,
+  },
+  {
+    id: 'atlas-release-step-dependency-audit',
+    type: 'procedural',
+    title: 'Atlas release checklist: run the dependency audit and record every advisory',
+    content:
+      'Step in the atlas release checklist: run the dependency audit before shipping a build and write each surviving advisory into the release ticket with the reason it was accepted, so the next release does not re-litigate it.',
+    project: 'atlas',
+    daysAgo: 394,
+  },
+  {
+    id: 'atlas-release-step-tag',
+    type: 'procedural',
+    title: 'Atlas release checklist: cut an annotated git tag from the release commit',
+    content:
+      'Step in the atlas release checklist: cut an annotated git tag on the exact release commit before shipping the build, because a lightweight tag carries no author and no date and makes a later bisect ambiguous.',
+    project: 'atlas',
+    daysAgo: 392,
+  },
+  {
+    id: 'atlas-release-step-image-digest',
+    type: 'procedural',
+    title: 'Atlas release checklist: pin the deployed image by digest, never by a floating tag',
+    content:
+      'Step in the atlas release checklist: the deploy manifest names the image by digest and never by a floating tag, so re-applying that manifest a week after shipping still deploys the build that was tested.',
+    project: 'atlas',
+    daysAgo: 390,
+  },
+  {
+    id: 'atlas-release-step-rollback-plan',
+    type: 'procedural',
+    title: 'Atlas release checklist: write the rollback plan into the release ticket',
+    content:
+      'Step in the atlas release checklist: before shipping a build, write the rollback plan into the release ticket — the previous image digest, whether any migration is one-way, and who decides — so nobody improvises it later.',
+    project: 'atlas',
+    daysAgo: 388,
+  },
+  {
+    id: 'atlas-release-step-status-page',
+    type: 'procedural',
+    title: 'Atlas release checklist: post the maintenance notice on the status page',
+    content:
+      'Step in the atlas release checklist: post the maintenance notice on the customer status page before shipping a build that takes write traffic offline, and clear it once the smoke suite passes in production.',
+    project: 'atlas',
+    daysAgo: 386,
+  },
+  {
+    id: 'atlas-incident-runbook-step',
+    type: 'procedural',
+    title: 'Atlas incident runbook: page the on-call engineer before touching production',
+    distractorFor: 'atlas-release-step-rollback-plan',
+    content:
+      'Step in the atlas incident runbook, which the shipping process does not use: page the on-call engineer and open an incident channel before touching production, even when the fix looks like one line of configuration.',
+    project: 'atlas',
+    daysAgo: 384,
+  },
+  {
+    id: 'atlas-onboarding-checklist-step',
+    type: 'procedural',
+    title: 'Atlas onboarding checklist: grant a new engineer the billing dashboards',
+    distractorFor: 'atlas-release-step-tag',
+    content:
+      'Step in the atlas onboarding checklist, which has nothing to do with shipping: grant the new engineer read access to the billing dashboards and to the staging database replica on their first day.',
+    project: 'atlas',
+    daysAgo: 382,
+  },
+
+  // The same shape at k=5 in a second project, so the displacement property is
+  // not carried by a single query in a single scope.
+  {
+    id: 'nimbus-runbook-step-lag-check',
+    type: 'procedural',
+    title: 'Nimbus on-call runbook: read the consumer lag dashboard first',
+    content:
+      'Step in the nimbus on-call runbook: during a paging incident read the queue lag dashboard before anything else — a lag that is flat rather than climbing means the consumers are alive and the problem is upstream.',
+    project: 'nimbus',
+    daysAgo: 370,
+  },
+  {
+    id: 'nimbus-runbook-step-pause-scheduler',
+    type: 'procedural',
+    title: 'Nimbus on-call runbook: pause the scheduler before replaying a batch',
+    content:
+      'Step in the nimbus on-call runbook: pause the scheduler before replaying a batch during a paging incident, or the replay and the live cycle collide on the same partition.',
+    project: 'nimbus',
+    daysAgo: 368,
+  },
+  {
+    id: 'nimbus-runbook-step-snapshot-offsets',
+    type: 'procedural',
+    title: 'Nimbus on-call runbook: snapshot the source offsets before any replay',
+    content:
+      'Step in the nimbus on-call runbook: snapshot the source table offsets before replaying anything during a paging incident, so the replay can be undone when it turns out to have been the wrong call.',
+    project: 'nimbus',
+    daysAgo: 366,
+  },
+  {
+    id: 'nimbus-runbook-step-dlq-drain',
+    type: 'procedural',
+    title: 'Nimbus on-call runbook: drain the dead-letter queue only once the cause is known',
+    content:
+      'Step in the nimbus on-call runbook: during a paging incident the dead-letter queue is evidence, so drain it only once the root cause is known — draining it first destroys the only record of what failed.',
+    project: 'nimbus',
+    daysAgo: 364,
+  },
+  {
+    id: 'nimbus-runbook-step-handoff',
+    type: 'procedural',
+    title: 'Nimbus on-call runbook: write a handoff note at the end of the shift',
+    content:
+      'Step in the nimbus on-call runbook: write a handoff note in the incident channel at the end of the shift covering what was tried during the paging incident and what was ruled out, so the next shift does not repeat it.',
+    project: 'nimbus',
+    daysAgo: 362,
+  },
+  {
+    id: 'nimbus-deploy-runbook-step',
+    type: 'procedural',
+    title: 'Nimbus deploy runbook: drain in-flight messages before rolling the workers',
+    distractorFor: 'nimbus-runbook-step-dlq-drain',
+    content:
+      'Step in the nimbus deploy runbook: drain the in-flight messages and wait for the consumers to go idle before rolling the workers, so a redeploy never interrupts a batch halfway through its writes.',
+    project: 'nimbus',
+    daysAgo: 360,
+  },
+
+  // Cross-project distractors, deliberately STRONG: near-verbatim restatements
+  // of the checklist steps above as the organisation-wide convention. A
+  // scope-blind read ranks them inside the page and they displace gold; a
+  // scoped one never sees them. `distractorFor` names the row each one shadows.
+  {
+    id: 'shared-release-step-migration-dryrun',
+    type: 'procedural',
+    title: 'Release checklist: every project runs the migration dry-run against a staging snapshot',
+    distractorFor: 'atlas-release-step-migration-dryrun',
+    content:
+      'Step in the release checklist every project follows: before shipping a build, run every pending migration against a restored staging snapshot and diff the resulting schema, so a destructive statement is caught off production.',
+    project: 'shared',
+    daysAgo: 380,
+  },
+  {
+    id: 'shared-release-step-staging-soak',
+    type: 'procedural',
+    title: 'Release checklist: every project soaks the candidate build on staging for one hour',
+    distractorFor: 'atlas-release-step-staging-soak',
+    content:
+      'Step in the release checklist every project follows: the candidate build sits on staging under synthetic traffic for a full hour before shipping, long enough for a slow connection-pool leak to show up in the dashboards.',
+    project: 'shared',
+    daysAgo: 378,
+  },
+  {
+    id: 'shared-release-step-image-digest',
+    type: 'procedural',
+    title:
+      'Release checklist: every project pins the deployed image by digest, never a floating tag',
+    distractorFor: 'atlas-release-step-image-digest',
+    content:
+      'Step in the release checklist every project follows: the deploy manifest names the image by digest and never by a floating tag, so re-applying that manifest a week after shipping still deploys the build that was tested.',
+    project: 'shared',
+    daysAgo: 376,
+  },
+  {
+    id: 'shared-release-step-rollback-plan',
+    type: 'procedural',
+    title: 'Release checklist: every project writes the rollback plan into the release ticket',
+    distractorFor: 'atlas-release-step-rollback-plan',
+    content:
+      'Step in the release checklist every project follows: before shipping a build, write the rollback plan into the release ticket — the previous image digest, whether any migration is one-way, and who decides — so nobody improvises it later.',
+    project: 'shared',
+    daysAgo: 374,
+  },
+  {
+    id: 'shared-runbook-step-lag-check',
+    type: 'procedural',
+    title: 'On-call runbook: every service reads its queue lag dashboard first',
+    distractorFor: 'nimbus-runbook-step-lag-check',
+    content:
+      'Step in the on-call runbook every service follows: during a paging incident read the queue lag dashboard before anything else — a lag that is flat rather than climbing means the consumers are alive and the problem is upstream.',
+    project: 'shared',
+    daysAgo: 372,
+  },
+  {
+    id: 'shared-runbook-step-handoff',
+    type: 'procedural',
+    title: 'On-call runbook: every on-call writes a handoff note at the end of the shift',
+    distractorFor: 'nimbus-runbook-step-handoff',
+    content:
+      'Step in the on-call runbook every service follows: write a handoff note in the incident channel at the end of the shift covering what was tried during the paging incident and what was ruled out, so the next shift does not repeat it.',
+    project: 'shared',
+    daysAgo: 358,
+  },
+
+  // Gold for the widened queries, and the plausible home-project answer each
+  // one has to beat. The gold lives OUTSIDE the project its query is issued
+  // against, so no amount of ranking inside the home project can satisfy it.
+  {
+    id: 'atlas-dunning-window',
+    type: 'project',
+    title: 'Atlas suspends an account after a twenty-one day dunning window',
+    content:
+      'Atlas widened its dunning window to twenty-one days: a failed card is retried on days 1, 3, 7 and 14, and the account is suspended only once the twenty-first day passes with no successful charge.',
+    project: 'atlas',
+    daysAgo: 300,
+  },
+  {
+    id: 'nimbus-parking-window-decoy',
+    type: 'project',
+    title: 'Nimbus parks a failed ingestion batch after retrying for three days',
+    distractorFor: 'atlas-dunning-window',
+    content:
+      'A failed nimbus ingestion batch is retried for three days before it is parked for manual inspection. Nothing in the pipeline suspends anything, and dunning is a billing concept nimbus does not model.',
+    project: 'nimbus',
+    daysAgo: 298,
+  },
+  {
+    id: 'nimbus-backfill-watermark',
+    type: 'project',
+    title: 'Nimbus keeps the backfill watermark in a table, not in Redis',
+    content:
+      'Nimbus stores the backfill watermark in a dedicated postgres table keyed by batch id rather than in Redis, because a Redis eviction would silently restart the backfill from the very beginning.',
+    project: 'nimbus',
+    daysAgo: 296,
+  },
+  {
+    id: 'atlas-export-watermark-decoy',
+    type: 'project',
+    title: 'Atlas keeps the invoice export watermark in Redis with a 24-hour TTL',
+    distractorFor: 'nimbus-backfill-watermark',
+    content:
+      'Atlas stores the invoice export watermark in Redis under a 24-hour TTL; it is regenerated from the invoice table on a miss, so an eviction costs a slower export rather than a wrong one.',
+    project: 'atlas',
+    daysAgo: 294,
+  },
 ];
