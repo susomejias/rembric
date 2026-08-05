@@ -80,6 +80,8 @@ describe('token project sets', () => {
   let server: BootstrappedServer;
   let baseUrl: string;
   let alpha: Project;
+  let beta: Project;
+  let gamma: Project;
   let sessionSeq = 0;
 
   beforeAll(async () => {
@@ -103,6 +105,8 @@ describe('token project sets', () => {
 
     const projects = new ProjectsService(createRepositories(server.dbHandle.db));
     alpha = projects.findBySlug('alpha') ?? projects.create({ slug: 'alpha' });
+    beta = projects.findBySlug('beta') ?? projects.create({ slug: 'beta' });
+    gamma = projects.findBySlug('gamma') ?? projects.create({ slug: 'gamma' });
   }, 30_000);
 
   afterAll(async () => {
@@ -297,8 +301,31 @@ describe('token project sets', () => {
     return res.status;
   }
 
+  async function adminRoute(token: string): Promise<{ status: number; code: string | null }> {
+    const res = await fetch(`${baseUrl}/admin/consolidation/run`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const body = (await res.json()) as { code?: string };
+    return { status: res.status, code: body.code ?? null };
+  }
+
   function persisted(name: string) {
     return server.dbHandle.db.select().from(tokensTable).where(eq(tokensTable.name, name)).get();
+  }
+
+  function allProjects(): Project[] {
+    return new ProjectsService(createRepositories(server.dbHandle.db)).list(true);
+  }
+
+  /** Member project ids of a token, ascending. Throws while the table is absent. */
+  function memberIds(tokenId: string): string[] {
+    const rows = server.dbHandle.raw
+      .prepare(
+        'SELECT project_id AS projectId FROM token_projects WHERE token_id = ? ORDER BY project_id',
+      )
+      .all(tokenId) as Array<{ projectId: string }>;
+    return rows.map((r) => r.projectId);
   }
 
   describe('controls that must hold on both sides of the change', () => {
@@ -374,6 +401,85 @@ describe('token project sets', () => {
           code: 'token_invalid',
         });
       }
+    });
+  });
+
+  describe('a token minted over several projects', () => {
+    it('persists the set literal, no single-project binding, and one membership row per project', async () => {
+      const jar = await loggedIn();
+      await mintPlaintext(jar, {
+        name: 'set-mint-shape',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+
+      const row = persisted('set-mint-shape');
+      expect(row).toBeDefined();
+      expect(row!.scope).toBe('projects');
+      expect(row!.projectId).toBeNull();
+      expect(memberIds(row!.id)).toEqual([alpha.id, gamma.id].sort());
+    });
+
+    it('reaches every member and is denied every non-member, including the path-less connection', async () => {
+      const jar = await loggedIn();
+      const set = await mintPlaintext(jar, {
+        name: 'set-reach',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+
+      for (const member of [alpha, gamma]) {
+        expect(await mcpRead(`/mcp/${member.slug}`, set), `${member.slug} read`).toEqual({
+          ok: true,
+        });
+        expect(
+          await mcpWrite(`/mcp/${member.slug}`, set, member.slug),
+          `${member.slug} write`,
+        ).toEqual({ ok: true });
+      }
+      expect(await apiSession(alpha.slug, set)).toEqual({ status: 200, code: null });
+
+      // Asserted in the same test as the reach above, never a separate one that
+      // could be skipped: the successes are what prove these probes well-formed.
+      expect(await mcpRead(`/mcp/${beta.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
+      expect(await mcpWrite(`/mcp/${beta.slug}`, set, 'beta')).toEqual({
+        ok: false,
+        code: 'forbidden',
+      });
+      expect(await mcpRead('/mcp', set)).toEqual({ ok: false, code: 'forbidden' });
+      expect(await mcpWrite('/mcp', set, 'pathless')).toEqual({ ok: false, code: 'forbidden' });
+      expect(await apiSession(beta.slug, set)).toEqual({ status: 403, code: 'forbidden' });
+    });
+
+    it('is not an admin token even when its set names every project', async () => {
+      const jar = await loggedIn();
+      const every = allProjects();
+      expect(every.length, 'a one-project set would not test breadth').toBeGreaterThanOrEqual(3);
+
+      const star = await mintPlaintext(jar, {
+        name: 'escalation-control-star',
+        projects: [],
+        access: 'write',
+      });
+      const set = await mintPlaintext(jar, {
+        name: 'escalation-set-every-project',
+        projects: every.map((p) => p.slug),
+        access: 'write',
+      });
+
+      // The `*` control first: without it a refusal below cannot be told from a
+      // gate that refuses everything.
+      expect(await login(star)).toBe(302);
+      expect(await adminRoute(star)).toMatchObject({ status: 200 });
+
+      expect(await login(set)).toBe(401);
+      expect(await adminRoute(set)).toEqual({ status: 403, code: 'forbidden' });
+
+      // Breadth is what the refusals above have to be about, so the subject has
+      // to actually be a set over every project.
+      const row = persisted('escalation-set-every-project');
+      expect(row!.scope).toBe('projects');
+      expect(memberIds(row!.id)).toEqual(every.map((p) => p.id).sort());
     });
   });
 });
