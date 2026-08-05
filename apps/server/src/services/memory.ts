@@ -514,7 +514,7 @@ export class MemoryService {
           repos: this.repos,
           embedQuery: this.embedQuery,
           query,
-          projectId,
+          scope,
           status,
           type: input.type,
           tag: input.tag,
