@@ -155,7 +155,7 @@ function remedyFor(ctx: RequestContext, scope: Scope, projects: ProjectsService)
 /** For a token pinned to one project and denied a DIFFERENT one. */
 function pinRemedy(pinned: string, scope: Scope, projects: ProjectsService): string {
   // Re-activating the scope already active cannot change the answer.
-  if (scope.kind === 'project' && scope.projectId === pinned) return '';
+  if (scope.projectId === pinned) return '';
   // A token row predating the enforced project binding carries a SLUG here
   // rather than an id (`db/schema/tokens.ts:35-37`), so it resolves to no
   // project row and the string itself is already the slug to name.
@@ -177,7 +177,7 @@ function setRemedy(
   scope: Scope,
   projects: ProjectsService,
 ): string {
-  if (scope.kind === 'project' && memberProjectIds.includes(scope.projectId)) return '';
+  if (memberProjectIds.includes(scope.projectId)) return '';
   const slugs = memberProjectIds
     .map((id) => projects.getById(id)?.slug)
     .filter((slug): slug is string => slug !== undefined)

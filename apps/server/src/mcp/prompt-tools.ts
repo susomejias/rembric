@@ -167,7 +167,7 @@ async function handleSearchPrompts(
       offset: args.offset,
     });
     return ok({
-      scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
+      scope: `project:${scope.projectId}`,
       prompts: result.prompts.map((p) => ({
         id: p.id,
         content: p.content,

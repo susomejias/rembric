@@ -324,11 +324,7 @@ async function handleSessionGet(deps: SessionToolDeps, args: { sessionId: string
     return errToMcp(err);
   }
   const row = deps.agentSessions.getById(args.sessionId);
-  if (
-    !row ||
-    row.deletedAt ||
-    (scope.kind === 'project' ? row.projectId !== scope.projectId : row.projectId !== null)
-  ) {
+  if (!row || row.deletedAt || row.projectId !== scope.projectId) {
     return mcpError('not_found', `session '${args.sessionId}' not found in this scope`);
   }
   return ok({

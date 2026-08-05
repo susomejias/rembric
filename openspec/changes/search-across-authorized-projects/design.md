@@ -183,6 +183,8 @@ The fused list is ordered by RRF score alone. Where two rows tie exactly, the ho
 
 Strict-schema behaviour comes free: `mcp-api/spec.md:2723` already makes every tool input schema strict at a single registration seam, so an older client sending `all_projects` is **refused** with `-32602 unrecognized_keys` rather than silently ignored — which is exactly what a client pinned to a pre-upgrade plugin should get.
 
+**RATIFIED by the owner, 2026-08-05.** Recorded because the owner asked for this feature by the name `all_projects` throughout its design, and every earlier memory and archived proposal calls it that. The rename was put to them explicitly and accepted, so a later reader finding `all_projects` in the history is looking at the superseded name, not at a drift this decision introduced.
+
 ### D12 — The entity branch widens too, under the same argument and the same authorization
 
 `memory.search`'s `entity` branch is the exact-address lookup: unranked, chronological, complete within scope. It carries **none** of the ranking risk that motivates D6 and D8 — no fusion, no RRF, no dense branch, no relevance gate — and it is the strongest case for the feature ("which of my projects mentions this file / CVE / host").
@@ -278,3 +280,27 @@ Reclaiming the first gives **100** characters; reclaiming both gives **194**. A 
 **OQ6 — RESOLVED (owner, 2026-08-05): scored over non-widened queries only, as a hard 0 cap.** Any foreign row in a query that did not ask to widen is a leak — a dissolved `scopeWhere` branch, a widened default, a forgotten predicate — and the metric says so with no threshold to argue about. The rejected alternative, a hand-labelled expected range per widened query, was declined because the expectation is a fixture and a wrong fixture turns the gate into noise or, worse, into a gate that passes what it exists to catch.
 
 **Widened queries are therefore NOT ungated, they are gated by a different instrument**, and the implementation must make that true rather than assume it: their gold SHALL deliberately live in a foreign project, so `recallAtK` cannot be satisfied without the widening actually reaching it, and `precisionAtK`/`mrr` move if foreign rows crowd out the answer. Task 3.x SHALL prove this the same way phase 3 proves everything else — mutate the widening to return home-project rows only and confirm those floors go RED. Without that demonstration the claim "widened queries are covered" is exactly the unverified assertion this repo keeps catching.
+
+### D17 — The repository boundary should speak `Scope`, not `projectId: string` (correction to phase 1, found by review)
+
+Phase 1 reduced `scopeWhere` / `scopeCondition` / `partitionKeyFor` to `(projectId: string)` and did the same to the six search-serving option bags (`SearchMemoryIdsOpts`, `SearchBm25IdsOpts`, `TextByIdsOpts`, `KnnOpts`, `HybridSearchOpts`, `findMemoriesByEntity`). Deleting the phantom `scope: MemoryScope` field was right; **replacing the value object with a bare primitive at that boundary was not**, and the cost falls due in phase 4.
+
+Task 4.2 commits those same reads to accepting `SearchScope`. A `string` carries no discriminant, so phase 4 has exactly three routes from here, and all three are worse than the shape phase 1 could have left:
+
+1. `string | readonly string[]` — stringly-typed, `Array.isArray()` at the seam, and the widened case is indistinguishable from a one-project list by type.
+2. A second exported `scopeWhereIn` beside `scopeWhere` — the two-shape drift **D6 already argues against** for the query itself; the same argument applies to its builder.
+3. Change the parameter to `SearchScope` — which re-edits the 19 `scopeWhere`/`scopeCondition` call sites in `memory-repository.ts` plus three elsewhere. That is the identical edit phase 1 just performed, performed again.
+
+**Had the builders and those six bags taken `scope: Scope`, phase 4 would be three signature widenings (`Scope → SearchScope`) plus one branch inside `scope-clause.ts`, with zero churn at the call sites** — and D3's compile-time barrier (a widened scope handed to a write is a type error) would come free from the parameter types rather than needing 4.2's hand-`tsc` widen/restore proof to demonstrate it. `partitionKeyFor`, currently the identity function `return projectId`, becomes a real function again (`SearchScope → string[]`) instead of ceremony the next reader is entitled to inline.
+
+The layering objection — `db/` importing a type from `services/` — is already settled by this change's own task 4.2, which has those repository reads taking `SearchScope` from `services/scope.ts`. So the boundary crosses either way; the only question is whether it crosses carrying a discriminated value or a bare string.
+
+**Not applied in phase 1, deliberately.** The phase-0 baseline and phase 1's evidence (86 files, floors held, suite green) were measured against the shape as landed, and re-cutting the repository boundary afterwards would invalidate that evidence for a benefit that is not due until phase 4. **Phase 4 therefore does it as its first step**, before 4.2's widening, so the widening lands on the right shape rather than on top of a second rewrite. This entry exists so that step is planned work rather than a surprise discovered mid-phase.
+
+### D18 — `adminBacklogCount`'s fast path lost SQLite's `COUNT(*)` shortcut (measured; accepted for now, with the fix recorded)
+
+Phase 1 turned `SELECT COUNT(*) FROM memory` into `… WHERE project_id IS NOT NULL`, because a row with no project is now in no scope. SQLite answers a bare `COUNT(*)` with `OP_Count` over the narrowest covering index; the predicate forces a filtered scan instead. Measured on the real schema (statement-level, **not** end-to-end): 0.001 → 0.016 ms at 1 000 rows, 0.002 → 0.423 at 20 000, 0.004 → 0.826 at 50 000 — roughly 200× at 50k, and the "fast path" is now only 1.6× better than the `LEFT JOIN` fallback it was written to avoid.
+
+Cost falls on `memory.doctor` and `/dashboard/entities`, once per call. It is **not** on the boot path: the two call sites sit inside the lazily-invoked `buildDoctorReport` thunk. Sub-millisecond on an admin-only surface, so it is accepted rather than fixed here.
+
+The fix, if it is ever worth a migration, is measured and restores the original figures exactly: a partial index `ON memory(id) WHERE project_id IS NULL` — near-empty by construction, one predicate evaluation per `memory` write — and subtract that count from the bare `COUNT(*)` instead of filtering it. Recorded here rather than left for rediscovery, because the whole subtract-two-counts shape exists to keep this read on the fast path and the reason it stopped being fast is invisible from the statement.
