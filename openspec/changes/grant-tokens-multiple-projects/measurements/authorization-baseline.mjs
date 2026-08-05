@@ -1,9 +1,11 @@
 /**
  * Pre-change authorization baseline for `grant-tokens-multiple-projects`.
  *
- * Usage (from the repo root):
+ * Usage — the path must be ABSOLUTE. `pnpm --filter … exec` runs with cwd
+ * `apps/server`, so a repo-relative path resolves against the wrong root and
+ * dies with ERR_MODULE_NOT_FOUND:
  *   pnpm --filter @rembric/server exec tsx \
- *     openspec/changes/grant-tokens-multiple-projects/measurements/authorization-baseline.mjs
+ *     /root/rembric/openspec/changes/grant-tokens-multiple-projects/measurements/authorization-baseline.mjs
  *
  * The whole change rests on "no existing token's behaviour moves". That is only
  * provable against a matrix captured on the boundaries a real caller uses,
