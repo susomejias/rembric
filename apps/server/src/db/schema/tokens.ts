@@ -12,10 +12,17 @@ import { projects } from './projects.js';
  *   - `read:*`         → read-only across all scopes
  *   - `project:<id>`   → write access scoped to a single project
  *   - `read:project:<id>` → read-only scoped to a single project
+ *   - `projects`       → write access to the set named by `token_projects`
+ *   - `read:projects`  → read-only access to that set
  *
  * For the two project arms `project_id` is the enforced binding: the FK
  * proves it names a real project and the CHECK proves the scope string
  * names the same one.
+ *
+ * The two set arms name no project, so `project_id` is NULL and the CHECK's
+ * first disjunct admits them unchanged — no rebuild was needed to add them.
+ * They authorize nothing by scope string alone; all their reach is in
+ * `token_projects`, so a reader that does not know that table under-authorizes.
  */
 export const tokens = sqliteTable(
   'tokens',
