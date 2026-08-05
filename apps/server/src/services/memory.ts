@@ -21,7 +21,7 @@ import {
   reviewTtlEntries,
   type ReviewState,
 } from './review.js';
-import { homeScope, memoryMatchesScope, type Scope, type SearchScope } from './scope.js';
+import { memoryMatchesScope, type Scope, type SearchScope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
@@ -464,7 +464,6 @@ export class MemoryService {
     const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
-    const projectId = homeScope(scope).projectId;
 
     const query = input.query?.trim();
     const entity = input.entity?.trim();
@@ -480,7 +479,7 @@ export class MemoryService {
       // within scope and the 8-row ranked default would truncate that.
       const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
-        scope: homeScope(scope),
+        scope,
         value: entity,
         status: input.status,
         type: input.type,
@@ -499,7 +498,7 @@ export class MemoryService {
       const draining =
         rows.length === 0 &&
         this.repos.entities.countPendingScans({
-          projectId,
+          scope,
         }) > 0;
       return {
         memories: page,

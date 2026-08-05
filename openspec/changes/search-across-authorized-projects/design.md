@@ -2,7 +2,7 @@
 
 ## Context
 
-`proposal.md` carries the motivation and the headline measurements. This document records the decisions by number (D1–D16), the constraints that bound every one of them, and the questions deliberately left open.
+`proposal.md` carries the motivation and the headline measurements. This document records the decisions by number (D1–D18), the constraints that bound every one of them, and the questions deliberately left open.
 
 **Three published requirements govern this change before it writes a line of code**, and two of them constrain it far more than the feature request suggests.
 
@@ -27,7 +27,7 @@
 - **The schema half of release N+1** (D2) — dropping `memory.scope`, the five scope-bearing indexes and `memory_entities_identity_idx`, and the `NOT NULL` flips on `sessions.project_id` / `prompts.project_id`.
 - **Any widening of `memory.context`, `memory.get`, `memory.timeline`, `memory.stats`, or any automatic recall path** (D13).
 - **Any widening of the HTTP surface.** `http-api/spec.md:393` — "no argument on this endpoint widens the result set past it, and none is accepted" — stays true verbatim and is not amended.
-- **Calibrating `ABSTENTION_FLOOR`** (D14), which is still `null` at `hybrid-search.ts:47` with the committed cap `abstentionFalsePositiveRate: 1` at both `k` (`baselines/hybrid.json:31,35`). Knowingly accepted, with its consequence stated.
+- **Calibrating `ABSTENTION_FLOOR`** (D14), which is still `null` at `hybrid-search.ts:49` with the committed cap `abstentionFalsePositiveRate: 1` at both `k` (`baselines/hybrid.json:31,35`). Knowingly accepted, with its consequence stated.
 - **Gating `avgTokensReturned`** (D9) — reserved by `retrieval-evaluation/spec.md:116` for its own change.
 - **Cross-project writes of any kind.** No memory row is written by this change.
 
@@ -94,7 +94,7 @@ export type SearchScope =
 One exported async function beside `resolveEffectiveScope`, taking the already-resolved `EffectiveScope` plus the request's `across_projects` flag, returning a `SearchScope`. Its body:
 
 - If widening was not requested → return the narrow `Scope`. No project list is read.
-- Else enumerate `projects.list(false)` and keep `p` where `isAuthorized(ctx, 'read', { scope: 'project', projectId: p.id })` — the identical predicate already live at `mcp/project-tools.ts:205`, reused rather than re-derived.
+- Else enumerate `projects.list(false)` and keep `p` where `isAuthorized(ctx, 'read', { scope: 'project', projectId: p.id })` — the identical predicate `project.list` applies, extracted to `_shared.ts::readableProjects` (:146) so both consumers read one expression.
 - If the surviving set has one member → return the narrow `Scope`. A one-member widened set and today's query are measured identical (`measurements/vec-partition-capability.md` §3), so this is a simplification, not a behaviour change — and it means a `project:<id>` token's widened search is provably the same call it makes today.
 - Else return `{ kind: 'authorized-projects', projectIds, homeProjectId }`.
 
@@ -124,7 +124,7 @@ The set is exactly `{p : isAuthorized(ctx, 'read', {scope:'project', projectId: 
 
 Measured in `measurements/vec-partition-capability.md`; the four facts that decide it:
 
-1. sqlite-vec 0.1.9 **accepts** `partition_key IN (…)` with literals, with bound parameters, and with a `json_each` subquery, and applies `k` per named partition, with `ORDER BY distance` merging into **one globally distance-ordered list** — so rank position is a global fact and RRF (`hybrid-search.ts:139`, `RANK_CONSTANT = 60` at `:19`) needs no fudge factor.
+1. sqlite-vec 0.1.9 **accepts** `partition_key IN (…)` with literals, with bound parameters, and with a `json_each` subquery, and applies `k` per named partition, with `ORDER BY distance` merging into **one globally distance-ordered list** — so rank position is a global fact and RRF (`hybrid-search.ts:541`, `RANK_CONSTANT = 60` at `:21`) needs no fudge factor.
 2. **`IN` scans the named shards, not the corpus**: at 50 000 vectors over 8 equal partitions, ratios of 1.00 / ≈2.03 / ≈4.05 / ≈8.09 for 1 / 2 / 4 / 8 partitions, reproduced across four independent runs with under 8% spread on every arm. The shard-scan property `vectors-repository.ts:116` exists to preserve survives `IN`.
 3. **N separate queries cost the same** (8.47 / 8.42 / 8.43 / 8.39 ms against `IN (2)`'s 8.33 / 8.62 / 9.03 / 8.44 ms — indistinguishable over four runs), so the choice between the two is **not** a performance choice. It is decided purely on semantics: `IN` gives one ordered list; N queries give N rank-1 rows, which is precisely the "a project holding three memories yields a rank-1 row and RRF weights it like the best home match" failure.
 4. **Dropping the predicate entirely is rejected on authorization, not on cost — this bullet's original cost claim was wrong.** As first written it said the predicate-free form is "never faster … and ≈1.4× slower in two of four runs". Phase 2 re-ran the committed harness five more times and measured it **2–8% faster** than `IN (all 8)` at every magnitude, with the bimodality not reproducing. The rejection survives on stronger ground: the form carries **no scope predicate at all**, so it cannot bound a read to the authorized set — a widening that reads every partition is the GHSA this change exists to avoid repeating, whatever it costs. Corrected in `measurements/vec-partition-scale.md` §8; the propose-phase artifact is left as written with the correction recorded against it.
@@ -143,7 +143,7 @@ Measured in `measurements/vec-partition-capability.md`; the four facts that deci
 
 `db/repositories/term-statistics-repository.ts:22` states it: "**Deliberately unscoped** — memory/spec.md, 'The relevance level's term statistics MUST come from the search index'", and `:30` pins the denominator: "Must stay the same denominator the per-term counts are drawn from: **every `memory` row, all scopes and statuses**." `memory/spec.md:474` already specifies it.
 
-So the IDF weighting a widened query applies is byte-identical to the one a narrow query applies. **A whole class of feared problem does not arise**: no document-frequency denominator changes, no term's weight moves, and the relevance level (`RELATIVE_LEVEL_RATIO = 0.4`, `hybrid-search.ts:58`) is computed against the same distribution it was calibrated on in `archive/2026-08-03-weight-relevance-levels-by-idf`. Stated as a decision rather than left implicit, because "widening changes the corpus so the IDF must be re-derived" is the obvious wrong inference and it would have cost a re-calibration sweep.
+So the IDF weighting a widened query applies is byte-identical to the one a narrow query applies. **A whole class of feared problem does not arise**: no document-frequency denominator changes, no term's weight moves, and the relevance level (`RELATIVE_LEVEL_RATIO = 0.4`, `hybrid-search.ts:60`) is computed against the same distribution it was calibrated on in `archive/2026-08-03-weight-relevance-levels-by-idf`. Stated as a decision rather than left implicit, because "widening changes the corpus so the IDF must be re-derived" is the obvious wrong inference and it would have cost a re-calibration sweep.
 
 ### D8 — Pure relevance, no home-project boost; a home tiebreak only on an exact fused-score tie
 
@@ -205,7 +205,7 @@ Same reasoning excludes `memory.get`, `memory.timeline`, `memory.stats` and the 
 
 ### D14 — `ABSTENTION_FLOOR` stays `null`, and that is a knowingly-accepted limitation with a named consequence
 
-Measured at HEAD: `hybrid-search.ts:47` is `export const ABSTENTION_FLOOR: number | null = null`, and `baselines/hybrid.json:31,35` commit `abstentionFalsePositiveRate: 1` at both `k = 5` and `k = 8` — i.e. the cap tolerates every abstention query returning something.
+Measured at HEAD: `hybrid-search.ts:49` is `export const ABSTENTION_FLOOR: number | null = null`, and `baselines/hybrid.json:31,35` commit `abstentionFalsePositiveRate: 1` at both `k = 5` and `k = 8` — i.e. the cap tolerates every abstention query returning something.
 
 **The consequence, stated plainly:** a widened search over an irrelevant question returns the least-bad rows from N projects instead of from one, and there is no absolute relevance threshold to stop it. The relative filter (`RELATIVE_LEVEL_RATIO = 0.4`) still applies and still cuts rows below 40% of the leader's level — but it is relative to whatever the leader happens to be, so a widened pool with a mediocre leader passes a mediocre page.
 
@@ -240,10 +240,10 @@ Reclaiming the first gives **100** characters; reclaiming both gives **194**. A 
 ## Risks / Trade-offs
 
 - **[Risk] The harness is fixed but still cannot detect over-widening, and phase 4 ships on a green light that means nothing.** → Mitigation: phase 3's acceptance criterion is not "the new metric exists" but "the over-widening arm goes **RED**" — the same mutation `retire-the-global-scope` 16.15 measured as leaving the eval green with MRR@8 _rising_ 0.828 → 0.859. Until that arm reds, phase 4 does not start.
-- **[Risk] A widened search leaks a project the token may not read.** → Mitigation: the set is built by the same `isAuthorized` predicate that already filters `project.list` (`project-tools.ts:205`), at one construction site (D4), behind a type a write cannot hold (D3), with the filter mutation-proved (D16). The residual is a bug in `isAuthorized` itself, which is shared with every other authorization decision in the tree.
+- **[Risk] A widened search leaks a project the token may not read.** → Mitigation: the set is built by the same `isAuthorized` predicate that already filters `project.list`, extracted to `_shared.ts::readableProjects` (:146) by task 4.3, at one construction site (D4), behind a type a write cannot hold (D3), with the filter mutation-proved (D16). The residual is a bug in `isAuthorized` itself, which is shared with every other authorization decision in the tree.
 - **[Risk] A one-element widened set silently changes behaviour for `project:<id>` tokens.** → Mitigation: measured identical — `partition_key IN ('P1')` returns exactly what `partition_key = 'P1'` returns (`measurements/vec-partition-capability.md` §3), and D4 collapses the set to the narrow scope before the query is built, so the code path is the same one, not merely an equivalent one.
 - **[Risk] Widening resolves to an empty set and the search silently returns nothing.** → Mitigation: measured that `IN ()` returns empty rather than erroring, so the failure would be silent. The home project is always a member by construction; that is spec'd as a requirement and pinned by test rather than left to the constructor.
-- **[Risk] The per-turn cost is 8.3× on the dense branch and nothing bounds how often the model widens.** → Mitigation: the description requirement (D15), which is the only lever on a single-user instance, plus `searchedProjects` making the reach visible to whoever reads the transcript. **Accepted, not eliminated** — this is the trade the feature is.
+- **[Risk] The per-turn cost is 1.3–2.6× end to end (`measurements/vec-partition-scale.md` §4, instrument I2/I3 on a realistically skewed corpus) and nothing bounds how often the model widens.** The ≈8× this risk originally quoted is an isolated statement on a uniform synthetic fixture — the instrument conflation D13 was already corrected for — and must not be repeated as a user-facing cost. → Mitigation: the description requirement (D15), which is the only lever on a single-user instance, plus `searchedProjects` making the reach visible to whoever reads the transcript. **Accepted, not eliminated** — this is the trade the feature is.
 - **[Risk] The `Scope` collapse breaks the retrieval harness and the fixtures get rewritten under time pressure at the same moment the baselines are being re-derived.** → Mitigation: phases 1 and 3 both touch `test/retrieval/`, so the baselines are re-derived **once**, after phase 3, with `--lower-floors` **printed rather than silently applied** (`ratchetFloors` refuses to lower without the flag, `floor-ratchet.ts:52-61`). Any lowering must be named in review, per `retrieval-evaluation/spec.md:126`.
 - **[Trade-off] Release N+1 is left half-done** (D2). → Accepted because `memory/spec.md:1619` already reserves the schema half, its timing depends on a rollback-window judgement this change cannot make, and the type collapse makes the remaining half strictly easier by deleting the call site that kept the branches live.
 - **[Trade-off] `ABSTENTION_FLOOR` stays `null`, so a widened irrelevant query returns the least-bad rows from N projects** (D14). → Accepted knowingly, with the consequence named, because calibrating it against a corpus that phase 3 is about to change would calibrate against nothing.

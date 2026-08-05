@@ -146,8 +146,9 @@ describe('applyRankingBoost', () => {
           confirmationCountsByIds: () => confirmations,
         },
       },
+      scope: projectScope('p0'),
       now: () => NOW,
-      // Minimal fake: applyRankingBoost reads only these two repo methods + `now`.
+      // Minimal fake: applyRankingBoost reads only these two repo methods, `scope` and `now`.
     } as unknown as Parameters<typeof applyRankingBoost>[1];
   }
 

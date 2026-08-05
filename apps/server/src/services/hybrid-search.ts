@@ -1,5 +1,5 @@
 import type { Repositories } from '../db/repositories/index.js';
-import { partitionKeyFor } from '../db/repositories/scope-clause.js';
+import { partitionKeysFor } from '../db/repositories/scope-clause.js';
 import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
 import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
@@ -372,6 +372,7 @@ export interface BoostedResult {
   id: string;
   score: number;
   sessionId: string | null;
+  projectId: string | null;
 }
 
 /**
@@ -383,6 +384,15 @@ export interface BoostedResult {
  * multiplier's magnitude; it does not, and is not meant to, prevent
  * reordering near-ties. Carries `sessionId` through from the same metadata
  * lookup so the diversity cap doesn't need a second query.
+ *
+ * The sort is a TOTAL order — score, then the home project, then fused
+ * position. The project term is not a boost: it separates only rows that
+ * already scored exactly equal, which is common because RRF scores are
+ * `1/(k + rank)` and two branches can rank at the same position. It cannot move
+ * a row above one that scored better. Fused position is the last key rather
+ * than `id`, because `ulid()` is not monotonic within a millisecond (measured:
+ * half of same-millisecond pairs invert), so ordering ties by id would make
+ * them depend on how a corpus happened to be written.
  */
 export function applyRankingBoost(
   fused: { id: string; score: number }[],
@@ -409,9 +419,21 @@ export function applyRankingBoost(
       else if (confirmationCount >= 1) boost += 0.05;
     }
     boost = Math.min(BOOST_MAX, Math.max(BOOST_MIN, boost));
-    return { id, score: score * boost, sessionId: m?.sessionId ?? null };
+    return {
+      id,
+      score: score * boost,
+      sessionId: m?.sessionId ?? null,
+      projectId: m?.projectId ?? null,
+    };
   });
-  boosted.sort((a, b) => b.score - a.score);
+  const homeProjectId = homeScope(opts.scope).projectId;
+  const fusedRank = new Map(fused.map((f, i) => [f.id, i]));
+  boosted.sort(
+    (a, b) =>
+      b.score - a.score ||
+      Number(b.projectId === homeProjectId) - Number(a.projectId === homeProjectId) ||
+      fusedRank.get(a.id)! - fusedRank.get(b.id)!,
+  );
   return boosted;
 }
 
@@ -491,12 +513,12 @@ async function denseRetriever(
     : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
-    const partitionKey = partitionKeyFor(homeScope(opts.scope).projectId);
+    const partitionKeys = partitionKeysFor(opts.scope);
     const neighbors = statuses
       .flatMap((status) =>
         opts.repos.vectors.knnByQueryVector({
           queryVector,
-          partitionKey,
+          partitionKeys,
           status,
           type: opts.type,
           rankWindowSize,
