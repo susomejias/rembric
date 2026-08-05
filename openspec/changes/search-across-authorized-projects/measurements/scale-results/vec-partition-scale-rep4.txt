@@ -1,0 +1,30 @@
+
+=== 8 partitions x 500 = 4000 vectors, k=64 ===
+{"label":"1 partition (today)","rows":64,"p50":"0.49","p90":"0.82"}
+{"label":"IN (2 partitions)","rows":128,"p50":"1.22","p90":"1.59"}
+{"label":"IN (4 partitions)","rows":256,"p50":"2.06","p90":"2.23"}
+{"label":"IN (all 8)","rows":512,"p50":"4.22","p90":"4.39"}
+{"label":"no partition pred","rows":64,"p50":"4.03","p90":"5.50"}
+{"label":"2 separate queries merged","rows":128,"p50":"0.94","p90":"1.09"}
+EQP IN(2): ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]
+EQP eq: ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]
+
+=== 8 partitions x 2500 = 20000 vectors, k=64 ===
+{"label":"1 partition (today)","rows":64,"p50":"1.88","p90":"1.99"}
+{"label":"IN (2 partitions)","rows":128,"p50":"3.87","p90":"4.08"}
+{"label":"IN (4 partitions)","rows":256,"p50":"7.87","p90":"8.53"}
+{"label":"IN (all 8)","rows":512,"p50":"16.40","p90":"21.65"}
+{"label":"no partition pred","rows":64,"p50":"15.70","p90":"22.15"}
+{"label":"2 separate queries merged","rows":128,"p50":"4.28","p90":"5.93"}
+EQP IN(2): ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]
+EQP eq: ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]
+
+=== 8 partitions x 6250 = 50000 vectors, k=64 ===
+{"label":"1 partition (today)","rows":64,"p50":"4.78","p90":"6.25"}
+{"label":"IN (2 partitions)","rows":128,"p50":"9.52","p90":"12.65"}
+{"label":"IN (4 partitions)","rows":256,"p50":"18.83","p90":"26.45"}
+{"label":"IN (all 8)","rows":512,"p50":"37.00","p90":"46.12"}
+{"label":"no partition pred","rows":64,"p50":"35.78","p90":"43.35"}
+{"label":"2 separate queries merged","rows":128,"p50":"8.73","p90":"10.11"}
+EQP IN(2): ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]
+EQP eq: ["SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_","USE TEMP B-TREE FOR ORDER BY"]

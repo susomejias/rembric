@@ -1,0 +1,282 @@
+{
+  "instrument": "I1 ISOLATED STATEMENT (prepared statement against the corpus on disk)",
+  "label": "1000/vol-shared/rep4",
+  "dataDir": "/root/corpora/skew-1000",
+  "home": {
+    "slug": "vol-shared",
+    "id": "01JGFJJZ000VKV26AFGCXMWH25",
+    "memories": 20
+  },
+  "projects": [
+    {
+      "slug": "vol-0",
+      "memories": 600
+    },
+    {
+      "slug": "vol-1",
+      "memories": 200
+    },
+    {
+      "slug": "vol-2",
+      "memories": 100
+    },
+    {
+      "slug": "vol-3",
+      "memories": 50
+    },
+    {
+      "slug": "vol-4",
+      "memories": 30
+    },
+    {
+      "slug": "vol-shared",
+      "memories": 20
+    },
+    {
+      "slug": "default",
+      "memories": 0
+    }
+  ],
+  "corpusMemories": 1000,
+  "rankWindowSize": 64,
+  "warmupQueries": 5,
+  "timedQueries": 40,
+  "node": "v22.23.1",
+  "dense": [
+    {
+      "name": "dense eq (shipped)",
+      "projects": 1,
+      "p50Ms": 0.266,
+      "p90Ms": 0.313,
+      "minMs": 0.23,
+      "maxMs": 0.34,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "dense IN(1) bound",
+      "projects": 1,
+      "p50Ms": 0.248,
+      "p90Ms": 0.28,
+      "minMs": 0.208,
+      "maxMs": 0.309,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "dense IN(1) literal",
+      "projects": 1,
+      "p50Ms": 0.219,
+      "p90Ms": 0.258,
+      "minMs": 0.172,
+      "maxMs": 0.277,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "dense IN(1) json_each",
+      "projects": 1,
+      "p50Ms": 0.209,
+      "p90Ms": 0.241,
+      "minMs": 0.167,
+      "maxMs": 0.624,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "dense IN(2) bound",
+      "projects": 2,
+      "p50Ms": 0.763,
+      "p90Ms": 0.816,
+      "minMs": 0.722,
+      "maxMs": 0.844,
+      "rowsTotal": 3200,
+      "rowsMin": 80,
+      "distinctPartitions": 2
+    },
+    {
+      "name": "dense IN(2) json_each",
+      "projects": 2,
+      "p50Ms": 0.745,
+      "p90Ms": 0.804,
+      "minMs": 0.694,
+      "maxMs": 0.884,
+      "rowsTotal": 3200,
+      "rowsMin": 80,
+      "distinctPartitions": 2
+    },
+    {
+      "name": "dense IN(4) bound",
+      "projects": 4,
+      "p50Ms": 1.694,
+      "p90Ms": 1.761,
+      "minMs": 1.597,
+      "maxMs": 2.285,
+      "rowsTotal": 8320,
+      "rowsMin": 208,
+      "distinctPartitions": 4
+    },
+    {
+      "name": "dense IN(4) json_each",
+      "projects": 4,
+      "p50Ms": 1.709,
+      "p90Ms": 1.814,
+      "minMs": 1.596,
+      "maxMs": 1.959,
+      "rowsTotal": 8320,
+      "rowsMin": 208,
+      "distinctPartitions": 4
+    },
+    {
+      "name": "dense IN(7) bound",
+      "projects": 7,
+      "p50Ms": 2.345,
+      "p90Ms": 2.469,
+      "minMs": 2.228,
+      "maxMs": 2.535,
+      "rowsTotal": 10880,
+      "rowsMin": 272,
+      "distinctPartitions": 6
+    },
+    {
+      "name": "dense IN(7) json_each",
+      "projects": 7,
+      "p50Ms": 2.349,
+      "p90Ms": 2.45,
+      "minMs": 2.24,
+      "maxMs": 3.03,
+      "rowsTotal": 10880,
+      "rowsMin": 272,
+      "distinctPartitions": 6
+    }
+  ],
+  "lexical": [
+    {
+      "name": "lexical eq (shipped)",
+      "projects": 1,
+      "p50Ms": 0.544,
+      "p90Ms": 0.588,
+      "minMs": 0.521,
+      "maxMs": 1.319,
+      "rowsTotal": 575,
+      "rowsMin": 11,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "lexical IN(1) json_each",
+      "projects": 1,
+      "p50Ms": 0.339,
+      "p90Ms": 0.392,
+      "minMs": 0.292,
+      "maxMs": 0.59,
+      "rowsTotal": 575,
+      "rowsMin": 11,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "lexical IN(2) json_each",
+      "projects": 2,
+      "p50Ms": 0.56,
+      "p90Ms": 0.611,
+      "minMs": 0.531,
+      "maxMs": 0.711,
+      "rowsTotal": 2560,
+      "rowsMin": 64,
+      "distinctPartitions": 2
+    },
+    {
+      "name": "lexical IN(4) json_each",
+      "projects": 4,
+      "p50Ms": 0.611,
+      "p90Ms": 0.645,
+      "minMs": 0.582,
+      "maxMs": 0.699,
+      "rowsTotal": 2560,
+      "rowsMin": 64,
+      "distinctPartitions": 4
+    },
+    {
+      "name": "lexical IN(7) json_each",
+      "projects": 7,
+      "p50Ms": 0.595,
+      "p90Ms": 0.625,
+      "minMs": 0.572,
+      "maxMs": 0.671,
+      "rowsTotal": 2560,
+      "rowsMin": 64,
+      "distinctPartitions": 6
+    }
+  ],
+  "textByIds": [
+    {
+      "name": "textByIds eq (shipped)",
+      "projects": 1,
+      "p50Ms": 0.054,
+      "p90Ms": 0.059,
+      "minMs": 0.049,
+      "maxMs": 0.069,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "textByIds IN(1) json_each",
+      "projects": 1,
+      "p50Ms": 0.036,
+      "p90Ms": 0.041,
+      "minMs": 0.033,
+      "maxMs": 0.06,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    },
+    {
+      "name": "textByIds IN(7) json_each",
+      "projects": 7,
+      "p50Ms": 0.033,
+      "p90Ms": 0.036,
+      "minMs": 0.031,
+      "maxMs": 0.053,
+      "rowsTotal": 640,
+      "rowsMin": 16,
+      "distinctPartitions": 1
+    }
+  ],
+  "plans": [
+    {
+      "arm": "dense eq",
+      "plan": [
+        "SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ]
+    },
+    {
+      "arm": "dense IN(1) bound",
+      "plan": [
+        "SCAN memory_vec VIRTUAL TABLE INDEX 0:3{___}___]Aa_&Aa_",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ]
+    },
+    {
+      "arm": "lexical eq",
+      "plan": [
+        "SCAN memory_fts VIRTUAL TABLE INDEX 32:M3",
+        "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "arm": "lexical IN(all) json_each",
+      "plan": [
+        "SCAN memory_fts VIRTUAL TABLE INDEX 32:M3",
+        "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+        "LIST SUBQUERY 1",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "CREATE BLOOM FILTER"
+      ]
+    }
+  ]
+}
