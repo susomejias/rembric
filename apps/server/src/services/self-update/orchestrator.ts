@@ -92,6 +92,11 @@ export interface OrchestratorDeps {
   socketPath?: string;
   /** Entrypoint of the upgrader inside the new image. */
   helperEntrypoint?: string[];
+  /**
+   * Raw REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS, forwarded verbatim to the
+   * upgrader — the helper is the sole validator (`parseHealthTimeoutMs`).
+   */
+  upgradeHealthTimeoutMs?: string;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -210,6 +215,9 @@ export class SelfUpdateOrchestrator {
         // Path as seen from the host-side data volume; only used in
         // operator-facing recovery messages, never opened by the helper.
         `REMBRIC_UPGRADE_BACKUP=${backupPath}`,
+        ...(this.deps.upgradeHealthTimeoutMs !== undefined
+          ? [`REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS=${this.deps.upgradeHealthTimeoutMs}`]
+          : []),
       ],
       Labels: { [UPGRADER_LABEL_KEY]: UPGRADER_LABEL_VALUE },
       HostConfig: {

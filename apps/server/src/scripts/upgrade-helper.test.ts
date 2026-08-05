@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContainerInspect } from '../services/self-update/engine-api.js';
 
-import { deriveCreatePayload, runUpgrade, type EngineLike } from './upgrade-helper.js';
+import {
+  deriveCreatePayload,
+  parseHealthTimeoutMs,
+  runUpgrade,
+  type EngineLike,
+} from './upgrade-helper.js';
 
 function oldContainer(over: Partial<ContainerInspect> = {}): ContainerInspect {
   return {
@@ -58,6 +63,30 @@ describe('deriveCreatePayload', () => {
     };
     expect(networking.EndpointsConfig['rembric_default']?.Aliases).toEqual(['rembric']);
   });
+});
+
+describe('parseHealthTimeoutMs', () => {
+  it('returns the parsed override', () => {
+    expect(parseHealthTimeoutMs('600000', () => {})).toBe(600_000);
+  });
+
+  it('unset means no override and no noise', () => {
+    const lines: string[] = [];
+    expect(parseHealthTimeoutMs(undefined, (l) => lines.push(l))).toBeUndefined();
+    expect(parseHealthTimeoutMs('', (l) => lines.push(l))).toBeUndefined();
+    expect(lines).toEqual([]);
+  });
+
+  it.each(['abc', '-5', '0', '1.5', '150000ms'])(
+    'a malformed value (%j) falls back to the default and says so',
+    (raw) => {
+      const lines: string[] = [];
+      expect(parseHealthTimeoutMs(raw, (l) => lines.push(l))).toBeUndefined();
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain('REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS');
+      expect(lines[0]).toContain(raw);
+    },
+  );
 });
 
 interface Calls {

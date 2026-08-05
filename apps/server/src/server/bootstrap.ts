@@ -361,6 +361,7 @@ export async function bootstrap(
         vacuumInto: (dest) => dbDiagnostics.vacuumInto(dest),
         backupsDir: join(config.dataDir, 'backups'),
       }),
+      upgradeHealthTimeoutMs: env['REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS'],
     });
 
   const rateLimiter = config.rateLimit.enabled
