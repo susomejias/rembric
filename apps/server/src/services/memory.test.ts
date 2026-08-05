@@ -2,13 +2,19 @@ import { decodeTime } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
-import { createTestDb, type TestDb, TestClock } from '../test/index.js';
+import {
+  createTestDb,
+  defaultProject,
+  defaultProjectScope,
+  TestClock,
+  type TestDb,
+} from '../test/index.js';
 
 import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { DomainError } from './errors.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { SCOPE_GLOBAL, projectScope } from './scope.js';
+import { projectScope } from './scope.js';
 
 let db: TestDb;
 let projects: ProjectsService;
@@ -57,31 +63,40 @@ describe('memory.save', () => {
     expect(m.tags).toEqual(['editor']);
   });
 
-  it('persists with the scope passed in (global)', () => {
-    const m = memory.save({ type: 'user', title: 'Dark mode', content: 'dark mode' }, SCOPE_GLOBAL);
-    expect(m.scope).toBe('global');
-    expect(m.projectId).toBeNull();
+  it('persists into the default project when that is the scope passed in', () => {
+    const m = memory.save(
+      { type: 'user', title: 'Dark mode', content: 'dark mode' },
+      defaultProjectScope(db.handle),
+    );
+    expect(m.scope).toBe('project');
+    expect(m.projectId).toBe(defaultProject(db.handle).id);
   });
 
   it('accepts the procedural type and round-trips it through get (improve-recall-relevance)', () => {
     const m = memory.save(
       { type: 'procedural', title: 'Deploy runbook', content: 'how deploys work here' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     expect(m.type).toBe('procedural');
-    const fetched = memory.get(m.id, SCOPE_GLOBAL);
+    const fetched = memory.get(m.id, defaultProjectScope(db.handle));
     expect(fetched?.memory.type).toBe('procedural');
   });
 
   it('rejects empty content', () => {
     expect(() =>
-      memory.save({ type: 'user', title: 'Blank content', content: '   ' }, SCOPE_GLOBAL),
+      memory.save(
+        { type: 'user', title: 'Blank content', content: '   ' },
+        defaultProjectScope(db.handle),
+      ),
     ).toThrow(/non-empty/);
   });
 
   it('rejects an empty title with invalid_input', () => {
     try {
-      memory.save({ type: 'user', title: '', content: 'has content' }, SCOPE_GLOBAL);
+      memory.save(
+        { type: 'user', title: '', content: 'has content' },
+        defaultProjectScope(db.handle),
+      );
       expect.unreachable('save should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DomainError);
@@ -91,7 +106,10 @@ describe('memory.save', () => {
 
   it('rejects a title longer than 100 chars with invalid_input', () => {
     try {
-      memory.save({ type: 'user', title: 'a'.repeat(101), content: 'has content' }, SCOPE_GLOBAL);
+      memory.save(
+        { type: 'user', title: 'a'.repeat(101), content: 'has content' },
+        defaultProjectScope(db.handle),
+      );
       expect.unreachable('save should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DomainError);
@@ -115,7 +133,10 @@ describe('memory.save', () => {
   // row never written. These must be rejected before the DB sees them.
   it('rejects a title containing a NUL byte with invalid_input, never writing a row', () => {
     try {
-      memory.save({ type: 'user', title: '\0abc', content: 'has content' }, SCOPE_GLOBAL);
+      memory.save(
+        { type: 'user', title: '\0abc', content: 'has content' },
+        defaultProjectScope(db.handle),
+      );
       expect.unreachable('save should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DomainError);
@@ -125,7 +146,10 @@ describe('memory.save', () => {
 
   it('rejects content containing an embedded NUL byte with invalid_input', () => {
     try {
-      memory.save({ type: 'user', title: 'ok title', content: 'ab\0c' }, SCOPE_GLOBAL);
+      memory.save(
+        { type: 'user', title: 'ok title', content: 'ab\0c' },
+        defaultProjectScope(db.handle),
+      );
       expect.unreachable('save should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DomainError);
@@ -137,7 +161,7 @@ describe('memory.save', () => {
     try {
       memory.save(
         { type: 'user', title: 'ok title', content: 'ok content', tags: ['fine', 'ba\0d'] },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       expect.unreachable('save should have thrown');
     } catch (err) {
@@ -150,7 +174,7 @@ describe('memory.save', () => {
     try {
       memory.saveWithTopicKey(
         { type: 'user', title: 'ok title', content: 'ok content', topicKey: 'topic\0key' },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       expect.unreachable('save should have thrown');
     } catch (err) {
@@ -192,19 +216,27 @@ describe('memory.search', () => {
     expect(a.some((m) => m.content.includes('B'))).toBe(false);
   });
 
-  it("global scope returns globals only — projects don't leak", async () => {
-    memory.save({ type: 'user', title: 'Global one', content: 'global one' }, SCOPE_GLOBAL);
+  it("the default project is a project like any other — a named project's rows don't leak into it", async () => {
+    const defaultId = defaultProject(db.handle).id;
+    memory.save(
+      { type: 'user', title: 'Default one', content: 'default one' },
+      defaultProjectScope(db.handle),
+    );
     memory.save(
       { type: 'user', title: 'Project one', content: 'project one' },
       projectScope(projectId),
     );
 
-    const globals = await memory.search({}, SCOPE_GLOBAL);
-    expect(globals.every((m) => m.scope === 'global')).toBe(true);
+    const rows = await memory.search({}, defaultProjectScope(db.handle));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((m) => m.projectId === defaultId)).toBe(true);
   });
 
   it("project scope returns project only — globals don't leak", async () => {
-    memory.save({ type: 'user', title: 'Global g', content: 'global g' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'user', title: 'Global g', content: 'global g' },
+      defaultProjectScope(db.handle),
+    );
     memory.save(
       { type: 'user', title: 'Project p', content: 'project p' },
       projectScope(projectId),
@@ -267,7 +299,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       a.id,
-      'project',
       projectId,
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       clock.now(),
@@ -294,7 +325,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       a.id,
-      'project',
       projectId,
       [{ kind: 'error_code', value: 'ENOENT' }],
       clock.now(),
@@ -368,14 +398,12 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       a.id,
-      'project',
       projectId,
       [{ kind: 'path', value: 'src/shared.ts' }],
       clock.now(),
     );
     repos.entities.linkMemory(
       b.id,
-      'project',
       otherId,
       [{ kind: 'path', value: 'src/shared.ts' }],
       clock.now(),
@@ -398,7 +426,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     for (const m of [matching, nonMatching]) {
       repos.entities.linkMemory(
         m.id,
-        'project',
         projectId,
         [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
         clock.now(),
@@ -420,7 +447,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       old.id,
-      'project',
       projectId,
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       clock.now(),
@@ -436,7 +462,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       );
       repos.entities.linkMemory(
         m.id,
-        'project',
         projectId,
         [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
         clock.now(),
@@ -468,7 +493,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     for (const m of [pref, note, retired]) {
       repos.entities.linkMemory(
         m.id,
-        'project',
         projectId,
         [{ kind: 'path', value: 'src/mixed.ts' }],
         clock.now(),
@@ -516,7 +540,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     for (const m of [old, fresh, retired]) {
       repos.entities.linkMemory(
         m.id,
-        'project',
         projectId,
         [{ kind: 'path', value: 'src/takes.ts' }],
         clock.now(),
@@ -550,7 +573,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       ids.push(m.id);
       repos.entities.linkMemory(
         m.id,
-        'project',
         projectId,
         [{ kind: 'error_code', value: 'ERR_TWELVE' }],
         clock.now(),
@@ -571,7 +593,7 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     const repos = createRepositories(db.handle.db);
     const globalMem = memory.save(
       { type: 'user', title: 'Global', content: 'user-wide convention' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const projectMem = memory.save(
       { type: 'project', title: 'Project', content: 'project convention' },
@@ -579,14 +601,12 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     );
     repos.entities.linkMemory(
       globalMem.id,
-      'global',
-      null,
+      defaultProjectScope(db.handle).projectId,
       [{ kind: 'path', value: 'src/both.ts' }],
       clock.now(),
     );
     repos.entities.linkMemory(
       projectMem.id,
-      'project',
       projectId,
       [{ kind: 'path', value: 'src/both.ts' }],
       clock.now(),
@@ -597,9 +617,11 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     ).toEqual([projectMem.id]);
     // The control: the excluded memory IS linked to the same entity and is
     // returned in its own scope, so the exclusion is the scope predicate.
-    expect((await memory.search({ entity: 'src/both.ts' }, SCOPE_GLOBAL)).map((m) => m.id)).toEqual(
-      [globalMem.id],
-    );
+    expect(
+      (await memory.search({ entity: 'src/both.ts' }, defaultProjectScope(db.handle))).map(
+        (m) => m.id,
+      ),
+    ).toEqual([globalMem.id]);
   });
 });
 
@@ -685,7 +707,10 @@ describe('memory.get', () => {
   });
 
   it('returns null for a global id when scope is project', () => {
-    const g = memory.save({ type: 'user', title: 'Global g', content: 'g' }, SCOPE_GLOBAL);
+    const g = memory.save(
+      { type: 'user', title: 'Global g', content: 'g' },
+      defaultProjectScope(db.handle),
+    );
     const result = memory.get(g.id, projectScope(projectId));
     expect(result).toBeNull();
   });
@@ -695,7 +720,7 @@ describe('memory.get', () => {
       { type: 'user', title: 'Project p', content: 'p' },
       projectScope(projectId),
     );
-    const result = memory.get(p.id, SCOPE_GLOBAL);
+    const result = memory.get(p.id, defaultProjectScope(db.handle));
     expect(result).toBeNull();
   });
 
@@ -710,7 +735,7 @@ describe('memory.get', () => {
   });
 
   it('returns null for an unknown id', () => {
-    expect(memory.get('does-not-exist', SCOPE_GLOBAL)).toBeNull();
+    expect(memory.get('does-not-exist', defaultProjectScope(db.handle))).toBeNull();
   });
 });
 
@@ -731,11 +756,11 @@ describe('memory.confirm', () => {
       { type: 'user', title: 'Sample x', content: 'x' },
       projectScope(projectId),
     );
-    expect(() => memory.confirm(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
+    expect(() => memory.confirm(m.id, defaultProjectScope(db.handle))).toThrow(/not found/);
   });
 
   it('throws not_found for unknown ids', () => {
-    expect(() => memory.confirm('nope', SCOPE_GLOBAL)).toThrow(/not found/);
+    expect(() => memory.confirm('nope', defaultProjectScope(db.handle))).toThrow(/not found/);
   });
 });
 
@@ -830,7 +855,7 @@ describe('memory.archive', () => {
       { type: 'user', title: 'Sample x', content: 'x' },
       projectScope(projectId),
     );
-    expect(() => memory.archive(m.id, SCOPE_GLOBAL)).toThrow(/not found/);
+    expect(() => memory.archive(m.id, defaultProjectScope(db.handle))).toThrow(/not found/);
   });
 
   it('refuses to archive a non-active memory', () => {
@@ -1162,7 +1187,7 @@ describe('derived review state', () => {
     clock.advance(100 * DAY);
 
     expect(memory.needsReviewForContext(projectScope(otherId), 5)).toHaveLength(0);
-    expect(memory.needsReviewForContext(SCOPE_GLOBAL, 5)).toHaveLength(0);
+    expect(memory.needsReviewForContext(defaultProjectScope(db.handle), 5)).toHaveLength(0);
     expect(memory.needsReviewForContext(projectScope(projectId), 5)).toHaveLength(1);
   });
 
@@ -1211,7 +1236,7 @@ describe('derived review state', () => {
       clock.advance(100 * DAY);
       expect(memory.countNeedsReview(projectScope(projectId))).toBe(1);
       expect(memory.countNeedsReview(projectScope(otherId))).toBe(1);
-      expect(memory.countNeedsReview(SCOPE_GLOBAL)).toBe(0);
+      expect(memory.countNeedsReview(defaultProjectScope(db.handle))).toBe(0);
     });
 
     it('stays consistent with needsReviewForContext for the same scope (task 5.3)', () => {
@@ -1286,7 +1311,10 @@ describe('ULID prefix equals created_at', () => {
   it('holds for every saved row, so id order is created_at order', () => {
     const rows = Array.from({ length: 25 }, (_, i) => {
       clock.advance(1000);
-      return memory.save({ type: 'project', title: `t${i}`, content: `c${i}` }, SCOPE_GLOBAL);
+      return memory.save(
+        { type: 'project', title: `t${i}`, content: `c${i}` },
+        defaultProjectScope(db.handle),
+      );
     });
     for (const r of rows) {
       expect(decodeTime(r.id)).toBe(r.createdAt.getTime());
@@ -1305,7 +1333,10 @@ describe('ULID prefix equals created_at', () => {
       db.handle.db,
       new TestClock(past).now,
     );
-    const row = backdated.save({ type: 'project', title: 'old', content: 'old' }, SCOPE_GLOBAL);
+    const row = backdated.save(
+      { type: 'project', title: 'old', content: 'old' },
+      defaultProjectScope(db.handle),
+    );
     expect(decodeTime(row.id)).toBe(past.getTime());
     expect(row.createdAt.getTime()).toBe(past.getTime());
   });

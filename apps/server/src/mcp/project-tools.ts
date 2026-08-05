@@ -209,7 +209,7 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
       slug: p.slug,
       displayName: p.displayName ?? null,
       archived: p.archivedAt !== null,
-      activeMemoryCount: deps.repos.memory.countActiveInScope('project', p.id),
+      activeMemoryCount: deps.repos.memory.countActiveInScope(p.id),
     })),
   });
 }

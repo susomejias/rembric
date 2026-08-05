@@ -586,7 +586,7 @@ export class AgentSessionsService {
    * counters stay in lock-step with `list()`, which hides them by default.
    */
   countByStatus(scope: Scope): Record<'active' | 'ended' | 'abandoned', number> {
-    const projectId = scope.kind === 'project' ? scope.projectId : null;
+    const projectId = scope.projectId;
     return toStatusRecord(this.repos.agentSessions.countByStatusInScope(projectId));
   }
 

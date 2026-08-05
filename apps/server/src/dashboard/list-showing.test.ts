@@ -16,6 +16,7 @@ import { RelationsService } from '../services/relations.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { seedProject } from '../test/default-project.js';
 
 import { PAGE_SIZE } from './components.js';
 import { createConsolidationRouter } from './consolidation.js';
@@ -41,6 +42,7 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
 
   beforeEach(() => {
     t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     repos = createRepositories(t.handle.db);
     sessions = new SessionsService(repos, randomBytes(32));
     const tokensSvc = new TokensService(repos, t.handle.db);
@@ -72,8 +74,8 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
             id: `G${i}`,
             title: deriveTitle(content),
             content,
-            scope: 'global',
-            projectId: null,
+            scope: 'project',
+            projectId: 'p0',
             type: 'project',
             tags: [],
             status: 'active',
@@ -104,8 +106,8 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
           id: 'RS',
           title: deriveTitle('relation source'),
           content: 'relation source',
-          scope: 'global',
-          projectId: null,
+          scope: 'project',
+          projectId: 'p0',
           type: 'project',
           tags: [],
           status: 'active',
@@ -117,8 +119,8 @@ describe('SHOWING never exceeds PAGE_SIZE across list views', () => {
           id: 'RT',
           title: deriveTitle('relation target'),
           content: 'relation target',
-          scope: 'global',
-          projectId: null,
+          scope: 'project',
+          projectId: 'p0',
           type: 'project',
           tags: [],
           status: 'active',

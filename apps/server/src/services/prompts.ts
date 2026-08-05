@@ -45,7 +45,7 @@ export interface SavePromptInput {
 }
 
 export interface RecentForContextInput {
-  projectId: string | null;
+  projectId: string;
   limit?: number;
 }
 
@@ -277,7 +277,7 @@ export class PromptsService {
     const requestedLimit = input.limit ?? 25;
     const limit = clamp(requestedLimit, 1, 100);
     const offset = Math.max(0, input.offset ?? 0);
-    const projectId = input.scope.kind === 'project' ? input.scope.projectId : null;
+    const projectId = input.scope.projectId;
     // Sanitize before it reaches `prompts_fts MATCH` — an arbitrary
     // natural-language query (punctuation, an unbalanced quote, a bareword
     // FTS5 operator) would otherwise raise a syntax error. Empty after

@@ -1,4 +1,4 @@
-import type { Memory, MemoryScope, MemoryType } from '../../db/schema/memory.js';
+import type { Memory, MemoryType } from '../../db/schema/memory.js';
 import type { GateOverrides } from '../../services/memory.js';
 import type { MemoryService } from '../../services/memory.js';
 
@@ -10,9 +10,8 @@ export interface CorpusItem {
   title: string;
   content: string;
   tags?: string[];
-  scope: MemoryScope;
-  /** Project slug (see `corpus.ts::PROJECTS`); required when `scope === 'project'`. */
-  project?: string;
+  /** Project slug — see `corpus.ts::PROJECTS`. */
+  project: string;
   /** Days before the eval run this memory was "created" — sets both `createdAt` and `lastSeenAt`. */
   daysAgo: number;
   /** Convergent-topic key; a second corpus item reusing the same key supersedes this one. */
@@ -22,11 +21,9 @@ export interface CorpusItem {
 }
 
 /** One ingested memory: the corpus item plus its real, DB-assigned identity. */
-export type IngestedMemory = Pick<
-  Memory,
-  'id' | 'type' | 'title' | 'content' | 'scope' | 'projectId' | 'createdAt'
-> & {
+export type IngestedMemory = Pick<Memory, 'id' | 'type' | 'title' | 'content' | 'createdAt'> & {
   stableId: string;
+  projectId: string;
 };
 
 /** The live throwaway corpus a retriever queries against. */
@@ -41,14 +38,12 @@ export interface IngestedCorpus {
 
 /** The scope a query is issued under, resolved to a real project id. */
 export interface QueryScope {
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
 }
 
 /** Same shape, but `project` is a fixture slug (see `corpus.ts::PROJECTS`) — resolved to a `QueryScope` at eval time. */
 export interface QueryScopeFixture {
-  scope: MemoryScope;
-  project?: string;
+  project: string;
 }
 
 export type QueryType =
@@ -110,10 +105,6 @@ export interface Retriever<TState = unknown> {
 }
 
 /** Scope match for an in-memory retriever (`grep`, `memory-md-dump`) — the non-SQL sibling of `services/scope.ts::memoryMatchesScope`. */
-export function inScope(
-  item: { scope: MemoryScope; projectId: string | null },
-  scope: QueryScope,
-): boolean {
-  if (scope.scope === 'global') return item.scope === 'global';
-  return item.scope === 'project' && item.projectId === scope.projectId;
+export function inScope(item: { projectId: string }, scope: QueryScope): boolean {
+  return item.projectId === scope.projectId;
 }

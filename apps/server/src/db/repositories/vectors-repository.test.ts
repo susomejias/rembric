@@ -21,8 +21,8 @@ function unit(a: number, b: number): Float32Array {
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {
   return {
     title: deriveTitle(overrides.content),
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -43,6 +43,7 @@ describe('VectorsRepository', () => {
     t.handle.db
       .insert(projects)
       .values([
+        { id: 'p0', slug: 'project-zero', createdAt: new Date(500) },
         { id: 'p1', slug: 'project-one', createdAt: new Date(500) },
         { id: 'p2', slug: 'project-two', createdAt: new Date(500) },
       ])
@@ -58,14 +59,13 @@ describe('VectorsRepository', () => {
     embedding: Float32Array,
     opts: { scope?: MemoryScope; projectId?: string | null; status?: MemoryStatus } = {},
   ): void {
-    const scope = opts.scope ?? 'global';
-    const projectId = opts.projectId ?? null;
+    const projectId = opts.projectId ?? 'p0';
     const status = opts.status ?? 'active';
     t.handle.db
       .insert(memory)
-      .values([row({ id, content: `content ${id}`, scope, projectId, status })])
+      .values([row({ id, content: `content ${id}`, projectId, status })])
       .run();
-    repo.insertEmbedding(id, Buffer.from(embedding.buffer), partitionKeyFor(scope, projectId));
+    repo.insertEmbedding(id, Buffer.from(embedding.buffer), partitionKeyFor(projectId));
   }
 
   describe('knnCandidates', () => {
@@ -78,8 +78,7 @@ describe('VectorsRepository', () => {
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         excludeIds: [],
         limit: 2,
       });
@@ -99,8 +98,7 @@ describe('VectorsRepository', () => {
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         excludeIds: ['A', 'B'],
         limit: 2,
       });
@@ -108,14 +106,13 @@ describe('VectorsRepository', () => {
     });
 
     it('cross-scope rows never appear as candidates', () => {
-      insertWithEmbedding('Q', unit(1, 0), { scope: 'project', projectId: 'p1' });
-      insertWithEmbedding('IN', unit(1, 0.3), { scope: 'project', projectId: 'p1' });
-      insertWithEmbedding('G', unit(1, 0), { scope: 'global', projectId: null });
-      insertWithEmbedding('P2', unit(1, 0), { scope: 'project', projectId: 'p2' });
+      insertWithEmbedding('Q', unit(1, 0), { projectId: 'p1' });
+      insertWithEmbedding('IN', unit(1, 0.3), { projectId: 'p1' });
+      insertWithEmbedding('G', unit(1, 0), { projectId: 'p0' });
+      insertWithEmbedding('P2', unit(1, 0), { projectId: 'p2' });
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        scope: 'project',
         projectId: 'p1',
         excludeIds: [],
         limit: 10,
@@ -131,8 +128,7 @@ describe('VectorsRepository', () => {
       expect(
         repo.knnCandidates({
           memoryId: 'NOVEC',
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           excludeIds: [],
           limit: 5,
         }),
@@ -191,7 +187,7 @@ describe('VectorsRepository', () => {
         .run();
       t.handle.raw.prepare("UPDATE memory SET status = 'superseded' WHERE id = 'RACE'").run();
 
-      repo.insertEmbedding('RACE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('global', null));
+      repo.insertEmbedding('RACE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('p0'));
 
       const row_ = t.handle.raw
         .prepare<[string], { status: string }>('SELECT status FROM memory_vec WHERE memory_id = ?')
@@ -200,7 +196,7 @@ describe('VectorsRepository', () => {
     });
 
     it('inserts nothing if the memory row no longer exists', () => {
-      repo.insertEmbedding('GONE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('global', null));
+      repo.insertEmbedding('GONE', Buffer.from(unit(1, 0).buffer), partitionKeyFor('p0'));
       const count = t.handle.raw
         .prepare<[], { c: number }>('SELECT count(*) c FROM memory_vec')
         .get();

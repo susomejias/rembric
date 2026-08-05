@@ -8,10 +8,10 @@ import { agentSessions } from '../db/schema/agent-sessions.js';
 import { tokens } from '../db/schema/tokens.js';
 import { MemoryService } from '../services/memory.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { defaultProjectScope } from '../test/default-project.js';
 import { extractCsrf } from '../test/forms.js';
 
 import { createMemoriesRouter } from './memories.js';
@@ -58,11 +58,11 @@ describe('memory detail hub', () => {
         content: 'with-source-marker',
         source: { agent: 'claude-code', tokenName: 'laptop-token' },
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const withoutSource = memorySvc.save(
       { type: 'feedback', title: 'no-source-marker', content: 'no-source-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
 
     const withHtml = await (await app.request(`/${withSource.id}`)).text();
@@ -90,7 +90,7 @@ describe('memory detail hub', () => {
         content: 'has-session-marker',
         sessionId: 'SESSAAA',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const html = await (await app.request(`/${withSession.id}`)).text();
     expect(html).toContain('href="/dashboard/sessions/SESSAAA"');
@@ -99,11 +99,11 @@ describe('memory detail hub', () => {
   it('renders replaces ids as links to their memory detail pages', async () => {
     const b = memorySvc.save(
       { type: 'feedback', title: 'replaces-b', content: 'replaces-b', topicKey: 'topic-x' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const c2 = memorySvc.save(
       { type: 'feedback', title: 'replaces-b-v2', content: 'replaces-b-v2', topicKey: 'topic-x' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     expect(c2.replaces).toContain(b.id);
 
@@ -114,11 +114,11 @@ describe('memory detail hub', () => {
   it('a superseded memory links forward to its successor; an active one shows no such link', async () => {
     const b = memorySvc.save(
       { type: 'feedback', title: 'succ-b', content: 'succ-b', topicKey: 'topic-succ' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const c2 = memorySvc.save(
       { type: 'feedback', title: 'succ-b-v2', content: 'succ-b-v2', topicKey: 'topic-succ' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
 
     const supersededHtml = await (await app.request(`/${b.id}`)).text();
@@ -132,7 +132,7 @@ describe('memory detail hub', () => {
   it('shows last_seen_at in the metadata block regardless of status', async () => {
     const row = memorySvc.save(
       { type: 'feedback', title: 'last-seen-marker', content: 'last-seen-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const html = await (await app.request(`/${row.id}`)).text();
     expect(html).toMatch(/Last seen[\s\S]{0,200}data-rembric-ts/);
@@ -146,7 +146,7 @@ describe('memory detail hub', () => {
         content: 'predecessor-a-content',
         topicKey: 'topic-y',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const b = memorySvc.save(
       {
@@ -155,11 +155,11 @@ describe('memory detail hub', () => {
         content: 'predecessor-b-content',
         topicKey: 'topic-y',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const head = memorySvc.save(
       { type: 'feedback', title: 'predecessor-head', content: 'predecessor-head-content' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     // `replaces` order reversed from chronological, to prove the view sorts by createdAt.
     t.handle.raw.prepare('UPDATE memory SET created_at = ? WHERE id = ?').run(1_000, a.id);
@@ -179,11 +179,11 @@ describe('memory detail hub', () => {
   it('Judgments section lists relations touching the memory, title-linked, with judgment links; empty state otherwise', async () => {
     const source = memorySvc.save(
       { type: 'feedback', title: 'judg-source-marker', content: 'judg-source-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     const target = memorySvc.save(
       { type: 'feedback', title: 'judg-target-marker', content: 'judg-target-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
 
     const emptyHtml = await (await app.request(`/${source.id}`)).text();
@@ -212,7 +212,7 @@ describe('memory detail hub', () => {
 
   describe('Judgments section ordering and degree', () => {
     const mem = (title: string) =>
-      memorySvc.save({ type: 'feedback', title, content: title }, SCOPE_GLOBAL);
+      memorySvc.save({ type: 'feedback', title, content: title }, defaultProjectScope(t.handle));
 
     /** Judgment-row ids in the order the section rendered them. */
     function renderedOrder(html: string): string[] {
@@ -393,7 +393,7 @@ describe('memory detail hub', () => {
     const staleSvc = new MemoryService(repos, t.handle.db, () => new Date(Date.now() - 120 * DAY));
     const m = staleSvc.save(
       { type: 'project', title: 'confirm-flow-marker', content: 'confirm-flow-marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
 
     const noCsrf = await app.request(`/${m.id}/confirm`, {

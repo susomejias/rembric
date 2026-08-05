@@ -101,16 +101,15 @@ describe('ConsolidationRunner sweep', () => {
     const summary = runner.sweepFor(p.id);
     const scopes = summary.runs.map((r) => r.scope);
     expect(scopes).toContainEqual({
-      scope: 'project',
       projectId: defaultProject(db.handle).id,
     });
-    expect(scopes).toContainEqual({ scope: 'project', projectId: p.id });
+    expect(scopes).toContainEqual({ projectId: p.id });
   });
 
   it('sweepFor does not sweep the default project twice when it IS the session project', () => {
     const dflt = defaultProject(db.handle).id;
     const summary = runner.sweepFor(dflt);
-    expect(summary.runs.map((r) => r.scope)).toEqual([{ scope: 'project', projectId: dflt }]);
+    expect(summary.runs.map((r) => r.scope)).toEqual([{ projectId: dflt }]);
     expect(summary.skipped).toEqual([]);
   });
 

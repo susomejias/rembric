@@ -84,7 +84,6 @@ describe('the cross-project-isolation queries keep their control in a second pro
   async function search(text: string, projectId: string): Promise<string[]> {
     const state = await hybridRetriever.init(corpus);
     const { ids } = await hybridRetriever.query(text, state, 8, {
-      scope: 'project',
       projectId,
     });
     return ids;
@@ -103,7 +102,7 @@ describe('the cross-project-isolation queries keep their control in a second pro
       expect(goldIds.length).toBeGreaterThan(1);
       for (const id of goldIds) expect(projectById.get(id)).toBe(projectId);
 
-      const ids = await search(q.text, projectId!);
+      const ids = await search(q.text, projectId);
       expect(ids.filter((id) => goldIds.includes(id)).length).toBeGreaterThan(0);
       for (const id of ids) expect(projectById.get(id)).toBe(projectId);
 

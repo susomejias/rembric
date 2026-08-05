@@ -16,7 +16,7 @@ const outcome = (over: Partial<RawOutcome>): RawOutcome => ({
     text: 'anything',
     type: 'abstention',
     goldStableIds: [],
-    scope: { scope: 'global' },
+    scope: { project: 'atlas' },
   },
   retrieved: [],
   reportedAbstained: undefined,

@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
-import type { MemoryScope, MemoryStatus, MemoryType } from '../schema/memory.js';
+import type { MemoryStatus, MemoryType } from '../schema/memory.js';
 
 import { partitionKeyFor } from './scope-clause.js';
 
@@ -24,8 +24,7 @@ export interface VecNeighbor {
 
 export interface KnnOpts {
   memoryId: string;
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   excludeIds: string[];
   limit: number;
 }
@@ -35,8 +34,7 @@ export interface PendingEmbedding {
   id: string;
   title: string;
   content: string;
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   status: MemoryStatus;
   type: MemoryType;
 }
@@ -71,7 +69,7 @@ export class VectorsRepository {
     if (!queryVector) return [];
     const neighbors = this.knnByQueryVector({
       queryVector,
-      partitionKey: partitionKeyFor(opts.scope, opts.projectId),
+      partitionKey: partitionKeyFor(opts.projectId),
       status: 'active',
       rankWindowSize: opts.limit + opts.excludeIds.length + 1,
     });
@@ -159,12 +157,13 @@ export class VectorsRepository {
   /** Non-archived memories missing an embedding, oldest first. */
   findMissingEmbeddings(limit: number): PendingEmbedding[] {
     return this.db.all<PendingEmbedding>(sql`
-      SELECT m.id AS id, m.title AS title, m.content AS content, m.scope AS scope,
+      SELECT m.id AS id, m.title AS title, m.content AS content,
              m.project_id AS projectId, m.status AS status, m.type AS type
       FROM memory m
       LEFT JOIN memory_vec v ON v.memory_id = m.id
       WHERE v.memory_id IS NULL
         AND m.status != 'archived'
+        AND m.project_id IS NOT NULL
       ORDER BY m.created_at ASC
       LIMIT ${limit}
     `);
@@ -183,7 +182,7 @@ export class VectorsRepository {
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v FROM memory m
       LEFT JOIN memory_vec v ON v.memory_id = m.id
-      WHERE v.memory_id IS NULL AND m.status != 'archived'
+      WHERE v.memory_id IS NULL AND m.status != 'archived' AND m.project_id IS NOT NULL
     `) as { v: number } | undefined;
     return row?.v ?? 0;
   }

@@ -7,10 +7,11 @@ import { createRepositories, type Repositories } from '../db/repositories/index.
 import { projects } from '../db/schema/projects.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { MemoryService } from '../services/memory.js';
-import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { defaultProject, defaultProjectScope } from '../test/default-project.js';
 import { extractCsrf } from '../test/forms.js';
 
 import { createEntitiesRouter } from './entities.js';
@@ -57,12 +58,11 @@ describe('dashboard entities view', () => {
   it('lists entities across kinds with their link counts', async () => {
     const a = memory.save(
       { type: 'project', title: 'Fix', content: 'fixed apps/server/src/db/migrate.ts' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     repos.entities.linkMemory(
       a.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       new Date(),
     );
@@ -74,13 +74,23 @@ describe('dashboard entities view', () => {
   });
 
   it('filters by kind', async () => {
-    const a = memory.save({ type: 'project', title: 'A', content: 'a' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'project', title: 'B', content: 'b' }, SCOPE_GLOBAL);
-    repos.entities.linkMemory(a.id, 'global', null, [{ kind: 'path', value: 'a.ts' }], new Date());
+    const a = memory.save(
+      { type: 'project', title: 'A', content: 'a' },
+      defaultProjectScope(t.handle),
+    );
+    const b = memory.save(
+      { type: 'project', title: 'B', content: 'b' },
+      defaultProjectScope(t.handle),
+    );
+    repos.entities.linkMemory(
+      a.id,
+      defaultProject(t.handle).id,
+      [{ kind: 'path', value: 'a.ts' }],
+      new Date(),
+    );
     repos.entities.linkMemory(
       b.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'error_code', value: 'ENOENT' }],
       new Date(),
     );
@@ -92,27 +102,33 @@ describe('dashboard entities view', () => {
   });
 
   it('single-reference filter shows only entities mentioned by exactly one memory', async () => {
-    const a = memory.save({ type: 'project', title: 'A', content: 'a' }, SCOPE_GLOBAL);
-    const b = memory.save({ type: 'project', title: 'B', content: 'b' }, SCOPE_GLOBAL);
-    const c = memory.save({ type: 'project', title: 'C', content: 'c' }, SCOPE_GLOBAL);
+    const a = memory.save(
+      { type: 'project', title: 'A', content: 'a' },
+      defaultProjectScope(t.handle),
+    );
+    const b = memory.save(
+      { type: 'project', title: 'B', content: 'b' },
+      defaultProjectScope(t.handle),
+    );
+    const c = memory.save(
+      { type: 'project', title: 'C', content: 'c' },
+      defaultProjectScope(t.handle),
+    );
     repos.entities.linkMemory(
       a.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'common.ts' }],
       new Date(),
     );
     repos.entities.linkMemory(
       b.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'common.ts' }],
       new Date(),
     );
     repos.entities.linkMemory(
       c.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'rare.ts' }],
       new Date(),
     );
@@ -129,18 +145,19 @@ describe('dashboard entities view', () => {
       .insert(projects)
       .values({ id: projectId, slug: 'demo', createdAt: new Date() })
       .run();
-    const g = memory.save({ type: 'project', title: 'G', content: 'g' }, SCOPE_GLOBAL);
+    const g = memory.save(
+      { type: 'project', title: 'G', content: 'g' },
+      defaultProjectScope(t.handle),
+    );
     const p = memory.save({ type: 'project', title: 'P', content: 'p' }, projectScope(projectId));
     repos.entities.linkMemory(
       g.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'global-only.ts' }],
       new Date(),
     );
     repos.entities.linkMemory(
       p.id,
-      'project',
       projectId,
       [{ kind: 'path', value: 'project-only.ts' }],
       new Date(),
@@ -154,11 +171,13 @@ describe('dashboard entities view', () => {
   });
 
   it('shows the rebuild action without a pending count once everything is scanned', async () => {
-    const m = memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    const m = memory.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(t.handle),
+    );
     repos.entities.linkMemory(
       m.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'apps/a.ts' }],
       new Date(),
     );
@@ -169,7 +188,10 @@ describe('dashboard entities view', () => {
   });
 
   it('shows the rebuild action with a pending count while a backlog exists', async () => {
-    memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(t.handle),
+    );
     const app = appWithSession(sessionFor('*'));
     const html = await (await app.request('/')).text();
     expect(html).toContain('REBUILD ENTITY INDEX (1 PENDING)');
@@ -179,13 +201,12 @@ describe('dashboard entities view', () => {
   it('POST /rebuild truncates and re-scans, redirecting with a count', async () => {
     const m = memory.save(
       { type: 'project', title: 'Fix', content: 'fixed apps/server/src/db/migrate.ts' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(t.handle),
     );
     // Simulate a stale/incorrect link that a rebuild should replace.
     repos.entities.linkMemory(
       m.id,
-      'global',
-      null,
+      defaultProject(t.handle).id,
       [{ kind: 'path', value: 'stale-wrong-value.ts' }],
       new Date(),
     );
@@ -213,7 +234,10 @@ describe('dashboard entities view', () => {
     // the hourly forced fallback. Spying on the exact instance held by
     // this test proves the handler drives that instance, not a fresh one.
     const spy = vi.spyOn(entityBackfillWorker, 'processBatch');
-    memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(t.handle),
+    );
 
     const app = appWithSession(sessionFor('*'));
     const before = await (await app.request('/')).text();
@@ -228,7 +252,10 @@ describe('dashboard entities view', () => {
   });
 
   it('POST /rebuild is forbidden for a non-admin (read:*) token', async () => {
-    memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(t.handle),
+    );
     const app = appWithSession(sessionFor('read:*'));
     const res = await app.request('/rebuild', {
       method: 'POST',

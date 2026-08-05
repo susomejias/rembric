@@ -1,7 +1,7 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { partitionKeyFor } from '../db/repositories/scope-clause.js';
 import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
-import type { MemoryScope, MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 /**
  * Standard hybrid retrieval for `memory.search`, expressed in the repo's flat
@@ -71,8 +71,7 @@ export interface HybridSearchOpts {
   repos: Pick<Repositories, 'memory' | 'vectors' | 'termStatistics'>;
   embedQuery?: (text: string) => Promise<Float32Array>;
   query: string;
-  scope: MemoryScope;
-  projectId: string | null;
+  projectId: string;
   /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -218,7 +217,6 @@ function poolLevels(
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
   const rows = opts.repos.memory.textByIds({
     ids: pool.map((r) => r.id),
-    scope: opts.scope,
     projectId: opts.projectId,
   });
   for (const r of rows) {
@@ -458,7 +456,6 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
   try {
     const rows = opts.repos.memory.searchBm25Ids({
       matchExpr,
-      scope: opts.scope,
       projectId: opts.projectId,
       status: opts.status,
       type: opts.type,
@@ -492,7 +489,7 @@ async function denseRetriever(
     : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
-    const partitionKey = partitionKeyFor(opts.scope, opts.projectId);
+    const partitionKey = partitionKeyFor(opts.projectId);
     const neighbors = statuses
       .flatMap((status) =>
         opts.repos.vectors.knnByQueryVector({

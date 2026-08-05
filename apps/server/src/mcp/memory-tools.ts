@@ -2,12 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import {
-  MEMORY_STATUSES,
-  MEMORY_TYPES,
-  type Memory,
-  type MemoryScope,
-} from '../db/schema/memory.js';
+import { MEMORY_STATUSES, MEMORY_TYPES, type Memory } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -556,8 +551,7 @@ export interface MemoryToolDeps {
     memoryId: string,
     title: string,
     content: string,
-    scope: MemoryScope,
-    projectId: string | null,
+    projectId: string,
   ) => Promise<boolean>;
   /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
   router?: SessionRouter;
@@ -668,8 +662,7 @@ export interface SaveWithCandidatesDeps {
     memoryId: string,
     title: string,
     content: string,
-    scope: MemoryScope,
-    projectId: string | null,
+    projectId: string,
   ) => Promise<boolean>;
 }
 
@@ -707,7 +700,7 @@ export async function saveMemoryWithCandidates(
       // Give the new row its vector before detection runs, so the vec
       // pass has a self-vector to kNN from (model is warm by boot
       // contract; on failure detection degrades to FTS5 for this save).
-      if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, m.scope, m.projectId);
+      if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, scope.projectId);
       const found = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
       candidatesDetected = found.detected;
       for (const c of found.candidates) {
@@ -741,7 +734,7 @@ export async function saveMemoryWithCandidates(
   // best-effort, never fails the save.
   if (deps.repos) {
     try {
-      deps.repos.entities.linkMemory(m.id, m.scope, m.projectId, extractedEntities, m.createdAt);
+      deps.repos.entities.linkMemory(m.id, scope.projectId, extractedEntities, m.createdAt);
     } catch {
       // Extraction/linking failure must never fail the save.
     }
@@ -774,11 +767,7 @@ async function handleSave(
 
   let resolvedSessionId: string | null;
   try {
-    resolvedSessionId = resolveActiveSessionId(
-      deps,
-      scope.kind === 'project' ? scope.projectId : null,
-      args.sessionId,
-    );
+    resolvedSessionId = resolveActiveSessionId(deps, scope.projectId, args.sessionId);
   } catch (err) {
     return errToMcp(err);
   }
@@ -1162,7 +1151,7 @@ async function handleConfirm(
     // active session for (token, project) — either way
     // confirmations.session_id stops being permanently NULL. See
     // openspec/changes/fix-audited-defects.
-    const confirmProjectId = scope.kind === 'project' ? scope.projectId : null;
+    const confirmProjectId = scope.projectId;
     let sessionId: string | undefined;
     try {
       sessionId = resolveActiveSessionId(deps, confirmProjectId, args.sessionId) ?? undefined;
@@ -1229,7 +1218,7 @@ function deriveFocusSeed(
   recentPrompts: { content: string }[],
 ): string | undefined {
   const parts: string[] = [];
-  const projectId = scope.kind === 'project' ? scope.projectId : null;
+  const projectId = scope.projectId;
   const project = projectId ? deps.projects.getById(projectId) : undefined;
   if (project) parts.push(project.displayName ?? project.slug);
 
@@ -1280,7 +1269,7 @@ async function handleContext(
 
   const recentSessions = deps.agentSessions
     .recentForContext({
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       limit: sessionsLimit,
     })
     .map((s) => ({
@@ -1295,8 +1284,7 @@ async function handleContext(
 
   const recentMemories = deps.repos.memory
     .recentForContext({
-      scope: scope.kind === 'project' ? 'project' : 'global',
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       includeArchived,
       limit: memoriesLimit,
     })
@@ -1313,7 +1301,7 @@ async function handleContext(
   const promptsLimit = clamp(args.prompts ?? 5, 0, CONTEXT_PROMPTS_MAX);
   const recentPrompts = deps.prompts
     .recentForContext({
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       limit: promptsLimit,
     })
     .map((p) => ({
@@ -1348,14 +1336,12 @@ async function handleContext(
     // ranked hybrid-search fallback, deduped by id, capped at the same
     // limit. `via` keeps the two populations distinguishable in the
     // response, matching `memory.search`'s `viaEntity` observability.
-    const memScope = scope.kind === 'global' ? 'global' : 'project';
-    const projectId = scope.kind === 'project' ? scope.projectId : null;
+    const projectId = scope.projectId;
     const byId = new Map<string, { memory: Memory; via: 'entity' | 'ranked' }>();
     if (deps.repos) {
       for (const e of extractEntities('', focusText)) {
         if (byId.size >= RELEVANCE_LIMIT) break;
         const rows = deps.repos.entities.findMemoriesByEntity({
-          scope: memScope,
           projectId,
           kind: e.kind,
           value: e.value,
@@ -1406,8 +1392,8 @@ async function handleContext(
   );
   const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
   const relationsScope = {
-    scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
-    projectId: scope.kind === 'project' ? scope.projectId : null,
+    scope: 'project' as const,
+    projectId: scope.projectId,
   };
   const pendingJudgments = deps.repos.relations
     .listPendingInScope({
@@ -1487,8 +1473,8 @@ async function handleTimeline(
 
   if (t.sessionId) {
     const neighborScope = {
-      scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      scope: 'project' as const,
+      projectId: scope.projectId,
     };
     const beforeRows = deps.repos.memory.sessionNeighbors({
       ...neighborScope,
@@ -1518,8 +1504,8 @@ async function handleTimeline(
   const windowMs = 2 * 3600 * 1000;
   const targetMs = t.createdAt.getTime();
   const window = {
-    scope: scope.kind === 'project' ? ('project' as const) : ('global' as const),
-    projectId: scope.kind === 'project' ? scope.projectId : null,
+    scope: 'project' as const,
+    projectId: scope.projectId,
     pivotId: t.id,
     loMs: targetMs - windowMs,
     hiMs: targetMs + windowMs,

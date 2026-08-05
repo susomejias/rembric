@@ -12,8 +12,8 @@ import { MemoryRepository } from './memory-repository.js';
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {
   return {
     title: deriveTitle(overrides.content),
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -34,6 +34,7 @@ describe('MemoryRepository', () => {
     t.handle.db
       .insert(projects)
       .values([
+        { id: 'p0', slug: 'project-zero', createdAt: new Date(500) },
         { id: 'p1', slug: 'project-one', createdAt: new Date(500) },
         { id: 'p2', slug: 'project-two', createdAt: new Date(500) },
       ])
@@ -59,7 +60,6 @@ describe('MemoryRepository', () => {
             id: '01B',
             content: 'bravo charlie',
             createdAt: new Date(2_000),
-            scope: 'project',
             projectId: 'p1',
             status: 'archived',
             type: 'project',
@@ -81,7 +81,7 @@ describe('MemoryRepository', () => {
     it('filters by project scope in SQL', () => {
       const hits = repo.adminSearchFts('bravo', {
         status: 'archived',
-        project: { kind: 'project', projectId: 'p1' },
+        projectId: 'p1',
         limit: 10,
         offset: 0,
       });
@@ -158,7 +158,6 @@ describe('MemoryRepository', () => {
           row({
             id: '02D',
             content: 'p2 active',
-            scope: 'project',
             projectId: 'p2',
             createdAt: new Date(4_000),
           }),
@@ -179,7 +178,7 @@ describe('MemoryRepository', () => {
     it('filters global-only', () => {
       const rows = repo.adminList({
         status: 'active',
-        project: { kind: 'global' },
+        projectId: 'p0',
         limit: 10,
         offset: 0,
       });
@@ -189,7 +188,7 @@ describe('MemoryRepository', () => {
     it('filters by project id', () => {
       const rows = repo.adminList({
         status: 'active',
-        project: { kind: 'project', projectId: 'p2' },
+        projectId: 'p2',
         limit: 10,
         offset: 0,
       });
@@ -211,7 +210,6 @@ describe('MemoryRepository', () => {
           row({
             id: '03B',
             content: 'project one',
-            scope: 'project',
             projectId: 'p1',
             createdAt: new Date(2_000),
           }),
@@ -249,14 +247,12 @@ describe('MemoryRepository', () => {
             id: '09P1',
             title: 'P1 row',
             content: 'p1 body',
-            scope: 'project',
             projectId: 'p1',
           }),
           row({
             id: '09P2',
             title: 'P2 row',
             content: 'p2 body',
-            scope: 'project',
             projectId: 'p2',
           }),
         ])
@@ -266,7 +262,6 @@ describe('MemoryRepository', () => {
     it('returns title and content for in-scope ids only', () => {
       const rows = repo.textByIds({
         ids: ['09G', '09P1', '09P2'],
-        scope: 'project',
         projectId: 'p1',
       });
       expect(rows).toEqual([{ id: '09P1', title: 'P1 row', content: 'p1 body' }]);
@@ -275,7 +270,6 @@ describe('MemoryRepository', () => {
     it('drops another project and the retired partition, with no argument that admits them', () => {
       const strict = repo.textByIds({
         ids: ['09G', '09P1', '09P2'],
-        scope: 'project',
         projectId: 'p1',
       });
       expect(strict.map((r) => r.id)).toEqual(['09P1']);
@@ -283,24 +277,20 @@ describe('MemoryRepository', () => {
       // The control: both excluded ids are readable in their own scope, so the
       // assertion above is about the predicate, not about missing rows.
       expect(
-        repo
-          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: 'project', projectId: 'p2' })
-          .map((r) => r.id),
+        repo.textByIds({ ids: ['09G', '09P1', '09P2'], projectId: 'p2' }).map((r) => r.id),
       ).toEqual(['09P2']);
       expect(
-        repo
-          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: 'global', projectId: null })
-          .map((r) => r.id),
+        repo.textByIds({ ids: ['09G', '09P1', '09P2'], projectId: 'p0' }).map((r) => r.id),
       ).toEqual(['09G']);
     });
 
     it('reads nothing for an empty id list', () => {
-      expect(repo.textByIds({ ids: [], scope: 'global', projectId: null })).toEqual([]);
+      expect(repo.textByIds({ ids: [], projectId: 'p0' })).toEqual([]);
     });
   });
 
   describe('scoped search status default', () => {
-    const base = { scope: 'global', projectId: null, limit: 10, offset: 0 } as const;
+    const base = { projectId: 'p0', limit: 10, offset: 0 } as const;
 
     beforeEach(() => {
       t.handle.db
@@ -402,8 +392,7 @@ describe('MemoryRepository', () => {
 
     it('selects rows past their per-type threshold; longer-lived & fresh rows exempt; missing type uses default', () => {
       const ids = repo.findDecayCandidateIds({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         nowMs: NOW,
         thresholdByType: [
           ['project', 100],
@@ -459,8 +448,7 @@ describe('MemoryRepository', () => {
         .run();
       const nowMs = past.getTime() + PROJECT_TTL + 1; // old1 & old2 past; fresh within
       const found = repo.findNeedsReview({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         nowMs,
         limit: 10,
         ttlByType,
@@ -492,8 +480,7 @@ describe('MemoryRepository', () => {
         .run();
 
       const page = repo.findNeedsReview({
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         nowMs,
         limit: 3,
         ttlByType,
@@ -512,8 +499,7 @@ describe('MemoryRepository', () => {
       expect(
         repo
           .findNeedsReview({
-            scope: 'global',
-            projectId: null,
+            projectId: 'p0',
             nowMs,
             limit: 10,
             ttlByType,
@@ -527,8 +513,7 @@ describe('MemoryRepository', () => {
         .run();
       expect(
         repo.findNeedsReview({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           nowMs,
           limit: 10,
           ttlByType,
@@ -545,14 +530,12 @@ describe('MemoryRepository', () => {
           row({
             id: 'a1',
             content: 'pa',
-            scope: 'project',
             projectId: 'p1',
             createdAt: new Date(1),
           }),
           row({
             id: 'a2',
             content: 'pa2',
-            scope: 'project',
             projectId: 'p1',
             createdAt: new Date(2),
           }),
@@ -562,7 +545,6 @@ describe('MemoryRepository', () => {
       expect(
         repo
           .findNeedsReview({
-            scope: 'project',
             projectId: 'p1',
             nowMs,
             limit: 10,
@@ -574,7 +556,6 @@ describe('MemoryRepository', () => {
       expect(
         repo
           .findNeedsReview({
-            scope: 'project',
             projectId: 'p1',
             nowMs,
             limit: 1,
@@ -586,8 +567,7 @@ describe('MemoryRepository', () => {
       expect(
         repo
           .findNeedsReview({
-            scope: 'global',
-            projectId: null,
+            projectId: 'p0',
             nowMs,
             limit: 10,
             ttlByType,
@@ -631,8 +611,7 @@ describe('MemoryRepository', () => {
         expect(
           repo
             .findNeedsReview({
-              scope: 'global',
-              projectId: null,
+              projectId: 'p0',
               nowMs: NOW,
               limit: 1,
               ttlByType,
@@ -654,8 +633,7 @@ describe('MemoryRepository', () => {
           .run();
 
         const page = repo.findNeedsReview({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           nowMs: NOW,
           limit: 3,
           ttlByType,
@@ -664,9 +642,7 @@ describe('MemoryRepository', () => {
         expect(page.map((m) => m.id)).toContain('ttl-old');
         expect(page[0]!.id).toBe('ttl-old');
         // All four still need review — only the ordering changed.
-        expect(
-          repo.countNeedsReview({ scope: 'global', projectId: null, nowMs: NOW, ttlByType }),
-        ).toBe(4);
+        expect(repo.countNeedsReview({ projectId: 'p0', nowMs: NOW, ttlByType })).toBe(4);
       });
     });
   });

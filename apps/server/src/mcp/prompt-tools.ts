@@ -105,7 +105,7 @@ async function handleSavePrompt(
   } catch (err) {
     return errToMcp(err);
   }
-  const promptProjectId = scope.kind === 'project' ? scope.projectId : null;
+  const promptProjectId = scope.projectId;
   let sessionId: string | null;
   try {
     if (args.sessionId)
@@ -118,7 +118,7 @@ async function handleSavePrompt(
     const row = deps.prompts.save({
       content: args.content,
       sessionId,
-      projectId: scope.kind === 'project' ? scope.projectId : null,
+      projectId: scope.projectId,
       agent: ctx.token.name,
       title: args.title,
       tags: args.tags ?? null,

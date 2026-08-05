@@ -11,7 +11,7 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { pinnedProjectId, TokensService, type TokenScope } from '../services/tokens.js';
-import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -84,13 +84,13 @@ function ctxFor(scope: TokenScope, overrides: Partial<RequestContext> = {}): Req
   };
 }
 
-/** The `<scope>:<projectId>` pairs the per-project count read is invoked for; real behaviour preserved. */
+/** The project ids the per-project count read is invoked for; real behaviour preserved. */
 function spyOnCountActiveInScope(): string[] {
   const seen: string[] = [];
   const real = repos.memory.countActiveInScope.bind(repos.memory);
-  vi.spyOn(repos.memory, 'countActiveInScope').mockImplementation((scope, projectId) => {
-    seen.push(`${scope}:${projectId ?? 'null'}`);
-    return real(scope, projectId);
+  vi.spyOn(repos.memory, 'countActiveInScope').mockImplementation((projectId) => {
+    seen.push(projectId);
+    return real(projectId);
   });
   return seen;
 }
@@ -154,7 +154,7 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
     expect(payload.code).toBe('forbidden');
-    await expect(memory.search({}, { kind: 'global' })).resolves.toHaveLength(0);
+    await expect(memory.search({}, defaultProjectScope(db.handle))).resolves.toHaveLength(0);
   });
 
   it('memory.save_prompt rejects a read:project:<id> token with forbidden; nothing is saved', async () => {
@@ -164,7 +164,9 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
     expect(payload.code).toBe('forbidden');
-    expect(prompts.recentForContext({ projectId: null, limit: 10 })).toHaveLength(0);
+    expect(
+      prompts.recentForContext({ projectId: defaultProject(db.handle).id, limit: 10 }),
+    ).toHaveLength(0);
   });
 
   it('memory.session_start rejects a read:* token with forbidden', async () => {
@@ -435,7 +437,7 @@ describe('project.list is filtered by token scope', () => {
     ]);
     // The handler names its own scope per row, so the authorization filter has
     // to run first: B's scope must never reach the read.
-    expect(scopesRead).toEqual([`project:${projectA.id}`]);
+    expect(scopesRead).toEqual([projectA.id]);
   });
 
   it('a `read:project:<id>` token sees only that project, and no count is taken for the other', async () => {
@@ -447,7 +449,7 @@ describe('project.list is filtered by token scope', () => {
     expect(entries(payload)).toEqual([
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
     ]);
-    expect(scopesRead).toEqual([`project:${projectB.id}`]);
+    expect(scopesRead).toEqual([projectB.id]);
   });
 });
 

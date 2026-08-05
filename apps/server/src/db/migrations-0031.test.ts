@@ -2,18 +2,21 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { embeddingInput } from '../embeddings/embedder.js';
 import {
   assertDataLossGuard,
   DataLossGuardError,
   writeStateMarker,
 } from '../server/data-loss-guard.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
+import { extractEntities } from '../services/entities.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { MemoryService } from '../services/memory.js';
 import { SLUG_REGEX } from '../services/projects.js';
-import { SCOPE_GLOBAL, projectScope } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import { doctorReport } from '../test/doctor.js';
 import { FakeEmbedder } from '../test/embedder.js';
 import { createMigrationFixture, type MigrationFixture } from '../test/migration-fixture.js';
@@ -111,6 +114,66 @@ function defaultProject(handle: DbHandle): { id: string; slug: string; display_n
   return row!;
 }
 
+/**
+ * A pre-0031 global memory row with its derived vec and entity rows, all
+ * written with SQL. Neither `MemoryService` nor the two backfill workers can
+ * produce this state any more: the `Scope` union has one arm, and the workers
+ * skip a row that belongs to no project. Constructing the state directly is
+ * what keeps this migration testable against the shape it exists to migrate.
+ * `memory_fts` is trigger-maintained and still tracks the insert.
+ */
+function insertGlobalMemory(
+  handle: DbHandle,
+  row: { id: string; type: string; title: string; content: string; topicKey?: string },
+  embedding?: Float32Array,
+): string {
+  handle.raw
+    .prepare(
+      `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, replaces,
+                           created_at, last_seen_at, topic_key)
+       VALUES (?, 'global', NULL, ?, ?, ?, '[]', 'active', '[]', ?, ?, ?)`,
+    )
+    .run(row.id, row.type, row.title, row.content, Date.now(), Date.now(), row.topicKey ?? null);
+
+  if (embedding) {
+    handle.raw
+      .prepare(
+        `INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding)
+         VALUES (?, '__global__', 'active', ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.type,
+        Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength),
+      );
+  }
+
+  for (const e of extractEntities(row.title, row.content)) {
+    const existing = handle.raw
+      .prepare<[string, string], { id: string }>(
+        `SELECT id FROM memory_entities
+          WHERE scope = 'global' AND project_id IS NULL AND kind = ? AND value = ?`,
+      )
+      .get(e.kind, e.value);
+    const entityId = existing?.id ?? ulid();
+    if (!existing) {
+      handle.raw
+        .prepare(
+          `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at)
+           VALUES (?, 'global', NULL, ?, ?, ?)`,
+        )
+        .run(entityId, e.kind, e.value, Date.now());
+    }
+    handle.raw
+      .prepare(`INSERT OR IGNORE INTO memory_entity_links (entity_id, memory_id) VALUES (?, ?)`)
+      .run(entityId, row.id);
+  }
+  handle.raw
+    .prepare(`INSERT OR REPLACE INTO memory_entity_scan (memory_id, scanned_at) VALUES (?, ?)`)
+    .run(row.id, Date.now());
+  return row.id;
+}
+
 function scratchTables(handle: DbHandle): string[] {
   return handle.raw
     .prepare<[], { name: string }>(
@@ -159,18 +222,23 @@ async function buildCorpus(): Promise<{
   const memory = new MemoryService(repos, handle.db);
   const globalIds: string[] = [];
   for (let i = 0; i < GLOBAL_ROWS; i++) {
-    const m = memory.save(
-      {
-        type: 'reference',
-        title: `Global memory ${i}`,
-        content: `previously global fact ${i} about src/global-${i}.ts and the deploy runbook`,
-        // Crosses `memory_topic_key_active_uidx`: the repointing changes these
-        // rows' key under it, so a populated destination would collide.
-        topicKey: i < 4 ? `topic-${i}` : undefined,
-      },
-      SCOPE_GLOBAL,
+    const title = `Global memory ${i}`;
+    const content = `previously global fact ${i} about src/global-${i}.ts and the deploy runbook`;
+    globalIds.push(
+      insertGlobalMemory(
+        handle,
+        {
+          id: `01GLOBALMEMORY${String(i).padStart(6, '0')}`,
+          type: 'reference',
+          title,
+          content,
+          // Crosses `memory_topic_key_active_uidx`: the repointing changes these
+          // rows' key under it, so a populated destination would collide.
+          ...(i < 4 ? { topicKey: `topic-${i}` } : {}),
+        },
+        await embedder.embed(embeddingInput(title, content)),
+      ),
     );
-    globalIds.push(m.id);
   }
   const alphaIds: string[] = [];
   for (let i = 0; i < ALPHA_ROWS; i++) {
@@ -494,10 +562,12 @@ describe('migration 0031 — the default project (correctness)', () => {
       );
     }
     for (let i = 0; i < 4; i++) {
-      memoryService.save(
-        { type: 'user', title: `Global ${i}`, content: `previously global row ${i}` },
-        SCOPE_GLOBAL,
-      );
+      insertGlobalMemory(pre, {
+        id: `01GLOBALOWNED${String(i).padStart(7, '0')}`,
+        type: 'user',
+        title: `Global ${i}`,
+        content: `previously global row ${i}`,
+      });
     }
     pre.close();
 
@@ -589,17 +659,13 @@ describe('migration 0031 — duplicate global entities', () => {
   function withDuplicate(): { memoryIds: string[]; entityValue: string } {
     const handle = open();
     const repos = createRepositories(handle.db);
-    const memoryService = new MemoryService(repos, handle.db);
-    const memoryIds = [0, 1].map(
-      (i) =>
-        memoryService.save(
-          {
-            type: 'reference',
-            title: `Global ${i}`,
-            content: `a note about src/shared.ts, number ${i}`,
-          },
-          SCOPE_GLOBAL,
-        ).id,
+    const memoryIds = [0, 1].map((i) =>
+      insertGlobalMemory(handle, {
+        id: `01GLOBALDUPLICATE${String(i).padStart(3, '0')}`,
+        type: 'reference',
+        title: `Global ${i}`,
+        content: `a note about src/shared.ts, number ${i}`,
+      }),
     );
     const entities = new EntityBackfillWorker({ repos, tx: handle.db, batchSize: 100 });
     for (let i = 0; i < 5; i++) {
@@ -646,7 +712,6 @@ describe('migration 0031 — duplicate global entities', () => {
       // Both memories are still reachable through the surviving entity — the
       // collapse must not cost a link.
       const hits = createRepositories(handle.db).entities.findMemoriesByEntity({
-        scope: 'project',
         projectId: dflt.id,
         value: entityValue,
         limit: 10,
@@ -847,7 +912,6 @@ describe('migration 0031 — derived state after the repointing', () => {
       const repos = createRepositories(handle.db);
       const dflt = defaultProject(handle);
       const hits = repos.entities.findMemoriesByEntity({
-        scope: 'project',
         projectId: dflt.id,
         value: 'src/global-3.ts',
         limit: 10,
@@ -856,7 +920,6 @@ describe('migration 0031 — derived state after the repointing', () => {
       // Still closed: the pre-existing project's own path is not reachable here.
       expect(
         repos.entities.findMemoriesByEntity({
-          scope: 'project',
           projectId: dflt.id,
           value: 'src/alpha-1.ts',
           limit: 10,

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory } from '../db/schema/memory.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { seedProject } from '../test/default-project.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
@@ -15,7 +16,7 @@ import {
   ENTITY_RARITY_MIN_LINKS,
   findSaveTimeCandidates,
 } from './save-time-candidates.js';
-import { projectScope, SCOPE_GLOBAL, type Scope } from './scope.js';
+import { projectScope, type Scope } from './scope.js';
 
 let db: TestDb;
 let memorySvc: MemoryService;
@@ -24,6 +25,7 @@ let relations: RelationsService;
 
 beforeEach(() => {
   db = createTestDb();
+  seedProject(db.handle, 'p0', 'project-zero');
   memorySvc = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(createRepositories(db.handle.db));
   relations = new RelationsService(createRepositories(db.handle.db), db.handle.db);
@@ -40,7 +42,7 @@ describe('topic_key upsert path', () => {
         content: 'auth via JWT',
         topicKey: 'decision/auth-model',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     expect(m.topicKey).toBe('decision/auth-model');
     expect(m.status).toBe('active');
@@ -55,7 +57,7 @@ describe('topic_key upsert path', () => {
         content: 'auth via JWT',
         topicKey: 'decision/auth-model',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const second = memorySvc.saveWithTopicKey(
       {
@@ -64,7 +66,7 @@ describe('topic_key upsert path', () => {
         content: 'auth via opaque tokens',
         topicKey: 'decision/auth-model',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     expect(second.supersededByTopicKey?.id).toBe(first.memory.id);
@@ -105,7 +107,7 @@ describe('topic_key upsert path', () => {
     expect(() =>
       memorySvc.saveWithTopicKey(
         { type: 'project', title: 'Long topic key', content: 'x', topicKey: long },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       ),
     ).toThrow(/128/);
   });
@@ -113,7 +115,7 @@ describe('topic_key upsert path', () => {
   it('empty topic_key is normalized to null', () => {
     const { memory: m } = memorySvc.saveWithTopicKey(
       { type: 'project', title: 'Empty topic key', content: 'x', topicKey: '   ' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     expect(m.topicKey).toBeNull();
   });
@@ -128,7 +130,7 @@ describe('topic_key upsert path', () => {
           content: `v${i}`,
           topicKey: 'decision/auth-model',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const active = db.handle.db
@@ -160,7 +162,7 @@ describe('findSaveTimeCandidates', () => {
           title: `Rollout schedule entry ${i}`,
           content: `rollout schedule entry ${i} covers timezone rotation and on-call handoff details for cycle ${i}`,
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
   }
@@ -173,7 +175,7 @@ describe('findSaveTimeCandidates', () => {
         title: 'Use two-space indentation always',
         content: 'use two-space indentation always in every file',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const duplicate = memorySvc.save(
       {
@@ -181,7 +183,7 @@ describe('findSaveTimeCandidates', () => {
         title: 'Use two-space indentation always',
         content: 'use two-space indentation always in every file',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
@@ -203,7 +205,7 @@ describe('findSaveTimeCandidates', () => {
           title: 'Prefer explicit error types over generic Error',
           content: 'prefer explicit error types over a generic Error across the codebase',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       const duplicate = memorySvc.save(
         {
@@ -211,7 +213,7 @@ describe('findSaveTimeCandidates', () => {
           title: 'Prefer explicit error types over generic Error',
           content: 'prefer explicit error types over a generic Error across the codebase',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
 
       const cands = findSaveTimeCandidates(createRepositories(db.handle.db), duplicate, {
@@ -232,7 +234,7 @@ describe('findSaveTimeCandidates', () => {
         content:
           'canary rollout strategy for the checkout service reduces blast radius during releases',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const saved = memorySvc.save(
       {
@@ -241,7 +243,7 @@ describe('findSaveTimeCandidates', () => {
         content:
           'canary rollout plan for the checkout service reduces blast radius during releases too',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
@@ -260,7 +262,7 @@ describe('findSaveTimeCandidates', () => {
     // old ASCII-only builder could never produce for CJK content (it returned '').
     const a = memorySvc.save(
       { type: 'feedback', title: '認証 トークン 設計', content: '認証 トークン 設計 の メモ' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const b = memorySvc.save(
       {
@@ -268,7 +270,7 @@ describe('findSaveTimeCandidates', () => {
         title: '認証 トークン 設計 改訂',
         content: '認証 トークン 設計 の 改訂 メモ',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), b, {
       perSaveMax: 5,
@@ -284,7 +286,7 @@ describe('findSaveTimeCandidates', () => {
           title: `Similar marker keyword ${i}`,
           content: `similar marker keyword ${i}`,
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const recent = memorySvc.save(
@@ -293,7 +295,7 @@ describe('findSaveTimeCandidates', () => {
         title: 'Similar marker keyword extra',
         content: 'similar marker keyword extra',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), recent, {
       perSaveMax: 3,
@@ -307,7 +309,7 @@ describe('findSaveTimeCandidates', () => {
 
     const _global = memorySvc.save(
       { type: 'feedback', title: 'Cross-scope marker', content: 'cross-scope marker' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     void _global;
     const saved = memorySvc.save(
@@ -329,7 +331,7 @@ describe('findSaveTimeCandidates', () => {
   it('does not re-surface a target the new memory ancestry already judged not_conflict', () => {
     const x = memorySvc.save(
       { type: 'feedback', title: 'shared dedup marker', content: 'shared dedup marker token' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const y = memorySvc.save(
       {
@@ -337,7 +339,7 @@ describe('findSaveTimeCandidates', () => {
         title: 'shared dedup marker two',
         content: 'shared dedup marker token two',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const base = memorySvc.saveWithTopicKey(
       {
@@ -346,7 +348,7 @@ describe('findSaveTimeCandidates', () => {
         content: 'shared dedup marker token base',
         topicKey: 'dedup/k',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     ).memory;
 
     // `base` previously dismissed X (not_conflict) but flagged Y (conflicts_with).
@@ -363,7 +365,7 @@ describe('findSaveTimeCandidates', () => {
         content: 'shared dedup marker token revised',
         topicKey: 'dedup/k',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     ).memory;
     expect(revised.replaces).toEqual([base.id]);
 
@@ -381,7 +383,7 @@ describe('findSaveTimeCandidates', () => {
   it('carries a not_conflict dismissal forward across two saves of the same topic', () => {
     const x = memorySvc.save(
       { type: 'feedback', title: 'shared dedup marker', content: 'shared dedup marker token' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const y = memorySvc.save(
       {
@@ -389,7 +391,7 @@ describe('findSaveTimeCandidates', () => {
         title: 'shared dedup marker two',
         content: 'shared dedup marker token two',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const saveTopic = (suffix: string) =>
       memorySvc.saveWithTopicKey(
@@ -399,7 +401,7 @@ describe('findSaveTimeCandidates', () => {
           content: `shared dedup marker token ${suffix}`,
           topicKey: 'dedup/deep',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       ).memory;
 
     const base = saveTopic('base');
@@ -430,7 +432,7 @@ describe('findSaveTimeCandidates', () => {
         content: 'auth model JWT',
         topicKey: 'decision/auth',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const second = memorySvc.saveWithTopicKey(
       {
@@ -439,7 +441,7 @@ describe('findSaveTimeCandidates', () => {
         content: 'auth model opaque tokens',
         topicKey: 'decision/auth',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     // second.memory.replaces contains first.memory.id; candidate
     // detection must not re-surface it.
@@ -459,7 +461,7 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
           title: `Indentation rule ${i}`,
           content: `use two-space indentation always in every file, revision ${i}`,
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
   }
@@ -472,7 +474,7 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
         title: 'Indentation rule',
         content: 'use two-space indentation always in every file, revision final',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const repos = createRepositories(db.handle.db);
 
@@ -493,7 +495,7 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
         title: 'Indentation rule',
         content: 'use two-space indentation always in every file, revision final',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const repos = createRepositories(db.handle.db);
     const full = findSaveTimeCandidates(repos, saved, { perSaveMax: 50 }).candidates;
@@ -511,12 +513,11 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
     for (let i = 0; i < 40; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Note ${i}`, content: `wholly unrelated note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       repos.entities.linkMemory(
         m.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'path', value: entities[i % entities.length]! }],
         new Date(),
       );
@@ -525,12 +526,12 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
     for (let i = 0; i < 90; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const saved = memorySvc.save(
       { type: 'project', title: 'Touches four files', content: 'touches four files at once' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const res = findSaveTimeCandidates(
       repos,
@@ -554,23 +555,22 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 10; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const chown = memorySvc.save(
       { type: 'project', title: 'Use chown 10001', content: 'use chown 10001 for the data dir' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     repos.entities.linkMemory(
       chown.id,
-      'global',
-      null,
+      defaultProjectScope(db.handle).projectId,
       [{ kind: 'path', value: 'docs/docker.md' }],
       new Date(),
     );
     const root = memorySvc.save(
       { type: 'project', title: 'Run as root', content: 'run as root instead' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const cands = findSaveTimeCandidates(repos, root, { perSaveMax: 5 }, [
@@ -594,25 +594,23 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Note ${i}`, content: `note number ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       repos.entities.linkMemory(
         m.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'ticket', value: 'PROJ-1' }],
         new Date(),
       );
     }
     const saved = memorySvc.save(
       { type: 'project', title: 'Note last', content: 'note number last' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     expect(
       repos.entities.entityLinkCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         kind: 'ticket',
         value: 'PROJ-1',
         excludeMemoryId: saved.id,
@@ -632,7 +630,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 20; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     for (let i = 0; i < 3; i++) {
@@ -642,12 +640,11 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
           title: `Distinct note ${i}`,
           content: `distinct note ${i} about topic ${i}`,
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       repos.entities.linkMemory(
         m.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'error_code', value: 'ENOENT' }],
         new Date(),
       );
@@ -658,7 +655,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
         title: 'Distinct note last',
         content: 'distinct note last about topic last',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 2 }, [
@@ -677,27 +674,26 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 18; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const nearDuplicate = memorySvc.save(
       { type: 'project', title: 'Deploy runbook', content: 'the deploy runbook lives here' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const entityOnly = memorySvc.save(
       { type: 'project', title: 'Ownership', content: 'chown ten thousand and one' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     repos.entities.linkMemory(
       entityOnly.id,
-      'global',
-      null,
+      defaultProjectScope(db.handle).projectId,
       [{ kind: 'path', value: 'docs/docker.md' }],
       new Date(),
     );
     const saved = memorySvc.save(
       { type: 'project', title: 'Deploy runbook', content: 'the deploy runbook lives here' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 1 }, [
@@ -722,19 +718,18 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     const repos = createRepositories(db.handle.db);
     const target = memorySvc.save(
       { type: 'project', title: 'Bind the port', content: 'bind the port to loopback only' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     repos.entities.linkMemory(
       target.id,
-      'global',
-      null,
+      defaultProjectScope(db.handle).projectId,
       [{ kind: 'path', value: 'docker-compose.yml' }],
       new Date(),
     );
     for (let i = 0; i < 9; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     // Non-archived: 6/16 = 0.375, over the gate. Active: 1/11 = 0.09, under it.
@@ -747,7 +742,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
           content: `compose revision ${i} adjusts the healthcheck interval`,
           topicKey: 'ops/compose-healthcheck',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       chain.push(m.id);
     }
@@ -756,8 +751,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (const id of chain.slice(0, -1)) {
       repos.entities.linkMemory(
         id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'path', value: 'docker-compose.yml' }],
         new Date(),
       );
@@ -777,7 +771,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
         title: 'Publish on all interfaces',
         content: 'publish on 0.0.0.0 instead',
       },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
       { kind: 'path', value: 'docker-compose.yml' },
@@ -796,34 +790,31 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     // surfaces. This test fails without the floor condition.
     const target = memorySvc.save(
       { type: 'project', title: 'Auth module note', content: 'the auth module retries twice' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     repos.entities.linkMemory(
       target.id,
-      'global',
-      null,
+      defaultProjectScope(db.handle).projectId,
       [{ kind: 'ticket', value: 'AUTH-7' }],
       new Date(),
     );
     memorySvc.save(
       { type: 'project', title: 'Unrelated one', content: 'nothing to do with auth' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const saved = memorySvc.save(
       { type: 'project', title: 'Auth retry raised', content: 'auth retry count raised' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     expect(
       repos.entities.scopeActiveMemoryCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         excludeMemoryId: saved.id,
       }),
     ).toBe(2);
     expect(
       repos.entities.entityLinkCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         kind: 'ticket',
         value: 'AUTH-7',
         excludeMemoryId: saved.id,
@@ -851,7 +842,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     const DUP = 'The deploy pipeline retries three times before giving up entirely.';
     const original = memorySvc.save(
       { type: 'project', title: 'Deploy retries', content: DUP },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const ents = Array.from({ length: 5 }, (_, i) => ({
       kind: 'ticket' as const,
@@ -860,13 +851,13 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (const e of ents) {
       const m = memorySvc.save(
         { type: 'project', title: `Note ${e.value}`, content: `about ${e.value}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
-      repos.entities.linkMemory(m.id, 'global', null, [e], new Date());
+      repos.entities.linkMemory(m.id, defaultProjectScope(db.handle).projectId, [e], new Date());
     }
     const saved = memorySvc.save(
       { type: 'project', title: 'Deploy retries again', content: DUP },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
 
     const result = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, ents);
@@ -890,12 +881,11 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Ticketed ${i}`, content: `ticketed note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       repos.entities.linkMemory(
         m.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'ticket', value: 'OPS-3' }],
         new Date(),
       );
@@ -903,17 +893,16 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 3; i++) {
       memorySvc.save(
         { type: 'project', title: `Plain ${i}`, content: `plain note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const saved = memorySvc.save(
       { type: 'project', title: 'Ops follow-up', content: 'ops follow-up note' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     expect(
       repos.entities.entityLinkCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         kind: 'ticket',
         value: 'OPS-3',
         excludeMemoryId: saved.id,
@@ -921,8 +910,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     ).toBe(ENTITY_RARITY_MIN_LINKS);
     expect(
       repos.entities.scopeActiveMemoryCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         excludeMemoryId: saved.id,
       }),
     ).toBe(8);
@@ -943,12 +931,11 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Retry note ${i}`, content: `retry note ${i} on the queue` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
       repos.entities.linkMemory(
         m.id,
-        'global',
-        null,
+        defaultProjectScope(db.handle).projectId,
         [{ kind: 'error_code', value: 'ETIMEDOUT' }],
         new Date(),
       );
@@ -956,7 +943,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     for (let i = 0; i < 14; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     // 15 saves on one topic_key leave 1 active and 14 superseded, which is the
@@ -969,18 +956,17 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
           content: `unrelated revision ${i} of the release checklist`,
           topicKey: 'ops/release-checklist',
         },
-        SCOPE_GLOBAL,
+        defaultProjectScope(db.handle),
       );
     }
     const saved = memorySvc.save(
       { type: 'project', title: 'Queue timeout raised', content: 'queue timeout raised to sixty' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     // Non-vacuous: the arithmetic the assertion rests on, asserted.
     expect(
       repos.entities.entityLinkCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         kind: 'error_code',
         value: 'ETIMEDOUT',
         excludeMemoryId: saved.id,
@@ -988,8 +974,7 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
     ).toBe(5);
     expect(
       repos.entities.scopeActiveMemoryCount({
-        scope: 'global',
-        projectId: null,
+        projectId: defaultProjectScope(db.handle).projectId,
         excludeMemoryId: saved.id,
       }),
     ).toBe(20);
@@ -1015,6 +1000,7 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
           const fresh = createTestDb();
           try {
             const svc = new MemoryService(createRepositories(fresh.handle.db), fresh.handle.db);
+            const freshScope = defaultProjectScope(fresh.handle);
             for (const op of ops) {
               const content = op.content.trim() || 'x';
               svc.saveWithTopicKey(
@@ -1024,7 +1010,7 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
                   content,
                   topicKey: `decision/${op.key}`,
                 },
-                SCOPE_GLOBAL,
+                freshScope,
               );
             }
             // Invariant: per topic_key, at most one active row.
@@ -1046,8 +1032,14 @@ describe('9.7 property: at most one active row per (scope, project_id, topic_key
 
 describe('RelationsService.compare — idempotency + cross-scope rejection', () => {
   it('compare twice on the same pair updates the existing row in place', () => {
-    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
-    const b = memorySvc.save({ type: 'feedback', title: 'Memory b', content: 'b' }, SCOPE_GLOBAL);
+    const a = memorySvc.save(
+      { type: 'feedback', title: 'Memory a', content: 'a' },
+      defaultProjectScope(db.handle),
+    );
+    const b = memorySvc.save(
+      { type: 'feedback', title: 'Memory b', content: 'b' },
+      defaultProjectScope(db.handle),
+    );
 
     const first = relations.compare({
       sourceId: a.id,
@@ -1077,7 +1069,10 @@ describe('RelationsService.compare — idempotency + cross-scope rejection', () 
 
   it('compare across scopes is rejected with cross_scope_relation', () => {
     const projA = projects.create({ slug: 'proj-a' });
-    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
+    const a = memorySvc.save(
+      { type: 'feedback', title: 'Memory a', content: 'a' },
+      defaultProjectScope(db.handle),
+    );
     const b = memorySvc.save(
       { type: 'feedback', title: 'Memory b', content: 'b' },
       projectScope(projA.id),
@@ -1095,8 +1090,14 @@ describe('RelationsService.compare — idempotency + cross-scope rejection', () 
   });
 
   it('double-judge of the same pending row throws conflict', () => {
-    const a = memorySvc.save({ type: 'feedback', title: 'Memory a', content: 'a' }, SCOPE_GLOBAL);
-    const b = memorySvc.save({ type: 'feedback', title: 'Memory b', content: 'b' }, SCOPE_GLOBAL);
+    const a = memorySvc.save(
+      { type: 'feedback', title: 'Memory a', content: 'a' },
+      defaultProjectScope(db.handle),
+    );
+    const b = memorySvc.save(
+      { type: 'feedback', title: 'Memory b', content: 'b' },
+      defaultProjectScope(db.handle),
+    );
     const pending = relations.createPending({ sourceId: a.id, targetId: b.id });
 
     relations.judge(pending.judgmentId, {

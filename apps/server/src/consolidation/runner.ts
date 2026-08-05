@@ -77,7 +77,7 @@ export class ConsolidationRunner {
   runAll(opts?: { force?: boolean }): ConsolidationRunSummary {
     const scopes: ScopeKey[] = this.opts.repos.projects
       .listAllIds()
-      .map((id) => ({ scope: 'project', projectId: id }));
+      .map((id) => ({ projectId: id }));
     return this.sweep(scopes, opts);
   }
 
@@ -88,9 +88,9 @@ export class ConsolidationRunner {
    */
   sweepFor(projectId: string | null): ConsolidationRunSummary {
     const defaultId = this.defaultProjectId();
-    const scopes: ScopeKey[] = [{ scope: 'project', projectId: defaultId }];
+    const scopes: ScopeKey[] = [{ projectId: defaultId }];
     if (projectId !== null && projectId !== defaultId) {
-      scopes.push({ scope: 'project', projectId });
+      scopes.push({ projectId });
     }
     return this.sweep(scopes);
   }
@@ -165,7 +165,6 @@ export class ConsolidationRunner {
   private orphanExpired(runId: string, scope: ScopeKey): number {
     const deadlineMs = this.opts.orphanDeadlineMs ?? DEFAULT_ORPHAN_DEADLINE_MS;
     const pending = this.opts.relations.findPendingOlderThanInScope({
-      scope: scope.scope,
       projectId: scope.projectId,
       cutoffMs: deadlineMs,
       limit: ORPHAN_BATCH,
@@ -195,5 +194,5 @@ export class ConsolidationRunner {
 }
 
 function scopeString(scope: ScopeKey): string {
-  return scope.scope === 'global' ? 'global' : `project:${scope.projectId ?? ''}`;
+  return `project:${scope.projectId}`;
 }

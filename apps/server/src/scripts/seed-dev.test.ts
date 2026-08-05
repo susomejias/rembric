@@ -88,7 +88,6 @@ describe('runSeed', () => {
     const demo = projects.findBySlug('demo');
     expect(demo).toBeDefined();
     const someMemory = repos.memory.searchMemoryIds({
-      scope: 'project',
       projectId: demo!.id,
       status: 'active',
       limit: 1,
@@ -97,7 +96,6 @@ describe('runSeed', () => {
     expect(someMemory).toBeDefined();
     repos.entities.linkMemory(
       someMemory!,
-      'project',
       demo!.id,
       [{ kind: 'path', value: 'docs/docker.md' }],
       new Date(),

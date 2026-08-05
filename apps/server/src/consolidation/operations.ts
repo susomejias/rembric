@@ -57,16 +57,10 @@ export interface UndoResult {
 
 function topicSlotOccupiedBy(
   repos: ConsolidationDeps,
-  row: {
-    id: string;
-    scope: 'global' | 'project';
-    projectId: string | null;
-    topicKey: string | null;
-  },
+  row: { id: string; projectId: string | null; topicKey: string | null },
 ): string | null {
-  if (!row.topicKey) return null;
+  if (!row.topicKey || row.projectId === null) return null;
   const active = repos.memory.findActiveByTopicKey({
-    scope: row.scope,
     projectId: row.projectId,
     topicKey: row.topicKey,
   });

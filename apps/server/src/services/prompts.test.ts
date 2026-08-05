@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { consolidationOps } from '../db/schema/consolidation.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { ProjectsService } from './projects.js';
 import { PromptsService } from './prompts.js';
-import { SCOPE_GLOBAL, projectScope } from './scope.js';
+import { projectScope } from './scope.js';
 
 /**
  * Typed helper for asserting on `DomainError.code` without tripping the
@@ -276,12 +276,16 @@ describe('PromptsService.searchByScope', () => {
     expect(result.prompts[0]?.content).toBe('local deploy');
   });
 
-  it('global scope only sees prompts with NULL project_id', () => {
+  it('a prompt with no project is reachable from no scope', () => {
     prompts.save({ content: 'project-scoped', title: 'project-scoped', projectId });
-    prompts.save({ content: 'global', title: 'global', projectId: null });
+    prompts.save({ content: 'project-less', title: 'project-less', projectId: null });
 
-    const result = prompts.searchByScope({ scope: SCOPE_GLOBAL });
-    expect(result.prompts.map((p) => p.content)).toEqual(['global']);
+    // Control: the project-scoped prompt IS returned in its own project, so the
+    // absence below is the predicate rather than an empty table.
+    expect(
+      prompts.searchByScope({ scope: projectScope(projectId) }).prompts.map((p) => p.content),
+    ).toEqual(['project-scoped']);
+    expect(prompts.searchByScope({ scope: defaultProjectScope(db.handle) }).prompts).toEqual([]);
   });
 
   it('honours agent filter', () => {

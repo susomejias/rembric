@@ -9,15 +9,17 @@
  * consolidation engine (which must legitimately cross scopes) and by
  * the dashboard admin views.
  *
+ * A scope is a project and nothing else. The `memory.scope` COLUMN still
+ * exists and is still written as the constant `'project'` so a rolled-back
+ * previous image can execute its own queries; no read branches on it, and its
+ * removal is a separate change (memory/spec.md).
+ *
  * Mapping from MCP request context to a Scope happens in one place
  * (the MCP handlers, via `resolveEffectiveScope`). Mapping from CLI /
  * cron to a scope happens at the call site of the consolidation engine.
  */
 
-export type Scope = { kind: 'global' } | { kind: 'project'; projectId: string };
-
-/** Convenience constants. */
-export const SCOPE_GLOBAL: Scope = { kind: 'global' };
+export type Scope = { kind: 'project'; projectId: string };
 
 /** Scope a project by id. */
 export function projectScope(projectId: string): Scope {
@@ -33,8 +35,5 @@ export function memoryMatchesScope(
   memory: { scope: 'global' | 'project'; projectId: string | null },
   scope: Scope,
 ): boolean {
-  if (scope.kind === 'global') {
-    return memory.scope === 'global' && memory.projectId === null;
-  }
   return memory.scope === 'project' && memory.projectId === scope.projectId;
 }

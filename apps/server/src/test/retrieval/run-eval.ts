@@ -127,7 +127,7 @@ function checkSanity(corpus: IngestedCorpus, reports: RetrieverReport[]): string
     [...projectSlugById.values()].map((slug) => [slug, 0] as const),
   );
   for (const item of corpus.items) {
-    const key = projectSlugById.get(item.projectId!) ?? item.projectId!;
+    const key = projectSlugById.get(item.projectId) ?? item.projectId;
     byScope.set(key, (byScope.get(key) ?? 0) + 1);
   }
   for (const [scope, count] of byScope) {

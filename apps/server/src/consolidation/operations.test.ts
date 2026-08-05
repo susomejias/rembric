@@ -429,12 +429,7 @@ describe('reactivation durability (fix-audited-defects)', () => {
     undoOp(repos, db.handle.db, opId);
     expect(memoryService.unsafeGetById(m.id)!.status).toBe('active');
 
-    const candidates = findDecayCandidates(
-      repos,
-      { scope: 'project', projectId },
-      DEFAULT_DECAY,
-      new Date(),
-    );
+    const candidates = findDecayCandidates(repos, { projectId }, DEFAULT_DECAY, new Date());
     expect(candidates).not.toContain(m.id);
   });
 
@@ -473,12 +468,7 @@ describe('escalation', () => {
       memoryService.get(m.id, projectScope(projectId));
     }
 
-    const candidates = findDecayCandidates(
-      repos,
-      { scope: 'project', projectId },
-      DEFAULT_DECAY,
-      clock.value,
-    );
+    const candidates = findDecayCandidates(repos, { projectId }, DEFAULT_DECAY, clock.value);
     expect(candidates).not.toContain(m.id);
 
     const seen = memoryService.get(m.id, projectScope(projectId));
@@ -495,12 +485,7 @@ describe('escalation', () => {
     clock.advance(60 * DAY_MS); // inside the first TTL: not even needs_review
     memoryService.get(m.id, projectScope(projectId));
 
-    const candidates = findDecayCandidates(
-      repos,
-      { scope: 'project', projectId },
-      DEFAULT_DECAY,
-      clock.value,
-    );
+    const candidates = findDecayCandidates(repos, { projectId }, DEFAULT_DECAY, clock.value);
     expect(candidates).not.toContain(m.id);
   });
 
@@ -515,12 +500,7 @@ describe('escalation', () => {
     clock.advance(60 * DAY_MS); // baseline moved: well inside the window again
     memoryService.get(m.id, projectScope(projectId));
 
-    const candidates = findDecayCandidates(
-      repos,
-      { scope: 'project', projectId },
-      DEFAULT_DECAY,
-      clock.value,
-    );
+    const candidates = findDecayCandidates(repos, { projectId }, DEFAULT_DECAY, clock.value);
     expect(candidates).not.toContain(m.id);
   });
 });

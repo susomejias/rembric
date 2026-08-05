@@ -56,7 +56,6 @@ export function findDecayCandidates(
     (e): e is [MemoryType, number] => typeof e[1] === 'number',
   );
   return repos.memory.findDecayCandidateIds({
-    scope: scope.scope,
     projectId: scope.projectId,
     nowMs: now.getTime(),
     thresholdByType,

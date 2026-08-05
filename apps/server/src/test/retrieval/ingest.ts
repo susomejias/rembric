@@ -7,7 +7,7 @@ import { EmbeddingWorker } from '../../services/embedding-worker.js';
 import { MemoryService } from '../../services/memory.js';
 import { ProjectsService } from '../../services/projects.js';
 import { RelationsService } from '../../services/relations.js';
-import { SCOPE_GLOBAL, projectScope, type Scope } from '../../services/scope.js';
+import { projectScope, type Scope } from '../../services/scope.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 
@@ -63,10 +63,7 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
 
   for (const item of items) {
     clock.set(new Date(Date.now() - item.daysAgo * DAY_MS));
-    const scope: Scope =
-      item.scope === 'global'
-        ? SCOPE_GLOBAL
-        : projectScope(requireProjectId(projectIdBySlug, item));
+    const scope: Scope = projectScope(requireProjectId(projectIdBySlug, item));
 
     const { memory: saved } = await saveMemoryWithCandidates(
       {
@@ -74,8 +71,8 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
         relations,
         candidates: { perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT },
         repos,
-        embedNow: (memoryId, title, content, memScope, projectId) =>
-          embeddingWorker.embedNow(memoryId, title, content, memScope, projectId),
+        embedNow: (memoryId, title, content, projectId) =>
+          embeddingWorker.embedNow(memoryId, title, content, projectId),
       },
       {
         type: item.type,
@@ -105,8 +102,7 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
       type: m.type,
       title: m.title,
       content: m.content,
-      scope: m.scope,
-      projectId: m.projectId,
+      projectId: m.projectId!,
       createdAt: m.createdAt,
     }));
 

@@ -59,7 +59,7 @@ export class EntityBackfillWorker {
     for (const row of pending) {
       try {
         const entities = extractEntities(row.title, row.content);
-        this.opts.repos.entities.linkMemory(row.id, row.scope, row.projectId, entities, this.now());
+        this.opts.repos.entities.linkMemory(row.id, row.projectId, entities, this.now());
         processed++;
       } catch {
         failed++;

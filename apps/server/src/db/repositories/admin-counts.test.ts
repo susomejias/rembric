@@ -26,8 +26,8 @@ const FUTURE_MS = 4_000_000_000_000;
 function mem(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {
   return {
     title: deriveTitle(overrides.content),
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -48,7 +48,10 @@ describe('admin list-page count methods', () => {
 
     t.handle.db
       .insert(projects)
-      .values({ id: 'p1', slug: 'proj-one', createdAt: new Date(500) })
+      .values([
+        { id: 'p0', slug: 'project-zero', createdAt: new Date(500) },
+        { id: 'p1', slug: 'proj-one', createdAt: new Date(500) },
+      ])
       .run();
     t.handle.db
       .insert(tokens)
@@ -60,7 +63,7 @@ describe('admin list-page count methods', () => {
     // archived 'widget' match so the FTS count must honour the status filter.
     const rows: NewMemory[] = [];
     for (let i = 0; i < 12; i++) rows.push(mem({ id: `G${i}`, content: `widget number ${i}` }));
-    rows.push(mem({ id: 'PROJ', content: 'gadget one', scope: 'project', projectId: 'p1' }));
+    rows.push(mem({ id: 'PROJ', content: 'gadget one', projectId: 'p1' }));
     rows.push(mem({ id: 'RS', content: 'relation source', status: 'archived' }));
     rows.push(mem({ id: 'RT', content: 'relation target', status: 'archived' }));
     rows.push(mem({ id: 'WSUP', content: 'widget superseded', status: 'superseded' }));
@@ -106,10 +109,8 @@ describe('admin list-page count methods', () => {
 
   it('memory.adminCount returns the true filtered count, not the page slice', () => {
     expect(repos.memory.adminCount({ status: 'active' })).toBe(13);
-    expect(repos.memory.adminCount({ status: 'active', project: { kind: 'global' } })).toBe(12);
-    expect(
-      repos.memory.adminCount({ status: 'active', project: { kind: 'project', projectId: 'p1' } }),
-    ).toBe(1);
+    expect(repos.memory.adminCount({ status: 'active', projectId: 'p0' })).toBe(12);
+    expect(repos.memory.adminCount({ status: 'active', projectId: 'p1' })).toBe(1);
     expect(repos.memory.adminCount({ status: 'active', type: 'user' })).toBe(0);
     expect(repos.memory.adminCount({ status: 'archived' })).toBe(3);
   });
@@ -125,13 +126,11 @@ describe('admin list-page count methods', () => {
     expect(repos.memory.adminCountFts('widget', { status: 'superseded' })).toBe(1);
     expect(repos.memory.adminCountFts('widget', { status: 'archived' })).toBe(1);
     // 'gadget' is project-scoped only: global filter → 0, project filter → 1.
-    expect(
-      repos.memory.adminCountFts('gadget', { status: 'active', project: { kind: 'global' } }),
-    ).toBe(0);
+    expect(repos.memory.adminCountFts('gadget', { status: 'active', projectId: 'p0' })).toBe(0);
     expect(
       repos.memory.adminCountFts('gadget', {
         status: 'active',
-        project: { kind: 'project', projectId: 'p1' },
+        projectId: 'p1',
       }),
     ).toBe(1);
   });

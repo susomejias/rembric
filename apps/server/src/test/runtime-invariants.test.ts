@@ -10,15 +10,16 @@ import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
 
 import { createTestDb, type TestDb } from './db.js';
+import { defaultProjectScope, seedProject } from './default-project.js';
 
 describe('runtime invariants — status FSM and scope discipline', () => {
   let testDb: TestDb;
 
   beforeAll(() => {
     testDb = createTestDb();
+    seedProject(testDb.handle, 'p0', 'project-zero');
     const projects = new ProjectsService(createRepositories(testDb.handle.db));
     projects.create({ slug: 'proj-x' });
     projects.create({ slug: 'proj-y' });
@@ -42,17 +43,17 @@ describe('runtime invariants — status FSM and scope discipline', () => {
 
     const a = svc.save(
       { type: 'feedback', title: `merge-A-${runId}`, content: `merge-A-${runId}` },
-      SCOPE_GLOBAL,
+      defaultProjectScope(testDb.handle),
     );
     const b = svc.save(
       { type: 'feedback', title: `merge-B-${runId}`, content: `merge-B-${runId}` },
-      SCOPE_GLOBAL,
+      defaultProjectScope(testDb.handle),
     );
     const mergedId = `merged-${runId}`;
     repos.memory.insert({
       id: mergedId,
-      scope: 'global',
-      projectId: null,
+      scope: 'project',
+      projectId: 'p0',
       type: 'feedback',
       title: `merged-${runId}`,
       content: `merged-${runId}`,
@@ -81,11 +82,11 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     const svc = new MemoryService(createRepositories(testDb.handle.db), testDb.handle.db);
     const m = svc.save(
       { type: 'feedback', title: 'fsm-test-1', content: 'fsm-test-1' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(testDb.handle),
     );
     expect(m.status).toBe('active');
 
-    svc.archive(m.id, SCOPE_GLOBAL);
+    svc.archive(m.id, defaultProjectScope(testDb.handle));
     expect(svc.unsafeGetById(m.id)!.status).toBe('archived');
   });
 
@@ -148,8 +149,8 @@ describe('runtime invariants — status FSM and scope discipline', () => {
       agentSessions: { purgeEmpty: () => ({ deletedIds: [] }) },
       decay: { thresholdByType: {}, defaultThresholdMs: 1_000, confidenceFloor: 1 },
     });
-    runner.runScope({ scope: 'project', projectId: x });
-    runner.runScope({ scope: 'project', projectId: y });
+    runner.runScope({ projectId: x });
+    runner.runScope({ projectId: y });
 
     const ops = db.select().from(consolidationOps).all();
     const tupleOf = (r: { scope: string; projectId: string | null }) =>

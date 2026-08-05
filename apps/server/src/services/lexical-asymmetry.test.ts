@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
+import { seedProject } from '../test/default-project.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import {
@@ -48,6 +49,7 @@ function indexDf(term: string): number | undefined {
 
 beforeEach(() => {
   db = createTestDb();
+  seedProject(db.handle, 'p0', 'project-zero');
   repos = createRepositories(db.handle.db);
 });
 afterEach(() => db.cleanup());
@@ -90,8 +92,7 @@ describe('the query side resolves to the document frequency the index records', 
       await hybridSearch({
         repos,
         query: script.text,
-        scope: 'global',
-        projectId: null,
+        projectId: 'p0',
         status: 'active',
         limit: 8,
         offset: 0,

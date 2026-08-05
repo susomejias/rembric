@@ -142,7 +142,7 @@ async function handleSessionStart(
       return errToMcp(err);
     }
   }
-  const projectId = scope.kind === 'project' ? scope.projectId : null;
+  const projectId = scope.projectId;
 
   try {
     assertAuthorized('write', scope, deps);
@@ -217,24 +217,14 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   // touch:false — end() stamps last_activity_at on an active row (and
   // deliberately not on a terminal one); touching here too would be a second
   // UPDATE of the same row for one request.
-  const sessionId = resolveSessionId(
-    deps,
-    args.sessionId,
-    scope.kind === 'project' ? scope.projectId : null,
-    { touch: false },
-  );
+  const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
   if (!sessionId) {
     return mcpError(
       'session_not_found',
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
-  const blocked = rejectIfDeleted(
-    deps,
-    sessionId,
-    ctx.token.id,
-    scope.kind === 'project' ? scope.projectId : null,
-  );
+  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
     const ended = deps.agentSessions.end(sessionId, { tokenId: ctx.token.id });
@@ -263,24 +253,14 @@ async function handleSessionSummary(
   }
   // touch:false — writeSummary() stamps last_activity_at on an active row, and
   // deliberately does not on a terminal one.
-  const sessionId = resolveSessionId(
-    deps,
-    args.sessionId,
-    scope.kind === 'project' ? scope.projectId : null,
-    { touch: false },
-  );
+  const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
   if (!sessionId) {
     return mcpError(
       'session_not_found',
       'no active session on this MCP transport and no sessionId was provided',
     );
   }
-  const blocked = rejectIfDeleted(
-    deps,
-    sessionId,
-    ctx.token.id,
-    scope.kind === 'project' ? scope.projectId : null,
-  );
+  const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
     const updated = deps.agentSessions.writeSummary(sessionId, {

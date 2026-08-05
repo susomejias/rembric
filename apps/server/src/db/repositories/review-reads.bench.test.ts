@@ -82,6 +82,8 @@ const TYPES: MemoryType[] = ['user', 'feedback', 'project', 'reference', 'proced
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW_MS = Date.UTC(2026, 0, 1);
 const PROJECT_ID = 'proj-1';
+/** A second project, so the scoped reads are measured against a non-empty out-of-scope population. */
+const OTHER_PROJECT_ID = 'proj-2';
 
 const BODY = [
   'The dashboard review counter derives its value at read time from the',
@@ -96,11 +98,9 @@ function memoryId(i: number): string {
 
 /** Deterministic, so each variant's database is identical bar its index set. */
 function seedCorpus(t: TestDb, repo: MemoryRepository, size: number): void {
-  new ProjectsRepository(t.handle.db).insert({
-    id: PROJECT_ID,
-    slug: 'bench',
-    createdAt: new Date(NOW_MS),
-  });
+  const projectsRepo = new ProjectsRepository(t.handle.db);
+  projectsRepo.insert({ id: PROJECT_ID, slug: 'bench', createdAt: new Date(NOW_MS) });
+  projectsRepo.insert({ id: OTHER_PROJECT_ID, slug: 'bench-other', createdAt: new Date(NOW_MS) });
   const whole = Math.floor(CONFIRMS_PER_MEMORY);
   const fraction = CONFIRMS_PER_MEMORY - whole;
   const extraEveryNth = fraction > 0 ? Math.round(1 / fraction) : 0;
@@ -114,8 +114,8 @@ function seedCorpus(t: TestDb, repo: MemoryRepository, size: number): void {
         id,
         title: `memory ${i}`,
         content: `${BODY} (${i})`,
-        scope: i % 4 === 0 ? 'global' : 'project',
-        projectId: i % 4 === 0 ? null : PROJECT_ID,
+        scope: 'project',
+        projectId: i % 4 === 0 ? OTHER_PROJECT_ID : PROJECT_ID,
         type: TYPES[i % TYPES.length]!,
         tags: [],
         status: 'active',
@@ -160,7 +160,6 @@ function reads(repo: MemoryRepository): Record<string, () => void> {
   return {
     findNeedsReview: () => {
       repo.findNeedsReview({
-        scope: 'project',
         projectId: PROJECT_ID,
         nowMs: NOW_MS,
         limit: 3,
@@ -169,14 +168,13 @@ function reads(repo: MemoryRepository): Record<string, () => void> {
       });
     },
     countNeedsReview: () => {
-      repo.countNeedsReview({ scope: 'project', projectId: PROJECT_ID, nowMs: NOW_MS, ttlByType });
+      repo.countNeedsReview({ projectId: PROJECT_ID, nowMs: NOW_MS, ttlByType });
     },
     adminCountNeedsReview: () => {
       repo.adminCountNeedsReview({ nowMs: NOW_MS, ttlByType });
     },
     findDecayCandidateIds: () => {
       repo.findDecayCandidateIds({
-        scope: 'project',
         projectId: PROJECT_ID,
         nowMs: NOW_MS,
         thresholdByType: decayThresholds,
@@ -355,7 +353,6 @@ describe.runIf(ENABLED)('review-axis read benchmark', () => {
       const ttlByType = reviewTtlEntries();
       const correlated = () =>
         withComposite.repo.countNeedsReview({
-          scope: 'project',
           projectId: PROJECT_ID,
           nowMs: NOW_MS,
           ttlByType,

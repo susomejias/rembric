@@ -1,29 +1,25 @@
-import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 
-import { memory, type MemoryScope } from '../schema/memory.js';
-
-/** Partition-key sentinel for the global scope (project_id IS NULL). */
-export const GLOBAL_PARTITION_KEY = '__global__';
+import { memory } from '../schema/memory.js';
 
 /**
  * Shared `(scope, project_id)` WHERE fragment for scoped reads over the
  * `memory` table. `alias` qualifies the columns (e.g. `'m'`); pass a
  * controlled literal, never user input. No argument widens a scope past the
  * one it is given (memory spec: strict scope isolation).
+ *
+ * `scope = 'project'` stays in the predicate although every row now carries
+ * that constant: it leads the five scope-bearing indexes, which are dropped
+ * and recreated by a separate change (memory/spec.md).
  */
-export function scopeWhere(scope: MemoryScope, projectId: string | null, alias?: string): SQL {
+export function scopeWhere(projectId: string, alias?: string): SQL {
   const p = sql.raw(alias ? `${alias}.` : '');
-  if (scope === 'project') {
-    return sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`;
-  }
-  return sql`${p}scope = 'global' AND ${p}project_id IS NULL`;
+  return sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`;
 }
 
 /** Drizzle-builder sibling of `scopeWhere` for builder call sites. */
-export function scopeCondition(scope: MemoryScope, projectId: string | null): SQL {
-  return scope === 'project'
-    ? (and(eq(memory.scope, 'project'), eq(memory.projectId, projectId ?? '')) as SQL)
-    : (and(eq(memory.scope, 'global'), isNull(memory.projectId)) as SQL);
+export function scopeCondition(projectId: string): SQL {
+  return and(eq(memory.scope, 'project'), eq(memory.projectId, projectId)) as SQL;
 }
 
 /**
@@ -36,10 +32,11 @@ export function idJsonSet(ids: readonly string[]): SQL {
 }
 
 /**
- * Scope-derived `memory_vec` partition key: the `project_id` for project
- * scope, the global sentinel otherwise. Set at insert time (vec0 forbids a
- * NULL partition key from being filled by a later trigger).
+ * A row's `memory_vec` partition IS its project. Named rather than inlined
+ * because the value has to be supplied at insert time — vec0 forbids a NULL
+ * partition key from being filled by a later trigger — so every writer has to
+ * know where the key comes from.
  */
-export function partitionKeyFor(scope: MemoryScope, projectId: string | null): string {
-  return scope === 'project' && projectId ? projectId : GLOBAL_PARTITION_KEY;
+export function partitionKeyFor(projectId: string): string {
+  return projectId;
 }

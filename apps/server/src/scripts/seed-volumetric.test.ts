@@ -16,7 +16,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createDb } from '../db/index.js';
 import { createRepositories } from '../db/repositories/index.js';
 import { MemoryService } from '../services/memory.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
+import { defaultProjectScope } from '../test/default-project.js';
 
 import {
   CORPUS_EPOCH_MS,
@@ -182,7 +182,7 @@ describe('seed-volumetric refusals', () => {
     const handle = createDb({ dataDir: dir });
     new MemoryService(createRepositories(handle.db), handle.db).save(
       { type: 'project', title: 'pre-existing', content: 'a row the harness must not touch' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(handle),
     );
     handle.close();
 
@@ -504,10 +504,11 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
       // linkMemory. `memory_fts` and `memory_replaces` are trigger-maintained
       // and stay correct; the vec index and the entity tables do not, which is
       // exactly the divergence the check exists to catch.
-      createRepositories(handle.db).memory.insert({
+      const repos = createRepositories(handle.db);
+      repos.memory.insert({
         id: '01JGFJJZ00XXWWS4ECTPBYPASS',
-        scope: 'global',
-        projectId: null,
+        scope: 'project',
+        projectId: repos.projects.findDefault()!.id,
         type: 'project',
         title: 'inserted behind the write path',
         content: 'no embedding, no entity links, no scan row',

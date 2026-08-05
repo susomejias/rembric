@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_DECAY } from '../../consolidation/decay.js';
 import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '../../services/review.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
+import { seedProject } from '../../test/default-project.js';
 import { confirmations } from '../schema/confirmations.js';
 import { consolidationOps, consolidationRuns } from '../schema/consolidation.js';
 import { memoryRelations } from '../schema/memory-relations.js';
@@ -15,8 +16,8 @@ function mem(overrides: Partial<NewMemory> & { id: string }): NewMemory {
   return {
     title: 't',
     content: 'c',
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: 'p0',
     type: 'project',
     tags: [],
     status: 'active',
@@ -95,6 +96,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
 
   beforeEach(() => {
     t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
     repo = new MemoryRepository(t.handle.db);
   });
 
@@ -387,7 +389,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
         .run();
 
       const ids = repo
-        .recentForContext({ scope: 'global', projectId: null, includeArchived: false, limit: 20 })
+        .recentForContext({ projectId: 'p0', includeArchived: false, limit: 20 })
         .map((m) => m.id);
 
       // Effective recency: B=9000, A=5000, C=3000; D excluded (archived).
@@ -398,7 +400,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
   describe('textByIds — the search gate window text read', () => {
     it('resolves each id by primary key, and never drives from a scope index', () => {
       const detail = explainWhileRunning(t, () =>
-        repo.textByIds({ ids: ['a', 'b', 'c'], scope: 'global', projectId: null }),
+        repo.textByIds({ ids: ['a', 'b', 'c'], projectId: 'p0' }),
       ).join(' | ');
       // One seek per id against `memory`'s TEXT primary-key autoindex. The
       // rejected plan drove from memory_scope_seen_idx and bloom-filtered the
@@ -437,14 +439,14 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       };
       const ids = Array.from({ length: 16 }, (_, i) => `bulk-${i * 100}`);
       const perCallMs = () => {
-        for (let i = 0; i < 50; i++) repo.textByIds({ ids, scope: 'global', projectId: null });
+        for (let i = 0; i < 50; i++) repo.textByIds({ ids, projectId: 'p0' });
         const start = performance.now();
-        for (let i = 0; i < 200; i++) repo.textByIds({ ids, scope: 'global', projectId: null });
+        for (let i = 0; i < 200; i++) repo.textByIds({ ids, projectId: 'p0' });
         return (performance.now() - start) / 200;
       };
 
       insertRange(0, 2_000);
-      expect(repo.textByIds({ ids, scope: 'global', projectId: null })).toHaveLength(16);
+      expect(repo.textByIds({ ids, projectId: 'p0' })).toHaveLength(16);
       const small = perCallMs();
 
       insertRange(2_000, 8_000);
@@ -466,8 +468,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     const reviewReads: Record<string, (repo: MemoryRepository) => void> = {
       findNeedsReview: (repo) => {
         repo.findNeedsReview({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           nowMs,
           limit: 3,
           ttlByType,
@@ -475,15 +476,14 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
         });
       },
       countNeedsReview: (repo) => {
-        repo.countNeedsReview({ scope: 'global', projectId: null, nowMs, ttlByType });
+        repo.countNeedsReview({ projectId: 'p0', nowMs, ttlByType });
       },
       adminCountNeedsReview: (repo) => {
         repo.adminCountNeedsReview({ nowMs, ttlByType });
       },
       findDecayCandidateIds: (repo) => {
         repo.findDecayCandidateIds({
-          scope: 'global',
-          projectId: null,
+          projectId: 'p0',
           nowMs,
           thresholdByType: decayThresholds,
           defaultThresholdMs: DEFAULT_DECAY.defaultThresholdMs,

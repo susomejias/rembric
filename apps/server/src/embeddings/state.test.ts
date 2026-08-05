@@ -7,8 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRepositories } from '../db/repositories/index.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EMBEDDING_INPUT_VERSION, EMBEDDING_MODEL_ID } from './embedder.js';
 import { ensureVectorModel } from './state.js';
@@ -43,7 +42,7 @@ describe('ensureVectorModel', () => {
   });
 
   it('input-version mismatch (pre-v2 marker) wipes stale vectors and re-embeds', async () => {
-    mem.save({ type: 'feedback', title: 'row', content: 'row' }, SCOPE_GLOBAL);
+    mem.save({ type: 'feedback', title: 'row', content: 'row' }, defaultProjectScope(db.handle));
     await new EmbeddingWorker({
       repos: createRepositories(db.handle.db),
       embedder: new FakeEmbedder(),
@@ -68,7 +67,7 @@ describe('ensureVectorModel', () => {
 
   it('matching marker is a no-op even with vectors present', async () => {
     ensureVectorModel(createRepositories(db.handle.db), db.dataDir);
-    mem.save({ type: 'feedback', title: 'row', content: 'row' }, SCOPE_GLOBAL);
+    mem.save({ type: 'feedback', title: 'row', content: 'row' }, defaultProjectScope(db.handle));
     await new EmbeddingWorker({
       repos: createRepositories(db.handle.db),
       embedder: new FakeEmbedder(),
@@ -84,11 +83,11 @@ describe('ensureVectorModel', () => {
     // Simulate the pre-upgrade era: vectors exist, no marker.
     mem.save(
       { type: 'feedback', title: 'old-vector-row', content: 'old-vector-row' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     mem.save(
       { type: 'feedback', title: 'old-vector-row-2', content: 'old-vector-row-2' },
-      SCOPE_GLOBAL,
+      defaultProjectScope(db.handle),
     );
     const worker = new EmbeddingWorker({
       repos: createRepositories(db.handle.db),

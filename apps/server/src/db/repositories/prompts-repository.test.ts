@@ -11,6 +11,7 @@ import { PromptsRepository } from './prompts-repository.js';
 function row(overrides: Partial<NewPrompt> & { id: string; content: string }): NewPrompt {
   return {
     title: 'a prompt',
+    projectId: 'p0',
     createdAt: new Date(1_000),
     ...overrides,
   };
@@ -25,7 +26,10 @@ describe('PromptsRepository', () => {
     repo = new PromptsRepository(t.handle.db);
     t.handle.db
       .insert(projects)
-      .values([{ id: 'p1', slug: 'project-one', createdAt: new Date(500) }])
+      .values([
+        { id: 'p0', slug: 'project-zero', createdAt: new Date(500) },
+        { id: 'p1', slug: 'project-one', createdAt: new Date(500) },
+      ])
       .run();
     t.handle.db
       .insert(tokens)
@@ -92,18 +96,18 @@ describe('PromptsRepository', () => {
       expect(rows.map((p) => p.id)).toEqual(['P3', 'P2', 'P1']);
     });
 
-    it('filters global-only and by project', () => {
-      const globals = repo.adminList({
+    it('filters by project', () => {
+      const zero = repo.adminList({
         includeDeleted: false,
-        project: { kind: 'global' },
+        projectId: 'p0',
         limit: 10,
         offset: 0,
       });
-      expect(globals.map((p) => p.id)).toEqual(['P1']);
+      expect(zero.map((p) => p.id)).toEqual(['P1']);
 
       const scoped = repo.adminList({
         includeDeleted: false,
-        project: { kind: 'project', projectId: 'p1' },
+        projectId: 'p1',
         limit: 10,
         offset: 0,
       });
@@ -158,12 +162,12 @@ describe('PromptsRepository', () => {
       expect(repo.adminCount({ includeDeleted: true })).toBe(3);
     });
 
-    it('mirrors the project/global filter', () => {
-      expect(repo.adminCount({ includeDeleted: false, project: { kind: 'global' } })).toBe(1);
+    it('mirrors the project filter', () => {
+      expect(repo.adminCount({ includeDeleted: false, projectId: 'p0' })).toBe(1);
       expect(
         repo.adminCount({
           includeDeleted: false,
-          project: { kind: 'project', projectId: 'p1' },
+          projectId: 'p1',
         }),
       ).toBe(1);
     });

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { AdminListPromptsOpts, Repositories } from '../db/repositories/index.js';
+import type { Repositories } from '../db/repositories/index.js';
 import type { Prompt } from '../db/schema/prompts.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
@@ -65,10 +65,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
       projectId,
       unknown: unknownProject,
     } = resolveProjectFilter(url, projectRows);
-    const project: AdminListPromptsOpts['project'] = projectId
-      ? { kind: 'project', projectId }
-      : undefined;
-
     let rows: Prompt[];
     if (unknownProject) {
       rows = [];
@@ -79,7 +75,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     } else {
       rows = deps.repos.prompts.adminList({
         includeDeleted,
-        project,
+        projectId,
         agent: agentFilter || undefined,
         // Operator pastes shortId; match by prefix against the session id.
         sessionIdPrefix: sessionFilter || undefined,
@@ -99,7 +95,7 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
         ? undefined
         : deps.repos.prompts.adminCount({
             includeDeleted,
-            project,
+            projectId,
             agent: agentFilter || undefined,
             sessionIdPrefix: sessionFilter || undefined,
           });

@@ -4,6 +4,7 @@ import { createRepositories } from '../db/repositories/index.js';
 import { MemoryService } from '../services/memory.js';
 import { RELATION_ANNOTATION_MAX, RelationsService } from '../services/relations.js';
 import { createTestDb, type TestDb } from '../test/db.js';
+import { defaultProjectScope } from '../test/default-project.js';
 
 /**
  * The pathological corpus, measured rather than reasoned about.
@@ -50,7 +51,7 @@ beforeAll(() => {
         title: `row ${i}`,
         content: `body ${i} `.repeat(Math.ceil(CONTENT_LENGTHS[i % CONTENT_LENGTHS.length]! / 8)),
       },
-      { kind: 'global' },
+      defaultProjectScope(t.handle),
     ).id;
 
   for (let i = 0; i < ROWS; i += 1) {

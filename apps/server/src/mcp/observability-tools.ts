@@ -2,7 +2,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryScope } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -140,8 +139,7 @@ export interface ObservabilityToolDeps {
     memoryId: string,
     title: string,
     content: string,
-    scope: MemoryScope,
-    projectId: string | null,
+    projectId: string,
   ) => Promise<boolean>;
   /** Set by `createMcpServer` after construction to enable roots discovery. */
   getServer?: () => McpServer;
@@ -201,7 +199,7 @@ async function handleCapturePassive(
       candidatesDetected: 0,
     });
   }
-  const captureProjectId = scope.kind === 'project' ? scope.projectId : null;
+  const captureProjectId = scope.projectId;
   let explicitSession: string | null;
   try {
     if (args.sessionId)
@@ -256,10 +254,7 @@ async function handleStats(deps: ObservabilityToolDeps) {
   } catch (err) {
     return errToMcp(err);
   }
-  const { byStatus, byType } = deps.repos.memory.countByStatusAndTypeInScope(
-    scope.kind === 'project' ? 'project' : 'global',
-    scope.kind === 'project' ? scope.projectId : null,
-  );
+  const { byStatus, byType } = deps.repos.memory.countByStatusAndTypeInScope(scope.projectId);
 
   // Scoped — NOT adminCountByStatus. See openspec/changes/fix-audited-defects
   // ("memory.stats.sessionsByStatus bypasses scope enforcement").

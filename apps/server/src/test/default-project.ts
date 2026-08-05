@@ -21,3 +21,13 @@ export function defaultProject(handle: DbHandle): { id: string; slug: string } {
 export function defaultProjectScope(handle: DbHandle): Scope {
   return projectScope(defaultProject(handle).id);
 }
+
+/**
+ * A project with a caller-chosen id, for fixtures that address rows by a
+ * literal (`'p0'`) rather than by the id the default project happens to get.
+ */
+export function seedProject(handle: DbHandle, id: string, slug = id): void {
+  handle.raw
+    .prepare('INSERT INTO projects (id, slug, created_at) VALUES (?, ?, ?)')
+    .run(id, slug, 0);
+}
