@@ -8,9 +8,16 @@ rewrites the dense branch's predicate. Task 1.9 pins retrieval _quality_ across 
 2.2 measures narrow against widened _after_ it — neither compares narrow-before with narrow-after.
 This document is what makes "we did not slow the normal search down" falsifiable instead of asserted.
 
-Status: **before** and **after phase 1** are measured (§4, §6); after phase 4 is not. §6 also records a
-methodological correction that binds every later re-run: the arms must be **paired and interleaved**
-against a worktree, because this instrument's between-process variance is dominated by machine state.
+Status: **complete.** Before, after phase 1 and after phase 4 are all measured — §4 and §6 as they were
+taken at the time, and §7 as a single four-arm comparison in which all three columns were measured
+within one window. §6 records a methodological correction that binds every later re-run: the arms must
+be **paired and interleaved** against a worktree, because this instrument's between-process variance is
+dominated by machine state. §7 is what that correction looks like carried out in full.
+
+**The answer, up front: the ordinary non-widened `memory.search` did not get slower.** Across the whole
+change the median p50 moves +1.1% / −2.6% / +0.7% at 1 000 / 20 000 / 50 000 in the first matrix and
++1.5% / +1.1% / +0.0% in an independent second one, against a tolerance of +15% committed before any
+after-number existed.
 
 ---
 
@@ -219,18 +226,165 @@ unpaired before arm and are left as measured. What the episode establishes is a 
 instrument that §5 did not anticipate: **its between-process variance is dominated by machine state, so
 an arm measured at a different time is not comparable to one measured now, however many repeats each
 has.** Task 2.2 and the phase-4 re-run MUST therefore be paired and interleaved, not merely repeated.
+The phase-4 re-run discharged that in §7, by re-measuring this section's two arms alongside the new ones
+instead of quoting the numbers above.
 
 The independent structural check agrees with the paired measurement, and is the one task 1.9 actually
 requires: `scopeWhere` emits `scope = 'project' AND project_id = ?` before and after, `scopeCondition`
 emits `and(eq(scope,'project'), eq(project_id, ?))` before and after, and `partitionKeyFor` returns the
 project id before and after. The collapse deleted branches that the project arm never took.
 
-### After phase 4
+## 7. After phase 4 — all three columns, measured in one window
 
-_Not yet measured. Same harness, same corpus directories, and — per the finding above — **paired against
-a worktree at the pre-phase-4 commit**, not against the numbers in this section._
+§6 leaves an obligation rather than a number: an arm measured at a different time is not comparable to
+one measured now, so the after-phase-4 column could not simply be appended to §4 and §6. It was
+therefore taken as a **four-arm paired and interleaved run**, in which the before-phase-1 and
+after-phase-1 arms were **re-measured alongside** the phase-4 ones rather than quoted from above. The
+three columns task 0.2 asks for are the three below, and they are comparable to each other because they
+were produced within the same three minutes on the same idle machine.
 
-## 7. What this does NOT establish
+### 7.1 The four arms, and why those four commits
+
+Each arm is a `git worktree` with `node_modules` symlinked from the main tree, so the arms differ in
+exactly one thing: the source under test. Every boundary was verified rather than assumed.
+
+| arm              | commit    | what it is                    | verification                                                      |
+| ---------------- | --------- | ----------------------------- | ----------------------------------------------------------------- |
+| `before-phase-1` | `e6eddd3` | pre-collapse, fixtures moved  | §6's reference arm, reused unchanged                              |
+| `after-phase-1`  | `de224d6` | the collapse plus its guard   | `git diff --name-only de224d6 86d505e -- apps/ scripts/` is empty |
+| `before-phase-4` | `84ca765` | pre-widening                  | `git rev-parse 799058b^` = `84ca765`                              |
+| `after-phase-4`  | `ec3a8e7` | the widened read path, landed | `git diff --name-only 49366fb ec3a8e7 -- apps/ scripts/` is empty |
+
+`de224d6` is the tree §6's after-phase-1 column was measured on, so its column here re-measures the same
+source rather than a later one. `84ca765` is exactly the parent of phase 4's first source commit, and
+the last two commits before HEAD touch `openspec/` only, so `ec3a8e7` is the phase-4 source tree.
+Phase 1 changed 86 files under `apps/`, phase 4 changed 13.
+
+**The harness is unchanged, and that is a fact rather than an intention:** the blob at
+`measurements/narrow-path-e2e.mjs` is `782a78c2ff6e00eb5b55f46ce4a00b9b9ced1247` at all four commits, so
+each arm runs its own tree's copy — which is what makes the relative imports resolve — and the four
+copies are byte-identical. The corpora are task 0.1's original `/root/corpora/narrow-{1000,20000,50000}`
+directories, **not rebuilt**, for the reason §2 gives.
+
+The measured value is still `projectScope(project.id)`, which after phase 4 is the narrow arm of the
+`SearchScope` union (`services/scope.ts:33-46`). No arm passes `acrossProjects`, so this is the ordinary
+search on every side — the widened one is `vec-partition-scale.md`'s subject, not this document's.
+
+Reproduce:
+
+```sh
+git worktree add --detach /root/narrow-arms/before-phase-1 e6eddd3   # and de224d6, 84ca765, ec3a8e7
+ln -s /root/rembric/node_modules            /root/narrow-arms/<arm>/node_modules
+ln -s /root/rembric/apps/server/node_modules /root/narrow-arms/<arm>/apps/server/node_modules
+# per magnitude and repeat, all four arms back to back, starting arm rotated per repeat:
+(cd /root/narrow-arms/<arm>/apps/server && /root/rembric/apps/server/node_modules/.bin/tsx \
+   /root/narrow-arms/<arm>/openspec/changes/search-across-authorized-projects/measurements/narrow-path-e2e.mjs \
+   --db /root/corpora/narrow-<n> --project vol-0 --json paired4-<arm>-<n>-rep<r>.json)
+```
+
+`pnpm exec` still does not work inside a worktree (§6), so the main tree's `tsx` drives every arm.
+
+### 7.2 Interleaving, and the second matrix
+
+All four arms run back to back inside one repeat, and **the starting arm rotates per repeat** so no arm
+systematically runs first — the same rotation `scale-e2e.mjs` applies per query. Six repeats per
+magnitude per arm is 72 process runs per matrix.
+
+**The whole matrix was then run a second time, independently.** §4's bolded outliers and
+`vec-partition-capability.md` §4's bimodal cell are both cases where one run would have been believed;
+repeating a single suspicious cell only tests that cell, whereas repeating the matrix tests the
+comparison. Raw JSON for all 144 runs is committed under `narrow-path-results/paired4-m{1,2}-*.json`.
+Machine load stayed at 1.4–1.7 throughout both, with no test suite or eval running.
+
+**One condition differs from §0 and is reported rather than reconciled:** §0 records 8 vCPU, and this
+machine reports **12** (`nproc`, `/proc/cpuinfo`) with the same 15 GB of RAM. No cause was established
+and none is claimed — the box may have been resized between the two runs. It does not bear on §7's
+verdict, which is a comparison between four arms inside one window on one machine, but it is a further
+reason not to read §7's absolute milliseconds against §4's.
+
+### 7.3 Non-vacuity — asserted over all 144 runs
+
+The harness's own gate (§3) exits non-zero on a zero-row query or a foreign `project_id`; none of the
+144 runs tripped it. Checked again at summarisation across every run: `rowsReturnedTotal` is **320** in
+all 144 (40 queries × the full `DEFAULT_SEARCH_LIMIT` page of 8), `rowsReturnedMin` is 8,
+`queriesReturningZeroRows` is 0 and `foreignScopeRows` is 0. The census is identical on every arm —
+8 334 rows and 8 334 vectors in `vol-0` at 50 000 — which also re-confirms §2's claim that scope slot 1
+holds the same rows before and after the collapse.
+
+### 7.4 The three columns
+
+Instrument **I2 END-TO-END**, median of the six per-process p50s, per §5. Repeats are listed rather than
+averaged. Matrix 1:
+
+| magnitude | before phase 1 | after phase 1 | after phase 4 | cumulative Δ | +15% bound | verdict |
+| --------: | -------------: | ------------: | ------------: | -----------: | ---------: | ------- |
+|     1 000 |        5.61 ms |       5.56 ms |       5.68 ms |    **+1.1%** |    6.46 ms | held    |
+|    20 000 |       17.70 ms |      17.87 ms |      17.25 ms |    **−2.6%** |   20.36 ms | held    |
+|    50 000 |       40.56 ms |      40.53 ms |      40.83 ms |    **+0.7%** |   46.64 ms | held    |
+
+Matrix 2, the independent repeat:
+
+| magnitude | before phase 1 | after phase 1 | after phase 4 | cumulative Δ | +15% bound | verdict |
+| --------: | -------------: | ------------: | ------------: | -----------: | ---------: | ------- |
+|     1 000 |        5.72 ms |       5.60 ms |       5.81 ms |    **+1.5%** |    6.58 ms | held    |
+|    20 000 |       17.39 ms |      17.85 ms |      17.58 ms |    **+1.1%** |   20.00 ms | held    |
+|    50 000 |       40.73 ms |      40.71 ms |      40.75 ms |    **+0.0%** |   46.84 ms | held    |
+
+Phase 4's own increment, the pairing §6 asked for, is `before-phase-4` → `after-phase-4`: **−1.4% /
+−2.0% / +0.6%** in matrix 1 and **+3.3% / −1.4% / +0.7%** in matrix 2. Every one is inside the residual
+repeat-to-repeat spread §5 measured at 3.2–4.8%, in both directions, which is what "no change" looks
+like on this instrument.
+
+The per-process p50s behind matrix 1's 50 000 row, so the tightness is visible rather than asserted:
+
+```
+before-phase-1  40.18 / 40.52 / 40.59 / 41.10 / 40.87 / 40.22
+after-phase-1   39.80 / 40.71 / 39.78 / 40.92 / 41.05 / 40.35
+before-phase-4  40.64 / 41.54 / 40.52 / 40.74 / 39.63 / 40.27
+after-phase-4   40.49 / 41.12 / 40.41 / 40.69 / 40.97 / 41.68
+```
+
+No arm drifted wholesale in either matrix — the failure mode §4 hit twice in six runs did not occur in 144. The plausible reason is that the four arms are minutes apart here rather than hours, which is the
+same property §6 identified; it is an observation about these runs, not a claim that the instrument has
+become stable.
+
+### 7.5 p90, and the figure that did not reproduce
+
+p90 medians, both matrices, cumulative `before-phase-1` → `after-phase-4`:
+
+| magnitude | matrix 1                 | matrix 2                 |
+| --------: | ------------------------ | ------------------------ |
+|     1 000 | 6.16 → 6.46 ms (+4.8%)   | 6.98 → 6.77 ms (−3.0%)   |
+|    20 000 | 19.37 → 18.37 ms (−5.2%) | 18.48 → 19.55 ms (+5.8%) |
+|    50 000 | 42.78 → 43.57 ms (+1.8%) | 46.40 → 44.24 ms (−4.6%) |
+
+Every cell holds the +15% bound, but **the sign flips between matrices at all three magnitudes**, so p90
+here resolves nothing beyond "smaller than ±6%". Reported because it bounds what the pass means, not as
+a result.
+
+**One figure did not reproduce and is named rather than dropped.** Matrix 2 reads phase 1's p90 at
+20 000 as **+12.7%** — the largest number anywhere in this run, and close enough to the tolerance to
+alarm. Matrix 1 reads the same pairing as **+4.6%**, and the same matrices read that pairing's p50 as
++1.0% and +2.6%. It is noise in a tail statistic, and it is exactly the kind of figure that a single
+matrix would have published. It is also, on its own, smaller than the +12.1% §6 had to retract.
+
+### 7.6 What §7 does and does not settle
+
+**Settled: the ordinary single-project `memory.search` is not measurably slower after this change.** The
++15% tolerance holds at every magnitude, on both statistics, in two independent matrices, on the
+committed statistic, with the three columns measured in one window and every run non-vacuous.
+
+**Not settled, and §5 said so in advance:** a regression below about 5% is inside this instrument's
+noise, and the cumulative p50 deltas here (+1.1%, −2.6%, +0.7%; +1.5%, +1.1%, +0.0%) sit inside it in
+both directions. This measurement cannot distinguish "unchanged" from "2% slower"; it is sized for the
+step change a re-planned query would produce, and there is no step change. The structural check in §6 —
+`scopeWhere` emitting the same text against the same columns — remains the stronger claim for phase 1,
+and phase 4's equivalent is task 4.13's byte-identical wire probe over pre-existing seeded data.
+
+The §4 and §6 tables are left as they were measured. They are the record of two earlier windows and
+their absolute milliseconds are **not** to be read against §7's, for the reason §6 established.
+
+## 8. What this does NOT establish
 
 1. **It is not a quality measurement.** Synthetic vectors; see the caveat in §2. `pnpm run eval` is the
    instrument for retrieval quality, and task 1.9 is where the collapse answers to it.
