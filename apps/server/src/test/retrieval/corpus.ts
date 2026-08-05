@@ -1,15 +1,17 @@
 import type { CorpusItem } from './types.js';
 
 /**
- * Fixture corpus: hand-written coding-session memories for two fictional
- * projects (`atlas`, a billing SaaS; `nimbus`, a data pipeline) plus a
- * handful of cross-project global memories. Every gold memory referenced by
- * `queries.ts` has at least one same-project, vocabulary-sharing distractor
- * here (design.md Decision 3) — see each item's `distractorFor`.
+ * Fixture corpus: hand-written coding-session memories for three fictional
+ * projects — `atlas`, a billing SaaS; `nimbus`, a data pipeline; and `shared`,
+ * which holds the cross-cutting conventions that apply to both. Every gold
+ * memory referenced by `queries.ts` has at least one same-project,
+ * vocabulary-sharing distractor here (design.md Decision 3) — see each item's
+ * `distractorFor`.
  */
 export const PROJECTS = [
   { slug: 'atlas', displayName: 'Atlas Billing' },
   { slug: 'nimbus', displayName: 'Nimbus Pipeline' },
+  { slug: 'shared', displayName: 'Shared Conventions' },
 ] as const;
 
 export const CORPUS: CorpusItem[] = [
@@ -171,7 +173,8 @@ export const CORPUS: CorpusItem[] = [
     title: 'User wants PR reviews to focus on correctness over style',
     content:
       'When reviewing PRs on atlas or nimbus, the user wants correctness, security, and regressions flagged first; style-only nitpicks should be mentioned last or skipped if the diff is already large.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 100,
   },
   {
@@ -181,7 +184,8 @@ export const CORPUS: CorpusItem[] = [
     distractorFor: 'pref-pr-review-depth',
     content:
       'The user prefers PR descriptions that explain why a change was made over restating what changed line-by-line, since the diff already shows the what.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 98,
   },
   {
@@ -270,12 +274,13 @@ export const CORPUS: CorpusItem[] = [
   },
 
   {
-    id: 'global-test-colocation',
+    id: 'shared-test-colocation',
     type: 'user',
     title: 'User wants tests co-located with source, never a separate /tests dir',
     content:
       'Across every project, the user wants test files co-located next to the source file they cover (e.g. foo.ts + foo.test.ts in the same directory), not gathered into a top-level /tests tree.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 220,
   },
   {
@@ -322,12 +327,13 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 42,
   },
   {
-    id: 'global-conventional-commits',
+    id: 'shared-conventional-commits',
     type: 'user',
     title: 'User wants Conventional Commits in every project',
     content:
       'Every project the user works on should use Conventional Commits (feat:, fix:, chore:, etc.) for commit messages, enforced by commitlint where possible.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 210,
   },
   {
@@ -395,60 +401,66 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 53,
   },
   {
-    id: 'global-commit-language-es',
+    id: 'shared-commit-language-es',
     type: 'user',
     title: 'Los mensajes de commit siempre van en inglés',
     content:
       'El equipo prefiere que los mensajes de commit sean en inglés siempre, independientemente del idioma en el que se converse con el agente.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 190,
   },
   {
-    id: 'global-commit-language-es-distractor',
+    id: 'shared-commit-language-es-distractor',
     type: 'user',
     title: 'Los títulos de PR también van siempre en inglés',
-    distractorFor: 'global-commit-language-es',
+    distractorFor: 'shared-commit-language-es',
     content:
       'Igual que los mensajes de commit, los títulos y descripciones de las pull requests se escriben siempre en inglés, sin importar el idioma del chat.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 188,
   },
   {
-    id: 'global-atomic-commits',
+    id: 'shared-atomic-commits',
     type: 'user',
     title: 'User wants each commit to be one atomic logical change',
     content:
       'Across every project, the user wants each commit to represent a single logical change — no mixing an unrelated refactor or dependency bump into the same commit as a feature or fix.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 140,
   },
   {
-    id: 'global-atomic-commits-distractor',
+    id: 'shared-atomic-commits-distractor',
     type: 'user',
     title: 'User wants commit subject lines kept under 72 characters',
-    distractorFor: 'global-atomic-commits',
+    distractorFor: 'shared-atomic-commits',
     content:
       'Separately from atomicity, the user wants the commit subject line kept under 72 characters, wrapping any further detail into the commit body instead.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 138,
   },
   {
-    id: 'global-no-emoji',
+    id: 'shared-no-emoji',
     type: 'user',
     title: 'User does not want emoji in code, commits, or PRs unless asked',
     content:
       'The user does not want emoji added to code, commit messages, or PR descriptions unless they explicitly ask for it in that instance.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 75,
   },
   {
-    id: 'global-no-emoji-distractor',
+    id: 'shared-no-emoji-distractor',
     type: 'user',
     title: 'User wants PR titles prefixed with a Conventional Commits type',
-    distractorFor: 'global-no-emoji',
+    distractorFor: 'shared-no-emoji',
     content:
       'Separately from the emoji preference, the user wants every PR title prefixed with a Conventional Commits type (feat:, fix:, etc.), matching the commit message convention.',
-    scope: 'global',
+    scope: 'project',
+    project: 'shared',
     daysAgo: 73,
   },
   {
