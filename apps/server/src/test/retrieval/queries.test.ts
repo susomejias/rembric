@@ -163,9 +163,14 @@ describe('the cross-project distractors are strong enough to displace gold', () 
   }
 
   it.each([
-    ['q-atlas-release-checklist', 'shared-release-step-'],
-    ['q-nimbus-oncall-runbook', 'shared-runbook-step-'],
-  ])('%s: a scope-blind read pulls %s rows into the page', async (queryId, prefix) => {
+    // `evictsGold` is in the table rather than derived at runtime, so a case
+    // that stops evicting fails instead of quietly taking the other branch.
+    // It can only be observed where the narrow page was FULL: `q-nimbus`
+    // returns five rows, so a widening that adds better-scoring foreign rows
+    // fills the page rather than pushing an answer off it.
+    ['q-atlas-release-checklist', 'shared-release-step-', true],
+    ['q-nimbus-oncall-runbook', 'shared-runbook-step-', false],
+  ])('%s: a scope-blind read pulls %s rows into the page', async (queryId, prefix, evictsGold) => {
     const q = QUERIES.find((item) => item.id === queryId)!;
     const distractorIds = CORPUS.filter((c) => c.id.startsWith(prefix)).map(
       (c) => corpus.idByStableId.get(c.id)!,
@@ -177,13 +182,28 @@ describe('the cross-project distractors are strong enough to displace gold', () 
     const narrow = await page(q.text, projectId, [projectId]);
     const widened = await page(q.text, projectId, [...corpus.projectIdBySlug.values()]);
 
-    // Non-vacuity: the narrow page answers the query, so the displacement
-    // below is a scope effect and not an empty-result artefact.
+    // Non-vacuity: the narrow page answers the query, so everything below is a
+    // scope effect and not an empty-result artefact.
     const narrowGold = narrow.filter((id: string) => goldIds.includes(id)).length;
     expect(narrowGold).toBeGreaterThan(0);
     expect(narrow.filter((id: string) => distractorIds.includes(id))).toEqual([]);
     expect(widened.filter((id: string) => distractorIds.includes(id)).length).toBeGreaterThan(0);
-    expect(widened.filter((id: string) => goldIds.includes(id)).length).toBeLessThan(narrowGold);
+
+    // Strength, stated as rank rather than as a count: a distractor that merely
+    // reached the page could have arrived last. These outrank an answer.
+    const bestDistractor = widened.findIndex((id: string) => distractorIds.includes(id));
+    const worstGold = widened.reduce(
+      (last: number, id: string, i: number) => (goldIds.includes(id) ? i : last),
+      -1,
+    );
+    expect(worstGold).toBeGreaterThan(bestDistractor);
+
+    if (evictsGold) {
+      expect(narrow).toHaveLength(8);
+      expect(widened.filter((id: string) => goldIds.includes(id)).length).toBeLessThan(narrowGold);
+    } else {
+      expect(narrow.length).toBeLessThan(8);
+    }
   });
 });
 
