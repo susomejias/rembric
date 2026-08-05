@@ -42,7 +42,14 @@ function fakeContext(p: Project): RequestContext {
     expiresAt: null,
     revokedAt: null,
   };
-  return { token, scope: '*', project: p, requestedSlug: p.slug, mcpSessionId: null };
+  return {
+    token,
+    scope: '*',
+    memberProjectIds: [],
+    project: p,
+    requestedSlug: p.slug,
+    mcpSessionId: null,
+  };
 }
 
 function parse<T>(raw: unknown): T {

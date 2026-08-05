@@ -95,7 +95,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     wipe(deps.handle);
   }
 
-  const tokensSvc = new TokensService(createRepositories(deps.handle.db));
+  const tokensSvc = new TokensService(createRepositories(deps.handle.db), deps.handle.db);
   const memorySvc = new MemoryService(createRepositories(deps.handle.db), deps.handle.db);
   const relationsSvc = new RelationsService(createRepositories(deps.handle.db), deps.handle.db);
   const sessionsSvc = new AgentSessionsService(createRepositories(deps.handle.db), deps.handle.db);

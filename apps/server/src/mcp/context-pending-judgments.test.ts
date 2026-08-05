@@ -42,6 +42,7 @@ function makeContext(token: Token): RequestContext {
   return {
     token,
     scope: SCOPE,
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { Project } from '../db/schema/projects.js';
 import type { Token } from '../db/schema/tokens.js';
-import type { TokenScope } from '../services/tokens.js';
+import type { TokenReach } from '../services/tokens.js';
 
 /**
  * Per-request context propagated through MCP tool handlers via
@@ -11,9 +11,14 @@ import type { TokenScope } from '../services/tokens.js';
  * who is calling and which project scope applies.
  */
 
-export interface RequestContext {
+/**
+ * Extends `TokenReach` (`scope` + `memberProjectIds`) so the context can be
+ * handed to `isAuthorized` whole: a call site cannot pass the scope string and
+ * forget the membership set, which would silently deny every set-scoped token.
+ * Both halves are re-read by `authenticate` on every request.
+ */
+export interface RequestContext extends TokenReach {
   token: Token;
-  scope: TokenScope;
   /**
    * Project resolved from the URL path `/mcp/<slug>` (or null when the
    * caller is on the unscoped `/mcp` endpoint, or when the requested

@@ -10,6 +10,7 @@ import {
 
 import { ulid } from 'ulid';
 
+import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { Project } from '../db/schema/projects.js';
 import { type Token } from '../db/schema/tokens.js';
@@ -37,10 +38,18 @@ import { DomainError } from './errors.js';
  *   - `read:*`                  → read across all scopes
  *   - `project:<id>`            → write to that single project
  *   - `read:project:<id>`       → read that single project
+ *   - `projects`                → write to the set in `token_projects`
+ *   - `read:projects`           → read that set
  *
  * The two project arms are composed by `create` from a resolved project
  * row, never accepted from a caller: `<id>` is compared against
  * `projects.id`, and a caller-supplied string could name a slug instead.
+ *
+ * The two set arms name no project, so they authorize nothing by string
+ * alone — deliberately, so that the union in `isAuthorized` can only add
+ * reach and a reader ignorant of `token_projects` under-authorizes. Spelling
+ * them as `*`/`read:*` plus a set was measured to reach every project
+ * regardless of the set.
  */
 
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keylen: 64 } as const;
@@ -49,18 +58,38 @@ const TOKEN_BYTES = 32;
 /** Bound on the verified-credential cache; oldest entry evicted past this. */
 const VERIFIED_CACHE_MAX = 64;
 
-export type TokenScope = '*' | 'read:*' | `project:${string}` | `read:project:${string}`;
+export type TokenScope =
+  | '*'
+  | 'read:*'
+  | `project:${string}`
+  | `read:project:${string}`
+  | 'projects'
+  | 'read:projects';
 
 /**
- * Reach is either global (the caller names the scope literal) or a single
- * project (the caller hands over the resolved row and an access verb). A
- * bare project id would re-admit a slug, so the row itself is required.
+ * Reach is unbound (the caller names the scope literal), a single project, or
+ * an explicit set of them; the last two carry an access verb. Resolved project
+ * ROWS throughout: a bare project id would re-admit a slug, and that is as true
+ * of the set as of the single arm.
  */
 export type TokenGrant =
-  | { scope: '*' | 'read:*'; project?: never; access?: never }
-  | { project: Project; access: 'read' | 'write'; scope?: never };
+  | { scope: '*' | 'read:*'; project?: never; projects?: never; access?: never }
+  | { project: Project; access: 'read' | 'write'; scope?: never; projects?: never }
+  | { projects: Project[]; access: 'read' | 'write'; scope?: never; project?: never };
 
 export type CreateTokenInput = { name: string; expiresAt?: Date | null } & TokenGrant;
+
+/**
+ * A credential's reach: what its scope string grants, plus the projects it
+ * reaches by membership. Both halves are required at every authorization
+ * decision, so `isAuthorized` takes them together rather than letting a call
+ * site supply one and forget the other.
+ */
+export interface TokenReach {
+  scope: TokenScope;
+  /** From `token_projects`; empty for every arm but `projects`/`read:projects`. */
+  memberProjectIds: readonly string[];
+}
 
 export interface CreatedToken {
   /** The plaintext secret. Shown to the operator exactly once. */
@@ -69,9 +98,8 @@ export interface CreatedToken {
   token: Token;
 }
 
-export interface ResolvedToken {
+export interface ResolvedToken extends TokenReach {
   token: Token;
-  scope: TokenScope;
 }
 
 export class TokensService {
@@ -80,6 +108,7 @@ export class TokensService {
 
   constructor(
     private readonly repos: Pick<Repositories, 'tokens'>,
+    private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     /** Injectable for tests; production callers use the default bound. */
     private readonly verifiedCacheMax: number = VERIFIED_CACHE_MAX,
@@ -99,18 +128,25 @@ export class TokensService {
     const plaintext = generatePlaintextToken();
     const hash = hashToken(plaintext);
     const ts = this.now();
-    const { scope, projectId } = composeGrant(input);
-    const row = this.repos.tokens.insert({
-      id: ulid(ts.getTime()),
-      name: input.name,
-      hash,
-      scope,
-      projectId,
-      createdAt: ts,
-      expiresAt: input.expiresAt ?? null,
-      revokedAt: null,
+    const { scope, projectId, memberProjectIds } = composeGrant(input);
+    const row = this.tx.transaction((): Token => {
+      const inserted = this.repos.tokens.insert({
+        id: ulid(ts.getTime()),
+        name: input.name,
+        hash,
+        scope,
+        projectId,
+        createdAt: ts,
+        expiresAt: input.expiresAt ?? null,
+        revokedAt: null,
+      });
+      if (!inserted)
+        throw new DomainError('conflict', 'tokens.create: insert did not return a row');
+      this.repos.tokens.insertProjects(
+        memberProjectIds.map((id) => ({ tokenId: inserted.id, projectId: id })),
+      );
+      return inserted;
     });
-    if (!row) throw new DomainError('conflict', 'tokens.create: insert did not return a row');
     return { plaintext, token: row };
   }
 
@@ -172,7 +208,15 @@ export class TokensService {
     if (row.expiresAt && row.expiresAt.getTime() <= this.now().getTime()) {
       throw new DomainError('token_expired', 'token has expired');
     }
-    return { token: row, scope: row.scope as TokenScope };
+    // Membership is read here, beside revoked/expired, and for the same reason:
+    // removing a project must take effect on the token's next request, so it is
+    // never carried in `verifiedCache` — that cache may live forever precisely
+    // because it substitutes for nothing on this path.
+    return {
+      token: row,
+      scope: row.scope as TokenScope,
+      memberProjectIds: this.repos.tokens.listProjectIds(row.id),
+    };
   }
 
   private cacheVerified(cacheKey: string, tokenId: string): void {
@@ -211,12 +255,39 @@ export class TokensService {
   }
 }
 
-function composeGrant(grant: TokenGrant): { scope: TokenScope; projectId: string | null } {
-  if (!grant.project) return { scope: grant.scope, projectId: null };
-  const base = grant.access === 'read' ? 'read:*' : '*';
+interface ComposedGrant {
+  scope: TokenScope;
+  projectId: string | null;
+  memberProjectIds: string[];
+}
+
+function composeGrant(grant: TokenGrant): ComposedGrant {
+  if (grant.projects) {
+    if (grant.projects.length === 0) {
+      throw new DomainError(
+        'invalid_input',
+        'tokens.create: a project set must name at least one project',
+      );
+    }
+    // One selection composes the SINGLE-project arm, not a one-member set, so
+    // the common case keeps the FK-enforced `project_id` binding.
+    if (grant.projects.length === 1) return singleProject(grant.projects[0]!, grant.access);
+    return {
+      scope: grant.access === 'read' ? 'read:projects' : 'projects',
+      projectId: null,
+      memberProjectIds: grant.projects.map((p) => p.id),
+    };
+  }
+  if (!grant.project) return { scope: grant.scope, projectId: null, memberProjectIds: [] };
+  return singleProject(grant.project, grant.access);
+}
+
+function singleProject(project: Project, access: 'read' | 'write'): ComposedGrant {
+  const base = access === 'read' ? 'read:*' : '*';
   return {
-    scope: projectScopedGrant(base, grant.project.id),
-    projectId: grant.project.id,
+    scope: projectScopedGrant(base, project.id),
+    projectId: project.id,
+    memberProjectIds: [],
   };
 }
 
@@ -262,10 +333,25 @@ function scryptAsync(
 }
 
 /**
- * Authorization checks against a token's scope. Used by the MCP middleware
+ * Authorization checks against a token's reach. Used by the MCP middleware
  * before dispatching tool calls.
+ *
+ * The union is additive: membership can only add authorizations, never remove
+ * one the scope string grants. That is what makes every pre-existing token —
+ * all of which have an empty membership set — observably unchanged.
  */
 export function isAuthorized(
+  reach: TokenReach,
+  action: 'read' | 'write',
+  target: { scope: 'global' | 'project'; projectId?: string | null },
+): boolean {
+  return (
+    authorizedByScope(reach.scope, action, target) || authorizedByMembership(reach, action, target)
+  );
+}
+
+/** What the scope string grants on its own. The two set arms grant nothing here. */
+function authorizedByScope(
   scope: TokenScope,
   action: 'read' | 'write',
   target: { scope: 'global' | 'project'; projectId?: string | null },
@@ -290,6 +376,22 @@ export function isAuthorized(
 }
 
 /**
+ * What the membership set grants. Confined to the two set arms: on a `*` or
+ * `read:*` base a set would be decorative — measured, base `read:*` with a set
+ * of {A, C} authorized project B — so a stray membership row widens nothing.
+ */
+function authorizedByMembership(
+  reach: TokenReach,
+  action: 'read' | 'write',
+  target: { scope: 'global' | 'project'; projectId?: string | null },
+): boolean {
+  if (reach.scope !== 'projects' && reach.scope !== 'read:projects') return false;
+  if (reach.scope === 'read:projects' && action !== 'read') return false;
+  if (target.scope !== 'project' || !target.projectId) return false;
+  return reach.memberProjectIds.includes(target.projectId);
+}
+
+/**
  * Narrow a global scope to a single project: `*` → `project:<id>`, `read:*` →
  * `read:project:<id>`. A null project leaves the scope unchanged. Lives beside
  * its inverse `pinnedProjectId` so the grammar has one writer and one reader;
@@ -306,6 +408,10 @@ export function projectScopedGrant(base: TokenScope, projectId: string | null): 
  * its caller holds a `TokenScope`, not a row — and the string is what
  * `isAuthorized` compares against. Legacy rows predating the enforced
  * binding still carry a slug here, and resolve to no project.
+ *
+ * Null for the two set arms too, and that is the answer rather than a gap: a
+ * set is not a pin, so there is no single project to name, and every caller
+ * treats null as "no pin to reason about" — which is fail-closed.
  */
 export function pinnedProjectId(scope: TokenScope): string | null {
   if (scope.startsWith('read:project:')) return scope.slice('read:project:'.length);

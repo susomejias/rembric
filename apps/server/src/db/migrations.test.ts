@@ -624,6 +624,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0029_tokens_project_binding.sql',
       '0030_memory_fts_vocab.sql',
       '0031_default_project.sql',
+      '0032_token_projects.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1097,7 +1098,11 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
     expect(() => df('ubiquitousterm')).toThrow(); // the table does not exist yet
 
     const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
-    expect(result.applied).toEqual(['0030_memory_fts_vocab.sql', '0031_default_project.sql']);
+    expect(result.applied).toEqual([
+      '0030_memory_fts_vocab.sql',
+      '0031_default_project.sql',
+      '0032_token_projects.sql',
+    ]);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);
     expect(df('rareterm7')).toBe(1);

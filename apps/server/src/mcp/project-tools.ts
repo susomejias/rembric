@@ -108,7 +108,7 @@ function handleUse(
       // otherwise a read action. A project minted here can never match a
       // project-pinned token id, so gate on an anonymous project target
       // BEFORE creating the row.
-      if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: null })) {
+      if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: null })) {
         return mcpError(
           'forbidden',
           `token scope '${ctx.scope}' does not authorize creating project '${args.slug}'`,
@@ -198,10 +198,11 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
   const ctx = getRequestContext();
   const includeArchived = args.includeArchived === true;
   // Filtered to what the token may read: `*`/`read:*` see all projects,
-  // `project:<id>`/`read:project:<id>` see only that project.
+  // `project:<id>`/`read:project:<id>` see only that project, and a set arm
+  // sees exactly its members.
   const rows = deps.projects
     .list(includeArchived)
-    .filter((p) => isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: p.id }));
+    .filter((p) => isAuthorized(ctx, 'read', { scope: 'project', projectId: p.id }));
 
   return ok({
     projects: rows.map((p) => ({

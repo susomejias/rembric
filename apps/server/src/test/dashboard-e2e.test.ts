@@ -378,7 +378,7 @@ describe('dashboard E2E', () => {
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
-    const tokensSvc = new TokensService(createRepositories(handle.db));
+    const tokensSvc = new TokensService(createRepositories(handle.db), handle.db);
     const admin = handle.db.select().from(tokensSchema).where(eq(tokensSchema.name, 'admin')).get();
     void tokensSvc;
     const proj = new ProjectsService(createRepositories(handle.db)).create({

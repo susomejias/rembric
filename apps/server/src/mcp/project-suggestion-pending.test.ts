@@ -50,6 +50,7 @@ function makeContext(overrides: Partial<RequestContext> = {}): RequestContext {
   return {
     token: adminToken,
     scope: SCOPE,
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
@@ -75,7 +76,7 @@ beforeEach(() => {
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
   tokens.bootstrapAdmin('project-suggestion-pending-test-admin-zzz');
   adminToken = db.handle.db
     .select()

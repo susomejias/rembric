@@ -55,7 +55,7 @@ describe('maintenance — on-demand backup', () => {
     t = createTestDb();
     repos = createRepositories(t.handle.db);
     sessions = new SessionsService(repos, randomBytes(32));
-    tokensSvc = new TokensService(repos);
+    tokensSvc = new TokensService(repos, t.handle.db);
   });
 
   afterEach(() => t.cleanup());

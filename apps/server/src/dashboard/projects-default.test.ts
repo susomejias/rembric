@@ -28,7 +28,7 @@ describe('the projects list marks the system default', () => {
     const repos = createRepositories(t.handle.db);
     projects = new ProjectsService(repos);
     const sessions = new SessionsService(repos, randomBytes(32));
-    const admin = new TokensService(repos).create({ name: 'admin', scope: '*' });
+    const admin = new TokensService(repos, t.handle.db).create({ name: 'admin', scope: '*' });
     const created = sessions.create(admin.token.id);
     const session: ResolvedSession = {
       session: created.session,

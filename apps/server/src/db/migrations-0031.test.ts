@@ -75,8 +75,20 @@ function insertProject(handle: DbHandle, id: string, slug: string): void {
 }
 
 function census(handle: DbHandle): Census {
+  // Restricted to what exists at this checkpoint: the fixture stages only the
+  // migrations up to 0031, so a table a LATER migration creates is absent by
+  // construction and counting it would fail the census rather than test 0031.
+  // A table that vanished across the migration still fails, as a key the after
+  // census lacks.
+  const present = new Set(
+    handle.raw
+      .prepare<[], { name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all()
+      .map((r) => r.name),
+  );
   const out: Census = {};
   for (const t of CENSUS_TABLES) {
+    if (!present.has(t)) continue;
     out[t] = handle.raw.prepare<[], { n: number }>(`SELECT count(*) AS n FROM ${t}`).get()?.n ?? 0;
   }
   return out;

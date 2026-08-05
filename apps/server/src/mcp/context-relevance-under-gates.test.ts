@@ -45,6 +45,7 @@ function ctx(): RequestContext {
   return {
     token,
     scope: '*',
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: 'mcp-sess-context-gates',

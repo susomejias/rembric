@@ -12,6 +12,7 @@ import type { Project } from '../db/schema/projects.js';
 import { tokens as tokensTable } from '../db/schema/tokens.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { ProjectsService } from '../services/projects.js';
+import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';
@@ -245,6 +246,32 @@ describe('token project sets', () => {
       } catch {
         return { ok: false, code: text.slice(0, 120) };
       }
+    } finally {
+      await client.close().catch(() => {});
+    }
+  }
+
+  /** A successful tool call's payload. Throws on a refusal, so a denial cannot read as an empty list. */
+  async function mcpPayload(
+    path: string,
+    token: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const client = new Client({ name: 'set-scope-probe', version: '0.0.0' }, { capabilities: {} });
+    const transport = new StreamableHTTPClientTransport(new URL(path, baseUrl), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    await client.connect(transport);
+    try {
+      const res = (await client.callTool({ name: tool, arguments: args })) as {
+        isError?: boolean;
+        structuredContent?: Record<string, unknown>;
+        content?: Array<{ type: string; text?: string }>;
+      };
+      const text = res.content?.find((c) => c.type === 'text')?.text ?? '';
+      expect(res.isError, `${tool} on ${path} was refused: ${text}`).not.toBe(true);
+      return res.structuredContent ?? {};
     } finally {
       await client.close().catch(() => {});
     }
@@ -661,6 +688,53 @@ describe('token project sets', () => {
           code: null,
         });
       }
+    });
+
+    it('reaches exactly its members at every gate, including the two project tools', async () => {
+      // Minted through the SERVICE rather than the form: the form composes the
+      // set arm only once the dashboard handler lands, so this is the union's
+      // end-to-end evidence until then. Every other test in this file keeps the
+      // form as its producer.
+      const svc = new TokensService(createRepositories(server.dbHandle.db), server.dbHandle.db);
+      const { plaintext: set } = svc.create({
+        name: 'set-service-minted',
+        projects: [alpha, gamma],
+        access: 'write',
+      });
+      const home = defaultProject(server.dbHandle);
+
+      expect(await mcpRead(`/mcp/${alpha.slug}`, set)).toEqual({ ok: true });
+      expect(await mcpWrite(`/mcp/${gamma.slug}`, set, 'svc-set')).toEqual({ ok: true });
+      expect(await apiSession(gamma.slug, set)).toEqual({ status: 200, code: null });
+      expect(await mcpRead(`/mcp/${beta.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
+      expect(await apiSession(beta.slug, set)).toEqual({ status: 403, code: 'forbidden' });
+
+      // `project.list` filters on `isAuthorized` (`mcp/project-tools.ts`), so a
+      // set token sees exactly its members. The absences are what make the two
+      // present slugs evidence of a filter rather than of a list.
+      const listed = await mcpPayload('/mcp', set, 'project.list', {});
+      const slugs = (listed.projects as Array<{ slug: string }>).map((p) => p.slug);
+      expect(slugs.sort()).toEqual([alpha.slug, gamma.slug].sort());
+      expect(slugs).not.toContain(beta.slug);
+      expect(slugs).not.toContain(home.slug);
+
+      // `project.use`'s read gate is that same function, on a fresh transport
+      // per call so neither answer is a switch-confirmation.
+      expect(await mcpCall('/mcp', set, 'project.use', { slug: gamma.slug })).toEqual({ ok: true });
+      expect(await mcpCall('/mcp', set, 'project.use', { slug: beta.slug })).toEqual({
+        ok: false,
+        code: 'forbidden',
+      });
+
+      // Last, so nothing above is affected: membership is authorization state,
+      // so removing a member lands on the very next request. Every probe above
+      // has already put this plaintext in the credential-lookup cache, which is
+      // the path that must not answer from a stale set.
+      const row = persisted('set-service-minted');
+      removeMember(row!.id, gamma.id);
+      expect(await mcpRead(`/mcp/${gamma.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
+      expect(await apiSession(gamma.slug, set)).toEqual({ status: 403, code: 'forbidden' });
+      expect(await mcpRead(`/mcp/${alpha.slug}`, set)).toEqual({ ok: true });
     });
 
     it('cannot create the project it would need to reach', async () => {
