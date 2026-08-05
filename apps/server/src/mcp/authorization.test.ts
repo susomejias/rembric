@@ -76,6 +76,7 @@ function ctxFor(scope: TokenScope, overrides: Partial<RequestContext> = {}): Req
   return {
     token: tokenFor(scope),
     scope,
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
@@ -114,7 +115,7 @@ beforeEach(() => {
   agentSessions = new AgentSessionsService(repos, db.handle.db);
   prompts = new PromptsService(repos, db.handle.db);
   relations = new RelationsService(repos, db.handle.db);
-  tokens = new TokensService(repos);
+  tokens = new TokensService(repos, db.handle.db);
   tokenByScope = new Map();
   projectA = projects.create({ slug: 'authz-proj-a' });
   projectB = projects.create({ slug: 'authz-proj-b' });

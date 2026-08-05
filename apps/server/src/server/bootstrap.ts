@@ -104,7 +104,7 @@ export async function bootstrap(
   const repos = createRepositories(dbHandle.db);
   const dbDiagnostics = createDiagnostics(dbHandle);
 
-  const tokens = new TokensService(repos);
+  const tokens = new TokensService(repos, dbHandle.db);
   const projects = new ProjectsService(repos);
   const agentSessionsSvc = new AgentSessionsService(repos, dbHandle.db);
   const promptsSvc = new PromptsService(repos, dbHandle.db);

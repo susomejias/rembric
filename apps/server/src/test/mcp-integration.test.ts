@@ -1463,7 +1463,7 @@ describe('MCP protocol conformance', () => {
   it('a project-pinned token denied the default project is told how to reach its own, at the wire', async () => {
     const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
     const own = projectsSvc.create({ slug: 'pinned-remedy-proj' });
-    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db));
+    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db), server.dbHandle.db);
     const pinned = tokensSvc.create({ name: 'pinned-remedy', project: own, access: 'write' });
 
     const pathless = await connect({ token: pinned.plaintext });
@@ -1779,7 +1779,7 @@ describe('MCP protocol conformance', () => {
     const dflt = defaultProject(server.dbHandle);
     const repos = createRepositories(server.dbHandle.db);
     const elsewhere = new ProjectsService(repos).create({ slug: 'refusal-enum-proj' });
-    const pinned = new TokensService(repos).create({
+    const pinned = new TokensService(repos, server.dbHandle.db).create({
       name: 'refusal-enum',
       project: elsewhere,
       access: 'read',
@@ -3170,7 +3170,7 @@ describe('HTTP hardening (real server)', () => {
 
   it('returns an identical 401 for a valid-non-admin vs an invalid login token', async () => {
     // Mint a real, valid, non-admin token on the server's own connection.
-    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db));
+    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db), server.dbHandle.db);
     const nonAdmin = tokensSvc.create({ name: 'ro-login', scope: 'read:*' });
 
     async function login(token: string): Promise<{ status: number; text: string }> {

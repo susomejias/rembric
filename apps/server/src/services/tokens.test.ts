@@ -3,14 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
-import { isAuthorized, TokensService, type CreateTokenInput } from './tokens.js';
+import {
+  isAuthorized,
+  pinnedProjectId,
+  TokensService,
+  type CreateTokenInput,
+  type TokenReach,
+  type TokenScope,
+} from './tokens.js';
 
 let db: TestDb;
 let tokens: TokensService;
 
 beforeEach(() => {
   db = createTestDb();
-  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
 });
 
 afterEach(() => {
@@ -43,8 +50,10 @@ describe('TokensService.create', () => {
       { name: 'slug-write', scope: 'project:alpha' },
       // @ts-expect-error same for the read arm, `read:project:<id>`
       { name: 'slug-read', scope: 'read:project:alpha' },
+      // @ts-expect-error the set arm takes resolved project ROWS; a bare slug would re-admit the same defect
+      { name: 'slug-set', projects: ['alpha'], access: 'write' },
     ];
-    expect(rejected).toHaveLength(2);
+    expect(rejected).toHaveLength(3);
   });
 });
 
@@ -94,36 +103,96 @@ describe('TokensService.bootstrapAdmin', () => {
   });
 });
 
+/** The reach of every token shape that predates `token_projects`: no members. */
+const unbound = (scope: TokenScope): TokenReach => ({ scope, memberProjectIds: [] });
+
 describe('isAuthorized', () => {
   it('admin can do anything', () => {
-    expect(isAuthorized('*', 'write', { scope: 'global' })).toBe(true);
-    expect(isAuthorized('*', 'read', { scope: 'project', projectId: 'p' })).toBe(true);
+    expect(isAuthorized(unbound('*'), 'write', { scope: 'global' })).toBe(true);
+    expect(isAuthorized(unbound('*'), 'read', { scope: 'project', projectId: 'p' })).toBe(true);
   });
 
   it('read:* allows reads but rejects writes', () => {
-    expect(isAuthorized('read:*', 'read', { scope: 'global' })).toBe(true);
-    expect(isAuthorized('read:*', 'write', { scope: 'global' })).toBe(false);
+    expect(isAuthorized(unbound('read:*'), 'read', { scope: 'global' })).toBe(true);
+    expect(isAuthorized(unbound('read:*'), 'write', { scope: 'global' })).toBe(false);
   });
 
   it('project:<id> restricts to that project', () => {
-    expect(isAuthorized('project:abc', 'write', { scope: 'project', projectId: 'abc' })).toBe(true);
-    expect(isAuthorized('project:abc', 'write', { scope: 'project', projectId: 'xyz' })).toBe(
-      false,
-    );
-    expect(isAuthorized('project:abc', 'write', { scope: 'global' })).toBe(false);
+    expect(
+      isAuthorized(unbound('project:abc'), 'write', { scope: 'project', projectId: 'abc' }),
+    ).toBe(true);
+    expect(
+      isAuthorized(unbound('project:abc'), 'write', { scope: 'project', projectId: 'xyz' }),
+    ).toBe(false);
+    expect(isAuthorized(unbound('project:abc'), 'write', { scope: 'global' })).toBe(false);
     // The premise the include_global widening gate rests on: neither
     // project-pinned form may READ global either.
-    expect(isAuthorized('project:abc', 'read', { scope: 'global' })).toBe(false);
-    expect(isAuthorized('read:project:abc', 'read', { scope: 'global' })).toBe(false);
+    expect(isAuthorized(unbound('project:abc'), 'read', { scope: 'global' })).toBe(false);
+    expect(isAuthorized(unbound('read:project:abc'), 'read', { scope: 'global' })).toBe(false);
   });
 
   it('read:project:<id> only allows reads of that project', () => {
-    expect(isAuthorized('read:project:abc', 'read', { scope: 'project', projectId: 'abc' })).toBe(
+    expect(
+      isAuthorized(unbound('read:project:abc'), 'read', { scope: 'project', projectId: 'abc' }),
+    ).toBe(true);
+    expect(
+      isAuthorized(unbound('read:project:abc'), 'write', { scope: 'project', projectId: 'abc' }),
+    ).toBe(false);
+  });
+
+  it('the two set literals authorize nothing by string alone', () => {
+    // The union's base. Both fall through to the final `return false`: neither
+    // is `*`/`read:*`, and `'projects'.startsWith('project:')` is false because
+    // position 7 is 's', not ':' — asserted rather than reasoned about.
+    expect('projects'.startsWith('project:')).toBe(false);
+    expect('read:projects'.startsWith('read:project:')).toBe(false);
+    for (const scope of ['projects', 'read:projects'] as const) {
+      for (const action of ['read', 'write'] as const) {
+        for (const target of [
+          { scope: 'global' } as const,
+          { scope: 'project', projectId: 'abc' } as const,
+          { scope: 'project', projectId: null } as const,
+        ]) {
+          expect(isAuthorized(unbound(scope), action, target), `${scope}/${action}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('membership adds reach to the set arms, and to nothing else', () => {
+    const set = (scope: TokenScope): TokenReach => ({ scope, memberProjectIds: ['abc', 'def'] });
+    expect(isAuthorized(set('projects'), 'write', { scope: 'project', projectId: 'abc' })).toBe(
       true,
     );
-    expect(isAuthorized('read:project:abc', 'write', { scope: 'project', projectId: 'abc' })).toBe(
+    expect(isAuthorized(set('projects'), 'read', { scope: 'project', projectId: 'def' })).toBe(
+      true,
+    );
+    expect(isAuthorized(set('projects'), 'write', { scope: 'project', projectId: 'xyz' })).toBe(
       false,
     );
+    expect(isAuthorized(set('projects'), 'write', { scope: 'global' })).toBe(false);
+
+    // The verb is not widened by membership.
+    expect(isAuthorized(set('read:projects'), 'read', { scope: 'project', projectId: 'abc' })).toBe(
+      true,
+    );
+    expect(
+      isAuthorized(set('read:projects'), 'write', { scope: 'project', projectId: 'abc' }),
+    ).toBe(false);
+
+    // A membership row on any other arm is inert: on a `read:*` base the set
+    // would otherwise be decorative, since that base already reads everything.
+    expect(isAuthorized(set('read:*'), 'write', { scope: 'project', projectId: 'abc' })).toBe(
+      false,
+    );
+    expect(isAuthorized(set('project:abc'), 'write', { scope: 'project', projectId: 'def' })).toBe(
+      false,
+    );
+  });
+
+  it('the set arms are pinned to no project', () => {
+    expect(pinnedProjectId('projects')).toBeNull();
+    expect(pinnedProjectId('read:projects')).toBeNull();
   });
 });
 
@@ -139,7 +208,7 @@ describe('TokensService.authenticate — verified-credential cache (#266)', () =
     // shared `tokens` from the outer beforeEach wraps its own, separate
     // Repositories object, so a spy on this file's `repos` would never
     // observe calls made through it.
-    const scopedTokens = new TokensService(repos);
+    const scopedTokens = new TokensService(repos, db.handle.db);
     const { plaintext } = scopedTokens.create({ name: 'cached', scope: '*' });
     const listAllSpy = vi.spyOn(repos.tokens, 'listAll');
 
@@ -161,7 +230,7 @@ describe('TokensService.authenticate — verified-credential cache (#266)', () =
 
   it('expiry takes effect on the very next request despite a warm cache', async () => {
     let nowMs = 1_000;
-    const clockedTokens = new TokensService(repos, () => new Date(nowMs));
+    const clockedTokens = new TokensService(repos, db.handle.db, () => new Date(nowMs));
     const { plaintext } = clockedTokens.create({
       name: 'expiring',
       scope: '*',
@@ -187,7 +256,7 @@ describe('TokensService.authenticate — verified-credential cache (#266)', () =
   it('evicts the oldest entry once the cache exceeds its bound', async () => {
     // Small injected bound so this proves the eviction policy without
     // paying for dozens of real scrypt verifies (the whole point of #266).
-    const smallCacheTokens = new TokensService(repos, undefined, 2);
+    const smallCacheTokens = new TokensService(repos, db.handle.db, undefined, 2);
     const p1 = smallCacheTokens.create({ name: 'evict-1', scope: '*' }).plaintext;
     const p2 = smallCacheTokens.create({ name: 'evict-2', scope: '*' }).plaintext;
     const p3 = smallCacheTokens.create({ name: 'evict-3', scope: '*' }).plaintext;

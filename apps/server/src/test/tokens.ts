@@ -11,6 +11,6 @@ export function mintTestToken(
   grant: TokenGrant = { scope: '*' },
   name = `test-${Math.random().toString(36).slice(2, 10)}`,
 ): CreatedToken {
-  const tokens = new TokensService(createRepositories(handle.db));
+  const tokens = new TokensService(createRepositories(handle.db), handle.db);
   return tokens.create({ name, ...grant });
 }

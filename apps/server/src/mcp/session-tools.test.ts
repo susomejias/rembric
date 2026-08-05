@@ -36,6 +36,7 @@ function makeContext(): RequestContext {
   return {
     token: adminToken,
     scope: SCOPE,
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: null,
@@ -57,7 +58,7 @@ beforeEach(() => {
   defaultProjectId = defaultProject(db.handle).id;
   projects = new ProjectsService(createRepositories(db.handle.db));
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
   tokens.bootstrapAdmin('session-tools-test-admin-zzz');
   adminToken = db.handle.db

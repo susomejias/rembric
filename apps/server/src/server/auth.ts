@@ -2,7 +2,7 @@ import type { Token } from '../db/schema/tokens.js';
 import { DomainError } from '../services/errors.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
-import type { TokenScope, TokensService } from '../services/tokens.js';
+import type { ResolvedToken, TokenScope, TokensService } from '../services/tokens.js';
 
 import type { RequestContext } from './request-context.js';
 
@@ -84,6 +84,7 @@ export async function authenticate(input: {
   return {
     token: resolved.token,
     scope: resolved.scope,
+    memberProjectIds: resolved.memberProjectIds,
     project,
     requestedSlug: pathSlug && pathSlug.length > 0 ? pathSlug : null,
     mcpSessionId: null,
@@ -100,7 +101,7 @@ async function resolveToken(
   plaintext: string,
   tokens: TokensService,
   oauth: OAuthService | null,
-): Promise<{ token: Token; scope: TokenScope }> {
+): Promise<ResolvedToken> {
   try {
     return await tokens.authenticate(plaintext);
   } catch (err) {
@@ -118,6 +119,10 @@ async function resolveToken(
         return {
           token: syntheticOAuthToken(oa.clientId, oa.scope, oa.projectId),
           scope: oa.scope,
+          // An OAuth grant is bound to the one project it was consented for
+          // (RFC 8707 `resource` is a single URL), and `oauth:<clientId>` is no
+          // `tokens` row, so there is no membership to read.
+          memberProjectIds: [],
         };
       }
     }

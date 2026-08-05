@@ -47,6 +47,7 @@ function fakeContext(project: Project | null): RequestContext {
   return {
     token,
     scope: ADMIN_TOKEN_SCOPE,
+    memberProjectIds: [],
     project,
     requestedSlug: project?.slug ?? null,
     mcpSessionId: null,
@@ -1202,6 +1203,7 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     return {
       token,
       scope: ADMIN_TOKEN_SCOPE,
+      memberProjectIds: [],
       project: null,
       requestedSlug: null,
       mcpSessionId: MCP_SESSION,
@@ -1309,6 +1311,7 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
     return {
       token,
       scope: ADMIN_TOKEN_SCOPE,
+      memberProjectIds: [],
       project: null,
       requestedSlug: null,
       mcpSessionId: MCP_SESSION,
@@ -1419,7 +1422,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     const { eq } = await import('drizzle-orm');
 
     agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-    const tokens = new TokensService(createRepositories(db.handle.db));
+    const tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
     tokens.bootstrapAdmin('attachment-test-token-with-enough-entropy');
     const admin = db.handle.db
       .select()
@@ -1549,7 +1552,7 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
     const { eq } = await import('drizzle-orm');
 
     agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
-    const tokens = new TokensService(createRepositories(db.handle.db));
+    const tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
     tokens.bootstrapAdmin('confirm-attachment-test-token-with-enough-entropy');
     const admin = db.handle.db
       .select()
@@ -1650,6 +1653,7 @@ describe('memory.search — no argument widens the resolved scope', () => {
     return {
       token,
       scope,
+      memberProjectIds: [],
       project: opts.project ?? null,
       requestedSlug: opts.project?.slug ?? null,
       mcpSessionId: opts.mcpSessionId ?? null,
@@ -1743,6 +1747,7 @@ describe('an unresolvable path slug establishes no scope', () => {
     const ctx: RequestContext = {
       token,
       scope: ADMIN_TOKEN_SCOPE,
+      memberProjectIds: [],
       project: null,
       requestedSlug: 'no-such-project',
       mcpSessionId: null,

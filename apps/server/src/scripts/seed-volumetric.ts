@@ -509,7 +509,7 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   let clockMs = CORPUS_EPOCH_MS;
   const clock = (): Date => new Date(clockMs);
   const projectsSvc = new ProjectsService(repos, clock);
-  const tokensSvc = new TokensService(repos, clock);
+  const tokensSvc = new TokensService(repos, handle.db, clock);
   const memorySvc = new MemoryService(repos, handle.db, clock);
   const sessionsSvc = new AgentSessionsService(repos, handle.db, clock);
   const relationsSvc = new RelationsService(repos, handle.db, clock);

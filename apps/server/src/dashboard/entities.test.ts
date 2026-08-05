@@ -47,7 +47,7 @@ describe('dashboard entities view', () => {
     t = createTestDb();
     repos = createRepositories(t.handle.db);
     sessions = new SessionsService(repos, randomBytes(32));
-    tokensSvc = new TokensService(repos);
+    tokensSvc = new TokensService(repos, t.handle.db);
     memory = new MemoryService(repos, t.handle.db);
     entityBackfillWorker = new EntityBackfillWorker({ repos, tx: t.handle.db });
   });

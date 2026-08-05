@@ -96,7 +96,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
-    if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: ctx.project.id })) {
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
       return c.json(
         { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
         403,
@@ -136,7 +136,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
-    if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: ctx.project.id })) {
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
       return c.json(
         { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
         403,
@@ -180,7 +180,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
-    if (!isAuthorized(ctx.scope, 'write', { scope: 'project', projectId: ctx.project.id })) {
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
       return c.json(
         { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
         403,
@@ -222,7 +222,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     if (!ctx.project) {
       return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
     }
-    if (!isAuthorized(ctx.scope, 'read', { scope: 'project', projectId: ctx.project.id })) {
+    if (!isAuthorized(ctx, 'read', { scope: 'project', projectId: ctx.project.id })) {
       return c.json(
         { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
         403,

@@ -83,6 +83,7 @@ function ctxFor(overrides: Partial<RequestContext> = {}): RequestContext {
   return {
     token: adminToken,
     scope: ADMIN,
+    memberProjectIds: [],
     project: null,
     requestedSlug: UNRESOLVABLE,
     mcpSessionId: 'mcp-sess-unresolvable',

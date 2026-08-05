@@ -134,7 +134,7 @@ export function unresolvableSlug(): string | null {
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
 export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean {
   const ctx = getRequestContext();
-  return isAuthorized(ctx.scope, action, {
+  return isAuthorized(ctx, action, {
     scope: scope.kind,
     projectId: scope.kind === 'project' ? scope.projectId : null,
   });
@@ -148,7 +148,7 @@ function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsS
   // A path-scoped connection would have `project.use` refused as `scope_locked`.
   if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
-  if (pinned === null) return '';
+  if (pinned === null) return projectSetRemedy(ctx, scope, projects);
   // Re-activating the scope already active cannot change the answer.
   if (scope.kind === 'project' && scope.projectId === pinned) return '';
   // A token row predating the enforced project binding carries a SLUG here
@@ -158,6 +158,28 @@ function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsS
   return (
     `; this token is pinned to project '${slug}' — call project.use({slug: '${slug}'}) ` +
     `or reconnect at '/mcp/${slug}'`
+  );
+}
+
+/**
+ * The same way in for a set-scoped token denied a project outside its set.
+ * Names EVERY member: naming one arbitrary member would read as the whole
+ * reach. Empty when the denied project is itself a member, because then the
+ * refusal is the access verb and no `project.use` changes it.
+ */
+function projectSetRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
+  if (ctx.scope !== 'projects' && ctx.scope !== 'read:projects') return '';
+  if (scope.kind === 'project' && ctx.memberProjectIds.includes(scope.projectId)) return '';
+  const slugs = ctx.memberProjectIds
+    .map((id) => projects.getById(id)?.slug)
+    .filter((slug): slug is string => slug !== undefined)
+    .sort();
+  const first = slugs[0];
+  if (first === undefined) return '';
+  const named = slugs.map((slug) => `'${slug}'`).join(', ');
+  return (
+    `; this token reaches ${slugs.length === 1 ? 'project' : 'projects'} ${named} — ` +
+    `call project.use({slug: '${first}'}) or reconnect at '/mcp/${first}'`
   );
 }
 

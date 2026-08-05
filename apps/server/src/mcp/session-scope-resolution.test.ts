@@ -52,6 +52,7 @@ function makeContext(token: Token, overrides: Partial<RequestContext> = {}): Req
   return {
     token,
     scope: SCOPE,
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: MCP_SESSION_ID,
@@ -78,7 +79,7 @@ beforeEach(() => {
   router = new SessionRouter();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
   prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
-  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
   tokens.bootstrapAdmin('scope-resolution-test-admin-zzz');
   adminToken = db.handle.db
     .select()

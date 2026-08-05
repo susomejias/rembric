@@ -40,7 +40,7 @@ async function call(token?: string): Promise<{ status: number; body: Record<stri
 
 beforeEach(() => {
   db = createTestDb();
-  tokens = new TokensService(createRepositories(db.handle.db));
+  tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
   projects = new ProjectsService(createRepositories(db.handle.db));
   app = mount();
 });

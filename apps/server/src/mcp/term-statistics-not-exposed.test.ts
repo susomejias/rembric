@@ -44,6 +44,7 @@ function context(): RequestContext {
   return {
     token,
     scope: '*',
+    memberProjectIds: [],
     project: null,
     requestedSlug: null,
     mcpSessionId: 'mcp-sess-term-stats',

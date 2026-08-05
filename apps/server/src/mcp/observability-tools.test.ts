@@ -173,7 +173,14 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
       expiresAt: null,
       revokedAt: null,
     };
-    return { token, scope: '*', project: null, requestedSlug: null, mcpSessionId: null };
+    return {
+      token,
+      scope: '*',
+      memberProjectIds: [],
+      project: null,
+      requestedSlug: null,
+      mcpSessionId: null,
+    };
   }
 
   beforeEach(() => {

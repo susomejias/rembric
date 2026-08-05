@@ -36,6 +36,7 @@ function fakeContext(project: Project | null = null): RequestContext {
   return {
     token,
     scope: '*',
+    memberProjectIds: [],
     project,
     requestedSlug: project?.slug ?? null,
     mcpSessionId: null,
