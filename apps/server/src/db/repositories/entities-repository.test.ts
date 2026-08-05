@@ -339,16 +339,16 @@ describe('EntitiesRepository', () => {
       insertMemory('m-p1', { projectId: 'p1' });
       insertMemory('m-p2', { projectId: 'p2' });
 
-      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(1);
-      expect(repo.countPendingScans({ projectId: 'p1' })).toBe(1);
-      expect(repo.countPendingScans({ projectId: 'p2' })).toBe(1);
+      expect(repo.countPendingScans({ scope: projectScope('p0') })).toBe(1);
+      expect(repo.countPendingScans({ scope: projectScope('p1') })).toBe(1);
+      expect(repo.countPendingScans({ scope: projectScope('p2') })).toBe(1);
     });
 
     it('reaches zero once the scope is drained', () => {
       insertMemory('g1');
-      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(1);
+      expect(repo.countPendingScans({ scope: projectScope('p0') })).toBe(1);
       repo.linkMemory('g1', 'p0', [], new Date());
-      expect(repo.countPendingScans({ projectId: 'p0' })).toBe(0);
+      expect(repo.countPendingScans({ scope: projectScope('p0') })).toBe(0);
     });
   });
 
