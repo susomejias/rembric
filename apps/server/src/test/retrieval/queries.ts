@@ -1,8 +1,7 @@
+import { type PROJECTS } from './corpus.js';
 import type { QueryItem, QueryScopeFixture } from './types.js';
 
-const GLOBAL: QueryScopeFixture = { scope: 'global' };
-
-function project(slug: 'atlas' | 'nimbus'): QueryScopeFixture {
+function project(slug: (typeof PROJECTS)[number]['slug']): QueryScopeFixture {
   return { scope: 'project', project: slug };
 }
 
@@ -64,7 +63,7 @@ export const QUERIES: QueryItem[] = [
     text: 'how does the user like PRs reviewed',
     type: 'preference',
     goldStableIds: ['pref-pr-review-depth'],
-    scope: GLOBAL,
+    scope: project('shared'),
   },
   {
     id: 'q-pref-nimbus-docstrings',
@@ -152,18 +151,18 @@ export const QUERIES: QueryItem[] = [
     scope: project('nimbus'),
   },
   {
-    id: 'q-abstain-global-shell-theme',
+    id: 'q-abstain-shared-shell-theme',
     text: 'what terminal shell and prompt theme does the user prefer',
     type: 'abstention',
     goldStableIds: [],
-    scope: GLOBAL,
+    scope: project('shared'),
   },
   {
-    id: 'q-abstain-global-changelog',
+    id: 'q-abstain-shared-changelog',
     text: 'how does the user want changelog entries written for a release',
     type: 'abstention',
     goldStableIds: [],
-    scope: GLOBAL,
+    scope: project('shared'),
   },
 
   {
@@ -178,8 +177,8 @@ export const QUERIES: QueryItem[] = [
     id: 'q-es-commit-language',
     text: 'en qué idioma deben escribirse los mensajes de commit',
     type: 'preference',
-    goldStableIds: ['global-commit-language-es'],
-    scope: GLOBAL,
+    goldStableIds: ['shared-commit-language-es'],
+    scope: project('shared'),
     bilingual: true,
   },
   {

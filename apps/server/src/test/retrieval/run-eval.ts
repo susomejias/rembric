@@ -123,15 +123,11 @@ function checkSanity(corpus: IngestedCorpus, reports: RetrieverReport[]): string
     );
   }
   const projectSlugById = new Map([...corpus.projectIdBySlug].map(([slug, id]) => [id, slug]));
-  const byScope = new Map<string, number>([
-    ['global', 0],
-    ...[...projectSlugById.values()].map((slug) => [slug, 0] as const),
-  ]);
+  const byScope = new Map<string, number>(
+    [...projectSlugById.values()].map((slug) => [slug, 0] as const),
+  );
   for (const item of corpus.items) {
-    const key =
-      item.scope === 'global'
-        ? 'global'
-        : (projectSlugById.get(item.projectId!) ?? item.projectId!);
+    const key = projectSlugById.get(item.projectId!) ?? item.projectId!;
     byScope.set(key, (byScope.get(key) ?? 0) + 1);
   }
   for (const [scope, count] of byScope) {
