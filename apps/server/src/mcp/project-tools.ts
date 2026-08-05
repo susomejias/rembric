@@ -12,6 +12,7 @@ import { isAuthorized } from '../services/tokens.js';
 
 import {
   assertAuthorized,
+  readableProjects,
   resolveEffectiveScopeOrNull,
   routerKey,
   type EffectiveScope,
@@ -195,14 +196,10 @@ function handleUse(
 }
 
 function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) {
-  const ctx = getRequestContext();
-  const includeArchived = args.includeArchived === true;
   // Filtered to what the token may read: `*`/`read:*` see all projects,
   // `project:<id>`/`read:project:<id>` see only that project, and a set arm
   // sees exactly its members.
-  const rows = deps.projects
-    .list(includeArchived)
-    .filter((p) => isAuthorized(ctx, 'read', { scope: 'project', projectId: p.id }));
+  const rows = readableProjects(deps.projects, args.includeArchived === true);
 
   return ok({
     projects: rows.map((p) => ({
