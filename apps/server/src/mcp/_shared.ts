@@ -5,8 +5,8 @@ import { getRequestContext, type RequestContext } from '../server/request-contex
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
-import type { ProjectsService } from '../services/projects.js';
-import { projectScope, type Scope } from '../services/scope.js';
+import type { ProjectsService, ProjectView } from '../services/projects.js';
+import { projectScope, type Scope, type SearchScope } from '../services/scope.js';
 import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
 import { isAuthorized, isProjectSetScope, pinnedProjectId } from '../services/tokens.js';
 
@@ -129,6 +129,46 @@ export function isPathScoped(): boolean {
 export function unresolvableSlug(): string | null {
   const ctx = getRequestContext();
   return ctx.project ? null : ctx.requestedSlug;
+}
+
+/**
+ * The projects the request's token may READ, in the projects service's own
+ * order. One expression, so `project.list` and a widened search can never
+ * disagree about a token's reach.
+ */
+export function readableProjects(
+  projects: ProjectsService,
+  includeArchived: boolean,
+): ProjectView[] {
+  const ctx = getRequestContext();
+  return projects
+    .list(includeArchived)
+    .filter((p) => isAuthorized(ctx, 'read', { scope: 'project', projectId: p.id }));
+}
+
+/**
+ * The one site that builds a widened search scope, so every downstream layer
+ * receives a set whose every member was already authorized rather than a flag
+ * it cannot check (auth/spec.md, GHSA-cc4j-ch4r-9pf5's generalisation).
+ *
+ * Archived projects are left out: the same token is refused `initialize` at an
+ * archived project's slug, so a widened read of one would reach past what the
+ * connection could open directly.
+ */
+export function resolveSearchScope(
+  deps: Pick<ScopeResolutionDeps, 'projects'>,
+  resolved: EffectiveScope,
+  acrossProjects: boolean | undefined,
+): SearchScope {
+  if (acrossProjects !== true) return resolved.scope;
+  const homeProjectId = resolved.scope.projectId;
+  const projectIds = readableProjects(deps.projects, false).map((p) => p.id);
+  // Both guards fall back to the resolved scope rather than widening onto a set
+  // that would serve less than the narrow search does. Neither failure would
+  // announce itself: `partition_key IN ()` returns an empty result set rather
+  // than an error.
+  if (projectIds.length < 2 || !projectIds.includes(homeProjectId)) return resolved.scope;
+  return { kind: 'authorized-projects', projectIds, homeProjectId };
 }
 
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
