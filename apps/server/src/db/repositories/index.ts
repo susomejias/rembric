@@ -46,7 +46,7 @@ export {
   type AdminRelationWithContent,
 } from './relations-repository.js';
 export { TermStatisticsRepository } from './term-statistics-repository.js';
-export { TokensRepository } from './tokens-repository.js';
+export { TokensRepository, type AdminTokenProjectSlug } from './tokens-repository.js';
 export { VectorsRepository } from './vectors-repository.js';
 
 export interface Repositories {
