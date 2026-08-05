@@ -28,6 +28,7 @@ export const SOURCE_TABLES = [
   'projects',
   'prompts',
   'sessions',
+  'token_projects',
   'tokens',
 ] as const;
 

@@ -87,11 +87,27 @@ Verbatim first failure per test, in file order:
 
 ## 3. Schema and migration
 
-- [ ] 3.1 Add `apps/server/src/db/schema/token-projects.ts`: `token_projects` with `token_id` / `project_id`, both real FKs, `PRIMARY KEY (token_id, project_id)`, `WITHOUT ROWID`. No secondary index — every read is keyed by the leading primary-key column.
-- [ ] 3.2 Add the migration at the prefix from 0.2: **exactly one `CREATE TABLE`**. No `_new` table, no `INSERT … SELECT`, no `DROP TABLE`, no index or trigger recreation, no pragma. `tokens` is **not** rebuilt — `tokens_project_scope_check`'s `project_id IS NULL` disjunct (`db/schema/tokens.ts:40`) already admits `scope = 'projects'` with a NULL binding, measured.
-- [ ] 3.3 Run the suite and **observe `test/schema-drift.test.ts:377` go red first** (`expect(tables).toEqual([...EXPECTED_TABLES].sort())`). Its going red is the proof the migration created the table. Record the failure output in the commit body.
-- [ ] 3.4 Add `token_projects` to the pinned inventory so 3.3 goes green again, **in the same commit** as 3.2.
-- [ ] 3.5 Update `apps/server/src/db/schema/tokens.ts:6-19`'s scope-semantics docstring for the two new arms. One line per non-obvious fact; no banner, no restatement of the type.
+- [x] 3.1 Add `apps/server/src/db/schema/token-projects.ts`: `token_projects` with `token_id` / `project_id`, both real FKs, `PRIMARY KEY (token_id, project_id)`, `WITHOUT ROWID`. No secondary index — every read is keyed by the leading primary-key column. **DONE.** `WITHOUT ROWID` is inexpressible in Drizzle (the same category as `memory_entity_links` / `memory_entity_scan`, `db/schema/entities.ts:65-66`), so the schema file says so and `schema-drift.test.ts::EXPECTED_WITHOUT_ROWID_TABLES` is what pins it against `sqlite_master`. Exported from `db/schema/index.ts` because `schema-drift`'s "every Drizzle table declares the primary key the DB actually has" iterates the barrel — an unexported table would not be checked at all.
+- [x] 3.2 Add the migration at the prefix from 0.2: **exactly one `CREATE TABLE`**. No `_new` table, no `INSERT … SELECT`, no `DROP TABLE`, no index or trigger recreation, no pragma. `tokens` is **not** rebuilt — `tokens_project_scope_check`'s `project_id IS NULL` disjunct (`db/schema/tokens.ts:40`) already admits `scope = 'projects'` with a NULL binding, measured. **DONE as `0032_token_projects.sql`.** The prefix was re-confirmed free at the moment of writing, as 0.2 requires: `ls apps/server/src/db/migrations/ | grep -E '^0032'` returned nothing, and the directory holds 32 `.sql` files (`0000`–`0031`, no gap and no duplicate prefix). `meta/_journal.json` is empty and unread by `db/migrate.ts`, so nothing was added there.
+- [x] 3.3 Run the suite and **observe `test/schema-drift.test.ts:377` go red first** (`expect(tables).toEqual([...EXPECTED_TABLES].sort())`). Its going red is the proof the migration created the table. Record the failure output in the commit body. **OBSERVED RED, and by TWO tests rather than the one the task predicted:**
+
+  ```
+  FAIL  src/test/schema-drift.test.ts > … > runs all migrations forward against a fresh DB
+  AssertionError: expected [ '_migrations', …(38) ] to deeply equal [ '_migrations', …(37) ]
+        "sessions",
+  +     "token_projects",
+        "tokens",
+
+  FAIL  src/test/schema-drift.test.ts > … > keeps WITHOUT ROWID on the tables that declare it
+  AssertionError: expected [ 'memory_entity_links', …(3) ] to deeply equal [ 'memory_entity_links', …(2) ]
+        "memory_replaces",
+  +     "token_projects",
+  ```
+
+  The second failure is the stronger evidence of the two: it proves the created table is `WITHOUT ROWID`, which the table-set assertion cannot see. `EXPECTED_INDEXES` did **not** red, and that is correct rather than a gap — a `WITHOUT ROWID` table's primary key creates no `sqlite_autoindex_*` row, which is why `memory_replaces` and `memory_entity_links` have no entry there either.
+
+- [x] 3.4 Add `token_projects` to the pinned inventory so 3.3 goes green again, **in the same commit** as 3.2. **DONE, three pins in the same commit:** `test/schema-inventory.ts::SOURCE_TABLES` (it is operator-supplied authorization state, not derived — `invariants.test.ts`'s source/derived partition is a partition, so an unclassified table fails there too), `schema-drift.test.ts::EXPECTED_WITHOUT_ROWID_TABLES`, and `EXPECTED_COLUMNS` (which pins both columns NOT NULL and the composite-PK positions `token_id` = 1, `project_id` = 2 — the ordering the `token_id`-keyed read depends on).
+- [x] 3.5 Update `apps/server/src/db/schema/tokens.ts:6-19`'s scope-semantics docstring for the two new arms. One line per non-obvious fact; no banner, no restatement of the type. **DONE** — two arms added to the grammar list, plus the two non-obvious facts: `project_id` is NULL for them and the CHECK's first disjunct is why that needed no rebuild, and their reach lives entirely in `token_projects` so a reader ignorant of that table under-authorizes.
 
 ## 4. Repository — all new SQL lives under `db/`
 
