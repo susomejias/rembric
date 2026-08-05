@@ -189,4 +189,59 @@ export const QUERIES: QueryItem[] = [
     scope: project('nimbus'),
     bilingual: true,
   },
+
+  // |gold| >= each gated k, so a row taking a slot in the page pushes an answer
+  // out of it. Below that size Precision@k is pinned at its arithmetic ceiling
+  // and Recall@k saturates, and a foreign row displaces nothing measurable.
+  // Asserted in queries.test.ts rather than left to the fixture.
+  {
+    id: 'q-atlas-release-checklist',
+    text: 'what does the atlas release checklist require before shipping a build',
+    type: 'extraction',
+    goldStableIds: [
+      'atlas-release-step-migration-dryrun',
+      'atlas-release-step-staging-soak',
+      'atlas-release-step-smoke',
+      'atlas-release-step-dependency-audit',
+      'atlas-release-step-tag',
+      'atlas-release-step-image-digest',
+      'atlas-release-step-rollback-plan',
+      'atlas-release-step-status-page',
+    ],
+    scope: project('atlas'),
+  },
+  {
+    id: 'q-nimbus-oncall-runbook',
+    text: 'what does the nimbus on-call runbook say to do during a paging incident',
+    type: 'extraction',
+    goldStableIds: [
+      'nimbus-runbook-step-lag-check',
+      'nimbus-runbook-step-pause-scheduler',
+      'nimbus-runbook-step-snapshot-offsets',
+      'nimbus-runbook-step-dlq-drain',
+      'nimbus-runbook-step-handoff',
+    ],
+    scope: project('nimbus'),
+  },
+
+  // Gold outside the queried project, so recall scores the widening itself:
+  // reading the home project alone cannot answer either of these, however well
+  // it ranks. Each home project holds a plausible near-answer, so the narrow
+  // page is a wrong answer rather than an empty one.
+  {
+    id: 'q-widened-dunning-window',
+    text: 'how long is the dunning window before an account is suspended',
+    type: 'cross-project-widened',
+    goldStableIds: ['atlas-dunning-window'],
+    scope: project('nimbus'),
+    widened: true,
+  },
+  {
+    id: 'q-widened-backfill-watermark',
+    text: 'where is the backfill watermark stored',
+    type: 'cross-project-widened',
+    goldStableIds: ['nimbus-backfill-watermark'],
+    scope: project('atlas'),
+    widened: true,
+  },
 ];

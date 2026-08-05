@@ -19,6 +19,7 @@ const outcome = (over: Partial<RawOutcome>): RawOutcome => ({
     scope: { project: 'atlas' },
   },
   retrieved: [],
+  scope: { projectId: 'p-atlas', projectIds: ['p-atlas'] },
   reportedAbstained: undefined,
   latencyMs: 0,
   goldIds: [],

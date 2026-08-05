@@ -19,6 +19,12 @@ export interface QueryOutcome {
   type: QueryType;
   k: number;
   retrieved: string[];
+  /** Project of each id in `retrieved`, same order. */
+  retrievedProjectIds: string[];
+  /** The project the query was issued against — a row outside it is foreign. */
+  scopeProjectId: string;
+  /** The query's own declaration, never inferred from the rows that came back. */
+  widened: boolean;
   goldIds: string[];
   latencyMs: number;
   tokensReturned: number;
@@ -32,6 +38,10 @@ export interface QueryMetrics {
   recallAtK: number | null;
   reciprocalRank: number | null;
   abstained: boolean;
+  widened: boolean;
+  returnedRows: number;
+  /** Rows outside the query's own project. Counted for every query, aggregated over the non-widened ones. */
+  foreignRows: number;
   tokensReturned: number;
   latencyMs: number;
 }
@@ -68,6 +78,11 @@ export function scoreQuery(outcome: QueryOutcome): QueryMetrics {
     recallAtK: gold.size > 0 ? hits / gold.size : null,
     reciprocalRank,
     abstained: retrieved.length === 0,
+    widened: outcome.widened,
+    returnedRows: top.length,
+    foreignRows: outcome.retrievedProjectIds
+      .slice(0, k)
+      .filter((projectId) => projectId !== outcome.scopeProjectId).length,
     tokensReturned: outcome.tokensReturned,
     latencyMs: outcome.latencyMs,
   };
@@ -88,6 +103,14 @@ export interface AggregateMetrics {
   abstentionFalsePositiveRate: number | null;
   /** Gold-bearing queries that returned nothing; folded into recall it is indistinguishable from a confidently wrong answer. */
   overAbstentionRate: number | null;
+  /**
+   * Rows returned from outside the query's own project, over rows returned, on
+   * the queries that did NOT declare widening. An isolation gate rather than a
+   * tuning bound: its committed cap is 0.
+   */
+  foreignScopeRate: number | null;
+  /** Rows the rate above is a fraction of — its own denominator, and its non-vacuity control. */
+  nForeignScopeRows: number;
   avgTokensReturned: number;
   p50LatencyMs: number;
   p95LatencyMs: number;
@@ -114,6 +137,10 @@ export function aggregate(
 
   const ceilingsForScored = scored.map((m) => ceilings.get(m.queryId)!);
 
+  const narrow = metrics.filter((m) => !m.widened);
+  const narrowRows = narrow.reduce((acc, m) => acc + m.returnedRows, 0);
+  const narrowForeignRows = narrow.reduce((acc, m) => acc + m.foreignRows, 0);
+
   return {
     k,
     n: scored.length,
@@ -128,6 +155,8 @@ export function aggregate(
         ? null
         : mean(abstentionQueries.map((m) => (m.abstained ? 0 : 1))),
     overAbstentionRate: scored.length === 0 ? null : mean(scored.map((m) => (m.abstained ? 1 : 0))),
+    foreignScopeRate: narrowRows === 0 ? null : narrowForeignRows / narrowRows,
+    nForeignScopeRows: narrowRows,
     avgTokensReturned: mean(metrics.map((m) => m.tokensReturned)),
     p50LatencyMs: percentile(
       metrics.map((m) => m.latencyMs),

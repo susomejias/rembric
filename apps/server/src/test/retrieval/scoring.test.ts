@@ -16,6 +16,9 @@ function metric(over: Partial<QueryMetrics> & { queryId: string }): QueryMetrics
     recallAtK: 1,
     reciprocalRank: 1,
     abstained: false,
+    widened: false,
+    returnedRows: 8,
+    foreignRows: 0,
     tokensReturned: 100,
     latencyMs: 1,
     ...over,
@@ -25,6 +28,7 @@ function metric(over: Partial<QueryMetrics> & { queryId: string }): QueryMetrics
 const CEILINGS = new Map([
   ['gold-a', ceilingFor(1, 8)],
   ['gold-b', ceilingFor(1, 8)],
+  ['gold-c', ceilingFor(1, 8)],
 ]);
 
 describe('the two abstention error axes', () => {
@@ -112,6 +116,9 @@ describe('the two abstention error axes', () => {
         type: 'extraction',
         k: 8,
         retrieved: [],
+        retrievedProjectIds: [],
+        scopeProjectId: 'p1',
+        widened: false,
         goldIds: ['g1'],
         latencyMs: 0,
         tokensReturned: 0,
@@ -123,10 +130,89 @@ describe('the two abstention error axes', () => {
         type: 'extraction',
         k: 8,
         retrieved: ['g1'],
+        retrievedProjectIds: ['p1'],
+        scopeProjectId: 'p1',
+        widened: false,
         goldIds: ['g1'],
         latencyMs: 0,
         tokensReturned: 10,
       }).abstained,
     ).toBe(false);
+  });
+});
+
+describe('foreignScopeRate', () => {
+  function outcome(over: Partial<Parameters<typeof scoreQuery>[0]> = {}) {
+    return scoreQuery({
+      queryId: 'q',
+      type: 'extraction',
+      k: 8,
+      retrieved: ['a', 'b', 'c', 'd'],
+      retrievedProjectIds: ['p1', 'p1', 'p1', 'p1'],
+      scopeProjectId: 'p1',
+      widened: false,
+      goldIds: ['a'],
+      latencyMs: 0,
+      tokensReturned: 10,
+      ...over,
+    });
+  }
+
+  it('counts a row from another project and reports the denominator beside it', () => {
+    const m = outcome({ retrievedProjectIds: ['p1', 'p2', 'p1', 'p1'] });
+    expect(m.foreignRows).toBe(1);
+    expect(m.returnedRows).toBe(4);
+  });
+
+  it('is a row-weighted fraction over the non-widened queries only', () => {
+    const agg = aggregate(
+      [
+        metric({ queryId: 'gold-a', returnedRows: 8, foreignRows: 2 }),
+        metric({ queryId: 'gold-b', returnedRows: 8, foreignRows: 0 }),
+        // Widened: its foreign rows are the point, and they must not enter either side.
+        metric({ queryId: 'gold-c', widened: true, returnedRows: 8, foreignRows: 8 }),
+      ],
+      CEILINGS,
+      8,
+    );
+    expect(agg.nForeignScopeRows).toBe(16);
+    expect(agg.foreignScopeRate).toBe(0.125);
+  });
+
+  it('reads exactly zero when every returned row is in scope, over a non-zero denominator', () => {
+    const agg = aggregate(
+      [metric({ queryId: 'gold-a', returnedRows: 8, foreignRows: 0 })],
+      CEILINGS,
+      8,
+    );
+    expect(agg.foreignScopeRate).toBe(0);
+    expect(agg.nForeignScopeRows).toBe(8);
+  });
+
+  it('is null rather than zero when no non-widened query returned a row', () => {
+    const agg = aggregate(
+      [metric({ queryId: 'gold-c', widened: true, returnedRows: 8, foreignRows: 8 })],
+      CEILINGS,
+      8,
+    );
+    expect(agg.foreignScopeRate).toBeNull();
+    expect(agg.nForeignScopeRows).toBe(0);
+  });
+
+  it('takes widening from the query declaration, not from the rows that came back', () => {
+    // Same rows, opposite declarations: inferring widening from the presence of
+    // foreign rows would make both of these read 0 and gate nothing.
+    const declared = aggregate(
+      [metric({ queryId: 'gold-a', widened: true, returnedRows: 4, foreignRows: 4 })],
+      CEILINGS,
+      8,
+    );
+    const undeclared = aggregate(
+      [metric({ queryId: 'gold-a', widened: false, returnedRows: 4, foreignRows: 4 })],
+      CEILINGS,
+      8,
+    );
+    expect(declared.foreignScopeRate).toBeNull();
+    expect(undeclared.foreignScopeRate).toBe(1);
   });
 });
