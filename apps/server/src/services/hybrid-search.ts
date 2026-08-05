@@ -3,7 +3,7 @@ import { partitionKeyFor } from '../db/repositories/scope-clause.js';
 import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
 import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
-import type { Scope } from './scope.js';
+import { homeScope, type SearchScope } from './scope.js';
 
 /**
  * Standard hybrid retrieval for `memory.search`, expressed in the repo's flat
@@ -73,7 +73,7 @@ export interface HybridSearchOpts {
   repos: Pick<Repositories, 'memory' | 'vectors' | 'termStatistics'>;
   embedQuery?: (text: string) => Promise<Float32Array>;
   query: string;
-  scope: Scope;
+  scope: SearchScope;
   /** Omitted means any status — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -491,7 +491,7 @@ async function denseRetriever(
     : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
-    const partitionKey = partitionKeyFor(opts.scope.projectId);
+    const partitionKey = partitionKeyFor(homeScope(opts.scope).projectId);
     const neighbors = statuses
       .flatMap((status) =>
         opts.repos.vectors.knnByQueryVector({
