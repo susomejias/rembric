@@ -4,6 +4,22 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
 
+## [0.24.0](https://github.com/susomejias/rembric/compare/plugin-v0.23.1...plugin-v0.24.0) (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** correction to the earlier note about the removed `include_global` and `scope` input properties: because every tool input schema is strict, a client that still sends either property is refused with JSON-RPC -32602 as an unknown property — it is NOT ignored. Pinned by the every-tool refusal test in `mcp-integration.test.ts`.
+
+### Bug Fixes
+
+* **plugin:** stop promising a scope the server retired ([d0c0ac6](https://github.com/susomejias/rembric/commit/d0c0ac68740a0f458d0c8eec30348ed6bcb81d10))
+
+
+### Documentation
+
+* **mcp:** correct the ignored-vs-refused release note for the removed properties ([9cb5571](https://github.com/susomejias/rembric/commit/9cb5571961e242b00203bbe08d90984e2b35011a))
+
 ## [0.23.1](https://github.com/susomejias/rembric/compare/plugin-v0.23.0...plugin-v0.23.1) (2026-07-30)
 
 
