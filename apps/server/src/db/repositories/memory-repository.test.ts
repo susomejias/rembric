@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
 import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '../../services/review.js';
+import { projectScope } from '../../services/scope.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { confirmations } from '../schema/confirmations.js';
 import { memory, type NewMemory } from '../schema/memory.js';
@@ -262,7 +263,7 @@ describe('MemoryRepository', () => {
     it('returns title and content for in-scope ids only', () => {
       const rows = repo.textByIds({
         ids: ['09G', '09P1', '09P2'],
-        projectId: 'p1',
+        scope: projectScope('p1'),
       });
       expect(rows).toEqual([{ id: '09P1', title: 'P1 row', content: 'p1 body' }]);
     });
@@ -270,27 +271,31 @@ describe('MemoryRepository', () => {
     it('drops another project and the retired partition, with no argument that admits them', () => {
       const strict = repo.textByIds({
         ids: ['09G', '09P1', '09P2'],
-        projectId: 'p1',
+        scope: projectScope('p1'),
       });
       expect(strict.map((r) => r.id)).toEqual(['09P1']);
 
       // The control: both excluded ids are readable in their own scope, so the
       // assertion above is about the predicate, not about missing rows.
       expect(
-        repo.textByIds({ ids: ['09G', '09P1', '09P2'], projectId: 'p2' }).map((r) => r.id),
+        repo
+          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: projectScope('p2') })
+          .map((r) => r.id),
       ).toEqual(['09P2']);
       expect(
-        repo.textByIds({ ids: ['09G', '09P1', '09P2'], projectId: 'p0' }).map((r) => r.id),
+        repo
+          .textByIds({ ids: ['09G', '09P1', '09P2'], scope: projectScope('p0') })
+          .map((r) => r.id),
       ).toEqual(['09G']);
     });
 
     it('reads nothing for an empty id list', () => {
-      expect(repo.textByIds({ ids: [], projectId: 'p0' })).toEqual([]);
+      expect(repo.textByIds({ ids: [], scope: projectScope('p0') })).toEqual([]);
     });
   });
 
   describe('scoped search status default', () => {
-    const base = { projectId: 'p0', limit: 10, offset: 0 } as const;
+    const base = { scope: projectScope('p0'), limit: 10, offset: 0 } as const;
 
     beforeEach(() => {
       t.handle.db

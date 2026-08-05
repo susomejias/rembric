@@ -1,5 +1,6 @@
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 
+import type { Scope } from '../../services/scope.js';
 import { memory } from '../schema/memory.js';
 
 /**
@@ -12,14 +13,14 @@ import { memory } from '../schema/memory.js';
  * that constant: it leads the five scope-bearing indexes, which are dropped
  * and recreated by a separate change (memory/spec.md).
  */
-export function scopeWhere(projectId: string, alias?: string): SQL {
+export function scopeWhere(scope: Scope, alias?: string): SQL {
   const p = sql.raw(alias ? `${alias}.` : '');
-  return sql`${p}scope = 'project' AND ${p}project_id = ${projectId}`;
+  return sql`${p}scope = 'project' AND ${p}project_id = ${scope.projectId}`;
 }
 
 /** Drizzle-builder sibling of `scopeWhere` for builder call sites. */
-export function scopeCondition(projectId: string): SQL {
-  return and(eq(memory.scope, 'project'), eq(memory.projectId, projectId)) as SQL;
+export function scopeCondition(scope: Scope): SQL {
+  return and(eq(memory.scope, 'project'), eq(memory.projectId, scope.projectId)) as SQL;
 }
 
 /**

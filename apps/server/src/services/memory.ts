@@ -480,7 +480,7 @@ export class MemoryService {
       // within scope and the 8-row ranked default would truncate that.
       const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
-        projectId,
+        scope,
         value: entity,
         status: input.status,
         type: input.type,
@@ -532,7 +532,7 @@ export class MemoryService {
     const ids =
       ranked?.ids ??
       this.repos.memory.searchMemoryIds({
-        projectId,
+        scope,
         status,
         type: input.type,
         tag: input.tag,

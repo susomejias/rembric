@@ -77,7 +77,7 @@ describe('ensureEntityExtractor', () => {
     expect(scanCount()).toBe(1);
     expect(
       repos.entities.findMemoriesByEntity({
-        projectId,
+        scope: projectScope(projectId),
         kind: 'ip_address',
         value: '192.168.1.50',
         limit: 10,

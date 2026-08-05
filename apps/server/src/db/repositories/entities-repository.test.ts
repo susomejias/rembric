@@ -2,6 +2,7 @@ import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
+import { projectScope } from '../../services/scope.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memory, type NewMemory } from '../schema/memory.js';
 import { projects } from '../schema/projects.js';
@@ -61,7 +62,7 @@ describe('EntitiesRepository', () => {
       );
 
       const found = repo.findMemoriesByEntity({
-        projectId: 'p0',
+        scope: projectScope('p0'),
         value: 'apps/server/src/db/migrate.ts',
         limit: 10,
       });
@@ -73,7 +74,7 @@ describe('EntitiesRepository', () => {
       repo.linkMemory('m1', 'p1', [{ kind: 'path', value: 'src/x.ts' }], new Date());
 
       const foundGlobal = repo.findMemoriesByEntity({
-        projectId: 'p0',
+        scope: projectScope('p0'),
         value: 'src/x.ts',
         limit: 10,
       });
@@ -86,7 +87,7 @@ describe('EntitiesRepository', () => {
         repo.linkMemory(`m${i}`, 'p0', [{ kind: 'error_code', value: 'ENOENT' }], new Date());
       }
       const found = repo.findMemoriesByEntity({
-        projectId: 'p0',
+        scope: projectScope('p0'),
         value: 'ENOENT',
         limit: 100,
       });
@@ -97,7 +98,7 @@ describe('EntitiesRepository', () => {
 
     it('an unknown entity returns empty', () => {
       const found = repo.findMemoriesByEntity({
-        projectId: 'p0',
+        scope: projectScope('p0'),
         value: 'never-linked',
         limit: 10,
       });
@@ -109,14 +110,14 @@ describe('EntitiesRepository', () => {
       repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       expect(
         repo.findMemoriesByEntity({
-          projectId: 'p0',
+          scope: projectScope('p0'),
           value: 'x.ts',
           limit: 10,
         }),
       ).toEqual([]);
       expect(
         repo.findMemoriesByEntity({
-          projectId: 'p0',
+          scope: projectScope('p0'),
           value: 'x.ts',
           status: 'archived',
           limit: 10,
@@ -130,7 +131,7 @@ describe('EntitiesRepository', () => {
       for (const id of ['active-user', 'superseded-project']) {
         repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       }
-      const base = { projectId: 'p0', value: 'x.ts', limit: 10 } as const;
+      const base = { scope: projectScope('p0'), value: 'x.ts', limit: 10 } as const;
 
       expect(
         repo
@@ -164,13 +165,13 @@ describe('EntitiesRepository', () => {
       repo.linkMemory('p1m', 'p1', [{ kind: 'path', value: 'shared.ts' }], new Date());
       repo.linkMemory('p2m', 'p2', [{ kind: 'path', value: 'shared.ts' }], new Date());
 
-      const scoped = { projectId: 'p1', value: 'shared.ts', limit: 10 } as const;
+      const scoped = { scope: projectScope('p1'), value: 'shared.ts', limit: 10 } as const;
       expect(repo.findMemoriesByEntity(scoped).map((m) => m.id)).toEqual(['p1m']);
       // The non-vacuity control: the rows excluded above are reachable, so the
       // assertion is about the scope predicate rather than about an empty index.
-      expect(repo.findMemoriesByEntity({ ...scoped, projectId: 'p2' }).map((m) => m.id)).toEqual([
-        'p2m',
-      ]);
+      expect(
+        repo.findMemoriesByEntity({ ...scoped, scope: projectScope('p2') }).map((m) => m.id),
+      ).toEqual(['p2m']);
     });
 
     it('is idempotent — linking the same memory twice does not duplicate', () => {
@@ -178,7 +179,7 @@ describe('EntitiesRepository', () => {
       repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'x.ts' }], new Date());
       const found = repo.findMemoriesByEntity({
-        projectId: 'p0',
+        scope: projectScope('p0'),
         value: 'x.ts',
         limit: 10,
       });
@@ -413,7 +414,7 @@ describe('EntitiesRepository', () => {
         repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'apps/tied.ts' }], tied);
       }
 
-      const base = { projectId: 'p0', value: 'apps/tied.ts' };
+      const base = { scope: projectScope('p0'), value: 'apps/tied.ts' };
       const all = repo.findMemoriesByEntity({ ...base, limit: 10 }).map((m) => m.id);
       expect(all).toEqual(['m-d', 'm-c', 'm-b', 'm-a']);
 

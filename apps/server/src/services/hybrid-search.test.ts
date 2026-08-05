@@ -1142,7 +1142,7 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     const normalizedLexicalLeader = () => {
       const rank = repos.memory.searchBm25Ids({
         matchExpr: sanitizeFtsQuery(QUERY),
-        projectId,
+        scope: projectScope(projectId),
         status: 'active',
         limit: 400,
       })[0]!.rank;
@@ -1323,7 +1323,7 @@ describe('the disabled path does no gate work', () => {
     const lexicalIds = repos.memory
       .searchBm25Ids({
         matchExpr: sanitizeFtsQuery(opts.query),
-        projectId,
+        scope: projectScope(projectId),
         status: 'active',
         limit: computeRankWindowSize(opts.limit, opts.offset),
       })
