@@ -25,10 +25,13 @@ import {
   type BuildResult,
   type VolumetricArgs,
   buildCorpus,
+  generateMemory,
   generateVector,
+  interleaveShares,
   normalizeDataDir,
   parseArgs,
   refuseTarget,
+  scopeSlotFor,
 } from './seed-volumetric.js';
 
 const dirs: string[] = [];
@@ -75,6 +78,7 @@ describe('seed-volumetric argument surface', () => {
       relations: 0,
       prompts: 0,
       seed: 1,
+      skew: false,
     });
   });
 
@@ -84,6 +88,16 @@ describe('seed-volumetric argument surface', () => {
       sessions: 50000,
     });
     expect(parseArgs(['--db', '/tmp/c', '--seed', '7'])).toMatchObject({ seed: 7 });
+    expect(parseArgs(['--db', '/tmp/c', '--skew'])).toMatchObject({ skew: true });
+  });
+
+  it('refuses --skew on a corpus too small to fill its thinnest project', () => {
+    expect(() => parseArgs(['--db', '/tmp/c', '--memories', '100', '--skew'])).toThrow(
+      /--skew needs --memories at least 500/,
+    );
+    expect(parseArgs(['--db', '/tmp/c', '--memories', '500', '--skew'])).toMatchObject({
+      skew: true,
+    });
   });
 
   it('rejects non-integer and negative counts', () => {
@@ -222,6 +236,7 @@ function buildInto(
       relations: SHARED_RELATIONS,
       prompts: SHARED_PROMPTS,
       seed: 1,
+      skew: false,
       ...overrides,
     },
     log: () => {},
@@ -486,6 +501,119 @@ describe('seed-volumetric generates the shape it declares', () => {
   });
 });
 
+const SKEWED_MEMORIES = 600;
+
+describe('seed-volumetric --skew builds one dominant project and several small ones', () => {
+  const dir = tempDir();
+  const { handle, result } = buildInto(dir, {
+    memories: SKEWED_MEMORIES,
+    sessions: 0,
+    relations: 0,
+    prompts: 0,
+    skew: true,
+  });
+  afterAll(() => handle.close());
+
+  it('realises the declared shares exactly', () => {
+    expect(result.memoriesByScopeSlot).toEqual(
+      VOLUMETRIC_SHAPE.skewShares.map((s) => s * SKEWED_MEMORIES),
+    );
+    // Not a restatement of the line above: it asserts the rows LANDED in the
+    // right projects, which the counter alone cannot show.
+    const bySlug = Object.fromEntries(
+      rows<{ slug: string; n: number }>(
+        handle,
+        'SELECT p.slug slug, COUNT(*) n FROM memory m JOIN projects p ON p.id = m.project_id GROUP BY p.slug',
+      ).map((r) => [r.slug, r.n]),
+    );
+    expect(bySlug).toEqual({
+      'vol-shared': 12,
+      'vol-0': 360,
+      'vol-1': 120,
+      'vol-2': 60,
+      'vol-3': 30,
+      'vol-4': 18,
+    });
+  });
+
+  // The failure mode a cumulative-threshold split would have: the dominant
+  // project holding the oldest rows, so the recency term of the ranking boost
+  // reads the skew as an age difference.
+  it('spreads every project across the whole created_at span', () => {
+    const span = rows<{ slug: string; lo: number; hi: number; total: number }>(
+      handle,
+      `SELECT p.slug slug, MIN(m.created_at) lo, MAX(m.created_at) hi,
+              (SELECT MAX(created_at) - MIN(created_at) FROM memory) total
+       FROM memory m JOIN projects p ON p.id = m.project_id GROUP BY p.slug`,
+    );
+    expect(span).toHaveLength(VOLUMETRIC_SHAPE.projectCount);
+    for (const s of span) {
+      expect(s.total).toBeGreaterThan(0);
+      expect((s.hi - s.lo) / s.total).toBeGreaterThan(0.9);
+    }
+  });
+
+  it('still supersedes the declared fraction, through real topic_key chains', () => {
+    const superseded = scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'");
+    // Exact rather than rounded: a slot supersedes once per completed pair, so
+    // its count is a function of its own row count and the 5-long chain period.
+    // The declared fraction is only exactly realised when every slot divides by
+    // 5, which an uneven split does not, and papering over that with a loose
+    // tolerance would hide a chain layout that had actually broken.
+    const expected = result.memoriesByScopeSlot.reduce((n, m) => n + Math.floor((m + 3) / 5), 0);
+    expect(superseded).toBe(expected);
+    expect(superseded / SKEWED_MEMORIES).toBeCloseTo(VOLUMETRIC_SHAPE.supersededFraction, 2);
+    expect(scalar(handle, 'SELECT COUNT(*) v FROM memory_replaces')).toBe(superseded);
+  });
+
+  it('populates every derived table consistently with its source', () => {
+    expect(derivedStateProblems(handle)).toEqual([]);
+    // The vec partitions carry the same skew, which is what the dense branch
+    // scans — an evenly-partitioned index under a skewed `memory` table would
+    // make every widened-kNN figure measure the wrong shape.
+    const byPartition = rows<{ n: number }>(
+      handle,
+      'SELECT COUNT(*) n FROM memory_vec GROUP BY partition_key ORDER BY n DESC',
+    ).map((r) => r.n);
+    expect(byPartition).toEqual([360, 120, 60, 30, 18, 12]);
+  });
+});
+
+describe('seed-volumetric slot assignment', () => {
+  it('interleaves shares exactly over one block, and orders slots by share', () => {
+    const block = interleaveShares(VOLUMETRIC_SHAPE.skewShares, 100);
+    const counts = VOLUMETRIC_SHAPE.skewShares.map((_, s) => block.filter((x) => x === s).length);
+    expect(counts).toEqual(VOLUMETRIC_SHAPE.skewShares.map((s) => s * 100));
+    // Non-vacuity: a block that named a single slot would satisfy nothing above
+    // if the shares were ever flattened.
+    expect(new Set(block).size).toBe(VOLUMETRIC_SHAPE.scopeCount);
+    // Pinned, not merely counted: `vec-partition-scale.md` reproduces its
+    // corpora from `--skew` alone, so which slot each index lands in is part of
+    // that recipe. The counts above survive any permutation of the block, and a
+    // reshuffle would silently produce a different corpus under the same
+    // invocation.
+    expect(block.slice(0, 24)).toEqual([
+      1, 2, 1, 3, 1, 1, 2, 1, 4, 1, 1, 2, 1, 5, 1, 3, 1, 1, 2, 1, 1, 0, 1, 2,
+    ]);
+  });
+
+  it('reproduces the even split when skew is off', () => {
+    const even = Array.from({ length: 60 }, (_, i) => scopeSlotFor(i, false));
+    expect(even).toEqual(Array.from({ length: 60 }, (_, i) => i % VOLUMETRIC_SHAPE.scopeCount));
+  });
+
+  // The three-argument call is what `retire-the-global-scope`'s archived fixture
+  // makes; a changed default there would silently rewrite that corpus.
+  it('generates the same memory with the slot ordinal omitted as with the even split value', () => {
+    for (const i of [0, 1, 7, 41, 480]) {
+      const slot = i % VOLUMETRIC_SHAPE.scopeCount;
+      expect(generateMemory(20260805, i, slot)).toEqual(
+        generateMemory(20260805, i, slot, Math.floor(i / VOLUMETRIC_SHAPE.scopeCount)),
+      );
+    }
+  });
+});
+
 describe('seed-volumetric derived-state assertion can actually fail', () => {
   // Task 4.4. The point is not that a bypass is possible — it is that the check
   // in the test above detects one. Without this, an all-green derived-state
@@ -496,7 +624,15 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
     try {
       buildCorpus({
         handle,
-        args: { dataDir: dir, memories: 60, sessions: 0, relations: 0, prompts: 0, seed: 1 },
+        args: {
+          dataDir: dir,
+          memories: 60,
+          sessions: 0,
+          relations: 0,
+          prompts: 0,
+          seed: 1,
+          skew: false,
+        },
         log: () => {},
       });
       expect(derivedStateProblems(handle)).toEqual([]);
