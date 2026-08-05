@@ -81,8 +81,6 @@ export interface HybridSearchOpts {
   topicKey?: string;
   limit: number;
   offset: number;
-  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
-  includeGlobal?: boolean;
   /** Injectable clock for the recency term of the ranking boost; defaults to `new Date()`. */
   now?: () => Date;
   /** These three override their module constants; production callers omit them. */
@@ -222,7 +220,6 @@ function poolLevels(
     ids: pool.map((r) => r.id),
     scope: opts.scope,
     projectId: opts.projectId,
-    includeGlobal: opts.includeGlobal,
   });
   for (const r of rows) {
     scored.set(r.id, relevanceComponents(queryTokens, r, cosineById.get(r.id), weightOf));
@@ -468,7 +465,6 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
       tag: opts.tag,
       topicKey: opts.topicKey,
       limit: rankWindowSize,
-      includeGlobal: opts.includeGlobal,
     });
     return rows.map((r) => r.id);
   } catch {
@@ -496,23 +492,16 @@ async function denseRetriever(
     : ['active', 'superseded'];
   try {
     const queryVector = await opts.embedQuery(opts.query);
-    // include_global scans the project + global partitions (each with its own
-    // `k=` over-fetch), merged by distance into one ranked list.
-    const partitionKeys =
-      opts.includeGlobal && opts.scope === 'project'
-        ? [partitionKeyFor(opts.scope, opts.projectId), partitionKeyFor('global', null)]
-        : [partitionKeyFor(opts.scope, opts.projectId)];
-    const neighbors = partitionKeys
-      .flatMap((partitionKey) =>
-        statuses.flatMap((status) =>
-          opts.repos.vectors.knnByQueryVector({
-            queryVector,
-            partitionKey,
-            status,
-            type: opts.type,
-            rankWindowSize,
-          }),
-        ),
+    const partitionKey = partitionKeyFor(opts.scope, opts.projectId);
+    const neighbors = statuses
+      .flatMap((status) =>
+        opts.repos.vectors.knnByQueryVector({
+          queryVector,
+          partitionKey,
+          status,
+          type: opts.type,
+          rankWindowSize,
+        }),
       )
       .sort((a, b) => a.distance - b.distance);
     // Dedup (nearest wins) before the slice — RRF needs distinct ids.

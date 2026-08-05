@@ -11,7 +11,7 @@ import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
 import { pinnedProjectId, TokensService, type TokenScope } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -343,7 +343,7 @@ describe('full-access token is never rejected by authorization', () => {
     const ctx = ctxFor('*');
 
     const write = await runWithContext(ctx, () =>
-      memoryHandlers.save({ scope: 'global', type: 'user', title: 'admin note', content: 'x' }),
+      memoryHandlers.save({ type: 'user', title: 'admin note', content: 'x' }),
     );
     expect(decode(write).isError).toBeFalsy();
 
@@ -393,6 +393,14 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+      // The system default project is listed on the same terms as any other,
+      // and is found by `is_default` — the slug is not its identity.
+      {
+        slug: defaultProject(db.handle).slug,
+        displayName: 'Default',
+        archived: false,
+        activeMemoryCount: 0,
+      },
     ]);
   });
 
@@ -404,6 +412,14 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
+      // The system default project is listed on the same terms as any other,
+      // and is found by `is_default` — the slug is not its identity.
+      {
+        slug: defaultProject(db.handle).slug,
+        displayName: 'Default',
+        archived: false,
+        activeMemoryCount: 0,
+      },
     ]);
   });
 

@@ -39,7 +39,7 @@ export interface ConsolidationDeps {
 }
 
 /** `project:<id>` → project slug when the project still exists; raw value otherwise. */
-function scopeLabel(repos: Repositories, scope: string | null): string {
+export function scopeLabel(repos: Repositories, scope: string | null): string {
   if (scope === null) return '—';
   if (!scope.startsWith('project:')) return scope;
   const row = repos.projects.adminFindById(scope.slice('project:'.length));

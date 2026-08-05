@@ -17,6 +17,7 @@ import {
   PAGE_SIZE,
   pageParam,
   pager,
+  resolveProjectFilter,
   projectOptions,
   sel,
   tblEmpty,
@@ -45,7 +46,6 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const justDeleted = url.searchParams.get('deleted');
     const justUndeleted = url.searchParams.get('undeleted');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
-    const projectFilter = url.searchParams.get('project') ?? '';
     const agentFilter = url.searchParams.get('agent') ?? '';
     const sessionFilter = url.searchParams.get('session') ?? '';
     const rawQuery = url.searchParams.get('q') ?? '';
@@ -58,31 +58,24 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();
-    const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
     const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
-    let project: AdminListPromptsOpts['project'];
-    if (projectFilter === '__global__') {
-      project = { kind: 'global' };
-    } else if (projectFilter) {
-      const p = projectBySlug.get(projectFilter);
-      if (p) project = { kind: 'project', projectId: p.id };
-    }
+    const {
+      slug: projectFilter,
+      projectId,
+      unknown: unknownProject,
+    } = resolveProjectFilter(url, projectRows);
+    const project: AdminListPromptsOpts['project'] = projectId
+      ? { kind: 'project', projectId }
+      : undefined;
 
     let rows: Prompt[];
-    if (query) {
+    if (unknownProject) {
+      rows = [];
+    } else if (query) {
       rows = deps.repos.prompts
         .adminSearchFts(query, PAGE_SIZE + 1, offset)
-        .filter((p) =>
-          matchesFilters(
-            p,
-            projectBySlug,
-            includeDeleted,
-            projectFilter,
-            agentFilter,
-            sessionFilter,
-          ),
-        );
+        .filter((p) => matchesFilters(p, includeDeleted, projectId, agentFilter, sessionFilter));
     } else {
       rows = deps.repos.prompts.adminList({
         includeDeleted,
@@ -100,14 +93,16 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
 
     // A text query has no cheap exact count (FTS filters post-pagination) —
     // leave `totalCount` undefined so the pager shows a lower bound.
-    const totalCount: number | undefined = query
-      ? undefined
-      : deps.repos.prompts.adminCount({
-          includeDeleted,
-          project,
-          agent: agentFilter || undefined,
-          sessionIdPrefix: sessionFilter || undefined,
-        });
+    const totalCount: number | undefined = unknownProject
+      ? 0
+      : query
+        ? undefined
+        : deps.repos.prompts.adminCount({
+            includeDeleted,
+            project,
+            agent: agentFilter || undefined,
+            sessionIdPrefix: sessionFilter || undefined,
+          });
     const total = totalCount === undefined ? `${visible.length}+` : String(totalCount);
 
     const flash = justDeleted
@@ -333,18 +328,13 @@ export function createPromptsRouter(deps: PromptsDeps): Hono {
 
 function matchesFilters(
   p: Prompt,
-  projectBySlug: Map<string, { id: string }>,
   includeDeleted: boolean,
-  projectFilter: string,
+  projectId: string | undefined,
   agentFilter: string,
   sessionFilter: string,
 ): boolean {
   if (!includeDeleted && p.deletedAt != null) return false;
-  if (projectFilter === '__global__' && p.projectId != null) return false;
-  if (projectFilter && projectFilter !== '__global__') {
-    const proj = projectBySlug.get(projectFilter);
-    if (!proj || p.projectId !== proj.id) return false;
-  }
+  if (projectId !== undefined && p.projectId !== projectId) return false;
   if (agentFilter && p.agent !== agentFilter) return false;
   if (sessionFilter && (!p.sessionId || !p.sessionId.startsWith(sessionFilter))) return false;
   return true;

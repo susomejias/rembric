@@ -7,13 +7,17 @@ import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
-import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
-import { assertAuthorized, routerKey } from './_shared.js';
+import {
+  assertAuthorized,
+  resolveEffectiveScopeOrNull,
+  routerKey,
+  type EffectiveScope,
+} from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
 import { ok } from './result.js';
-import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 /**
  * Tool handlers for the `project.*` MCP namespace introduced in change
@@ -211,39 +215,26 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
 
 async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>) {
   void _args;
-  const ctx = getRequestContext();
-  const key = routerKey();
 
-  // Await any eager (or in-flight) roots discovery; trigger it lazily
-  // if no eager run happened. No-op when the URL already pinned a slug,
-  // when the client doesn't advertise `roots`, or when discovery already
-  // settled for this transport.
-  if (key && deps.getServer) {
-    await ensureRootsDiscoveryRun(
-      { server: deps.getServer(), router: deps.router, projects: deps.projects },
-      { tokenId: key.tokenId, mcpSessionId: key.mcpSessionId, pathSlug: ctx.requestedSlug },
-    );
-  }
-
-  const entry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
-
-  const activeProjectId = entry?.projectId ?? ctx.project?.id ?? null;
+  // The resolver awaits (or lazily triggers) roots discovery, so the router
+  // entry read below is populated by the time we read its suggestion list.
+  let resolved: EffectiveScope | null;
   try {
-    assertAuthorized('read', activeProjectId ? projectScope(activeProjectId) : SCOPE_GLOBAL, deps);
+    resolved = await resolveEffectiveScopeOrNull(deps);
+    if (resolved) assertAuthorized('read', resolved.scope, deps);
   } catch (err) {
     return errToMcp(err);
   }
-  const activeSlug = activeProjectId
-    ? (deps.projects.getById(activeProjectId)?.slug ?? null)
-    : null;
-  const source =
-    entry?.projectResolutionSource ??
-    (ctx.project ? 'url-path' : ctx.requestedSlug ? 'url-path' : 'none');
+
+  const key = routerKey();
+  const entry = key ? deps.router.get(key.tokenId, key.mcpSessionId) : undefined;
 
   return ok({
-    slug: activeSlug,
-    projectId: activeProjectId,
-    source,
+    slug: resolved?.project?.slug ?? null,
+    projectId: resolved?.project?.id ?? null,
+    // Null only when a URL slug named no project, which is the one case the
+    // resolver declines to answer.
+    source: resolved?.source ?? 'url-path',
     suggestedSlugs: entry?.pendingSuggestedSlugs ?? [],
   });
 }

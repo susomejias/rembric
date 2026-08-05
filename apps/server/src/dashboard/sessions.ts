@@ -18,6 +18,8 @@ import {
   PAGE_SIZE,
   pageParam,
   pager,
+  projectOptions,
+  resolveProjectFilter,
   mdBody,
   sel,
   tblEmpty,
@@ -27,16 +29,7 @@ import {
 } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import {
-  escape,
-  formatTs,
-  html,
-  raw,
-  rawPill,
-  scopePill,
-  shortId,
-  statusPill,
-} from './templates.js';
+import { escape, formatTs, html, raw, rawPill, shortId, statusPill } from './templates.js';
 
 export interface SessionsDeps {
   repos: Repositories;
@@ -56,7 +49,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const justRestored = url.searchParams.get('restored');
     const justAbandoned = url.searchParams.get('abandoned');
     const includeDeleted = url.searchParams.get('include_deleted') === '1';
-    const projectFilter = url.searchParams.get('project') ?? '';
     const agentFilter = url.searchParams.get('agent') ?? '';
     const statusFilterRaw = url.searchParams.get('status') ?? '';
     const statusFilter = (AGENT_SESSION_STATUSES as readonly string[]).includes(statusFilterRaw)
@@ -66,25 +58,23 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const offset = page * PAGE_SIZE;
 
     const projectRows = deps.repos.projects.adminListAll();
-    const projectBySlug = new Map(projectRows.map((p) => [p.slug, p]));
-
-    let projectId: string | null | undefined;
-    if (projectFilter === '__global__') {
-      projectId = null;
-    } else if (projectFilter) {
-      const p = projectBySlug.get(projectFilter);
-      if (p) projectId = p.id;
-    }
-
-    const visibleRowsRaw = deps.repos.agentSessions.adminList({
-      deleted: false,
-      activeFirst: true,
+    const {
+      slug: projectFilter,
       projectId,
-      agent: agentFilter || undefined,
-      status: statusFilter,
-      limit: PAGE_SIZE + 1,
-      offset,
-    });
+      unknown: unknownProject,
+    } = resolveProjectFilter(url, projectRows);
+
+    const visibleRowsRaw = unknownProject
+      ? []
+      : deps.repos.agentSessions.adminList({
+          deleted: false,
+          activeFirst: true,
+          projectId,
+          agent: agentFilter || undefined,
+          status: statusFilter,
+          limit: PAGE_SIZE + 1,
+          offset,
+        });
     const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
     const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
     // Filters apply to the non-deleted table only; include_deleted is unchanged.
@@ -111,9 +101,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             <a href="/dashboard/sessions/${r.id}">${displayTitle}</a>
           </td>
           <td>${r.agent}</td>
-          <td>
-            ${r.projectSlug ? raw(`<code>${escape(r.projectSlug)}</code>`) : scopePill('global')}
-          </td>
+          <td>${r.projectSlug ? raw(`<code>${escape(r.projectSlug)}</code>`) : raw('—')}</td>
           <td class="small">
             ${r.tokenName ?? '—'}
             ${r.tokenRevokedAt ? raw('<span class="muted small">(revoked)</span>') : raw('')}
@@ -186,15 +174,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
             </p>`
           : raw('');
 
-    const projectOptionsList = [
-      { value: '', label: 'all scopes', selected: projectFilter === '' },
-      { value: '__global__', label: 'global only', selected: projectFilter === '__global__' },
-      ...projectRows.map((p) => ({
-        value: p.slug,
-        label: p.slug,
-        selected: projectFilter === p.slug,
-      })),
-    ];
+    const projectOptionsList = projectOptions(projectRows, projectFilter);
     const statusOptionsList = [
       { value: '', label: 'all statuses', selected: statusFilterRaw === '' },
       ...AGENT_SESSION_STATUSES.map((s) => ({
@@ -220,12 +200,14 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       </span>`,
     ]);
 
-    const total = deps.repos.agentSessions.adminCount({
-      deleted: false,
-      projectId,
-      agent: agentFilter || undefined,
-      status: statusFilter,
-    });
+    const total = unknownProject
+      ? 0
+      : deps.repos.agentSessions.adminCount({
+          deleted: false,
+          projectId,
+          agent: agentFilter || undefined,
+          status: statusFilter,
+        });
 
     const body = html`
       ${viewHead({
@@ -387,7 +369,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
       ${kvGrid([
         kv({ k: 'Status', v: statusPill(row.status) }),
         kv({ k: 'Agent', v: row.agent }),
-        kv({ k: 'Project', v: row.projectSlug ?? '— (global)' }),
+        kv({ k: 'Project', v: row.projectSlug ?? '—' }),
         kv({
           k: 'Token',
           v: html`${row.tokenName ?? '—'}${row.tokenRevokedAt

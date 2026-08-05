@@ -15,8 +15,14 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
+import type { Scope } from '../services/scope.js';
+import {
+  createTestDb,
+  defaultProject,
+  defaultProjectScope,
+  mintTestToken,
+  type TestDb,
+} from '../test/index.js';
 
 import { buildMemoryHandlers, RELEVANCE_LIMIT } from './memory-tools.js';
 
@@ -28,6 +34,8 @@ import { buildMemoryHandlers, RELEVANCE_LIMIT } from './memory-tools.js';
  */
 
 let db: TestDb;
+let defaultScope: Scope;
+let defaultProjectId: string;
 let repos: Repositories;
 let memory: MemoryService;
 let handlers: ReturnType<typeof buildMemoryHandlers>;
@@ -64,7 +72,7 @@ const saveFillers = (n: number) => {
   for (let i = 0; i < n; i++)
     memory.save(
       { type: 'project', title: `Filler ${i}`, content: `the nimbus notes row ${i}` },
-      SCOPE_GLOBAL,
+      defaultScope,
     );
 };
 
@@ -73,14 +81,22 @@ const saveLinked = (n: number, path: string) => {
   for (let i = 0; i < n; i++) {
     const row = memory.save(
       { type: 'project', title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
-      SCOPE_GLOBAL,
+      defaultScope,
     );
-    repos.entities.linkMemory(row.id, 'global', null, [{ kind: 'path', value: path }], new Date());
+    repos.entities.linkMemory(
+      row.id,
+      'project',
+      defaultProjectId,
+      [{ kind: 'path', value: path }],
+      new Date(),
+    );
   }
 };
 
 beforeEach(() => {
   db = createTestDb();
+  defaultProjectId = defaultProject(db.handle).id;
+  defaultScope = defaultProjectScope(db.handle);
   repos = createRepositories(db.handle.db);
   memory = new MemoryService(repos, db.handle.db);
   token = mintTestToken(db.handle, { scope: '*' }).token;
@@ -105,7 +121,7 @@ describe('memory.context relevance channel under the shipped gates', () => {
   });
 
   it('still returns the best-matching rows, and never empties on a matching focus', async () => {
-    const answer = memory.save(RUNBOOK, SCOPE_GLOBAL);
+    const answer = memory.save(RUNBOOK, defaultScope);
     saveFillers(12);
 
     const focused = payload(
@@ -120,7 +136,7 @@ describe('memory.context relevance channel under the shipped gates', () => {
   it('a focus that matches nothing yields an empty channel rather than an error', async () => {
     memory.save(
       { type: 'project', title: 'Unrelated', content: 'billing invoice reconciliation' },
-      SCOPE_GLOBAL,
+      defaultScope,
     );
 
     const resp = await runWithContext(ctx(), () =>
@@ -135,14 +151,14 @@ describe('memory.context relevance channel under the shipped gates', () => {
   });
 
   it('reports the ranked pass as shortened when the shipped ratio cuts its page', async () => {
-    const answer = memory.save(RUNBOOK, SCOPE_GLOBAL);
+    const answer = memory.save(RUNBOOK, defaultScope);
     saveFillers(12);
     const focus = 'how do we restart the nimbus scheduler';
 
     // Control at the service layer, since the gates are deliberately unreachable
     // from the tool: without the filter the same pass fills the page, so the
     // short page below is the gate's doing and not a small corpus.
-    const ungated = await memory.searchWithAbstention({ query: focus, limit: 5 }, SCOPE_GLOBAL, {
+    const ungated = await memory.searchWithAbstention({ query: focus, limit: 5 }, defaultScope, {
       relativeLevelRatio: null,
     });
     expect(ungated.memories).toHaveLength(5);
@@ -154,19 +170,21 @@ describe('memory.context relevance channel under the shipped gates', () => {
     expect(body.rankedPass).toEqual({ abstained: false, gateShortened: true });
   });
 
-  it('omits the ranked pass when no seed can be derived', async () => {
-    memory.save({ type: 'project', title: 'Anything', content: 'anything at all' }, SCOPE_GLOBAL);
+  // Premise changed: a project is always active, so the seed always carries at
+  // least its label and the no-seed branch is no longer reachable from the tool.
+  it('seeds an unfocused call from the active project, and reports abstention when nothing matches', async () => {
+    memory.save({ type: 'project', title: 'Anything', content: 'anything at all' }, defaultScope);
 
     const body = payload(await runWithContext(ctx(), () => handlers.context({})));
     expect(body.relevantMemories).toEqual([]);
-    // Absent, not `{ abstained: false }`: no search ran, so there is no verdict.
-    expect(body.rankedPass).toBeUndefined();
+    expect(body.rankedPass?.abstained).toBe(true);
+    expect(body.rankedPass?.abstainReason).toBe(EMPTY_POOL_REASON);
   });
 
   it('omits the ranked pass when the entity pre-pass already filled the channel', async () => {
     const path = 'apps/server/src/db/migrate.ts';
     saveLinked(RELEVANCE_LIMIT, path);
-    memory.save(RUNBOOK, SCOPE_GLOBAL);
+    memory.save(RUNBOOK, defaultScope);
 
     const body = payload(
       await runWithContext(ctx(), () =>
@@ -182,7 +200,7 @@ describe('memory.context relevance channel under the shipped gates', () => {
     const path = 'apps/server/src/db/migrate.ts';
     saveLinked(3, path);
     const strong = [0, 1].map((i) =>
-      memory.save({ ...RUNBOOK, title: `${RUNBOOK.title} ${i}` }, SCOPE_GLOBAL),
+      memory.save({ ...RUNBOOK, title: `${RUNBOOK.title} ${i}` }, defaultScope),
     );
     saveFillers(6);
 

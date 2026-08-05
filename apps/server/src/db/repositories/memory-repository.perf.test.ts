@@ -409,11 +409,8 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       expect(detail).not.toContain('BLOOM FILTER');
     });
 
-    it('keeps that plan for a project scope and for the include_global widening', () => {
-      for (const opts of [
-        { ids: ['a'], scope: 'project' as const, projectId: 'p' },
-        { ids: ['a'], scope: 'project' as const, projectId: 'p', includeGlobal: true },
-      ]) {
+    it('keeps that plan for a project scope', () => {
+      for (const opts of [{ ids: ['a'], scope: 'project' as const, projectId: 'p' }]) {
         const detail = explainWhileRunning(t, () => repo.textByIds(opts)).join(' | ');
         expect(detail).toContain('SEARCH m USING INDEX sqlite_autoindex_memory_1 (id=?)');
         expect(detail).not.toContain('memory_scope_seen_idx');

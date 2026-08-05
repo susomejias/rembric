@@ -145,8 +145,6 @@ export interface SearchMemoriesInput {
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
-  /** Widen a `project` scope to also match `global` rows; no-op for `global` scope. */
-  includeGlobal?: boolean;
 }
 
 /**
@@ -493,7 +491,6 @@ export class MemoryService {
         type: input.type,
         tag: input.tag,
         topicKey: input.topicKey,
-        includeGlobal: input.includeGlobal,
         limit: query ? Math.max(offset + entityLimit, RANK_WINDOW_CEILING) : offset + entityLimit,
       });
       const filtered = query
@@ -509,7 +506,6 @@ export class MemoryService {
         this.repos.entities.countPendingScans({
           scope: memScope,
           projectId,
-          includeGlobal: input.includeGlobal,
         }) > 0;
       return {
         memories: page,
@@ -532,7 +528,6 @@ export class MemoryService {
           topicKey: input.topicKey,
           limit,
           offset,
-          includeGlobal: input.includeGlobal,
           ...gates,
         })
       : undefined;
@@ -552,7 +547,6 @@ export class MemoryService {
         topicKey: input.topicKey,
         limit,
         offset,
-        includeGlobal: input.includeGlobal,
       });
     if (ids.length === 0) return { memories: [], ...verdict };
 

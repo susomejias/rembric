@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 
 import { DomainError } from '../services/errors.js';
-import { SLUG_REGEX, type ProjectsService } from '../services/projects.js';
+import { SLUG_REGEX, type ProjectsService, type ProjectView } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
-import { formatTs, html, raw } from './templates.js';
+import { defaultProjectPill, formatTs, html, raw } from './templates.js';
 
 export interface ProjectsDeps {
   projects: ProjectsService;
@@ -28,17 +28,11 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
     const active = deps.projects.list();
     const archived = deps.projects.listArchived();
 
-    const renderRow = (p: {
-      id: string;
-      slug: string;
-      displayName: string | null;
-      archivedAt: Date | null;
-      createdAt: Date;
-    }) => {
+    const renderRow = (p: ProjectView) => {
       const isLegacy = !SLUG_REGEX.test(p.slug);
       return html`
         <tr>
-          <td>${p.displayName ?? p.slug}</td>
+          <td>${p.label} ${p.isDefault ? defaultProjectPill() : raw('')}</td>
           <td class="mono">
             ${p.slug} ${isLegacy ? raw(' <span class="pill superseded">legacy</span>') : raw('')}
           </td>
@@ -61,20 +55,21 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
                     <button type="submit">UNARCHIVE</button>
                   </form>
                 `
-              : html`
-                  <form
-                    action="/dashboard/projects/${p.id}/archive"
-                    method="post"
-                    class="inline"
-                    data-confirm='Archive project "${p.displayName ??
-                    p.slug}"? New writes will be rejected; existing memories stay queryable. You can unarchive later.'
-                    data-confirm-label="ARCHIVE PROJECT"
-                    data-confirm-tone="warn"
-                  >
-                    ${csrfInput(session.session, deps.sessions, 'project.archive')}
-                    <button class="warn" type="submit">ARCHIVE</button>
-                  </form>
-                `}
+              : p.isDefault
+                ? raw('')
+                : html`
+                    <form
+                      action="/dashboard/projects/${p.id}/archive"
+                      method="post"
+                      class="inline"
+                      data-confirm='Archive project "${p.label}"? New writes will be rejected; existing memories stay queryable. You can unarchive later.'
+                      data-confirm-label="ARCHIVE PROJECT"
+                      data-confirm-tone="warn"
+                    >
+                      ${csrfInput(session.session, deps.sessions, 'project.archive')}
+                      <button class="warn" type="submit">ARCHIVE</button>
+                    </form>
+                  `}
           </td>
         </tr>
       `;

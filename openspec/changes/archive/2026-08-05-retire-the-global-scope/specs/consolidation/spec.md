@@ -58,6 +58,13 @@ The sweep's empty-session purge step SHALL invoke `AgentSessionsService.purgeEmp
 - **THEN** `purgeEmpty` SHALL be invoked and its deleted-id count SHALL be greater than zero
 - **AND** the trigger SHALL be the default project's run rather than any condition on a global scope, so it cannot become permanently false
 
+#### Scenario: A migration that retargets a live run writes the scope string readers parse
+
+- **GIVEN** an unfinished `consolidation_runs` row whose scope is being moved from the retiring scope onto the default project
+- **WHEN** the migration rewrites it
+- **THEN** the value SHALL be the `project:<id>` form every reader parses — the throttle lookup, the dashboard's scope cell, and the run-detail label — and SHALL NOT be a bare project id
+- **AND** a bare id SHALL be shown to satisfy none of them: the throttle would not find the row, and the operator surface would render opaque hex where it is required to render the project's slug
+
 ### Requirement: Consolidation MUST NEVER cross scope boundaries
 
 The consolidation SHALL operate one project at a time. A single consolidation op SHALL NOT touch memories belonging to more than one project. The default project is an ordinary project for this purpose and confers no cross-project reach.

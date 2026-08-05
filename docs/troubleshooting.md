@@ -115,13 +115,13 @@ The agent sent a plain token. Configure the MCP entry to set `Authorization: Bea
 
 Three possibilities:
 
-1. **Scope mismatch.** `/mcp` connections see only global; `/mcp/<slug>` sees only that project. Crossed scopes return empty by design.
+1. **Scope mismatch.** `/mcp` connections see the default project, or whatever `project.use` pinned; `/mcp/<slug>` sees only that project. Crossed scopes return empty by design.
 2. **FTS5 query syntax.** Default tokenizer treats `-`, `:`, `.` as separators. `agent-name` searches as two tokens.
 3. **Decay archived it.** Check the dashboard with `status=archived` (overview counters at `/dashboard` show archived totals too).
 
 ### `code: scope_locked`
 
-You connected to `/mcp/<slug>` and asked for `scope=global`. User-wide memory is not reachable from a path-scoped connection: save it as `scope=project` instead, or add a second, path-less `/mcp` entry to the client's MCP config. The agent cannot do the latter itself — the bridge derives its URL path from `.rembric`, so only an operator can add another entry.
+You connected to `/mcp/<slug>` and then asked to work in a different project — `project.use({slug: other})` or `memory.session_start({project: other})`. A path-scoped connection is locked to its own project, so use that slug instead. The agent cannot change its own URL — the bridge derives the path from `.rembric`, so only an operator can point the client somewhere else.
 
 ### `code: project_not_found`
 

@@ -381,11 +381,11 @@ First-party client-side JavaScript SHALL be hand-written and embedded inline in 
 
 ### Requirement: The dashboard MUST surface a sessions list view at `/dashboard/sessions`
 
-A logged-in dashboard user SHALL see a list of recent sessions for the active project (or globally when no project is selected). The list SHALL include columns for title, agent, started_at, ended_at, status, a memory count (number of `memory` rows with that `session_id`), and a prompt count (number of `prompts` rows with that `session_id` AND `deleted_at IS NULL`). The list SHALL NOT include a session id column; the `title` cell carries the row's anchor to `/dashboard/sessions/:id`.
+A logged-in dashboard user SHALL see a list of recent sessions for the selected project, or across all projects when no project is selected. Every session belongs to a project, so the list SHALL render each row's project slug and SHALL NOT render a scope pill or a `— (global)` placeholder in place of one. The list SHALL include columns for title, agent, started_at, ended_at, status, a memory count (number of `memory` rows with that `session_id`), and a prompt count (number of `prompts` rows with that `session_id` AND `deleted_at IS NULL`). The list SHALL NOT include a session id column; the `title` cell carries the row's anchor to `/dashboard/sessions/:id`.
 
 The list SHALL be ordered with `status = 'active'` rows first, then all remaining rows; within each group rows SHALL be ordered by `started_at DESC`. The ordering SHALL be applied in the SQL query (before `LIMIT`/`OFFSET`) so pagination respects it. The soft-deleted table shown under `?include_deleted=1` keeps plain `started_at DESC`.
 
-The view SHALL provide a filter bar (matching the memories-list pattern) with controls for project, agent, and status. Filters SHALL be applied server-side in the repository query (affecting rows, pagination, and the header total alike) and SHALL apply to the non-deleted table only; the `include_deleted` toggle is unchanged. Each filter control SHALL have an associated `<label>`.
+The view SHALL provide a filter bar (matching the memories-list pattern) with controls for project, agent, and status. The project control SHALL offer `all scopes` plus one option per project and SHALL NOT offer a `global only` option (see "No operator filter MAY offer a scope that does not exist"). Filters SHALL be applied server-side in the repository query (affecting rows, pagination, and the header total alike) and SHALL apply to the non-deleted table only; the `include_deleted` toggle is unchanged. Each filter control SHALL have an associated `<label>`.
 
 The `title` column SHALL render using the cascade `row.title ?? row.description ?? shortId(row.id)`. The cascade SHALL NOT short-circuit on placeholder titles (e.g. `'rembric · 22:14 UTC'`) — those count as real titles for the purpose of display, because they are still more informative than `shortId` alone. The cascade ensures legacy rows (where `title` is NULL because they predate the column migration) still get a sensible value.
 
@@ -399,6 +399,7 @@ The memory count and the prompt count SHALL be rendered as two separate right-al
 - **THEN** the server SHALL return a paginated list of 50 sessions ordered active-first then `started_at DESC`, with each row linking to `/dashboard/sessions/:id` via `data-href` and via the `title` cell's anchor
 - **AND** each row SHALL include a `title` column rendered via the documented cascade
 - **AND** each row SHALL include both a `memories` count column and a `prompts` count column
+- **AND** each row's project cell SHALL name a project slug, never a scope pill
 - **AND** the table header SHALL NOT contain a `<th>` labelled `id`
 
 #### Scenario: Filtering sessions by agent and status
@@ -436,6 +437,7 @@ The memory count and the prompt count SHALL be rendered as two separate right-al
 
 - **WHEN** the user navigates to `/dashboard/sessions/:id` for an accessible session
 - **THEN** the page SHALL display: the title as the `<h1>` (via the same cascade as the list view), the session metadata (agent, project, token name, started_at, ended_at, status), the verbatim `summary` text, a table of memories whose `session_id` matches, AND a table of prompts whose `session_id` matches AND `deleted_at IS NULL` rendered below the memories table
+- **AND** the `Project` field SHALL name a project slug rather than a `— (global)` placeholder
 
 #### Scenario: A session was created by a now-revoked token
 
@@ -874,7 +876,7 @@ The detail view at `/dashboard/sessions/:id` SHALL render the Abandon form in th
 
 ### Requirement: The dashboard MUST surface a prompts list view at `/dashboard/prompts`
 
-A logged-in dashboard user SHALL see a list of curated user prompts for the active project (or globally when no project is selected). The list SHALL include columns for title (cascade `title → content[truncated to 80 chars] → shortId`), project slug, session short id (link to session detail when present), agent, tags (comma-separated), and created_at. The list SHALL NOT include a prompt id column.
+A logged-in dashboard user SHALL see a list of curated user prompts for the selected project, or across all projects when no project is selected. The list SHALL include columns for title (cascade `title → content[truncated to 80 chars] → shortId`), project slug, session short id (link to session detail when present), agent, tags (comma-separated), and created_at. The list SHALL NOT include a prompt id column. Every prompt belongs to a project, so the project-slug column SHALL always be populated.
 
 The view SHALL paginate at 50 rows per page (`PAGE_SIZE` shared constant). The view SHALL support a free-text query box that submits as the `q` query parameter; when non-empty, the server-side handler SHALL use the FTS5 `prompts_fts` index (matching against `content` + `tags`). The view SHALL support filters by `project_slug`, `session_id` (shortId match), and `agent`.
 
@@ -888,7 +890,7 @@ The view SHALL NOT include a detail page at `/dashboard/prompts/:id` in this rev
 
 - **WHEN** an authenticated admin operator navigates to `/dashboard/prompts`
 - **THEN** the server SHALL return a paginated list of the 50 most recent prompts (active and not-deleted) ordered by `created_at DESC`
-- **AND** each row SHALL include the documented columns
+- **AND** each row SHALL include the documented columns, with a populated project slug
 - **AND** the table header SHALL NOT contain a `<th>` labelled `id`
 - **AND** each row SHALL include a `Delete` form using `data-confirm` modal attributes on the `<form>` element
 
@@ -1394,7 +1396,7 @@ An operator cannot currently tell where a project's memory is dense and where it
 
 The view SHALL surface the inverse signal as well — the most-referenced entities are interesting, but entities referenced exactly once are the more actionable list, because they mark knowledge that never converged into a maintained topic.
 
-The view SHALL be **cross-scope with an explicit scope label** rather than scope-isolated: every row carries the project slug it belongs to, or `global`. The dashboard is a single operator behind one admin token and `/dashboard/memories` already lists every scope on one page, so isolating this one view would be inconsistent with the surface it sits in and would hide exactly the cross-project density comparison the view exists to make. Scope isolation is an AGENT-facing guarantee, structurally held by `memory_entities_identity_idx` (see the `persistence` capability): the same literal string in two projects is two rows, so no cross-project join exists for an operator view to leak. A per-project filter remains a legitimate later request; it is not a missing part of this requirement.
+The view SHALL be **cross-project with an explicit project label** rather than project-isolated: every row carries the project slug it belongs to. No row SHALL be labelled `global`, because every entity belongs to a project. The dashboard is a single operator behind one admin token and `/dashboard/memories` already lists every project on one page, so isolating this one view would be inconsistent with the surface it sits in and would hide exactly the cross-project density comparison the view exists to make. Project isolation is an AGENT-facing guarantee, structurally held by `memory_entities_identity_idx` (see the `persistence` capability): the same literal string in two projects is two rows, so no cross-project join exists for an operator view to leak. A per-project filter remains a legitimate later request; it is not a missing part of this requirement.
 
 #### Scenario: Entities are listed with their counts
 
@@ -1413,9 +1415,10 @@ The view SHALL be **cross-scope with an explicit scope label** rather than scope
 
 #### Scenario: Every row names its scope
 
-- **GIVEN** an entity present only in one project and an entity present only in the global scope
+- **GIVEN** an entity present only in one project and an entity present only in the default project
 - **WHEN** the operator opens the entity view
-- **THEN** both SHALL appear, each labelled with its project slug or with `global`
+- **THEN** both SHALL appear, each labelled with its own project slug
+- **AND** no row SHALL be labelled `global`
 
 ### Requirement: Memory detail MUST list the judgments touching that memory, in decision-relevance order
 
@@ -1457,3 +1460,26 @@ The section heading SHALL report the memory's **degree**: the number of rows ren
 
 - **WHEN** the operator opens the detail view of a memory that no `memory_relations` row touches
 - **THEN** the section SHALL render the text `No judgments touch this memory.` and SHALL report a degree of `0`
+
+### Requirement: No operator filter MAY offer a scope that does not exist
+
+Every scope filter on the operator surface SHALL offer only `all scopes` plus one entry per project. The `global only` option and its `__global__` sentinel value SHALL be removed from every filter that carries them, and no view SHALL render a scope pill distinguishing `GLOBAL` from `PROJECT`, because after the retirement every row is a project row and the pill carries no information.
+
+A filter option that selects nothing is worse than a missing one: an operator who picks it sees an empty table and cannot tell whether the scope is empty or the filter is broken. The default project appears in these filters under its own slug like any other project.
+
+Where a session, prompt or entity row previously rendered a `global` label because it carried no project, it SHALL now render its project's slug, because every such row is repointed by migration.
+
+#### Scenario: The scope filter offers no global option
+
+- **WHEN** the operator opens the memories list or the sessions list
+- **THEN** the project filter SHALL contain `all scopes` plus one option per project, and SHALL NOT contain a `global only` option or a `__global__` value
+
+#### Scenario: The stale sentinel is not silently accepted
+
+- **WHEN** a request arrives carrying `?project=__global__` from a bookmarked URL
+- **THEN** the page SHALL render without error and SHALL NOT filter to an empty set on the strength of a scope that no longer exists
+
+#### Scenario: No row renders a global scope label
+
+- **WHEN** the memories list, a memory detail page, the sessions list, a session detail page, the prompts list and the entity view are rendered over a populated database
+- **THEN** none SHALL render the text `GLOBAL` or a `— (global)` placeholder, and every row SHALL name a project slug

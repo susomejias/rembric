@@ -15,8 +15,8 @@ URL:    http(s)://your-host:8787/mcp[/<project-slug>]
 Header: Authorization: Bearer <agent-token>
 ```
 
-- `/mcp` → global scope. The agent operates user-wide until it calls `project.use({slug})`.
-- `/mcp/<slug>` → path-scoped. The agent is locked to that project; `scope=global` saves are rejected with `code: scope_locked`. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never treated as a user-wide connection. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
+- `/mcp` → the default project. A project is always active; the agent switches with `project.use({slug})`.
+- `/mcp/<slug>` → path-scoped. The agent is locked to that project and no argument reaches another one. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
@@ -26,8 +26,8 @@ Every tool call is authorized against the token's scope and the connection's eff
 | --------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `*`                   | Every tool, any scope                                  | —                                                                                     |
 | `read:*`              | Every read-classified tool, any scope                  | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) |
-| `project:<id>`        | Every tool, scoped to project `<id>` only              | Any tool whose effective scope resolves to another project or to global             |
-| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only   | Writes, and reads whose effective scope resolves to another project or to global    |
+| `project:<id>`        | Every tool, scoped to project `<id>` only              | Any tool whose effective scope resolves to another project                          |
+| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only   | Writes, and reads whose effective scope resolves to another project                 |
 
 Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write.
 
@@ -54,7 +54,7 @@ ChatGPT connects as a **custom MCP connector** (no plugin, no static token) usin
 
 1. **Enable OAuth on the server**: set `REMBRIC_PUBLIC_URL` to the public **https** origin (e.g. `https://memory.example.com`) — the OAuth issuer, **without** the `/mcp` suffix. ChatGPT reaches the server from OpenAI's backend, so a public HTTPS endpoint is required (`http://localhost` works only for local clients, not ChatGPT). Recreate the container so it loads the env.
 2. **Add the connector** in ChatGPT → Settings → Apps → Developer mode → new connector:
-   - URL: `https://memory.example.com/mcp/<slug>` (the `/<slug>` binds it to that project; omit for global).
+   - URL: `https://memory.example.com/mcp/<slug>` (the `/<slug>` binds it to that project; omit to land in the default project).
    - Authentication: **OAuth**. Leave the advanced panel alone — the server advertises Dynamic Client Registration, so ChatGPT registers itself automatically (no client id/secret).
 3. **Consent**: the browser lands on the Rembric consent screen → sign in with your `REMBRIC_ADMIN_TOKEN` → **Authorize**. ChatGPT manages the token (refresh included) from then on.
 4. **Disable ChatGPT's native memory** _(optional but recommended)_: in Settings → Personalization → Memory, turn off **Reference saved memories** (and **Reference chat history**). This stops ChatGPT from falling back to its own store, so it leans on Rembric as the single source of truth — fewer stale or duplicated facts, and the custom instruction below has nothing to compete with. Leave it on if you deliberately want both stores.
@@ -125,7 +125,7 @@ After install, drop a `.rembric` file at the root of each project to path-scope 
 echo "PROJECT_SLUG=my-app" > .rembric
 ```
 
-Without that file the bridge connects path-less (`/mcp`) and operates in global scope.
+Without that file the bridge connects path-less (`/mcp`) and operates in the default project.
 
 #### Credentials — REQUIRED: shell env vars
 
@@ -367,31 +367,19 @@ Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Stre
 
 If your client is stdio-only, use `mcp-remote` (the same package the Rembric plugin's bridge wraps) as a stdio↔HTTP shim. See its README for the exact spawn command; the Rembric plugin's `bin/rembric-bridge.mjs` is a working reference.
 
-## `project_suggestion_pending`
+## Roots-discovered slugs that name no project
 
-When you connect to `/mcp` (path-less) and roots-based discovery surfaces a slug that does not yet exist as a project, write tools refuse to silently fall through to global. They return:
+When you connect to `/mcp` (path-less) and roots-based discovery surfaces a slug that does not yet exist as a project, writes land in the default project rather than being refused. Nothing is lost and nothing leaks: the destination is an ordinary project, `project.current` names it, and the corpus is append-only, so a misfiled memory is re-saved under the right project.
 
-```json
-{
-  "ok": false,
-  "code": "project_suggestion_pending",
-  "message": "...",
-  "suggestedSlugs": ["acme-research"]
-}
-```
+To file the work under its own project, `project.use({slug, autocreate: true})` first. Never autocreate or autopin silently — minting a project is the user's call.
 
-Two resolutions, both belong to the user:
-
-- **Stay global**: re-issue passing `scope: 'global'` explicitly.
-- **Mint the project**: `project.use({slug, autocreate: true})`, then re-issue.
-
-Never autocreate or autopin silently.
+Earlier releases refused these writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
 
 ## Surviving compaction
 
 Long-running agents compact their context. To survive that, two tools fire at specific moments:
 
-- **Before "done" / before compaction**: `memory.session_summary({Goal, Accomplished, Decisions+why, Verified+how, Unfinished+why, Files})` closes the session and persists the state.
+- **Before "done" / before compaction**: `memory.session_summary({title, summary})` closes the session and persists the state. Those two are the whole schema — an unknown property is refused — so the rubric (Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files) goes inside `summary`.
 - **After compaction / new session**: `memory.context({sessions, prompts, memories})` restores it.
 
 The proactive-save protocol embedded in `initialize.instructions` already tells agents to do this. If your client ignores the field, paste the equivalent into the client's rules file (`AGENTS.md`, `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, `~/.gemini/system.md`, etc.).

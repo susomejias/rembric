@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { ProjectsService, SLUG_REGEX } from './projects.js';
 
@@ -61,7 +61,11 @@ describe('ProjectsService.list / rename / archive', () => {
     projects.archive(archived.id);
 
     const active = projects.list();
-    expect(active.map((p) => p.slug).sort()).toEqual(['a', 'b']);
+    // The system default project is an ordinary listed project, resolved by the
+    // boolean that identifies it rather than by the spelling of its slug.
+    expect(active.map((p) => p.slug).sort()).toEqual(
+      ['a', 'b', defaultProject(db.handle).slug].sort(),
+    );
   });
 
   it('lists archived when requested', () => {
@@ -87,6 +91,34 @@ describe('ProjectsService.list / rename / archive', () => {
     const p = projects.create({ slug: 'parch' });
     projects.archive(p.id);
     expect(() => projects.assertWritable(p.id)).toThrow(/archived/);
+  });
+
+  it('refuses to archive the default project, and the row is untouched', () => {
+    const def = defaultProject(db.handle);
+    expect(() => projects.archive(def.id)).toThrow(/default project and cannot be archived/);
+    const after = projects.getById(def.id);
+    expect(after?.archivedAt).toBeNull();
+    expect(after?.isDefault).toBe(true);
+    // Control: every other project still archives, so the guard is narrow.
+    const other = projects.create({ slug: 'pnotdefault' });
+    expect(projects.archive(other.id).archivedAt).not.toBeNull();
+  });
+
+  it('refuses to archive at all when no row carries is_default', () => {
+    const def = defaultProject(db.handle);
+    db.handle.raw.prepare('UPDATE projects SET is_default = 0').run();
+    // Fail closed: a database with no default is the state the guard's own
+    // reason argues from, so it must refuse rather than compare against nothing.
+    expect(() => projects.archive(def.id)).toThrow(/missing its default/);
+    expect(projects.getById(def.id)?.archivedAt).toBeNull();
+  });
+
+  it('renames the default project without touching its slug or its flag', () => {
+    const def = defaultProject(db.handle);
+    const renamed = projects.rename(def.id, 'operator-renamed');
+    expect(renamed.slug).toBe(def.slug);
+    expect(renamed.isDefault).toBe(true);
+    expect(renamed.displayName).toBe('operator-renamed');
   });
 });
 

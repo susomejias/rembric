@@ -2,8 +2,8 @@ import type { QueryItem, QueryScopeFixture } from './types.js';
 
 const GLOBAL: QueryScopeFixture = { scope: 'global' };
 
-function project(slug: 'atlas' | 'nimbus', includeGlobal = false): QueryScopeFixture {
-  return { scope: 'project', project: slug, includeGlobal };
+function project(slug: 'atlas' | 'nimbus'): QueryScopeFixture {
+  return { scope: 'project', project: slug };
 }
 
 export const QUERIES: QueryItem[] = [
@@ -90,18 +90,21 @@ export const QUERIES: QueryItem[] = [
   },
 
   {
-    id: 'q-cross-scope-test-colocation',
+    id: 'q-isolation-test-colocation',
     text: 'where should test files live in atlas',
-    type: 'cross-scope',
-    goldStableIds: ['global-test-colocation', 'atlas-test-colocation-instance'],
-    scope: project('atlas', true),
+    type: 'cross-project-isolation',
+    goldStableIds: ['atlas-test-colocation-convention', 'atlas-test-colocation-instance'],
+    scope: project('atlas'),
   },
   {
-    id: 'q-cross-scope-commit-convention',
+    id: 'q-isolation-commit-convention',
     text: 'what commit message convention should nimbus follow',
-    type: 'cross-scope',
-    goldStableIds: ['global-conventional-commits', 'nimbus-conventional-commits-instance'],
-    scope: project('nimbus', true),
+    type: 'cross-project-isolation',
+    goldStableIds: [
+      'nimbus-conventional-commits-convention',
+      'nimbus-conventional-commits-instance',
+    ],
+    scope: project('nimbus'),
   },
 
   // >= 8 so the rates move in 0.125 steps; each shares vocabulary with its own

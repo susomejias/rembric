@@ -66,7 +66,7 @@ PROJECT_SLUG=my-app
 
 The bridge subprocess reads this file at spawn time and connects to `/mcp/my-app` automatically. The same convention is used by Claude Code, Codex CLI, and Hermes Agent — one file, all clients.
 
-Without `.rembric`, the plugin no-ops cleanly: lifecycle POSTs are skipped, the MCP bridge falls back to global `/mcp`, the agent still works but operates user-wide.
+Without `.rembric`, the plugin no-ops cleanly: lifecycle POSTs are skipped, the MCP bridge falls back to path-less `/mcp`, and the agent still works — that connection resolves to the server's default project.
 
 The slug regex is `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Invalid slugs are rejected silently with a stderr diagnostic.
 

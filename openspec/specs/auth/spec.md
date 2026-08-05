@@ -38,7 +38,9 @@ On first startup, if no token row exists, the server SHALL require `REMBRIC_ADMI
 
 ### Requirement: Tokens MUST support scope and expiration
 
-Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` for project-restricted, `read:*` for read-only, or `read:project:<id>` for read-only project-restricted) and SHALL optionally carry an `expires_at` timestamp. The MCP middleware SHALL enforce these on every request: every tool call (except the data-free `memory.about`) SHALL pass an `isAuthorized(tokenScope, action, resolvedScope)` check, where `action` is the tool's read/write classification and `resolvedScope` is the connection's effective scope (or the tool's requested/target scope where the tool takes one).
+Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` for project-restricted, `read:*` for read-only, or `read:project:<id>` for read-only project-restricted) and SHALL optionally carry an `expires_at` timestamp. The MCP middleware SHALL enforce these on every request: every tool call (except the data-free `memory.about`) SHALL pass an `isAuthorized(tokenScope, action, resolvedScope)` check, where `action` is the tool's read/write classification and `resolvedScope` is the connection's effective scope.
+
+Because every connection now resolves to exactly one project, `resolvedScope` is always a project scope. A `*` or `read:*` token is **unbound** rather than global-scoped: it authorizes against every project, and it carries no project binding of its own.
 
 #### Scenario: Project-scoped token used for another project
 
@@ -61,8 +63,9 @@ Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` fo
 #### Scenario: Project-restricted token calls a read tool outside its project
 
 - **GIVEN** a token with `scope = 'read:project:A'` or `project:A`
-- **WHEN** the token invokes a read-classified tool on a connection whose effective scope is project B or global
+- **WHEN** the token invokes a read-classified tool on a connection whose effective scope is any project other than A — including the default project on a path-less connection
 - **THEN** the call SHALL be rejected with code `forbidden`
+- **AND** the refusal SHALL name the pinned project and `project.use` (see the `mcp-api` requirement "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform")
 
 ### Requirement: Revocation MUST take effect immediately
 
@@ -193,27 +196,39 @@ When the deployment's external origin is HTTPS (the OAuth issuer `REMBRIC_PUBLIC
 
 `isAuthorized(tokenScope, action, resolvedScope)` answers one question: may this token act on the connection's effective scope? A tool argument that widens the returned result set beyond that effective scope asks a second, different question, and the server SHALL authorize it separately. A token SHALL NOT receive rows from a scope it is not authorized to read, whatever argument requested them.
 
-Specifically: where a read tool accepts an argument that admits `global` rows into a `project`-scoped result (`memory.search`'s `include_global`, and the entity-lookup widening `memory-entities` defines as mirroring it), the server SHALL evaluate `isAuthorized(tokenScope, 'read', { scope: 'global' })` before widening. When that check fails the widening SHALL be dropped and the project-scoped result served unchanged; the call SHALL NOT be rejected, because the caller is authorized for everything it actually receives.
+This requirement is the fix for **GHSA-cc4j-ch4r-9pf5** and it is deliberately **generalised rather than retired**. The concrete widening argument that occasioned it (`memory.search`'s `include_global`, and the entity-lookup widening `memory-entities` defined as mirroring it) no longer exists: with one kind of scope there is nothing to widen into, and the argument is removed from the published tool contract. **The principle outlives the argument.** A published security requirement SHALL NOT be deleted because its single known instance was removed — a future widening argument would otherwise arrive unconstrained, and the advisory would have to be rediscovered rather than cited.
 
-This is distinct from the existing requirement that a project-restricted token invoking a read tool whose _effective scope_ is global be rejected with `forbidden`. That case concerns which scope the connection resolved to. This one concerns a result set widened past a scope the token legitimately holds.
+Normatively, therefore: the server SHALL admit into a result set only rows belonging to the scope the connection resolved to. Where a change proposes ANY argument, filter, flag or default that admits rows from a scope other than the resolved one, that change SHALL evaluate `isAuthorized(tokenScope, 'read', <the wider scope>)` before widening, and SHALL be bound by this requirement from the moment it is proposed. Where the check fails, the widening SHALL be dropped and the resolved-scope result served unchanged rather than the call being rejected, because the caller is authorized for everything it actually receives.
+
+The structural reason the advisory was possible SHALL also be recorded, because it is a design constraint on any future widening: a widening flag that travels beside the resolved scope as a bare boolean cannot tell any layer that carries it whether anyone was authorized to set it. Any future widening SHALL therefore carry its authorization decision with it, or be constructed at exactly one site that has already made that decision.
+
+This is distinct from the requirement that a project-restricted token invoking a read tool whose _effective scope_ is a project it does not hold be rejected with `forbidden`. That case concerns which scope the connection resolved to. This one concerns a result set widened past a scope the token legitimately holds.
 
 #### Scenario: Project-restricted token requests global widening
 
 - **GIVEN** a token with `scope = 'project:A'` or `read:project:A`, on a connection whose effective scope is project A
-- **WHEN** the token calls `memory.search` with `include_global = true`
-- **THEN** the response SHALL contain no memory whose `scope = 'global'`, and the call SHALL succeed rather than return `forbidden`
+- **WHEN** the token calls `memory.search` with any argument, including one named `include_global`
+- **THEN** the response SHALL contain only project A's memories, and an argument named `include_global` SHALL be rejected by the input schema as unrecognized rather than silently ignored
+- **AND** the scenario title predates this change: the argument it names is removed, and this scenario now pins that no argument reintroduces widening
 
 #### Scenario: Full-access token requests global widening
 
 - **GIVEN** a token with `scope = '*'` or `read:*`, on a connection whose effective scope is a project reached via `project.use`
-- **WHEN** the token calls `memory.search` with `include_global = true`
-- **THEN** global memories SHALL be returned alongside the project's own
+- **WHEN** the token calls `memory.search` with any argument
+- **THEN** the response SHALL contain only that project's memories, and no argument SHALL admit rows from any other project — a full-access token gains reach by switching scope with `project.use`, never by widening one read
+- **AND** the scenario title predates this change: there is no wider scope for a full-access token to be widened into
 
 #### Scenario: The widening argument does not escalate a write
 
 - **GIVEN** a token with `scope = 'read:project:A'`
 - **WHEN** the token calls any write-classified tool
 - **THEN** the call SHALL be rejected with code `forbidden`, unchanged by the presence or absence of any widening argument on any other tool
+
+#### Scenario: A newly proposed widening is bound by this requirement
+
+- **GIVEN** a change proposing an argument, filter or default that would admit rows from a scope other than the one the connection resolved to
+- **WHEN** that change is reviewed
+- **THEN** it SHALL evaluate authorization against the wider scope before widening, SHALL drop the widening rather than reject the call when that check fails, and SHALL NOT construct its widening decision outside the single site that made it
 
 ### Requirement: A persisted project-scoped token MUST be bound to the project row, enforced by the database
 
@@ -223,7 +238,7 @@ Every persisted token whose `scope` is `project:<id>` or `read:project:<id>` SHA
 
 The `TokenScope` string SHALL NOT be accepted from a caller for the project arm. The service that creates tokens SHALL compose it from a resolved project row together with a read/write access selection, so that a call site cannot supply `project:<slug>` — or any other project string — at all. Callers minting a non-project token (`*`, `read:*`) SHALL continue to supply the scope literal directly.
 
-`tokens.project_id` SHALL be `NULL` for `*` and `read:*` tokens.
+`tokens.project_id` SHALL be `NULL` for `*` and `read:*` tokens. That null is **not** a retired global scope and SHALL NOT be migrated: it records that the token is unbound — authorized against every project — and the `CHECK` constraint's first disjunct depends on it.
 
 #### Scenario: A token minted for a project authorizes that project
 
@@ -260,6 +275,8 @@ The `TokenScope` string SHALL NOT be accepted from a caller for the project arm.
 
 - **WHEN** a token is created with scope `*` or `read:*`
 - **THEN** the persisted row SHALL have `project_id IS NULL`
+- **AND** that null SHALL survive the migration that retires the global scope, because it records an unbound token rather than a scope
+- **AND** the scenario title predates this change: such a token is unbound, not global
 
 ### Requirement: A token whose project binding does not resolve MUST authorize nothing and MUST NOT be repaired
 

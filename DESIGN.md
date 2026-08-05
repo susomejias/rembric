@@ -408,8 +408,8 @@ Every destructive button (warn/danger) MUST live inside a form marked
 
 `.pill` is a small bordered chip with a coloured leading bullet. Use
 modifier classes for state: `active`, `superseded`, `archived`,
-`pending`, `judged`, `orphaned`, `global`, `scope`, `project`, plus
-type pills (`t-user`, `t-feedback`, `t-project`, `t-reference`) and
+`pending`, `judged`, `orphaned`, `default`, plus type pills
+(`t-user`, `t-feedback`, `t-project`, `t-reference`) and
 relation-kind pills (`k-supersedes`, `k-conflicts_with`, `k-related`,
 `k-compatible`, `k-scoped`, `k-not_conflict`, `k-pending`).
 
@@ -486,21 +486,21 @@ allowing submit. Tone via `data-confirm-tone` (`warn` / `danger`).
 
 ### Component reference
 
-| Helper                                | File            | Purpose                                                   |
-| ------------------------------------- | --------------- | --------------------------------------------------------- |
-| `renderPage(c, sessions, body, opts)` | `page-shell.ts` | canonical entry for authenticated pages                   |
-| `shell(body, opts)`                   | `templates.ts`  | lower-level layout — used only by login + by `renderPage` |
-| `viewHead(opts)`                      | `components.ts` | hero header with lime-block highlight                     |
-| `backLink(opts)`                      | `components.ts` | "← BACK TO …" sub-page link                               |
-| `statCard(opts)`                      | `components.ts` | brutalist stat tile                                       |
-| `pager(opts)`                         | `components.ts` | prev / next pager                                         |
-| `sectionBar(opts)`                    | `components.ts` | soft section divider                                      |
-| `flash(opts)`                         | `components.ts` | inline banner                                             |
-| `btn(opts)`                           | `components.ts` | branded button                                            |
-| `sparkline(data)`                     | `components.ts` | inline SVG sparkline                                      |
-| `urlWithPage(url, page)`              | `components.ts` | preserve filters when paging                              |
-| `formatTs(d)`                         | `templates.ts`  | local-time `<time>` with UTC fallback                     |
-| `statusPill(s)` / `scopePill(s)`      | `templates.ts`  | brand-aware pills                                         |
+| Helper                                   | File            | Purpose                                                   |
+| ---------------------------------------- | --------------- | --------------------------------------------------------- |
+| `renderPage(c, sessions, body, opts)`    | `page-shell.ts` | canonical entry for authenticated pages                   |
+| `shell(body, opts)`                      | `templates.ts`  | lower-level layout — used only by login + by `renderPage` |
+| `viewHead(opts)`                         | `components.ts` | hero header with lime-block highlight                     |
+| `backLink(opts)`                         | `components.ts` | "← BACK TO …" sub-page link                               |
+| `statCard(opts)`                         | `components.ts` | brutalist stat tile                                       |
+| `pager(opts)`                            | `components.ts` | prev / next pager                                         |
+| `sectionBar(opts)`                       | `components.ts` | soft section divider                                      |
+| `flash(opts)`                            | `components.ts` | inline banner                                             |
+| `btn(opts)`                              | `components.ts` | branded button                                            |
+| `sparkline(data)`                        | `components.ts` | inline SVG sparkline                                      |
+| `urlWithPage(url, page)`                 | `components.ts` | preserve filters when paging                              |
+| `formatTs(d)`                            | `templates.ts`  | local-time `<time>` with UTC fallback                     |
+| `statusPill(s)` / `defaultProjectPill()` | `templates.ts`  | brand-aware pills                                         |
 
 ## Do's and Don'ts
 

@@ -10,7 +10,7 @@ import { deriveTitle } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { type DecayThresholds } from './decay.js';
 import { ConsolidationRunner } from './runner.js';
@@ -45,6 +45,7 @@ beforeEach(() => {
     repos: createRepositories(db.handle.db),
     tx: db.handle.db,
     relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
+    projects,
     agentSessions: sessions,
   });
 });
@@ -62,18 +63,21 @@ describe('ConsolidationRunner sweep', () => {
   });
 
   it('records one consolidation_runs row per scope with null llm columns', () => {
-    projects.create({ slug: 'proj-a' });
+    const projA = projects.create({ slug: 'proj-a' });
     const summary = runner.runAll({ force: true });
-    expect(summary.runs.length).toBe(2); // global + proj-a
 
     const rows = db.handle.db
       .select()
       .from(consolidationRuns)
       .orderBy(desc(consolidationRuns.startedAt))
       .all();
-    expect(rows.length).toBe(2);
+    // The SET, not the count: two rows cannot tell one scope swept twice with
+    // another never swept from one row per scope.
+    expect([...rows.map((r) => r.scope)].sort()).toEqual(
+      [`project:${projA.id}`, `project:${defaultProject(db.handle).id}`].sort(),
+    );
+    expect(rows.length).toBe(summary.runs.length);
     for (const row of rows) {
-      expect(row.scope).not.toBeNull();
       expect(row.finishedAt).not.toBeNull();
     }
   });
@@ -92,12 +96,22 @@ describe('ConsolidationRunner sweep', () => {
     expect(forced.skipped.length).toBe(0);
   });
 
-  it('sweepFor covers the session scope plus global', () => {
+  it('sweepFor covers the session project plus the default project', () => {
     const p = projects.create({ slug: 'proj-b' });
     const summary = runner.sweepFor(p.id);
     const scopes = summary.runs.map((r) => r.scope);
-    expect(scopes).toContainEqual({ scope: 'global', projectId: null });
+    expect(scopes).toContainEqual({
+      scope: 'project',
+      projectId: defaultProject(db.handle).id,
+    });
     expect(scopes).toContainEqual({ scope: 'project', projectId: p.id });
+  });
+
+  it('sweepFor does not sweep the default project twice when it IS the session project', () => {
+    const dflt = defaultProject(db.handle).id;
+    const summary = runner.sweepFor(dflt);
+    expect(summary.runs.map((r) => r.scope)).toEqual([{ scope: 'project', projectId: dflt }]);
+    expect(summary.skipped).toEqual([]);
   });
 
   it('a maintenance-scoped journal row does not suppress scope sweeps', () => {
@@ -117,6 +131,9 @@ describe('ConsolidationRunner sweep', () => {
       .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
 
     const summary = runner.runAll({ force: true });
+    // Non-zero, stated as a count: a purge assertion over a corpus with nothing
+    // eligible passes without exercising anything.
+    expect(summary.purgedSessionIds?.length ?? 0).toBeGreaterThan(0);
     expect(summary.purgedSessionIds).toContain(s.id);
     expect(sessions.getById(s.id)).toBeUndefined();
 
@@ -129,8 +146,22 @@ describe('ConsolidationRunner sweep', () => {
     expect(ops[0]!.affectedIds).toContain(s.id);
   });
 
-  it('skips the purge step when the global scope is throttled (not this call)', () => {
-    runner.runAll(); // primes the global scope's throttle
+  it("purges on the session-start path too, gated on the default project's run", () => {
+    const projectId = projects.create({ slug: 'sweep-purge-lazy' }).id;
+    const s = sessions.start({ tokenId, projectId: null, agent: 'noise' });
+    sessions.end(s.id, { tokenId });
+    db.handle.raw
+      .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+      .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+    const summary = runner.sweepFor(projectId);
+    expect(summary.purgedSessionIds?.length ?? 0).toBeGreaterThan(0);
+    expect(summary.purgedSessionIds).toContain(s.id);
+    expect(sessions.getById(s.id)).toBeUndefined();
+  });
+
+  it('skips the purge step when the default project is throttled (not this call)', () => {
+    runner.runAll(); // primes every scope's throttle, the default project included
     const projectId = projects.create({ slug: 'sweep-purge-throttled' }).id;
     const s = sessions.start({ tokenId, projectId, agent: 'noise' });
     sessions.end(s.id, { tokenId });
@@ -138,19 +169,19 @@ describe('ConsolidationRunner sweep', () => {
       .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
       .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
 
-    const summary = runner.runAll(); // unforced — global is within the throttle window
+    const summary = runner.runAll(); // unforced — the default project is within the throttle window
     expect(summary.purgedSessionIds).toBeUndefined();
     expect(sessions.getById(s.id)).toBeDefined();
   });
 });
 
-function decayRow(id: string, type: MemoryType, lastSeenAt: Date): NewMemory {
+function decayRow(id: string, type: MemoryType, lastSeenAt: Date, projectId: string): NewMemory {
   return {
     id,
     title: deriveTitle(`${type} ${id}`),
     content: `${type} ${id}`,
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId,
     type,
     tags: [],
     status: 'active',
@@ -174,6 +205,7 @@ describe('ConsolidationRunner per-type decay', () => {
       repos: createRepositories(db.handle.db),
       tx: db.handle.db,
       relations: new RelationsService(createRepositories(db.handle.db), db.handle.db),
+      projects,
       agentSessions: { purgeEmpty: () => ({ deletedIds: [] }) },
       decay,
     });
@@ -181,12 +213,13 @@ describe('ConsolidationRunner per-type decay', () => {
 
   it('archives only rows past their per-type threshold; reference is exempt', () => {
     const old = new Date(Date.now() - 60_000);
+    const dflt = defaultProject(db.handle).id;
     db.handle.db
       .insert(memory)
       .values([
-        decayRow('PROJ', 'project', old),
-        decayRow('REF', 'reference', old),
-        decayRow('USERD', 'user', old), // no explicit entry → defaultThresholdMs
+        decayRow('PROJ', 'project', old, dflt),
+        decayRow('REF', 'reference', old, dflt),
+        decayRow('USERD', 'user', old, dflt), // no explicit entry → defaultThresholdMs
       ])
       .run();
 
@@ -201,10 +234,43 @@ describe('ConsolidationRunner per-type decay', () => {
     expect(statusOf('REF')).toBe('active');
   });
 
+  it('a session start in one project sweeps the default project too, and decays it', () => {
+    const projA = projects.create({ slug: 'session-project' }).id;
+    const dflt = defaultProject(db.handle).id;
+    const old = new Date(Date.now() - 60_000);
+    db.handle.db
+      .insert(memory)
+      .values([
+        decayRow('DFLT-DECAY', 'project', old, dflt),
+        decayRow('A-KEEP', 'reference', old, projA),
+      ])
+      .run();
+
+    const summary = buildRunner(SHORT_DECAY).sweepFor(projA);
+
+    // Both scopes swept, named by id rather than by any scope literal.
+    expect(summary.runs.map((r) => r.scope.projectId).sort()).toEqual([projA, dflt].sort());
+    const runScopes = db.handle.db
+      .select()
+      .from(consolidationRuns)
+      .all()
+      .map((r) => r.scope);
+    expect(runScopes.sort()).toEqual([`project:${dflt}`, `project:${projA}`].sort());
+
+    // The work itself, not just the run row: the default project's decayed row
+    // is archived, and the exempt row in the session's project is untouched.
+    const statusOf = (id: string) =>
+      db.handle.db.select().from(memory).where(eq(memory.id, id)).get()?.status;
+    expect(statusOf('DFLT-DECAY')).toBe('archived');
+    expect(statusOf('A-KEEP')).toBe('active');
+  });
+
   it('is idempotent: a second forced sweep archives nothing new', () => {
     db.handle.db
       .insert(memory)
-      .values([decayRow('A', 'project', new Date(Date.now() - 60_000))])
+      .values([
+        decayRow('A', 'project', new Date(Date.now() - 60_000), defaultProject(db.handle).id),
+      ])
       .run();
     const r = buildRunner(SHORT_DECAY);
     expect(r.runAll({ force: true }).runs.reduce((n, x) => n + x.ops.archives, 0)).toBe(1);

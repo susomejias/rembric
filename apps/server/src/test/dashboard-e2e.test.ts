@@ -615,8 +615,10 @@ describe('dashboard E2E', () => {
     expect(listBody).not.toMatch(/<td>project:01[A-Z0-9]+<\/td>/);
 
     // Detail page shows the slug in the Scope stat card too.
+    // Row-scoped: `[\s\S]*?` spanned rows, so the href captured was the first
+    // row's rather than the one holding the cell.
     const rowRe =
-      /<tr data-href="(\/dashboard\/consolidation\/[A-Z0-9]+)">[\s\S]*?<td>e2e-created-project<\/td>/;
+      /<tr data-href="(\/dashboard\/consolidation\/[A-Z0-9]+)">(?:(?!<\/tr>)[\s\S])*?<td>e2e-created-project<\/td>/;
     const row = rowRe.exec(listBody);
     expect(row).toBeTruthy();
     const detail = await get(baseUrl, row![1]!, jar);

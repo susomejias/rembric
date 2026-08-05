@@ -1,46 +1,25 @@
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDb, type DbHandle } from './index.js';
+import { createMigrationFixture, type MigrationFixture } from '../test/migration-fixture.js';
+
+import type { DbHandle } from './index.js';
 
 /**
  * 0029 rebuilds a table that is an FK parent of two populated children, so
  * the interesting cases are only observable against a database migrated to
- * 0028 first and then stepped forward. The migrations directory is staged
- * file by file to reach that pre-migration state.
+ * 0028 first and then stepped forward — which is what the shared fixture's
+ * file-by-file staging is for.
  */
 
 const MIGRATION = '0029_tokens_project_binding.sql';
-const SOURCE_DIR = fileURLToPath(new URL('./migrations', import.meta.url));
 
 type Row = Record<string, unknown>;
 
-let dataDir: string;
-let migrationsDir: string;
+let fx: MigrationFixture;
 
-function stagePreMigration(): void {
-  for (const f of readdirSync(SOURCE_DIR)) {
-    if (f.endsWith('.sql') && f < MIGRATION) {
-      copyFileSync(join(SOURCE_DIR, f), join(migrationsDir, f));
-    }
-  }
-}
-
-function stage0029(): void {
-  copyFileSync(join(SOURCE_DIR, MIGRATION), join(migrationsDir, MIGRATION));
-}
-
-function unstage0029(): void {
-  unlinkSync(join(migrationsDir, MIGRATION));
-}
-
-function open(): DbHandle {
-  return createDb({ dataDir, migrationsDir });
-}
+const stage0029 = (): void => fx.stage();
+const unstage0029 = (): void => fx.unstage();
+const open = (): DbHandle => fx.open();
 
 function seeded(): void {
   const handle = open();
@@ -87,15 +66,11 @@ function insertToken(handle: DbHandle, id: string, scope: string, projectId: str
 }
 
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'rembric-0029-data-'));
-  migrationsDir = mkdtempSync(join(tmpdir(), 'rembric-0029-migrations-'));
-  stagePreMigration();
+  fx = createMigrationFixture(MIGRATION);
+  fx.stagePrior();
 });
 
-afterEach(() => {
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(migrationsDir, { recursive: true, force: true });
-});
+afterEach(() => fx.cleanup());
 
 describe('migration 0029 — tokens project binding', () => {
   it('preserves every pre-existing row verbatim, including the malformed legacy scope', () => {

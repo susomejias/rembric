@@ -30,9 +30,11 @@ Know your sessionId? Pass it — never guess it.
 Update Rembric: memory.about.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>
-  `\n\nThis connection is path-scoped to '${slug}': scope='global' is rejected and include_global is inert. User-wide memory is not reachable here.`;
+  `\n\nThis connection is bound to project '${slug}': everything you save or recall here belongs to it, and no argument reaches another project.`;
 
-const UNSCOPED_NOTE = `\n\nProject scope: auto-detected from your client's MCP roots when supported. Otherwise call project.use({slug, autocreate:true}) to pin (and create on first use). project.current reports the active project.`;
+// Names `project.use` without restating its flags: the copy here omitted
+// `confirmSwitch`, which the tool's own description names as required to switch.
+const UNSCOPED_NOTE = `\n\nA project is always active here: your client's MCP roots when supported, otherwise the default project. project.current names it; project.use switches it.`;
 
 export function buildInstructions(ctx: InstructionsContext): string {
   return ctx.requestedSlug ? BASE + PATH_SCOPED_NOTE(ctx.requestedSlug) : BASE + UNSCOPED_NOTE;

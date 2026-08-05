@@ -10,7 +10,7 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildSessionHandlers } from './session-tools.js';
 
@@ -32,6 +32,7 @@ let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
 let otherToken: Token;
+let defaultProjectId: string;
 let handlers: ReturnType<typeof buildSessionHandlers>;
 
 function makeContext(token: Token, overrides: Partial<RequestContext> = {}): RequestContext {
@@ -72,6 +73,7 @@ beforeEach(() => {
     .get()!;
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
+  defaultProjectId = defaultProject(db.handle).id;
   // Pass deps via a variable (not a fresh literal) so the broad object is
   // accepted by the narrower SessionToolDeps without excess-property errors.
   const deps = {
@@ -93,10 +95,14 @@ beforeEach(() => {
 });
 
 afterEach(() => db.cleanup());
+/** The default-project session every test in this file starts from. */
+function startSession(agent = 'a') {
+  return agentSessions.start({ tokenId: adminToken.id, projectId: defaultProjectId, agent });
+}
 
 describe('memory.session_end / .session_summary — session_deleted gate', () => {
   it('session_end on a soft-deleted row returns session_deleted', async () => {
-    const sess = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    const sess = startSession();
     agentSessions.softDelete(sess.id, { adminBypass: true });
     const r = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.sessionEnd({ sessionId: sess.id })),
@@ -107,7 +113,7 @@ describe('memory.session_end / .session_summary — session_deleted gate', () =>
   });
 
   it('session_summary on a soft-deleted row returns session_deleted', async () => {
-    const sess = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    const sess = startSession();
     agentSessions.softDelete(sess.id, { adminBypass: true });
     const r = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.sessionSummary({ sessionId: sess.id, summary: 'late summary' })),
@@ -122,7 +128,7 @@ describe('memory.session_end / .session_summary — session_deleted gate', () =>
   });
 
   it('cross-token call still gets session_not_found (not session_deleted)', async () => {
-    const sess = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'a' });
+    const sess = startSession();
     agentSessions.softDelete(sess.id, { adminBypass: true });
     const r = await runWithContext(makeContext(otherToken), () =>
       Promise.resolve(handlers.sessionEnd({ sessionId: sess.id })),
@@ -133,7 +139,7 @@ describe('memory.session_end / .session_summary — session_deleted gate', () =>
   });
 
   it('memory.session_start opens a fresh row even when other sessions are deleted', async () => {
-    const old = agentSessions.start({ tokenId: adminToken.id, projectId: null, agent: 'old' });
+    const old = startSession('old');
     agentSessions.softDelete(old.id, { adminBypass: true });
     const r = await runWithContext(makeContext(adminToken), () =>
       handlers.sessionStart({ agent: 'new' }),

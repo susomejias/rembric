@@ -2,11 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext, type RequestContext } from '../server/request-context.js';
-import type { SessionRouter } from '../server/session-router.js';
+import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
-import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import { projectScope, type Scope } from '../services/scope.js';
 import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
 import { isAuthorized, pinnedProjectId } from '../services/tokens.js';
 
@@ -21,26 +21,30 @@ import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
 export interface ScopeResolutionDeps {
   router?: SessionRouter;
-  projects?: ProjectsService;
+  projects: ProjectsService;
   getServer?: () => McpServer;
 }
 
 export interface EffectiveScope {
   scope: Scope;
   project: { id: string; slug: string } | null;
+  /**
+   * Which branch below resolved the project. `'default'` is a fallback rather
+   * than an activation, and callers that record or report provenance MUST
+   * treat it as one.
+   */
+  source: ProjectResolutionSource;
 }
 
 /**
  * The refusal a path slug naming no project earns. One place, so the resolver
  * and `memory.save`'s pre-resolver guard cannot drift in wording or payload.
- * `suggestedSlugs` is advisory (empty without a `ProjectsService`); the
- * refusal is not.
  */
-export function unresolvableSlugError(slug: string, projects?: ProjectsService): DomainError {
+export function unresolvableSlugError(slug: string, projects: ProjectsService): DomainError {
   return new DomainError(
     'project_not_found',
     `project '${slug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
-    { suggestedSlugs: projects ? projects.findSimilarSlugs(slug) : [] },
+    { suggestedSlugs: projects.findSimilarSlugs(slug) },
   );
 }
 
@@ -52,10 +56,13 @@ export function unresolvableSlugError(slug: string, projects?: ProjectsService):
  *      and the slug resolved to an existing project.
  *   2. `SessionRouter` entry — set by an explicit `project.use({slug})` or
  *      by roots-based discovery on a path-less `/mcp` connection.
- *   3. Global scope, reachable only from a path-LESS connection: a URL slug
- *      that names no project is a caller asking to be confined to something
- *      that does not exist, so it throws `project_not_found` instead of
- *      widening the request to user-wide memory.
+ *   3. The default project, reachable only from a path-LESS connection: a URL
+ *      slug that names no project is a caller asking to be confined to
+ *      something that does not exist, so it throws `project_not_found` rather
+ *      than answering with somebody else's project.
+ *
+ * There is no fourth source and no scopeless outcome — every authenticated
+ * connection resolves to exactly one project.
  *
  * Before consulting source #2 on an unscoped connection, this helper
  * awaits any in-flight roots discovery (or triggers it lazily as a
@@ -65,11 +72,10 @@ export function unresolvableSlugError(slug: string, projects?: ProjectsService):
  */
 export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
   const ctx = getRequestContext();
-  if (ctx.project) return { scope: projectScope(ctx.project.id), project: ctx.project };
+  if (ctx.project)
+    return { scope: projectScope(ctx.project.id), project: ctx.project, source: 'url-path' };
   if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, deps.projects);
-  if (!ctx.mcpSessionId || !deps.router || !deps.projects) {
-    return { scope: SCOPE_GLOBAL, project: null };
-  }
+  if (!ctx.mcpSessionId || !deps.router) return defaultProjectScope(deps.projects);
   if (deps.getServer) {
     await ensureRootsDiscoveryRun(
       { server: deps.getServer(), router: deps.router, projects: deps.projects },
@@ -78,8 +84,34 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
   }
   const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
   const project = entry?.projectId ? (deps.projects.getById(entry.projectId) ?? null) : null;
-  if (!project) return { scope: SCOPE_GLOBAL, project: null };
-  return { scope: projectScope(project.id), project };
+  if (!entry || !project) return defaultProjectScope(deps.projects);
+  return {
+    scope: projectScope(project.id),
+    project,
+    source: entry.projectResolutionSource,
+  };
+}
+
+/**
+ * The fallback every path-less connection lands on. Sole construction site for
+ * the default project's scope, so a handler cannot resolve it differently from
+ * the resolver.
+ */
+function defaultProjectScope(projects: ProjectsService): EffectiveScope {
+  const project = projects.getDefault();
+  return { scope: projectScope(project.id), project, source: 'default' };
+}
+
+/**
+ * `resolveEffectiveScope` for the one caller that must survive a slug naming no
+ * project: `project.current` is how an agent diagnoses such a connection, so it
+ * reports the absent scope instead of refusing with `project_not_found`.
+ */
+export async function resolveEffectiveScopeOrNull(
+  deps: ScopeResolutionDeps,
+): Promise<EffectiveScope | null> {
+  if (unresolvableSlug() !== null) return null;
+  return resolveEffectiveScope(deps);
 }
 
 /**
@@ -88,6 +120,15 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
  */
 export function isPathScoped(): boolean {
   return getRequestContext().requestedSlug !== null;
+}
+
+/**
+ * The URL slug when it named no project, else null. The narrower half of
+ * `isPathScoped`, which cannot distinguish the two.
+ */
+export function unresolvableSlug(): string | null {
+  const ctx = getRequestContext();
+  return ctx.project ? null : ctx.requestedSlug;
 }
 
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
@@ -100,20 +141,20 @@ export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean
 }
 
 /**
- * A token pinned to one project, denied a global-scope action on a path-less
- * connection, is refused a scope it never asked for — and has a one-call way
- * in. Empty in every other case, so a token with no pin (`read:*`) is not told
- * to activate something that does not exist.
+ * The one-call way in for a token pinned to one project and denied an action on
+ * a path-less connection that resolved to a DIFFERENT one. Empty otherwise.
  */
-function projectPinRemedy(
-  ctx: RequestContext,
-  scope: Scope,
-  projects: ProjectsService | undefined,
-): string {
-  if (scope.kind !== 'global' || ctx.requestedSlug !== null) return '';
+function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
+  // A path-scoped connection would have `project.use` refused as `scope_locked`.
+  if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
   if (pinned === null) return '';
-  const slug = projects?.getById(pinned)?.slug ?? pinned;
+  // Re-activating the scope already active cannot change the answer.
+  if (scope.kind === 'project' && scope.projectId === pinned) return '';
+  // A token row predating the enforced project binding carries a SLUG here
+  // rather than an id (`db/schema/tokens.ts:35-37`), so it resolves to no
+  // project row and the string itself is already the slug to name.
+  const slug = projects.getById(pinned)?.slug ?? pinned;
   return (
     `; this token is pinned to project '${slug}' — call project.use({slug: '${slug}'}) ` +
     `or reconnect at '/mcp/${slug}'`
@@ -125,14 +166,11 @@ function projectPinRemedy(
  * passes through: checks the request token's scope against the tool's
  * read/write classification and the target scope, throwing
  * `DomainError('forbidden')` on failure.
- *
- * `deps` is optional only so callers without a `ProjectsService` keep working;
- * supplying it resolves the pinned project id in the remedy hint to its slug.
  */
 export function assertAuthorized(
   action: 'read' | 'write',
   scope: Scope,
-  deps?: Pick<ScopeResolutionDeps, 'projects'>,
+  deps: Pick<ScopeResolutionDeps, 'projects'>,
 ): void {
   const ctx = getRequestContext();
   if (!isAuthorizedFor(action, scope)) {
@@ -140,7 +178,7 @@ export function assertAuthorized(
     throw new DomainError(
       'forbidden',
       `token scope '${ctx.scope}' does not authorize ${action} on ${target}` +
-        projectPinRemedy(ctx, scope, deps?.projects),
+        projectPinRemedy(ctx, scope, deps.projects),
     );
   }
 }

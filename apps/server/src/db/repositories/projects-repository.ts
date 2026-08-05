@@ -18,6 +18,11 @@ export class ProjectsRepository {
     return this.db.select().from(projects).where(eq(projects.slug, slug)).get();
   }
 
+  /** The system default project. At most one row can match: `projects_is_default_uidx`. */
+  findDefault(): Project | undefined {
+    return this.db.select().from(projects).where(eq(projects.isDefault, true)).get();
+  }
+
   listOrdered(includeArchived: boolean): Project[] {
     const query = this.db.select().from(projects).orderBy(asc(projects.createdAt)).$dynamic();
     return includeArchived ? query.all() : query.where(isNull(projects.archivedAt)).all();

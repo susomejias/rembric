@@ -77,6 +77,21 @@ const FORBIDDEN: ForbiddenRule[] = [
     description: 'raw `UPDATE memory SET title = …` is forbidden — title is immutable',
   },
   {
+    // `[^;]*` rather than `[^)]*`: the narrower form cannot cross a `)`, so a
+    // call anywhere in the object literal (`.set({ status: f(), projectId: x })`)
+    // slipped past it — measured.
+    pattern: /\bupdate\(\s*memory\s*\)[^;]*\.set\([^;]*\bprojectId\s*:/i,
+    description:
+      '`db.update(memory).set({ projectId: … })` is forbidden — only a schema migration may move a memory between projects',
+  },
+  {
+    // Migrations are exempt by construction: `listSourceFiles` skips the
+    // directory and the runner reads `.sql`, which is not scanned at all.
+    pattern: /UPDATE\s+memory\b[^;]*\bSET\s+project_id\s*=/i,
+    description:
+      'raw `UPDATE memory SET project_id = …` is forbidden outside db/migrations/ — the append-only carve-out is a migration-only one',
+  },
+  {
     pattern: /delete\s*\(\s*agentSessions\s*\)/i,
     description: 'Drizzle `db.delete(agentSessions)` is forbidden — agent sessions are append-only',
   },
@@ -202,6 +217,39 @@ describe('append-only invariants (static grep)', () => {
     const file = join(srcRoot, 'db/repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
+  });
+
+  /**
+   * The DELETE-FROM rules are anchored by their allow-listed files, which must
+   * still contain the statement. The two `project_id` rules allow-list nothing —
+   * their exemption is `db/migrations/`, which `listSourceFiles` does not scan at
+   * all — so with no file to anchor against, a pattern that matches nothing
+   * anywhere is indistinguishable from a pattern that is doing its job. Both
+   * were measured NOT CAUGHT by a mutation before this existed.
+   */
+  it('grep anchors: the memory.project_id rules match a known-bad line and not a near miss', () => {
+    const rule = (needle: string): ForbiddenRule => {
+      const found = FORBIDDEN.filter((r) => r.description.includes(needle));
+      expect(found, `no forbidden rule mentions ${needle}`).toHaveLength(1);
+      return found[0]!;
+    };
+
+    const drizzle = rule('db.update(memory).set({ projectId');
+    expect(drizzle.pattern.test('db.update(memory).set({ projectId: id }).run();')).toBe(true);
+    expect(
+      drizzle.pattern.test('db.update(memory).set({ status: pick(), projectId: id }).run();'),
+    ).toBe(true);
+    expect(drizzle.pattern.test('db.update(memoryRelations).set({ projectId: id }).run();')).toBe(
+      false,
+    );
+
+    const raw = rule('raw `UPDATE memory SET project_id');
+    expect(raw.pattern.test('sql`UPDATE memory SET project_id = ${id} WHERE id = ${m}`')).toBe(
+      true,
+    );
+    expect(raw.pattern.test('sql`UPDATE memory SET last_seen_at = ${now} WHERE id = ${m}`')).toBe(
+      false,
+    );
   });
 
   it('allow-list anchors: db/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
@@ -490,84 +538,6 @@ describe('scope-leak invariant', () => {
 });
 
 /**
- * `includeGlobal` construction invariant (issue #304).
- *
- * `includeGlobal` is the one value that relaxes the scope guarantee the
- * compiler otherwise enforces: it widens a project-scoped read to also admit
- * `global` rows. It travels BESIDE `Scope` as a bare boolean, so no layer
- * that carries it can tell whether anyone was authorized to set it.
- *
- * Exactly one production site may decide it —
- * `mcp/memory-tools.ts::resolveIncludeGlobal` — which gates on both halves of
- * GHSA-cc4j-ch4r-9pf5: the connection must not be path-scoped, AND the token
- * must authorize a global read. A second decision site (a new HTTP endpoint,
- * a new MCP tool, a widened `memory.get`) reopens that bypass, and nothing
- * else catches it: the compiler sees a valid boolean, and the existing tests
- * exercise `handleSearch` rather than arbitrary callers.
- *
- * Everywhere else the value may only be threaded through
- * (`<expr>.includeGlobal`), declared as a type, or set to `false`/`undefined`.
- */
-const INCLUDE_GLOBAL_ASSIGNMENT = /\bincludeGlobal\s*\??\s*[:=](?!=)\s*(.*)$/;
-/** Type declaration, pass-through of an already-decided value, or an explicit narrowing. */
-const INCLUDE_GLOBAL_INERT_RHS = /^(boolean|false|undefined|[\w$]+(?:\.[\w$]+)*\.includeGlobal)\b/;
-const INCLUDE_GLOBAL_DECIDER = 'mcp/memory-tools.ts';
-
-describe('includeGlobal construction invariant', () => {
-  const files = listSourceFiles(srcRoot);
-
-  const decisions = (): { file: string; line: number; rhs: string; text: string }[] => {
-    const found: { file: string; line: number; rhs: string; text: string }[] = [];
-    for (const file of files) {
-      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
-      if (rel === 'test/invariants.test.ts') continue;
-      const lines = readFileSync(file, 'utf8').split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]!;
-        const trimmed = line.trim();
-        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
-          continue;
-        }
-        const match = INCLUDE_GLOBAL_ASSIGNMENT.exec(line);
-        if (!match) continue;
-        const rhs = match[1]!.trim();
-        if (INCLUDE_GLOBAL_INERT_RHS.test(rhs)) continue;
-        found.push({ file: rel, line: i + 1, rhs, text: trimmed });
-      }
-    }
-    return found;
-  };
-
-  it('only mcp/memory-tools.ts decides includeGlobal', () => {
-    const offenders = decisions().filter((d) => d.file !== INCLUDE_GLOBAL_DECIDER);
-    if (offenders.length > 0) {
-      const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
-      throw new Error(
-        `includeGlobal is decided outside ${INCLUDE_GLOBAL_DECIDER}::resolveIncludeGlobal. ` +
-          `Widening a project scope to global requires re-authorizing the token for a global read ` +
-          `(GHSA-cc4j-ch4r-9pf5); thread the decided value through instead, or route the new site ` +
-          `through resolveIncludeGlobal.\n${formatted}`,
-      );
-    }
-  });
-
-  it('the one decision inside mcp/memory-tools.ts goes through resolveIncludeGlobal', () => {
-    const inDecider = decisions().filter((d) => d.file === INCLUDE_GLOBAL_DECIDER);
-    expect(inDecider.length).toBeGreaterThan(0);
-    const unrouted = inDecider.filter((d) => !d.rhs.startsWith('resolveIncludeGlobal('));
-    expect(unrouted.map((d) => `${d.file}:${d.line}  ${d.text}`)).toEqual([]);
-  });
-
-  it('resolveIncludeGlobal still checks both the connection and the token', () => {
-    const src = readFileSync(join(srcRoot, INCLUDE_GLOBAL_DECIDER), 'utf8');
-    const body = /function resolveIncludeGlobal\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(src)?.[1];
-    expect(body, 'resolveIncludeGlobal not found in ' + INCLUDE_GLOBAL_DECIDER).toBeTruthy();
-    expect(body).toContain('isPathScoped()');
-    expect(body).toContain("isAuthorizedFor('read', SCOPE_GLOBAL)");
-  });
-});
-
-/**
  * Data-access confinement invariant.
  *
  * ALL SQL — Drizzle query-builder calls, the drizzle-orm `sql` tag, and raw
@@ -627,7 +597,6 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminCountArchived',
     'adminCountByStatus',
     'adminCountCreatedByDay',
-    'adminFindById',
     'adminListRuns',
     'adminOpCounts',
     'adminRecent',

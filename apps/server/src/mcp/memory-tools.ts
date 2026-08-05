@@ -31,24 +31,21 @@ import {
   type RelationsService,
 } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import { SCOPE_GLOBAL, type Scope } from '../services/scope.js';
+import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
   assertExplicitSessionOwned,
   boundAnnotationReasons,
   clamp,
-  isAuthorizedFor,
-  isPathScoped,
+  type EffectiveScope,
   requireScope,
   resolveEffectiveScope,
   routerKey,
   serializeMemory,
   snippet,
-  unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';
-import { pendingSuggestionGate, suggestionPendingMessage } from './project-suggestion-gate.js';
 import { ok } from './result.js';
 
 /**
@@ -59,26 +56,10 @@ import { ok } from './result.js';
  * service call. The service layer enforces the scope at the SQL level
  * (rows outside scope are invisible) so handlers cannot leak by mistake.
  *
- * Path-scoping contract (also asserted by tests):
- *
- *   /mcp/<slug>  → scope = project:<id>
- *     - memory.save scope='global'  →  mcpError 'scope_locked'
- *     - memory.save scope='project' →  saved to that project
- *     - memory.search                →  only that project's memories
- *     - memory.get / .confirm        →  cross-scope ids are 'not_found'
- *
- *   /mcp  (no slug)            → scope = global (unless `project.use` ran)
- *     - memory.save scope='project' →  mcpError 'project_required'
- *                                     (unless `project.use` activated one
- *                                      for this transport — see
- *                                      `resolveEffectiveScope` in `_shared`)
- *     - memory.save scope='global'  →  saved as user-wide
- *     - memory.search                →  globals only (or the active project
- *                                       set via `project.use`)
- *     - memory.get / .confirm        →  project ids are 'not_found' (idem)
+ * No tool takes a scope argument: the destination is the connection's single
+ * resolved project (`resolveEffectiveScope` in `_shared`), so `memory.get` and
+ * `memory.confirm` answer `not_found` for an id belonging to another one.
  */
-
-const MEMORY_SCOPES = ['global', 'project'] as const;
 
 /** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
 const PENDING_JUDGMENTS_MAX = 50;
@@ -125,7 +106,6 @@ function relationsLimitParam(defaults: string) {
 }
 
 export const memorySaveSchema = {
-  scope: z.enum(MEMORY_SCOPES).default('project'),
   type: z.enum(MEMORY_TYPES),
   title: z.string().min(1).max(100),
   content: z.string().min(1),
@@ -147,7 +127,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag`, `topic_key` and `include_global` (which is gated — see its own description); with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
+      'Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any "36"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag` and `topic_key`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.',
     ),
   type: z.enum(MEMORY_TYPES).optional(),
   tag: z.string().optional(),
@@ -160,12 +140,6 @@ export const memorySearchSchema = {
       "Return only memories carrying this exact topic_key. On its own it returns the topic's whole history — the active row plus every row it superseded — because that is what tells you whether the topic already converged before you save a synonym key; pass `status` too to narrow to one. Pair with memory.suggest_topic_key.",
     ),
   status: z.enum(MEMORY_STATUSES).optional(),
-  include_global: z
-    .boolean()
-    .optional()
-    .describe(
-      "When scoped to a project, also include global memories in the results (e.g. user-wide preferences/conventions), on the ranked and entity branches alike. Silently ignored, never an error, on a path-scoped connection ('/mcp/<slug>'), on a global-scoped connection, or when this token is not authorized to read global.",
-    ),
   include_relations: z
     .boolean()
     .optional()
@@ -587,8 +561,8 @@ export interface MemoryToolDeps {
   ) => Promise<boolean>;
   /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
   router?: SessionRouter;
-  /** Optional — required to evaluate the project-suggestion gate on save. */
-  projects?: ProjectsService;
+  /** Every connection resolves to a project, so scope resolution cannot proceed without this. */
+  projects: ProjectsService;
   /**
    * Optional — when present, `memory.save` attaches the most-recently-
    * active session row for `(tokenId, projectId)` to the memory when the
@@ -779,7 +753,6 @@ export async function saveMemoryWithCandidates(
 async function handleSave(
   deps: MemoryToolDeps,
   args: {
-    scope: 'global' | 'project';
     type: (typeof MEMORY_TYPES)[number];
     title: string;
     content: string;
@@ -790,56 +763,14 @@ async function handleSave(
 ) {
   const ctx = getRequestContext();
 
-  // Path-scoped connections forbid global writes.
-  if (isPathScoped() && args.scope === 'global') {
-    return mcpError(
-      'scope_locked',
-      `This MCP connection is path-scoped to project '${ctx.requestedSlug}'. ` +
-        'Global writes are not permitted and user-wide memory is not reachable ' +
-        "here. Save this as a project memory instead (scope='project'), or ask " +
-        "your operator to add a path-less '/mcp' entry for user-wide memory.",
-    );
-  }
-
-  // Path-scoped to a slug that doesn't exist: writes need an existing project.
-  if (ctx.requestedSlug !== null && !ctx.project && args.scope === 'project') {
-    return errToMcp(unresolvableSlugError(ctx.requestedSlug, deps.projects));
-  }
-
-  // Pick up the project the agent already activated via `project.use` on
-  // this transport (or that roots discovery activated), in addition to the
-  // URL-derived `ctx.project`. Mirrors the precedence used by
-  // `handleSessionStart` and `project.current`.
-  const { scope, project: activeProject } = await resolveEffectiveScope(deps);
-
-  // When roots-based discovery surfaced suggestions the agent has not yet
-  // acted on, refuse the silent fallback to global. The agent must either
-  // pass scope='global' explicitly, or call project.use({slug, autocreate}).
-  if (!activeProject && args.scope === 'project' && deps.router && deps.projects) {
-    const pending = pendingSuggestionGate(ctx, { router: deps.router, projects: deps.projects });
-    if (pending) {
-      return mcpError('project_suggestion_pending', suggestionPendingMessage(), {
-        suggestedSlugs: pending,
-      });
-    }
-  }
-
-  // Unscoped connections cannot persist project memories without a target.
-  if (!activeProject && args.scope === 'project') {
-    return mcpError(
-      'project_required',
-      'This MCP connection has no active project. To save a project memory, either: ' +
-        "(a) reconnect at '/mcp/<your-project-slug>' (recommended for per-project setups), " +
-        '(b) call project.use({slug}) to set a project for this session, ' +
-        "or (c) set scope='global' to save as a user-wide memory instead.",
-    );
-  }
-
+  let resolved: EffectiveScope;
   try {
-    assertAuthorized('write', scope, deps);
+    resolved = await resolveEffectiveScope(deps);
+    assertAuthorized('write', resolved.scope, deps);
   } catch (err) {
     return errToMcp(err);
   }
+  const { scope, project: activeProject } = resolved;
 
   let resolvedSessionId: string | null;
   try {
@@ -868,7 +799,7 @@ async function handleSave(
     // Archived projects reject new writes (projects spec, "Archiving a
     // project"). Enforced here rather than in resolveEffectiveScope so the
     // read paths (search/get) keep returning an archived project's memories.
-    if (activeProject) deps.projects?.assertWritable(activeProject.id);
+    if (activeProject) deps.projects.assertWritable(activeProject.id);
 
     const {
       memory: m,
@@ -928,12 +859,6 @@ function annotationBudgetError(
   );
 }
 
-/** Denial narrows the result rather than rejecting: the caller is authorized for every row it receives. */
-function resolveIncludeGlobal(requested: boolean | undefined): boolean {
-  if (!requested) return false;
-  return !isPathScoped() && isAuthorizedFor('read', SCOPE_GLOBAL);
-}
-
 async function handleSearch(
   deps: MemoryToolDeps,
   args: {
@@ -943,7 +868,6 @@ async function handleSearch(
     tag?: string;
     topic_key?: string;
     status?: (typeof MEMORY_STATUSES)[number];
-    include_global?: boolean;
     include_relations?: boolean;
     limit?: number;
     offset?: number;
@@ -969,7 +893,6 @@ async function handleSearch(
     status: args.status,
     limit: args.limit,
     offset: args.offset,
-    includeGlobal: resolveIncludeGlobal(args.include_global),
   };
 
   // The EFFECTIVE row count, not the declared one. An omitted `limit` means 8 rows
@@ -1307,7 +1230,7 @@ function deriveFocusSeed(
 ): string | undefined {
   const parts: string[] = [];
   const projectId = scope.kind === 'project' ? scope.projectId : null;
-  const project = projectId ? deps.projects?.getById(projectId) : undefined;
+  const project = projectId ? deps.projects.getById(projectId) : undefined;
   if (project) parts.push(project.displayName ?? project.slug);
 
   if (deps.router && deps.agentSessions) {

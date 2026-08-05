@@ -9,7 +9,8 @@ import { SessionRouter } from '../server/session-router.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { projectScope } from '../services/scope.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildRelationsHandlers } from './relations-tools.js';
 import { suggestTopicKey } from './topic-key.js';
@@ -19,6 +20,7 @@ let repos: Repositories;
 let relations: RelationsService;
 let memorySvc: MemoryService;
 let handlers: ReturnType<typeof buildRelationsHandlers>;
+let defaultProjectId: string;
 
 function fakeContext(project: Project | null = null): RequestContext {
   const token: Token = {
@@ -50,8 +52,8 @@ function mem(id: string, content: string): NewMemory {
     id,
     title: deriveTitle(content),
     content,
-    scope: 'global',
-    projectId: null,
+    scope: 'project',
+    projectId: defaultProjectId,
     type: 'project',
     tags: [],
     status: 'active',
@@ -67,6 +69,7 @@ function memInProject(id: string, content: string, projectId: string): NewMemory
 
 beforeEach(() => {
   db = createTestDb();
+  defaultProjectId = defaultProject(db.handle).id;
   repos = createRepositories(db.handle.db);
   relations = new RelationsService(repos, db.handle.db);
   memorySvc = new MemoryService(repos, db.handle.db);
@@ -232,7 +235,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
     const suggestion = suggestTopicKey({ type: 'project', title }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title, content: 'x', topicKey: suggestion },
-      { kind: 'global' },
+      projectScope(defaultProjectId),
     ).memory;
 
     const r = await runWithContext(fakeContext(), () =>
@@ -272,7 +275,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
     const heldKey = suggestTopicKey({ type: 'project', title: heldTitle }).topicKey!;
     const held = memorySvc.saveWithTopicKey(
       { type: 'project', title: heldTitle, content: 'x', topicKey: heldKey },
-      { kind: 'global' },
+      projectScope(defaultProjectId),
     ).memory;
 
     const r = await runWithContext(fakeContext(), () =>
@@ -300,7 +303,7 @@ describe('memory.suggest_topic_key — scope-aware occupied/nearby (fix-audited-
         content: 'x',
         topicKey: suggestTopicKey({ type: 'project', title }).topicKey!,
       },
-      { kind: 'project', projectId: projectB.id },
+      projectScope(projectB.id),
     );
 
     const r = await runWithContext(fakeContext(projectA), () =>

@@ -74,6 +74,16 @@ describe('urlWithPage', () => {
       '/dashboard/memories?status=active',
     );
   });
+
+  it('drops the retired project sentinel instead of echoing it into the href', () => {
+    expect(urlWithPage('http://x/dashboard/sessions?project=__global__&status=active', 1)).toBe(
+      '/dashboard/sessions?status=active&page=1',
+    );
+    // Control: a real slug is preserved, so the rule is narrow.
+    expect(urlWithPage('http://x/dashboard/sessions?project=demo', 1)).toBe(
+      '/dashboard/sessions?project=demo&page=1',
+    );
+  });
 });
 
 describe('viewHead', () => {
@@ -294,11 +304,18 @@ describe('truncate', () => {
 });
 
 describe('projectOptions', () => {
-  it('always leads with "all scopes" then "global only"', () => {
+  it('leads with "all scopes" and then offers only projects', () => {
     const opts = projectOptions([{ slug: 'proj-a' }], '');
-    expect(opts[0]).toEqual({ value: '', label: 'all scopes', selected: true });
-    expect(opts[1]).toEqual({ value: '__global__', label: 'global only', selected: false });
-    expect(opts[2]).toEqual({ value: 'proj-a', label: 'proj-a', selected: false });
+    expect(opts).toEqual([
+      { value: '', label: 'all scopes', selected: true },
+      { value: 'proj-a', label: 'proj-a', selected: false },
+    ]);
+  });
+
+  it('offers no option for a scope that no longer exists', () => {
+    const opts = projectOptions([{ slug: 'proj-a' }, { slug: 'default' }], '');
+    expect(opts.map((o) => o.value)).not.toContain('__global__');
+    expect(opts.map((o) => o.label)).not.toContain('global only');
   });
 
   it('marks the selected project slug', () => {

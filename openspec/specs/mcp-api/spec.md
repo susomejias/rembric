@@ -19,59 +19,66 @@ The server SHALL expose the Model Context Protocol over the Streamable HTTP tran
 
 When the MCP connection is path-scoped (`/mcp/<slug>`) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope visible:
 
-- `memory.save` with `scope='global'` SHALL be rejected with structured code `scope_locked`.
-- `memory.save` with `scope='project'` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies.
-- `memory.search` SHALL return only memories whose `scope = 'project'` and `project_id` equals the bound project; global memories SHALL NOT be returned. The `includeGlobal` argument SHALL be ignored on path-scoped connections.
-- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory is global or belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes.
+- `memory.save` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies. There is no argument by which an agent can name a different destination: `memory.save` accepts no `scope` argument, so the destination is determined entirely by the connection the operator configured.
+- `memory.search` SHALL return only memories whose `project_id` equals the bound project. No argument SHALL widen the result set past it; `include_global` is removed from the tool's input schema.
+- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes.
 
-A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the four clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to the global scope. The refusal SHALL be the connection's uniform answer regardless of tool classification: an unresolvable slug SHALL never widen a read to user-wide memory, and SHALL never admit a write into the global scope.
+Because there is now exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its project is fixed by the URL and cannot be changed by `project.use` for the life of the connection.
+
+A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to any other project — in particular not to the default project, whose role is to serve path-LESS connections. An operator who typed a slug asked to be confined to it, and answering a typo with someone else's project is worse than refusing.
 
 The `not_found` clause above governs a connection whose slug DOES resolve, where the comparison is between the bound project and the requested memory. On an unresolvable slug there is no bound project to compare against, so `project_not_found` — which names the unusable connection — takes precedence over `not_found`, and the two do not conflict.
 
 #### Scenario: save with scope='global' on a path-scoped connection
 
-- **GIVEN** a client connected at `/mcp/foo` with a valid token
-- **WHEN** the client calls `memory.save` with `scope='global'`
-- **THEN** the response SHALL be an MCP error containing `code: 'scope_locked'` and a message naming the bound project
+- **GIVEN** a path-scoped connection at `/mcp/foo` with a valid token
+- **WHEN** the client calls `memory.save` with an argument named `scope`
+- **THEN** the call SHALL be rejected by the input schema as an unrecognized argument, and no refusal SHALL name the scope the argument used to request
+- **AND** the scenario title predates this change: the argument it names has been removed, so no call can ask for a scope and be refused one. `scope_locked` survives only as a refusal of a project **switch** (see "the surviving `scope_locked` refusals lock a switch, not a scope"); it SHALL NOT be reintroduced as a refusal of a scope
 
 #### Scenario: search on a path-scoped connection does not leak globals
 
-- **GIVEN** a path-scoped connection at `/mcp/foo` and at least one memory with `scope='global'`
-- **WHEN** the client calls `memory.search` with or without `includeGlobal=true`
-- **THEN** the response SHALL NOT contain any memory whose `scope='global'`
+- **GIVEN** a path-scoped connection at `/mcp/foo` and memories in another project
+- **WHEN** the client calls `memory.search`, with or without any additional argument
+- **THEN** the response SHALL contain only project `foo`'s memories, and no argument SHALL admit another project's rows
+- **AND** the scenario title predates this change: there are no global memories left to leak, and `include_global` is no longer an accepted argument
 
 #### Scenario: get across project boundaries
 
-- **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M with `scope='project'`, `project_id='bar'`
+- **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M whose `project_id` is another project
 - **WHEN** the client calls `memory.get('M')`
 - **THEN** the response SHALL be an MCP error with `code: 'not_found'`, identical to the response for a non-existent id
 
 #### Scenario: search on an unresolvable slug refuses instead of reading global memory
 
-- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and at least one memory with `scope='global'`
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and memories in the default project
 - **WHEN** the client calls `memory.search`
 - **THEN** the response SHALL be an MCP error with `code: 'project_not_found'`
-- **AND** the response SHALL contain no memory whose `scope='global'`
+- **AND** the response SHALL contain no memory, in particular none from the default project
+- **AND** the scenario title predates this change: there is no global memory to read, and the refusal it pins is unchanged
 
 #### Scenario: get on a global id from an unresolvable slug refuses
 
-- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and a memory M with `scope='global'`
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and a memory M in the default project
 - **WHEN** the client calls `memory.get({id: M})`
 - **THEN** the response SHALL be an MCP error with `code: 'project_not_found'` and SHALL NOT return M's `content`
+- **AND** the scenario title predates this change: M is a memory in the default project, not a global one, which is what its body already says
 
 #### Scenario: writes on an unresolvable slug do not land in global memory
 
 - **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project and a token whose scope is `*`
 - **WHEN** the client calls `memory.capture_passive` with text containing a well-formed Key Learnings section, or calls `memory.save_prompt`
 - **THEN** each call SHALL be refused with `code: 'project_not_found'`
-- **AND** no row SHALL be inserted into `memory` or `prompts`
+- **AND** no row SHALL be inserted into `memory` or `prompts`, in the default project or any other
+- **AND** the scenario title predates this change: there is no global memory to land in, and the refusal it pins is unchanged
 
 #### Scenario: a session is not opened in the global scope from an unresolvable slug
 
 - **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project and a token whose scope is `*`
 - **WHEN** the client calls `memory.session_start`
 - **THEN** the call SHALL be refused with `code: 'project_not_found'`
-- **AND** no `agent_sessions` row SHALL be inserted, in the global scope or any other
+- **AND** no `agent_sessions` row SHALL be inserted, in the default project or any other
+- **AND** the scenario title predates this change: there is no global scope to open a session in, and the refusal it pins is unchanged
 
 #### Scenario: the refusal names candidate slugs
 
@@ -88,9 +95,9 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 
 ### Requirement: The MCP endpoint MUST support path-based project scoping
 
-The server SHALL accept MCP requests at `/mcp` (global) and at `/mcp/<project-slug>` (project-scoped). When the path includes a non-empty slug after `/mcp/`, the server SHALL resolve that slug to a project via `projects.findBySlug(slug)` and SHALL use the resulting project as the request's project scope. Resolution SHALL NOT create a project: auto-create on read is forbidden by the `projects` capability, and creating a project row at the authentication layer would let any token holding `*` mint arbitrary projects by requesting arbitrary URLs, before any write authorization has been checked.
+The server SHALL accept MCP requests at `/mcp` (which resolves to the default project) and at `/mcp/<project-slug>` (bound to the named project). When the path includes a non-empty slug after `/mcp/`, the server SHALL resolve that slug to a project via `projects.findBySlug(slug)` and SHALL use the resulting project as the request's project scope. Resolution SHALL NOT create a project: auto-create on read is forbidden by the `projects` capability, and creating a project row at the authentication layer would let any token holding `*` mint arbitrary projects by requesting arbitrary URLs, before any write authorization has been checked.
 
-When `findBySlug` returns nothing, the `initialize` handshake SHALL still succeed and the connection SHALL be treated as path-scoped to a project that does not exist — refused per the strict-isolation requirement, never resolved to the global scope.
+When `findBySlug` returns nothing, the `initialize` handshake SHALL still succeed and the connection SHALL be treated as path-scoped to a project that does not exist — refused per the strict-isolation requirement, never resolved to another project and in particular never to the default project.
 
 The `X-Rembric-Project` header SHALL NOT be consulted in scope resolution (see the `projects` capability); the path slug is the only connection-level mechanism.
 
@@ -113,7 +120,9 @@ The `X-Rembric-Project` header SHALL NOT be consulted in scope resolution (see t
 #### Scenario: Global connection
 
 - **WHEN** an MCP client connects to `/mcp` without a slug
-- **THEN** the request SHALL be accepted without a project scope; tools that require a project (e.g. `memory.save` with `scope='project'`) SHALL respond with a structured error code `project_required` whose message instructs the caller to reconnect at `/mcp/<slug>`, to call `project.use({slug})`, or to save as `scope='global'` instead
+- **THEN** the request SHALL be accepted with the default project as its scope, and every tool that resolves scope SHALL operate in it
+- **AND** no tool SHALL respond with `project_required` on such a connection, because a project is always active
+- **AND** the scenario title predates this change: a path-less connection is no longer "global", and `project_required` is retired from the MCP surface entirely rather than surviving on a narrower path — the two paths that leave a connection unusable emit their own codes, `project_not_found` for an unresolvable slug and `project_archived` for an archived project, and neither message SHALL name a scope
 
 ### Requirement: Every MCP request MUST be authenticated
 
@@ -422,7 +431,7 @@ In the batch form (`{ ids }`), the server SHALL de-duplicate the ids, record one
 
 ### Requirement: The MCP server MUST expose a `memory.archive` tool
 
-The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the routed project (via `project.use`) or global scope.
+The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the project the router pinned (via `project.use`), or in the default project when nothing else resolved.
 
 A cross-scope or unknown `id` SHALL return the same `not_found`-class error as `memory.get`/`memory.confirm` — there is no cross-scope or cross-project archive path. Archiving a non-`active` memory SHALL return a `conflict`-class error. The tool SHALL NOT delete rows, drop vectors, or expose any purge capability; physical deletion remains operator/admin-only.
 
@@ -635,7 +644,7 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 #### Scenario: `memory.context` returns a bootstrap snapshot
 
 - **WHEN** an MCP client calls `memory.context` with `{ sessions?: number, prompts?: number, memories?: number, judgments?: number, includeArchived?: boolean }`
-- **THEN** the server SHALL return `{ scope, recentSessions, recentPrompts, recentMemories, relevantMemories, pendingJudgments, pendingJudgmentsTotal, needsReview, needsReviewTotal }` — where `scope` is the resolved scope label, as on `memory.stats` — plus `rankedPass` when the ranked pass executed (see "`memory.context` MUST offer a relevance channel alongside recency"), with each list scoped to the request context (global vs path-scoped project)
+- **THEN** the server SHALL return `{ scope, recentSessions, recentPrompts, recentMemories, relevantMemories, pendingJudgments, pendingJudgmentsTotal, needsReview, needsReviewTotal }` — where `scope` is the resolved scope label, as on `memory.stats` — plus `rankedPass` when the ranked pass executed (see "`memory.context` MUST offer a relevance channel alongside recency"), with each list scoped to the request context (the connection's one project)
 - **AND** when a size argument is omitted the default SHALL be `sessions = 3`, `memories = 10`, `prompts = 5`, `judgments = 5` (kept small because the snapshot is read every session start; callers needing more pass explicit args, still bounded by the maxima below)
 - **AND** `recentSessions` SHALL contain only sessions that satisfy the `sessionHasContent` predicate (see `sessions` capability), ordered by `started_at DESC`, with empty sessions filtered out BEFORE truncation to `sessions ?? 3`
 - **AND** `recentPrompts` SHALL be ordered by `created_at DESC` and filtered to `deleted_at IS NULL`
@@ -659,7 +668,7 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 #### Scenario: `pendingJudgmentsTotal` respects scope
 
 - **GIVEN** a pending relation whose memories belong to project B
-- **WHEN** an MCP client scoped to project A (or the global endpoint) calls `memory.context`
+- **WHEN** an MCP client scoped to project A calls `memory.context`
 - **THEN** `pendingJudgmentsTotal` SHALL NOT count it
 
 #### Scenario: `needsReview` is unary and disjoint from `pendingJudgments`
@@ -671,7 +680,7 @@ Both of those pending channels SHALL be restricted to ADJUDICABLE pairs — a pe
 #### Scenario: `needsReview` respects scope
 
 - **GIVEN** an `active` memory past its review shelf life that belongs to project B
-- **WHEN** an MCP client calls `memory.context` on a connection scoped to project A (or the global endpoint)
+- **WHEN** an MCP client calls `memory.context` on a connection scoped to project A
 - **THEN** that memory SHALL NOT appear in `needsReview`
 
 #### Scenario: `needsReview` excludes non-active and within-shelf-life memories
@@ -876,11 +885,11 @@ When `focus` is absent, the server SHALL derive a seed from signals it already h
 
 ### Requirement: `memory.timeline` session neighbors MUST be filtered by the connection's effective scope
 
-`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `(scope, project_id)` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one scope (an unscoped `/mcp` connection can save a global memory and a project memory within the same session) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another scope's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this `(scope, project_id)` filter; the session-neighbor query SHALL match it.
+`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `project_id` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one project (a path-less connection can call `project.use` mid-session and save into a second project) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another project's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this filter; the session-neighbor query SHALL match it.
 
 #### Scenario: A same-session memory in another scope is not returned
 
-- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and another memory `<G>` in global scope (or project B) that also carries `session_id = <S>`
+- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and another memory `<G>` in project B that also carries `session_id = <S>`
 - **WHEN** a connection whose effective scope is project A calls `memory.timeline` with `{ memoryId: '<M>' }`
 - **THEN** the returned `before`/`after` neighbors SHALL NOT include `<G>` or its `content`
 
@@ -911,7 +920,7 @@ The `db` block SHALL NOT carry an `open` flag. Producing the report requires a d
 
 - **WHEN** the caller's scope is `read:*`, or is `read:project:<id>` and the connection's effective scope resolves to that same project
 - **THEN** both tools SHALL succeed (they are read-only by design)
-- **WHEN** the caller's scope is `read:project:<id>` and the connection's effective scope resolves to global or to a different project
+- **WHEN** the caller's scope is `read:project:<id>` and the connection's effective scope resolves to a different project
 - **THEN** the call SHALL be rejected with code `forbidden`
 
 #### Scenario: The report carries no `db.open` flag
@@ -929,11 +938,11 @@ The `db` block SHALL NOT carry an `open` flag. Producing the report requires a d
 
 ### Requirement: The observability tool descriptions MUST disclose which population their counters cover
 
-`memory.doctor` and `memory.stats` return counters under colliding names over two different populations: doctor's are server-wide (all projects plus global), stats' are resolved against the request context. `memory.stats` carries a top-level `scope` field and `memory.doctor` carries none, but a client SHALL NOT be expected to infer one tool's semantics from the ABSENCE of a field in another. The counters therefore differ in value with nothing on the wire to explain it, and two readers of this codebase have already drawn a wrong conclusion from the collision. The tool description is the surface the model reads before deciding to call, so the disclosure belongs there.
+`memory.doctor` and `memory.stats` return counters under colliding names over two different populations: doctor's are server-wide (every project), stats' are resolved against the request context. `memory.stats` carries a top-level `scope` field and `memory.doctor` carries none, but a client SHALL NOT be expected to infer one tool's semantics from the ABSENCE of a field in another. The counters therefore differ in value with nothing on the wire to explain it, and two readers of this codebase have already drawn a wrong conclusion from the collision. The tool description is the surface the model reads before deciding to call, so the disclosure belongs there.
 
 `memory.doctor`'s registered description SHALL:
 
-- state that the report is SERVER-WIDE, covering all projects and the global scope;
+- state that the report is SERVER-WIDE, covering every project;
 - state that `memory.stats` carries the scoped equivalents and that the two sets of numbers WILL differ, so a mismatch reads as intent rather than as one of them being stale;
 - name EVERY cause of that divergence, not only the population. `review.needsReview` diverges from `memory.stats`' `needsReviewTotal` by population alone, but `review.pendingJudgments` diverges by population AND by filtering: doctor's counter is an unfiltered count of pending rows while the scoped totals count only ADJUDICABLE pairs, both endpoints still `active` (see the `memory` capability, "that field SHALL remain an unfiltered count of pending rows"). Naming only the population is worse than naming no cause, because a reader who verifies that both calls resolve to one project — where the population cannot explain anything — is left concluding that one of the two numbers is stale. The divergence is measurable inside a single project: archiving one endpoint of a pending pair drops the scoped totals and leaves doctor's count unchanged;
 - name the blocks the report actually returns, including `entities`, `sessions` and `review`, the three the description omitted before this requirement existed;
@@ -950,7 +959,7 @@ This requirement constrains description prose only. It SHALL NOT be read as re-s
 #### Scenario: `memory.doctor`'s description discloses the server-wide population and its scoped counterpart
 
 - **WHEN** an MCP client retrieves the tool description for `memory.doctor` via `tools/list`
-- **THEN** the description SHALL convey that the report is server-wide across all projects and the global scope
+- **THEN** the description SHALL convey that the report is server-wide across every project
 - **AND** the description SHALL name `memory.stats` as the source of the scoped equivalents and SHALL convey that the two will differ
 - **AND** the description SHALL name `entities`, `sessions` and `review` among the blocks returned
 
@@ -964,7 +973,7 @@ This requirement constrains description prose only. It SHALL NOT be read as re-s
 
 - **WHEN** an MCP client retrieves the tool description for `memory.stats` via `tools/list`
 - **THEN** the description SHALL name `needsReviewTotal` and `pendingJudgmentsTotal`
-- **AND** the description SHALL still convey that its counters are scoped to the active project or global
+- **AND** the description SHALL still convey that its counters are scoped to the active project
 - **AND** the description SHALL convey that `memory.doctor`'s same-named counters are server-wide and will differ
 
 #### Scenario: The disclosures live in the top-level description, not a schema `describe()`
@@ -1072,10 +1081,10 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.use`, `project.li
 
 #### Scenario: `activeMemoryCount` excludes memories outside the reported project
 
-- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the global scope
+- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the default project
 - **WHEN** a token authorized for both projects calls `project.list`
 - **THEN** each entry's `activeMemoryCount` SHALL count only that entry's own project scope
-- **AND** no entry's `activeMemoryCount` SHALL include the global-scope memories
+- **AND** no entry's `activeMemoryCount` SHALL include any other project's memories
 
 #### Scenario: A project-scoped token sees only its own project and its own count
 
@@ -1100,11 +1109,13 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.use`, `project.li
 #### Scenario: `project.current` reports resolution provenance
 
 - **WHEN** an MCP client calls `project.current`
-- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'roots' | 'tool-explicit' | 'none', suggestedSlugs: string[] }` where `suggestedSlugs` is populated by the most recent `roots/list` derivation that did NOT auto-activate (existing-but-already-active, or non-existing)
+- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'roots' | 'tool-explicit' | 'default' | 'none', suggestedSlugs: string[] }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'` — and `suggestedSlugs` is populated by the most recent `roots/list` derivation that did NOT auto-activate (existing-but-already-active, or non-existing)
 
 ### Requirement: The MCP `initialize` response MUST ship a protocol-teaching `instructions` block
 
 When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in both variants. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
+
+Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect when nothing else resolved, and name `project.use` as the way to switch.
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
@@ -1117,7 +1128,8 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp/<slug>`
 
 - **WHEN** the `initialize` handshake completes against `/mcp/my-project`
-- **THEN** the `InitializeResult.instructions` SHALL contain references to `memory.save`, `memory.search`, `memory.session_summary`, AND `memory.context` plus a note indicating the connection is project-scoped to `'my-project'` and that `scope='global'` will be rejected
+- **THEN** the `InitializeResult.instructions` SHALL contain references to `memory.save`, `memory.search`, `memory.session_summary`, AND `memory.context` plus a note indicating the connection is bound to project `'my-project'`
+- **AND** the note SHALL NOT contain `global`, `include_global` or `user-wide`
 - **AND** the instructions SHALL contain the substring `memory.session_summary` and the substring `title` and a reference to "before" (referring to before ending a working turn)
 - **AND** the instructions SHALL contain the substring `10000` (the summary length cap)
 - **AND** the instructions SHALL contain the substring `memory.context` (the recall flow)
@@ -1138,7 +1150,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp` without a project
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
-- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note indicating how a project becomes active on an unscoped connection — roots-based auto-detection where the client supports it, otherwise `project.use`. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `apps/server/src/mcp/instructions.test.ts`.
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect, roots-based auto-detection where the client supports it, and `project.use` as the way to switch. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `apps/server/src/mcp/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
 
 #### Scenario: Instructions length is checked at build time
 
@@ -1159,7 +1171,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **WHEN** `apps/server/src/mcp/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
 - **THEN** both outputs SHALL contain the substrings `memory.save`, `memory.context`, `memory.session_summary`, AND `memory.about`
 - **AND** both outputs SHALL be ≤1000 chars
-- **AND** existing assertions for `memory.search`, scope notes, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass
+- **AND** existing assertions for `memory.search`, the scope note, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass, with the scope-note assertion updated to the project-only wording
 
 #### Scenario: The instructions cap stays below the client ceiling
 
@@ -1173,7 +1185,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 This closes a blind spot: `memory.session_summary`'s and `memory.session_end`'s zod schemas already declared `sessionId` as optional, but their tool descriptions never mentioned it — a model reading only the description had no reason to believe passing it was possible. `memory.save` and `memory.save_prompt` did not accept the argument at all prior to this requirement.
 
-An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id, where a global-scope write requires `project_id IS NULL`), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied; the transport/active-session fallback paths already resolve to a session owned by the caller within the effective scope. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
+An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied; the transport/active-session fallback paths already resolve to a session owned by the caller within the effective scope. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
 
 #### Scenario: memory.save accepts and prioritizes an explicit sessionId
 
@@ -1200,7 +1212,7 @@ An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.s
 #### Scenario: An explicit sessionId from another project is rejected
 
 - **GIVEN** the caller's token owns a session `<S>` whose `project_id` is project B
-- **WHEN** the caller, on a connection whose effective scope is project A (or global), calls a write-attaching tool with `sessionId = '<S>'`
+- **WHEN** the caller, on a connection whose effective scope is project A, calls a write-attaching tool with `sessionId = '<S>'`
 - **THEN** the call SHALL be rejected with code `session_not_found` and no row SHALL be written
 
 #### Scenario: An explicit sessionId naming a soft-deleted session is rejected
@@ -1332,68 +1344,6 @@ The server SHALL register a `memory.compare` tool that records a verdict on two 
 - **WHEN** `memory.compare` is called with `relation: 'not_conflict'`
 - **THEN** the call SHALL be rejected with code `invalid_input`; `not_conflict` is only valid as a `memory.judge` verdict (it answers "the save-time candidate was a false positive"), not as a proactive comparison
 
-### Requirement: Path-less MCP writes MUST refuse silent fallback to global when project suggestions are pending
-
-When an MCP request lands on the path-less endpoint `/mcp` (i.e. the connection is NOT path-scoped via `/mcp/<slug>`), the server SHALL gate writes that default to `scope='project'` against the set of pending project suggestions for the current MCP session. A slug SHALL be considered _pending_ iff it was surfaced by the most recent `roots/list` exchange for the current MCP session AND no row with that slug exists in the `projects` table at the time of the gate check.
-
-Gated tools and their gate conditions:
-
-- `memory.session_start` is gated when its `project` argument is absent or empty AND no project is pinned for the current MCP session (via a prior `project.use`).
-- `memory.save` is gated when its `scope` argument is absent or `'project'` AND no project is pinned for the current MCP session.
-
-When the gate fires, the server SHALL respond with a structured error containing:
-
-- `code: 'project_suggestion_pending'`;
-- a human-readable `message` that names the two resolution paths verbatim: pass `scope:'global'` explicitly, or call `project.use({slug, autocreate:true})` after asking the user;
-- `suggestedSlugs`: the array of pending suggested slugs (non-empty, in the order they were surfaced by `roots/list`).
-
-The gate SHALL be a no-op (the call proceeds with the previous behavior) when ANY of the following holds:
-
-- the set of pending suggestions is empty (no roots advertised, or every suggested slug already exists as a project);
-- the agent passes `scope:'global'` explicitly on `memory.save`;
-- the agent passes a `project` argument to `memory.session_start`;
-- the connection is path-scoped (`/mcp/<slug>`).
-
-#### Scenario: memory.session_start without project on /mcp with a pending suggestion
-
-- **GIVEN** an MCP connection on `/mcp` whose roots-based discovery surfaced suggested slug `acme-research` and where no row with that slug exists in `projects`
-- **AND** the client has not called `project.use` for the current session
-- **WHEN** the client calls `memory.session_start` without a `project` argument
-- **THEN** the response SHALL be an MCP error containing `code: 'project_suggestion_pending'` and `suggestedSlugs: ['acme-research']`
-- **AND** no row SHALL be inserted into the `agent_sessions` table for this call
-
-#### Scenario: memory.save without explicit scope on /mcp with a pending suggestion
-
-- **GIVEN** the same connection state as above
-- **WHEN** the client calls `memory.save` with `type:'project'`, `content:'…'` and no `scope` argument
-- **THEN** the response SHALL be an MCP error containing `code: 'project_suggestion_pending'` and `suggestedSlugs: ['acme-research']`
-- **AND** no row SHALL be inserted into the `memory` table for this call
-
-#### Scenario: memory.save with explicit scope='global' bypasses the gate
-
-- **GIVEN** the same connection state as above
-- **WHEN** the client calls `memory.save` with `scope:'global'`, `type:'project'`, `content:'…'`
-- **THEN** the save SHALL succeed and the new row SHALL have `scope='global'` and `project_id=NULL`
-
-#### Scenario: project.use with autocreate clears the gate
-
-- **GIVEN** the same connection state as above
-- **WHEN** the client calls `project.use({slug:'acme-research', autocreate:true})` and then `memory.save` with `type:'project'`, `content:'…'` and no `scope` argument
-- **THEN** the `project.use` call SHALL mint the project and pin it to the session
-- **AND** the subsequent `memory.save` SHALL succeed and the new row SHALL have `scope='project'` and `project_id` equal to the newly minted project's id
-
-#### Scenario: A suggestion that already exists as a project does not trigger the gate
-
-- **GIVEN** an MCP connection on `/mcp` whose roots-based discovery surfaced suggested slugs `['acme-research', 'analytics']` AND the `projects` table contains a row with slug `acme-research`
-- **WHEN** the client calls `memory.session_start` without a `project` argument
-- **THEN** the gate SHALL NOT fire because at least one suggestion resolves to an existing project, and the call SHALL proceed under the existing path-less-session-start contract (scope='global' if no project is pinned)
-
-#### Scenario: Path-scoped connections are unaffected
-
-- **GIVEN** an MCP connection on `/mcp/<some-slug>` (path-scoped)
-- **WHEN** the client calls `memory.save` with default scope
-- **THEN** the existing `Path-scoped connections MUST enforce strict project isolation` requirement applies and the new gate SHALL NOT fire
-
 ### Requirement: Session-lifecycle MCP tools MUST reject soft-deleted sessions
 
 `memory.session_end` and `memory.session_summary` SHALL resolve the target row before performing any state transition. When the resolved row has `deleted_at IS NOT NULL`, the call SHALL be rejected with a structured MCP error containing `code: 'session_deleted'` and a message naming the deleted-at timestamp. No state mutation SHALL be performed. The cross-token check that already protects these calls SHALL continue to run first; only when the cross-token check passes does the `session_deleted` gate apply.
@@ -1436,7 +1386,7 @@ Refine behaviour: when `replaces` is provided, the server SHALL run an atomic SQ
 
 1. Loads the predecessor row by id.
 2. Rejects with `prompt_not_found` if no row exists.
-3. Rejects with `prompt_scope_mismatch` if the predecessor's `project_id` does not match the active scope's `project_id` (both NULL counts as a match for global scope).
+3. Rejects with `prompt_scope_mismatch` if the predecessor's `project_id` does not match the active scope's `project_id`.
 4. Rejects with `prompt_already_deleted` if the predecessor's `deleted_at IS NOT NULL`.
 5. Sets the predecessor's `deleted_at = now()`.
 6. Inserts the new prompt row with `replaces = [<predecessorId>]`.
@@ -1509,7 +1459,7 @@ Response shape:
 
 ```json
 {
-  "scope": "project:<id>" | "global",
+  "scope": "project:<id>",
   "prompts": [
     {
       "id": "<ulid>",
@@ -1528,7 +1478,7 @@ Response shape:
 }
 ```
 
-The tool SHALL resolve effective project via the existing `scopeFromContext` precedence (path-scoped `ctx.project` → `SessionRouter` pin → global). It SHALL NOT leak prompts from any other scope.
+The tool SHALL resolve effective project via the existing `scopeFromContext` precedence (path-scoped `ctx.project` → `SessionRouter` pin → the default project). It SHALL NOT leak prompts from any other scope.
 
 Because the input schema's bound exactly brackets the service's own range, no clamping can occur over the transport, and the response SHALL NOT carry a field reporting that `limit` was clamped (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"). The service MAY retain an in-process clamp over the same range as a defensive bound for a direct caller; it is unobservable over the transport and SHALL NOT be reported in the response. The tool's description SHALL name `limit`'s default and its maximum and SHALL state that a larger value is rejected rather than clamped — a rejection the caller was not told how to avoid is not a safe bound.
 
@@ -1655,13 +1605,13 @@ When OAuth is enabled (`REMBRIC_PUBLIC_URL` set), an unauthenticated or invalid-
 
 ### Requirement: OAuth and static tokens MUST share the path-scoping contract
 
-A connection authenticated by an OAuth access token SHALL be subject to the identical `/mcp` vs `/mcp/<slug>` path-scoping contract as a static-token connection: a path-scoped OAuth connection SHALL enforce strict project isolation, and a global OAuth connection SHALL behave as a global static-token connection. The authentication mechanism SHALL NOT change scope resolution.
+A connection authenticated by an OAuth access token SHALL be subject to the identical `/mcp` vs `/mcp/<slug>` path-scoping contract as a static-token connection: a path-scoped OAuth connection SHALL be bound to its slug's project, and a path-less OAuth connection SHALL resolve to the default project exactly as a path-less static-token connection does. The authentication mechanism SHALL NOT change scope resolution.
 
 #### Scenario: Path-scoped OAuth connection enforces isolation
 
 - **GIVEN** a connection at `/mcp/foo` authenticated with an OAuth access token
-- **WHEN** the client calls `memory.save` with `scope='global'`
-- **THEN** the response SHALL be an MCP error with `code: 'scope_locked'`, identical to the static-token case
+- **WHEN** the client calls `memory.save`
+- **THEN** the row SHALL be persisted with `foo`'s `project_id`, and no argument SHALL admit any other destination — identical to the static-token case
 
 #### Scenario: Reserved OAuth paths do not shadow MCP slugs
 
@@ -1790,8 +1740,10 @@ Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passi
 
 #### Scenario: Project-restricted token on an unscoped connection resolving global scope
 
+The title predates this change: the scope a path-less connection resolves is the default project.
+
 - **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
-- **WHEN** the token calls a read tool whose effective scope resolves to global
+- **WHEN** the token calls a read tool whose effective scope resolves to the default project
 - **THEN** the call SHALL be rejected with code `forbidden`; after `project.use A` (authorized) the same call SHALL succeed against project A
 
 #### Scenario: `project.list` is filtered by token scope
@@ -1818,7 +1770,7 @@ Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passi
 
 #### Scenario: Comparing memories from another scope
 
-- **WHEN** a connection whose effective scope is project A calls `memory.compare` naming a memory stored in global scope or project B
+- **WHEN** a connection whose effective scope is project A calls `memory.compare` naming a memory stored in project B
 - **THEN** the call SHALL be rejected with code `not_found`
 
 #### Scenario: A bogus judgmentId is indistinguishable from an out-of-scope one
@@ -1829,11 +1781,11 @@ Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passi
 
 ### Requirement: Scope-sensitive tools MUST share the single async scope resolver
 
-All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses (awaiting roots discovery on unscoped connections). The sync resolver that skipped discovery SHALL be removed. Write tools on unscoped connections SHALL honor the `project_suggestion_pending` gate exactly as `memory.save` does.
+All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses (awaiting roots discovery on unscoped connections). The sync resolver that skipped discovery SHALL be removed. On a path-less connection the resolver SHALL return the default project when neither the URL path, roots discovery nor a prior `project.use` named one; it SHALL NOT return a scopeless result, so no tool can observe an unresolved scope.
 
 The shared resolver SHALL refuse with `project_not_found` rather than returning a scope when the path slug names no project, so no tool routed through it can inherit a fallback by omission — including a tool added after this requirement lands.
 
-A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. Two do, both because they must classify the request before a scope exists to assert against: `memory.save`, which distinguishes `scope='global'` (`scope_locked`) from `scope='project'`, and `memory.session_start`, which binds the session row to a project. Every such site SHALL build its message and `suggestedSlugs[]` from one shared constructor, so the refusals cannot drift in wording or payload. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
+A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. One does — `memory.session_start`, which binds the session row to a project — and it SHALL build its message and `suggestedSlugs[]` from the same shared constructor, so the refusals cannot drift in wording or payload. `memory.save` no longer classifies the request before resolving, because it no longer accepts a `scope` argument to classify; it delegates to the resolver like every other tool. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
 
 Every tool routed through the resolver SHALL surface that refusal as a structured `mcpError` (`isError: true` with a JSON body carrying `code` and `message`), never as an exception escaping into the transport, because an escaped exception yields an error result with no machine-readable `code`. A tool SHALL therefore resolve scope inside the same error-translating boundary it already uses for authorization failures. Where a tool previously validated its arguments before resolving scope, scope resolution SHALL come first: an unusable connection is reported ahead of a malformed argument, because the call cannot succeed under any arguments.
 
@@ -1843,13 +1795,14 @@ Coverage SHALL be asserted by enumeration rather than by inspection: a test SHAL
 
 - **GIVEN** an unscoped `/mcp` connection whose project is resolvable via MCP roots discovery
 - **WHEN** the agent's first tool call is `memory.context` (before any other call has populated the router)
-- **THEN** the server SHALL await roots discovery and return the PROJECT's context, not global context
+- **THEN** the server SHALL await roots discovery and return the discovered PROJECT's context, not the default project's
 
 #### Scenario: `memory.capture_passive` while a project suggestion is pending
 
-- **GIVEN** an unscoped `/mcp` connection with a pending project suggestion
+- **GIVEN** an unscoped `/mcp` connection whose roots discovery surfaced a slug that names no project
 - **WHEN** the agent calls `memory.capture_passive` or `memory.save_prompt`
-- **THEN** the call SHALL be rejected with code `project_suggestion_pending`, identically to `memory.save`
+- **THEN** the call SHALL succeed against the default project rather than being rejected, and no `project_suggestion_pending` code SHALL be emitted by any path
+- **AND** the scenario title predates this change: the gate it names is retired, because with a default project always active its precondition ("no project is active") can never hold
 
 #### Scenario: Every registered scope-sensitive tool refuses an unresolvable slug
 
@@ -1861,7 +1814,7 @@ Coverage SHALL be asserted by enumeration rather than by inspection: a test SHAL
 
 - **GIVEN** a change that registers a new scope-sensitive MCP tool
 - **WHEN** the test suite runs without that tool being classified
-- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the global scope
+- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the default project
 
 #### Scenario: Scope resolution precedes argument validation
 
@@ -2008,7 +1961,7 @@ When `entity` is supplied, the response SHALL be the scoped set of memories link
 
 Completeness is bounded, and the bound SHALL be the same generous over-fetch ceiling the ranked branches use rather than the ranked default page size: an omitted `limit` on the entity path means "every linked memory in scope" up to that ceiling, NOT the small default that is calibrated for a ranked page. Returning eight rows out of twelve under a description promising completeness is a correctness problem, because the agent has no signal that anything was withheld. An explicit `limit` SHALL still bound the page.
 
-`entity` SHALL compose with every other selection filter `memory.search` accepts — `status`, `type`, `tag`, `topic_key` and `include_global` — applying the same predicates with the same meaning as on the ranked path. A filter that is documented as combinable but silently dropped is worse than an unsupported one: an agent that narrows to `type: 'user'` and receives unfiltered rows reads project notes as user preferences. An OMITTED `status`, however, SHALL mean "any but archived" here rather than the ranked branches' `active` default — the same reason an omitted `limit` means the generous bound: this path is specified as complete within scope, and inheriting the ranked default would withhold the `superseded` history exactly as the ranked default page withheld the twelfth row. An explicit `status` SHALL filter exactly, `superseded` and `archived` included. Combining `entity` with a text `query` SHALL narrow within the entity's memories rather than fusing two result sets.
+`entity` SHALL compose with every other selection filter `memory.search` accepts — `status`, `type`, `tag` and `topic_key` — applying the same predicates with the same meaning as on the ranked path. A filter that is documented as combinable but silently dropped is worse than an unsupported one: an agent that narrows to `type: 'user'` and receives unfiltered rows reads project notes as user preferences. An OMITTED `status`, however, SHALL mean "any but archived" here rather than the ranked branches' `active` default — the same reason an omitted `limit` means the generous bound: this path is specified as complete within scope, and inheriting the ranked default would withhold the `superseded` history exactly as the ranked default page withheld the twelfth row. An explicit `status` SHALL filter exactly, `superseded` and `archived` included. Combining `entity` with a text `query` SHALL narrow within the entity's memories rather than fusing two result sets.
 
 An empty entity result SHALL say whether the index has caught up. The tool's own guidance is "empty means it is not there, so retry with `query`" — which is wrong for as long as the extraction drain is still running, and after a recipe change that is the state of the whole corpus. When an `entity` lookup returns nothing AND the scope still holds memories awaiting their first scan, the response SHALL carry a draining flag, and the argument's description SHALL name it so the agent retries the same lookup rather than degrading to text. A non-empty result and a miss over a fully-scanned scope SHALL NOT carry it, so its presence always means something.
 
@@ -2063,9 +2016,11 @@ An empty entity result SHALL say whether the index has caught up. The tool's own
 
 #### Scenario: Entity combines with include_global
 
-- **GIVEN** a global memory and a project memory both linked to the same path, and a third project's memory linked to it too
-- **WHEN** `memory.search` is called in the project scope with that `entity` and `include_global`
-- **THEN** the global and the in-scope project memory SHALL both be returned, and the other project's memory SHALL NOT
+The title predates this change: the argument it names is retired, and what the scenario now pins is that the entity branch admits no row outside the connection's project.
+
+- **GIVEN** two memories in the connection's project linked to the same path, and another project's memory linked to it too
+- **WHEN** `memory.search` is called with that `entity`
+- **THEN** both in-scope memories SHALL be returned, the other project's memory SHALL NOT, and no argument SHALL widen the branch past the resolved project
 
 ### Requirement: Memory-returning reads MUST expose the entities a memory is about
 
@@ -2525,49 +2480,6 @@ bounded, and `snippet`, `fields` and `limit` remain the caller's instruments for
 - **THEN** the assertion SHALL fail, and the change SHALL either fit under the ceiling or raise it
   and record the re-measured worst case
 
-### Requirement: `include_global` MUST be ignored unless the connection is authorized for global reads
-
-`memory.search` accepts `include_global` to admit `global` rows into a project-scoped result. The argument SHALL take effect only where both the connection and the token permit it, and SHALL be silently ignored otherwise — never rejected, so a client that passes it habitually degrades to project-only results instead of failing.
-
-Two independent conditions gate it:
-
-1. **Connection.** On a path-scoped connection the argument SHALL be ignored regardless of token scope, per the existing strict-isolation requirement. That requirement's verb is "ignored", and this requirement does not weaken it: on a path-scoped connection a `*` token receives that project's rows only.
-2. **Token.** On a connection that reached `project` scope through `project.use` rather than a path slug, the argument SHALL take effect only when the token authorizes a global read.
-
-The gate SHALL apply uniformly to every branch the argument reaches — the ranked lexical branch, the dense branch, and the `entity` branch — so a single call cannot be widened through one path while narrowed through another. `memory.get` gains no widening from this requirement.
-
-This requirement governs the widening argument only, and therefore cannot constrain a connection whose _base_ scope is already global. On a path-scoped connection the base scope can no longer be global: a slug that names no project is refused with `project_not_found` rather than resolved, per the strict-isolation requirement. The isolation guarantees above therefore hold for every path-scoped connection, resolvable or not.
-
-#### Scenario: Path-scoped connection with a full-access token
-
-- **GIVEN** a path-scoped connection at `/mcp/foo` whose slug resolves to an existing project, with a token whose scope is `*`, and at least one memory with `scope = 'global'`
-- **WHEN** the client calls `memory.search` with `include_global = true`
-- **THEN** the response SHALL contain no memory whose `scope = 'global'`
-
-#### Scenario: Path-scoped connection whose slug names no project
-
-- **GIVEN** a connection at `/mcp/no-such-project`, a token whose scope is `*`, and at least one memory with `scope = 'global'`
-- **WHEN** the client calls `memory.search` with `include_global = true`
-- **THEN** the call SHALL be refused with `code: 'project_not_found'` and the response SHALL contain no memory
-
-#### Scenario: `project.use` scope with an authorized token
-
-- **GIVEN** a path-less `/mcp` connection with a token whose scope is `*`, which has called `project.use({slug: 'foo'})`
-- **WHEN** the client calls `memory.search` with `include_global = true`
-- **THEN** global memories SHALL be returned alongside project `foo`'s own, and no other project's memories SHALL be returned
-
-#### Scenario: `project.use` scope with a project-restricted token
-
-- **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>`, which has called `project.use({slug: 'foo'})`
-- **WHEN** the client calls `memory.search` with `include_global = true`
-- **THEN** the call SHALL succeed and the response SHALL contain no memory whose `scope = 'global'`
-
-#### Scenario: The entity branch is gated identically
-
-- **GIVEN** a global memory and a project memory both linked to the same entity value, on a path-scoped connection
-- **WHEN** the client calls `memory.search` with that `entity` and `include_global = true`
-- **THEN** only the in-scope project memory SHALL be returned
-
 ### Requirement: A `supersedes` verdict MUST be refused when either endpoint is no longer active
 
 `supersedes` is the only verdict that rewrites the lifecycle of both memories it names: the target transitions to `superseded` and the source's `replaces[]` gains the target's id. That rewrite is only meaningful while both rows still represent live knowledge. The server SHALL therefore verify that the source AND the target are both `status = 'active'` before applying the side effect, and SHALL reject the call with structured code `conflict` otherwise, persisting nothing — neither the lifecycle flip nor the `memory_relations` transition that accompanies it.
@@ -2620,27 +2532,37 @@ No other relation SHALL be constrained this way. `not_conflict`, `conflicts_with
 
 An error message on the MCP surface is read by an agent that will act on it, so a message naming an unreachable remedy costs a wasted turn and, worse, teaches the agent a false model of its own connection. Every structured error message SHALL name only remedies reachable by the party it addresses, and SHALL NOT contradict the `instructions` block delivered on the same connection.
 
-Two consequences are normative:
+One consequence is normative:
 
-- The `scope_locked` message returned for `memory.save({scope: 'global'})` on a path-scoped connection SHALL NOT instruct the agent to open a second MCP connection. An agent cannot: each client has one MCP entry and the bridge derives its URL path from the project's `.rembric` file, so only the operator can add another. The message SHALL name the bound project (as already required), SHALL state that user-wide memory is not reachable on this connection, in agreement with the path-scoped `instructions` note, and SHALL name a remedy the agent or the operator can actually apply.
-- The `forbidden` message returned when a token pinned to exactly one project is denied a global-scope action on a path-less connection SHALL name the way out — activating that project with `project.use({slug})`, or reconnecting at `/mcp/<slug>`. Naming only the token scope and the denied target reads as a misconfigured token and hides a one-call fix. This requirement changes no authorization outcome: the denial itself is correct and unchanged.
+- The `forbidden` message returned when a token pinned to exactly one project is denied an action on a connection whose resolved scope is a DIFFERENT project — including the default project on a path-less connection — SHALL name the way out: activating the pinned project with `project.use({slug})`, or reconnecting at `/mcp/<slug>`. Naming only the token scope and the denied target reads as a misconfigured token and hides a one-call fix. This requirement changes no authorization outcome: the denial itself is correct and unchanged. The remedy's condition SHALL be expressed in terms of the resolved scope differing from the token's pin, NOT in terms of the resolved scope being global — a global-scope condition becomes permanently false when a path-less connection resolves to a project, which would silently stop the remedy being emitted and regress this requirement to a bare identifier with no next step.
+
+The previously-normative consequence about `scope_locked` as a **scope** refusal is retired with the argument that produced it. `memory.save` accepts no `scope` argument, so no call can request a scope the connection forbids, and no message can promise a user-wide destination. A change SHALL NOT reintroduce a message naming a scope or user-wide memory, nor one instructing the operator to add a path-less `/mcp` entry for user-wide memory.
+
+The `scope_locked` code itself is NOT retired: it survives as the refusal for a **switch** a path-scoped connection cannot perform — `project.use({slug})` or `memory.session_start({project})` naming a project the URL contradicts. That refusal names the bound slug and no scope, so it is outside what the paragraph above forbids, and it is the only refusal for "this connection is fixed by its URL, you cannot change it from a tool". Its message SHALL keep that shape.
 
 #### Scenario: `scope_locked` does not promise a second connection
 
 - **GIVEN** a path-scoped connection at `/mcp/foo`
-- **WHEN** the client calls `memory.save` with `scope='global'`
-- **THEN** the error message SHALL contain the bound project's slug
-- **AND** the message SHALL NOT instruct opening or connecting to a second MCP connection
-- **AND** the message SHALL state that user-wide memory is not reachable on this connection
+- **WHEN** every refusal the connection can produce is enumerated
+- **THEN** no message SHALL name a scope, SHALL instruct opening or connecting to a second MCP connection, or SHALL mention user-wide memory
+- **AND** each enumerated message SHALL be pinned verbatim, not screened against a list of prohibited words — a paraphrase of a prohibited instruction carries none of its words, so only the verbatim pin makes a change to a refusal message visible
+- **AND** the scenario title predates this change: `scope_locked` is retired as a scope refusal, and this scenario pins that it does not come back as one
+
+#### Scenario: the surviving `scope_locked` refusals lock a switch, not a scope
+
+- **GIVEN** a path-scoped connection at `/mcp/foo`
+- **WHEN** the client calls `project.use({slug: 'bar'})` or `memory.session_start({project: 'bar'})`
+- **THEN** each call SHALL be refused with `code: 'scope_locked'`
+- **AND** each message SHALL name the bound slug `foo`, and SHALL name no scope, promise no second connection and mention no user-wide memory
 
 #### Scenario: `scope_locked` agrees with the connection's own instructions
 
-- **WHEN** the path-scoped `instructions` variant and the `scope_locked` message are compared for the same connection
-- **THEN** neither SHALL assert that user-wide memory is reachable from this connection
+- **WHEN** the path-scoped `instructions` variant and every refusal the same connection can produce are compared
+- **THEN** neither SHALL assert that user-wide memory is reachable, and neither SHALL name a scope
 
 #### Scenario: A project-pinned token on a path-less connection is told the remedy
 
-- **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>` and no active project
+- **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>`, where `foo` is not the default project
 - **WHEN** the client calls `memory.context` or `memory.search`
 - **THEN** the call SHALL be refused with `code: 'forbidden'` (unchanged)
 - **AND** the message SHALL name `project.use` and SHALL name the slug `foo`
@@ -2730,3 +2652,104 @@ An in-process bound sitting behind the rejecting boundary MAY be retained as a d
 - **THEN** the change SHALL classify it as one of the three failure modes and apply the corresponding remedy
 - **AND** keeping the disagreement SHALL NOT satisfy this requirement, whether or not the description is partially corrected
 - **AND** the closing change SHALL be recorded as a scenario of this requirement rather than as a new requirement, so the rule stays stated once
+
+### Requirement: A path-less `/mcp` connection MUST resolve to the default project
+
+A connection at `/mcp` with no path slug SHALL resolve its effective scope to the **default project** — the single `projects` row marked as the system default (see the `projects` capability). There SHALL be no state in which a connection is authenticated but has no project scope, and no tool SHALL be reachable in such a state.
+
+Every site that previously fell back to the global scope on a path-less connection SHALL target the default project instead, and the set of such sites SHALL be exhaustive rather than sampled: the shared scope resolver, `memory.session_start`'s project binding, `project.current`'s authorization target, and the pinned-token remedy builder. A site missed here does not fail — it silently authorizes against, or reports, a scope that no longer exists.
+
+`project.use` SHALL still switch the connection to another project the token is authorized to read, and the default project SHALL be an ordinary target of that switch. Switching the single closed scope is not widening it: no read admits two projects' rows, and a token authorized for two projects could already move between them.
+
+**Authorization is unchanged and still gates the default project.** A token pinned to one project, connecting path-lessly, SHALL be refused with `code: 'forbidden'` naming the default project — a project it was never granted. The denial is the same denial it receives today against the global scope; only the named target changes, and it changes to one an operator can open. The refusal SHALL carry the pinned-project remedy (see "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform").
+
+#### Scenario: A path-less save with no arguments succeeds
+
+- **GIVEN** a path-less `/mcp` connection, a token authorized to write the default project, and no `.rembric` file, no roots capability and no prior `project.use`
+- **WHEN** the client calls `memory.save` with only `type`, `title` and `content`
+- **THEN** the call SHALL succeed and the new row SHALL carry the default project's `project_id`
+- **AND** the call SHALL NOT be refused with `project_required` or `project_suggestion_pending`
+
+#### Scenario: `project.current` names the default project on a path-less connection
+
+- **GIVEN** a path-less `/mcp` connection with a token authorized to read the default project and no prior `project.use`
+- **WHEN** the client calls `project.current`
+- **THEN** the response SHALL name the default project's slug and id, and `source` SHALL report that resolution came from the default rather than from a URL path, roots discovery or an explicit tool call
+
+#### Scenario: A project-pinned token is refused, and told the way out
+
+- **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>`, where `foo` is not the default project
+- **WHEN** the client calls `memory.search` or `project.current`
+- **THEN** the call SHALL be refused with `code: 'forbidden'`
+- **AND** the message SHALL name `project.use` and SHALL name the slug `foo`
+
+#### Scenario: Switching to another project does not merge two projects
+
+- **GIVEN** a path-less `/mcp` connection resolved to the default project, a token authorized for both it and project `beta`, and memories in each
+- **WHEN** the client calls `project.use({slug: 'beta'})` and then `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`
+- **THEN** every response SHALL contain only `beta`'s rows and counters, and none SHALL contain a row or counter from the default project
+
+#### Scenario: The default project is listable and usable like any other
+
+- **GIVEN** a token authorized to read the default project
+- **WHEN** the client calls `project.list`
+- **THEN** the default project SHALL appear as an ordinary entry with its slug, display name, archived flag and `activeMemoryCount`
+- **AND** `project.use` with its slug SHALL activate it under the same rules as any other project
+
+### Requirement: No MCP tool surface MAY name a scope the server does not have
+
+`global` is not a scope. No registered tool's description, no input property name, and no per-property `describe()` SHALL name `global`, `include_global`, or `user-wide` memory, and no error message SHALL offer a remedy that reaches one. This is an instance of "A tool's description and its response MUST agree, and neither may promise an unreachable state", and the remedy applied throughout is **remove the field or claim**.
+
+The obligation SHALL be enforced by a test that reads the **live `tools/list` response** rather than the description constants, over **all** registered tools rather than the ones a change happened to edit. A prose sweep that a human performs once is exactly how twenty false statements accumulated; a test over the manifest makes the class non-recurrable.
+
+The test SHALL fail on a reintroduction rather than merely reporting it, and SHALL assert over a non-empty tool set — a manifest read that returned nothing would satisfy every negative assertion vacuously.
+
+#### Scenario: No tool description names a retired scope
+
+- **WHEN** every registered tool's description is read from a real `tools/list` response
+- **THEN** none SHALL contain `global`, `include_global` or `user-wide`
+- **AND** the number of tools examined SHALL be asserted to be non-zero, so an empty manifest cannot pass
+
+#### Scenario: No input property names a retired scope
+
+- **WHEN** every registered tool's `inputSchema` is read from a real `tools/list` response
+- **THEN** no property name SHALL be `scope` or `include_global`, and no property `description` SHALL contain `global` or `user-wide`
+
+#### Scenario: No error message offers a retired remedy
+
+- **WHEN** the refusals a path-less and a path-scoped connection can produce are enumerated
+- **THEN** none SHALL instruct the caller to set a scope, to save user-wide, or to add a path-less `/mcp` entry for user-wide memory
+
+### Requirement: Every MCP tool input schema MUST refuse an unknown property rather than ignore it
+
+Every registered tool SHALL validate its arguments against a **strict** object schema: a property the tool does not declare SHALL be refused, naming both the tool and the offending property, and the call SHALL NOT reach the handler.
+
+The reason is retirement, not tidiness. MCP has no version negotiation (see the release-sequencing decision that splits this change across two releases), so a client pinned to an older plugin keeps sending the arguments it was built against, and the server cannot detect that it is old. Under a schema that silently drops unknown properties, a retired argument keeps parsing forever and quietly means something different from what the caller intends — `include_global: true` on a connection that can no longer widen anything reads as consent to a result set the caller did not ask for. A refusal that names the property tells the operator to upgrade; a silent drop tells them nothing. It is also the only way the published manifest becomes true: `tools/list` already advertises `additionalProperties: false` for every tool, so a server that strips instead of refusing publishes a constraint it does not enforce.
+
+Strictness SHALL apply uniformly to the whole tool surface and SHALL NOT carry a per-tool exception list — an exempt tool is where the next retired argument goes on meaning something. It SHALL be applied at the single seam where tool input shapes are registered, so a tool added later inherits it rather than opting in, and SHALL reach nested object properties as well as top-level ones.
+
+A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single async scope resolver", whose subject is the refusal a resolver produces.
+
+#### Scenario: A retired argument is refused, not dropped
+
+- **GIVEN** any connection with a valid token
+- **WHEN** the client calls `memory.search` with `include_global`, or `memory.save` with `scope`
+- **THEN** the call SHALL be refused with the transport's invalid-parameters error, the message SHALL name the tool and the offending property, and no memory SHALL be written or returned
+
+#### Scenario: An unknown property is refused on every registered tool
+
+- **WHEN** every tool in a real `tools/list` response is called with a property no tool declares
+- **THEN** every call SHALL be refused and each message SHALL name that property
+- **AND** the number of tools examined SHALL be asserted to be non-zero, so an empty manifest cannot pass
+
+#### Scenario: A legitimate call still succeeds
+
+- **GIVEN** a connection resolved to a project the token may read and write
+- **WHEN** the client calls `memory.save`, `memory.search`, `memory.get`, `memory.context`, `project.use` and `memory.session_start` with every argument each of them declares
+- **THEN** every call SHALL succeed
+- **AND** this scenario is the non-vacuity control for the two above: without it a server that refused everything would satisfy them
+
+#### Scenario: A wrong-typed declared argument fails as it did before
+
+- **WHEN** the client calls a tool with a declared property carrying the wrong type
+- **THEN** the call SHALL be refused exactly as it was before strictness, so the pre-existing failure mode is unchanged and the new refusal is attributable to the unknown property alone

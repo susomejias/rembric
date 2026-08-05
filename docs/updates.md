@@ -81,6 +81,40 @@ Anything written between the backup and the restore is lost — that window is t
 
 **Bad release** (healthy but misbehaving): pin the previous version in `.env` and `docker compose up -d`. Your data directory is untouched by updates; if you also need the pre-update state of the database, stop the container and copy `data/backups/pre-update-v<target>-<ts>.sqlite` over `data/data.db` (remove `data.db-wal` / `data.db-shm` first).
 
+## Upgrading past the global scope (one-time)
+
+The release that retires the global scope moves every **user-wide** memory into an ordinary project. Path-less `/mcp` connections resolve to that project from then on, so nothing becomes unreachable — but the upgrade rewrites rows, takes visible time on a large corpus, and is not fully transparent to a rollback. Read this before you click update.
+
+**What the first boot does.** It creates a new project (slug `default`, or `default-2`, `default-3`, … if you already own that slug — it never adopts or renames a project of yours), repoints every user-wide memory, prompt, session and vector onto it, and prints what it did:
+
+```
+[migrate] applying 0031_default_project.sql
+[migrate] repartitioning the dense vector index (the largest step: 73% of this migration at scale)
+[migrate] checking foreign keys
+[migrate] committing
+[migrate] repointed 12483 previously-global memory row(s) into the default project default
+```
+
+Open `/dashboard/projects` afterwards: the new project carries a `DEFAULT` pill, and you can rename it. Its slug cannot change, and it cannot be archived.
+
+**How long it takes, and why the server is silent-but-busy.** The migration runs before the server accepts any request, so the container answers nothing until it finishes. Measured against a corpus that is ~91% user-wide, which is what an installation that only ever used path-less `/mcp` has:
+
+| user-wide memories | first boot after the upgrade |
+| -----------------: | ---------------------------- |
+|              1 000 | under a second               |
+|             10 000 | a couple of seconds          |
+|             50 000 | about 15 seconds             |
+|            200 000 | about 2½ minutes             |
+
+**Do not treat that as a hang, and do not restart into it.** An interrupted migration is safe — it rolls back completely, losing nothing — but it also starts again from scratch, so a container restarting every 60 seconds on a large corpus never finishes. If you run a health check or a Kubernetes `startupProbe`, give the first boot after this upgrade a start period longer than the table above. The progress lines are your signal that work is happening.
+
+**Free space.** While it runs, the migration needs roughly **1.4× your database size free on the data volume**. Measured on a 2.3 GB database: about 1.5 GB of write-ahead log, up to 1.5 GB of scratch files written next to the database, and 0.16 GB of permanent growth. Scratch goes on the data volume deliberately, so the space you sized for Rembric is the space it uses. If the volume is too small the migration fails safely — nothing half-moved — but it fails into the silent boot above, so check free space first. Afterwards the file is only a few percent larger and there is nothing to reclaim: **you do not need to run `VACUUM`.**
+
+**Rollback is survivable, not transparent.** As everywhere else in this document, a rollback does not restore the database ([Recovery](#recovery)). The previous version boots fine on the migrated file and loses nothing, but its _user-wide_ view reads **empty** — the memories are all under the `default` slug now, so reach them at `/mcp/default` instead of `/mcp`.
+
+> [!WARNING]
+> **If you roll back, stop writing user-wide memories.** Anything the previous version saves with `scope: 'global'` while you are rolled back is stranded when you upgrade again: the migration has already run, so it does not move those rows, and the new version has no scope that can read them. They are still in the database and still in your backups, but no tool will return them and nothing warns you. Write into a project (`/mcp/<slug>`) for as long as you stay rolled back.
+
 ## Updating across the distroless boundary (one-time, v0.21.14)
 
 Starting with the runtime image shipped in **v0.21.14**, Rembric runs on a **distroless** base: Node lives at `/nodejs/bin/node` and there is **no bare `node` on `PATH`**. Crossing this boundary takes one manual step, because the _old_ server (≤ v0.21.14) drives the upgrade and still calls bare `node`.

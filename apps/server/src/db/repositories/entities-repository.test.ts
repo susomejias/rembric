@@ -162,7 +162,7 @@ describe('EntitiesRepository', () => {
       ]);
     });
 
-    it('includeGlobal widens a project read to global entities without admitting another project', () => {
+    it('returns only the read scope, with no argument that widens it', () => {
       t.handle.db
         .insert(projects)
         .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
@@ -176,12 +176,11 @@ describe('EntitiesRepository', () => {
 
       const scoped = { scope: 'project', projectId: 'p1', value: 'shared.ts', limit: 10 } as const;
       expect(repo.findMemoriesByEntity(scoped).map((m) => m.id)).toEqual(['p1m']);
-      expect(
-        repo
-          .findMemoriesByEntity({ ...scoped, includeGlobal: true })
-          .map((m) => m.id)
-          .sort(),
-      ).toEqual(['g1', 'p1m']);
+      // The non-vacuity control: the rows excluded above are reachable, so the
+      // assertion is about the scope predicate rather than about an empty index.
+      expect(repo.findMemoriesByEntity({ ...scoped, projectId: 'p2' }).map((m) => m.id)).toEqual([
+        'p2m',
+      ]);
     });
 
     it('is idempotent — linking the same memory twice does not duplicate', () => {
@@ -350,7 +349,7 @@ describe('EntitiesRepository', () => {
   });
 
   describe('countPendingScans', () => {
-    it('is scoped, and widens to globals only when asked', () => {
+    it('is scoped, and no argument widens it', () => {
       t.handle.db
         .insert(projects)
         .values([{ id: 'p2', slug: 'project-two', createdAt: new Date(500) }])
@@ -361,9 +360,7 @@ describe('EntitiesRepository', () => {
 
       expect(repo.countPendingScans({ scope: 'global', projectId: null })).toBe(1);
       expect(repo.countPendingScans({ scope: 'project', projectId: 'p1' })).toBe(1);
-      expect(
-        repo.countPendingScans({ scope: 'project', projectId: 'p1', includeGlobal: true }),
-      ).toBe(2);
+      expect(repo.countPendingScans({ scope: 'project', projectId: 'p2' })).toBe(1);
     });
 
     it('reaches zero once the scope is drained', () => {

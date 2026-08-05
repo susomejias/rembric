@@ -9,8 +9,8 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope, SCOPE_GLOBAL, type Scope } from '../services/scope.js';
-import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
+import { projectScope, type Scope } from '../services/scope.js';
+import { createTestDb, defaultProjectScope, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -29,6 +29,7 @@ const SCOPE = '*' as const;
 const ORPHAN_AFTER_MS = 86_400_000;
 
 let db: TestDb;
+let defaultScope: Scope;
 let repos: Repositories;
 let projects: ProjectsService;
 let memory: MemoryService;
@@ -77,7 +78,7 @@ function callStats() {
 }
 
 /** A pending pair created `ageMs` ago, so the aged/un-aged split is controllable. */
-function seedPending(label: string, ageMs: number, scope: Scope = SCOPE_GLOBAL): string {
+function seedPending(label: string, ageMs: number, scope: Scope = defaultScope): string {
   const source = memory.save({ type: 'project', title: `${label} source`, content: label }, scope);
   const target = memory.save({ type: 'project', title: `${label} target`, content: label }, scope);
   return pendingBetween(source.id, target.id, ageMs);
@@ -91,6 +92,7 @@ function pendingBetween(sourceId: string, targetId: string, ageMs: number): stri
 
 beforeEach(() => {
   db = createTestDb();
+  defaultScope = defaultProjectScope(db.handle);
   repos = createRepositories(db.handle.db);
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
@@ -238,20 +240,20 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
   function seedTopicKeyRevision(): { a: string; b: string; live: string } {
     const a = memory.saveWithTopicKey(
       { type: 'project', title: 'A on t', content: 'a on t', topicKey: 't' },
-      SCOPE_GLOBAL,
+      defaultScope,
     ).memory;
     for (let i = 0; i < 5; i += 1) {
       const target = memory.save(
         { type: 'project', title: `x${i}`, content: `x${i}` },
-        SCOPE_GLOBAL,
+        defaultScope,
       );
       pendingBetween(a.id, target.id, 3 * ORPHAN_AFTER_MS - i);
     }
     const b = memory.saveWithTopicKey(
       { type: 'project', title: 'B on t', content: 'b on t', topicKey: 't' },
-      SCOPE_GLOBAL,
+      defaultScope,
     ).memory;
-    const target = memory.save({ type: 'project', title: 'y', content: 'y' }, SCOPE_GLOBAL);
+    const target = memory.save({ type: 'project', title: 'y', content: 'y' }, defaultScope);
     const live = pendingBetween(b.id, target.id, 2 * ORPHAN_AFTER_MS);
     return { a: a.id, b: b.id, live };
   }
@@ -273,13 +275,13 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
   it('a withheld pair stays reachable and closable through its annotation', async () => {
     const a = memory.saveWithTopicKey(
       { type: 'project', title: 'A on u', content: 'a on u', topicKey: 'u' },
-      SCOPE_GLOBAL,
+      defaultScope,
     ).memory;
-    const counterpart = memory.save({ type: 'project', title: 'z', content: 'z' }, SCOPE_GLOBAL);
+    const counterpart = memory.save({ type: 'project', title: 'z', content: 'z' }, defaultScope);
     const jid = pendingBetween(a.id, counterpart.id, 3 * ORPHAN_AFTER_MS);
     memory.saveWithTopicKey(
       { type: 'project', title: 'B on u', content: 'b on u', topicKey: 'u' },
-      SCOPE_GLOBAL,
+      defaultScope,
     );
     expect(repos.memory.unsafeGetById(a.id)?.status).toBe('superseded');
     expect(repos.memory.unsafeGetById(counterpart.id)?.status).toBe('active');
@@ -310,10 +312,10 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
   });
 
   it('an aged pair whose target was archived is withheld on the same terms', async () => {
-    const source = memory.save({ type: 'project', title: 's', content: 's' }, SCOPE_GLOBAL);
-    const target = memory.save({ type: 'project', title: 't', content: 't' }, SCOPE_GLOBAL);
+    const source = memory.save({ type: 'project', title: 's', content: 's' }, defaultScope);
+    const target = memory.save({ type: 'project', title: 't', content: 't' }, defaultScope);
     pendingBetween(source.id, target.id, 2 * ORPHAN_AFTER_MS);
-    memory.archive(target.id, SCOPE_GLOBAL);
+    memory.archive(target.id, defaultScope);
 
     expect(repos.memory.unsafeGetById(target.id)?.status).toBe('archived');
 
@@ -327,14 +329,14 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
     for (let i = 0; i < 3; i += 1) {
       const source = memory.save(
         { type: 'project', title: `dead-src-${i}`, content: `dead-src-${i}` },
-        SCOPE_GLOBAL,
+        defaultScope,
       );
       const target = memory.save(
         { type: 'project', title: `dead-tgt-${i}`, content: `dead-tgt-${i}` },
-        SCOPE_GLOBAL,
+        defaultScope,
       );
       pendingBetween(source.id, target.id, 0);
-      memory.archive(target.id, SCOPE_GLOBAL);
+      memory.archive(target.id, defaultScope);
     }
     const live = seedPending('adjudicable', 0);
 

@@ -10,7 +10,7 @@ export function resolveScope(corpus: IngestedCorpus, fixture: QueryScopeFixture)
   if (fixture.scope === 'global') return { scope: 'global', projectId: null };
   const projectId = fixture.project ? corpus.projectIdBySlug.get(fixture.project) : undefined;
   if (!projectId) throw new Error(`queries.ts: unknown project slug '${fixture.project}'`);
-  return { scope: 'project', projectId, includeGlobal: fixture.includeGlobal };
+  return { scope: 'project', projectId };
 }
 
 export function resolveGold(corpus: IngestedCorpus, stableIds: string[]): string[] {

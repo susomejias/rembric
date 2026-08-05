@@ -72,6 +72,19 @@ export class ProjectsService {
     return this.repos.projects.findById(id);
   }
 
+  /**
+   * The project a path-less `/mcp` connection resolves to. Throws rather than
+   * returning undefined: migration `0031` creates the row, so its absence is a
+   * broken database and not a recoverable request-level condition.
+   */
+  getDefault(): Project {
+    const row = this.repos.projects.findDefault();
+    if (!row) {
+      throw new Error('no project carries is_default = 1; the database is missing its default');
+    }
+    return row;
+  }
+
   list(includeArchived = false): ProjectView[] {
     return this.repos.projects.listOrdered(includeArchived).map(withLabel);
   }
@@ -90,6 +103,19 @@ export class ProjectsService {
   }
 
   archive(id: string): Project {
+    // No fallback scope sits behind the default project, so archiving it would
+    // leave a path-less connection with no resolution and refuse every write it
+    // routes. Guarded here as well as in the template, because the dashboard's
+    // archive endpoint is reachable with a crafted request carrying a valid CSRF
+    // token. `getDefault()` rather than `findDefault()?.id`: with no `is_default`
+    // row the comparison is false and the guard silently permits the archive, in
+    // exactly the broken state its reason argues from.
+    if (this.getDefault().id === id) {
+      throw new DomainError(
+        'conflict',
+        `projects.archive: id=${id} is the default project and cannot be archived`,
+      );
+    }
     const updated = this.repos.projects.setArchivedAt(id, this.now(), true);
     if (!updated) {
       const existing = this.getById(id);

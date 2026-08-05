@@ -10,8 +10,8 @@ import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { SCOPE_GLOBAL } from '../services/scope.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import type { Scope } from '../services/scope.js';
+import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import {
   buildObservabilityHandlers,
@@ -157,6 +157,7 @@ describe('doctor consolidation.lastRunOps contract', () => {
 
 describe('memory.capture_passive — handler-level (fix-audited-defects)', () => {
   let db: TestDb;
+  let defaultScope: Scope;
   let repos: Repositories;
   let memory: MemoryService;
   let handlers: ReturnType<typeof buildObservabilityHandlers>;
@@ -177,6 +178,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
 
   beforeEach(() => {
     db = createTestDb();
+    defaultScope = defaultProjectScope(db.handle);
     repos = createRepositories(db.handle.db);
     memory = new MemoryService(repos, db.handle.db);
     const relations = new RelationsService(repos, db.handle.db);
@@ -216,7 +218,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
         title: 'Use two-space indentation always',
         content: 'use two-space indentation always',
       },
-      SCOPE_GLOBAL,
+      defaultScope,
     );
 
     const text =
@@ -262,7 +264,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
           title: `Indentation rule ${i}`,
           content: `use two-space indentation always in every file, revision ${i}`,
         },
-        SCOPE_GLOBAL,
+        defaultScope,
       );
     }
     const text =

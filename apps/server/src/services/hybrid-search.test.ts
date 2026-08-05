@@ -566,63 +566,43 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(res.map((m) => m.id)).toEqual([tagged.id]);
   });
 
-  it('include_global blends project + global results on the hybrid (query) path', async () => {
+  it('no argument admits another scope on the hybrid (query) path', async () => {
     const projectRow = mem.save(
       { type: 'user', title: 'Widget project note', content: 'widget project note' },
       projectScope(projectId),
     );
-    const globalRow = mem.save(
-      { type: 'user', title: 'Widget global note', content: 'widget global note' },
+    const otherRow = mem.save(
+      { type: 'user', title: 'Widget other note', content: 'widget other note' },
       SCOPE_GLOBAL,
     );
     await embedAll();
 
-    const withoutGlobal = await mem.search({ query: 'widget note' }, projectScope(projectId));
-    expect(withoutGlobal.map((m) => m.id)).toContain(projectRow.id);
-    expect(withoutGlobal.map((m) => m.id)).not.toContain(globalRow.id);
+    const scoped = await mem.search({ query: 'widget note' }, projectScope(projectId));
+    expect(scoped.map((m) => m.id)).toContain(projectRow.id);
+    expect(scoped.map((m) => m.id)).not.toContain(otherRow.id);
 
-    const withGlobal = await mem.search(
-      { query: 'widget note', includeGlobal: true },
-      projectScope(projectId),
-    );
-    const ids = withGlobal.map((m) => m.id);
-    expect(ids).toContain(projectRow.id);
-    expect(ids).toContain(globalRow.id);
+    // The control: the excluded row is retrievable in its own scope, so the
+    // exclusion above is the scope predicate rather than a failed index.
+    const own = await mem.search({ query: 'widget note' }, SCOPE_GLOBAL);
+    expect(own.map((m) => m.id)).toContain(otherRow.id);
   });
 
-  it('include_global blends project + global results on the no-query listing path', async () => {
+  it('no argument admits another scope on the no-query listing path', async () => {
     const projectRow = mem.save(
       { type: 'user', title: 'Listing project row', content: 'listing project row' },
       projectScope(projectId),
     );
-    const globalRow = mem.save(
-      { type: 'user', title: 'Listing global row', content: 'listing global row' },
+    const otherRow = mem.save(
+      { type: 'user', title: 'Listing other row', content: 'listing other row' },
       SCOPE_GLOBAL,
     );
 
-    const withoutGlobal = await mem.search({}, projectScope(projectId));
-    expect(withoutGlobal.map((m) => m.id)).not.toContain(globalRow.id);
+    const scoped = await mem.search({}, projectScope(projectId));
+    expect(scoped.map((m) => m.id)).toContain(projectRow.id);
+    expect(scoped.map((m) => m.id)).not.toContain(otherRow.id);
 
-    const withGlobal = await mem.search({ includeGlobal: true }, projectScope(projectId));
-    const ids = withGlobal.map((m) => m.id);
-    expect(ids).toContain(projectRow.id);
-    expect(ids).toContain(globalRow.id);
-  });
-
-  it('a global-scoped search never returns project rows, even with include_global set', async () => {
-    mem.save(
-      { type: 'user', title: 'Project only widget', content: 'project only widget' },
-      projectScope(projectId),
-    );
-    const globalRow = mem.save(
-      { type: 'user', title: 'Global widget note', content: 'global widget note' },
-      SCOPE_GLOBAL,
-    );
-    await embedAll();
-
-    const res = await mem.search({ query: 'widget', includeGlobal: true }, SCOPE_GLOBAL);
-    expect(res.every((m) => m.scope === 'global')).toBe(true);
-    expect(res.map((m) => m.id)).toContain(globalRow.id);
+    const own = await mem.search({}, SCOPE_GLOBAL);
+    expect(own.map((m) => m.id)).toContain(otherRow.id);
   });
 
   it('the no-query listing path is unaffected by the ranking boost (pure chronological order)', async () => {

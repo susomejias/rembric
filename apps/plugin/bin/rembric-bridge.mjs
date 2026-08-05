@@ -15,9 +15,9 @@
 //
 // If `.rembric` is missing, unparseable, or PROJECT_SLUG is invalid the
 // bridge falls back to path-less `/mcp` and writes a diagnostic to
-// stderr. The session still works; the agent will operate in global
-// scope (or whatever `project.use` it chooses to make) but the plugin
-// does not break.
+// stderr. The session still works; that connection resolves to the
+// server's default project (or whatever `project.use` it chooses to
+// make) but the plugin does not break.
 //
 // All MCP wire-protocol handling is delegated to `npx -y mcp-remote`.
 // This bridge is a thin URL-building entrypoint.

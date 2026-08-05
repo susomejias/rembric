@@ -22,11 +22,13 @@ import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
+import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
 import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
+import { defaultProject } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
 /** Probe the OS for a free TCP port and release it. */
@@ -223,7 +225,7 @@ describe('MCP protocol conformance', () => {
 
     // Measured at the boundary the client reads, not off the constant.
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the budget recorded in design.md D5').toBe(1874);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1854);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {
@@ -298,7 +300,6 @@ describe('MCP protocol conformance', () => {
 
     expect(desc).toMatch(/server-wide/i);
     expect(desc).toMatch(/all projects/i);
-    expect(desc).toMatch(/global/i);
     expect(desc).toContain('memory.stats');
     expect(desc).toMatch(/differ/i);
 
@@ -386,7 +387,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'relations_limit over-ask probe',
         content: 'relations-limit-over-ask-probe',
@@ -434,7 +434,6 @@ describe('MCP protocol conformance', () => {
       const res = (await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'project',
           type: 'procedural',
           title,
           content: `batch-parity ${title}`,
@@ -731,8 +730,10 @@ describe('MCP protocol conformance', () => {
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
       ['memory.session_start', 624],
-      ['memory.doctor', 612],
+      ['memory.doctor', 603],
       ['memory.timeline', 395],
+      ['memory.save', 1549],
+      ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
       expect(desc, `${name} missing from tools/list`).toBeDefined();
@@ -858,7 +859,7 @@ describe('MCP protocol conformance', () => {
     const save = async (title: string, content: string): Promise<string> => {
       const res = (await client.callTool({
         name: 'memory.save',
-        arguments: { scope: 'project', type: 'feedback', title, content },
+        arguments: { type: 'feedback', title, content },
       })) as ToolResult;
       const body = readJson(res) as { id: string; candidates?: unknown[] };
       expect(body.candidates ?? [], `${title} detected candidates`).toEqual([]);
@@ -1003,7 +1004,6 @@ describe('MCP protocol conformance', () => {
     it('rejects an over-budget memory.timeline window and names the remedy', async () => {
       const client = await connect();
       const saved = await callWith(client, 'memory.save', {
-        scope: 'global',
         type: 'project',
         title: 'timeline window probe',
         content: 'timeline-window-probe',
@@ -1142,13 +1142,12 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('round-trips save → search → get → confirm against /mcp (global scope)', async () => {
+  it('round-trips save → search → get → confirm against a path-less /mcp', async () => {
     const client = await connect();
 
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'roundtrip marker indicator',
         content: 'roundtripmarkeraaa indicator',
@@ -1185,24 +1184,716 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('rejects scope=global on a path-scoped /mcp/<slug> connection', async () => {
-    const client = await connect({ projectSlug: 'integration-proj' });
+  it('reads the default project from a path-less /mcp, with the path-scoped read as control', async () => {
+    const dflt = defaultProject(server.dbHandle);
 
-    const result = (await client.callTool({
+    // Write through a path-scoped connection, so the row lands in the default
+    // project exactly where the migration leaves the previously-global corpus.
+    const scoped = await connect({ projectSlug: dflt.slug });
+    const saved = readJson(
+      (await scoped.callTool({
+        name: 'memory.save',
+        arguments: {
+          type: 'reference',
+          title: 'default project marker row',
+          content: 'defaultprojectmarkerbbb row',
+        },
+      })) as ToolResult,
+    ) as { id: string };
+    expect(saved.id).toMatch(/^[0-9A-Z]+$/);
+
+    // Control — must hold on both sides of the resolver change.
+    const scopedCtx = readJson(
+      (await scoped.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
+    ) as { scope: string; recentMemories: { id: string }[] };
+    expect(scopedCtx.scope).toBe(`project:${dflt.id}`);
+    expect(scopedCtx.recentMemories.map((m) => m.id)).toContain(saved.id);
+    await scoped.close();
+
+    // Subject: the same corpus, read from `/mcp` with no slug.
+    const pathless = await connect();
+    const pathlessCtx = readJson(
+      (await pathless.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
+    ) as { scope: string; recentMemories: { id: string }[] };
+    expect(pathlessCtx.scope).toBe(`project:${dflt.id}`);
+    expect(pathlessCtx.recentMemories.length).toBeGreaterThan(0);
+
+    const found = readJson(
+      (await pathless.callTool({
+        name: 'memory.search',
+        arguments: { query: 'defaultprojectmarkerbbb', limit: 5 },
+      })) as ToolResult,
+    ) as { memories: { id: string }[] };
+    expect(found.memories.map((m) => m.id)).toContain(saved.id);
+
+    const current = readJson(
+      (await pathless.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    ) as { slug: string | null; projectId: string | null; source: string };
+    expect(current).toMatchObject({ slug: dflt.slug, projectId: dflt.id, source: 'default' });
+    await pathless.close();
+  });
+
+  it('project.list returns the default project as an ordinary entry, and project.use activates it', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    // Own sibling, so the "listed alongside others" control does not depend on
+    // which other tests in this file happened to run first. Minted on its own
+    // connection: a pinned router entry would make the `project.use` below a
+    // switch, which is a different gate from the one under test.
+    const sibling = await connect();
+    await sibling.callTool({
+      name: 'project.use',
+      arguments: { slug: 'listed-sibling', autocreate: true },
+    });
+    await sibling.close();
+
+    const client = await connect();
+    const listed = readJson(
+      (await client.callTool({ name: 'project.list', arguments: {} })) as ToolResult,
+    ) as {
+      projects: {
+        slug: string;
+        displayName: string | null;
+        archived: boolean;
+        activeMemoryCount: number;
+      }[];
+    };
+    const entry = listed.projects.find((p) => p.slug === dflt.slug);
+    expect(entry, 'the default project is missing from project.list').toBeDefined();
+    expect(Object.keys(entry!).sort()).toEqual([
+      'activeMemoryCount',
+      'archived',
+      'displayName',
+      'slug',
+    ]);
+    expect(entry!.archived).toBe(false);
+    expect(typeof entry!.displayName).toBe('string');
+    expect(typeof entry!.activeMemoryCount).toBe('number');
+    // Non-vacuity: it is listed alongside others, not the only entry.
+    expect(listed.projects.length).toBeGreaterThan(1);
+
+    const used = readJson(
+      (await client.callTool({
+        name: 'project.use',
+        arguments: { slug: dflt.slug },
+      })) as ToolResult,
+    ) as { slug: string; created: boolean };
+    expect(used).toMatchObject({ slug: dflt.slug, created: false });
+
+    const stats = readJson(
+      (await client.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult,
+    ) as { scope: string };
+    expect(stats.scope).toBe(`project:${dflt.id}`);
+    await client.close();
+  });
+
+  it('seven read surfaces stay closed across a two-step project.use', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const ENTITY = 'src/closed-scope-probe.ts';
+    const seed = async (slug: string | undefined, marker: string) => {
+      const c = await connect({ projectSlug: slug });
+      const saved = readJson(
+        (await c.callTool({
+          name: 'memory.save',
+          arguments: {
+            type: 'reference',
+            title: `closed scope ${marker}`,
+            content: `closedscopeprobe ${marker} touches ${ENTITY} once`,
+          },
+        })) as ToolResult,
+      ) as { id: string };
+      await c.close();
+      return saved.id;
+    };
+
+    const a = await connect();
+    readJson(
+      (await a.callTool({
+        name: 'project.use',
+        arguments: { slug: 'closed-a', autocreate: true },
+      })) as ToolResult,
+    );
+    await a.close();
+    const b = await connect();
+    readJson(
+      (await b.callTool({
+        name: 'project.use',
+        arguments: { slug: 'closed-b', autocreate: true },
+      })) as ToolResult,
+    );
+    await b.close();
+
+    const defaultId = await seed(dflt.slug, 'in-default');
+    const aId = await seed('closed-a', 'in-a');
+    const bId = await seed('closed-b', 'in-b');
+
+    const client = await connect();
+    // Step one, then the confirmed switch: `project.use` moves the single closed
+    // scope, so the reads below must see project B alone at the end of it.
+    expect(
+      readJson(
+        (await client.callTool({
+          name: 'project.use',
+          arguments: { slug: 'closed-a' },
+        })) as ToolResult,
+      ),
+    ).toMatchObject({ slug: 'closed-a' });
+    expect(
+      readJson(
+        (await client.callTool({
+          name: 'project.use',
+          arguments: { slug: 'closed-b', confirmSwitch: true },
+        })) as ToolResult,
+      ),
+    ).toMatchObject({ slug: 'closed-b', switched: true });
+
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = (await client.callTool({ name, arguments: args })) as ToolResult;
+      return { result, body: readJson(result) };
+    };
+    const outsiders = [defaultId, aId];
+
+    const search = (await call('memory.search', { query: 'closedscopeprobe', limit: 20 })).body as {
+      memories: { id: string }[];
+    };
+    expect(search.memories.map((m) => m.id)).toEqual([bId]);
+
+    const byEntity = (await call('memory.search', { entity: ENTITY })).body as {
+      memories: { id: string }[];
+    };
+    expect(byEntity.memories.map((m) => m.id)).toEqual([bId]);
+
+    const bProjectId = (
+      (await call('project.current', {})).body as { slug: string; projectId: string }
+    ).projectId;
+
+    const ctx = (await call('memory.context', { memories: 50 })).body as {
+      scope: string;
+      recentMemories: { id: string }[];
+    };
+    expect(ctx.scope).toBe(`project:${bProjectId}`);
+    expect(ctx.recentMemories.map((m) => m.id)).toEqual([bId]);
+
+    const stats = (await call('memory.stats', {})).body as {
+      memoriesByStatus: Record<string, number>;
+    };
+    expect(stats.memoriesByStatus).toEqual({ active: 1 });
+
+    const batch = (await call('memory.get', { ids: [bId, ...outsiders] })).body as {
+      memories: { id: string }[];
+      notFound: string[];
+    };
+    expect(batch.memories.map((m) => m.id)).toEqual([bId]);
+    expect(batch.notFound.sort()).toEqual([...outsiders].sort());
+
+    expect((await call('memory.get', { id: bId })).result.isError).toBeFalsy();
+    for (const outside of outsiders) {
+      const denied = await call('memory.get', { id: outside });
+      expect(denied.result.isError).toBe(true);
+      expect(JSON.stringify(denied.body)).toContain('not_found');
+    }
+
+    const timeline = (await call('memory.timeline', { memoryId: bId, before: 25, after: 25 }))
+      .body as { before: { id: string }[]; after: { id: string }[] };
+    const neighbors = [...timeline.before, ...timeline.after].map((m) => m.id);
+    for (const outside of outsiders) expect(neighbors).not.toContain(outside);
+    for (const outside of outsiders) {
+      const denied = await call('memory.timeline', { memoryId: outside });
+      expect(denied.result.isError).toBe(true);
+    }
+
+    await client.close();
+  });
+
+  it('project.use pins after a path-less memory.session_start, and the switch gates still refuse a real pin', async () => {
+    const client = await connect();
+
+    const started = readJson(
+      (await client.callTool({
+        name: 'memory.session_start',
+        arguments: { agent: 'pin-after-start' },
+      })) as ToolResult,
+    ) as { sessionId: string };
+    expect(started.sessionId).toMatch(/^[0-9A-Z]+$/);
+
+    // The flow `instructions.ts` documents verbatim: pin (and create) after the
+    // session is open. A default-project resolution is not an activation, so it
+    // must not make this look like a project switch.
+    const used = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-a', autocreate: true },
+    })) as ToolResult;
+    if (used.isError) throw new Error(`project.use refused: ${JSON.stringify(readJson(used))}`);
+    expect(readJson(used)).toMatchObject({
+      slug: 'pin-after-start-a',
+      created: true,
+      switched: false,
+      source: 'tool-explicit',
+    });
+
+    // Control — the gates are not globally weakened: moving off a DELIBERATE
+    // pin still demands confirmation.
+    const unconfirmed = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-b', autocreate: true },
+    })) as ToolResult;
+    expect(unconfirmed.isError).toBe(true);
+    expect(readJson(unconfirmed)).toMatchObject({
+      code: 'project_switch_requires_confirm',
+      currentSlug: 'pin-after-start-a',
+      targetSlug: 'pin-after-start-b',
+    });
+
+    // Control — and with a session open, a confirmed switch away from a
+    // deliberate pin is still refused.
+    const confirmed = (await client.callTool({
+      name: 'project.use',
+      arguments: { slug: 'pin-after-start-b', autocreate: true, confirmSwitch: true },
+    })) as ToolResult;
+    expect(confirmed.isError).toBe(true);
+    expect(readJson(confirmed)).toMatchObject({
+      code: 'session_active_must_end',
+      activeSessionId: started.sessionId,
+      currentSlug: 'pin-after-start-a',
+      targetSlug: 'pin-after-start-b',
+    });
+
+    await client.close();
+  });
+
+  it('a project-pinned token denied the default project is told how to reach its own, at the wire', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'pinned-remedy-proj' });
+    const tokensSvc = new TokensService(createRepositories(server.dbHandle.db));
+    const pinned = tokensSvc.create({ name: 'pinned-remedy', project: own, access: 'write' });
+
+    const pathless = await connect({ token: pinned.plaintext });
+    const refused = (await pathless.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything' },
+    })) as ToolResult;
+    expect(refused.isError).toBe(true);
+    const body = readJson(refused) as { code: string; message: string };
+    expect(body.code).toBe('forbidden');
+    expect(body.message).toContain(`project '${defaultProject(server.dbHandle).id}'`);
+    expect(body.message).toContain("project.use({slug: 'pinned-remedy-proj'})");
+    expect(body.message).toContain("reconnect at '/mcp/pinned-remedy-proj'");
+    await pathless.close();
+
+    // Control — the remedy names a reachable path: the same token on its own
+    // slug is authorized.
+    const scoped = await connect({ token: pinned.plaintext, projectSlug: own.slug });
+    const allowed = (await scoped.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything' },
+    })) as ToolResult;
+    expect(allowed.isError).toBeFalsy();
+    await scoped.close();
+  });
+
+  it('memory.save publishes no scope argument, and one sent anyway is rejected', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'no-scope-arg-proj' });
+    const client = await connect({ projectSlug: own.slug });
+
+    const { tools } = await client.listTools();
+    const save = tools.find((t) => t.name === 'memory.save');
+    expect(save, 'memory.save missing from tools/list').toBeDefined();
+    const properties = (save?.inputSchema.properties ?? {}) as Record<string, unknown>;
+    // Non-vacuity: the schema IS published, so the absence below is a removed
+    // property rather than an empty manifest.
+    expect(Object.keys(properties)).toContain('type');
+    expect(Object.keys(properties)).not.toContain('scope');
+
+    const rejected = (await client.callTool({
       name: 'memory.save',
       arguments: {
         scope: 'global',
         type: 'reference',
-        title: 'should be rejected',
-        content: 'should-be-rejected',
+        title: 'sent a retired argument',
+        content: 'sentaretiredargumentaaa',
       },
     })) as ToolResult;
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('memory.save');
+    expect(message).toContain('scope');
 
-    expect(result.isError).toBe(true);
-    const payload = readJson(result) as { code?: string };
-    expect(payload.code).toBe('scope_locked');
-
+    // Control: the same call without the retired argument succeeds, so the
+    // rejection above is the unknown key and not a broken save path.
+    const accepted = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'reference',
+        title: 'sent no retired argument',
+        content: 'sentnoretiredargumentaaa',
+      },
+    })) as ToolResult;
+    expect(accepted.isError).toBeFalsy();
+    const saved = readJson(accepted) as { id: string };
+    const row = new MemoryService(
+      createRepositories(server.dbHandle.db),
+      server.dbHandle.db,
+    ).unsafeGetById(saved.id);
+    expect(row?.projectId).toBe(own.id);
+    expect(row?.scope).toBe('project');
     await client.close();
+  });
+
+  it('memory.search publishes no include_global, and one sent anyway is rejected', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const own = projectsSvc.create({ slug: 'no-widen-arg-proj' });
+    const memorySvc = new MemoryService(createRepositories(server.dbHandle.db), server.dbHandle.db);
+    const outside = memorySvc.save(
+      { type: 'user', title: 'widenprobe outside row', content: 'widenprobeaaa outside row' },
+      { kind: 'project', projectId: dflt.id },
+    );
+    const inside = memorySvc.save(
+      { type: 'user', title: 'widenprobe inside row', content: 'widenprobeaaa inside row' },
+      { kind: 'project', projectId: own.id },
+    );
+
+    const client = await connect({ projectSlug: own.slug });
+    const { tools } = await client.listTools();
+    const search = tools.find((t) => t.name === 'memory.search');
+    const properties = (search?.inputSchema.properties ?? {}) as Record<string, unknown>;
+    expect(Object.keys(properties)).toContain('query');
+    expect(Object.keys(properties)).not.toContain('include_global');
+
+    const rejected = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', include_global: true, limit: 20 },
+    })) as ToolResult;
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('memory.search');
+    expect(message).toContain('include_global');
+
+    // Control: the same query without the retired argument is accepted, sees
+    // the in-scope row and not the other project's — so the rejection above is
+    // the unknown key, and the scope closure it used to prove still holds.
+    const accepted = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', limit: 20 },
+    })) as ToolResult;
+    expect(accepted.isError).toBeFalsy();
+    const ids = (readJson(accepted) as { memories: { id: string }[] }).memories.map((m) => m.id);
+    expect(ids).toContain(inside.id);
+    expect(ids).not.toContain(outside.id);
+    await client.close();
+
+    // The excluded row is findable by the same query on the connection that
+    // owns it, so the exclusion is the scope, not the index.
+    const pathless = await connect();
+    const own2 = (await pathless.callTool({
+      name: 'memory.search',
+      arguments: { query: 'widenprobeaaa', limit: 20 },
+    })) as ToolResult;
+    expect((readJson(own2) as { memories: { id: string }[] }).memories.map((m) => m.id)).toContain(
+      outside.id,
+    );
+    await pathless.close();
+  });
+
+  it('refuses an unknown property on every registered tool', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    // Without this the loop below would pass over an empty manifest.
+    expect(tools.length).toBeGreaterThan(15);
+
+    for (const tool of tools) {
+      const rejected = (await client.callTool({
+        name: tool.name,
+        arguments: { rembric_unknown_probe: 1 },
+      })) as ToolResult;
+      const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(rejected.isError, `${tool.name} accepted an unknown property`).toBe(true);
+      expect(message, tool.name).toContain('rembric_unknown_probe');
+      expect(message, tool.name).toContain(tool.name);
+    }
+    await client.close();
+  });
+
+  it('accepts a maximal legitimate argument set on the tools strictness most affects', async () => {
+    const projectsSvc = new ProjectsService(createRepositories(server.dbHandle.db));
+    const target = projectsSvc.create({ slug: 'strictness-controls-proj' });
+    const client = await connect();
+    const call = async (name: string, args: Record<string, unknown>): Promise<ToolResult> => {
+      const r = (await client.callTool({ name, arguments: args })) as ToolResult;
+      expect(r.isError, `${name}: ${JSON.stringify(readJson(r))}`).toBeFalsy();
+      return r;
+    };
+
+    const used = readJson(await call('project.use', { slug: target.slug, autocreate: false })) as {
+      projectId: string;
+    };
+    expect(used.projectId).toBe(target.id);
+
+    const started = readJson(
+      await call('memory.session_start', {
+        agent: 'strictness-probe',
+        description: 'maximal legitimate argument set',
+        project: target.slug,
+      }),
+    ) as { sessionId: string };
+
+    const saved = readJson(
+      await call('memory.save', {
+        type: 'project',
+        title: 'strictness control row',
+        content: 'strictnesscontrolaaa row body',
+        tags: ['strictness', 'control'],
+        topic_key: 'strictness-control',
+        sessionId: started.sessionId,
+      }),
+    ) as { id: string };
+
+    await call('memory.search', {
+      query: 'strictnesscontrolaaa',
+      type: 'project',
+      tag: 'strictness',
+      status: 'active',
+      topic_key: 'strictness-control',
+      include_relations: true,
+      limit: 20,
+      offset: 0,
+    });
+    await call('memory.search', { entity: 'strictnesscontrolaaa' });
+    await call('memory.get', { id: saved.id, relations_limit: 5 });
+    await call('memory.get', { ids: [saved.id] });
+    await call('memory.context', {
+      sessions: 2,
+      prompts: 2,
+      memories: 5,
+      judgments: 5,
+      includeArchived: true,
+      focus: 'strictnesscontrolaaa',
+    });
+    await client.close();
+  });
+
+  it('still rejects a wrong-typed declared argument, as it did before strictness', async () => {
+    const client = await connect();
+    const rejected = (await client.callTool({
+      name: 'memory.search',
+      arguments: { query: 'anything', limit: 'not-a-number' },
+    })) as ToolResult;
+    expect(rejected.isError).toBe(true);
+    const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
+    expect(message).toContain('-32602');
+    expect(message).toContain('limit');
+    expect(message).not.toContain('rembric_unknown_probe');
+    await client.close();
+  });
+
+  it('a path-less memory.save with only type, title and content lands in the default project', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const client = await connect();
+    const result = (await client.callTool({
+      name: 'memory.save',
+      arguments: {
+        type: 'reference',
+        title: 'no arguments beyond the required three',
+        content: 'norequiredargumentsbeyondaaa',
+      },
+    })) as ToolResult;
+    if (result.isError) {
+      throw new Error(`path-less save refused: ${JSON.stringify(readJson(result))}`);
+    }
+    const saved = readJson(result) as { id: string };
+    const row = new MemoryService(
+      createRepositories(server.dbHandle.db),
+      server.dbHandle.db,
+    ).unsafeGetById(saved.id);
+    expect(row?.projectId).toBe(dflt.id);
+    await client.close();
+  });
+
+  it('the five surfaces that named a retired scope no longer do, read from tools/list', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const desc = (name: string): string => {
+      const t = tools.find((x) => x.name === name);
+      expect(t, `${name} missing from tools/list`).toBeDefined();
+      const d = t?.description ?? '';
+      expect(d.length).toBeGreaterThan(0);
+      return d;
+    };
+
+    const save = desc('memory.save');
+    expect(save).not.toContain('scope_locked');
+    expect(save).not.toMatch(/scope=global|user-wide/i);
+
+    const search = desc('memory.search');
+    // The reclaimed clause `mcp-api` requires a change to name, verbatim.
+    expect(search).toContain("Every connection sees exactly one project's memories.");
+    expect(search).not.toContain('unscoped see globals only');
+    expect(search).toBeTruthy();
+
+    expect(desc('memory.doctor')).not.toMatch(/global/i);
+    expect(desc('memory.stats')).not.toMatch(/global/i);
+
+    const instructions = client.getInstructions() ?? '';
+    expect(instructions.length).toBeGreaterThan(0);
+    expect(instructions).not.toMatch(/global|include_global|user-wide/i);
+    await client.close();
+
+    const scoped = await connect({ projectSlug: defaultProject(server.dbHandle).slug });
+    const scopedInstructions = scoped.getInstructions() ?? '';
+    expect(scopedInstructions.length).toBeGreaterThan(0);
+    expect(scopedInstructions).not.toMatch(/global|include_global|user-wide/i);
+    await scoped.close();
+  });
+
+  it('no registered tool names a retired scope anywhere in the manifest', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    await client.close();
+
+    // Without this the negative assertions below all pass over an empty
+    // manifest, which is the only way this test can lie.
+    expect(tools.length).toBeGreaterThanOrEqual(23);
+
+    const RETIRED = /global|include_global|user-wide/i;
+    let propertiesChecked = 0;
+    for (const tool of tools) {
+      expect(tool.description ?? '', `${tool.name} description`).not.toMatch(RETIRED);
+      const schema = tool.inputSchema as {
+        properties?: Record<string, { description?: string }>;
+      };
+      for (const [property, spec] of Object.entries(schema.properties ?? {})) {
+        propertiesChecked += 1;
+        expect(property, `${tool.name} property name`).not.toMatch(RETIRED);
+        // `describe()` lands here, the only place a per-argument string reaches
+        // the model.
+        expect(spec.description ?? '', `${tool.name}.${property} describe()`).not.toMatch(RETIRED);
+      }
+    }
+    // Second non-vacuity control: the property loop ran over real properties.
+    expect(propertiesChecked).toBeGreaterThan(20);
+  });
+
+  it('no refusal a path-less or a path-scoped connection can produce points at a scope', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const repos = createRepositories(server.dbHandle.db);
+    const elsewhere = new ProjectsService(repos).create({ slug: 'refusal-enum-proj' });
+    const pinned = new TokensService(repos).create({
+      name: 'refusal-enum',
+      project: elsewhere,
+      access: 'read',
+    });
+
+    const refusals: { where: string; code: unknown; message: unknown; body: string }[] = [];
+    const record = async (
+      where: string,
+      client: Client,
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      const result = (await client.callTool({ name, arguments: args })) as ToolResult;
+      expect(result.isError, `${where} was expected to refuse`).toBe(true);
+      const payload = readJson(result) as { code?: unknown; message?: unknown };
+      refusals.push({
+        where,
+        code: payload?.code,
+        message: payload?.message,
+        body: JSON.stringify(payload),
+      });
+    };
+
+    const unresolvable = await connect({ projectSlug: 'no-such-project-here' });
+    await record('unresolvable slug / save', unresolvable, 'memory.save', {
+      type: 'reference',
+      title: 'refusal enumeration',
+      content: 'refusal enumeration content',
+    });
+    await record('unresolvable slug / search', unresolvable, 'memory.search', { query: 'x' });
+    await record('unresolvable slug / context', unresolvable, 'memory.context', {});
+    await unresolvable.close();
+
+    const scoped = await connect({ projectSlug: dflt.slug });
+    await record('path-scoped / switch away', scoped, 'project.use', { slug: 'somewhere-else' });
+    await record('path-scoped / session_start elsewhere', scoped, 'memory.session_start', {
+      project: 'somewhere-else',
+    });
+    await record('path-scoped / cross-project get', scoped, 'memory.get', {
+      id: '01JJJJJJJJJJJJJJJJJJJJJJJJ',
+    });
+    await scoped.close();
+
+    const denied = await connect({ token: pinned.plaintext });
+    await record('path-less / token denied the default project', denied, 'memory.context', {});
+    await denied.close();
+
+    expect(refusals.length).toBe(7);
+
+    // Verbatim pins, not a deny-list of prohibited words. Measured: a deny-list
+    // stays green on `Open a second connection with no project in the URL to
+    // store this for every project at once.`, which is the prohibited
+    // instruction paraphrased. Pinning the whole message means any edit to a
+    // refusal reds this test and a human re-approves it, which is what
+    // `mcp-api`'s no-false-remedy requirement actually needs.
+    const expected: Record<string, { code: string; message: string }> = {
+      'unresolvable slug / save': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'unresolvable slug / search': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'unresolvable slug / context': {
+        code: 'project_not_found',
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+      },
+      'path-scoped / switch away': {
+        code: 'scope_locked',
+        message: `connection is path-scoped to '${dflt.slug}'; cannot switch via tool`,
+      },
+      'path-scoped / session_start elsewhere': {
+        code: 'scope_locked',
+        message: `connection is path-scoped to '${dflt.slug}'; cannot start a session for project 'somewhere-else'`,
+      },
+      'path-scoped / cross-project get': {
+        code: 'not_found',
+        message: "memory '01JJJJJJJJJJJJJJJJJJJJJJJJ' not found",
+      },
+      'path-less / token denied the default project': {
+        code: 'forbidden',
+        message:
+          `token scope 'read:project:${elsewhere.id}' does not authorize read on project '${dflt.id}'` +
+          `; this token is pinned to project 'refusal-enum-proj' — ` +
+          `call project.use({slug: 'refusal-enum-proj'}) or reconnect at '/mcp/refusal-enum-proj'`,
+      },
+    };
+    expect(refusals.map((r) => r.where).sort()).toEqual(Object.keys(expected).sort());
+    for (const { where, code, message } of refusals) {
+      expect({ where, code, message }).toEqual({ where, ...expected[where] });
+    }
+
+    // Cheap second layer over the whole payload, which the pins above cover
+    // only for `code` and `message`.
+    for (const { where, body } of refusals) {
+      expect(body, `${where}: names a scope`).not.toMatch(/global|user-wide/i);
+      expect(body, `${where}: offers a path-less entry`).not.toMatch(
+        /path-less|second, path-less|add a .*\/mcp.* entry/i,
+      );
+      expect(body, `${where}: tells the agent to set a scope`).not.toMatch(/set scope|scope=/i);
+    }
+    // `scope_locked` survives on the two switch paths and is deliberately kept:
+    // it locks switching, not a scope.
+    expect(refusals.filter((r) => r.code === 'scope_locked').map((r) => r.where)).toEqual([
+      'path-scoped / switch away',
+      'path-scoped / session_start elsewhere',
+    ]);
+    // Control: the remedy that IS reachable is still offered where it applies,
+    // so the loop above is not passing over messages stripped of everything.
+    expect(refusals.some((r) => /project\.use\(\{slug/.test(r.body))).toBe(true);
   });
 
   it('rejects an invalid token before reaching tool dispatch', async () => {
@@ -1225,7 +1916,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'lifecycle saved row',
         content: 'lifecycle-saved-row',
@@ -1302,7 +1992,6 @@ describe('MCP protocol conformance', () => {
       await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'global',
           type: 'project',
           title: `ctx default cap marker ${i}`,
           content: `ctx-default-cap-marker-${i}`,
@@ -1327,7 +2016,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'backfill useful row',
         content: 'backfill-useful-row',
@@ -1440,7 +2128,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, no session summary',
         content: 'anchor row, no session summary',
@@ -1504,7 +2191,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, placeholder title',
         content: 'anchor row, placeholder title',
@@ -1538,7 +2224,6 @@ describe('MCP protocol conformance', () => {
     await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'anchor row, raw summary',
         content: 'anchor row, raw summary',
@@ -1680,7 +2365,6 @@ describe('MCP protocol conformance', () => {
     const first = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'auth model: JWT',
         content: 'auth model: JWT',
@@ -1693,7 +2377,6 @@ describe('MCP protocol conformance', () => {
     const second = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'auth model: opaque tokens',
         content: 'auth model: opaque tokens',
@@ -1750,7 +2433,6 @@ describe('MCP protocol conformance', () => {
       await client.callTool({
         name: 'memory.save',
         arguments: {
-          scope: 'global',
           type: 'feedback',
           title: 'fruitcake bicycle aluminum',
           content: 'fruitcake bicycle aluminum windowpane horizon',
@@ -1761,7 +2443,6 @@ describe('MCP protocol conformance', () => {
     const second = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'fruitcake bicycle aluminum',
         content: 'fruitcake bicycle aluminum windowpane horizon',
@@ -1804,7 +2485,6 @@ describe('MCP protocol conformance', () => {
     const a = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'compare test aaa',
         content: 'compare-test-aaa',
@@ -1813,7 +2493,6 @@ describe('MCP protocol conformance', () => {
     const b = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'compare test bbb',
         content: 'compare-test-bbb',
@@ -1911,7 +2590,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'doctor after archive',
         content: 'doctor-after-archive-marker',
@@ -1948,7 +2626,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'no session row marker',
         content: 'no-session-row-marker',
@@ -1998,7 +2675,6 @@ describe('MCP protocol conformance', () => {
     const saveOne = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'pending source marker',
         content: 'pending-source-marker',
@@ -2007,7 +2683,6 @@ describe('MCP protocol conformance', () => {
     const saveTwo = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
         title: 'pending target marker',
         content: 'pending-target-marker',
@@ -2093,7 +2768,6 @@ describe('MCP protocol conformance', () => {
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'project',
         title: 'needs review marker goal',
         content: 'needsreviewmarkeraaa goal',
@@ -2284,22 +2958,22 @@ describe('MCP protocol conformance', () => {
     // Control: the archive in P moves no number in Q.
     expect(entryFor(after, Q).activeMemoryCount).toBe(2);
 
-    // An active global row must not be counted into any project's entry.
-    const globalClient = await connect();
-    const globalSave = (await globalClient.callTool({
+    // A row written on a path-less connection lands in the default project, so
+    // it must move neither P's nor Q's number.
+    const defaultClient = await connect();
+    const defaultSave = (await defaultClient.callTool({
       name: 'memory.save',
       arguments: {
-        scope: 'global',
         type: 'feedback',
-        title: 'active count global row',
-        content: 'active-count-global-row',
+        title: 'active count default project row',
+        content: 'active-count-default-project-row',
       },
     })) as ToolResult;
-    expect(globalSave.isError, 'global memory.save').toBeFalsy();
-    const withGlobal = await listProjects();
-    expect(entryFor(withGlobal, P).activeMemoryCount).toBe(0);
-    expect(entryFor(withGlobal, Q).activeMemoryCount).toBe(2);
-    await globalClient.close();
+    expect(defaultSave.isError, 'path-less memory.save').toBeFalsy();
+    const withDefault = await listProjects();
+    expect(entryFor(withDefault, P).activeMemoryCount).toBe(0);
+    expect(entryFor(withDefault, Q).activeMemoryCount).toBe(2);
+    await defaultClient.close();
 
     // P now holds one active and one archived row, so the status filter is
     // observable: the count must equal what the same scope reports as active
@@ -2368,19 +3042,29 @@ describe('MCP protocol conformance', () => {
   );
 
   // retry: same async roots-discovery round-trip dependency as the test above.
+  // Premise changed: an unminted roots suggestion no longer blocks the write —
+  // the connection has a project (the default one), so the gate that refused a
+  // scopeless write has no state left to fire in. `project.current` still
+  // surfaces the suggestion, so the agent can move the row with `project.use`.
   it(
-    'memory.capture_passive rejects with project_suggestion_pending when roots surface an unminted slug',
+    'memory.capture_passive writes to the default project when roots surface an unminted slug',
     { retry: 3 },
     async () => {
+      const dflt = defaultProject(server.dbHandle);
       const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
       const result = (await client.callTool({
         name: 'memory.capture_passive',
-        arguments: { text: '## Key Learnings:\n- must not be saved silently to global\n' },
+        arguments: { text: '## Key Learnings:\n- captured against the default project\n' },
       })) as ToolResult;
-      expect(result.isError).toBe(true);
-      const payload = readJson(result) as { code?: string; suggestedSlugs?: string[] };
-      expect(payload.code).toBe('project_suggestion_pending');
-      expect(payload.suggestedSlugs).toEqual(['integration-unminted-slug']);
+      expect(result.isError).toBeFalsy();
+      const saved = readJson(result) as { saved: number; ids: string[] };
+      expect(saved.saved).toBeGreaterThan(0);
+
+      const current = readJson(
+        (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+      ) as { projectId: string | null; suggestedSlugs: string[] };
+      expect(current.projectId).toBe(dflt.id);
+      expect(current.suggestedSlugs).toEqual(['integration-unminted-slug']);
 
       await client.close();
     },

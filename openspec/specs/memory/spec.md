@@ -2,13 +2,17 @@
 
 ## Purpose
 
-Defines the core memory model: append-only semantics, scope isolation (global vs project), supersedes chains, confirmations, retrieval with history, and in-process always-on embeddings.
+Defines the core memory model: append-only semantics, per-project scope isolation, supersedes chains, confirmations, retrieval with history, and in-process always-on embeddings.
 
 ## Requirements
 
 ### Requirement: Memories MUST be append-only
 
 The system SHALL never delete a memory row and SHALL never mutate the `content` or `title` of an existing memory, EXCEPT through the operator-only physical-purge escape hatch defined in "Memories MAY be physically purged when archived and disconnected". Lifecycle changes are otherwise expressed exclusively by transitioning the `status` column among `active`, `superseded`, and `archived`, and by setting the `replaces` JSON array on newly inserted memories. Because `title` is fixed at insert and never updated, a memory's title can never drift away from the immutable `content` it labels.
+
+One carve-out is added, scoped as narrowly as the case requires: **a schema migration MAY rewrite a memory row's `project_id` where doing so preserves a row that would otherwise become unreachable.** No runtime path may — not a service, not a repository method, not a consolidation op, not an MCP tool. The carve-out exists because retiring a scope leaves rows attached to a partition that no longer resolves, and a row nothing can address is a deleted row in every sense except the physical one. Its bound is that the rewrite SHALL be part of an applied migration, SHALL preserve the total row count, and SHALL be journaled in the boot report so an operator can see it happened.
+
+`content` and `title` remain immutable under this carve-out, and lifecycle remains `status` flips plus `replaces` links. Nothing here permits a migration to change what a memory SAYS — only which project addresses it.
 
 #### Scenario: Code path attempts to physically delete a memory
 
@@ -24,6 +28,18 @@ The system SHALL never delete a memory row and SHALL never mutate the `content` 
 
 - **WHEN** any service emits an `UPDATE memory SET title = ?` statement
 - **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
+
+#### Scenario: A runtime path attempts to rewrite `project_id`
+
+- **WHEN** any file under `apps/server/src` other than `apps/server/src/db/migrations/` emits an `UPDATE memory SET project_id` statement
+- **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
+
+#### Scenario: A migration rewriting `project_id` conserves the corpus
+
+- **GIVEN** a populated database whose memories are spread across the retiring partition and one or more projects
+- **WHEN** the migration that repoints them is applied
+- **THEN** the total `memory` row count SHALL be unchanged, `PRAGMA foreign_key_check` SHALL report no violations, and `PRAGMA integrity_check` SHALL report `ok`
+- **AND** the number of rows repointed SHALL be reported in the boot output
 
 ### Requirement: Memories MUST carry a non-empty title
 
@@ -58,33 +74,23 @@ Existing rows SHALL be backfilled with a title derived from their `content` by t
 - **WHEN** any memory-returning read (`memory.get`, `memory.search`, `memory.timeline`, `memory.context`, and `memory.save` candidates) returns a memory
 - **THEN** the returned shape SHALL include that memory's `title`
 
-### Requirement: Memories MUST be scoped to either global or a project
-
-Every memory row SHALL carry a `scope` of either `global` or `project`. When `scope = 'project'`, `project_id` SHALL reference an existing row in `projects` and SHALL NOT be null. When `scope = 'global'`, `project_id` SHALL be null.
-
-#### Scenario: Saving a project memory with a missing project id
-
-- **WHEN** `memory.save` is called with `scope = 'project'` and no `project_id`
-- **THEN** the call SHALL reject with a validation error and SHALL NOT insert any row
-
-#### Scenario: Saving a global memory with a project id
-
-- **WHEN** `memory.save` is called with `scope = 'global'` and a non-null `project_id`
-- **THEN** the call SHALL reject with a validation error and SHALL NOT insert any row
-
 ### Requirement: Memory search MUST respect scope isolation
 
-`memory.search` SHALL return only memories matching the requested scope. When scoped to a project, results MAY also include `global` memories at the caller's request; under no circumstances SHALL results from a different `project_id` be returned.
+`memory.search` SHALL return only memories matching the requested scope, which is always exactly one project. No argument widens it, and under no circumstances SHALL results from a different `project_id` be returned.
 
 #### Scenario: Searching within a project returns only that project plus globals when requested
 
-- **WHEN** `memory.search` is called with `scope = 'project'`, `project_id = 'A'`, `include_global = true`
-- **THEN** the response SHALL include memories with `scope = 'global'` or `(scope = 'project' AND project_id = 'A')` only
+The title predates this change: there is nothing left to add to the project half, which is all that survives.
+
+- **WHEN** `memory.search` is called with `project_id = 'A'`
+- **THEN** the response SHALL include memories with `project_id = 'A'` only, and no argument SHALL admit another project's row
 
 #### Scenario: Searching globals never returns project memories
 
-- **WHEN** `memory.search` is called with `scope = 'global'`
-- **THEN** the response SHALL contain no row whose `scope` is `project`
+The title predates this change: the wider search it names is no longer expressible, which is what this scenario now pins.
+
+- **WHEN** a caller attempts to search anything other than the connection's resolved project
+- **THEN** no such request SHALL be expressible: `memory.search` accepts no scope argument, and scope resolution yields a project on every branch or refuses the call
 
 ### Requirement: Confirmations MUST follow the supersedes chain
 
@@ -589,7 +595,11 @@ Memories with no originating session SHALL NOT be grouped together by that absen
 
 ### Requirement: The vector index MUST mirror the memory lifecycle and support scoped kNN over an arbitrary query vector
 
-`memory_vec` is a derived index, not primary data: an embedding is a deterministic function of `memory.content` (which append-only preserves) and is recomputable at any time. The index therefore is NOT bound by the append-only invariant of the `memory` table; it MAY be updated to track the memory lifecycle, mirroring the existing `memory_fts` trigger-driven sync. `memory_vec` SHALL carry a scope-derived partition key (the `project_id` for project scope, a fixed sentinel that cannot collide with a real `project_id` for global scope), a `status`, and a `type`. The partition key, `status`, and `type` SHALL be supplied when the embedding row is inserted (not by a trigger on the vector table, which the engine forbids); `status` SHALL thereafter be kept in sync with the owning memory's `status` by a trigger on the base `memory` table. The repository SHALL expose a scoped kNN query over an arbitrary query vector that filters by partition key plus requested `status` and optional `type`, so that a scoped search scans only its own partition and its own structured slice. Vectors SHALL be retained across `status` transitions so that `superseded` history remains semantically recoverable when explicitly requested. `archived` rows MAY still have retained vectors while present, but because the post-model-change backfill intentionally targets non-archived rows, archived rows are outside the semantic-search guarantee and SHALL be treated as lexical-only for correctness. Vectors SHALL be physically removed only when the owning memory row is physically purged through an existing journaled escape hatch.
+`memory_vec` is a derived index, not primary data: an embedding is a deterministic function of `memory.content` (which append-only preserves) and is recomputable at any time. The index therefore is NOT bound by the append-only invariant of the `memory` table; it MAY be updated to track the memory lifecycle, mirroring the existing `memory_fts` trigger-driven sync. `memory_vec` SHALL carry a scope-derived partition key — the owning memory's `project_id`, with no sentinel value and no unpartitioned rows — plus a `status` and a `type`. The partition key, `status`, and `type` SHALL be supplied when the embedding row is inserted (not by a trigger on the vector table, which the engine forbids); `status` SHALL thereafter be kept in sync with the owning memory's `status` by a trigger on the base `memory` table. The repository SHALL expose a scoped kNN query over an arbitrary query vector that filters by partition key plus requested `status` and optional `type`, so that a scoped search scans only its own partition and its own structured slice. Vectors SHALL be retained across `status` transitions so that `superseded` history remains semantically recoverable when explicitly requested. `archived` rows MAY still have retained vectors while present, but because the post-model-change backfill intentionally targets non-archived rows, archived rows are outside the semantic-search guarantee and SHALL be treated as lexical-only for correctness. Vectors SHALL be physically removed only when the owning memory row is physically purged through an existing journaled escape hatch.
+
+**A partition key SHALL NOT be changed by `UPDATE`.** The vector engine rejects `UPDATE memory_vec SET partition_key = …` outright, so any migration or maintenance path that must move a row between partitions SHALL DELETE the row and re-INSERT it carrying the identical embedding blob. The re-inserted blob SHALL be byte-identical to the original; re-embedding is NOT an acceptable substitute, because it makes the operation's correctness depend on a background worker completing after the transaction commits.
+
+**A wrongly-partitioned row is undetectable by the existing repair path, so it SHALL be pinned by test rather than left to a health check.** `findMissingEmbeddings` is an anti-join that detects the ABSENCE of a `memory_vec` row, not a wrong partition key: a stale-partition row is present, so it is never queued for re-embedding, the doctor's embeddings backlog reads zero, the dense branch filters it out forever, and the lexical branch keeps returning the memory — so search returns results and nothing anywhere reports a fault. Any change that moves rows between partitions SHALL assert both that the retiring partition is empty AND that the destination partition is non-empty, and SHALL exercise recall end-to-end through the search entry point rather than through the kNN repository method.
 
 #### Scenario: Scoped kNN returns only in-scope active neighbors
 
@@ -620,6 +630,17 @@ Memories with no originating session SHALL NOT be grouped together by that absen
 - **GIVEN** a corpus spread across many project scopes
 - **WHEN** a scoped search runs a kNN
 - **THEN** it SHALL scan only its own partition (cost proportional to in-partition rows, not total corpus); within a single large partition the kNN remains a brute-force scan whose latency grows with the in-partition row count
+
+#### Scenario: A partition key cannot be updated in place
+
+- **WHEN** a statement attempts `UPDATE memory_vec SET partition_key = ?`
+- **THEN** the engine SHALL reject it, and the only conforming way to move the row SHALL be DELETE followed by re-INSERT of the identical blob
+
+#### Scenario: Repointed vectors remain reachable by the dense branch
+
+- **GIVEN** a migration that has moved every vector out of a retiring partition
+- **WHEN** the retiring partition is counted and a semantic search is run in the destination scope through the search entry point
+- **THEN** the retiring partition SHALL hold zero rows, the total `memory_vec` row count SHALL be greater than zero, and a repointed memory SHALL be returned by the dense branch alongside a control memory native to the destination scope
 
 ### Requirement: Memories MAY upsert by `(scope, project_id, topic_key)`
 
@@ -711,7 +732,7 @@ That re-derivability SHALL be specified as re-derivability and NOT as reproducib
 
 - **GIVEN** the just-saved row is in scope `project:'A'`
 - **WHEN** candidate detection runs
-- **THEN** every candidate's `(scope, project_id)` SHALL match `project:'A'`; rows in other projects or in global SHALL NOT be considered, regardless of similarity
+- **THEN** every candidate's `project_id` SHALL match `'A'`; rows in any other project SHALL NOT be considered, regardless of similarity
 
 #### Scenario: The detected count respects scope
 
@@ -848,7 +869,7 @@ Every archive SHALL be journaled — in the SAME transaction as the `status` fli
 #### Scenario: Archiving a cross-scope id is not found
 
 - **GIVEN** a memory `X` that exists only in project `A`
-- **WHEN** `MemoryService.archive('X', S)` is called with `S` being global scope or project `B`
+- **WHEN** `MemoryService.archive('X', S)` is called with `S` being project `B`
 - **THEN** the call SHALL raise `memory_not_found`
 - **AND** `X.status` SHALL be unchanged
 
@@ -1590,3 +1611,31 @@ The rows themselves SHALL NOT be hidden from the operator, retired earlier, or o
 - **GIVEN** a scope holding one adjudicable pending pair and three pairs with a retired endpoint
 - **WHEN** the scoped agent-facing pending count and the server-wide `memory.doctor` pending counter are both read
 - **THEN** the scoped count SHALL be 1 and the server-wide counter SHALL be 4 — the divergence is deliberate: the server-wide figure is a table inventory for the operator (already specified as server-wide rather than scope-resolved), while the scoped figure is a work queue for the agent
+
+### Requirement: Every memory MUST belong to exactly one project
+
+Every memory row SHALL be attached to exactly one project. `project_id` SHALL reference an existing row in `projects` and SHALL NOT be null. There SHALL be no memory that belongs to no project, and no read SHALL return a memory belonging to a project other than the one the caller's scope resolved to.
+
+This replaces "Memories MUST be scoped to either global or a project". The `memory.scope` column remains present in this release, written as the constant `'project'` on every insert, solely so a rolled-back previous image can still execute its own queries; it carries no information and no read SHALL branch on it. Its removal is a separate change.
+
+#### Scenario: A memory cannot be saved without a project
+
+- **WHEN** a memory insert is attempted with `project_id` null
+- **THEN** the insert SHALL be rejected and no row SHALL be created
+
+#### Scenario: A memory cannot be saved against a project that does not exist
+
+- **WHEN** a memory insert is attempted with a `project_id` naming no row in `projects`
+- **THEN** the insert SHALL be rejected and no row SHALL be created
+
+#### Scenario: No read admits a second project's rows
+
+- **GIVEN** two projects each holding memories, and no argument on any read tool that widens a result set past its scope
+- **WHEN** a read is performed in the scope of one of them
+- **THEN** the result SHALL contain only that project's memories, and no request argument SHALL be able to change that
+
+#### Scenario: The retained scope column is constant
+
+- **WHEN** any memory row is inserted by any runtime path after this change
+- **THEN** its `scope` column SHALL hold `'project'`
+- **AND** no repository read SHALL use the value of `scope` to select rows other than as a constant conjunct

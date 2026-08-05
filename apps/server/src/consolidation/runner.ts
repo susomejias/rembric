@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
+import type { ProjectsService } from '../services/projects.js';
 import type { RelationsService } from '../services/relations.js';
 
 import type { ScopeKey } from './candidates.js';
@@ -22,14 +23,14 @@ import { applyDecay, recordOrphanPromote, type ConsolidationDeps } from './opera
  *      re-exposed to agents via `memory.context.pendingJudgments[]` for
  *      fresh-context judgment via `memory.judge`.
  *
- * Plus one global (not per-scope) step piggybacked on the global scope's
- * own throttle: empty-session purge, via the same `AgentSessionsService
- * .purgeEmpty` the `/dashboard/maintenance` button already calls directly.
- * `purgeEmpty` has no scope filter (sessions aren't necessarily
- * project-scoped the way memory is), so it runs once per sweep call,
- * gated on whether the global scope actually ran this time (every sweep
- * call — `runAll` and `sweepFor` alike — always includes the global
- * scope, so this reuses the existing throttle rather than adding one).
+ * Plus one server-wide (not per-scope) step piggybacked on the default
+ * project's own throttle: empty-session purge, via the same
+ * `AgentSessionsService.purgeEmpty` the `/dashboard/maintenance` button
+ * already calls directly. `purgeEmpty` has no scope filter (sessions aren't
+ * necessarily project-scoped the way memory is), so it runs once per sweep
+ * call, gated on whether the default project actually ran this time (every
+ * sweep call — `runAll` and `sweepFor` alike — always includes it, so this
+ * reuses the existing throttle rather than adding one).
  *
  * Triggered lazily on session start (throttled per scope) and manually
  * via `POST /admin/consolidation/run` (force). There is no cron.
@@ -39,6 +40,8 @@ export interface ConsolidationRunnerOptions {
   repos: ConsolidationDeps & Pick<Repositories, 'projects'>;
   tx: TransactionRunner;
   relations: RelationsService;
+  /** Resolves the default project, whose sweep also gates the empty-session purge. */
+  projects: Pick<ProjectsService, 'getDefault'>;
   agentSessions: Pick<AgentSessionsService, 'purgeEmpty'>;
   decay?: DecayThresholds;
   /** Pending relations older than this are orphaned by the sweep. */
@@ -50,7 +53,7 @@ export interface ConsolidationRunnerOptions {
 export interface ConsolidationRunSummary {
   runs: ScopeRunResult[];
   skipped: ScopeKey[];
-  /** Session ids purged this call, if the global scope ran and any were eligible. */
+  /** Session ids purged this call, if the default project ran and any were eligible. */
   purgedSessionIds?: string[];
 }
 
@@ -70,23 +73,25 @@ const ORPHAN_BATCH = 50;
 export class ConsolidationRunner {
   constructor(private readonly opts: ConsolidationRunnerOptions) {}
 
-  /** Sweep the global scope and every project. Manual trigger passes force. */
+  /** Sweep every project, the default one included. Manual trigger passes force. */
   runAll(opts?: { force?: boolean }): ConsolidationRunSummary {
-    const scopes: ScopeKey[] = [{ scope: 'global', projectId: null }];
-    for (const id of this.opts.repos.projects.listAllIds()) {
-      scopes.push({ scope: 'project', projectId: id });
-    }
+    const scopes: ScopeKey[] = this.opts.repos.projects
+      .listAllIds()
+      .map((id) => ({ scope: 'project', projectId: id }));
     return this.sweep(scopes, opts);
   }
 
   /**
-   * Lazy entry point for session start: sweep the session's scope plus
-   * global (global hygiene would otherwise starve — the HTTP session
-   * path is always project-scoped).
+   * Lazy entry point for session start: sweep the session's project plus the
+   * default one, whose hygiene would otherwise starve until someone opened a
+   * session in it — the HTTP session path always names some project.
    */
   sweepFor(projectId: string | null): ConsolidationRunSummary {
-    const scopes: ScopeKey[] = [{ scope: 'global', projectId: null }];
-    if (projectId !== null) scopes.push({ scope: 'project', projectId });
+    const defaultId = this.defaultProjectId();
+    const scopes: ScopeKey[] = [{ scope: 'project', projectId: defaultId }];
+    if (projectId !== null && projectId !== defaultId) {
+      scopes.push({ scope: 'project', projectId });
+    }
     return this.sweep(scopes);
   }
 
@@ -100,11 +105,17 @@ export class ConsolidationRunner {
       }
       runs.push(this.runScope(scope));
     }
-    const globalRan = runs.some((r) => r.scope.scope === 'global');
-    const purgedSessionIds = globalRan
+    const defaultId = this.defaultProjectId();
+    const defaultRan = runs.some((r) => r.scope.projectId === defaultId);
+    const purgedSessionIds = defaultRan
       ? this.opts.agentSessions.purgeEmpty({ adminBypass: true }).deletedIds
       : undefined;
     return { runs, skipped, purgedSessionIds };
+  }
+
+  /** Resolved from `is_default`, never a literal: the slug is not the identity. */
+  private defaultProjectId(): string {
+    return this.opts.projects.getDefault().id;
   }
 
   private recentlySwept(scope: ScopeKey, now: Date = new Date()): boolean {

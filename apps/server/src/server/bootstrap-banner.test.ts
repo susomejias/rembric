@@ -1,4 +1,6 @@
+import { readdirSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -72,5 +74,36 @@ describe('startup banner', () => {
 
   it('emits the "no prior state marker" line on a fresh data dir', () => {
     expect(lines.some((l) => l.includes('no prior state marker'))).toBe(true);
+  });
+
+  /**
+   * The migration runner narrates from where an operator and a container health
+   * check watch — the process log stream — and it has to arrive WHILE the
+   * migration runs. A data-moving migration is the whole of the first boot after
+   * an upgrade (measured 203 s at 200 000 repointed rows), so a summary printed
+   * once the wait is over is precisely what is missing in every failure the
+   * silence causes.
+   */
+  it('narrates every migration it applies, before the banner rather than after it', () => {
+    const applying = lines.filter((l) => /^\[migrate\] applying \d{4}_/.test(l));
+    // EVERY file, not just the ones whose author declared a slow step: which file
+    // is being applied is the runner's knowledge, so a fresh boot narrates all of
+    // them. This is a fresh data dir, so every migration applies.
+    const files = readdirSync(fileURLToPath(new URL('../db/migrations', import.meta.url))).filter(
+      (f) => f.endsWith('.sql'),
+    );
+    expect(files.length).toBeGreaterThan(1);
+    expect(applying.map((l) => l.replace('[migrate] applying ', '')).sort()).toEqual(files.sort());
+    const ready = lines.findIndex((l) => l.startsWith('[bootstrap] rembric v'));
+    expect(ready).toBeGreaterThan(-1);
+    expect(lines.indexOf(applying[applying.length - 1]!)).toBeLessThan(ready);
+    // The runner's own phases too: they run after the last statement, so no
+    // migration author can instrument them.
+    expect(lines).toContain('[migrate] checking foreign keys');
+    expect(lines).toContain('[migrate] committing');
+    // Nothing repeats the report on the banner: one fact, one stream, once.
+    expect(lines.filter((l) => /repointed \d+ previously-global/.test(l))).toEqual([
+      '[migrate] repointed 0 previously-global memory row(s) into the default project default',
+    ]);
   });
 });

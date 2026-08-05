@@ -1,8 +1,9 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   RootsListChangedNotificationSchema,
   type ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+import { z, type ZodObject, type ZodRawShape } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
 import type { MemoryScope } from '../db/schema/memory.js';
@@ -124,10 +125,10 @@ export interface CreateMcpServerOptions {
 export const DESCRIPTION_MAX_LENGTH = 1900;
 
 const SAVE_DESCRIPTION =
-  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. `candidatesDetected` counts the matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5) trimmed the list: a lower bound on how many memories resemble this one, not a scope total, and no request argument raises it. Only `candidates[]` entries carry `judgmentId`s, so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key) instead of judging many pairs. The remainder stays reachable via memory.search and recordable per pair with memory.compare. Path-scoped connections (/mcp/<slug>) reject scope=global with code "scope_locked"; on /mcp the agent picks scope (project-scope requires either path-scoping or a prior project.use call).';
+  'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. `candidatesDetected` counts the matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5) trimmed the list: a lower bound on how many memories resemble this one, not a scope total, and no request argument raises it. Only `candidates[]` entries carry `judgmentId`s, so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key) instead of judging many pairs. The remainder stays reachable via memory.search and recordable per pair with memory.compare.';
 
 const SEARCH_DESCRIPTION =
-  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded — so you can check whether a topic already converged before saving with a new key. Got a literal identifier (path, git SHA, URL, error code, ticket, CVE, IP, hostname, systemd unit, MAC, env var, UUID)? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. Answers "what do I know about this file/error/host"; with `query` it narrows rather than fuses. Each result carries `entities[]`, so you can pivot to a related identifier. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Path-scoped connections see only that project; unscoped see globals only. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
+  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda", "acuérdate". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded — so you can check whether a topic already converged before saving with a new key. Got a literal identifier (path, git SHA, URL, error code, ticket, CVE, IP, hostname, systemd unit, MAC, env var, UUID)? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. Answers "what do I know about this file/error/host"; with `query` it narrows rather than fuses. Each result carries `entities[]`, so you can pivot to a related identifier. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging also works but is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. Every connection sees exactly one project\'s memories. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
 
 const GET_DESCRIPTION =
   'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. `predecessors[]` is bounded (id/title/status/createdAt only, no content) — `truncated:true` means more predecessor history exists than was returned; `headTruncated:true` means the supersedes-chain head could not be fully resolved. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
@@ -176,6 +177,25 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
   );
 
+  // Registers strict: a raw shape becomes a plain `z.object()`, which strips
+  // unknown keys instead of refusing them.
+  const registerTool = <InputArgs extends ZodRawShape, OutputArgs extends ZodRawShape>(
+    name: string,
+    config: {
+      description: string;
+      inputSchema: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations: ToolAnnotations;
+    },
+    cb: ToolCallback<InputArgs>,
+  ): void => {
+    server.registerTool<OutputArgs, ZodObject<InputArgs, 'strict'>>(
+      name,
+      { ...config, inputSchema: z.object(config.inputSchema).strict() },
+      cb,
+    );
+  };
+
   // ── Memory tools: save / search / get / confirm + context / timeline ─
   const memoryHandlers = buildMemoryHandlers({
     memory: opts.memory,
@@ -190,7 +210,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     orphanAfterMs: opts.orphanAfterMs,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'memory.save',
     {
       description: SAVE_DESCRIPTION,
@@ -200,7 +220,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.save,
   );
-  server.registerTool(
+  registerTool(
     'memory.search',
     {
       description: SEARCH_DESCRIPTION,
@@ -210,7 +230,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.search,
   );
-  server.registerTool(
+  registerTool(
     'memory.get',
     {
       description: GET_DESCRIPTION,
@@ -220,7 +240,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.get,
   );
-  server.registerTool(
+  registerTool(
     'memory.confirm',
     {
       description: CONFIRM_DESCRIPTION,
@@ -230,7 +250,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.confirm,
   );
-  server.registerTool(
+  registerTool(
     'memory.archive',
     {
       description: ARCHIVE_DESCRIPTION,
@@ -273,7 +293,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     getServer: () => server,
   });
 
-  server.registerTool(
+  registerTool(
     'memory.session_start',
     {
       description:
@@ -284,7 +304,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionStart,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_end',
     {
       description:
@@ -295,7 +315,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionEnd,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_summary',
     {
       description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Keep it concise but include useful handoff detail. Body: ${SUMMARY_SECTIONS}. Does NOT end the session — use memory.session_end for that.`,
@@ -305,7 +325,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionSummary,
   );
-  server.registerTool(
+  registerTool(
     'memory.context',
     {
       description:
@@ -316,7 +336,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.context,
   );
-  server.registerTool(
+  registerTool(
     'memory.session_get',
     {
       description:
@@ -327,7 +347,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     sessionHandlers.sessionGet,
   );
-  server.registerTool(
+  registerTool(
     'memory.timeline',
     {
       description:
@@ -338,7 +358,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     memoryHandlers.timeline,
   );
-  server.registerTool(
+  registerTool(
     'memory.capture_passive',
     {
       description:
@@ -349,7 +369,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     observabilityHandlers.capturePassive,
   );
-  server.registerTool(
+  registerTool(
     'memory.save_prompt',
     {
       description:
@@ -360,7 +380,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     promptHandlers.savePrompt,
   );
-  server.registerTool(
+  registerTool(
     'memory.search_prompts',
     {
       description:
@@ -371,18 +391,18 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     promptHandlers.searchPrompts,
   );
-  server.registerTool(
+  registerTool(
     'memory.doctor',
     {
       description:
-        'Read-only operational diagnostics, SERVER-WIDE (all projects + global): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ — for two reasons: population (server-wide vs scoped) and, for `pendingJudgments` only, filtering (doctor counts every pending row; the scoped totals count only adjudicable pairs, both endpoints still active). Use at session start when behavior seems off.',
+        'Read-only operational diagnostics, SERVER-WIDE (all projects): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ — for two reasons: population (server-wide vs scoped) and, for `pendingJudgments` only, filtering (doctor counts every pending row; the scoped totals count only adjudicable pairs, both endpoints still active). Use at session start when behavior seems off.',
       inputSchema: {},
       outputSchema: doctorOutput,
       annotations: READ_ANNOTATIONS('Diagnostics'),
     },
     observabilityHandlers.doctor,
   );
-  server.registerTool(
+  registerTool(
     'memory.about',
     {
       description:
@@ -393,11 +413,11 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     handleAbout,
   );
-  server.registerTool(
+  registerTool(
     'memory.stats',
     {
       description:
-        'Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal` — all scoped to the active project (or global). `memory.doctor` reports same-named counters server-wide, so its numbers will differ.',
+        'Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal` — all scoped to the active project. `memory.doctor` reports same-named counters server-wide, so its numbers will differ.',
       inputSchema: {},
       outputSchema: statsOutput,
       annotations: READ_ANNOTATIONS('Stats'),
@@ -416,7 +436,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     router: opts.router,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'project.use',
     {
       description:
@@ -427,7 +447,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     projectHandlers.use,
   );
-  server.registerTool(
+  registerTool(
     'project.list',
     {
       description:
@@ -438,7 +458,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     projectHandlers.list,
   );
-  server.registerTool(
+  registerTool(
     'project.current',
     {
       description:
@@ -458,7 +478,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     repos: opts.repos,
     getServer: () => server,
   });
-  server.registerTool(
+  registerTool(
     'memory.suggest_topic_key',
     {
       description:
@@ -469,7 +489,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     relationsHandlers.suggestTopicKey,
   );
-  server.registerTool(
+  registerTool(
     'memory.judge',
     {
       description:
@@ -480,7 +500,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     relationsHandlers.judge,
   );
-  server.registerTool(
+  registerTool(
     'memory.compare',
     {
       description:

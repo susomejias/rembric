@@ -5,6 +5,15 @@ import type { MemoryScope, MemoryStatus, MemoryType } from '../schema/memory.js'
 
 import { partitionKeyFor } from './scope-clause.js';
 
+/** `memory_vec.embedding` is a packed float32 blob; the view aliases it, no copy. */
+export function decodeEmbedding(blob: Buffer): Float32Array {
+  return new Float32Array(
+    blob.buffer,
+    blob.byteOffset,
+    blob.byteLength / Float32Array.BYTES_PER_ELEMENT,
+  );
+}
+
 export interface VecNeighbor {
   id: string;
   distance: number;
@@ -97,11 +106,7 @@ export class VectorsRepository {
       sql`SELECT embedding FROM memory_vec WHERE memory_id = ${memoryId}`,
     ) as { embedding: Buffer } | undefined;
     if (!row) return undefined;
-    return new Float32Array(
-      row.embedding.buffer,
-      row.embedding.byteOffset,
-      row.embedding.byteLength / Float32Array.BYTES_PER_ELEMENT,
-    );
+    return decodeEmbedding(row.embedding);
   }
 
   /**

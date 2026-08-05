@@ -31,6 +31,8 @@ export interface CreateDbOptions {
    * subcommand against a running server's data dir.
    */
   readonly?: boolean;
+  /** Migration progress sink; defaults to stderr. See `migrate.ts`. */
+  onMigrationProgress?: (line: string) => void;
 }
 
 export interface DbHandle {
@@ -71,6 +73,7 @@ export function createDb(opts: CreateDbOptions): DbHandle {
 
     migrate(sqlite, {
       migrationsDir: opts.migrationsDir ?? defaultMigrationsDir(),
+      onProgress: opts.onMigrationProgress,
     });
 
     // ANALYZE, not `PRAGMA optimize`: optimize re-analyzes only on a ~10x row-count

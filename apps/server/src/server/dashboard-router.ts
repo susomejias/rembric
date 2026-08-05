@@ -24,7 +24,7 @@ import {
   truncate,
   viewHead,
 } from '../dashboard/components.js';
-import { createConsolidationRouter } from '../dashboard/consolidation.js';
+import { createConsolidationRouter, scopeLabel } from '../dashboard/consolidation.js';
 import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
 import { createEntitiesRouter } from '../dashboard/entities.js';
 import { createJudgmentsRouter } from '../dashboard/judgments.js';
@@ -293,10 +293,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     const lastRun = lastRunRow
       ? {
           ...lastRunRow,
-          scopeSlug: lastRunRow.scope?.startsWith('project:')
-            ? (deps.repos.projects.adminFindById(lastRunRow.scope.slice('project:'.length))?.slug ??
-              null)
-            : null,
+          scopeLabel: scopeLabel(deps.repos, lastRunRow.scope),
           totalOps: lastRunCounts.total,
           revertedOps: lastRunCounts.reverted,
         }
@@ -439,7 +436,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
                           <span class="agent">▸ ${s.agent}</span>
                           ${s.projectSlug
                             ? html`<span class="proj">/ ${s.projectSlug}</span>`
-                            : raw('<span class="pill global">GLOBAL</span>')}
+                            : raw('<span class="proj muted">/ —</span>')}
                           <span class="desc"
                             >${truncate(s.summary ?? '—', 60)}${s.summary && !s.summaryFinal
                               ? html` ${rawPill()}`
@@ -473,10 +470,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
           <span class="val ${lastRun ? 'lime' : 'dim'}">${lastRun ? 'OK' : '—'}</span>
           <span class="sub"
             >${lastRun
-              ? html`${relTime(lastRun.finishedAt ?? lastRun.startedAt)} ·
-                ${lastRun.scope === 'global'
-                  ? 'global'
-                  : (lastRun.scopeSlug ?? lastRun.scope ?? 'global')}`
+              ? html`${relTime(lastRun.finishedAt ?? lastRun.startedAt)} · ${lastRun.scopeLabel}`
               : 'NEVER'}</span
           >
         </div>

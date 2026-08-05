@@ -9,9 +9,9 @@ import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
-import { projectScope, SCOPE_GLOBAL } from '../services/scope.js';
+import { projectScope } from '../services/scope.js';
 import { TokensService, type TokenScope } from '../services/tokens.js';
-import { createTestDb, type TestDb } from '../test/index.js';
+import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
 import { buildObservabilityHandlers } from './observability-tools.js';
@@ -27,8 +27,8 @@ import { buildPromptHandlers } from './prompt-tools.js';
  * All handlers now share `resolveEffectiveScope` (`_shared.ts`):
  *   1. ctx.project          → path-scoped connection
  *   2. SessionRouter entry  → path-less connection with prior project.use
- *   3. SCOPE_GLOBAL         → nothing resolved on a path-LESS connection
- *      (a path slug naming no project is refused, not widened to global)
+ *   3. the default project  → nothing resolved on a path-LESS connection
+ *      (a path slug naming no project is refused, not resolved to it)
  */
 
 const MCP_SESSION_ID = 'mcp-sess-scope-test';
@@ -43,6 +43,7 @@ let prompts: PromptsService;
 let tokens: TokensService;
 let adminToken: Token;
 let otherToken: Token;
+let defaultProjectId: string;
 let handlers: ReturnType<typeof buildMemoryHandlers> &
   ReturnType<typeof buildPromptHandlers> &
   ReturnType<typeof buildObservabilityHandlers>;
@@ -71,6 +72,7 @@ function decode(resp: unknown): { isError: boolean; payload: Record<string, unkn
 
 beforeEach(() => {
   db = createTestDb();
+  defaultProjectId = defaultProject(db.handle).id;
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   router = new SessionRouter();
@@ -172,7 +174,7 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(t?.id).toBe(target.id);
   });
 
-  it('memory.stats counts the pinned project, not the global scope', async () => {
+  it('memory.stats counts the pinned project, not the default one', async () => {
     const project = projects.create({ slug: 'baz', displayName: null });
     memory.save(
       {
@@ -192,15 +194,15 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
       },
       projectScope(project.id),
     );
-    // Add a global memory that must NOT leak into the stats for project baz.
+    // A row outside project baz that must NOT leak into its stats.
     memory.save(
       {
         type: 'reference',
-        title: 'global noise that must not leak',
-        content: 'global noise that must not leak',
+        title: 'noise that must not leak',
+        content: 'noise that must not leak',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
@@ -260,16 +262,16 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
   });
 });
 
-describe('resolveEffectiveScope — fallback to SCOPE_GLOBAL', () => {
-  it('path-less /mcp with empty router → memory.context returns global', async () => {
+describe('resolveEffectiveScope — fallback to the default project', () => {
+  it('path-less /mcp with empty router → memory.context returns the default project', async () => {
     memory.save(
       {
         type: 'reference',
-        title: 'a global note',
-        content: 'a global note',
+        title: 'a note in the default project',
+        content: 'a note in the default project',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
 
     const r = await runWithContext(makeContext(adminToken), () =>
@@ -278,9 +280,9 @@ describe('resolveEffectiveScope — fallback to SCOPE_GLOBAL', () => {
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
-    expect(payload.scope).toBe('global');
+    expect(payload.scope).toBe(`project:${defaultProjectId}`);
     const recent = payload.recentMemories as Array<{ snippet: string }>;
-    expect(recent.some((m) => m.snippet.includes('a global note'))).toBe(true);
+    expect(recent.some((m) => m.snippet.includes('a note in the default project'))).toBe(true);
   });
 
   it('does not leak across tokens — other token sees no project pin from admin', async () => {
@@ -305,7 +307,7 @@ describe('resolveEffectiveScope — fallback to SCOPE_GLOBAL', () => {
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
-    expect(payload.scope).toBe('global');
+    expect(payload.scope).toBe(`project:${defaultProjectId}`);
     const recent = payload.recentMemories as Array<{ snippet: string }>;
     expect(recent.some((m) => m.snippet.includes('admin-only memory'))).toBe(false);
   });
@@ -398,8 +400,12 @@ describe('memory.search_prompts — scope resolution', () => {
     expect(list.map((p) => p.content)).toEqual(['pinned prompt content']);
   });
 
-  it('returns global prompts when no router pin and no path scope', async () => {
-    prompts.save({ content: 'global only', title: 'global only', projectId: null });
+  it("returns the default project's prompts when no router pin and no path scope", async () => {
+    prompts.save({
+      content: 'default project only',
+      title: 'default only',
+      projectId: defaultProjectId,
+    });
     const project = projects.create({ slug: 'unused', displayName: null });
     prompts.save({ content: 'project noise', title: 'noise', projectId: project.id });
     // No router pin, no ctx.project.
@@ -410,9 +416,9 @@ describe('memory.search_prompts — scope resolution', () => {
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
-    expect(payload.scope).toBe('global');
+    expect(payload.scope).toBe(`project:${defaultProjectId}`);
     const list = payload.prompts as Array<{ content: string }>;
-    expect(list.map((p) => p.content)).toEqual(['global only']);
+    expect(list.map((p) => p.content)).toEqual(['default project only']);
   });
 
   it('returns the path-scoped project, ignoring stale router pin', async () => {
@@ -540,7 +546,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -565,7 +570,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project: projectA, requestedSlug: projectA.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -590,7 +594,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -614,7 +617,6 @@ describe('explicit sessionId on write-attaching tools is validated', () => {
       makeContext(adminToken, { project, requestedSlug: project.slug }),
       () =>
         handlers.save({
-          scope: 'project',
           type: 'project',
           title: 't',
           content: 'c',
@@ -707,11 +709,11 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
   it('explicit focus populates relevantMemories and leaves recentMemories unchanged', async () => {
     memory.save(
       { type: 'project', title: 'db migration runbook', content: 'db migration runbook steps' },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
     memory.save(
       { type: 'user', title: 'unrelated widget note', content: 'unrelated widget note' },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
 
     const withoutFocus = await runWithContext(makeContext(adminToken), () =>
@@ -737,9 +739,13 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
         title: 'auth token rotation policy',
         content: 'auth token rotation policy details',
       },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
-    prompts.save({ content: 'auth token rotation policy', title: 'auth token rotation policy' });
+    prompts.save({
+      content: 'auth token rotation policy',
+      title: 'auth token rotation policy',
+      projectId: defaultProjectId,
+    });
 
     const r = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.context({})),
@@ -751,7 +757,10 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
   });
 
   it('no derivable seed yields empty relevantMemories plus normal recentMemories', async () => {
-    memory.save({ type: 'user', title: 'a lone memory', content: 'a lone memory' }, SCOPE_GLOBAL);
+    memory.save(
+      { type: 'user', title: 'a lone memory', content: 'a lone memory' },
+      projectScope(defaultProjectId),
+    );
 
     const r = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.context({})),
@@ -778,7 +787,7 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
     );
     const { isError, payload } = decode(r);
     expect(isError).toBeFalsy();
-    expect(payload.scope).toBe('global');
+    expect(payload.scope).toBe(`project:${defaultProjectId}`);
     const relevant = payload.relevantMemories as Array<{ snippet: string }>;
     expect(relevant.some((m) => m.snippet.includes('distinctive_relevance_marker'))).toBe(false);
   });
@@ -787,12 +796,12 @@ describe('memory.context — relevance channel (improve-recall-relevance)', () =
     const repos = createRepositories(db.handle.db);
     const known = memory.save(
       { type: 'project', title: 'Fix', content: 'unrelated wording, no shared vocabulary at all' },
-      SCOPE_GLOBAL,
+      projectScope(defaultProjectId),
     );
     repos.entities.linkMemory(
       known.id,
-      'global',
-      null,
+      'project',
+      defaultProjectId,
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       new Date(),
     );

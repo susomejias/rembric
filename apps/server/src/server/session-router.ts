@@ -19,10 +19,11 @@
  *   url-path     | the connection arrived at `/mcp/<slug>`
  *   roots        | server queried roots/list and auto-activated
  *   tool-explicit| agent called `project.use({slug})` for this session
+ *   default      | nothing named a project, so the default one is in effect
  *   none         | no active project for the transport
  */
 
-export type ProjectResolutionSource = 'url-path' | 'roots' | 'tool-explicit' | 'none';
+export type ProjectResolutionSource = 'url-path' | 'roots' | 'tool-explicit' | 'default' | 'none';
 
 export interface RouterEntry {
   /** Currently-active Rembric session id, or null if no session_start yet. */
