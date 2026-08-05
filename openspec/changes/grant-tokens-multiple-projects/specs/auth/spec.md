@@ -2,7 +2,9 @@
 
 ### Requirement: Tokens MUST support scope and expiration
 
-Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` for project-restricted, `read:*` for read-only, `read:project:<id>` for read-only project-restricted, `projects` for a token whose reach is an explicit set of projects, or `read:projects` for a read-only token over an explicit set of projects) and SHALL optionally carry an `expires_at` timestamp. The MCP middleware SHALL enforce these on every request: every tool call (except the data-free `memory.about`) SHALL pass an `isAuthorized(tokenScope, action, resolvedScope)` check, where `action` is the tool's read/write classification and `resolvedScope` is the connection's effective scope (or the tool's requested/target scope where the tool takes one).
+Every token SHALL carry a `scope` (one of `*` for full access, `project:<id>` for project-restricted, `read:*` for read-only, `read:project:<id>` for read-only project-restricted, `projects` for a token whose reach is an explicit set of projects, or `read:projects` for a read-only token over an explicit set of projects) and SHALL optionally carry an `expires_at` timestamp. The MCP middleware SHALL enforce these on every request: every tool call (except the data-free `memory.about`) SHALL pass an `isAuthorized(tokenScope, action, resolvedScope)` check, where `action` is the tool's read/write classification and `resolvedScope` is the connection's effective scope.
+
+Because every connection now resolves to exactly one project, `resolvedScope` is always a project scope. A `*` or `read:*` token is **unbound** rather than global-scoped: it authorizes against every project, and it carries no project binding of its own.
 
 The two set arms SHALL NOT be spelled as a variant of `*` or `read:*`. A set token's reach comes from its membership set alone (see "A set-scoped token's scope string MUST authorize nothing on its own"), so a base scope that already reaches every project would make the set inert and silently grant more than the operator selected.
 
@@ -27,8 +29,9 @@ The two set arms SHALL NOT be spelled as a variant of `*` or `read:*`. A set tok
 #### Scenario: Project-restricted token calls a read tool outside its project
 
 - **GIVEN** a token with `scope = 'read:project:A'` or `project:A`
-- **WHEN** the token invokes a read-classified tool on a connection whose effective scope is project B or global
+- **WHEN** the token invokes a read-classified tool on a connection whose effective scope is any project other than A — including the default project on a path-less connection
 - **THEN** the call SHALL be rejected with code `forbidden`
+- **AND** the refusal SHALL name the pinned project and `project.use` (see the `mcp-api` requirement "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform")
 
 #### Scenario: A set-scoped token reaches every project in its set
 
