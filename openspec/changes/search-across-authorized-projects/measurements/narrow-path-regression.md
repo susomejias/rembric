@@ -8,8 +8,9 @@ rewrites the dense branch's predicate. Task 1.9 pins retrieval _quality_ across 
 2.2 measures narrow against widened _after_ it — neither compares narrow-before with narrow-after.
 This document is what makes "we did not slow the normal search down" falsifiable instead of asserted.
 
-Status: the **before** column is measured. The two **after** columns are placeholders, to be filled by
-re-running the identical harness against the identical corpus directories.
+Status: **before** and **after phase 1** are measured (§4, §6); after phase 4 is not. §6 also records a
+methodological correction that binds every later re-run: the arms must be **paired and interleaved**
+against a worktree, because this instrument's between-process variance is dominated by machine state.
 
 ---
 
@@ -161,16 +162,73 @@ step change, not a 2% one.
 level: `scopeWhere('project', id)` must emit the same text against the same columns before and after.
 That is a separate, stronger check than a timing comparison, and it is task 1.9's job.
 
-## 6. After phase 1 / after phase 4
+**One thing this statistic turned out not to control for, discovered in §6 and recorded here because it
+is a property of the instrument rather than of the change:** a median of six absorbs one drifted
+_process_, but not a drifted _machine_. Two arms measured hours apart differ in time as well as in code,
+and six repeats of each does not separate the two. Every later comparison pairs and interleaves them.
 
-_Not yet measured. Same harness, same six repeats, same corpus directories — rebuilt corpora are
-inadmissible for the reason in §2._
+## 6. After phase 1 — and why the first reading of it was wrong
 
-| magnitude | before (median p50) | after phase 1 | after phase 4 | tolerance (+15%) |
-| --------: | ------------------: | ------------: | ------------: | ---------------: |
-|     1 000 |             8.35 ms |             — |             — |          9.60 ms |
-|    20 000 |            17.41 ms |             — |             — |         20.02 ms |
-|    50 000 |            41.32 ms |             — |             — |         47.52 ms |
+The unpaired after-phase-1 run, six fresh processes per magnitude against the same corpus directories,
+read as a **+12.1% rise at 50 000** on the §5 statistic: a before-median of 41.32 ms against an
+after-median of 46.31 ms, with the after arm split three runs at ≈41 ms and three at ≈51–54 ms where the
+before arm had been tight. Inside the +15% tolerance, but only just, and bimodal where its own baseline
+was not.
+
+**That reading did not survive being re-measured, and the reason is the confound the §5 statistic
+cannot remove: the two arms were run hours apart on a machine that had a full test suite and two eval
+runs in between.** The two arms differ in TIME as well as in code, so an unpaired comparison cannot
+separate them.
+
+**The paired arm removes it.** A `git worktree` at `e6eddd3` — the commit before the collapse, fixtures
+already moved — with `node_modules` symlinked from the main tree, so the two arms differ in exactly one
+thing: the source under test. The runs are **interleaved**, before/after/before/after, six pairs per
+magnitude, against the identical corpus directories. Raw JSON for all 36 runs is committed under
+`narrow-path-results/paired-*.json`. Reproduce:
+
+```sh
+git worktree add /root/rembric-before <pre-change-commit>
+ln -s /root/rembric/node_modules /root/rembric-before/node_modules
+ln -s /root/rembric/apps/server/node_modules /root/rembric-before/apps/server/node_modules
+# then, per magnitude, alternate the two arms in one loop:
+#   (cd /root/rembric-before/apps/server && tsx <harness> --db <corpus> --project vol-0 --json b$r.json)
+#   (cd /root/rembric/apps/server        && tsx <harness> --db <corpus> --project vol-0 --json a$r.json)
+```
+
+`pnpm exec` does not work inside the worktree — it tries to reinstall `node_modules` and aborts without
+a TTY — so the harness is driven through the main tree's `tsx` binary directly.
+
+| magnitude | paired before (median p50) | paired after (median p50) | Δ         | tolerance (+15%) | verdict |
+| --------: | -------------------------: | ------------------------: | --------- | ---------------: | ------- |
+|     1 000 |                    5.70 ms |                   5.63 ms | **−1.3%** |          6.56 ms | held    |
+|    20 000 |                   17.58 ms |                  18.00 ms | **+2.4%** |         20.22 ms | held    |
+|    50 000 |                   41.29 ms |                  40.80 ms | **−1.2%** |         47.48 ms | held    |
+
+| magnitude | paired before (median p90) | paired after (median p90) | Δ          |
+| --------: | -------------------------: | ------------------------: | ---------- |
+|     1 000 |                    7.61 ms |                   7.30 ms | −4.1%      |
+|    20 000 |                   23.55 ms |                  24.23 ms | +2.9%      |
+|    50 000 |                   50.99 ms |                  45.79 ms | **−10.2%** |
+
+Every magnitude moves by less than the instrument's own repeat-to-repeat spread, in both directions,
+which is what "no change" looks like on this instrument. **The 12% was machine state, not the collapse.**
+
+**Recorded rather than deleted, because the mistake is the finding.** The unpaired arms are still in
+`narrow-path-results/before-phase-1-*.json` and `after-phase-1-*.json`; the numbers in §4 are the
+unpaired before arm and are left as measured. What the episode establishes is a property of this
+instrument that §5 did not anticipate: **its between-process variance is dominated by machine state, so
+an arm measured at a different time is not comparable to one measured now, however many repeats each
+has.** Task 2.2 and the phase-4 re-run MUST therefore be paired and interleaved, not merely repeated.
+
+The independent structural check agrees with the paired measurement, and is the one task 1.9 actually
+requires: `scopeWhere` emits `scope = 'project' AND project_id = ?` before and after, `scopeCondition`
+emits `and(eq(scope,'project'), eq(project_id, ?))` before and after, and `partitionKeyFor` returns the
+project id before and after. The collapse deleted branches that the project arm never took.
+
+### After phase 4
+
+_Not yet measured. Same harness, same corpus directories, and — per the finding above — **paired against
+a worktree at the pre-phase-4 commit**, not against the numbers in this section._
 
 ## 7. What this does NOT establish
 
