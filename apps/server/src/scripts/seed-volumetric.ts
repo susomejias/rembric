@@ -2,7 +2,7 @@
  * Volumetric corpus generator — the reproduction recipe for a performance claim.
  *
  * Usage:
- *   pnpm run corpus:build -- --db <dir> [--memories N] [--sessions M] [--seed S]
+ *   pnpm run corpus:build -- --db <dir> [--memories N] [--sessions M] [--seed S] [--skew]
  *
  * The pnpm script is `corpus:build`, deliberately NOT `seed:*`: this script and
  * `seed-dev.ts` have opposite safety properties and must not be confusable at a
@@ -54,6 +54,8 @@ export interface VolumetricArgs {
   relations: number;
   prompts: number;
   seed: number;
+  /** Memories follow `VOLUMETRIC_SHAPE.skewShares` instead of an even split. */
+  skew: boolean;
 }
 
 export const DEFAULT_ARGS = {
@@ -62,6 +64,7 @@ export const DEFAULT_ARGS = {
   relations: 0,
   prompts: 0,
   seed: 1,
+  skew: false,
 } as const;
 
 export class UsageError extends Error {}
@@ -87,6 +90,7 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
   let relations: number = DEFAULT_ARGS.relations;
   let prompts: number = DEFAULT_ARGS.prompts;
   let seed: number = DEFAULT_ARGS.seed;
+  let skew: boolean = DEFAULT_ARGS.skew;
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!;
@@ -109,23 +113,35 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
       case '--seed':
         seed = requireCount(flag, requireValue(flag, argv[(i += 1)]));
         break;
+      case '--skew':
+        skew = true;
+        break;
       default:
         throw new UsageError(
-          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --relations R --prompts P --seed S. ` +
+          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --relations R --prompts P --seed S --skew. ` +
             'This harness never deletes, so there is no --reset and no --force: remove the corpus directory yourself.',
         );
     }
   }
 
   if (dataDir === undefined) throw new UsageError('--db <dir> is required');
-  const args = { dataDir: normalizeDataDir(dataDir), memories, sessions, relations, prompts, seed };
+  const args = {
+    dataDir: normalizeDataDir(dataDir),
+    memories,
+    sessions,
+    relations,
+    prompts,
+    seed,
+    skew,
+  };
   assertBuildable(args);
   return args;
 }
 
 /**
- * The one cross-axis precondition. Asserted by `buildCorpus` too, so a
- * programmatic caller cannot bypass it and silently get self-relations.
+ * The cross-axis preconditions. Asserted by `buildCorpus` too, so a
+ * programmatic caller cannot bypass them and silently get self-relations or an
+ * empty project.
  */
 export function assertBuildable(args: VolumetricArgs): void {
   if (args.relations > 0 && args.memories < MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS) {
@@ -133,6 +149,17 @@ export function assertBuildable(args: VolumetricArgs): void {
       `--relations ${args.relations} needs --memories at least ${MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS} ` +
         `(a relation joins two memories in the same scope, and the corpus spreads memories over ${VOLUMETRIC_SHAPE.scopeCount} scopes)`,
     );
+  }
+  if (args.skew) {
+    const min = Math.min(...VOLUMETRIC_SHAPE.skewShares);
+    const needed = Math.ceil(MIN_MEMORIES_PER_SKEWED_SCOPE / min);
+    if (args.memories > 0 && args.memories < needed) {
+      throw new UsageError(
+        `--skew needs --memories at least ${needed}: the smallest share is ${min}, and a project ` +
+          'holding fewer than ' +
+          `${MIN_MEMORIES_PER_SKEWED_SCOPE} memories makes a widened-vs-narrow comparison vacuous on that project`,
+      );
+    }
   }
 }
 
@@ -188,6 +215,14 @@ export const VOLUMETRIC_SHAPE = {
   /** `tune`: "6 scopes" — read here as six projects, one per scope slot. */
   scopeCount: 6,
   projectCount: 6,
+  /**
+   * `--skew` only. Share of the memory axis per scope slot, in slot order, so
+   * slot 1 (`vol-0`) dominates and slot 0 (`vol-shared`) is the smallest. A
+   * corpus split evenly over six projects is the one shape a widening cost is
+   * never measured on in production, where one repository usually holds most of
+   * what an agent has ever written.
+   */
+  skewShares: [0.02, 0.6, 0.2, 0.1, 0.05, 0.03],
   /** `tune`: "realistic ~1.3KB bodies". Median of the generated distribution. */
   bodyBytesP50: 1300,
   /** The long tail D3 asks for: p90 at roughly twice the median. */
@@ -223,6 +258,53 @@ const RELATION_ORPHAN_CUTOFF =
 
 /** Two per scope: a relation needs two distinct memories in one scope. */
 const MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS = 2 * VOLUMETRIC_SHAPE.scopeCount;
+
+/** Above `DEFAULT_SEARCH_LIMIT`, so the thinnest project can still fill a page. */
+const MIN_MEMORIES_PER_SKEWED_SCOPE = 10;
+
+/**
+ * Positions in one repeat of the skew pattern. `skewShares × 100` are integers,
+ * so a block of this length realises them exactly and every whole block leaves
+ * the corpus on the declared shares.
+ */
+const SKEW_BLOCK_LENGTH = 100;
+
+/**
+ * Smooth weighted round-robin: at each position take the slot furthest behind
+ * its share so far. Every slot's rows are therefore spread across the whole
+ * `created_at` span rather than clustered, which a cumulative-threshold split
+ * would not give — the dominant project would hold the oldest rows and the
+ * recency term of the ranking boost would read the skew as an age difference.
+ *
+ * A tie goes to the lowest slot index. `skewShares` holds no two equal values,
+ * so no tie arises for it (measured: zero over a 100-long block); the rule
+ * matters only if the shares are ever made equal.
+ */
+export function interleaveShares(shares: readonly number[], length: number): number[] {
+  const assigned = shares.map(() => 0);
+  const out: number[] = [];
+  for (let i = 0; i < length; i += 1) {
+    let best = 0;
+    let bestDeficit = -Infinity;
+    for (let s = 0; s < shares.length; s += 1) {
+      const deficit = shares[s]! * (i + 1) - assigned[s]!;
+      if (deficit > bestDeficit) {
+        bestDeficit = deficit;
+        best = s;
+      }
+    }
+    assigned[best]! += 1;
+    out.push(best);
+  }
+  return out;
+}
+
+const SKEW_BLOCK = interleaveShares(VOLUMETRIC_SHAPE.skewShares, SKEW_BLOCK_LENGTH);
+
+/** Scope slot of memory `index`: even round-robin, or the skew block. */
+export function scopeSlotFor(index: number, skew: boolean): number {
+  return skew ? SKEW_BLOCK[index % SKEW_BLOCK_LENGTH]! : index % VOLUMETRIC_SHAPE.scopeCount;
+}
 
 /** `supersedes` absent here, so every one in the corpus is a `topic_key` audit row. */
 const JUDGED_VERDICTS = RELATION_VALUES.filter((r) => r !== 'supersedes');
@@ -408,8 +490,19 @@ export interface GeneratedMemory {
   tags: string[];
 }
 
-/** Pure function of `(seed, index)`. Tokens interleaved, not clustered in a header. */
-export function generateMemory(seed: number, index: number, scopeSlot: number): GeneratedMemory {
+/**
+ * Pure function of `(seed, index)`. Tokens interleaved, not clustered in a
+ * header. `slotOrdinal` is the row's position WITHIN its scope slot, which the
+ * chain layout is keyed on so an uneven split still produces two-long chains;
+ * its default is the even split's value, so an omitted argument reproduces the
+ * corpus a three-argument call produced.
+ */
+export function generateMemory(
+  seed: number,
+  index: number,
+  scopeSlot: number,
+  slotOrdinal: number = Math.floor(index / VOLUMETRIC_SHAPE.scopeCount),
+): GeneratedMemory {
   const rng = rngFor(seed, STREAM.memory, index);
 
   const tokens: string[] = [];
@@ -446,8 +539,8 @@ export function generateMemory(seed: number, index: number, scopeSlot: number): 
 
   const type = MEMORY_TYPES[index % MEMORY_TYPES.length]!;
   // Two fifths sit in two-long chains, so a fifth end up superseded.
-  const chainPos = Math.floor(index / VOLUMETRIC_SHAPE.scopeCount) % 5;
-  const chainId = Math.floor(index / VOLUMETRIC_SHAPE.scopeCount / 5);
+  const chainPos = slotOrdinal % 5;
+  const chainId = Math.floor(slotOrdinal / 5);
   const topicKey = chainPos < 2 ? `vol/chain/${scopeSlot}/${chainId}` : null;
 
   return {
@@ -476,6 +569,8 @@ export function generateVector(seed: number, index: number): Float32Array {
 
 export interface BuildResult {
   memories: number;
+  /** Indexed by scope slot; the realised split, even or skewed. */
+  memoriesByScopeSlot: number[];
   superseded: number;
   confirmations: number;
   sessions: number;
@@ -516,7 +611,7 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   const promptsSvc = new PromptsService(repos, handle.db, clock);
 
   log(
-    `[corpus] seed=${args.seed} memories=${args.memories} sessions=${args.sessions} relations=${args.relations} prompts=${args.prompts}`,
+    `[corpus] seed=${args.seed} memories=${args.memories} sessions=${args.sessions} relations=${args.relations} prompts=${args.prompts} skew=${args.skew}`,
   );
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
 
@@ -536,6 +631,7 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
 
   const result: BuildResult = {
     memories: 0,
+    memoriesByScopeSlot: Array.from({ length: VOLUMETRIC_SHAPE.scopeCount }, () => 0),
     superseded: 0,
     confirmations: 0,
     sessions: 0,
@@ -607,9 +703,9 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     'memories',
     args.memories,
     (i, memoryStep) => {
-      const scopeSlot = i % VOLUMETRIC_SHAPE.scopeCount;
+      const scopeSlot = scopeSlotFor(i, args.skew);
       const scope = scopes[scopeSlot]!;
-      const gen = generateMemory(args.seed, i, scopeSlot);
+      const gen = generateMemory(args.seed, i, scopeSlot, idsByScope[scopeSlot]!.length);
       const sessionRng = rngFor(args.seed, STREAM.memorySession, i);
       const sessionId =
         sessionIds.length > 0 && sessionRng() < VOLUMETRIC_SHAPE.memoriesWithSessionFraction
@@ -628,6 +724,7 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
       );
       if (supersededByTopicKey) result.superseded += 1;
       result.memories += 1;
+      result.memoriesByScopeSlot[scopeSlot]! += 1;
       idsByScope[scopeSlot]!.push(row.id);
 
       const vector = generateVector(args.seed, i);
@@ -733,8 +830,11 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   );
   log(`  prompts:       ${result.prompts} (${result.deletedPrompts} soft-deleted)`);
   log(`  projects:      ${result.projects} (one per scope slot)`);
+  for (const [slot, n] of result.memoriesByScopeSlot.entries()) {
+    log(`    slot ${slot} (${projects[slot]!.slug}): ${n}`);
+  }
   log(
-    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --seed ${args.seed}`,
+    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --seed ${args.seed}${args.skew ? ' --skew' : ''}`,
   );
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
   return result;
