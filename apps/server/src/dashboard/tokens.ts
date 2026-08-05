@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 
 import type { Repositories } from '../db/repositories/index.js';
-import type { Project } from '../db/schema/projects.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
@@ -254,21 +253,6 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     }
     const access = accessInput;
 
-    const selected: Project[] = [];
-    for (const slug of projectInputs) {
-      // Operator-initiated token creation: autocreate the project row if
-      // the slug is new. The slug must still satisfy the strict regex,
-      // which `ProjectsService.create` enforces.
-      try {
-        selected.push(deps.projects.findBySlug(slug) ?? deps.projects.create({ slug }));
-      } catch (err) {
-        if (err instanceof DomainError) {
-          return flashErrorPage(c, deps.sessions, err.message, view);
-        }
-        throw err;
-      }
-    }
-
     let expiresAt: Date | null = null;
     if (expiresInput) {
       const parsed = new Date(expiresInput);
@@ -283,13 +267,21 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       expiresAt = parsed;
     }
 
+    // Destructured rather than length-checked: the set arm is typed non-empty,
+    // and this is what tells the compiler which branch supplies it.
+    const [firstSlug, ...restSlugs] = projectInputs;
+
     try {
       // One selection composes the single-project arm, not a one-member set;
-      // `composeGrant` owns that so the two cannot drift.
+      // `composeGrant` owns that so the two cannot drift. Autocreating a named
+      // project is the service's job too, so a refusal rolls it back.
       const { plaintext } =
-        selected.length === 0
+        firstSlug === undefined
           ? deps.tokens.create({ name, scope: access === 'read' ? 'read:*' : '*', expiresAt })
-          : deps.tokens.create({ name, projects: selected, access, expiresAt });
+          : deps.tokens.createForSlugs(
+              { name, slugs: [firstSlug, ...restSlugs], access, expiresAt },
+              deps.projects,
+            );
       const url = new URL('/dashboard/tokens', c.req.url);
       url.searchParams.set('created', plaintext);
       url.searchParams.set('name', name);

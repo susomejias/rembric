@@ -16,6 +16,7 @@ import type { Project } from '../db/schema/projects.js';
 import { type Token } from '../db/schema/tokens.js';
 
 import { DomainError } from './errors.js';
+import type { ProjectsService } from './projects.js';
 
 /**
  * Bearer-token authn/z service.
@@ -75,7 +76,13 @@ export type TokenScope =
 export type TokenGrant =
   | { scope: '*' | 'read:*'; project?: never; projects?: never; access?: never }
   | { project: Project; access: 'read' | 'write'; scope?: never; projects?: never }
-  | { projects: Project[]; access: 'read' | 'write'; scope?: never; project?: never };
+  | {
+      /** Non-empty by type: a credential over no project would authorize nothing. */
+      projects: readonly [Project, ...Project[]];
+      access: 'read' | 'write';
+      scope?: never;
+      project?: never;
+    };
 
 export type CreateTokenInput = { name: string; expiresAt?: Date | null } & TokenGrant;
 
@@ -90,6 +97,9 @@ export interface TokenReach {
   /** From `token_projects`; empty for every arm but `projects`/`read:projects`. */
   memberProjectIds: readonly string[];
 }
+
+/** What `createForSlugs` needs of `ProjectsService`, derived so it cannot drift from it. */
+type ProjectResolver = Pick<ProjectsService, 'findBySlug' | 'create'>;
 
 export interface CreatedToken {
   /** The plaintext secret. Shown to the operator exactly once. */
@@ -148,6 +158,39 @@ export class TokensService {
       return inserted;
     });
     return { plaintext, token: row };
+  }
+
+  /**
+   * Mint a token over project SLUGS, creating any that names no project yet.
+   * One transaction spans the project inserts and the mint, so a refusal from
+   * either — an invalid slug, a token name already taken — leaves behind no
+   * project the operator never got a credential for. `create`'s own
+   * transaction nests inside this one as a savepoint (measured: an outer
+   * rollback undoes the inner commit).
+   *
+   * The resolver is an argument rather than a constructor dependency: every
+   * other construction site of this service would otherwise have to grow one.
+   */
+  createForSlugs(
+    input: {
+      name: string;
+      slugs: readonly [string, ...string[]];
+      access: 'read' | 'write';
+      expiresAt?: Date | null;
+    },
+    projects: ProjectResolver,
+  ): CreatedToken {
+    const resolve = (slug: string): Project =>
+      projects.findBySlug(slug) ?? projects.create({ slug });
+    return this.tx.transaction((): CreatedToken => {
+      const [first, ...rest] = input.slugs;
+      return this.create({
+        name: input.name,
+        projects: [resolve(first), ...rest.map((slug) => resolve(slug))],
+        access: input.access,
+        expiresAt: input.expiresAt,
+      });
+    });
   }
 
   list(): Token[] {
@@ -263,19 +306,14 @@ interface ComposedGrant {
 
 function composeGrant(grant: TokenGrant): ComposedGrant {
   if (grant.projects) {
-    if (grant.projects.length === 0) {
-      throw new DomainError(
-        'invalid_input',
-        'tokens.create: a project set must name at least one project',
-      );
-    }
+    const [first, ...rest] = grant.projects;
     // One selection composes the SINGLE-project arm, not a one-member set, so
     // the common case keeps the FK-enforced `project_id` binding.
-    if (grant.projects.length === 1) return singleProject(grant.projects[0]!, grant.access);
+    if (rest.length === 0) return singleProject(first, grant.access);
     return {
       scope: grant.access === 'read' ? 'read:projects' : 'projects',
       projectId: null,
-      memberProjectIds: grant.projects.map((p) => p.id),
+      memberProjectIds: [first.id, ...rest.map((p) => p.id)],
     };
   }
   if (!grant.project) return { scope: grant.scope, projectId: null, memberProjectIds: [] };
