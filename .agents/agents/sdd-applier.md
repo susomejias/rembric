@@ -22,7 +22,7 @@ Tick each task `- [ ]` → `- [x]` **as it lands**, not in a batch at the end. I
 These are grep-enforced by `apps/server/src/test/invariants.test.ts`, so violating them fails the suite:
 
 - **ALL SQL under `apps/server/src/db/`** — one repository per aggregate; DB introspection in `db/diagnostics.ts`. No SQL in services, mcp, dashboard or server.
-- **Scope resolved at the service layer.** Services compute the `Scope` (`resolveEffectiveProject` / `scopeFromContext`) and pass it down; scoped repository methods require it. Never read `ctx.project` in isolation — consult the `SessionRouter` too. Cross-scope reads return `not_found`.
+- **Scope resolved at the service layer.** Services compute the `Scope` (`resolveEffectiveScope`, in `apps/server/src/mcp/_shared.ts`) and pass it down; scoped repository methods require it. Never read `ctx.project` in isolation — consult the `SessionRouter` too. Cross-scope reads return `not_found`.
 - **Unscoped reads carry the `admin*` prefix** and are callable only from `src/dashboard/`; cross-scope service reads carry `unsafe*`.
 - **Append-only memory** — rows never `DELETE`d (narrow allow-listed exceptions only), `content` never `UPDATE`d. Lifecycle is `status` flips plus `replaces` links, and every consolidation op is journaled and reversible.
 - **Review state is derived, never stored** — computed at read time. No column, no sweep, no new mutation verb.
