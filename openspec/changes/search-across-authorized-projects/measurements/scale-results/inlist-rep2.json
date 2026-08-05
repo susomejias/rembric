@@ -1,0 +1,259 @@
+{
+  "instrument": "I1 ISOLATED STATEMENT (synthetic, in-memory)",
+  "label": "rep2",
+  "rowsPerPartition": 2,
+  "rankWindowSize": 64,
+  "warmup": 5,
+  "timed": 40,
+  "node": "v22.23.1",
+  "lengths": [
+    {
+      "partitions": 8,
+      "vectors": 16,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 0.045,
+          "p90Ms": 0.046,
+          "rowsMin": 16,
+          "rowsMax": 16
+        },
+        {
+          "form": "bound",
+          "p50Ms": 0.045,
+          "p90Ms": 0.049,
+          "rowsMin": 16,
+          "rowsMax": 16
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 0.046,
+          "p90Ms": 0.046,
+          "rowsMin": 16,
+          "rowsMax": 16
+        }
+      ],
+      "literalOverJsonEach": 0.978,
+      "boundOverJsonEach": 0.978,
+      "rowsAgree": true
+    },
+    {
+      "partitions": 32,
+      "vectors": 64,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 0.197,
+          "p90Ms": 0.207,
+          "rowsMin": 64,
+          "rowsMax": 64
+        },
+        {
+          "form": "bound",
+          "p50Ms": 0.198,
+          "p90Ms": 0.205,
+          "rowsMin": 64,
+          "rowsMax": 64
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 0.198,
+          "p90Ms": 0.206,
+          "rowsMin": 64,
+          "rowsMax": 64
+        }
+      ],
+      "literalOverJsonEach": 0.995,
+      "boundOverJsonEach": 1,
+      "rowsAgree": true
+    },
+    {
+      "partitions": 128,
+      "vectors": 256,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 1.107,
+          "p90Ms": 1.334,
+          "rowsMin": 256,
+          "rowsMax": 256
+        },
+        {
+          "form": "bound",
+          "p50Ms": 1.221,
+          "p90Ms": 1.416,
+          "rowsMin": 256,
+          "rowsMax": 256
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 1.111,
+          "p90Ms": 1.366,
+          "rowsMin": 256,
+          "rowsMax": 256
+        }
+      ],
+      "literalOverJsonEach": 0.996,
+      "boundOverJsonEach": 1.099,
+      "rowsAgree": true
+    },
+    {
+      "partitions": 512,
+      "vectors": 1024,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 9.053,
+          "p90Ms": 12.664,
+          "rowsMin": 1024,
+          "rowsMax": 1024
+        },
+        {
+          "form": "bound",
+          "p50Ms": 9.628,
+          "p90Ms": 13.194,
+          "rowsMin": 1024,
+          "rowsMax": 1024
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 8.76,
+          "p90Ms": 12.416,
+          "rowsMin": 1024,
+          "rowsMax": 1024
+        }
+      ],
+      "literalOverJsonEach": 1.033,
+      "boundOverJsonEach": 1.099,
+      "rowsAgree": true
+    },
+    {
+      "partitions": 2048,
+      "vectors": 4096,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 111.973,
+          "p90Ms": 142.077,
+          "rowsMin": 4096,
+          "rowsMax": 4096
+        },
+        {
+          "form": "bound",
+          "p50Ms": 105.73,
+          "p90Ms": 150.696,
+          "rowsMin": 4096,
+          "rowsMax": 4096
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 99.21,
+          "p90Ms": 127.42,
+          "rowsMin": 4096,
+          "rowsMax": 4096
+        }
+      ],
+      "literalOverJsonEach": 1.129,
+      "boundOverJsonEach": 1.066,
+      "rowsAgree": true
+    },
+    {
+      "partitions": 8192,
+      "vectors": 16384,
+      "arms": [
+        {
+          "form": "literal",
+          "p50Ms": 1426.552,
+          "p90Ms": 1547.501,
+          "rowsMin": 16384,
+          "rowsMax": 16384
+        },
+        {
+          "form": "bound",
+          "p50Ms": 1473.197,
+          "p90Ms": 1614.604,
+          "rowsMin": 16384,
+          "rowsMax": 16384
+        },
+        {
+          "form": "json_each",
+          "p50Ms": 1454.442,
+          "p90Ms": 1542.355,
+          "rowsMin": 16384,
+          "rowsMax": 16384
+        }
+      ],
+      "literalOverJsonEach": 0.981,
+      "boundOverJsonEach": 1.013,
+      "rowsAgree": true
+    }
+  ],
+  "bindCeiling": [
+    {
+      "listLength": 1000,
+      "bound": {
+        "ok": true,
+        "rows": 2
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    },
+    {
+      "listLength": 32000,
+      "bound": {
+        "ok": true,
+        "rows": 2
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    },
+    {
+      "listLength": 32765,
+      "bound": {
+        "ok": true,
+        "rows": 2
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    },
+    {
+      "listLength": 32766,
+      "bound": {
+        "ok": false,
+        "error": "too many SQL variables"
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    },
+    {
+      "listLength": 32767,
+      "bound": {
+        "ok": false,
+        "error": "too many SQL variables"
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    },
+    {
+      "listLength": 40000,
+      "bound": {
+        "ok": false,
+        "error": "too many SQL variables"
+      },
+      "jsonEach": {
+        "ok": true,
+        "rows": 2
+      }
+    }
+  ]
+}
