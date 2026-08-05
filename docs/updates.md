@@ -115,6 +115,17 @@ Open `/dashboard/projects` afterwards: the new project carries a `DEFAULT` pill,
 > [!WARNING]
 > **If you roll back, stop writing user-wide memories.** Anything the previous version saves with `scope: 'global'` while you are rolled back is stranded when you upgrade again: the migration has already run, so it does not move those rows, and the new version has no scope that can read them. They are still in the database and still in your backups, but no tool will return them and nothing warns you. Write into a project (`/mcp/<slug>`) for as long as you stay rolled back.
 
+## Tokens that reach several projects
+
+You can now mint one token for a set of projects instead of one per project. Tick two or more projects on the create form at `/dashboard/tokens` and the token reaches exactly those, and nothing else — not the projects you did not tick, and not the default project. Tick one and you get the same single-project token you always got.
+
+**Reach is not admin.** A token that names _every_ project still cannot sign in to the dashboard and still cannot touch `/admin/*`. Only a token with full access can, and breadth never adds up to it.
+
+**One verb for the whole set.** `read` or `write` applies to every project in the selection; there is no per-project verb yet. So "read these three, write this one" needs two tokens today — and a client install has a single credential slot, so in practice it means choosing the wider verb or splitting the work between two installs. Adding a per-project verb later needs one column and no table rebuild, so this is a deferral, not a dead end.
+
+> [!WARNING]
+> **If you roll back, your multi-project tokens stop working — silently.** The previous version has no idea what a set-scoped token is, so it refuses one everywhere: measured, `403` on every project including the ones the token names, and `401` at the dashboard login. Nothing is deleted and nothing is corrupted — the memberships are still in the database and come back the moment you upgrade again — but no message says why the token stopped working, and an agent using it just fails. If you roll back and need those grants, re-mint single-project tokens deliberately rather than waiting to find out from failing agents.
+
 ## Updating across the distroless boundary (one-time, v0.21.14)
 
 Starting with the runtime image shipped in **v0.21.14**, Rembric runs on a **distroless** base: Node lives at `/nodejs/bin/node` and there is **no bare `node` on `PATH`**. Crossing this boundary takes one manual step, because the _old_ server (≤ v0.21.14) drives the upgrade and still calls bare `node`.
