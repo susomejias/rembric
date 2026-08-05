@@ -250,7 +250,8 @@
   cursor: pointer;
   min-width: 90px;
 }
-.filters .group input[type='checkbox'] {
+.filters .group input[type='checkbox'],
+.main form input[type='checkbox'] {
   appearance: none;
   width: 14px;
   height: 14px;
@@ -260,11 +261,13 @@
   cursor: pointer;
   flex: 0 0 auto;
 }
-.filters .group input[type='checkbox']:checked {
+.filters .group input[type='checkbox']:checked,
+.main form input[type='checkbox']:checked {
   border-color: var(--lime);
   background: var(--lime);
 }
-.filters .group input[type='checkbox']:focus-visible {
+.filters .group input[type='checkbox']:focus-visible,
+.main form input[type='checkbox']:focus-visible {
   outline: 1px solid var(--lime);
   outline-offset: 2px;
 }
