@@ -213,7 +213,8 @@
 }
 
 /* form labels (legacy form.stack uses `<label>One thing <input/></label>`) */
-.main label {
+.main label,
+.main .chk-group > .lab {
   display: grid;
   gap: var(--s-2);
   font-family: var(--f-mono);
@@ -497,35 +498,11 @@
   display: inline;
 }
 
-/* multi-selection checkbox list inside a form (token create) */
-.main form input[type='checkbox'] {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  border: 1px solid var(--fg-faint);
-  background: transparent;
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-.main form input[type='checkbox']:checked {
-  border-color: var(--lime);
-  background: var(--lime);
-}
-.main form input[type='checkbox']:focus-visible {
-  outline: 1px solid var(--lime);
-  outline-offset: 2px;
-}
+/* multi-selection checkbox list inside a form (token create); the box itself
+   is styled with the filter panel's checkbox in patterns.css */
 .main .chk-group {
   display: grid;
   gap: var(--s-2);
-}
-.main .chk-group > .lab {
-  font-family: var(--f-mono);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--fg-dim);
 }
 .main .chk-list {
   display: flex;
