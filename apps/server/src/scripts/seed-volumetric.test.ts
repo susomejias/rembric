@@ -459,16 +459,17 @@ describe('seed-volumetric generates the shape it declares', () => {
     ).toBeGreaterThan(SHARED_SESSIONS / 2);
   });
 
-  it('spreads prompts over both scope shapes and soft-deletes the declared share', () => {
+  it('spreads prompts over every project and soft-deletes the declared share', () => {
     expect(scalar(handle, 'SELECT COUNT(*) v FROM prompts')).toBe(SHARED_PROMPTS);
-    // Both shapes must be present: the global one is what `searchByScope` has to
-    // serve with an IS NULL predicate rather than an equality.
-    expect(
-      scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NULL'),
-    ).toBeGreaterThan(0);
-    expect(
-      scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NOT NULL'),
-    ).toBeGreaterThan(0);
+    // No prompt may be project-less: no reader can reach one since the scope
+    // collapse, so seeding any would be dead weight the measurements count.
+    expect(scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NULL')).toBe(0);
+    // Every project carries prompts — the axis used to be indexed one slot off
+    // the memory axis, which starved the last project and skewed the corpus
+    // that phase 2's comparisons rest on.
+    expect(scalar(handle, 'SELECT COUNT(DISTINCT project_id) v FROM prompts')).toBe(
+      VOLUMETRIC_SHAPE.projectCount,
+    );
     const deleted = scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE deleted_at IS NOT NULL');
     expect(deleted / SHARED_PROMPTS).toBeCloseTo(VOLUMETRIC_SHAPE.promptsDeletedFraction, 1);
     const lens = rows<{ L: number }>(

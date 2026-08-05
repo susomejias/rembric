@@ -314,16 +314,8 @@ export class EntitiesRepository {
    * backlog that never reaches zero.
    */
   adminBacklogCount(): number {
-    // Exact while `memory_entity_scan.memory_id` is an FK-enforced PK on
-    // `memory.id`. A negative means an orphan slipped in (a table rebuild runs
-    // with `foreign_keys = OFF`), so fall back rather than show the operator a
-    // negative backlog.
-    const row = this.db.get<{ v: number }>(sql`
-      SELECT (SELECT COUNT(*) FROM ${memory} WHERE project_id IS NOT NULL)
-           - (SELECT COUNT(*) FROM ${memoryEntityScan}) AS v
-    `) as { v: number } | undefined;
-    const diff = row?.v ?? 0;
-    if (diff >= 0) return diff;
+    // A subtract-two-counts shortcut undercounts here: it would take the scan
+    // count over every row while the total excludes project-less ones.
     return (
       this.db
         .select({ n: sql<number>`count(*)` })

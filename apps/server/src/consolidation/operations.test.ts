@@ -225,6 +225,46 @@ describe('undoOp preserves topic_key convergence', () => {
     expect(result.skipped).toEqual([]);
   });
 
+  it('skips a project-less row rather than attempting a reactivation the UNIQUE index refuses', () => {
+    // A row an older image wrote with no project. `memory_topic_key_active_uidx`
+    // keys on COALESCE(project_id,''), so it occupies a slot exactly like a
+    // project-scoped one — and a second such row already holds it.
+    const raw = db.handle.raw;
+    const insert = raw.prepare(
+      `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, topic_key, created_at, last_seen_at)
+       VALUES (?, 'global', NULL, 'user', ?, ?, '[]', ?, 'legacy-k', ?, ?)`,
+    );
+    const now = Date.now();
+    insert.run('legacy-decayed', 'decayed', 'decayed', 'active', now, now);
+
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: ['legacy-decayed'],
+      reasoning: 'stale',
+    });
+    expect(memoryService.unsafeGetById('legacy-decayed')!.status, 'nothing to undo').toBe(
+      'archived',
+    );
+    // Only now is the slot free to claim — the index refuses two active rows
+    // in it, which is the constraint the undo would hit.
+    insert.run('legacy-holder', 'holder', 'holder', 'active', now, now);
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(result.skipped).toEqual([
+      { id: 'legacy-decayed', topicKey: 'legacy-k', occupiedBy: 'legacy-decayed' },
+    ]);
+    expect(memoryService.unsafeGetById('legacy-decayed')!.status).toBe('archived');
+    // Control: the op is still marked reverted, so the transaction committed
+    // rather than aborting on SQLITE_CONSTRAINT_UNIQUE.
+    const op = db.handle.db
+      .select()
+      .from(consolidationOps)
+      .where(eq(consolidationOps.id, opId))
+      .get();
+    expect(op?.revertedAt).not.toBeNull();
+  });
+
   it('orphan_promote undo skips a target whose topic slot is occupied but still resets the relation', () => {
     const source = memoryService.save(
       { type: 'user', title: 'src', content: 'src' },

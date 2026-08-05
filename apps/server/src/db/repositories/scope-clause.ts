@@ -31,12 +31,7 @@ export function idJsonSet(ids: readonly string[]): SQL {
   return sql`(SELECT value FROM json_each(${JSON.stringify([...ids])}))`;
 }
 
-/**
- * A row's `memory_vec` partition IS its project. Named rather than inlined
- * because the value has to be supplied at insert time — vec0 forbids a NULL
- * partition key from being filled by a later trigger — so every writer has to
- * know where the key comes from.
- */
+/** A row's `memory_vec` partition IS its project. Widens to a set in phase 4. */
 export function partitionKeyFor(projectId: string): string {
   return projectId;
 }
