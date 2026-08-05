@@ -44,7 +44,11 @@ A corpus of unrelated memories does not discriminate between retrievers. The com
 
 The query set SHALL contain at least eight `abstention` queries. A threshold cannot be calibrated against a metric with three attainable values: with two such queries the abstention rate can only read 0, 0.5 or 1, so no sweep over it can distinguish a good value from a lucky one, let alone identify a plateau. Each `abstention` query SHALL share vocabulary with the scope it is issued against, so that the lexical branch returns candidates and the query tests the relevance gate rather than an empty candidate set.
 
-Question types SHALL cover at minimum: extraction, `knowledge-update`, `temporal`, `preference`, `multi-session-causal`, `cross-scope`, and `abstention`.
+Question types SHALL cover at minimum: extraction, `knowledge-update`, `temporal`, `preference`, `multi-session-causal`, `cross-project-isolation`, and `abstention`.
+
+**The `cross-scope` query type is retired with the scope it named.** Its two committed queries each carried one gold memory in the global scope and one in a project, and scored a retriever on returning both — a shape that cannot exist once every scope is closed. They SHALL be **rewritten rather than deleted, and the floor SHALL NOT be lowered to accommodate their loss.** Losing half the gold on two of sixteen gold-bearing queries costs 0.0625 of Recall@8, which puts the measured value 0.0125 below the committed k=8 floor while remaining above the k=5 floor — a CI failure caused by two fixtures describing a world that no longer exists, not by a retrieval regression. Recording it as the new normal via the explicit lowering opt-in is therefore forbidden for this change.
+
+The rewritten queries SHALL keep testing what the originals tested — a convention stated once and instantiated per project — with all gold in one project, and SHALL keep the isolation control the type was named for: a vocabulary-sharing memory in a second project that must not appear. The renamed type states the surviving property, so a reader cannot mistake it for the retired one.
 
 #### Scenario: A distractor is not counted as a hit
 
@@ -69,6 +73,13 @@ Question types SHALL cover at minimum: extraction, `knowledge-update`, `temporal
 - **GIVEN** a gold memory in project A and a vocabulary-sharing memory in project B
 - **WHEN** a query is run scoped to project A
 - **THEN** project B's memory SHALL NOT appear in the results
+- **AND** every gold id for that query SHALL live in project A, so the query is satisfiable without any scope being widened
+
+#### Scenario: Retiring the global scope does not lower a committed floor
+
+- **WHEN** the change that retires the global scope runs the harness against the committed baselines
+- **THEN** Recall@8 SHALL be at or above the committed floor without the explicit lowering opt-in
+- **AND** the retrieval fixtures SHALL be committed, so a run over a dirty working tree cannot be presented as the passing measurement
 
 ### Requirement: The harness MUST ship a naive baseline and a context-dump baseline
 

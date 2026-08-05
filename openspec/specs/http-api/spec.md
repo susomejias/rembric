@@ -39,7 +39,9 @@ The Rembric server SHALL expose a non-MCP HTTP API mounted in the Hono app at th
 
 The endpoint SHALL accept a JSON body `{ id: string, cwd?: string, agent?: string, description?: string }`. The `id` field is REQUIRED and SHALL match the regex `^[A-Za-z0-9_-]{8,128}$`. On a request whose `(token_id, id)` tuple does not yet exist, the server SHALL insert a new `agent_sessions` row with `status='active'`, `started_at=now`, the resolved `project_id` from the path slug, the provided `agent`/`description` (default `agent='unknown'`), and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` (or `session · HH:MM UTC` if `cwd` is omitted/unparseable) with `title_final = false`. On a request whose `(token_id, id)` tuple already exists, the server SHALL return the existing row unchanged (idempotent ensure-session pattern, safe for hook re-fires).
 
-The server SHALL respond `200 OK` on both insert and upsert paths with body `{ ok: true, sessionId: <id>, scope: 'project'|'global', projectId: string|null, startedAt: string, title: string, created: boolean }`. The `created` field SHALL be `true` for fresh inserts, `false` for idempotent hits.
+The server SHALL respond `200 OK` on both insert and upsert paths with body `{ ok: true, sessionId: <id>, scope: 'project', projectId: string, startedAt: string, title: string, created: boolean }`. The `created` field SHALL be `true` for fresh inserts, `false` for idempotent hits.
+
+`scope` SHALL be the literal `'project'` and `projectId` SHALL be non-null: this endpoint is reachable only under a path slug, so it always resolves a project. The previous `'project'|'global'` union and nullable `projectId` described a state this route could not produce even before the global scope was retired, and a field with one reachable value carries no information — but the key is retained rather than removed, because the plugin clients of all four supported agents read this response body and a removed key is a breaking change to a shipped HTTP contract for no gain. Its type narrows; its presence does not change.
 
 #### Scenario: Fresh insert with valid id and cwd
 
@@ -77,6 +79,11 @@ The server SHALL respond `200 OK` on both insert and upsert paths with body `{ o
 
 - **WHEN** a client POSTs to `/api/sessions` (no slug segment)
 - **THEN** the server SHALL respond `404` `{ ok: false, code: 'not_found' }`
+
+#### Scenario: The response never reports a scope other than `project`
+
+- **WHEN** the endpoint responds on any reachable path, insert or upsert
+- **THEN** `scope` SHALL be `'project'` and `projectId` SHALL be non-null
 
 ### Requirement: `POST /api/<slug>/sessions/:id/summary` MUST write a summary and close the session
 
@@ -383,7 +390,7 @@ The Streamable HTTP transport SHALL accept operator-configured `Host` and `Origi
 
 The endpoint SHALL accept a JSON body `{ query: string, limit?: number }`. The `query` field is REQUIRED and SHALL be a non-empty string. The `limit` field, when present, SHALL be clamped to `[1, 5]` (this endpoint feeds a per-turn context-injection budget, not exploratory search); when omitted it SHALL default to 5. The endpoint SHALL resolve scope via the same `authenticate({pathSlug})` helper used by the other `/api/<slug>/*` routes, so the same 401/403/404 error contract (`missing_token`, `token_invalid`, `project_not_found`, `forbidden`, `project_archived`) applies unchanged.
 
-The endpoint SHALL delegate to the same `MemoryService.search()` path used by the MCP `memory.search` tool (project scope resolved from the path slug, `include_global` NOT set — this endpoint always searches the path-scoped project only), so ranking (including any hybrid-search boost) is identical to the MCP-facing search. On success the server SHALL respond `200 OK` with body `{ ok: true, memories: [{ id: string, title: string, snippet: string }], formatted: string }`, where `memories` mirrors the ranked `memory.search` results (title + a content snippet capped the same way other context snippets are capped) and `formatted` is a ready-to-inject string of the shape `<memory-context>\n<one line per memory: "- {title}: {snippet}">\n</memory-context>`, or the empty string when `memories` is empty.
+The endpoint SHALL delegate to the same `MemoryService.search()` path used by the MCP `memory.search` tool, with the project scope resolved from the path slug, so ranking (including any hybrid-search boost) is identical to the MCP-facing search. It searches the path-scoped project only; no argument on this endpoint widens the result set past it, and none is accepted. On success the server SHALL respond `200 OK` with body `{ ok: true, memories: [{ id: string, title: string, snippet: string }], formatted: string }`, where `memories` mirrors the ranked `memory.search` results (title + a content snippet capped the same way other context snippets are capped) and `formatted` is a ready-to-inject string of the shape `<memory-context>\n<one line per memory: "- {title}: {snippet}">\n</memory-context>`, or the empty string when `memories` is empty.
 
 This endpoint SHALL NOT be exposed to any client other than the Hermes provider in this revision; it carries no client-identifying restriction at the HTTP layer (any valid token scoped to the slug may call it), but no other client's plugin code calls it yet.
 
@@ -413,3 +420,9 @@ This endpoint SHALL NOT be exposed to any client other than the Hermes provider 
 
 - **WHEN** a client POSTs to `/api/<slug>/memory/recall` without a valid bearer token, or with a token scoped to a different project, or against an unknown or archived slug
 - **THEN** the response SHALL match the corresponding scenario already specified for `POST /api/<slug>/sessions` (401 `missing_token`/`token_invalid`, 403 `forbidden`, 404 `project_not_found`, 403 `project_archived`)
+
+#### Scenario: No result comes from outside the path-scoped project
+
+- **GIVEN** memories in the path-scoped project and memories in the default project sharing the query's vocabulary
+- **WHEN** a client POSTs a query to `/api/<slug>/memory/recall`
+- **THEN** every returned memory SHALL belong to the path-scoped project

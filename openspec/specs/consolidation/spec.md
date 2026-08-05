@@ -10,7 +10,11 @@ Defines the deterministic consolidation sweep that resolves memory pollution (de
 
 The server SHALL run the deterministic consolidation sweep (decay + deadline orphaning + empty-session purge) as a side effect of session creation — both `POST /api/sessions` / `POST /api/<slug>/sessions` and MCP `memory.session_start` SHALL funnel through the same service method. The sweep SHALL be throttled: it SHALL short-circuit when the most recent `consolidation_runs` row for the target scope is younger than the internal minimum interval (24h). Sweep execution SHALL happen off the request's critical path: a sweep failure SHALL be logged and SHALL NOT fail the session call. A manually triggered run via `POST /admin/consolidation/run` (or the dashboard equivalent) SHALL remain possible at any time and SHALL bypass the throttle.
 
+**A session start SHALL sweep its own project AND the default project.** The sweep previously included the global scope unconditionally, on the reasoning that global hygiene would otherwise starve because every session-registering path is project-scoped. That reasoning does not stop applying when the global scope is retired — it transfers verbatim to the default project, whose rows are precisely the ones the retiring migration moved there. A default project that is only swept when someone opens a session in it would accumulate exactly the un-decayed corpus this mechanism exists to prevent, and the memories affected would be the migrated ones. The second scope SHALL therefore be the default project, resolved from `is_default`, not a hardcoded scope literal.
+
 The sweep's empty-session purge step SHALL invoke `AgentSessionsService.purgeEmpty` — the same method already reachable manually from `/dashboard/maintenance` — using the session capability's `sessionHasContent` predicate to decide eligibility. It SHALL introduce no new scheduling primitive, admin-bypass surface, or throttle beyond the sweep's own; a purge performed this way SHALL journal to `consolidation_ops` identically to a manually-triggered one.
+
+**The empty-session purge SHALL be triggered by the default project's run, not by a global run.** Its condition was previously "a global-scope run happened in this sweep", which becomes permanently false once no run is global — and the failure is silent: no counter moves, no warning fires, and empty sessions simply accumulate forever. The condition SHALL be re-anchored on the run for the default project, which every session start includes, so the purge fires on the same cadence it does today. A test SHALL assert a **non-zero** purge count, because a purge assertion over a corpus with nothing eligible passes without exercising anything.
 
 #### Scenario: First session start after the throttle window triggers a sweep
 
@@ -45,6 +49,27 @@ The sweep's empty-session purge step SHALL invoke `AgentSessionsService.purgeEmp
 
 - **WHEN** an operator clicks the existing purge button on `/dashboard/maintenance`
 - **THEN** behavior SHALL be unchanged — this requirement only adds an additional, automatic invocation site inside the existing sweep
+
+#### Scenario: A session start in one project also sweeps the default project
+
+- **GIVEN** a project `alpha` and the default project, both outside the throttle window
+- **WHEN** a session is started in `alpha`
+- **THEN** the sweep SHALL produce a `consolidation_runs` row for `alpha` AND one for the default project
+- **AND** the default project's decay work SHALL be performed, so a memory in it that has crossed its decay threshold SHALL be archived
+
+#### Scenario: The empty-session purge still fires
+
+- **GIVEN** at least one session eligible for `purgeEmpty` and a session start in any project outside the throttle window
+- **WHEN** the sweep runs
+- **THEN** `purgeEmpty` SHALL be invoked and its deleted-id count SHALL be greater than zero
+- **AND** the trigger SHALL be the default project's run rather than any condition on a global scope, so it cannot become permanently false
+
+#### Scenario: A migration that retargets a live run writes the scope string readers parse
+
+- **GIVEN** an unfinished `consolidation_runs` row whose scope is being moved from the retiring scope onto the default project
+- **WHEN** the migration rewrites it
+- **THEN** the value SHALL be the `project:<id>` form every reader parses — the throttle lookup, the dashboard's scope cell, and the run-detail label — and SHALL NOT be a bare project id
+- **AND** a bare id SHALL be shown to satisfy none of them: the throttle would not find the row, and the operator surface would render opaque hex where it is required to render the project's slug
 
 ### Requirement: Aged pending relations MUST be deterministically orphaned after a deadline
 
@@ -140,13 +165,20 @@ Each operation in a consolidation run SHALL be applied within a single SQLite tr
 
 ### Requirement: Consolidation MUST NEVER cross scope boundaries
 
-The consolidation SHALL operate one (scope, project_id) tuple at a time. A single consolidation op SHALL NOT touch memories that span more than one scope or more than one project.
+The consolidation SHALL operate one project at a time. A single consolidation op SHALL NOT touch memories belonging to more than one project. The default project is an ordinary project for this purpose and confers no cross-project reach.
 
 #### Scenario: Two memories of different projects look similar
 
-- **GIVEN** memory X has `scope = 'project'`, `project_id = 'A'` and memory Y has `scope = 'project'`, `project_id = 'B'`, and their content is near-duplicate
+- **GIVEN** memory X with `project_id = 'A'` and memory Y with `project_id = 'B'`, and their content is near-duplicate
 - **WHEN** the consolidation runs
 - **THEN** they SHALL NOT be considered candidates for the same merge, regardless of similarity
+
+#### Scenario: A memory in the default project is not merged with one in another project
+
+- **GIVEN** a near-duplicate pair, one memory in the default project and one in project `A`
+- **WHEN** the consolidation runs
+- **THEN** they SHALL NOT be considered candidates for the same merge
+- **AND** the test asserting this SHALL be built on a fixture holding ops in TWO projects and SHALL assert a non-zero op count, so it cannot pass by having produced no ops at all
 
 ### Requirement: Every consolidation decision MUST be journaled
 
