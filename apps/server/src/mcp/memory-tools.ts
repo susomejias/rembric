@@ -1336,13 +1336,12 @@ async function handleContext(
     // ranked hybrid-search fallback, deduped by id, capped at the same
     // limit. `via` keeps the two populations distinguishable in the
     // response, matching `memory.search`'s `viaEntity` observability.
-    const projectId = scope.projectId;
     const byId = new Map<string, { memory: Memory; via: 'entity' | 'ranked' }>();
     if (deps.repos) {
       for (const e of extractEntities('', focusText)) {
         if (byId.size >= RELEVANCE_LIMIT) break;
         const rows = deps.repos.entities.findMemoriesByEntity({
-          projectId,
+          scope,
           kind: e.kind,
           value: e.value,
           limit: RELEVANCE_LIMIT,

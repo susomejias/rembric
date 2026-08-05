@@ -78,7 +78,7 @@ describe('EntityBackfillWorker', () => {
     expect(
       entities
         .findMemoriesByEntity({
-          projectId: defaultProjectScope(db.handle).projectId,
+          scope: defaultProjectScope(db.handle),
           value: 'apps/a.ts',
           status: 'archived',
           limit: 10,
