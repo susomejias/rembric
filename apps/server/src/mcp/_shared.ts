@@ -8,7 +8,7 @@ import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import { projectScope, type Scope } from '../services/scope.js';
 import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
-import { isAuthorized, pinnedProjectId } from '../services/tokens.js';
+import { isAuthorized, isProjectSetScope, pinnedProjectId } from '../services/tokens.js';
 
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 
@@ -168,7 +168,7 @@ function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsS
  * refusal is the access verb and no `project.use` changes it.
  */
 function projectSetRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
-  if (ctx.scope !== 'projects' && ctx.scope !== 'read:projects') return '';
+  if (!isProjectSetScope(ctx.scope)) return '';
   if (scope.kind === 'project' && ctx.memberProjectIds.includes(scope.projectId)) return '';
   const slugs = ctx.memberProjectIds
     .map((id) => projects.getById(id)?.slug)

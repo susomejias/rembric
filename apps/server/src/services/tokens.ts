@@ -423,7 +423,7 @@ function authorizedByMembership(
   action: 'read' | 'write',
   target: { scope: 'global' | 'project'; projectId?: string | null },
 ): boolean {
-  if (reach.scope !== 'projects' && reach.scope !== 'read:projects') return false;
+  if (!isProjectSetScope(reach.scope)) return false;
   if (reach.scope === 'read:projects' && action !== 'read') return false;
   if (target.scope !== 'project' || !target.projectId) return false;
   return reach.memberProjectIds.includes(target.projectId);
@@ -455,6 +455,15 @@ export function pinnedProjectId(scope: TokenScope): string | null {
   if (scope.startsWith('read:project:')) return scope.slice('read:project:'.length);
   if (scope.startsWith('project:')) return scope.slice('project:'.length);
   return null;
+}
+
+/**
+ * The set arms, whose reach lives in `token_projects` rather than in the string.
+ * A predicate rather than a comparison, so every consumer narrows: the dashboard
+ * interpolates the scope into a template unescaped once it does.
+ */
+export function isProjectSetScope(scope: TokenScope): scope is 'projects' | 'read:projects' {
+  return scope === 'projects' || scope === 'read:projects';
 }
 
 /** Derive an HMAC-based session-signing key from a base secret. */

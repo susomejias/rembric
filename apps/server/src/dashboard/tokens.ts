@@ -4,7 +4,12 @@ import type { Repositories } from '../db/repositories/index.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';
-import { pinnedProjectId, type TokensService, type TokenScope } from '../services/tokens.js';
+import {
+  isProjectSetScope,
+  pinnedProjectId,
+  type TokensService,
+  type TokenScope,
+} from '../services/tokens.js';
 
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
@@ -54,7 +59,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       if (unresolvable(t.scope as TokenScope)) return { label: 'inert', cls: 'legacy' };
       // Not `inert`: that label promises the row is never to be repaired, while
       // an operator can give an empty set members.
-      if (isProjectSet(t.scope as TokenScope) && (memberSlugs.get(t.id)?.length ?? 0) === 0) {
+      if (isProjectSetScope(t.scope as TokenScope) && (memberSlugs.get(t.id)?.length ?? 0) === 0) {
         return { label: 'no projects', cls: 'pending' };
       }
       return { label: 'active', cls: 'active' };
@@ -177,17 +182,13 @@ export function createTokensRouter(deps: TokensDeps): Hono {
         </label>
         <div class="chk-group">
           <span class="lab">Projects (optional)</span>
-          ${selectable.length === 0
-            ? raw('<span class="muted small">No projects yet.</span>')
-            : html`
-                <div class="chk-list">
-                  ${selectable.map((p) =>
-                    raw(
-                      `<label class="chk"><input type="checkbox" name="project" value="${escape(p.slug)}" />${escape(p.slug)}</label>`,
-                    ),
-                  )}
-                </div>
-              `}
+          <div class="chk-list">
+            ${selectable.map((p) =>
+              raw(
+                `<label class="chk"><input type="checkbox" name="project" value="${escape(p.slug)}" />${escape(p.slug)}</label>`,
+              ),
+            )}
+          </div>
           <span class="muted small">
             None selected: ADMIN, every project + dashboard login. One: that project only. Two or
             more: exactly those, and still not admin.
@@ -324,11 +325,7 @@ function readStringField(form: FormData, name: string): string {
 function scopeBadge(scope: TokenScope): SafeHtml {
   if (scope === '*') return raw('<span class="pill scope-star">*</span>');
   if (scope === 'read:*') return raw('<span class="pill">read:*</span>');
-  if (isProjectSet(scope)) return raw(`<span class="pill">${scope}</span>`);
+  // Narrowed to the two literals, so this interpolation carries no attacker input.
+  if (isProjectSetScope(scope)) return raw(`<span class="pill">${scope}</span>`);
   return raw(`<code>${escape(scope)}</code>`);
-}
-
-/** The two set arms name no project: their reach lives in `token_projects`. */
-function isProjectSet(scope: TokenScope): boolean {
-  return scope === 'projects' || scope === 'read:projects';
 }
