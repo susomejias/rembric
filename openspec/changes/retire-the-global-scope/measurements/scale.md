@@ -7,6 +7,20 @@ The migration was designed and previously measured against **3 real global rows 
 is the gap this document closes. The worst case is not "a big corpus" — it is **a corpus that is
 almost entirely global**, which is exactly what an operator who only ever used path-less `/mcp` has.
 
+> **Which figures the shipped migration superseded, and which still stand.** Every table here measures
+> variant B with both scratch tables in the **main database**. What ships instead is variant B with them
+> as `CREATE TEMP TABLE` and the runner pointing SQLite's temp directory at the database's own — the same
+> statements, a different place for the spill. **Superseded: the body wall-clock and every disk figure at
+> 200k.** Re-measured through the real runner: body **137–152 s** (not 195.6), db growth **+159 MB** (not
+> +943), **freelist 0** (not 791 MB, so the `VACUUM`-afterwards advice largely goes away), WAL peak
+> **1543 MB** (not 2267), peak RSS **460 MB** (not 1108) — plus up to **~1.5 GB of transient temp spill in
+> the data directory**, which the tables below do not have a column for because the earlier shape spilled
+> into the database file instead. **Still standing:** the statement-group breakdown and its shares (§3),
+> the `foreign_key_check` scaling curve (§4), the four-shape comparison as a _relative_ ranking (§6), the
+> interruption result (§8), and all of §9's correctness. `tasks.md` 15.1a carries the operator-facing
+> restatement; §5's peak-demand conclusion (**≈1.4× the database size free, transiently**) survives with a
+> different composition — WAL plus temp spill rather than WAL plus permanent growth.
+
 ---
 
 ## 0. What was built, and why not with `seed-volumetric` as-is
