@@ -105,6 +105,31 @@ export function runSeed(deps: SeedDeps): SeedResult {
   // 1. Project.
   const proj = projectsSvc.create({ slug: DEMO_SLUG, displayName: 'Demo Project' });
 
+  // 1b. Showcase projects — enough rows that the projects list and the token
+  // form's project picker render at a realistic operator scale, with display
+  // names of uneven width. Bare projects: no tokens, no memories.
+  const showcase: Array<{ slug: string; displayName: string }> = [
+    { slug: 'api-gateway', displayName: 'API Gateway' },
+    { slug: 'mobile-app', displayName: 'Mobile App' },
+    { slug: 'data-pipeline', displayName: 'Data Pipeline' },
+    { slug: 'infra', displayName: 'Infra & Terraform' },
+    { slug: 'ml-experiments', displayName: 'ML Experiments' },
+    { slug: 'design-system', displayName: 'Design System' },
+    { slug: 'marketing-site', displayName: 'Marketing Site' },
+    { slug: 'internal-tools', displayName: 'Internal Tools' },
+    { slug: 'auth-service', displayName: 'Auth Service' },
+    { slug: 'billing', displayName: 'Billing' },
+    { slug: 'analytics', displayName: 'Analytics Dashboard' },
+    { slug: 'e2e-testing', displayName: 'E2E Testing' },
+    { slug: 'docs-site', displayName: 'Docs Site' },
+    { slug: 'browser-extension', displayName: 'Browser Extension' },
+    { slug: 'partner-integrations', displayName: 'Partner Integrations' },
+    { slug: 'legacy-migration', displayName: 'Legacy Monolith Migration to Services' },
+    { slug: 'sre-runbooks', displayName: 'SRE Runbooks' },
+    { slug: 'support-kb', displayName: 'Customer Support KB' },
+  ];
+  for (const p of showcase) projectsSvc.create(p);
+
   // 2. Admin token. When the dev container's boot chain passes
   // adminTokenPlaintext (from `REMBRIC_ADMIN_TOKEN` in .env), insert the
   // admin row with that exact plaintext via bootstrapAdmin — so the
