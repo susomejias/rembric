@@ -712,7 +712,7 @@ describe('migration 0031 — duplicate global entities', () => {
       // Both memories are still reachable through the surviving entity — the
       // collapse must not cost a link.
       const hits = createRepositories(handle.db).entities.findMemoriesByEntity({
-        projectId: dflt.id,
+        scope: projectScope(dflt.id),
         value: entityValue,
         limit: 10,
       });
@@ -912,7 +912,7 @@ describe('migration 0031 — derived state after the repointing', () => {
       const repos = createRepositories(handle.db);
       const dflt = defaultProject(handle);
       const hits = repos.entities.findMemoriesByEntity({
-        projectId: dflt.id,
+        scope: projectScope(dflt.id),
         value: 'src/global-3.ts',
         limit: 10,
       });
@@ -920,7 +920,7 @@ describe('migration 0031 — derived state after the repointing', () => {
       // Still closed: the pre-existing project's own path is not reachable here.
       expect(
         repos.entities.findMemoriesByEntity({
-          projectId: dflt.id,
+          scope: projectScope(dflt.id),
           value: 'src/alpha-1.ts',
           limit: 10,
         }),

@@ -3,6 +3,8 @@ import { partitionKeyFor } from '../db/repositories/scope-clause.js';
 import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
 import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
+import { projectScope } from './scope.js';
+
 /**
  * Standard hybrid retrieval for `memory.search`, expressed in the repo's flat
  * idiom (a module function, mirroring `findSaveTimeCandidates`): a lexical
@@ -217,7 +219,7 @@ function poolLevels(
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
   const rows = opts.repos.memory.textByIds({
     ids: pool.map((r) => r.id),
-    projectId: opts.projectId,
+    scope: projectScope(opts.projectId),
   });
   for (const r of rows) {
     scored.set(r.id, relevanceComponents(queryTokens, r, cosineById.get(r.id), weightOf));
@@ -456,7 +458,7 @@ function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): strin
   try {
     const rows = opts.repos.memory.searchBm25Ids({
       matchExpr,
-      projectId: opts.projectId,
+      scope: projectScope(opts.projectId),
       status: opts.status,
       type: opts.type,
       tag: opts.tag,

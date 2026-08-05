@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveTitle } from '../../services/memory.js';
+import { projectScope } from '../../services/scope.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { memory, type MemoryScope, type MemoryStatus, type NewMemory } from '../schema/memory.js';
 import { projects } from '../schema/projects.js';
@@ -78,7 +79,7 @@ describe('VectorsRepository', () => {
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        projectId: 'p0',
+        scope: projectScope('p0'),
         excludeIds: [],
         limit: 2,
       });
@@ -98,7 +99,7 @@ describe('VectorsRepository', () => {
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        projectId: 'p0',
+        scope: projectScope('p0'),
         excludeIds: ['A', 'B'],
         limit: 2,
       });
@@ -113,7 +114,7 @@ describe('VectorsRepository', () => {
 
       const out = repo.knnCandidates({
         memoryId: 'Q',
-        projectId: 'p1',
+        scope: projectScope('p1'),
         excludeIds: [],
         limit: 10,
       });
@@ -128,7 +129,7 @@ describe('VectorsRepository', () => {
       expect(
         repo.knnCandidates({
           memoryId: 'NOVEC',
-          projectId: 'p0',
+          scope: projectScope('p0'),
           excludeIds: [],
           limit: 5,
         }),

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_DECAY } from '../../consolidation/decay.js';
 import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '../../services/review.js';
+import { projectScope } from '../../services/scope.js';
 import { createTestDb, type TestDb } from '../../test/db.js';
 import { seedProject } from '../../test/default-project.js';
 import { confirmations } from '../schema/confirmations.js';
@@ -400,7 +401,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
   describe('textByIds — the search gate window text read', () => {
     it('resolves each id by primary key, and never drives from a scope index', () => {
       const detail = explainWhileRunning(t, () =>
-        repo.textByIds({ ids: ['a', 'b', 'c'], projectId: 'p0' }),
+        repo.textByIds({ ids: ['a', 'b', 'c'], scope: projectScope('p0') }),
       ).join(' | ');
       // One seek per id against `memory`'s TEXT primary-key autoindex. The
       // rejected plan drove from memory_scope_seen_idx and bloom-filtered the
@@ -412,7 +413,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
 
     it('keeps that plan for a project scope', () => {
-      for (const opts of [{ ids: ['a'], scope: 'project' as const, projectId: 'p' }]) {
+      for (const opts of [{ ids: ['a'], scope: projectScope('p') }]) {
         const detail = explainWhileRunning(t, () => repo.textByIds(opts)).join(' | ');
         expect(detail).toContain('SEARCH m USING INDEX sqlite_autoindex_memory_1 (id=?)');
         expect(detail).not.toContain('memory_scope_seen_idx');
@@ -439,14 +440,14 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       };
       const ids = Array.from({ length: 16 }, (_, i) => `bulk-${i * 100}`);
       const perCallMs = () => {
-        for (let i = 0; i < 50; i++) repo.textByIds({ ids, projectId: 'p0' });
+        for (let i = 0; i < 50; i++) repo.textByIds({ ids, scope: projectScope('p0') });
         const start = performance.now();
-        for (let i = 0; i < 200; i++) repo.textByIds({ ids, projectId: 'p0' });
+        for (let i = 0; i < 200; i++) repo.textByIds({ ids, scope: projectScope('p0') });
         return (performance.now() - start) / 200;
       };
 
       insertRange(0, 2_000);
-      expect(repo.textByIds({ ids, projectId: 'p0' })).toHaveLength(16);
+      expect(repo.textByIds({ ids, scope: projectScope('p0') })).toHaveLength(16);
       const small = perCallMs();
 
       insertRange(2_000, 8_000);

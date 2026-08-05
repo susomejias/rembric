@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { ProjectsService } from '../services/projects.js';
+import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
@@ -88,7 +89,7 @@ describe('runSeed', () => {
     const demo = projects.findBySlug('demo');
     expect(demo).toBeDefined();
     const someMemory = repos.memory.searchMemoryIds({
-      projectId: demo!.id,
+      scope: projectScope(demo!.id),
       status: 'active',
       limit: 1,
       offset: 0,

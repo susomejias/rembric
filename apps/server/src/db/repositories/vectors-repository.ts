@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 
+import type { Scope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import type { MemoryStatus, MemoryType } from '../schema/memory.js';
 
@@ -24,7 +25,7 @@ export interface VecNeighbor {
 
 export interface KnnOpts {
   memoryId: string;
-  projectId: string;
+  scope: Scope;
   excludeIds: string[];
   limit: number;
 }
@@ -69,7 +70,7 @@ export class VectorsRepository {
     if (!queryVector) return [];
     const neighbors = this.knnByQueryVector({
       queryVector,
-      partitionKey: partitionKeyFor(opts.projectId),
+      partitionKey: partitionKeyFor(opts.scope.projectId),
       status: 'active',
       rankWindowSize: opts.limit + opts.excludeIds.length + 1,
     });

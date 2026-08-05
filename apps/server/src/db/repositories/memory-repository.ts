@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from 'drizzle-orm';
 
+import { projectScope, type Scope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
@@ -37,7 +38,7 @@ export interface ReviewTimestamps {
 }
 
 export interface SearchMemoryIdsOpts {
-  projectId: string;
+  scope: Scope;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -50,13 +51,13 @@ export interface SearchMemoryIdsOpts {
 
 export interface TextByIdsOpts {
   ids: readonly string[];
-  projectId: string;
+  scope: Scope;
 }
 
 export interface SearchBm25IdsOpts {
   /** Pre-sanitized FTS5 MATCH expression (see services/hybrid-search.ts). */
   matchExpr: string;
-  projectId: string;
+  scope: Scope;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
   status?: MemoryStatus;
   type?: MemoryType;
@@ -83,7 +84,7 @@ export class MemoryRepository {
       .select()
       .from(memory)
       .where(
-        sql`${scopeWhere(opts.projectId)} AND topic_key = ${opts.topicKey} AND status = 'active'`,
+        sql`${scopeWhere(projectScope(opts.projectId))} AND topic_key = ${opts.topicKey} AND status = 'active'`,
       )
       .limit(1)
       .get();
@@ -122,7 +123,7 @@ export class MemoryRepository {
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
           AND m.id != ${opts.excludeId}
-          AND ${scopeWhere(opts.projectId, 'm')}
+          AND ${scopeWhere(projectScope(opts.projectId), 'm')}
           AND m.status = 'active'
           AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
         ORDER BY rank
@@ -133,7 +134,7 @@ export class MemoryRepository {
 
   /** Recent in-scope memories (memory.context), newest by last-seen/created. */
   recentForContext(opts: { projectId: string; includeArchived: boolean; limit: number }): Memory[] {
-    const conditions: SQL[] = [scopeCondition(opts.projectId)];
+    const conditions: SQL[] = [scopeCondition(projectScope(opts.projectId))];
     if (!opts.includeArchived) conditions.push(sql`${memory.status} != 'archived'`);
     return this.db
       .select()
@@ -153,7 +154,7 @@ export class MemoryRepository {
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
-    const scopeFilter = scopeCondition(opts.projectId);
+    const scopeFilter = scopeCondition(projectScope(opts.projectId));
     const cmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} < ${opts.pivotCreatedAt.getTime()}`
@@ -185,7 +186,7 @@ export class MemoryRepository {
     direction: 'before' | 'after';
     limit: number;
   }): Memory[] {
-    const scopeFilter = scopeCondition(opts.projectId);
+    const scopeFilter = scopeCondition(projectScope(opts.projectId));
     const windowCmp =
       opts.direction === 'before'
         ? sql`${memory.createdAt} >= ${opts.loMs} AND ${memory.createdAt} < ${opts.pivotMs}`
@@ -205,7 +206,7 @@ export class MemoryRepository {
     byStatus: Record<string, number>;
     byType: Record<string, number>;
   } {
-    const scopeFilter = scopeCondition(projectId);
+    const scopeFilter = scopeCondition(projectScope(projectId));
     const statusRows = this.db
       .select({ status: memory.status, n: count() })
       .from(memory)
@@ -230,7 +231,7 @@ export class MemoryRepository {
     const row = this.db
       .select({ value: count() })
       .from(memory)
-      .where(and(scopeCondition(projectId), eq(memory.status, 'active')))
+      .where(and(scopeCondition(projectScope(projectId)), eq(memory.status, 'active')))
       .get();
     return row?.value ?? 0;
   }
@@ -253,7 +254,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(opts.projectId, 'm')}
+        WHERE ${scopeWhere(opts.scope, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -286,7 +287,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(opts.projectId, 'm')}
+          AND ${scopeWhere(opts.scope, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -321,7 +322,7 @@ export class MemoryRepository {
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
         CROSS JOIN memory m ON m.id = je.value
-      WHERE ${scopeWhere(opts.projectId, 'm')}
+      WHERE ${scopeWhere(opts.scope, 'm')}
     `);
   }
 
@@ -352,7 +353,7 @@ export class MemoryRepository {
     return this.db.all<{ topicKey: string; title: string }>(sql`
       SELECT m.topic_key AS topicKey, m.title AS title
       FROM memory m
-      WHERE ${scopeWhere(opts.projectId, 'm')}
+      WHERE ${scopeWhere(projectScope(opts.projectId), 'm')}
         AND m.status = 'active'
         AND m.topic_key IS NOT NULL
         AND m.topic_key != ${opts.excludeExact}
@@ -590,7 +591,7 @@ export class MemoryRepository {
     defaultThresholdMs: number;
     confidenceFloor: number;
   }): string[] {
-    const scopeFilter = scopeCondition(opts.projectId);
+    const scopeFilter = scopeCondition(projectScope(opts.projectId));
     // Per-type inactivity window: a row decays once last_seen_at predates
     // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
     const thresholdExpr =
@@ -697,7 +698,7 @@ export class MemoryRepository {
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
     return this.runNeedsReview(
-      scopeCondition(opts.projectId),
+      scopeCondition(projectScope(opts.projectId)),
       opts.ttlByType,
       opts.nowMs,
       opts.limit,
@@ -713,7 +714,11 @@ export class MemoryRepository {
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): number {
     if (opts.ttlByType.length === 0) return 0;
-    return this.runCountNeedsReview(scopeCondition(opts.projectId), opts.ttlByType, opts.nowMs);
+    return this.runCountNeedsReview(
+      scopeCondition(projectScope(opts.projectId)),
+      opts.ttlByType,
+      opts.nowMs,
+    );
   }
 
   private runCountNeedsReview(
@@ -745,7 +750,7 @@ export class MemoryRepository {
     refutedPriorityMs: number;
   }): Memory[] {
     if (opts.ttlByType.length === 0 || opts.limit <= 0) return [];
-    const scopeFilter = opts.projectId ? scopeCondition(opts.projectId) : undefined;
+    const scopeFilter = opts.projectId ? scopeCondition(projectScope(opts.projectId)) : undefined;
     return this.runNeedsReview(
       scopeFilter,
       opts.ttlByType,
@@ -893,7 +898,7 @@ export class MemoryRepository {
   ): SQL[] {
     const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
     if (opts.type) conds.push(sql`m.type = ${opts.type}`);
-    if (opts.projectId) conds.push(scopeWhere(opts.projectId, 'm'));
+    if (opts.projectId) conds.push(scopeWhere(projectScope(opts.projectId), 'm'));
     return conds;
   }
 
@@ -917,7 +922,7 @@ export class MemoryRepository {
   adminList(opts: AdminListMemoriesOpts): Memory[] {
     const conditions: SQL[] = [eq(memory.status, opts.status)];
     if (opts.type) conditions.push(eq(memory.type, opts.type));
-    if (opts.projectId) conditions.push(scopeCondition(opts.projectId));
+    if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
     return this.db
       .select()
       .from(memory)
@@ -931,7 +936,7 @@ export class MemoryRepository {
   adminCount(opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
     const conditions: SQL[] = [eq(memory.status, opts.status)];
     if (opts.type) conditions.push(eq(memory.type, opts.type));
-    if (opts.projectId) conditions.push(scopeCondition(opts.projectId));
+    if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
     const row = this.db
       .select({ value: count() })
       .from(memory)
@@ -957,7 +962,7 @@ export class MemoryRepository {
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
   }): number {
     if (opts.ttlByType.length === 0) return 0;
-    const scopeFilter = opts.projectId ? scopeCondition(opts.projectId) : undefined;
+    const scopeFilter = opts.projectId ? scopeCondition(projectScope(opts.projectId)) : undefined;
     return this.runCountNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs);
   }
 

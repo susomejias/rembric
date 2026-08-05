@@ -5,6 +5,7 @@ import { ProjectsRepository } from '../../db/repositories/projects-repository.js
 import type { EntityKind } from '../../db/schema/entities.js';
 import { memory } from '../../db/schema/memory.js';
 import { sanitizeFtsQuery } from '../../services/hybrid-search.js';
+import { projectScope } from '../../services/scope.js';
 import { createTestDb } from '../db.js';
 
 import { NOISE_PROBES, type NoiseProbe } from './corpus.js';
@@ -77,7 +78,7 @@ function runProbe(probe: NoiseProbe): ProbeResult {
     const hits = matchExpr
       ? repo.searchBm25Ids({
           matchExpr,
-          projectId,
+          scope: projectScope(projectId),
           status: 'active',
           limit: rows.length + 1,
         })

@@ -3,6 +3,7 @@ import type { Memory } from '../db/schema/memory.js';
 
 import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
+import { projectScope } from './scope.js';
 
 /**
  * How far back through the new row's `replaces` ancestry save-time detection
@@ -162,7 +163,7 @@ export function findSaveTimeCandidates(
   // picks up the slack.
   const vecRows = repos.vectors.knnCandidates({
     memoryId: saved.id,
-    projectId,
+    scope: projectScope(projectId),
     excludeIds,
     limit: poolSize,
   });

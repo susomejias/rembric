@@ -1,6 +1,7 @@
 import { and, eq, getTableColumns, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
+import { projectScope, type Scope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import {
   type EntityKind,
@@ -115,7 +116,7 @@ export class EntitiesRepository {
    * not "active" — the entity path is specified as complete within scope.
    */
   findMemoriesByEntity(opts: {
-    projectId: string;
+    scope: Scope;
     kind?: EntityKind;
     value: string;
     status?: MemoryStatus;
@@ -124,7 +125,10 @@ export class EntitiesRepository {
     topicKey?: string;
     limit: number;
   }): Memory[] {
-    const conditions = [entityScopeCondition(opts.projectId), eq(memoryEntities.value, opts.value)];
+    const conditions = [
+      entityScopeCondition(opts.scope.projectId),
+      eq(memoryEntities.value, opts.value),
+    ];
     if (opts.kind) conditions.push(eq(memoryEntities.kind, opts.kind));
     conditions.push(
       opts.status ? eq(memory.status, opts.status) : sql`${memory.status} != 'archived'`,
@@ -212,7 +216,7 @@ export class EntitiesRepository {
    * linking has already run, rather than relying solely on call order.
    */
   scopeActiveMemoryCount(opts: { projectId: string; excludeMemoryId?: string }): number {
-    const conditions = [scopeCondition(opts.projectId), eq(memory.status, 'active')];
+    const conditions = [scopeCondition(projectScope(opts.projectId)), eq(memory.status, 'active')];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
     return (
       this.db
@@ -333,7 +337,7 @@ export class EntitiesRepository {
    * on an agent-facing read.
    */
   countPendingScans(opts: { projectId: string }): number {
-    const scoped = scopeCondition(opts.projectId);
+    const scoped = scopeCondition(projectScope(opts.projectId));
     return (
       this.db
         .select({ n: sql<number>`count(*)` })
