@@ -19,13 +19,17 @@ Captured by `authorization-baseline.mjs` at base `1cb9821995dfb17c0e0c94cc4d1ea9
 
 ## Matrix (1.2, 1.3)
 
-| token                  | `login` | `/mcp read`         | `/mcp write`        | `/mcp/alpha read`   | `/mcp/alpha write`  | `/mcp/home read`    | `/mcp/home write`   | `POST /api/alpha/sessions` | `POST /api/home/sessions` |
-| ---------------------- | ------- | ------------------- | ------------------- | ------------------- | ------------------- | ------------------- | ------------------- | -------------------------- | ------------------------- |
-| `*`                    | 302     | OK                  | OK                  | OK                  | OK                  | OK                  | OK                  | 200                        | 200                       |
-| `read:*`               | 401     | OK                  | `forbidden`         | OK                  | `forbidden`         | OK                  | `forbidden`         | 403 `forbidden`            | 403 `forbidden`           |
-| `project:<alpha>`      | 401     | `forbidden`         | `forbidden`         | OK                  | OK                  | `forbidden`         | `forbidden`         | 200                        | 403 `forbidden`           |
-| `read:project:<alpha>` | 401     | `forbidden`         | `forbidden`         | OK                  | `forbidden`         | `forbidden`         | `forbidden`         | 403 `forbidden`            | 403 `forbidden`           |
-| `invalid bearer`       | 401     | 401 `token_invalid` | 401 `token_invalid` | 401 `token_invalid` | 401 `token_invalid` | 401 `token_invalid` | 401 `token_invalid` | 401 `token_invalid`        | 401 `token_invalid`       |
+| token                  | `login` | `/mcp read`                        | `/mcp write`                       | `/mcp/alpha read`                  | `/mcp/alpha write`                 | `/mcp/home read`                   | `/mcp/home write`                  | `POST /api/alpha/sessions` | `POST /api/home/sessions` |
+| ---------------------- | ------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | -------------------------- | ------------------------- |
+| `*`                    | 302     | OK                                 | OK                                 | OK                                 | OK                                 | OK                                 | OK                                 | 200                        | 200                       |
+| `read:*`               | 401     | OK                                 | `forbidden`                        | OK                                 | `forbidden`                        | OK                                 | `forbidden`                        | 403 `forbidden`            | 403 `forbidden`           |
+| `project:<alpha>`      | 401     | `forbidden`                        | `forbidden`                        | OK                                 | OK                                 | `forbidden`                        | `forbidden`                        | 200                        | 403 `forbidden`           |
+| `read:project:<alpha>` | 401     | `forbidden`                        | `forbidden`                        | OK                                 | `forbidden`                        | `forbidden`                        | `forbidden`                        | 403 `forbidden`            | 403 `forbidden`           |
+| `invalid bearer`       | 401     | transport refused, `token_invalid` | transport refused, `token_invalid` | transport refused, `token_invalid` | transport refused, `token_invalid` | transport refused, `token_invalid` | transport refused, `token_invalid` | 401 `token_invalid`        | 401 `token_invalid`       |
+
+## A correction to this document
+
+**The six invalid-bearer MCP cells originally printed `401 token_invalid`, and that status was never measured.** `authorization-baseline.json` records `{"transport":"refused","status":null}` for each: the SDK client throws before `initialize` completes, the throw carries the JSON error body but no status line, so the script's three-digit extraction returned null. The `401` was carried over from the expected table in task 1.2 — an expectation wearing a measurement's clothes, in the one document whose whole purpose is evidence. Corrected to what the instrument actually saw. Task 2.3 measures the status properly with a raw `initialize` POST (401, `token_invalid`) and keeps the SDK transport refusal as its own shape, per 1.3's rule that the two are materially different. **Task 8.1's re-run will reproduce `status: null` in these cells; that is not a regression.**
 
 ## Where the measurement differs from what the proposal predicted
 
