@@ -157,7 +157,7 @@ Change `REMBRIC_VERSION` in `.env` to the previous tag and recreate:
 docker compose up -d
 ```
 
-If the new server version included a schema migration that your old data hadn't seen, the rollback is still safe **as long as you didn't manually trigger a migration that's not reversible**. Migrations in Rembric are append-only; existing data isn't transformed by upgrades. Worst case: restore from a backup.
+If the new server version included a schema migration that your old data hadn't seen, the rolled-back version boots on the migrated file and loses nothing — but the rollback is not always transparent. Most migrations are additive; the ones that rewrite rows (the global-scope retirement in `0.26.0` moves every user-wide memory into the `default` project) leave the old version reading the new shape, with version-specific consequences. Check the one-time upgrade notes in [updates.md](./updates.md) before rolling back across one of those. Worst case: restore from a backup.
 
 ### Watchtower (auto-update)
 
