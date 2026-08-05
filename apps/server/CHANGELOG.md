@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.26.0](https://github.com/susomejias/rembric/compare/server-v0.25.2...server-v0.26.0) (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** correction to the earlier note about the removed `include_global` and `scope` input properties: because every tool input schema is strict, a client that still sends either property is refused with JSON-RPC -32602 as an unknown property — it is NOT ignored. Pinned by the every-tool refusal test in `mcp-integration.test.ts`.
+* **mcp:** MCP tool calls carrying a property the tool does not declare are now refused with JSON-RPC -32602 instead of having the property silently dropped. No Rembric client sends one — the bridge forwards frames untouched, session lifecycle is HTTP, and the four clients' slash commands name only declared arguments — but a third-party client or a hand-written tool call that passed an extra key will now fail.
+* **mcp:** `memory.search`'s `include_global` and `memory.save`'s `scope` input properties are removed from the published tool schemas, and the `project_suggestion_pending` error code is retired (remedy applied: remove the field or claim). A client that still sends either property has it ignored; reads and writes address exactly one project.
+* **db:** `MigrateResult` no longer carries `reports` or `skipped`, and `DbHandle` no longer carries `migrations`. The migration report reaches the operator on the `[migrate]` stream instead of the `[bootstrap]` banner.
+* **db:** the global scope is retired in the database. Previously-global memories, entity rows, sessions and prompts move to the default project, and a rolled-back image reads an empty global partition with the rows reachable under the default project's slug instead.
+* **mcp:** three published MCP output schemas lose a required field. `memory.context` returns 9 keys instead of 10 (`clamped` removed); `memory.search_prompts` returns 3 instead of 4 (`clamped` removed); `memory.doctor`'s `db` block returns 3 instead of 4 (`open` removed). `PromptsService.searchByScope`'s `SearchByScopeResult` drops `clamped` too. `memory.get({ids})` rows gain `reviewState`, `reviewAfter`, `reviewEscalated` and `replaces`. Measured consumer set for the removed fields is zero: no hit under apps/plugin, docs, README or CONTRIBUTING, and no typed client.
+* **mcp:** `project.list` renames its per-project `memoryCount` field to `activeMemoryCount`, and the number now counts only memories whose `status` is `active`. Any consumer parsing the old key gets an absent field rather than a plausible wrong number. Zero in-tree consumers: no hits under `apps/plugin/`, `docs/` or `README.md`, and there is no typed client.
+* **mcp:** an MCP connection at /mcp/<slug> whose slug names no existing project is now refused with `project_not_found` on every tool that resolves scope, instead of silently operating in the global scope. Deployments where a stale or hand-authored `.rembric` points at a slug with no matching project row will start seeing refusals where reads and writes previously appeared to work — those calls were reading and writing user-wide memory. Recover by creating the project (dashboard, or `project.use({slug, autocreate: true})`) or by correcting the slug; the refusal carries `suggestedSlugs[]` for near misses. There is no flag that restores the old fallback.
+
+### Features
+
+* **auth:** authorize a token by its scope string OR its project membership ([81ac47a](https://github.com/susomejias/rembric/commit/81ac47a322acd922c10bc828af157632711faee9))
+* **dashboard:** mint a token for the set of projects the operator ticked ([9acb3f7](https://github.com/susomejias/rembric/commit/9acb3f7880efc21a36f186784177d2387a803135))
+* **db:** read and write token project membership from the tokens repository ([4651898](https://github.com/susomejias/rembric/commit/4651898191977a2f46a42c4cff1863658a69e99c))
+* **db:** record which projects a set-scoped token reaches ([bb4bc7a](https://github.com/susomejias/rembric/commit/bb4bc7a10157be1842409fcf01c149af22092496))
+* **db:** repoint previously-global memories onto a default project ([82c1dfe](https://github.com/susomejias/rembric/commit/82c1dfe8a7d5a10a71f016a0be91c76de0cc5806))
+* **mcp:** refuse unknown tool arguments instead of stripping them ([2ebb5a3](https://github.com/susomejias/rembric/commit/2ebb5a33b819147e002515630cbfe7b2ef4db1b3))
+* **mcp:** remove include_global and memory.save's scope argument ([a018392](https://github.com/susomejias/rembric/commit/a01839223430095be3dfb6499652ca3f179fb2cd))
+* **mcp:** report the relevance gate's verdict truthfully ([8d84822](https://github.com/susomejias/rembric/commit/8d848222f1057cf616d844e16d67ee8d767bc865))
+* **self-update:** let the operator raise the upgrader's health wait ([1113dd3](https://github.com/susomejias/rembric/commit/1113dd38579e957b087e18d2b66e13318285a248))
+
+
+### Bug Fixes
+
+* **consolidation:** re-anchor the lazy sweep and empty-session purge ([db438a8](https://github.com/susomejias/rembric/commit/db438a88b855d2c43008e1196ad8c5b644b9d328))
+* **dashboard:** mint the token the operator asked for ([0cbf249](https://github.com/susomejias/rembric/commit/0cbf249b4113cdfbbf20071e3d0567bd59236b56)), closes [#307](https://github.com/susomejias/rembric/issues/307) [#309](https://github.com/susomejias/rembric/issues/309)
+* **dashboard:** render the project, not a scope that no longer exists ([7f8398e](https://github.com/susomejias/rembric/commit/7f8398e0b97c6c2d7e5ea08016d63388d99b9b5c))
+* **dashboard:** roll back autocreated projects when a mint is refused ([73be694](https://github.com/susomejias/rembric/commit/73be6943431e421b070094115fc455253bd35df7))
+* **db:** make the repointing migration survivable, and report it once ([2a70eee](https://github.com/susomejias/rembric/commit/2a70eeeb87034fc1f512635308e6f36db88f619a))
+* **mcp:** count only active memories in project.list ([39912ac](https://github.com/susomejias/rembric/commit/39912acd2fd64d1dfb1168a8ba93ac4ee4aa3bb8))
+* **mcp:** forbid what the delta meant, and pin the refusals verbatim ([85eb794](https://github.com/susomejias/rembric/commit/85eb7944950e382c87d0104f4f6f88bc7a1b5e0a))
+* **mcp:** refuse an unresolvable path slug instead of falling back to global ([640dfab](https://github.com/susomejias/rembric/commit/640dfab75ea94921e71cc89c63e43d3433931d1a))
+* **mcp:** say which population memory.doctor's counters cover ([54e867a](https://github.com/susomejias/rembric/commit/54e867ab09ff6df11b5e7b57de1a2be696c7c496)), closes [#306](https://github.com/susomejias/rembric/issues/306)
+* **mcp:** stop blaming the gate for a page the caller paged past ([701920c](https://github.com/susomejias/rembric/commit/701920cc1bbd30ce865c23a64fbd37231e2d30d0))
+* **mcp:** stop naming a scope the server does not have ([61776bb](https://github.com/susomejias/rembric/commit/61776bb750752be4b4c8ca1604f3b8595b369712))
+* **mcp:** stop pinning the default project as if the agent had chosen it ([70781bf](https://github.com/susomejias/rembric/commit/70781bfb1854cfd86e71cd4f0aed4b6a82976d8f))
+* **mcp:** stop promising what the tools do not do ([b1d0b81](https://github.com/susomejias/rembric/commit/b1d0b81d4388d43714d3c108cc72057a0077a8b9))
+* **openspec:** reconcile four published claims against measured behaviour ([e25df0d](https://github.com/susomejias/rembric/commit/e25df0d6e636d377870505588635de3fcfae058e))
+* **openspec:** reconcile the gateShortened delta with the rule the code implements ([ee76b22](https://github.com/susomejias/rembric/commit/ee76b220dec505a9eee9ee65678ba2dba2392e84))
+* **seed:** put the default project back after a --reset wipe ([8f093f5](https://github.com/susomejias/rembric/commit/8f093f5cef20d69a00b37d03a7ef0913e2530436))
+* **seed:** wipe token memberships so --reset can drop tokens and projects ([d19ec4a](https://github.com/susomejias/rembric/commit/d19ec4ad80def294814b2d18447efbcde5aa7894))
+
+
+### Refactor
+
+* **auth:** give the set-arm grammar one writer and one reader ([b86fa4b](https://github.com/susomejias/rembric/commit/b86fa4b042a40effae16e1a2b6ed211287deca05))
+* **mcp:** dispatch the denial remedy once instead of inside the pinned one ([991d751](https://github.com/susomejias/rembric/commit/991d7511d5dc726a7827ca833202bf407fdca7d1))
+* **mcp:** name the search verdict once, so both surfaces cannot drift ([a1a29a0](https://github.com/susomejias/rembric/commit/a1a29a0b496fab1fc77bdd95d28243ef215612f6))
+* **mcp:** resolve path-less connections to the default project ([b4e709a](https://github.com/susomejias/rembric/commit/b4e709a7eebf5bb2cadceb2c91a491eeb54cc9de))
+
+
+### Documentation
+
+* **mcp:** correct the ignored-vs-refused release note for the removed properties ([9cb5571](https://github.com/susomejias/rembric/commit/9cb5571961e242b00203bbe08d90984e2b35011a))
+
 ## [0.25.2](https://github.com/susomejias/rembric/compare/server-v0.25.1...server-v0.25.2) (2026-08-01)
 
 
