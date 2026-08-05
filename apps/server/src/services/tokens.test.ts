@@ -52,8 +52,10 @@ describe('TokensService.create', () => {
       { name: 'slug-read', scope: 'read:project:alpha' },
       // @ts-expect-error the set arm takes resolved project ROWS; a bare slug would re-admit the same defect
       { name: 'slug-set', projects: ['alpha'], access: 'write' },
+      // @ts-expect-error and it is non-empty: a credential over no project would authorize nothing at all
+      { name: 'empty-set', projects: [], access: 'write' },
     ];
-    expect(rejected).toHaveLength(3);
+    expect(rejected).toHaveLength(4);
   });
 });
 

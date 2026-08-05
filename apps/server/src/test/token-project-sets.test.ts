@@ -380,7 +380,7 @@ describe('token project sets', () => {
     return row!.id;
   }
 
-  function countRows(table: 'tokens' | 'token_projects'): number {
+  function countRows(table: 'tokens' | 'token_projects' | 'projects'): number {
     const row = server.dbHandle.raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {
       n: number;
     };
@@ -873,14 +873,26 @@ describe('token project sets', () => {
       expect(memberIds(control!.id)).toEqual([alpha.id, gamma.id].sort());
     });
 
-    it('creates neither a token nor a membership row when one selected slug is invalid', async () => {
+    it('creates neither a token nor a membership row nor a project when one selected slug is invalid', async () => {
       const jar = await loggedIn();
       expect(tableExists('token_projects'), 'token_projects does not exist').toBe(true);
-      const before = { tokens: countRows('tokens'), members: countRows('token_projects') };
+      const before = {
+        tokens: countRows('tokens'),
+        members: countRows('token_projects'),
+        projects: countRows('projects'),
+      };
+
+      // The NEW slug leads: a selection the handler autocreates before it
+      // reaches the invalid one. With an already-existing slug in that position
+      // there is nothing to leak and the projects count cannot move.
+      const fresh = 'never-minted-project';
+      expect(
+        new ProjectsService(createRepositories(server.dbHandle.db)).findBySlug(fresh),
+      ).toBeUndefined();
 
       const res = await mint(jar, {
         name: 'invalid-member-slug',
-        projects: [alpha.slug, 'INVALID Slug!'],
+        projects: [fresh, 'INVALID Slug!'],
         access: 'write',
       });
 
@@ -889,6 +901,7 @@ describe('token project sets', () => {
       expect(persisted('invalid-member-slug')).toBeUndefined();
       expect(countRows('tokens')).toBe(before.tokens);
       expect(countRows('token_projects')).toBe(before.members);
+      expect(countRows('projects'), 'a refused mint autocreated a project').toBe(before.projects);
     });
   });
 });
