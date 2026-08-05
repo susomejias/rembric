@@ -131,13 +131,13 @@ Verbatim first failure per test, in file order:
 
 ## 6. Dashboard
 
-- [ ] 6.1 Replace the single `<select name="project">` (`dashboard/tokens.ts:153-161`) with a multi-selection control. Use a checkbox list, not `<select multiple>`: measured, `<select multiple>` inherits `.main select`'s `appearance: none` plus arrow art and `min-height` (`styles/core/content.css:260-272`), cosmetically wrong for a listbox.
-- [ ] 6.2 Extend the `input[type='checkbox']` rule from `.filters .group` (`styles/core/patterns.css:253-269`) to the form scope. **A new selector reusing `--lime` and `--fg-faint` only** — no new `:root` token, so `dashboard/spec.md:565-572` stays untouched and `:210`'s "introduces no new design tokens" stays true. Verify by diffing the `:root` block: it must be byte-identical.
-- [ ] 6.3 Rewrite the create handler's grant decision per the `dashboard` delta's table: zero selections → literal arm; one → single-project arm; two or more → set arm.
-- [ ] 6.4 Extend `unresolvable` / `stateOf` (`:37-47`) for the memberless-set state with the label from 0.7, and set precedence to `revoked` → `expired` → unresolvable → empty-set → `active`. `pinnedProjectId('projects')` returns `null`, so `unresolvable` already short-circuits correctly at `:38-39` — do not "fix" that.
-- [ ] 6.5 Extend the project cell (`:56`) to render every member slug in slug-ascending order, archived members included (`deps.projects.list(true)` at `:34` already includes them, for the reason its comment at `:32-33` gives).
-- [ ] 6.6 Extend `scopeBadge` (`:286-290`) for the two new literals.
-- [ ] 6.7 Extend the one-time-view panel to enumerate every member slug — not a count.
+- [x] 6.1 Replace the single `<select name="project">` (`dashboard/tokens.ts:153-161`) with a multi-selection control. Use a checkbox list, not `<select multiple>`: measured, `<select multiple>` inherits `.main select`'s `appearance: none` plus arrow art and `min-height` (`styles/core/content.css:260-272`), cosmetically wrong for a listbox.
+- [x] 6.2 Extend the `input[type='checkbox']` rule from `.filters .group` (`styles/core/patterns.css:253-269`) to the form scope. **A new selector reusing `--lime` and `--fg-faint` only** — no new `:root` token, so `dashboard/spec.md:565-572` stays untouched and `:210`'s "introduces no new design tokens" stays true. Verify by diffing the `:root` block: it must be byte-identical.
+- [x] 6.3 Rewrite the create handler's grant decision per the `dashboard` delta's table: zero selections → literal arm; one → single-project arm; two or more → set arm.
+- [x] 6.4 Extend `unresolvable` / `stateOf` (`:37-47`) for the memberless-set state with the label from 0.7, and set precedence to `revoked` → `expired` → unresolvable → empty-set → `active`. `pinnedProjectId('projects')` returns `null`, so `unresolvable` already short-circuits correctly at `:38-39` — do not "fix" that.
+- [x] 6.5 Extend the project cell (`:56`) to render every member slug in slug-ascending order, archived members included (`deps.projects.list(true)` at `:34` already includes them, for the reason its comment at `:32-33` gives).
+- [x] 6.6 Extend `scopeBadge` (`:286-290`) for the two new literals.
+- [x] 6.7 Extend the one-time-view panel to enumerate every member slug — not a count.
 - [ ] 6.8 No `data-confirm` modal is added (creating a token is not destructive, `dashboard/spec.md:210`); the revoke action keeps its danger-tone modal. Timestamps already go through `formatTs`. Confirm both by inspection and note it.
 - [ ] 6.9 Validate the rendered form and list headless (Playwright screenshot, no GUI available) at desktop and mobile widths, and confirm the checkbox list is legible in both.
 

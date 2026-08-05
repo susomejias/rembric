@@ -497,6 +497,59 @@
   display: inline;
 }
 
+/* multi-selection checkbox list inside a form (token create) */
+.main form input[type='checkbox'] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--fg-faint);
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.main form input[type='checkbox']:checked {
+  border-color: var(--lime);
+  background: var(--lime);
+}
+.main form input[type='checkbox']:focus-visible {
+  outline: 1px solid var(--lime);
+  outline-offset: 2px;
+}
+.main .chk-group {
+  display: grid;
+  gap: var(--s-2);
+}
+.main .chk-group > .lab {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+}
+.main .chk-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+  background: var(--bg-elev);
+  border: 1px solid var(--fg-faint);
+  padding: var(--s-3) var(--s-4);
+  max-height: 232px;
+  overflow-y: auto;
+}
+.main .chk-list .chk {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 28px;
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fg);
+  cursor: pointer;
+}
+
 /* legacy `.one-shot` plaintext banner (tokens) — brutalist look */
 .main .one-shot {
   border: 1px solid var(--warn);

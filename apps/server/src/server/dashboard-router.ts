@@ -587,7 +587,12 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
   );
   app.route(
     '/tokens',
-    createTokensRouter({ tokens: deps.tokens, projects: deps.projects, sessions: deps.sessions }),
+    createTokensRouter({
+      repos: deps.repos,
+      tokens: deps.tokens,
+      projects: deps.projects,
+      sessions: deps.sessions,
+    }),
   );
   app.route(
     '/update',

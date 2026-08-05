@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 
+import type { Repositories } from '../db/repositories/index.js';
 import type { Project } from '../db/schema/projects.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -12,6 +13,7 @@ import { renderPage } from './page-shell.js';
 import { escape, formatTs, html, raw, type SafeHtml } from './templates.js';
 
 export interface TokensDeps {
+  repos: Repositories;
   tokens: TokensService;
   projects: ProjectsService;
   sessions: SessionsService;
@@ -34,6 +36,14 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const projects = deps.projects.list(true);
     const slugById = new Map(projects.map((p) => [p.id, p.slug]));
 
+    // Slug-ascending per token: the repository orders by (token_id, slug).
+    const memberSlugs = new Map<string, string[]>();
+    for (const m of deps.repos.tokens.adminListProjectSlugs()) {
+      const found = memberSlugs.get(m.tokenId);
+      if (found) found.push(m.slug);
+      else memberSlugs.set(m.tokenId, [m.slug]);
+    }
+
     const unresolvable = (scope: TokenScope): boolean => {
       const pinned = pinnedProjectId(scope);
       return pinned !== null && !slugById.has(pinned);
@@ -43,17 +53,27 @@ export function createTokensRouter(deps: TokensDeps): Hono {
       if (t.revokedAt) return { label: 'revoked', cls: 'archived' };
       if (t.expiresAt && t.expiresAt.getTime() <= now) return { label: 'expired', cls: 'archived' };
       if (unresolvable(t.scope as TokenScope)) return { label: 'inert', cls: 'legacy' };
+      // Not `inert`: that label promises the row is never to be repaired, while
+      // an operator can give an empty set members.
+      if (isProjectSet(t.scope as TokenScope) && (memberSlugs.get(t.id)?.length ?? 0) === 0) {
+        return { label: 'no projects', cls: 'pending' };
+      }
       return { label: 'active', cls: 'active' };
     };
 
     const rows = tokens.map((t) => {
       const s = stateOf(t);
+      const members = memberSlugs.get(t.id) ?? [];
       const slug = t.projectId === null ? null : (slugById.get(t.projectId) ?? null);
       return html`
         <tr>
           <td>${t.name}</td>
           <td class="mono small">${scopeBadge(t.scope as TokenScope)}</td>
-          <td>${slug ?? raw('<span class="muted">—</span>')}</td>
+          <td>
+            ${members.length > 0
+              ? members.join(', ')
+              : (slug ?? raw('<span class="muted">—</span>'))}
+          </td>
           <td class="muted">${formatTs(t.createdAt)}</td>
           <td class="muted">${formatTs(t.expiresAt)}</td>
           <td><span class="pill ${s.cls}">${s.label}</span></td>
@@ -85,6 +105,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const mintedName = params.get('name');
     const minted = mintedName === null ? undefined : tokens.find((t) => t.name === mintedName);
     const mintedSlug = minted?.projectId == null ? null : (slugById.get(minted.projectId) ?? null);
+    const mintedMembers = minted ? (memberSlugs.get(minted.id) ?? []) : [];
 
     const oneShot = justCreated
       ? html`
@@ -96,9 +117,14 @@ export function createTokensRouter(deps: TokensDeps): Hono {
               ? html`
                   <p class="small">
                     Scope <code>${minted.scope}</code> —
-                    ${mintedSlug
-                      ? html`bound to project <strong>${mintedSlug}</strong>.`
-                      : raw('bound to no project.')}
+                    ${mintedMembers.length > 0
+                      ? html`reaches
+                        ${raw(
+                          mintedMembers.map((s) => `<strong>${escape(s)}</strong>`).join(', '),
+                        )}.`
+                      : mintedSlug
+                        ? html`bound to project <strong>${mintedSlug}</strong>.`
+                        : raw('bound to no project.')}
                   </p>
                 `
               : raw('')}
@@ -150,15 +176,24 @@ export function createTokensRouter(deps: TokensDeps): Hono {
           >Name
           <input name="name" type="text" required placeholder="claude-laptop" />
         </label>
-        <label
-          >Project (optional)
-          <select name="project">
-            <option value="">— none: ADMIN, every project + dashboard login —</option>
-            ${selectable.map((p) =>
-              raw(`<option value="${escape(p.slug)}">${escape(p.slug)}</option>`),
-            )}
-          </select>
-        </label>
+        <div class="chk-group">
+          <span class="lab">Projects (optional)</span>
+          ${selectable.length === 0
+            ? raw('<span class="muted small">No projects yet.</span>')
+            : html`
+                <div class="chk-list">
+                  ${selectable.map((p) =>
+                    raw(
+                      `<label class="chk"><input type="checkbox" name="project" value="${escape(p.slug)}" />${escape(p.slug)}</label>`,
+                    ),
+                  )}
+                </div>
+              `}
+          <span class="muted small">
+            None selected: ADMIN, every project + dashboard login. One: that project only. Two or
+            more: exactly those, and still not admin.
+          </span>
+        </div>
         <label
           >Access
           <select name="access">
@@ -183,7 +218,16 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     if (form instanceof Response) return form;
 
     const name = readStringField(form, 'name').trim();
-    const projectInput = readStringField(form, 'project').trim();
+    // Deduplicated: the composite primary key of `token_projects` answers a
+    // repeated slug with a constraint failure, and a crafted POST can repeat one.
+    const projectInputs = [
+      ...new Set(
+        form
+          .getAll('project')
+          .map((v) => (typeof v === 'string' ? v.trim() : ''))
+          .filter((v) => v.length > 0),
+      ),
+    ];
     const accessInput = readStringField(form, 'access').trim();
     const expiresInput = readStringField(form, 'expires').trim();
 
@@ -210,14 +254,13 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     }
     const access = accessInput;
 
-    let project: Project | null = null;
-    if (projectInput) {
+    const selected: Project[] = [];
+    for (const slug of projectInputs) {
       // Operator-initiated token creation: autocreate the project row if
       // the slug is new. The slug must still satisfy the strict regex,
       // which `ProjectsService.create` enforces.
       try {
-        project =
-          deps.projects.findBySlug(projectInput) ?? deps.projects.create({ slug: projectInput });
+        selected.push(deps.projects.findBySlug(slug) ?? deps.projects.create({ slug }));
       } catch (err) {
         if (err instanceof DomainError) {
           return flashErrorPage(c, deps.sessions, err.message, view);
@@ -241,9 +284,12 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     }
 
     try {
-      const { plaintext } = project
-        ? deps.tokens.create({ name, project, access, expiresAt })
-        : deps.tokens.create({ name, scope: access === 'read' ? 'read:*' : '*', expiresAt });
+      // One selection composes the single-project arm, not a one-member set;
+      // `composeGrant` owns that so the two cannot drift.
+      const { plaintext } =
+        selected.length === 0
+          ? deps.tokens.create({ name, scope: access === 'read' ? 'read:*' : '*', expiresAt })
+          : deps.tokens.create({ name, projects: selected, access, expiresAt });
       const url = new URL('/dashboard/tokens', c.req.url);
       url.searchParams.set('created', plaintext);
       url.searchParams.set('name', name);
@@ -286,5 +332,11 @@ function readStringField(form: FormData, name: string): string {
 function scopeBadge(scope: TokenScope): SafeHtml {
   if (scope === '*') return raw('<span class="pill scope-star">*</span>');
   if (scope === 'read:*') return raw('<span class="pill">read:*</span>');
+  if (isProjectSet(scope)) return raw(`<span class="pill">${scope}</span>`);
   return raw(`<code>${escape(scope)}</code>`);
+}
+
+/** The two set arms name no project: their reach lives in `token_projects`. */
+function isProjectSet(scope: TokenScope): boolean {
+  return scope === 'projects' || scope === 'read:projects';
 }
