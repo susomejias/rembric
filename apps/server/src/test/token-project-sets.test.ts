@@ -845,6 +845,34 @@ describe('token project sets', () => {
       expect(memberIds(row!.id), 'a single selection became a one-member set').toEqual([]);
     });
 
+    it('answers a crafted submission naming one slug twice without a server error', async () => {
+      const jar = await loggedIn();
+
+      // The checkbox list cannot produce this; a crafted POST can, and the
+      // composite primary key of `token_projects` answers a repeated slug with
+      // SQLITE_CONSTRAINT_PRIMARYKEY — a 500 — if the selection is not deduped.
+      const crafted = await mint(jar, {
+        name: 'crafted-duplicate-slug',
+        projects: [alpha.slug, alpha.slug],
+        access: 'write',
+      });
+      expect(crafted.status, crafted.body.slice(0, 300)).toBe(302);
+      const row = persisted('crafted-duplicate-slug');
+      expect(row!.scope).toBe(`project:${alpha.id}`);
+      expect(memberIds(row!.id), 'one slug twice became a set').toEqual([]);
+
+      // Two DISTINCT slugs in the same test, so the collapse above is the
+      // duplicate being dropped rather than the handler ignoring extra values.
+      await mintPlaintext(jar, {
+        name: 'crafted-duplicate-control',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+      const control = persisted('crafted-duplicate-control');
+      expect(control!.scope).toBe('projects');
+      expect(memberIds(control!.id)).toEqual([alpha.id, gamma.id].sort());
+    });
+
     it('creates neither a token nor a membership row when one selected slug is invalid', async () => {
       const jar = await loggedIn();
       expect(tableExists('token_projects'), 'token_projects does not exist').toBe(true);
