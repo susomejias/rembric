@@ -141,14 +141,22 @@ export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean
 }
 
 /**
- * The one-call way in for a token pinned to one project and denied an action on
- * a path-less connection that resolved to a DIFFERENT one. Empty otherwise.
+ * The one-call way in for a token denied an action on a path-less connection
+ * that resolved to a project it does not reach. Empty when no `project.use`
+ * could change the answer. Does the connection guard once and picks the
+ * message builder that fits the token's reach.
  */
-function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
+function remedyFor(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
   // A path-scoped connection would have `project.use` refused as `scope_locked`.
   if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
-  if (pinned === null) return projectSetRemedy(ctx, scope, projects);
+  if (pinned !== null) return pinRemedy(pinned, scope, projects);
+  if (isProjectSetScope(ctx.scope)) return setRemedy(ctx.memberProjectIds, scope, projects);
+  return '';
+}
+
+/** For a token pinned to one project and denied a DIFFERENT one. */
+function pinRemedy(pinned: string, scope: Scope, projects: ProjectsService): string {
   // Re-activating the scope already active cannot change the answer.
   if (scope.kind === 'project' && scope.projectId === pinned) return '';
   // A token row predating the enforced project binding carries a SLUG here
@@ -162,15 +170,18 @@ function projectPinRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsS
 }
 
 /**
- * The same way in for a set-scoped token denied a project outside its set.
- * Names EVERY member: naming one arbitrary member would read as the whole
- * reach. Empty when the denied project is itself a member, because then the
- * refusal is the access verb and no `project.use` changes it.
+ * The same for a set-scoped token denied a project outside its set. Names EVERY
+ * member: naming one arbitrary member would read as the whole reach. Empty when
+ * the denied project is itself a member, because then the refusal is the access
+ * verb and no `project.use` changes it.
  */
-function projectSetRemedy(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
-  if (!isProjectSetScope(ctx.scope)) return '';
-  if (scope.kind === 'project' && ctx.memberProjectIds.includes(scope.projectId)) return '';
-  const slugs = ctx.memberProjectIds
+function setRemedy(
+  memberProjectIds: readonly string[],
+  scope: Scope,
+  projects: ProjectsService,
+): string {
+  if (scope.kind === 'project' && memberProjectIds.includes(scope.projectId)) return '';
+  const slugs = memberProjectIds
     .map((id) => projects.getById(id)?.slug)
     .filter((slug): slug is string => slug !== undefined)
     .sort();
@@ -200,7 +211,7 @@ export function assertAuthorized(
     throw new DomainError(
       'forbidden',
       `token scope '${ctx.scope}' does not authorize ${action} on ${target}` +
-        projectPinRemedy(ctx, scope, deps.projects),
+        remedyFor(ctx, scope, deps.projects),
     );
   }
 }
