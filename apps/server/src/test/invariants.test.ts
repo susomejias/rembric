@@ -1340,3 +1340,54 @@ describe('scope-is-one-arm invariant', () => {
     });
   }
 });
+
+/**
+ * One-construction-site invariant for the widened search scope.
+ *
+ * A widened scope carries its own authorization decision, so a second place
+ * that builds one is a second place that decides who may read what — the shape
+ * `auth/spec.md` forbids ("constructed at exactly one site that has already
+ * made that decision"). The compiler already refuses the value on every write;
+ * this is the second line, for the case the compiler cannot see: another
+ * request-facing module assembling the literal itself.
+ *
+ * Exactly two production occurrences are licit and both are named below — the
+ * arm's declaration, and the one site that builds it. Fixtures may construct
+ * one freely, so `.test.ts` and the harness under `test/` are out of scope.
+ */
+const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
+const WIDENED_SCOPE_SITES: Record<string, number> = {
+  'services/scope.ts': 1,
+  'mcp/_shared.ts': 1,
+};
+
+describe('the widened scope has one construction site', () => {
+  const production = listAllTsFiles(srcRoot).filter(
+    (f) =>
+      !f.endsWith('.test.ts') &&
+      !f
+        .slice(srcRoot.length + 1)
+        .replace(/\\/g, '/')
+        .startsWith('test/'),
+  );
+
+  it('the scan reaches the production tree', () => {
+    expect(production.length).toBeGreaterThan(100);
+    const control = scanForPattern(production, /\bprojectScope\(/);
+    expect(new Set(control.map((m) => m.file)).size).toBeGreaterThan(5);
+  });
+
+  it('names the discriminant in exactly the declaring module and the one builder', () => {
+    const matches = scanForPattern(production, WIDENED_SCOPE_DISCRIMINANT);
+
+    // Non-vacuity: a rename would empty this, and every count assertion below
+    // would then hold over nothing.
+    expect(matches.length).toBeGreaterThan(0);
+
+    const byFile: Record<string, number> = {};
+    for (const m of matches) byFile[m.file] = (byFile[m.file] ?? 0) + 1;
+    expect(byFile, matches.map((m) => `  ${m.file}:${m.line}  ${m.text}`).join('\n')).toEqual(
+      WIDENED_SCOPE_SITES,
+    );
+  });
+});
