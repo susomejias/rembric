@@ -1,0 +1,205 @@
+{
+  "capturedAt": "2026-08-05T10:36:17.781Z",
+  "baseCommit": null,
+  "persisted": [
+    ["baseline-star", "*", "—", "2026-08-05 10:36:15 UTC"],
+    ["baseline-read-star", "read:*", "—", "2026-08-05 10:36:15 UTC"],
+    [
+      "baseline-project-alpha",
+      "project:01KZ8QXJZ3KKHXJSE28JKK4MS3",
+      "alpha",
+      "2026-08-05 10:36:15 UTC"
+    ],
+    [
+      "baseline-read-project-alpha",
+      "read:project:01KZ8QXJZ3KKHXJSE28JKK4MS3",
+      "alpha",
+      "2026-08-05 10:36:15 UTC"
+    ]
+  ],
+  "matrix": {
+    "*": {
+      "login": {
+        "status": 302
+      },
+      "/mcp read": {
+        "ok": true
+      },
+      "/mcp write": {
+        "ok": true
+      },
+      "/mcp/alpha read": {
+        "ok": true
+      },
+      "/mcp/alpha write": {
+        "ok": true
+      },
+      "/mcp/home read": {
+        "ok": true
+      },
+      "/mcp/home write": {
+        "ok": true
+      },
+      "POST /api/alpha/sessions": {
+        "status": 200,
+        "code": null
+      },
+      "POST /api/home/sessions": {
+        "status": 200,
+        "code": null
+      }
+    },
+    "read:*": {
+      "login": {
+        "status": 401
+      },
+      "/mcp read": {
+        "ok": true
+      },
+      "/mcp write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/alpha read": {
+        "ok": true
+      },
+      "/mcp/alpha write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/home read": {
+        "ok": true
+      },
+      "/mcp/home write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "POST /api/alpha/sessions": {
+        "status": 403,
+        "code": "forbidden"
+      },
+      "POST /api/home/sessions": {
+        "status": 403,
+        "code": "forbidden"
+      }
+    },
+    "project:<alpha>": {
+      "login": {
+        "status": 401
+      },
+      "/mcp read": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/alpha read": {
+        "ok": true
+      },
+      "/mcp/alpha write": {
+        "ok": true
+      },
+      "/mcp/home read": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/home write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "POST /api/alpha/sessions": {
+        "status": 200,
+        "code": null
+      },
+      "POST /api/home/sessions": {
+        "status": 403,
+        "code": "forbidden"
+      }
+    },
+    "read:project:<alpha>": {
+      "login": {
+        "status": 401
+      },
+      "/mcp read": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/alpha read": {
+        "ok": true
+      },
+      "/mcp/alpha write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/home read": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "/mcp/home write": {
+        "ok": false,
+        "code": "forbidden"
+      },
+      "POST /api/alpha/sessions": {
+        "status": 403,
+        "code": "forbidden"
+      },
+      "POST /api/home/sessions": {
+        "status": 403,
+        "code": "forbidden"
+      }
+    },
+    "invalid bearer": {
+      "login": {
+        "status": 401
+      },
+      "/mcp read": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "/mcp write": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "/mcp/alpha read": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "/mcp/alpha write": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "/mcp/home read": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "/mcp/home write": {
+        "transport": "refused",
+        "status": null,
+        "detail": "Error: Streamable HTTP error: Error POSTing to endpoint: {\"ok\":false,\"code\":\"token_invalid\",\"message\":\"token not recogni"
+      },
+      "POST /api/alpha/sessions": {
+        "status": 401,
+        "code": "token_invalid"
+      },
+      "POST /api/home/sessions": {
+        "status": 401,
+        "code": "token_invalid"
+      }
+    }
+  },
+  "nonVacuity": {
+    "successCells": 16,
+    "totalCells": 45
+  }
+}
