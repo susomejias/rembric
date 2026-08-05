@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from 'drizzle-orm';
 
-import { homeScope, projectScope, type SearchScope } from '../../services/scope.js';
+import { projectScope, type SearchScope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
@@ -36,6 +36,8 @@ export interface ReviewTimestamps {
   affirmedAt: Date | null;
   refutedAt: Date | null;
 }
+
+export type RankingMetadata = Pick<Memory, 'type' | 'lastSeenAt' | 'sessionId' | 'projectId'>;
 
 export interface SearchMemoryIdsOpts {
   scope: SearchScope;
@@ -254,7 +256,7 @@ export class MemoryRepository {
       sql`
         SELECT m.id
         FROM memory m
-        WHERE ${scopeWhere(homeScope(opts.scope), 'm')}
+        WHERE ${scopeWhere(opts.scope, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -287,7 +289,7 @@ export class MemoryRepository {
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
-          AND ${scopeWhere(homeScope(opts.scope), 'm')}
+          AND ${scopeWhere(opts.scope, 'm')}
           ${statusClause}
           ${typeClause}
           ${tagClause}
@@ -322,7 +324,7 @@ export class MemoryRepository {
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
         CROSS JOIN memory m ON m.id = je.value
-      WHERE ${scopeWhere(homeScope(opts.scope), 'm')}
+      WHERE ${scopeWhere(opts.scope, 'm')}
     `);
   }
 
@@ -658,14 +660,9 @@ export class MemoryRepository {
     return out;
   }
 
-  /** Lightweight `(type, last_seen_at)` projection per id (search ranking boost input). */
-  rankingMetadataByIds(
-    ids: readonly string[],
-  ): Map<string, { type: MemoryType; lastSeenAt: Date | null; sessionId: string | null }> {
-    const out = new Map<
-      string,
-      { type: MemoryType; lastSeenAt: Date | null; sessionId: string | null }
-    >();
+  /** Lightweight projection per id: the ranking boost's inputs plus the row's project, which orders exact ties. */
+  rankingMetadataByIds(ids: readonly string[]): Map<string, RankingMetadata> {
+    const out = new Map<string, RankingMetadata>();
     if (ids.length === 0) return out;
     const rows = this.db
       .select({
@@ -673,12 +670,18 @@ export class MemoryRepository {
         type: memory.type,
         lastSeenAt: memory.lastSeenAt,
         sessionId: memory.sessionId,
+        projectId: memory.projectId,
       })
       .from(memory)
       .where(inArray(memory.id, [...ids]))
       .all();
     for (const r of rows)
-      out.set(r.id, { type: r.type, lastSeenAt: r.lastSeenAt, sessionId: r.sessionId });
+      out.set(r.id, {
+        type: r.type,
+        lastSeenAt: r.lastSeenAt,
+        sessionId: r.sessionId,
+        projectId: r.projectId,
+      });
     return out;
   }
 
