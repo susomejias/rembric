@@ -66,3 +66,39 @@ site no longer exists, and neither does the branch it reached.
   worktree at the pre-collapse commit (`measurements/narrow-path-regression.md` §6).
 - `scopeWhere` emits `scope = 'project' AND project_id = ?` before and after; `partitionKeyFor`
   returns the project id before and after. The deleted branches are ones the project arm never took.
+
+## Smoke against pre-existing seeded data, at the wire
+
+Not the full task 6.3 — that one owns the Docker image, an upgrade-in-place and a rollback. This is the
+part phase 1 could answer now, and it answered the question phase 1 actually raised.
+
+The corpus is a copy of the 1 000-memory volumetric corpus **built before task 1.6**, so it holds **167
+rows at `scope='global'` with `project_id IS NULL`**: rows the current image can no longer write, which
+is exactly the stranded-row shape of task 7.12. A real server (`server-entrypoint.ts`, not a test
+harness) was booted on it and driven over MCP at `/mcp/vol-0` with a `*` token.
+
+| probe                                                   | result                                                                           |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| boot on a corpus holding 167 stranded rows              | clean; `counts: memory=1000 projects=6 sessions=20`                              |
+| `memory.search` (ranked)                                | 5 rows, **0 from another project**                                               |
+| `memory.save` → `memory.search({ entity })`             | round-trips; the saved row lands in `vol-0` and is found by its path entity      |
+| `memory.get` on a `vol-1` row from a `vol-0` connection | `not_found` — with the control that an own-project id IS returned                |
+| `memory.search({ all_projects: true })`                 | `-32602 unrecognized_keys` (the strictness D11 relies on, confirmed at the wire) |
+
+**The load-bearing one is the drain.** Both derived indexes had been invalidated on boot (the embedding
+identity and the entity recipe both differ from what the synthetic corpus carried), so both workers ran
+a full rebuild over a corpus containing rows they now skip:
+
+| census                               |                            |
+| ------------------------------------ | -------------------------: |
+| `memory`                             |                      1 001 |
+| of which `project_id IS NULL`        |                        167 |
+| `memory_vec`                         |                        834 |
+| vectors for a project-less row       |                      **0** |
+| embedding backlog, project-bearing   |                      **0** |
+| entity-scan backlog, project-bearing |                      **0** |
+| `memory_vec` partitions              | 5, none named `__global__` |
+
+`834 = 1001 − 167`. **Both drains reach zero rather than hot-looping on a row they cannot place**,
+which is the failure the `project_id IS NOT NULL` filters exist to prevent, and 167 rows are left
+exactly as unreachable as they were before — unindexed, undeleted, addressed by no scope.
