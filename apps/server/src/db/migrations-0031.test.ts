@@ -798,7 +798,7 @@ describe('migration 0031 — the dense index survives repartitioning', () => {
       expect(
         repos.vectors.knnByQueryVector({
           queryVector,
-          partitionKey: dflt.id,
+          partitionKeys: [dflt.id],
           status: 'active',
           rankWindowSize: 10,
         }).length,
@@ -806,7 +806,7 @@ describe('migration 0031 — the dense index survives repartitioning', () => {
       expect(
         repos.vectors.knnByQueryVector({
           queryVector,
-          partitionKey: before.alphaId,
+          partitionKeys: [before.alphaId],
           status: 'active',
           rankWindowSize: 10,
         }).length,

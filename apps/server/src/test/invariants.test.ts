@@ -738,8 +738,8 @@ function unscopedUnprefixedReads(src: string): string[] {
       src,
       balancedSpan(src, m.index + m[0].length - 1, '(', ')'),
     );
-    // `partition_key` is `memory_vec`'s scope column.
-    if (/\b(scope|projectId|partitionKey)\b/.test(params)) continue;
+    // `partition_key` is `memory_vec`'s scope column; a search names a set of them.
+    if (/\b(scope|projectId|partitionKeys?)\b/.test(params)) continue;
     if (/\b\w*[Ii]ds?\b/.test(params)) continue;
     found.push(name!);
   }

@@ -4,7 +4,7 @@ import type { Scope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import type { MemoryStatus, MemoryType } from '../schema/memory.js';
 
-import { partitionKeyFor } from './scope-clause.js';
+import { idJsonSet, partitionKeyFor } from './scope-clause.js';
 
 /** `memory_vec.embedding` is a packed float32 blob; the view aliases it, no copy. */
 export function decodeEmbedding(blob: Buffer): Float32Array {
@@ -42,7 +42,7 @@ export interface PendingEmbedding {
 
 export interface QueryVectorKnnOpts {
   queryVector: Float32Array;
-  partitionKey: string;
+  partitionKeys: readonly string[];
   /** Archived rows are outside the post-model-change semantic guarantee. */
   status: Exclude<MemoryStatus, 'archived'>;
   type?: MemoryType;
@@ -70,7 +70,7 @@ export class VectorsRepository {
     if (!queryVector) return [];
     const neighbors = this.knnByQueryVector({
       queryVector,
-      partitionKey: partitionKeyFor(opts.scope.projectId),
+      partitionKeys: [partitionKeyFor(opts.scope.projectId)],
       status: 'active',
       rankWindowSize: opts.limit + opts.excludeIds.length + 1,
     });
@@ -112,9 +112,16 @@ export class VectorsRepository {
    * kNN over an arbitrary query vector, pre-filtered inside the vector index
    * by partition key (scope shard), `status`, and optional `type`. Powers the
    * `memory.search` dense branch. Uses sqlite-vec's `MATCH … AND k = ?` form
-   * (k, not LIMIT) so the partition shard is scanned, not the whole corpus.
+   * (k, not LIMIT) so the named shards are scanned, not the whole corpus.
+   *
+   * `k` applies PER named partition and `ORDER BY distance` merges the shards
+   * into one globally distance-ordered list, so a rank here is a global fact
+   * and fusion needs no per-project correction (vec-partition-capability.md §3).
+   * The predicate is never dropped: without it the read is not bounded to the
+   * authorized set at all.
    */
   knnByQueryVector(opts: QueryVectorKnnOpts): { id: string; distance: number }[] {
+    if (opts.partitionKeys.length === 0) throw new Error('kNN addresses no partition');
     const embedding = Buffer.from(
       opts.queryVector.buffer,
       opts.queryVector.byteOffset,
@@ -127,7 +134,7 @@ export class VectorsRepository {
         FROM memory_vec
         WHERE embedding MATCH ${embedding}
           AND k = ${opts.rankWindowSize}
-          AND partition_key = ${opts.partitionKey}
+          AND partition_key IN ${idJsonSet(opts.partitionKeys)}
           AND status = ${opts.status}
           ${typeClause}
         ORDER BY distance
