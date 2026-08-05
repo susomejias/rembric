@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { ProjectsService } from '../services/projects.js';
+import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { runSeed } from './seed-dev.js';
@@ -13,6 +14,13 @@ beforeEach(() => {
 });
 
 afterEach(() => db.cleanup());
+
+function countTokenProjects(): number {
+  const row = db.handle.raw.prepare('SELECT count(*) AS n FROM token_projects').get() as {
+    n: number;
+  };
+  return row.n;
+}
 
 describe('runSeed', () => {
   it('seeds a fresh DB with the expected entity counts', () => {
@@ -103,6 +111,37 @@ describe('runSeed', () => {
         log: () => {},
       }),
     ).not.toThrow();
+  });
+
+  it('--reset does not violate FK constraints when a token names a set of projects (regression: grant-tokens-multiple-projects)', () => {
+    runSeed({ handle: db.handle, reset: false, log: () => {} });
+
+    // A set-scoped token's reach lives in `token_projects`, whose rows
+    // reference BOTH `tokens` and `projects` — so wipe() must delete them
+    // before either parent, or the deferred check fails the whole reset at
+    // COMMIT and the dev stack cannot boot until someone deletes the row by
+    // hand.
+    const repos = createRepositories(db.handle.db);
+    const projects = new ProjectsService(repos);
+    const demo = projects.findBySlug('demo');
+    expect(demo).toBeDefined();
+    const extra = projects.create({ slug: 'seed-reset-extra' });
+    new TokensService(repos, db.handle.db).create({
+      name: 'seed-reset-set-token',
+      projects: [demo!, extra],
+      access: 'write',
+    });
+    expect(countTokenProjects(), 'nothing to regress against').toBe(2);
+
+    expect(() =>
+      runSeed({
+        handle: db.handle,
+        reset: true,
+        env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+        log: () => {},
+      }),
+    ).not.toThrow();
+    expect(countTokenProjects()).toBe(0);
   });
 
   it('--reset without REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 refuses and preserves data', () => {
