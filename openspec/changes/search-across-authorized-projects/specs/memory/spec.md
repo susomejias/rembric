@@ -39,9 +39,11 @@ Where a search spans several projects, each retrieval branch SHALL produce **one
 
 The project a row belongs to SHALL NOT influence its score. No home-project boost, multiplier or tier SHALL be applied. Where two rows carry an equal fused score, a row from the home project SHALL sort first; that tiebreak SHALL NOT be able to move a row above another row with a strictly better score.
 
+**The candidate window SHALL NOT be divided by the size of the widened set.** Each branch SHALL draw the same candidate window it draws for a narrow search, so the pool grows with the set rather than being rationed across it. Dividing it hands every project an identical quota regardless of its size or its distance from the query, which makes the home project's share of the pool a function of how many projects the token happens to reach rather than of the corpus — the same defect as fusing per-project lists, arriving by arithmetic instead of by fusion. The measured price of not dividing is a single-digit percentage of end-to-end latency, falling as the corpus grows, and it is accepted.
+
 Term statistics SHALL remain corpus-wide and SHALL NOT be recomputed per widened set, per "The relevance level's term statistics MUST come from the search index". A widened query therefore applies the identical IDF weighting a narrow query applies, and widening SHALL NOT be treated as an occasion to re-derive any relevance constant.
 
-The dense branch SHALL name its partitions rather than omitting the partition predicate. Omitting it is measurably slower over the identical row set and returns strictly less, so it SHALL NOT be used as a way to obtain a single ranked list.
+The dense branch SHALL name its partitions rather than omitting the partition predicate. A predicate-free kNN carries no scope bound at all, so it cannot restrict a widened read to the authorized set; it is refused on that ground and not on cost, and the refusal SHALL hold whether it measures slower or faster than the set form — it has measured both. It also returns strictly fewer candidates over the same corpus, because `k` then applies globally instead of per named partition.
 
 #### Scenario: A foreign row outranks a home row when it is more relevant
 
@@ -54,6 +56,13 @@ The dense branch SHALL name its partitions rather than omitting the partition pr
 - **GIVEN** a widened search over a large home project and a project holding three weakly-matching memories
 - **WHEN** the search runs
 - **THEN** no row from the small project SHALL be ranked above a home row with a strictly better fused score
+
+#### Scenario: A small project does not get a fixed share of the candidate pool
+
+- **GIVEN** a widened search over a large home project and a project holding fewer memories than the candidate window
+- **WHEN** the candidates handed to fusion are counted per project
+- **THEN** the small project SHALL contribute only the candidates it has, and the home project SHALL contribute a full window
+- **AND** adding a further authorized project to the set SHALL NOT reduce what the home project contributes
 
 #### Scenario: The home tiebreak applies only on an exact tie
 
@@ -75,6 +84,8 @@ The dense branch SHALL name its partitions rather than omitting the partition pr
 `memory.search` SHALL return only memories the connection is authorized to read. By default that is exactly one project — the scope the connection resolved to — and no argument SHALL admit a row from any other project.
 
 `memory.search` MAY additionally accept one explicit, opt-in argument that widens the read to the set of projects the connection's **token is authorized to read**, and to no others. When that argument is absent the behaviour SHALL be identical to a server that does not implement it. When it is present, the widened set SHALL be computed by evaluating the same read-authorization predicate that filters the project listing, once per candidate project, and SHALL exclude archived projects. The set SHALL always contain the connection's resolved project.
+
+Where the resolved project is not itself in that set — the reachable case is a connection pinned to a project that was archived afterwards, since only a path-scoped connection is refused at authentication for that — the widening SHALL be dropped and the resolved-scope result served unchanged, which is what the `auth` capability already requires of a widening that cannot be authorized. A widened set SHALL never be empty and SHALL never omit the home project; both properties SHALL be pinned by test rather than left to the constructor, because an empty membership list yields an empty result set rather than an error.
 
 Under no circumstances SHALL a result set contain a row from a project the token was not authorized to read, whatever argument requested it. No other read tool SHALL accept such an argument, and no default, filter or configuration SHALL widen a read that did not explicitly ask to be widened.
 
@@ -113,6 +124,14 @@ The title predates this change: the global scope it names does not exist, and th
 - **WHEN** a widened search runs on a connection resolved to A
 - **THEN** no row whose `project_id` is B SHALL be returned, and B SHALL NOT be named among the projects searched
 
+#### Scenario: An archived home project drops the widening rather than the search
+
+- **GIVEN** a connection resolved to project A by an explicit switch, A archived afterwards, and a token authorized to read live projects B and C
+- **WHEN** a widened search is requested
+- **THEN** the call SHALL succeed and return exactly what the same call without the argument returns
+- **AND** no row from B or C SHALL be returned, and neither SHALL be named among the projects searched
+- **AND** a control call from a live home over the same corpus SHALL widen, so the fallback is attributable to the archived home rather than to an empty reach
+
 #### Scenario: No other read tool widens
 
 - **WHEN** `memory.context`, `memory.get`, `memory.timeline`, `memory.stats` or the HTTP search endpoint is called with any argument
@@ -126,7 +145,7 @@ The title predates this change: the global scope it names does not exist, and th
 
 **A wrongly-partitioned row is undetectable by the existing repair path, so it SHALL be pinned by test rather than left to a health check.** `findMissingEmbeddings` is an anti-join that detects the ABSENCE of a `memory_vec` row, not a wrong partition key: a stale-partition row is present, so it is never queued for re-embedding, the doctor's embeddings backlog reads zero, the dense branch filters it out forever, and the lexical branch keeps returning the memory — so search returns results and nothing anywhere reports a fault. Any change that moves rows between partitions SHALL assert both that the retiring partition is empty AND that the destination partition is non-empty, and SHALL exercise recall end-to-end through the search entry point rather than through the kNN repository method.
 
-**The kNN SHALL be able to name several partitions in ONE query, and SHALL never omit the partition predicate.** The repository SHALL expose a kNN that filters on membership in a set of partition keys, retaining the `k = ?` form and the `status`/`type` filters unchanged, and SHALL order the result by distance so that rank position is a fact about the whole named set rather than about any one partition. A set of one SHALL be equivalent to the single-partition form. An empty set SHALL be unreachable by construction, because the caller's own partition is always a member; that property SHALL be asserted, since an empty membership list yields an empty result set rather than an error and would fail silently. The partition predicate SHALL NOT be dropped as a way to search every partition: doing so is measurably slower over the identical rows and returns strictly fewer of them.
+**The kNN SHALL be able to name several partitions in ONE query, and SHALL never omit the partition predicate.** The repository SHALL expose a kNN that filters on membership in a set of partition keys, retaining the `k = ?` form and the `status`/`type` filters unchanged, and SHALL order the result by distance so that rank position is a fact about the whole named set rather than about any one partition. A set of one SHALL be equivalent to the single-partition form, in the rows returned and at the recorded latency tolerance, so the two need not be carried as separate query shapes. An empty set SHALL be unreachable by construction, because the caller's own partition is always a member; that property SHALL be asserted, since an empty membership list yields an empty result set rather than an error and would fail silently. The partition predicate SHALL NOT be dropped as a way to search every partition: a kNN without it carries no scope bound, so it cannot restrict a read to the authorized set, and that refusal does not depend on its cost — it has been measured both slower and faster than the set form. It also returns strictly fewer rows over the same corpus, because `k` then applies globally rather than per named partition.
 
 #### Scenario: Scoped kNN returns only in-scope active neighbors
 

@@ -2,9 +2,11 @@
 
 ### Requirement: The harness MUST be able to FAIL on over-widening, and the proof is a mutation that reddens it
 
-A green evaluation run has never been evidence of scope isolation, and this was measured rather than suspected: under a mutation dissolving the scope predicate in the memory repository's shared WHERE fragment — total loss of isolation — MRR@8 **rose** from 0.828 to 0.859 and the evaluation stayed green. A harness whose gated metrics improve when isolation is destroyed cannot be the evidence that a deliberate widening is safe.
+A green evaluation run has never been evidence of scope isolation, and this was measured rather than suspected: under a mutation dissolving the scope predicate in the memory repository's shared WHERE fragment — total loss of isolation — MRR@8 **rose** and the evaluation stayed green. The rise was 0.828 → 0.859 when first measured, and 0.828 → **0.891** when re-measured on the corpus this change starts from; the direction is the finding and it reproduced on both. A harness whose gated metrics improve when isolation is destroyed cannot be the evidence that a deliberate widening is safe.
 
 The harness SHALL therefore be able to fail on over-widening **before** any widening ships, and the obligation SHALL be discharged by demonstration rather than by construction: a mutation that dissolves scope isolation SHALL make the evaluation **RED**. A change that adds a metric, a query or a fixture without demonstrating that red has not satisfied this requirement.
+
+**The demonstration SHALL also record what the QUALITY metrics did under the same mutation**, because the answer decides what may be relied on afterwards. Where they still move the wrong way — measured after this change's own fixtures landed, MRR@8 rises 0.854 → 0.858 under the mutation while Precision@8 and Recall@8 do not move at all — the gate works _despite_ them rather than through them, and no floor metric SHALL thereafter be treated as a proxy for the metric that counts foreign rows.
 
 Three structural defects SHALL be corrected, each named because each independently defeats detection:
 
@@ -42,7 +44,9 @@ The query set SHALL contain at least eight `abstention` queries. A threshold can
 
 **Gold-set size is a gate on the harness's own discriminating power, not a corpus-authoring preference.** Where every gold set is far smaller than the gated `k`, Precision@k is pinned at its arithmetic ceiling and Recall@k saturates, so no row that fills a remaining slot can move a gated metric — including a row from another project. The query set SHALL therefore contain, for each gated `k`, at least one gold-bearing query whose gold set holds at least `k` members.
 
-Question types SHALL cover at minimum: extraction, `knowledge-update`, `temporal`, `preference`, `multi-session-causal`, `cross-project-isolation`, and `abstention`.
+**The query set SHALL contain at least one query that explicitly requests widening, and its gold SHALL live in a project other than the one it is issued against.** Widened queries are excluded from the foreign-scope cap's denominator (see the modified ratchet requirement), so without such a query that exclusion is never exercised and "widened queries are gated by a different instrument" is an assertion rather than a fact. With one, deleting the widening drops its recall to zero and breaches an ordinary floor, which is what makes the claim checkable.
+
+Question types SHALL cover at minimum: extraction, `knowledge-update`, `temporal`, `preference`, `multi-session-causal`, `cross-project-isolation`, `cross-project-widened`, and `abstention`.
 
 **The `cross-scope` query type is retired with the scope it named.** Its two committed queries each carried one gold memory in the global scope and one in a project, and scored a retriever on returning both — a shape that cannot exist once every scope is closed. They SHALL be **rewritten rather than deleted, and the floor SHALL NOT be lowered to accommodate their loss.** Losing half the gold on two of sixteen gold-bearing queries costs 0.0625 of Recall@8, which puts the measured value 0.0125 below the committed k=8 floor while remaining above the k=5 floor — a CI failure caused by two fixtures describing a world that no longer exists, not by a retrieval regression. Recording it as the new normal via the explicit lowering opt-in is therefore forbidden for this change.
 
@@ -90,6 +94,13 @@ The rewritten queries SHALL keep testing what the originals tested — a convent
 
 - **WHEN** the committed corpus and query set are inspected
 - **THEN** every item and every query SHALL name a project, and none SHALL name the retired global scope
+
+#### Scenario: A widened query's gold lives where the narrow search cannot reach it
+
+- **GIVEN** the committed query set
+- **WHEN** the queries declaring widening are inspected
+- **THEN** at least one SHALL exist, and every gold id it carries SHALL belong to a project other than the one the query is issued against
+- **AND** mutating the retriever's widening to read the home project alone SHALL drop that query's recall to zero and breach a committed floor
 
 ### Requirement: Regressions MUST fail CI via a committed ratchet
 
