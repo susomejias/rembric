@@ -1,4 +1,4 @@
-import type { IngestedCorpus, QueryScope, QueryScopeFixture } from './types.js';
+import type { IngestedCorpus, QueryItem, QueryScope } from './types.js';
 
 /**
  * Lives here rather than in `run-eval.ts` because that module calls `main()` at
@@ -6,10 +6,18 @@ import type { IngestedCorpus, QueryScope, QueryScopeFixture } from './types.js';
  * throw on a miss: an unknown fixture slug that silently resolved to some other
  * project would make a test pass against the wrong corpus.
  */
-export function resolveScope(corpus: IngestedCorpus, fixture: QueryScopeFixture): QueryScope {
-  const projectId = corpus.projectIdBySlug.get(fixture.project);
-  if (!projectId) throw new Error(`queries.ts: unknown project slug '${fixture.project}'`);
-  return { projectId };
+export function resolveScope(
+  corpus: IngestedCorpus,
+  query: Pick<QueryItem, 'scope' | 'widened'>,
+): QueryScope {
+  const projectId = corpus.projectIdBySlug.get(query.scope.project);
+  if (!projectId) throw new Error(`queries.ts: unknown project slug '${query.scope.project}'`);
+  if (!query.widened) return { projectId, projectIds: [projectId] };
+  // Home first, then the rest in corpus order: the widened set is a token's
+  // reach, which no query argument narrows, and the order has to be stable
+  // because the fusion below it breaks ties by first appearance.
+  const others = [...corpus.projectIdBySlug.values()].filter((id) => id !== projectId);
+  return { projectId, projectIds: [projectId, ...others] };
 }
 
 export function resolveGold(corpus: IngestedCorpus, stableIds: string[]): string[] {

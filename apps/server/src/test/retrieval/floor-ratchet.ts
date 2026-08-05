@@ -20,7 +20,11 @@ export type FloorMetric = (typeof FLOOR_METRICS)[number];
 export type MetricFloors = Record<FloorMetric, number>;
 
 /** Lower is better for each, so these are gated as caps and never as floors. */
-export const CAP_METRICS = ['abstentionFalsePositiveRate', 'overAbstentionRate'] as const;
+export const CAP_METRICS = [
+  'abstentionFalsePositiveRate',
+  'overAbstentionRate',
+  'foreignScopeRate',
+] as const;
 export type CapMetric = (typeof CAP_METRICS)[number];
 export type MetricCaps = Record<CapMetric, number>;
 
@@ -114,9 +118,10 @@ export interface RatchetedCaps {
 
 /**
  * The floor ratchet's mirror image: a cap only ever moves DOWN, and is clamped
- * to 1 because both metrics are rates. `headroomByMetric` is per-metric because
- * the two denominators differ; a shared one set from the coarser axis silently
- * tolerates several queries going wrong on the finer one.
+ * to 1 because every capped metric is a rate. `headroomByMetric` is per-metric
+ * because the denominators differ — empty-gold queries, gold-bearing queries,
+ * and rows returned on non-widened queries — and a shared one set from the
+ * coarsest axis silently tolerates several queries going wrong on a finer one.
  */
 export function ratchetCaps(opts: {
   label: string;

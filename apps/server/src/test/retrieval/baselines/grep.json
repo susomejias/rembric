@@ -4,36 +4,38 @@
   "discriminatingMetric": "recall@k vs 'hybrid' — how far naive substring matching gets alone",
   "ceilings": {
     "5": {
-      "precisionAtK": 0.25,
-      "recallAtK": 1,
+      "precisionAtK": 0.32,
+      "recallAtK": 0.98125,
       "mrr": 1
     },
     "8": {
-      "precisionAtK": 0.15625,
+      "precisionAtK": 0.21875,
       "recallAtK": 1,
       "mrr": 1
     }
   },
   "floors": {
     "5": {
-      "precisionAtK": 0.16250000000000003,
-      "recallAtK": 0.79375,
-      "mrr": 0.6499999999999999
+      "precisionAtK": 0.22000000000000003,
+      "recallAtK": 0.7062499999999999,
+      "mrr": 0.7
     },
     "8": {
-      "precisionAtK": 0.0984375,
-      "recallAtK": 0.8875,
-      "mrr": 0.6604166666666667
+      "precisionAtK": 0.15625,
+      "recallAtK": 0.85,
+      "mrr": 0.7142857142857142
     }
   },
   "caps": {
     "5": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.0625
+      "overAbstentionRate": 0.05,
+      "foreignScopeRate": 0
     },
     "8": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.0625
+      "overAbstentionRate": 0.05,
+      "foreignScopeRate": 0
     }
   }
 }

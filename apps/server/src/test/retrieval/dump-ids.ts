@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   let total = 0;
   try {
     for (const q of QUERIES) {
-      const resolved = resolveScope(corpus, q.scope);
+      const resolved = resolveScope(corpus, q);
       for (const limit of LIMITS) {
         // Through the retriever the harness scores, so the dump cannot drift
         // onto a different entry point than the one the eval measures.

@@ -36,9 +36,12 @@ export interface IngestedCorpus {
   projectIdBySlug: Map<string, string>;
 }
 
-/** The scope a query is issued under, resolved to a real project id. */
+/** The scope a query is issued under, resolved to real project ids. */
 export interface QueryScope {
+  /** The project the query was issued against; a returned row outside it is foreign. */
   projectId: string;
+  /** Every project the retriever may read — `[projectId]` unless the query requested widening. */
+  projectIds: readonly string[];
 }
 
 /** Same shape, but `project` is a fixture slug (see `corpus.ts::PROJECTS`) — resolved to a `QueryScope` at eval time. */
@@ -53,6 +56,7 @@ export type QueryType =
   | 'preference'
   | 'multi-session-causal'
   | 'cross-project-isolation'
+  | 'cross-project-widened'
   | 'abstention';
 
 /** A single query fixture row. See `queries.ts`. */
@@ -63,6 +67,13 @@ export interface QueryItem {
   /** Corpus fixture ids that count as relevant. Empty for `abstention` queries. */
   goldStableIds: string[];
   scope: QueryScopeFixture;
+  /**
+   * Asks the retriever to read every corpus project rather than `scope` alone.
+   * Read by the harness as an explicit declaration, never inferred from whether
+   * foreign rows came back: it is what removes a query from `foreignScopeRate`'s
+   * denominator, so inferring it would make the isolation gate self-satisfying.
+   */
+  widened?: true;
   /** Marks the small Spanish subset (design.md Open Question 1). */
   bilingual?: boolean;
 }
@@ -78,6 +89,8 @@ export interface RetrievalOutcome {
 export interface RawOutcome {
   query: QueryItem;
   retrieved: string[];
+  /** The resolved scope the retriever was actually invoked with. */
+  scope: QueryScope;
   /** Undefined for a retriever with no explicit flag (`grep`, `memory-md-dump`). */
   reportedAbstained: boolean | undefined;
   latencyMs: number;
@@ -106,5 +119,5 @@ export interface Retriever<TState = unknown> {
 
 /** Scope match for an in-memory retriever (`grep`, `memory-md-dump`) — the non-SQL sibling of `services/scope.ts::memoryMatchesScope`. */
 export function inScope(item: { projectId: string }, scope: QueryScope): boolean {
-  return item.projectId === scope.projectId;
+  return scope.projectIds.includes(item.projectId);
 }
