@@ -33,10 +33,10 @@ touched:
 $ npx tsc --noEmit
 src/services/memory.ts(200,56): error TS2345: Argument of type 'SearchScope' is not assignable to parameter of type 'Scope'.
   Property 'projectId' is missing in type '{ kind: "authorized-projects"; projectIds: readonly string[]; homeProjectId: string; }' but required in type 'Scope'.
-src/services/search-scope.test.ts(62,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(65,7): error TS2578: Unused '@ts-expect-error' directive.
 ```
 
-`search-scope.test.ts:62` is the `save` directive, and it is the ONLY one that
+`search-scope.test.ts:65` is the `save` directive, and it is the ONLY one that
 went unused — the other five write paths still refuse. The build reds twice
 over: at the widened signature itself (`save`'s body immediately passes the
 scope to a repository read that takes a `Scope`, so the barrier is layered
@@ -52,12 +52,12 @@ with `SearchScope` left as it is:
 
 ```
 $ npx tsc --noEmit | grep TS2578
-src/services/search-scope.test.ts(62,7): error TS2578: Unused '@ts-expect-error' directive.
-src/services/search-scope.test.ts(64,7): error TS2578: Unused '@ts-expect-error' directive.
-src/services/search-scope.test.ts(66,7): error TS2578: Unused '@ts-expect-error' directive.
-src/services/search-scope.test.ts(68,7): error TS2578: Unused '@ts-expect-error' directive.
-src/services/search-scope.test.ts(70,7): error TS2578: Unused '@ts-expect-error' directive.
-src/services/search-scope.test.ts(72,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(65,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(67,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(69,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(71,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(73,7): error TS2578: Unused '@ts-expect-error' directive.
+src/services/search-scope.test.ts(75,7): error TS2578: Unused '@ts-expect-error' directive.
 ```
 
 **All six.** Under the one-union shape every write path and both single-row
