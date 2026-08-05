@@ -171,6 +171,19 @@ export function resolveSearchScope(
   return { kind: 'authorized-projects', projectIds, homeProjectId };
 }
 
+/**
+ * The slugs a `SearchScope` addresses, in the projects service's own order.
+ * Reads the archived ones too: a widening that fell back to an archived home
+ * must still name it, and the widened set already excluded them.
+ */
+export function searchedProjectSlugs(projects: ProjectsService, scope: SearchScope): string[] {
+  const ids = new Set(scope.kind === 'project' ? [scope.projectId] : scope.projectIds);
+  return projects
+    .list(true)
+    .filter((p) => ids.has(p.id))
+    .map((p) => p.slug);
+}
+
 /** Non-throwing sibling of `assertAuthorized`, so both derive the target descriptor identically. */
 export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean {
   const ctx = getRequestContext();

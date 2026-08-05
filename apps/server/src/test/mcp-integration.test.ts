@@ -225,7 +225,7 @@ describe('MCP protocol conformance', () => {
 
     // Measured at the boundary the client reads, not off the constant.
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1854);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1842);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {
@@ -1727,8 +1727,10 @@ describe('MCP protocol conformance', () => {
     expect(save).not.toMatch(/scope=global|user-wide/i);
 
     const search = desc('memory.search');
-    // The reclaimed clause `mcp-api` requires a change to name, verbatim.
-    expect(search).toContain("Every connection sees exactly one project's memories.");
+    // Reclaimed to pay for the widening clause, and false once a search can
+    // read more than one project. The successor sentence is what replaced it.
+    expect(search).not.toContain("Every connection sees exactly one project's memories.");
+    expect(search).toContain('`across_projects:true` also reads the other projects');
     expect(search).not.toContain('unscoped see globals only');
     expect(search).toBeTruthy();
 
