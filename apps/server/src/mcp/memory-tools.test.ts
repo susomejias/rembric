@@ -1724,11 +1724,11 @@ describe('memory.search — no argument widens the resolved scope', () => {
 });
 
 describe('an unresolvable path slug establishes no scope', () => {
-  // The inverted characterization test for the leak this suite used to
-  // document: a slug naming no project used to resolve to defaultProjectScope(db.handle), so the
-  // connection read user-wide memory while presenting as path-scoped. It now
-  // resolves to nothing and the call is refused, reads included.
-  it('refuses a `*` token at /mcp/<unknown-slug> instead of serving global memories', async () => {
+  // Characterizes the leak this suite used to document: an unresolvable slug
+  // resolved to the global scope, so the connection read user-wide memory while
+  // presenting as path-scoped. It now resolves to nothing and the call is
+  // refused, reads included.
+  it('refuses a `*` token at /mcp/<unknown-slug> instead of serving another scope', async () => {
     memory.save(
       { type: 'user', title: 'user-wide row', content: 'user-wide row' },
       defaultProjectScope(db.handle),

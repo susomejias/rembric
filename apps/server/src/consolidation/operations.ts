@@ -59,7 +59,11 @@ function topicSlotOccupiedBy(
   repos: ConsolidationDeps,
   row: { id: string; projectId: string | null; topicKey: string | null },
 ): string | null {
-  if (!row.topicKey || row.projectId === null) return null;
+  if (!row.topicKey) return null;
+  // `memory_topic_key_active_uidx` keys on COALESCE(project_id,''), so a
+  // project-less row occupies a slot too — reporting it free would attempt a
+  // reactivation that aborts the whole undo on the UNIQUE constraint.
+  if (row.projectId === null) return row.id;
   const active = repos.memory.findActiveByTopicKey({
     projectId: row.projectId,
     topicKey: row.topicKey,

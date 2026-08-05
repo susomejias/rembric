@@ -577,9 +577,18 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const id = c.req.param('id');
     const row = deps.memory.unsafeGetById(id);
-    // A row with no project is unaddressable — there is no scope to act in —
-    // so it behaves like a missing one rather than falling back to a wider one.
-    if (!row?.projectId) return c.redirect('/dashboard/memories');
+    if (!row) return c.redirect('/dashboard/memories');
+    if (!row.projectId) {
+      return domainErrorPage(
+        c,
+        deps.sessions,
+        new DomainError(
+          'conflict',
+          'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.',
+        ),
+        { title: 'Memory', activeNav: 'memories' },
+      );
+    }
 
     try {
       deps.memory.archive(id, projectScope(row.projectId));
@@ -601,7 +610,18 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
 
     const id = c.req.param('id');
     const row = deps.memory.unsafeGetById(id);
-    if (!row?.projectId) return c.redirect('/dashboard/memories');
+    if (!row) return c.redirect('/dashboard/memories');
+    if (!row.projectId) {
+      return domainErrorPage(
+        c,
+        deps.sessions,
+        new DomainError(
+          'conflict',
+          'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.',
+        ),
+        { title: 'Memory', activeNav: 'memories' },
+      );
+    }
 
     try {
       deps.memory.confirm(id, projectScope(row.projectId), {

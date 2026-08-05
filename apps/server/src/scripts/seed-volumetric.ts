@@ -697,9 +697,8 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
 
   phase('prompts', args.prompts, (i, promptStep) => {
     const rng = rngFor(args.seed, STREAM.prompt, i);
-    // Slot 0 is global (`project_id` NULL), a shape the readers must serve.
     const slot = i % VOLUMETRIC_SHAPE.scopeCount;
-    const projectId = slot === 0 ? null : projects[slot - 1]!.id;
+    const projectId = projects[slot]!.id;
     // Only when the session axis was built, so the axes stay independent.
     const sessionId = sessionIds.length > 0 ? sessionIds[i % sessionIds.length]! : null;
     const words: string[] = [];
