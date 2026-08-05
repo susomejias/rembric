@@ -1250,3 +1250,93 @@ describe('derived-table reproducibility invariant', () => {
     }
   });
 });
+
+/**
+ * Scope-is-one-arm invariant.
+ *
+ * `Scope` carries a single `{ kind: 'project' }` arm. The global arm and every
+ * symbol that served it were deleted; nothing may reintroduce one, in
+ * production code OR in a fixture — the retrieval harness kept its own copy of
+ * the global scope alive long after the production one stopped being reachable,
+ * which is how a phantom arm survived a release.
+ *
+ * The `memory.scope` COLUMN is a different thing and is deliberately NOT
+ * matched here: it is still written as the constant `'project'`, the migration
+ * tests still construct pre-migration rows carrying `'global'`, and its removal
+ * is a separate change (memory/spec.md).
+ */
+const GLOBAL_SCOPE_PATTERNS: { pattern: RegExp; description: string }[] = [
+  { pattern: /\bSCOPE_GLOBAL\b/, description: '`SCOPE_GLOBAL` — deleted with the global arm' },
+  {
+    pattern: /\bGLOBAL_PARTITION_KEY\b/,
+    description: '`GLOBAL_PARTITION_KEY` — deleted; a partition key is a project id',
+  },
+  {
+    pattern: /kind:\s*'global'/,
+    description: "`{ kind: 'global' }` — constructing a global Scope",
+  },
+  {
+    pattern: /kind\s*===\s*'global'/,
+    description: "`kind === 'global'` — branching on a Scope arm that does not exist",
+  },
+];
+
+/**
+ * Every `.ts` under `src/`, tests included: a fixture may not reintroduce it
+ * either. This file is the one exclusion — it names the forbidden tokens in
+ * order to forbid them, so it matches its own patterns.
+ */
+function listAllTsFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      if (entry === 'migrations') continue;
+      out.push(...listAllTsFiles(full));
+      continue;
+    }
+    if (entry.endsWith('.ts') && entry !== 'invariants.test.ts') out.push(full);
+  }
+  return out;
+}
+
+function scanForPattern(
+  files: readonly string[],
+  pattern: RegExp,
+): { file: string; line: number; text: string }[] {
+  const matches: { file: string; line: number; text: string }[] = [];
+  for (const file of files) {
+    const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+    const lines = readFileSync(file, 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i]!.trim();
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      if (pattern.test(trimmed)) matches.push({ file: rel, line: i + 1, text: trimmed });
+    }
+  }
+  return matches;
+}
+
+describe('scope-is-one-arm invariant', () => {
+  const files = listAllTsFiles(srcRoot);
+
+  // Non-vacuity control. Every assertion below is negative, and an empty file
+  // list — or a scan that never reads a line — satisfies all of them. This
+  // greps for a token that MUST be present, through the identical scanner.
+  it('the scan reaches source files and reads their non-comment lines', () => {
+    expect(files.filter((f) => f.endsWith('.test.ts')).length).toBeGreaterThan(50);
+    const control = scanForPattern(files, /\bprojectScope\(/);
+    expect(control.length).toBeGreaterThan(20);
+    expect(new Set(control.map((m) => m.file)).size).toBeGreaterThan(5);
+  });
+
+  for (const { pattern, description } of GLOBAL_SCOPE_PATTERNS) {
+    it(`no file reintroduces ${description}`, () => {
+      const matches = scanForPattern(files, pattern);
+      expect(
+        matches.length,
+        matches.map((m) => `  ${m.file}:${m.line}  ${m.text}`).join('\n'),
+      ).toBe(0);
+    });
+  }
+});
