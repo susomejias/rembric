@@ -34,3 +34,19 @@ Captured by `authorization-baseline.mjs` at base `1cb9821995dfb17c0e0c94cc4d1ea9
 ## Where the measurement differs from what the proposal predicted
 
 Nothing contradicts the expected table: all five rows reproduce cell for cell. One reading changed underneath an unchanged verdict, and it matters for §8's diff — a `project:<alpha>` token's path-less `/mcp` cells are still `forbidden`, but the **reason** moved. Before `retire-the-global-scope` the refusal was "no project is active on this connection"; now `/mcp` resolves to the default project and the refusal is "this token is not authorized for the default project". Same code, different cause, and the refusal message now names the default project. A diff on code alone cannot see that, which is why the message text is worth checking by hand in §8.
+
+## The after-run (task 8.1–8.3)
+
+Re-run against the changed tree with the same script, the committed before-run copied out first and restored after so the JSON above is still the before-run. **45 cells compared, 0 moved**, ULIDs normalised. Non-vacuity unchanged: **16 successes of 45 on both sides**, so the identical diff is not an identical diff over an all-refused matrix. The only differing value anywhere is the `created_at` column of the persisted-scope table — two run times, not a behaviour. Reproduced independently by a review agent with its own instrument, same result.
+
+## The new surface (task 8.4) — separate, and sourced
+
+These three arms are **not** measured by `authorization-baseline.mjs`. It mints only the four pre-existing shapes, deliberately, so the regression instrument stays exactly what it was when the before-run was taken. The new surface is measured by `apps/server/src/test/token-project-sets.test.ts` at the same boundaries — the dashboard mint form, the MCP SDK `StreamableHTTPClientTransport`, and `POST /api/<slug>/sessions`.
+
+| new arm                    | measured behaviour                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| set over `{alpha, gamma}`  | reaches both members read **and** write on `/mcp/<slug>` and on `POST /api/<slug>/sessions`; refused on `beta`, on the default project, and on the path-less `/mcp`. Asserted in **one** test so the grant and the refusal cannot be skipped separately.           |
+| set over **every** project | denied `POST /dashboard/login` (401) and every `/admin/*` route (403 `forbidden`), while the `*` control succeeds on both (302, 200). This is the escalation control: reach must not become admin.                                                                 |
+| memberless set             | authorizes nothing on any surface, and renders as `no projects` (class `pending`) — distinct from `active`, from `revoked`/`expired`, and from the unresolvable `inert`, whose never-repair contract does not apply to a set an operator can still add members to. |
+
+Two properties of this surface that no assertion can establish on its own, both from §7's mutation gate: dropping the membership arm reds the member-reach test **while leaving every refusal test green** (a suite of refusal assertions cannot notice a grant that never happens), and memoizing the membership read reds exactly one test — the warm-cache freshness one.
