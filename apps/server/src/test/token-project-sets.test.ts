@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
+import { memory } from '../db/schema/memory.js';
 import type { Project } from '../db/schema/projects.js';
 import { tokens as tokensTable } from '../db/schema/tokens.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
@@ -328,6 +329,37 @@ describe('token project sets', () => {
     return rows.map((r) => r.projectId);
   }
 
+  function removeMember(tokenId: string, projectId: string): void {
+    const info = server.dbHandle.raw
+      .prepare('DELETE FROM token_projects WHERE token_id = ? AND project_id = ?')
+      .run(tokenId, projectId);
+    expect(info.changes, 'no membership row was removed').toBe(1);
+  }
+
+  /**
+   * Re-label an already-minted token, so a shape the typed producer cannot yet
+   * compose still has a plaintext that authenticates. `tokens.scope` is a text
+   * column and the CHECK admits any scope string alongside a NULL binding.
+   */
+  function relabelScope(name: string, scope: string): string {
+    const row = persisted(name);
+    expect(row, `token ${name} was not persisted`).toBeDefined();
+    server.dbHandle.db
+      .update(tokensTable)
+      .set({ scope, projectId: null })
+      .where(eq(tokensTable.name, name))
+      .run();
+    return row!.id;
+  }
+
+  function memoryCount(projectId: string): number {
+    return server.dbHandle.db
+      .select({ id: memory.id })
+      .from(memory)
+      .where(eq(memory.projectId, projectId))
+      .all().length;
+  }
+
   describe('controls that must hold on both sides of the change', () => {
     it('an admin token reaches a project over MCP and HTTP and opens a dashboard session', async () => {
       const jar = await loggedIn();
@@ -480,6 +512,139 @@ describe('token project sets', () => {
       const row = persisted('escalation-set-every-project');
       expect(row!.scope).toBe('projects');
       expect(memberIds(row!.id)).toEqual(every.map((p) => p.id).sort());
+    });
+
+    it('reads but does not write its members when the set is read-only', async () => {
+      const jar = await loggedIn();
+      const readSet = await mintPlaintext(jar, {
+        name: 'set-read-only',
+        projects: [alpha.slug, gamma.slug],
+        access: 'read',
+      });
+      const row = persisted('set-read-only');
+      expect(row!.scope).toBe('read:projects');
+      expect(row!.projectId).toBeNull();
+
+      const before = memoryCount(alpha.id);
+      expect(await mcpRead(`/mcp/${alpha.slug}`, readSet)).toEqual({ ok: true });
+      expect(await mcpWrite(`/mcp/${alpha.slug}`, readSet, 'read-set')).toEqual({
+        ok: false,
+        code: 'forbidden',
+      });
+      expect(await apiSession(alpha.slug, readSet)).toEqual({ status: 403, code: 'forbidden' });
+      expect(memoryCount(alpha.id), 'a refused write persisted a row').toBe(before);
+
+      // Down to the single member the requirement names. A one-member set is
+      // not mintable from the form, which mints the single-project arm there.
+      removeMember(row!.id, gamma.id);
+      expect(memberIds(row!.id)).toEqual([alpha.id]);
+      expect(await mcpRead(`/mcp/${alpha.slug}`, readSet)).toEqual({ ok: true });
+      expect(await mcpWrite(`/mcp/${alpha.slug}`, readSet, 'read-set-single')).toEqual({
+        ok: false,
+        code: 'forbidden',
+      });
+      expect(memoryCount(alpha.id)).toBe(before);
+    });
+
+    it('loses a removed member on the next request with the credential cache already warm', async () => {
+      const jar = await loggedIn();
+      const set = await mintPlaintext(jar, {
+        name: 'set-membership-freshness',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+      const row = persisted('set-membership-freshness');
+
+      // This request is what warms the plaintext → token id cache, so the
+      // refusal below is answered on the cached-lookup path — the one whose
+      // permission to persist indefinitely rests on re-reading authorization
+      // state every time.
+      expect(await mcpRead(`/mcp/${gamma.slug}`, set)).toEqual({ ok: true });
+
+      removeMember(row!.id, gamma.id);
+
+      expect(await mcpRead(`/mcp/${gamma.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
+      expect(await apiSession(gamma.slug, set)).toEqual({ status: 403, code: 'forbidden' });
+      expect(await mcpRead(`/mcp/${alpha.slug}`, set)).toEqual({ ok: true });
+      expect(await mcpWrite(`/mcp/${alpha.slug}`, set, 'still-a-member')).toEqual({ ok: true });
+    });
+
+    it('authorizes nothing while its set is empty', async () => {
+      const jar = await loggedIn();
+      const home = defaultProject(server.dbHandle);
+      const star = await mintPlaintext(jar, {
+        name: 'empty-set-control-star',
+        projects: [],
+        access: 'write',
+      });
+      const empty = await mintPlaintext(jar, {
+        name: 'empty-set-subject',
+        projects: [],
+        access: 'write',
+      });
+      // Never given a member, so its whole reach would have to come from the
+      // scope string — which is the thing that must authorize nothing.
+      relabelScope('empty-set-subject', 'projects');
+
+      expect(await login(empty)).toBe(401);
+      for (const path of ['/mcp', `/mcp/${alpha.slug}`, `/mcp/${home.slug}`]) {
+        expect(await mcpRead(path, empty), `${path} read`).toEqual({
+          ok: false,
+          code: 'forbidden',
+        });
+        expect(await mcpWrite(path, empty, 'empty-set'), `${path} write`).toEqual({
+          ok: false,
+          code: 'forbidden',
+        });
+      }
+      for (const slug of [alpha.slug, home.slug]) {
+        expect(await apiSession(slug, empty), slug).toEqual({ status: 403, code: 'forbidden' });
+      }
+
+      expect(await login(star)).toBe(302);
+      for (const path of ['/mcp', `/mcp/${alpha.slug}`, `/mcp/${home.slug}`]) {
+        expect(await mcpRead(path, star), `control ${path} read`).toEqual({ ok: true });
+        expect(await mcpWrite(path, star, 'empty-set-control'), `control ${path} write`).toEqual({
+          ok: true,
+        });
+      }
+      for (const slug of [alpha.slug, home.slug]) {
+        expect(await apiSession(slug, star), `control ${slug}`).toEqual({
+          status: 200,
+          code: null,
+        });
+      }
+    });
+
+    it('cannot create the project it would need to reach', async () => {
+      const jar = await loggedIn();
+      const set = await mintPlaintext(jar, {
+        name: 'set-autocreate',
+        projects: [alpha.slug, gamma.slug],
+        access: 'write',
+      });
+      const star = await mintPlaintext(jar, {
+        name: 'set-autocreate-control-star',
+        projects: [],
+        access: 'write',
+      });
+      const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+      expect(projects.findBySlug('brand-new')).toBeUndefined();
+
+      // The path-less connection: a path-scoped one refuses `project.use` with
+      // `scope_locked` before the autocreate gate is reached.
+      expect(
+        await mcpCall('/mcp', set, 'project.use', { slug: 'brand-new', autocreate: true }),
+      ).toEqual({ ok: false, code: 'forbidden' });
+      expect(projects.findBySlug('brand-new')).toBeUndefined();
+
+      expect(
+        await mcpCall('/mcp', star, 'project.use', { slug: 'brand-new', autocreate: true }),
+      ).toEqual({ ok: true });
+      expect(projects.findBySlug('brand-new')).toBeDefined();
+
+      const row = persisted('set-autocreate');
+      expect(row!.scope).toBe('projects');
     });
   });
 });
