@@ -79,6 +79,26 @@ export interface UpgradeOptions {
 
 export type UpgradeOutcome = 'ok' | 'rolled-back' | 'rolled-back-unhealthy';
 
+/**
+ * Sole validator of the operator's health-wait override: the orchestrator
+ * forwards the raw env value verbatim. A malformed value degrades to the
+ * default with a log line instead of refusing to run — this knob exists to
+ * rescue updates whose first boot outlives the default wait, and a refusal
+ * would strand exactly the operator it serves.
+ */
+export function parseHealthTimeoutMs(
+  raw: string | undefined,
+  log: (line: string) => void,
+): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    log(`ignoring malformed REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS="${raw}" — using the 150s default`);
+    return undefined;
+  }
+  return n;
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -196,6 +216,10 @@ async function main(): Promise<void> {
     oldId,
     targetImage,
     backupPath: process.env['REMBRIC_UPGRADE_BACKUP'],
+    healthTimeoutMs: parseHealthTimeoutMs(
+      process.env['REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS'],
+      (line) => console.error(line),
+    ),
   });
   if (outcome === 'ok') {
     // Best-effort self-removal: the daemon force-kills this container as

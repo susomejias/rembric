@@ -132,6 +132,7 @@ describe('SelfUpdateOrchestrator', () => {
     failPull?: boolean;
     failBackup?: boolean;
     failPrune?: boolean;
+    upgradeHealthTimeoutMs?: string;
   }): {
     orch: SelfUpdateOrchestrator;
     calls: EngineCalls;
@@ -158,6 +159,7 @@ describe('SelfUpdateOrchestrator', () => {
       socketPath: '/tmp/test.sock',
       now: () => 42,
       log: () => {},
+      upgradeHealthTimeoutMs: opts.upgradeHealthTimeoutMs,
     });
     return { orch, calls, backups };
   }
@@ -210,6 +212,20 @@ describe('SelfUpdateOrchestrator', () => {
     expect(calls.started).toEqual(['helper789']);
     expect(orch.status().phase).toBe('restarting');
     expect(orch.status().pull).toEqual({ done: 1, total: 1 });
+  });
+
+  it('forwards the operator health-wait override to the upgrader, and only then', async () => {
+    const withOverride = build({ upgradeHealthTimeoutMs: '600000' });
+    await withOverride.orch.start('0.22.0');
+    await settle();
+    const overrideEnv = withOverride.calls.created[0]?.payload['Env'] as string[];
+    expect(overrideEnv).toContain('REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS=600000');
+
+    const without = build({});
+    await without.orch.start('0.22.0');
+    await settle();
+    const plainEnv = without.calls.created[0]?.payload['Env'] as string[];
+    expect(plainEnv.some((e) => e.startsWith('REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS='))).toBe(false);
   });
 
   it('cleanup runs pre-pull with label-scoped filters', async () => {
