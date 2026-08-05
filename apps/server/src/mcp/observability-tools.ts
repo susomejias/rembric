@@ -263,7 +263,7 @@ async function handleStats(deps: ObservabilityToolDeps) {
   const pendingJudgmentsTotal = deps.relations ? deps.relations.countPendingInScope(scope) : 0;
 
   return ok({
-    scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
+    scope: `project:${scope.projectId}`,
     memoriesByStatus: byStatus,
     memoriesByType: byType,
     sessionsByStatus,

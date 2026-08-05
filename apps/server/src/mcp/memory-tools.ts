@@ -1391,10 +1391,7 @@ async function handleContext(
     PENDING_JUDGMENTS_MAX,
   );
   const pendingCutoff = now - (deps.orphanAfterMs ?? 86_400_000);
-  const relationsScope = {
-    scope: 'project' as const,
-    projectId: scope.projectId,
-  };
+  const relationsScope = { projectId: scope.projectId };
   const pendingJudgments = deps.repos.relations
     .listPendingInScope({
       ...relationsScope,
@@ -1428,7 +1425,7 @@ async function handleContext(
   const needsReviewTotal = deps.memory.countNeedsReview(scope);
 
   return ok({
-    scope: scope.kind === 'project' ? `project:${scope.projectId}` : 'global',
+    scope: `project:${scope.projectId}`,
     recentSessions,
     recentPrompts,
     recentMemories,
@@ -1472,10 +1469,7 @@ async function handleTimeline(
   const t = target.memory;
 
   if (t.sessionId) {
-    const neighborScope = {
-      scope: 'project' as const,
-      projectId: scope.projectId,
-    };
+    const neighborScope = { projectId: scope.projectId };
     const beforeRows = deps.repos.memory.sessionNeighbors({
       ...neighborScope,
       sessionId: t.sessionId,
@@ -1504,7 +1498,6 @@ async function handleTimeline(
   const windowMs = 2 * 3600 * 1000;
   const targetMs = t.createdAt.getTime();
   const window = {
-    scope: 'project' as const,
     projectId: scope.projectId,
     pivotId: t.id,
     loMs: targetMs - windowMs,

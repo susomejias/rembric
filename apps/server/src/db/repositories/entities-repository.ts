@@ -11,6 +11,8 @@ import {
 } from '../schema/entities.js';
 import { memory, type Memory, type MemoryStatus, type MemoryType } from '../schema/memory.js';
 
+import { scopeCondition } from './scope-clause.js';
+
 export interface EntityRef {
   kind: EntityKind;
   value: string;
@@ -210,11 +212,7 @@ export class EntitiesRepository {
    * linking has already run, rather than relying solely on call order.
    */
   scopeActiveMemoryCount(opts: { projectId: string; excludeMemoryId?: string }): number {
-    const conditions = [
-      eq(memory.scope, 'project'),
-      eq(memory.projectId, opts.projectId),
-      eq(memory.status, 'active'),
-    ];
+    const conditions = [scopeCondition(opts.projectId), eq(memory.status, 'active')];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
     return (
       this.db
@@ -343,7 +341,7 @@ export class EntitiesRepository {
    * on an agent-facing read.
    */
   countPendingScans(opts: { projectId: string }): number {
-    const scoped = and(eq(memory.scope, 'project'), eq(memory.projectId, opts.projectId));
+    const scoped = scopeCondition(opts.projectId);
     return (
       this.db
         .select({ n: sql<number>`count(*)` })

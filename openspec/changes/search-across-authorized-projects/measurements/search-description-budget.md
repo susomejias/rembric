@@ -121,3 +121,43 @@ cd apps/server && node --input-type=module -e "
 
 Per task 5.6 this figure MUST be re-measured from a live `tools/list` response before phase 5 closes —
 the constant is what the file holds, not necessarily what the wire carries.
+
+## Re-verification: is there a cheaper 94 characters than the entity-kind list?
+
+The plan above takes reclaim 2 (the entity-kind list) as necessary, and reclaim 2 is the only one of
+the three with a named cost — `mcp-api/spec.md:462` records that some clients do not surface
+per-argument `describe()`, so moving the list there loses it on those clients. That makes "find 94
+characters of pure verbosity instead" worth testing before accepting the loss. **Tested, and the
+answer is no.**
+
+Measured against the constant, sentence by sentence, counting only rewrites that preserve every fact:
+
+| rewrite                                                                       |  saves |
+| ----------------------------------------------------------------------------- | -----: |
+| `offset` sentence: drop "also works but", keep "ranked over a bounded window" |     15 |
+| trigger list: four recall examples instead of five, both languages kept       |     13 |
+| **total genuinely lossless**                                                  | **28** |
+
+**A first pass claimed 93 and was wrong.** It counted deleting
+`"Answers \"what do I know about this file/error/host\"; …"` (53) as verbosity. It is not: that
+sentence is the use-case cue that tells the model _when_ to reach for `entity` at all, and unlike the
+entity-kind list it has no `describe()` to fall back to. Cutting it trades a better-covered loss for a
+worse-covered one. Recorded because the arithmetic looked like a free win and was not.
+
+So the budget is a two-way choice, both arms measured (free 46 + reclaim 1's 53 + lossless 28 +
+reclaim 3's 75 = 202 before any entity-list decision):
+
+| arm                                    | budget | clause that fits              | spare | what it costs                                          |
+| -------------------------------------- | -----: | ----------------------------- | ----: | ------------------------------------------------------ |
+| **A — take reclaim 2**                 |    296 | the 240-char, **two-trigger** |    56 | entity-kind list survives only in `describe()`         |
+| B — keep the entity-kind list in place |    202 | the 182-char, **one-trigger** |    20 | drops "or this project came back empty" from the steer |
+
+**Recommended: A.** The owner named two trigger conditions, and B silently drops one of them — a
+description that understates when the option is legitimate is the same class of defect as one that
+overstates it, and this one would push the model toward never widening rather than toward widening
+carelessly. A's residual cost is bounded and partial (the list survives wherever `describe()` is
+surfaced); B's cost falls on the steer itself, which is the whole point of the requirement. A also
+leaves 56 characters of margin against 20, and `mcp-api/spec.md:2183` keeps a margin precisely so the
+guard fires on approach rather than on arrival.
+
+Still not wired in: the clause lands in phase 5 with the argument, in one commit.
