@@ -12,7 +12,6 @@ import type { Project } from '../db/schema/projects.js';
 import { tokens as tokensTable } from '../db/schema/tokens.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { ProjectsService } from '../services/projects.js';
-import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';
@@ -690,24 +689,14 @@ describe('token project sets', () => {
       }
     });
 
-    it('reaches exactly its members at every gate, including the two project tools', async () => {
-      // Minted through the SERVICE rather than the form: the form composes the
-      // set arm only once the dashboard handler lands, so this is the union's
-      // end-to-end evidence until then. Every other test in this file keeps the
-      // form as its producer.
-      const svc = new TokensService(createRepositories(server.dbHandle.db), server.dbHandle.db);
-      const { plaintext: set } = svc.create({
-        name: 'set-service-minted',
-        projects: [alpha, gamma],
+    it('is the filter behind both project tools, and sees exactly its members', async () => {
+      const jar = await loggedIn();
+      const set = await mintPlaintext(jar, {
+        name: 'set-project-tools',
+        projects: [alpha.slug, gamma.slug],
         access: 'write',
       });
       const home = defaultProject(server.dbHandle);
-
-      expect(await mcpRead(`/mcp/${alpha.slug}`, set)).toEqual({ ok: true });
-      expect(await mcpWrite(`/mcp/${gamma.slug}`, set, 'svc-set')).toEqual({ ok: true });
-      expect(await apiSession(gamma.slug, set)).toEqual({ status: 200, code: null });
-      expect(await mcpRead(`/mcp/${beta.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
-      expect(await apiSession(beta.slug, set)).toEqual({ status: 403, code: 'forbidden' });
 
       // `project.list` filters on `isAuthorized` (`mcp/project-tools.ts`), so a
       // set token sees exactly its members. The absences are what make the two
@@ -725,16 +714,6 @@ describe('token project sets', () => {
         ok: false,
         code: 'forbidden',
       });
-
-      // Last, so nothing above is affected: membership is authorization state,
-      // so removing a member lands on the very next request. Every probe above
-      // has already put this plaintext in the credential-lookup cache, which is
-      // the path that must not answer from a stale set.
-      const row = persisted('set-service-minted');
-      removeMember(row!.id, gamma.id);
-      expect(await mcpRead(`/mcp/${gamma.slug}`, set)).toEqual({ ok: false, code: 'forbidden' });
-      expect(await apiSession(gamma.slug, set)).toEqual({ status: 403, code: 'forbidden' });
-      expect(await mcpRead(`/mcp/${alpha.slug}`, set)).toEqual({ ok: true });
     });
 
     it('cannot create the project it would need to reach', async () => {

@@ -48,9 +48,7 @@ import type { ProjectsService } from './projects.js';
  *
  * The two set arms name no project, so they authorize nothing by string
  * alone — deliberately, so that the union in `isAuthorized` can only add
- * reach and a reader ignorant of `token_projects` under-authorizes. Spelling
- * them as `*`/`read:*` plus a set was measured to reach every project
- * regardless of the set.
+ * reach and a reader ignorant of `token_projects` under-authorizes.
  */
 
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keylen: 64 } as const;
