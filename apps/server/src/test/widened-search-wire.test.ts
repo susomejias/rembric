@@ -385,7 +385,9 @@ describe('memory.search across authorized projects, at the wire', () => {
     // per-argument description still delivers to the model.
     expect(Object.keys(properties)).toContain('across_projects');
     expect(properties.across_projects?.description ?? '').not.toBe('');
-    expect(description).not.toContain(properties.across_projects?.description ?? ' ');
+    expect(description).not.toContain(
+      properties.across_projects?.description ?? '<<no description>>',
+    );
 
     expect(description).toContain('across_projects');
     expect(description).toMatch(/never a default/i);

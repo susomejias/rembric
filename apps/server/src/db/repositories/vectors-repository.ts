@@ -118,7 +118,8 @@ export class VectorsRepository {
    * into one globally distance-ordered list, so a rank here is a global fact
    * and fusion needs no per-project correction (vec-partition-capability.md §3).
    * The predicate is never dropped: without it the read is not bounded to the
-   * authorized set at all.
+   * authorized set at all. It uses `idJsonSet` where `scopeWhere` refuses to:
+   * `memory_vec` is a vtable with no b-tree index for the planner to drop.
    */
   knnByQueryVector(opts: QueryVectorKnnOpts): { id: string; distance: number }[] {
     if (opts.partitionKeys.length === 0) throw new Error('kNN addresses no partition');
