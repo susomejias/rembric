@@ -1350,10 +1350,6 @@ describe('scope-is-one-arm invariant', () => {
  * made that decision"). The compiler already refuses the value on every write;
  * this is the second line, for the case the compiler cannot see: another
  * request-facing module assembling the literal itself.
- *
- * Exactly two production occurrences are licit and both are named below — the
- * arm's declaration, and the one site that builds it. Fixtures may construct
- * one freely, so `.test.ts` and the harness under `test/` are out of scope.
  */
 const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
 const WIDENED_SCOPE_SITES: Record<string, number> = {
