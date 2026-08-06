@@ -1,6 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { createServer as createNetServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,24 +30,7 @@ import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
-/** Probe the OS for a free TCP port and release it. */
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('expected an AddressInfo'));
-        return;
-      }
-      const port = addr.port;
-      sock.close(() => resolve(port));
-    });
-  });
-}
+import { findFreePort } from './index.js';
 
 /**
  * 8.10 / 13.14 — MCP protocol conformance tests.

@@ -1,11 +1,11 @@
-import { createServer as createNetServer } from 'node:net';
-
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';
 import { FakeEmbedder } from './embedder.js';
+
+import { findFreePort } from './index.js';
 
 /**
  * 13.24 — smoke test.
@@ -20,24 +20,6 @@ import { FakeEmbedder } from './embedder.js';
  * If a 60s run is required for the release pipeline, an additional CI
  * job can shell out to `node dist/server-entrypoint.js` with the same env.
  */
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('no port'));
-        return;
-      }
-      const p = addr.port;
-      sock.close(() => resolve(p));
-    });
-  });
-}
 
 const SMOKE_ADMIN_TOKEN = 'smoke-test-token-with-enough-entropy-xx';
 
