@@ -1,0 +1,33 @@
+{
+  "instrument": "I2 END-TO-END (MemoryService.searchWithAbstention)",
+  "label": "before-phase-1/1000",
+  "dataDir": "/root/corpora/narrow-1000",
+  "project": {
+    "slug": "vol-0",
+    "id": "01JGFJJZ004Q2YF055MXTVN83C"
+  },
+  "census": {
+    "memoriesTotal": 1000,
+    "memoriesInProject": 167,
+    "activeInProject": 133,
+    "vectorsInPartition": 167,
+    "projects": 6
+  },
+  "warmupQueries": 5,
+  "timedQueries": 40,
+  "p50Ms": 5.614,
+  "p90Ms": 6.003,
+  "minMs": 4.941,
+  "maxMs": 6.268,
+  "rowsReturnedTotal": 320,
+  "rowsReturnedMin": 8,
+  "queriesReturningZeroRows": 0,
+  "abstainedQueries": 0,
+  "foreignScopeRows": 0,
+  "node": "v22.23.1",
+  "samplesMs": [
+    5.821, 5.626, 5.706, 6.261, 5.785, 5.236, 5.627, 5.658, 5.381, 5.566, 5.742, 5.512, 5.307,
+    5.178, 5.365, 5.131, 5.811, 5.614, 5.486, 5.724, 5.558, 5.178, 5.644, 5.732, 5.547, 5.141,
+    6.268, 5.921, 6.238, 6.106, 5.653, 5.909, 6.003, 5.363, 5.15, 5.231, 5.709, 5.576, 4.966, 4.941
+  ]
+}

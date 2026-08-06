@@ -17,15 +17,15 @@ The server SHALL expose the Model Context Protocol over the Streamable HTTP tran
 
 ### Requirement: Path-scoped connections MUST enforce strict project isolation
 
-When the MCP connection is path-scoped (`/mcp/<slug>`) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope visible:
+When the MCP connection is path-scoped (`/mcp/<slug>`) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope the server chooses on the caller's behalf:
 
 - `memory.save` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies. There is no argument by which an agent can name a different destination: `memory.save` accepts no `scope` argument, so the destination is determined entirely by the connection the operator configured.
-- `memory.search` SHALL return only memories whose `project_id` equals the bound project. No argument SHALL widen the result set past it; `include_global` is removed from the tool's input schema.
-- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes.
+- `memory.search` SHALL return only memories whose `project_id` equals the bound project, **unless the caller explicitly passes the cross-project argument specified in "`memory.search` MUST accept an opt-in cross-project read and report which projects it read", in which case it SHALL return only memories from projects the token is authorized to read.** No other argument SHALL widen the result set past the bound project, and `include_global` remains absent from the tool's input schema. **Widening is a property of the caller's request and the token's reach, not of the connection: a path-scoped connection may widen exactly as a path-less one may, because the path fixes which project is the caller's home, not which projects the token may read.**
+- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes. **Neither accepts a widening argument**, so this clause is unchanged by the cross-project search.
 
-Because there is now exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its project is fixed by the URL and cannot be changed by `project.use` for the life of the connection.
+Because there is exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its home project is fixed by the URL and cannot be changed by `project.use` for the life of the connection.
 
-A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to any other project — in particular not to the default project, whose role is to serve path-LESS connections. An operator who typed a slug asked to be confined to it, and answering a typo with someone else's project is worse than refusing.
+A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to any other project — in particular not to the default project, whose role is to serve path-LESS connections, and **in particular not by widening**: with no resolved home project there is nothing to widen from, and the cross-project argument SHALL NOT make such a connection usable. An operator who typed a slug asked to be confined to it, and answering a typo with someone else's project is worse than refusing.
 
 The `not_found` clause above governs a connection whose slug DOES resolve, where the comparison is between the bound project and the requested memory. On an unresolvable slug there is no bound project to compare against, so `project_not_found` — which names the unusable connection — takes precedence over `not_found`, and the two do not conflict.
 
@@ -38,23 +38,33 @@ The `not_found` clause above governs a connection whose slug DOES resolve, where
 
 #### Scenario: search on a path-scoped connection does not leak globals
 
+The title predates this change: there are no global memories left to leak, and the only cross-project read is one the caller asked for and the token was authorized for — everything else stays closed, which is what this scenario now pins.
+
 - **GIVEN** a path-scoped connection at `/mcp/foo` and memories in another project
-- **WHEN** the client calls `memory.search`, with or without any additional argument
-- **THEN** the response SHALL contain only project `foo`'s memories, and no argument SHALL admit another project's rows
-- **AND** the scenario title predates this change: there are no global memories left to leak, and `include_global` is no longer an accepted argument
+- **WHEN** the client calls `memory.search` with any argument other than the cross-project one
+- **THEN** the response SHALL contain only project `foo`'s memories, and no such argument SHALL admit another project's rows
+- **AND** `include_global` SHALL still be refused as an unrecognized argument
+
+#### Scenario: a path-scoped connection may widen deliberately
+
+- **GIVEN** a path-scoped connection at `/mcp/foo`, a token authorized to read `foo` and `bar`, and memories in each
+- **WHEN** the client calls `memory.search` with the cross-project argument
+- **THEN** the response MAY contain `bar`'s memories and SHALL name both projects as searched
+- **AND** `memory.save` on the same connection SHALL still write to `foo`, so widening a read has not widened a write
 
 #### Scenario: get across project boundaries
 
 - **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M whose `project_id` is another project
 - **WHEN** the client calls `memory.get('M')`
 - **THEN** the response SHALL be an MCP error with `code: 'not_found'`, identical to the response for a non-existent id
+- **AND** this SHALL hold whether or not a prior `memory.search` on the same connection widened and returned M, because `memory.get` accepts no widening argument
 
 #### Scenario: search on an unresolvable slug refuses instead of reading global memory
 
 - **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and memories in the default project
-- **WHEN** the client calls `memory.search`
+- **WHEN** the client calls `memory.search`, with or without the cross-project argument
 - **THEN** the response SHALL be an MCP error with `code: 'project_not_found'`
-- **AND** the response SHALL contain no memory, in particular none from the default project
+- **AND** the response SHALL contain no memory, in particular none from the default project and none from any other project the token may read
 - **AND** the scenario title predates this change: there is no global memory to read, and the refusal it pins is unchanged
 
 #### Scenario: get on a global id from an unresolvable slug refuses
@@ -1702,9 +1712,9 @@ The MCP tool-handler layer at `apps/server/src/mcp/` SHALL place each tool domai
 
 ### Requirement: Every MCP tool call MUST be authorized against the token's scope
 
-Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → roots discovery → `SessionRouter`) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. Tools that accept a `scope` input (`memory.save`, `memory.search`) SHALL authorize the requested scope after their existing input-driven resolution. The path-scoping error contract (`scope_locked`, `project_required`, `project_not_found`, `project_suggestion_pending`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
+Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → roots discovery → `SessionRouter`) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_required`, `project_not_found`, `project_suggestion_pending`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
 
-Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.use` (against the requested project), `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project.
+Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.use` (against the requested project), `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
 
 `project.use({autocreate: true})` on a slug that does not yet exist is a WRITE (it mints a new project row), even though `project.use` is otherwise read-classified: the server SHALL check `isAuthorized(tokenScope, 'write', {scope: 'project', projectId: null})` before creating the row. `autocreate: true` against an ALREADY-existing slug is unaffected (no row is created, so the normal read check against the resolved project applies).
 
@@ -1745,12 +1755,19 @@ The title predates this change: the scope a path-less connection resolves is the
 - **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
 - **WHEN** the token calls a read tool whose effective scope resolves to the default project
 - **THEN** the call SHALL be rejected with code `forbidden`; after `project.use A` (authorized) the same call SHALL succeed against project A
+- **AND** passing the cross-project argument SHALL NOT make the refused call succeed, because the widening is authorized after the resolved-scope check, not instead of it
 
 #### Scenario: `project.list` is filtered by token scope
 
 - **GIVEN** projects A and B exist and a token with scope `project:A`
 - **WHEN** the token calls `project.list`
 - **THEN** the response SHALL contain project A only
+
+#### Scenario: `project.list` and a widened search agree
+
+- **GIVEN** any token and any set of projects
+- **WHEN** the token calls `project.list` and then `memory.search` with the cross-project argument
+- **THEN** the slugs in `searchedProjects` SHALL be a subset of the non-archived slugs `project.list` returned, and SHALL equal them when none is archived
 
 #### Scenario: Full-access tokens are unaffected
 
@@ -2016,11 +2033,11 @@ An empty entity result SHALL say whether the index has caught up. The tool's own
 
 #### Scenario: Entity combines with include_global
 
-The title predates this change: the argument it names is retired, and what the scenario now pins is that the entity branch admits no row outside the connection's project.
+The title predates this change twice over: the argument it names is retired, and the entity branch DOES now widen — under the explicit cross-project argument specified in "`memory.search` MUST accept an opt-in cross-project read and report which projects it read", and under nothing else. What this scenario pins is the unwidened case. Its closing clause previously read "no argument SHALL widen the branch past the resolved project", which this change contradicts head-on; the clause is narrowed rather than deleted, because everything it excluded except the one authorized argument is still excluded.
 
 - **GIVEN** two memories in the connection's project linked to the same path, and another project's memory linked to it too
-- **WHEN** `memory.search` is called with that `entity`
-- **THEN** both in-scope memories SHALL be returned, the other project's memory SHALL NOT, and no argument SHALL widen the branch past the resolved project
+- **WHEN** `memory.search` is called with that `entity` and without the cross-project argument
+- **THEN** both in-scope memories SHALL be returned, the other project's memory SHALL NOT, and no OTHER argument SHALL widen the branch past the resolved project
 
 ### Requirement: Memory-returning reads MUST expose the entities a memory is about
 
@@ -2659,7 +2676,7 @@ A connection at `/mcp` with no path slug SHALL resolve its effective scope to th
 
 Every site that previously fell back to the global scope on a path-less connection SHALL target the default project instead, and the set of such sites SHALL be exhaustive rather than sampled: the shared scope resolver, `memory.session_start`'s project binding, `project.current`'s authorization target, and the pinned-token remedy builder. A site missed here does not fail — it silently authorizes against, or reports, a scope that no longer exists.
 
-`project.use` SHALL still switch the connection to another project the token is authorized to read, and the default project SHALL be an ordinary target of that switch. Switching the single closed scope is not widening it: no read admits two projects' rows, and a token authorized for two projects could already move between them.
+`project.use` SHALL still switch the connection to another project the token is authorized to read, and the default project SHALL be an ordinary target of that switch. Switching the connection's home scope is not the same operation as widening one read: a switch changes where writes land and what every subsequent tool sees by default, while a widening affects exactly one `memory.search` call and no write. Both are bounded by the same authorization, so neither reaches a project the token may not read.
 
 **Authorization is unchanged and still gates the default project.** A token pinned to one project, connecting path-lessly, SHALL be refused with `code: 'forbidden'` naming the default project — a project it was never granted. The denial is the same denial it receives today against the global scope; only the named target changes, and it changes to one an operator can open. The refusal SHALL carry the pinned-project remedy (see "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform").
 
@@ -2686,8 +2703,14 @@ Every site that previously fell back to the global scope on a path-less connecti
 #### Scenario: Switching to another project does not merge two projects
 
 - **GIVEN** a path-less `/mcp` connection resolved to the default project, a token authorized for both it and project `beta`, and memories in each
-- **WHEN** the client calls `project.use({slug: 'beta'})` and then `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`
+- **WHEN** the client calls `project.use({slug: 'beta'})` and then `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`, none of them passing the cross-project argument
 - **THEN** every response SHALL contain only `beta`'s rows and counters, and none SHALL contain a row or counter from the default project
+
+#### Scenario: A widened search does not change where a subsequent write lands
+
+- **GIVEN** a path-less connection resolved to the default project and a token authorized for it and `beta`
+- **WHEN** the client calls `memory.search` with the cross-project argument and then `memory.save`
+- **THEN** the saved row SHALL carry the default project's `project_id`, so a widened read leaves the connection's home scope untouched
 
 #### Scenario: The default project is listable and usable like any other
 
@@ -2753,3 +2776,90 @@ A refusal for an unknown property is an **argument**-validation failure, not a s
 
 - **WHEN** the client calls a tool with a declared property carrying the wrong type
 - **THEN** the call SHALL be refused exactly as it was before strictness, so the pre-existing failure mode is unchanged and the new refusal is attributable to the unknown property alone
+
+### Requirement: `memory.search` MUST accept an opt-in cross-project read and report which projects it read
+
+`memory.search` SHALL accept one optional boolean input property, `across_projects`, defaulting to absent. When absent, the tool SHALL behave exactly as a server that does not implement it. When `true`, the tool SHALL read the projects the connection's token is authorized to read, per the `auth` capability's re-authorization requirement.
+
+The property SHALL NOT be named `scope`, `include_global`, or `all_projects`. The first two are forbidden by "No MCP tool surface MAY name a scope the server does not have". The third is forbidden here because it is false for a set-scoped token — it promises every project and delivers a membership set — and a published input name that promises more than the tool delivers is the defect "A tool's description and its response MUST agree, and neither may promise an unreachable state" governs.
+
+The widening SHALL apply to **both** retrieval branches of the tool — the ranked text/filter branch and the `entity` exact-address branch — because one argument on one tool whose meaning depends on which branch runs cannot be described truthfully.
+
+The response SHALL carry:
+
+- **`searchedProjects`**: the slugs of the projects actually read, in a stable order. Present whenever `across_projects` was requested, whatever the outcome of authorization.
+- **`widened`**: `true` when and only when more than one project was read. It reports the result, not the request, so a token reaching exactly one project does not receive `widened: true` for asking.
+
+Both SHALL appear in the tool's declared `outputSchema`, per "Every MCP tool MUST advertise an output schema and return conforming structured content". These fields are load-bearing rather than informational: an unauthorized widening is dropped and served rather than refused, so without them a caller cannot distinguish an exhaustive cross-project answer from a widening that did nothing.
+
+The input schema SHALL remain strict, so a client sending `all_projects` or any other unknown property is refused rather than silently ignored.
+
+#### Scenario: Absent argument is byte-identical to today
+
+- **GIVEN** any connection and a corpus spanning several projects
+- **WHEN** `memory.search` is called without `across_projects`
+- **THEN** the response SHALL contain only the resolved project's rows, and SHALL carry neither `searchedProjects` nor `widened`
+
+#### Scenario: A widened search names the projects it read
+
+- **GIVEN** a token authorized to read projects `alpha` and `beta`, on a connection resolved to `alpha`
+- **WHEN** `memory.search` is called with `across_projects: true`
+- **THEN** the response SHALL carry `searchedProjects` containing exactly `alpha` and `beta`
+- **AND** it SHALL carry `widened: true`
+- **AND** at least one row from each project SHALL be returned for a query both match, so the assertion is not satisfied by an empty result set
+
+#### Scenario: A widening that reached one project does not claim otherwise
+
+- **GIVEN** a token authorized to read exactly one project
+- **WHEN** `memory.search` is called with `across_projects: true`
+- **THEN** `searchedProjects` SHALL contain that one slug and `widened` SHALL be absent
+- **AND** the returned rows SHALL be identical to the same call without the argument
+
+#### Scenario: The entity branch widens under the same argument
+
+- **GIVEN** an identifier appearing in memories in two projects the token may read
+- **WHEN** `memory.search` is called with that identifier as `entity` and `across_projects: true`
+- **THEN** memories from both projects SHALL be returned in the branch's ordinary chronological order
+- **AND** the same call without `across_projects` SHALL return only the resolved project's memories
+
+#### Scenario: The widened entity branch keeps its response-level bound
+
+- **GIVEN** an identifier linked to more memories across the widened set than the branch's completeness bound
+- **WHEN** the widened entity lookup runs with no `limit`
+- **THEN** the number of rows returned SHALL NOT exceed the same bound a narrow lookup is subject to, so widening cannot multiply the worst-case annotation payload
+
+#### Scenario: An unknown widening spelling is refused
+
+- **GIVEN** any connection with a valid token
+- **WHEN** the client calls `memory.search` with `all_projects: true` or `include_global: true`
+- **THEN** the call SHALL be refused with the transport's invalid-parameters error naming the tool and the offending property, and no memory SHALL be returned
+
+#### Scenario: The declared output schema admits the new fields
+
+- **WHEN** an MCP client reads `memory.search`'s `outputSchema` from a real `tools/list` response
+- **THEN** it SHALL declare `searchedProjects` and `widened`, and a widened call's structured content SHALL conform to it
+
+### Requirement: The `across_projects` description MUST steer against habitual widening
+
+Because widening is opt-in and free to request, its tool description is load-bearing and SHALL constrain when the model uses it. The `memory.search` description SHALL instruct the model to pass `across_projects` ONLY when the user has explicitly asked about other projects, or when the model is genuinely exploring broadly and the answer is not expected in the current project. It SHALL state that the default — one project — is the right choice for ordinary recall. It SHALL name `searchedProjects` so the model can report the true reach rather than inferring it. These constraints SHALL NOT be expressed only in the per-argument zod `describe()`, which some clients do not surface to the model, but in the tool's top-level description text.
+
+**The description is not a substitute for the authorization gate, and the gate is not a substitute for the description.** They bound different threats and both are required. The gate prevents a token from reading a project it may not read; on a single-operator instance with a full-access token that gate always passes and therefore bounds nothing about how often the model widens. The description is the only lever on frequency, and frequency is what costs tokens, dilutes precision, and raises per-turn latency — measurably, though by less than the number of projects searched, since only the dense and lexical reads scale with the widened set (see the `data-access` capability, which records the figure and names its instrument).
+
+Satisfying this obligation SHALL stay within `DESCRIPTION_MAX_LENGTH`. Per "The four existing memory tools MUST advertise protocol-teaching descriptions", the text it needs SHALL be reclaimed from clauses no requirement mandates, the reclaimed clause SHALL be named in this change, and the resulting length SHALL be measured from a real `tools/list` response rather than from the description constant.
+
+#### Scenario: The description carries the restraint guard
+
+- **WHEN** an MCP client retrieves the tool description for `memory.search` via `tools/list`
+- **THEN** the description SHALL convey that `across_projects` is for an explicit user request about other projects or a genuinely broad exploration
+- **AND** it SHALL convey that a single project is the default and the right choice for ordinary recall
+- **AND** it SHALL name the field that reports which projects were read
+
+#### Scenario: The restraint guard is not only in the argument description
+
+- **WHEN** the top-level description text is inspected independently of the input schema
+- **THEN** it SHALL carry the restraint guard on its own, so a client that does not surface per-argument descriptions still delivers it to the model
+
+#### Scenario: The reworded description is measured, not assumed
+
+- **WHEN** the description is changed to carry this obligation
+- **THEN** its `String.length` measured from a real `tools/list` response SHALL be at or below `DESCRIPTION_MAX_LENGTH`, the change SHALL record the measured length and remaining headroom, and it SHALL name every clause it reclaimed

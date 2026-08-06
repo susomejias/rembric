@@ -16,7 +16,7 @@ Header: Authorization: Bearer <agent-token>
 ```
 
 - `/mcp` → the default project. A project is always active; the agent switches with `project.use({slug})`.
-- `/mcp/<slug>` → path-scoped. The agent is locked to that project and no argument reaches another one. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
+- `/mcp/<slug>` → path-scoped. The agent's home project is fixed to that slug and cannot be switched for the life of the connection; every write lands there and no argument names another destination. Reads are the same as anywhere else — the opt-in `across_projects` search below works here too, because the path fixes which project is home, not which projects the token may read. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
