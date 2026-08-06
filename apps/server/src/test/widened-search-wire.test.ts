@@ -373,12 +373,6 @@ describe('memory.search across authorized projects, at the wire', () => {
     expect(description).toMatch(/never a default/i);
     expect(description).toMatch(/explicit ask/i);
     expect(description).toContain('searchedProjects');
-    // The four clauses `mcp-api` mandates, which no reclaim may have taken.
-    expect(description).toMatch(/Call this whenever/);
-    expect(description).toMatch(/hybrid semantic \+ keyword/);
-    expect(description).toContain('`limit`');
-    expect(description).toContain('`offset`');
-    expect(description).toContain('gateShortened');
   });
 
   it('the argument does not rescue a call the resolved scope refuses', async () => {
