@@ -525,6 +525,11 @@ async function denseRetriever(
         }),
       )
       .sort((a, b) => a.distance - b.distance);
+    // `k` is per named partition, so the merged list already holds a full
+    // window per project; truncating it back to one window would ration the
+    // pool across the set and subtract from the home project as it grows
+    // (memory/spec.md, "the pool grows with the set").
+    const denseWindow = rankWindowSize * partitionKeys.length;
     // Dedup (nearest wins) before the slice — RRF needs distinct ids.
     const seen = new Set<string>();
     let scored: { id: string; score: number }[] = [];
@@ -532,7 +537,7 @@ async function denseRetriever(
       if (seen.has(n.id)) continue;
       seen.add(n.id);
       scored.push({ id: n.id, score: 1 - Math.max(0, Math.min(1, n.distance)) });
-      if (scored.length >= rankWindowSize) break;
+      if (scored.length >= denseWindow) break;
     }
     if (opts.tag && scored.length > 0) {
       const tagged = opts.repos.memory.idsWithTag(

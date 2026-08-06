@@ -129,7 +129,7 @@ Check, in order:
 2. **Archived projects are excluded.** They are refused at authentication for a direct connection too, so they are never candidates. Un-archiving restores them with no further step — the set is recomputed per call, not stored.
 3. **`project.list` on the same connection.** It applies the identical predicate, so the two can never disagree. If `project.list` shows a project that `searchedProjects` omits, that project is archived.
 
-A shorter page than the narrow search is a different thing and is also not a bug — see [Searching across projects](./agents.md#searching-across-projects). The relevance gate is computed over the widened pool, so a strong foreign match can cut home rows; `gateShortened: true` is the signal.
+A shorter page than the narrow search is a different thing and is also not a bug — see [Searching across projects](./agents.md#searching-across-projects). The relevance gate is computed over the widened pool, so a strong foreign match can cut home rows; `gateShortened: true` is the signal. A page that stays **full** but holds fewer of your own rows is the other case and carries no flag: foreign rows outranked yours, and the rows' own projects are what shows it.
 
 ### `-32602 unrecognized_keys` on `across_projects`
 

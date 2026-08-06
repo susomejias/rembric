@@ -281,6 +281,20 @@ try {
   const widths = [1, 2, 4, projects.length].filter(
     (n, i, a) => n <= projects.length && a.indexOf(n) === i,
   );
+  // I2 over the SHIPPED widening. The `shadow-*` arms below predate phase 4 and
+  // ration one window across the union on both branches; these draw a window per
+  // project, which is what the spec requires and what the service now does, so
+  // the two series are not interchangeable and are reported separately.
+  for (const n of widths) {
+    if (n === 1) continue;
+    const ids = setOf(n);
+    arms.push({
+      name: `shipped-${n === projects.length ? 'all' : n}`,
+      projectIds: ids,
+      scope: { kind: 'authorized-projects', projectIds: ids, homeProjectId: home.id },
+      service: shipped,
+    });
+  }
   for (const n of widths) {
     for (const divide of n === 1 ? [false] : [false, true]) {
       const ids = setOf(n);
@@ -311,7 +325,7 @@ try {
     arm.projectsSeen = new Set();
     arm.ids = [];
     for (let i = 0; i < WARMUP_QUERIES; i += 1) {
-      await arm.service.searchWithAbstention({ query: queries[i] }, scope);
+      await arm.service.searchWithAbstention({ query: queries[i] }, arm.scope ?? scope);
     }
   }
 
@@ -321,7 +335,7 @@ try {
     for (let a = 0; a < arms.length; a += 1) {
       const arm = arms[(a + i) % arms.length];
       const t0 = process.hrtime.bigint();
-      const result = await arm.service.searchWithAbstention({ query }, scope);
+      const result = await arm.service.searchWithAbstention({ query }, arm.scope ?? scope);
       const t1 = process.hrtime.bigint();
       arm.samples.push(Number(t1 - t0) / 1e6);
       arm.rowCounts.push(result.memories.length);
@@ -375,6 +389,7 @@ try {
   report.densePoolComposition = [];
   for (const arm of arms) {
     if (arm.name === 'shipped-narrow' || arm.name === 'overlay-passthrough') continue;
+    if (arm.name.startsWith('shipped-')) continue;
     const ids = arm.projectIds;
     const k = arm.divideWindow ? Math.max(1, Math.ceil(RANK_WINDOW / ids.length)) : RANK_WINDOW;
     const byProject = new Map();

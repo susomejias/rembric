@@ -444,7 +444,7 @@ The patterns live in one registry (`extractor-rules.ts`) where every rule must d
 
 The index backs three things, two of which need no agent opt-in:
 
-- **`memory.search({ entity })`** — every linked memory in scope, chronological, complete: no ranking, no cutoff. Combined with `query` it narrows rather than fuses, and with `across_projects` it answers "which of my projects mentions this file / CVE / host" — the branch has no ranking to distort, so widening it only adds rows. The 400-row completeness bound stays a bound on the response, not per project.
+- **`memory.search({ entity })`** — every linked memory in scope, chronological, complete: no ranking, no cutoff. Combined with `query` it narrows rather than fuses, and with `across_projects` it answers "which of my projects mentions this file / CVE / host" — the branch has no ranking to distort, so nothing is reordered by relevance. The 400-row completeness bound stays a bound on the response, not per project, so where an entity is linked more widely than that the newest rows across the set win and a home row can fall off the end.
 - **`memory.context`** — identifiers found in the session's focus text seed exact matches ahead of the ranked fallback (tagged `via: 'entity'`).
 - **Save-time conflict detection** — a new memory sharing a sufficiently _rare_ entity with an active one becomes a `candidates[]` entry, catching contradictions that share no vocabulary and sit far apart in embedding space. Common entities are gated out (the same idea as IDF, applied to link counts).
 
