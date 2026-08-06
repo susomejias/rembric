@@ -12,7 +12,7 @@ import {
   type NewMemory,
 } from '../schema/memory.js';
 
-import { idJsonSet, scopeCondition, scopeWhere } from './scope-clause.js';
+import { idJsonSet, projectIdsOf, scopeCondition, scopeWhere } from './scope-clause.js';
 
 // BM25 column weights for the interactive search lexical branch, in
 // `memory_fts` declaration order (content, tags, title). A title hit is a
@@ -273,6 +273,12 @@ export class MemoryRepository {
    * ordered by BM25 rank for a PRE-SANITIZED MATCH expression, bounded to a
    * rank window (no OFFSET — RRF fusion paginates in memory). Distinct from
    * the unscoped `adminSearchFts` and the save-time `searchBm25Candidates`.
+   *
+   * `limit` is the window EACH named project draws, not a total over the union:
+   * a single bound would let a foreign project displace home rows, so adding an
+   * authorized project would subtract from what the home project contributes
+   * (memory/spec.md, "the pool grows with the set rather than being rationed
+   * across it"). The rows stay in one global BM25 order across the whole set.
    */
   searchBm25Ids(opts: SearchBm25IdsOpts): { id: string; rank: number }[] {
     const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
@@ -283,9 +289,8 @@ export class MemoryRepository {
     const statusClause = opts.status
       ? sql`AND m.status = ${opts.status}`
       : sql`AND m.status != 'archived'`;
-    return this.db.all<{ id: string; rank: number }>(
-      sql`
-        SELECT m.id AS id, bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE}) AS rank
+    const rank = sql`bm25(memory_fts, ${FTS_WEIGHT_CONTENT}, ${FTS_WEIGHT_TAGS}, ${FTS_WEIGHT_TITLE})`;
+    const matched = sql`
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
         WHERE memory_fts MATCH ${opts.matchExpr}
@@ -293,9 +298,31 @@ export class MemoryRepository {
           ${statusClause}
           ${typeClause}
           ${tagClause}
-          ${topicKeyClause}
+          ${topicKeyClause}`;
+    // One project partitions into itself, so the window would only buy it a
+    // full materialisation of the match set where `ORDER BY … LIMIT` fills a
+    // bounded sorter. Emitting the narrow statement unchanged keeps that read's
+    // opcode stream identical, not merely its query plan.
+    if (projectIdsOf(opts.scope).length === 1) {
+      return this.db.all<{ id: string; rank: number }>(
+        sql`
+        SELECT m.id AS id, ${rank} AS rank${matched}
         ORDER BY rank
         LIMIT ${opts.limit}
+      `,
+      );
+    }
+    return this.db.all<{ id: string; rank: number }>(
+      sql`
+        SELECT id, rank FROM (
+          SELECT id, rank,
+                 ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY rank) AS project_rank
+          FROM (
+            SELECT m.id AS id, m.project_id AS project_id, ${rank} AS rank${matched}
+          )
+        )
+        WHERE project_rank <= ${opts.limit}
+        ORDER BY rank
       `,
     );
   }

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { scopeCondition, scopeWhere } from '../db/repositories/scope-clause.js';
@@ -280,7 +280,7 @@ describe('a widened dense read draws a full window per named partition', () => {
     expect(census.get(small)).toBe(3);
   });
 
-  it('adding another authorized project does not reduce what the home project contributes', async () => {
+  it('adding another authorized project does not reduce what the kNN draws from home', async () => {
     const two = await censusOf([home, small]);
     const three = await censusOf([home, small, third]);
     expect(three.get(home)).toBe(two.get(home));
@@ -456,9 +456,6 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
   });
 
   afterEach(() => db.cleanup());
-  afterAll(() => {
-    /* embedder has no teardown */
-  });
 
   it('the better foreign answer outranks every home row it outscores', async () => {
     const homeRows = [
@@ -581,4 +578,109 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
     expect(wide.ids).toContain(weak.id);
     expect(wide.ids.indexOf(weak.id)).toBe(4);
   }, 60_000);
+});
+
+describe('the candidates handed to fusion grow with the widened set', () => {
+  let db: TestDb;
+  let repos: Repositories;
+  let fake: FakeEmbedder;
+  let mem: MemoryService;
+  let home: string;
+  let away: string;
+  let third: string;
+  const WINDOW = computeRankWindowSize(8, 0);
+  const ROWS_PER_PROJECT = WINDOW + 26;
+  const TERM = 'rotation';
+
+  /**
+   * Byte-identical text in every project, foreign rows written FIRST. Both
+   * halves are load-bearing: with distinguishable text BM25 and the embedder
+   * rank the home rows above the foreign ones and the window never has to
+   * choose, so a shared window passes. Only a tie the insertion order breaks
+   * against home isolates the predicate from the ranking.
+   */
+  beforeEach(async () => {
+    db = createTestDb();
+    repos = createRepositories(db.handle.db);
+    const projects = new ProjectsService(repos);
+    home = projects.create({ slug: 'home' }).id;
+    away = projects.create({ slug: 'away' }).id;
+    third = projects.create({ slug: 'third' }).id;
+    fake = new FakeEmbedder();
+    mem = new MemoryService(repos, db.handle.db, undefined, (t) => fake.embed(t));
+
+    for (const projectId of [away, third, home]) {
+      for (let i = 0; i < ROWS_PER_PROJECT; i++) {
+        mem.save(
+          { type: 'user', title: 'Handoff note', content: `${TERM} handoff payload` },
+          projectScope(projectId),
+        );
+      }
+    }
+    const worker = new EmbeddingWorker({ repos, embedder: fake });
+    let guard = 0;
+    while ((await worker.processBatch()).processed > 0 && guard++ < 80) {
+      /* keep draining */
+    }
+  });
+
+  afterEach(() => db.cleanup());
+
+  const lexicalCensus = (scope: SearchScope) => {
+    const ids = repos.memory
+      .searchBm25Ids({ matchExpr: TERM, scope, limit: WINDOW })
+      .map((r) => r.id);
+    const meta = repos.memory.rankingMetadataByIds(ids);
+    const perProject = new Map<string, number>();
+    for (const id of ids) {
+      const projectId = meta.get(id)?.projectId ?? 'none';
+      perProject.set(projectId, (perProject.get(projectId) ?? 0) + 1);
+    }
+    return { size: ids.length, perProject };
+  };
+
+  it('the lexical branch draws a full window from the home project however wide the set is', () => {
+    const narrow = lexicalCensus(projectScope(home));
+    const two = lexicalCensus(widened(home, away));
+    const three = lexicalCensus(widened(home, away, third));
+
+    // Control: neither pool is empty, so a zero home count below is a
+    // statement about the window and not about a fixture that matched nothing.
+    expect(narrow.size).toBe(WINDOW);
+    expect(two.size).toBeGreaterThan(0);
+
+    expect(narrow.perProject.get(home)).toBe(WINDOW);
+    expect(two.perProject.get(home)).toBe(WINDOW);
+    expect(three.perProject.get(home)).toBe(WINDOW);
+    expect(two.perProject.get(away)).toBe(WINDOW);
+  });
+
+  it('the fused pool grows with the set rather than being rationed across it', async () => {
+    // A query no FTS row matches, so the pool IS the dense pool and the size
+    // below is that branch's alone.
+    const poolSizeFor = async (scope: SearchScope) => {
+      let poolSize = -1;
+      await hybridSearch({
+        repos,
+        embedQuery: (t) => fake.embed(t),
+        query: 'zqxjv',
+        scope,
+        status: 'active',
+        limit: 8,
+        offset: 0,
+        onGateWindow: (w) => {
+          poolSize = w.poolSize;
+        },
+      });
+      return poolSize;
+    };
+
+    const narrow = await poolSizeFor(projectScope(home));
+    const two = await poolSizeFor(widened(home, away));
+    const three = await poolSizeFor(widened(home, away, third));
+
+    expect(narrow).toBe(WINDOW);
+    expect(two).toBe(2 * WINDOW);
+    expect(three).toBe(3 * WINDOW);
+  });
 });

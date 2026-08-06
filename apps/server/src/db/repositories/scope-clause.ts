@@ -8,7 +8,7 @@ import { memory } from '../schema/memory.js';
  * `IN ()`, which SQLite answers with an empty result rather than an error — a
  * widening that resolved to nothing would silently return no rows.
  */
-function projectIdsOf(scope: SearchScope): readonly string[] {
+export function projectIdsOf(scope: SearchScope): readonly string[] {
   const ids = scope.kind === 'project' ? [scope.projectId] : scope.projectIds;
   if (ids.length === 0) throw new Error('scope addresses no project');
   return ids;
