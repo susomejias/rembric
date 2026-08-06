@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { createServer as createNetServer } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -7,6 +6,8 @@ import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';
 import { FakeEmbedder } from './embedder.js';
+
+import { findFreePort } from './index.js';
 
 /**
  * Local OAuth 2.1 end-to-end against a live server (no ChatGPT, no Docker,
@@ -22,24 +23,6 @@ import { FakeEmbedder } from './embedder.js';
 
 const ADMIN_TOKEN = 'oauth-e2e-admin-token-with-enough-entropy-xyz';
 const REDIRECT = 'https://chatgpt.example/callback';
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('expected AddressInfo'));
-        return;
-      }
-      const p = addr.port;
-      sock.close(() => resolve(p));
-    });
-  });
-}
 
 function pkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString('base64url');

@@ -1,5 +1,3 @@
-import { createServer as createNetServer } from 'node:net';
-
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,6 +15,8 @@ import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
+import { findFreePort } from './index.js';
+
 /**
  * `memory.search`'s cross-project argument, exercised through the MCP SDK
  * transport and never against a handler directly: a direct call bypasses the
@@ -28,24 +28,6 @@ import { FakeEmbedder } from './embedder.js';
  * assertions with the widening deleted, the authorization filter deleted, and
  * the predicate inverted alike.
  */
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('expected an AddressInfo'));
-        return;
-      }
-      const { port } = addr;
-      sock.close(() => resolve(port));
-    });
-  });
-}
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>;

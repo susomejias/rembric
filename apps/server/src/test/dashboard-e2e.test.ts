@@ -1,5 +1,3 @@
-import { createServer as createNetServer } from 'node:net';
-
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -12,6 +10,8 @@ import { REMBRIC_VERSION } from '../version.js';
 import { createTestDb } from './db.js';
 import { defaultProjectScope } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
+
+import { findFreePort } from './index.js';
 
 /**
  * 9.13 / 13.22 — dashboard end-to-end tests.
@@ -29,24 +29,6 @@ import { FakeEmbedder } from './embedder.js';
  *   - create + revoke a token (one-shot plaintext in redirect query)
  *   - CSRF rejection (POST without token returns 403)
  */
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('expected AddressInfo'));
-        return;
-      }
-      const p = addr.port;
-      sock.close(() => resolve(p));
-    });
-  });
-}
 
 interface CookieJar {
   cookie: string | null;
