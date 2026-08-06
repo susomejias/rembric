@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.27.0](https://github.com/susomejias/rembric/compare/server-v0.26.0...server-v0.27.0) (2026-08-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scope:** Scope has one arm. Every construction site in the tree and in the retrieval harness moves with it. No wire contract and no schema change.
+
+### Features
+
+* **corpus:** let seed-volumetric build a skewed multi-project corpus ([b296db2](https://github.com/susomejias/rembric/commit/b296db2f27185b7f497a42ed2b2269c3b0503c29))
+* **mcp:** build the widened search scope at one authorized site ([83bbd7d](https://github.com/susomejias/rembric/commit/83bbd7df76f0d3bcd3e3a709503e1bfc876e02f0))
+* **mcp:** let memory.search read the other projects a token may reach ([01e10b8](https://github.com/susomejias/rembric/commit/01e10b8e2c6f8de626b47d3060bf089adaea05d4))
+* **scope:** add the search-only scope a write cannot hold ([b94f73b](https://github.com/susomejias/rembric/commit/b94f73bba3d5c62a9a6fad96878ba738e2743872))
+* **search:** let the search path alone accept a widened scope ([963dcbe](https://github.com/susomejias/rembric/commit/963dcbeec31e653130d4f0ba389b34126787c039))
+* **search:** name every authorized partition in one kNN, and order the page totally ([64e3c71](https://github.com/susomejias/rembric/commit/64e3c7162d542c334d1b205f48ef0d09df771404))
+* **search:** serve the entity branch from every project the scope names ([62c7566](https://github.com/susomejias/rembric/commit/62c7566eb23f7024c56745e0e5489d8e9bd17bde))
+* **search:** serve the lexical and listing reads from the whole scope ([576340a](https://github.com/susomejias/rembric/commit/576340a830172a5af8a85f8b071a93eabb6573ee))
+
+
+### Bug Fixes
+
+* **consolidation:** stop the undo path from attempting a doomed reactivation ([d4d219a](https://github.com/susomejias/rembric/commit/d4d219a352fa652d37fb0e71d3060ce11c31d637))
+* **mcp:** widen across_projects' second trigger to the condition its spec states ([d8e997e](https://github.com/susomejias/rembric/commit/d8e997e9fc65bd5a5f4fb0515e3ca4af2f083a9b))
+* **search:** draw the candidate window per project, not once across the union ([ccc10b2](https://github.com/susomejias/rembric/commit/ccc10b2011ef8d71b06903a0f0326a8261503dba))
+* **test:** replace a raw NUL that made a test file binary to grep ([bb64085](https://github.com/susomejias/rembric/commit/bb6408570c376fcc6872537ba677e5f01724e9b1))
+
+
+### Refactor
+
+* **db:** let the scope clause builders address a set of projects ([6b46f1c](https://github.com/susomejias/rembric/commit/6b46f1c2d97d2472254c61bc40c3257a384ce2a0))
+* **db:** let the scope clause builders take the Scope, not its id ([83c2002](https://github.com/susomejias/rembric/commit/83c2002996508d1e9c040ea929757e5af58b5805))
+* **mcp:** delete the scope checks the collapse left always-true ([d0f6e0c](https://github.com/susomejias/rembric/commit/d0f6e0c288c6bc684e345a7d2961d4db737b2fcc))
+* **scope:** collapse Scope to its project arm ([bcfa172](https://github.com/susomejias/rembric/commit/bcfa172b933ebbfd44509e75c1d09c986e7adb88))
+* **search:** let the hybrid search options carry the scope value ([508a7f5](https://github.com/susomejias/rembric/commit/508a7f58181da050909bd19e192f19e6fc305b68))
+* **test:** give findFreePort one definition in the test barrel ([c5b3cdb](https://github.com/susomejias/rembric/commit/c5b3cdb0234c28f730e91f896dead364d34f379c))
+
 ## [0.26.0](https://github.com/susomejias/rembric/compare/server-v0.25.2...server-v0.26.0) (2026-08-05)
 
 
