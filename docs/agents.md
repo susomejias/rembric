@@ -22,18 +22,38 @@ Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown
 
 Every tool call is authorized against the token's scope and the connection's effective (resolved) scope — not just at connection time. A call with insufficient scope fails with `forbidden`; a `memory.judge`/`memory.compare` target outside the effective scope fails with `not_found` (existence never leaks across scopes).
 
-| Token scope          | Can call                                               | Cannot call                                                                          |
-| --------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `*`                   | Every tool, any scope                                  | —                                                                                     |
-| `read:*`              | Every read-classified tool, any scope                  | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) |
-| `project:<id>`        | Every tool, scoped to project `<id>` only              | Any tool whose effective scope resolves to another project                          |
-| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only   | Writes, and reads whose effective scope resolves to another project                 |
+| Token scope           | Can call                                             | Cannot call                                                                          | `across_projects` reaches |
+| --------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------- |
+| `*`                   | Every tool, any scope                                | —                                                                                    | every project             |
+| `read:*`              | Every read-classified tool, any scope                | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) | every project             |
+| `projects`            | Every tool, scoped to the projects the token names   | Any tool whose effective scope resolves outside that set                             | exactly those projects    |
+| `read:projects`       | Read-classified tools, scoped to that same set       | Writes, and reads whose effective scope resolves outside that set                    | exactly those projects    |
+| `project:<id>`        | Every tool, scoped to project `<id>` only            | Any tool whose effective scope resolves to another project                           | that one project          |
+| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only | Writes, and reads whose effective scope resolves to another project                  | that one project          |
 
-Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write.
+Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write. Mint a `projects` / `read:projects` token by ticking two or more projects on the create form — see [Tokens that reach several projects](./updates.md#tokens-that-reach-several-projects).
 
 **OAuth 2.1 — no static token.** OAuth-capable clients (Claude Code as a remote MCP server, ChatGPT custom connectors) can connect without minting a token: set `REMBRIC_PUBLIC_URL` (the https issuer; `http://localhost` allowed for local testing) and the server runs the authorization-code + PKCE flow itself. The client points at the same `…/mcp[/<slug>]` URL with **no `Authorization` header**; the first connect opens a consent screen where you sign in with the admin token and approve, after which the client manages the token (refresh included). It is off unless `REMBRIC_PUBLIC_URL` is set, and the static-token path above is unchanged — both kinds of token authenticate `/mcp` identically.
 
 The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` (Claude Code, Codex CLI) inject it into the system prompt. Other clients still get the same protocol via each tool's description.
+
+## Searching across projects
+
+One tool crosses the project boundary, and only when asked: `memory.search({across_projects: true})`. It is read-only, opt-in, and absent it behaves exactly as a server that does not implement it — the last column of the table above is the whole authorization rule, evaluated per candidate project, so a widened search never reaches a project the token could not open directly. Archived projects are never in the set: a connection at an archived project's slug is refused at authentication, so a widening that admitted one would serve rows the same token cannot ask for.
+
+No other surface widens. `memory.context`, `memory.get`, `memory.timeline`, `memory.stats`, the automatic recall paths and the HTTP `/api/<slug>/memory/search` endpoint all stay on one project and accept no such argument.
+
+The response says what actually happened rather than what was asked for:
+
+- **`searchedProjects[]`** — the slugs actually read. Present whenever the argument was passed, so a page of home-project rows is distinguishable from "my token only reaches one project".
+- **`widened: true`** — present only when more than one project was read. A `project:<id>` token that passes the argument gets its own slug in `searchedProjects` and **no** `widened` flag, because nothing widened; its page is byte-identical to its narrow one.
+
+Two behaviours worth knowing before you turn it on:
+
+- **A widened page can be _smaller_ than the narrow one, and can replace its rows entirely.** Ranking is pure relevance with no home-project preference, and the relevance gate is computed over the widened pool — so one strongly matching foreign row can cut home rows that were passing on their own. Measured on a real two-project corpus, a query returning 6 home rows narrow returned 1 foreign row widened, with `gateShortened: true`. That flag is the signal that a gate cut rows; a short page is not corpus exhaustion.
+- **It costs 1.3–2.6× a narrow search end to end**, measured through the real search path at 1 000 / 20 000 / 50 000 memories. Widening from a project holding most of the corpus is at the low end; widening from a small one is at the high end. That is why the tool's own description tells the model to widen only on an explicit ask or a genuinely broad exploration, rather than by habit.
+
+A widened read changes nothing about where writes go: `memory.save` on the same connection still lands in the connection's own project, and `memory.get` still answers `not_found` for a memory in another project — including one a widened search just returned.
 
 ## Reading prior context
 

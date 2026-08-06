@@ -409,7 +409,7 @@ Single Node process, single SQLite file, packaged as a multi-arch Docker image (
 Four load-bearing invariants:
 
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
-- **Project scoping by construction**: every memory is attached to exactly one `project_id`. Consolidation and relations never cross scope.
+- **Project scoping by construction**: every memory is attached to exactly one `project_id`. Consolidation, relations and every write never cross scope. One read may, and only when asked: `memory.search({across_projects: true})` reads the projects the connection's token is authorized to read and names them in `searchedProjects[]` — opt-in, read-only, and a compile error on any write path. See [docs/agents.md](./docs/agents.md#searching-across-projects).
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
@@ -444,7 +444,7 @@ The patterns live in one registry (`extractor-rules.ts`) where every rule must d
 
 The index backs three things, two of which need no agent opt-in:
 
-- **`memory.search({ entity })`** — every linked memory in scope, chronological, complete: no ranking, no cutoff. Combined with `query` it narrows rather than fuses.
+- **`memory.search({ entity })`** — every linked memory in scope, chronological, complete: no ranking, no cutoff. Combined with `query` it narrows rather than fuses, and with `across_projects` it answers "which of my projects mentions this file / CVE / host" — the branch has no ranking to distort, so widening it only adds rows. The 400-row completeness bound stays a bound on the response, not per project.
 - **`memory.context`** — identifiers found in the session's focus text seed exact matches ahead of the ranked fallback (tagged `via: 'entity'`).
 - **Save-time conflict detection** — a new memory sharing a sufficiently _rare_ entity with an active one becomes a `candidates[]` entry, catching contradictions that share no vocabulary and sit far apart in embedding space. Common entities are gated out (the same idea as IDF, applied to link counts).
 

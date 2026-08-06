@@ -119,6 +119,24 @@ Three possibilities:
 2. **FTS5 query syntax.** Default tokenizer treats `-`, `:`, `.` as separators. `agent-name` searches as two tokens.
 3. **Decay archived it.** Check the dashboard with `status=archived` (overview counters at `/dashboard` show archived totals too).
 
+### `searchedProjects` names fewer projects than expected
+
+That list is the token's read reach, not a bug and not a filter over what happened to match. `across_projects` widens to exactly the projects `isAuthorized(read)` admits for this token — the same set `project.list` shows it — so a token pinned to one project gets one slug back and no `widened` flag, whatever it asked for. An unauthorized widening is deliberately **dropped rather than refused**: the call succeeds and serves the resolved project's rows, which is why the list is there at all.
+
+Check, in order:
+
+1. **The token's scope**, at `/dashboard/tokens`. A `project:<id>` / `read:project:<id>` token reaches one project by definition; a `projects` / `read:projects` token reaches only the projects it names.
+2. **Archived projects are excluded.** They are refused at authentication for a direct connection too, so they are never candidates. Un-archiving restores them with no further step — the set is recomputed per call, not stored.
+3. **`project.list` on the same connection.** It applies the identical predicate, so the two can never disagree. If `project.list` shows a project that `searchedProjects` omits, that project is archived.
+
+A shorter page than the narrow search is a different thing and is also not a bug — see [Searching across projects](./agents.md#searching-across-projects). The relevance gate is computed over the widened pool, so a strong foreign match can cut home rows; `gateShortened: true` is the signal.
+
+### `-32602 unrecognized_keys` on `across_projects`
+
+The server predates the argument. Either the agent's plugin is newer than the server, or the server was rolled back to a release without it. It is fail-closed by design — strict tool schemas refuse an unknown property rather than ignoring it — but it is a hard error on every widened search rather than a degraded one, so the agent sees a failure instead of a narrow page. Drop the argument or upgrade the server; nothing is wrong with the data, and every non-widened search is unaffected.
+
+The same error naming `all_projects` means the client is sending a name that was never published. The argument is `across_projects`.
+
 ### `code: scope_locked`
 
 You connected to `/mcp/<slug>` and then asked to work in a different project — `project.use({slug: other})` or `memory.session_start({project: other})`. A path-scoped connection is locked to its own project, so use that slug instead. The agent cannot change its own URL — the bridge derives the path from `.rembric`, so only an operator can point the client somewhere else.
