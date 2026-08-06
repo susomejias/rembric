@@ -225,7 +225,7 @@ describe('MCP protocol conformance', () => {
 
     // Measured at the boundary the client reads, not off the constant.
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1842);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1856);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {

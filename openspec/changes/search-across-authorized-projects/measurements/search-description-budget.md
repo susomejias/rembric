@@ -161,3 +161,27 @@ leaves 56 characters of margin against 20, and `mcp-api/spec.md:2183` keeps a ma
 guard fires on approach rather than on arrival.
 
 Still not wired in: the clause lands in phase 5 with the argument, in one commit.
+
+## What actually shipped, and one deliberate departure from arm A
+
+Measured from a live `tools/list` after phase 5: **1856 characters, 44 of headroom.**
+
+Arm A's own arithmetic was off by two — reclaim 1 is 54 characters, not 53, and reclaim 3 is 76, not
+75 — so the arm left 58 spare rather than 56. One reclaim also cost less than this document priced it:
+re-homing the entity-kind list into `entity`'s own `describe()` turned out to be a **deletion, not a
+transfer**, because that `describe()` already listed the same kinds. The partial loss
+`mcp-api/spec.md:458` warns about is therefore not incurred at all.
+
+**The second trigger shipped broader than the wording recommended above, and 14 of those spare
+characters paid for it.** The recommended clause said the option is legitimate "when this project came
+back empty". The delta spec says "genuinely exploring broadly and the answer is not expected in the
+current project", and the owner's own words were "sólo para casos aislados o cuando el usuario lo
+solicite" — isolated cases **or** an explicit request. "Came back empty" is narrower than either: it
+admits only the case where the narrow search already failed, and a description that understates when an
+option is legitimate steers the model away from using it at all, which is the mirror of the overuse this
+requirement exists to prevent. The shipped clause reads "…or when the answer is not expected in this
+project", which is the delta spec's condition in the budget's register.
+
+Cost accounted: 1842 + 14 = **1856**, headroom 44, still the largest margin any candidate in this
+document leaves. The published length is pinned by test at the MCP boundary, so a later reword cannot
+drift the budget silently.
