@@ -124,7 +124,8 @@ it must on a non-widened query.
 ## 4. Baseline — narrow `memory.search`, before phase 1
 
 Instrument **I2 END-TO-END**. Six independent process runs per magnitude, each the p50/p90 of 40 timed
-queries. Raw JSON for every run is committed under `narrow-path-results/`.
+queries. The per-run JSONs are not committed; the harness above rewrites them and every value a
+conclusion rests on is tabulated here.
 
 | magnitude | p50 per repeat (ms)                               | p90 per repeat (ms)                           | median of the six p50s |
 | --------: | ------------------------------------------------- | --------------------------------------------- | ---------------------: |
@@ -191,7 +192,7 @@ separate them.
 already moved — with `node_modules` symlinked from the main tree, so the two arms differ in exactly one
 thing: the source under test. The runs are **interleaved**, before/after/before/after, six pairs per
 magnitude, against the identical corpus directories. Raw JSON for all 36 runs is committed under
-`narrow-path-results/paired-*.json`. Reproduce:
+the harness, which the reproduction below rewrites. Reproduce:
 
 ```sh
 git worktree add /root/rembric-before <pre-change-commit>
@@ -221,7 +222,7 @@ Every magnitude moves by less than the instrument's own repeat-to-repeat spread,
 which is what "no change" looks like on this instrument. **The 12% was machine state, not the collapse.**
 
 **Recorded rather than deleted, because the mistake is the finding.** The unpaired arms are still in
-`narrow-path-results/before-phase-1-*.json` and `after-phase-1-*.json`; the numbers in §4 are the
+the harness at each commit; the numbers in §4 are the
 unpaired before arm and are left as measured. What the episode establishes is a property of this
 instrument that §5 did not anticipate: **its between-process variance is dominated by machine state, so
 an arm measured at a different time is not comparable to one measured now, however many repeats each
@@ -293,7 +294,7 @@ magnitude per arm is 72 process runs per matrix.
 **The whole matrix was then run a second time, independently.** §4's bolded outliers and
 `vec-partition-capability.md` §4's bimodal cell are both cases where one run would have been believed;
 repeating a single suspicious cell only tests that cell, whereas repeating the matrix tests the
-comparison. Raw JSON for all 144 runs is committed under `narrow-path-results/paired4-m{1,2}-*.json`.
+comparison. The 144 per-run JSONs are not committed; the harness rewrites them.
 Machine load stayed at 1.4–1.7 throughout both, with no test suite or eval running.
 
 **One condition differs from §0 and is reported rather than reconciled:** §0 records 8 vCPU, and this
