@@ -10,7 +10,7 @@ A deterministic, offline harness that scores retrieval quality over a committed 
 
 The system SHALL provide an offline evaluation harness that ingests a committed corpus through the production write path, runs a committed query set against a retriever, and reports Precision@k, Recall@k, MRR, tokens returned, and p50/p95 latency. Scoring SHALL be fully deterministic: no language model participates in ingestion, retrieval, or grading. Gold units SHALL be memory ids, because the memory row is the retrieval unit.
 
-Each run SHALL emit per-query rows and an aggregate summary, and the aggregate SHALL include a breakdown per question type, so a regression can be localised rather than merely detected.
+Each run SHALL emit per-query rows and an aggregate summary, and the aggregate SHALL include a breakdown per question type, so a regression can be localised rather than merely detected. The per-question-type breakdown SHALL reach disk in the per-retriever report; `summary.json` carries the headline aggregate only, and its absence there is not a gap.
 
 #### Scenario: A run produces per-query and aggregate results
 
