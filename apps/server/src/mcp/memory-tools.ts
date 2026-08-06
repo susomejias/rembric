@@ -26,7 +26,7 @@ import {
   type RelationsService,
 } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import type { Scope } from '../services/scope.js';
+import type { Scope, SearchScope } from '../services/scope.js';
 
 import {
   assertAuthorized,
@@ -36,7 +36,9 @@ import {
   type EffectiveScope,
   requireScope,
   resolveEffectiveScope,
+  resolveSearchScope,
   routerKey,
+  searchedProjectSlugs,
   serializeMemory,
   snippet,
 } from './_shared.js';
@@ -135,6 +137,12 @@ export const memorySearchSchema = {
       "Return only memories carrying this exact topic_key. On its own it returns the topic's whole history — the active row plus every row it superseded — because that is what tells you whether the topic already converged before you save a synonym key; pass `status` too to narrow to one. Pair with memory.suggest_topic_key.",
     ),
   status: z.enum(MEMORY_STATUSES).optional(),
+  across_projects: z
+    .boolean()
+    .optional()
+    .describe(
+      'Also read the other projects this token is allowed to read — never one it is not. Leave it off for ordinary recall: pass it only when the user explicitly asks about other projects, or when this project answered nothing. `searchedProjects[]` in the response names the projects actually read, and `widened:true` appears only when that was more than one; a token that reaches a single project gets its ordinary result. Reads only — it does not change where memory.save writes, and memory.get still refuses an id from another project.',
+    ),
   include_relations: z
     .boolean()
     .optional()
@@ -357,6 +365,15 @@ export const memorySearchOutput = {
   memories: z.array(memoryRow),
   expanded: z.array(expandedMemoryRow).optional(),
   ...searchVerdict,
+  /**
+   * The slugs read, present whenever `across_projects` was requested — however
+   * authorization resolved it. An unauthorized widening is dropped and served
+   * rather than refused, so without this the caller cannot tell an exhaustive
+   * cross-project answer from a widening that did nothing.
+   */
+  searchedProjects: z.array(z.string()).optional(),
+  /** Reports the result, not the request: absent when only one project was read. */
+  widened: z.boolean().optional(),
   /** True when `entity` drove retrieval (exact-address, not ranked). */
   viaEntity: z.boolean().optional(),
   /**
@@ -857,6 +874,7 @@ async function handleSearch(
     tag?: string;
     topic_key?: string;
     status?: (typeof MEMORY_STATUSES)[number];
+    across_projects?: boolean;
     include_relations?: boolean;
     limit?: number;
     offset?: number;
@@ -866,12 +884,19 @@ async function handleSearch(
   },
 ) {
   let scope: Scope;
+  let searchScope: SearchScope;
   try {
-    scope = (await resolveEffectiveScope(deps)).scope;
+    const resolved = await resolveEffectiveScope(deps);
+    scope = resolved.scope;
+    // The resolved scope is authorized first, so the widening can only ever add
+    // projects to a call that was already allowed.
     assertAuthorized('read', scope, deps);
+    searchScope = resolveSearchScope(deps, resolved, args.across_projects);
   } catch (err) {
     return errToMcp(err);
   }
+  const searchedProjects =
+    args.across_projects === true ? searchedProjectSlugs(deps.projects, searchScope) : null;
 
   const input: SearchMemoriesInput = {
     query: args.query,
@@ -899,7 +924,7 @@ async function handleSearch(
 
   try {
     const { memories, abstained, abstainReason, gateShortened, viaEntity, entityIndexDraining } =
-      await deps.memory.searchWithAbstention(input, scope);
+      await deps.memory.searchWithAbstention(input, searchScope);
     const entitiesByMemory = deps.repos
       ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
       : new Map<string, { kind: string; value: string }[]>();
@@ -989,6 +1014,8 @@ async function handleSearch(
         return Object.fromEntries(Object.entries(full).filter(([k]) => fieldSet.has(k)));
       }),
       ...(expanded ? { expanded } : {}),
+      ...(searchedProjects ? { searchedProjects } : {}),
+      ...(searchedProjects && searchedProjects.length > 1 ? { widened: true } : {}),
       abstained,
       ...(abstainReason ? { abstainReason } : {}),
       ...(gateShortened ? { gateShortened } : {}),
