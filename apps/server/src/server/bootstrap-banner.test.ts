@@ -1,31 +1,13 @@
 import { readdirSync } from 'node:fs';
-import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createTestDb } from '../test/db.js';
 import { FakeEmbedder } from '../test/embedder.js';
+import { findFreePort } from '../test/index.js';
 
 import { createServer, type BootstrappedServer } from './index.js';
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('no port'));
-        return;
-      }
-      const p = addr.port;
-      sock.close(() => resolve(p));
-    });
-  });
-}
 
 const BANNER_ADMIN_TOKEN = 'banner-test-token-with-enough-entropy-xx';
 

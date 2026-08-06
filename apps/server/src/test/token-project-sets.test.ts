@@ -1,5 +1,3 @@
-import { createServer as createNetServer } from 'node:net';
-
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
@@ -17,6 +15,8 @@ import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';
 import { FakeEmbedder } from './embedder.js';
 
+import { findFreePort } from './index.js';
+
 /**
  * Authorization over a token's reach, exercised on the four boundaries a real
  * caller uses and never on a handler directly: the dashboard mint form
@@ -30,24 +30,6 @@ import { FakeEmbedder } from './embedder.js';
  * `type` is outside `MEMORY_TYPES`, or a session POST without an `id` matching
  * `^[A-Za-z0-9_-]{8,128}$`, is refused before authorization is ever consulted.
  */
-
-async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sock = createNetServer();
-    sock.unref();
-    sock.on('error', reject);
-    sock.listen(0, '127.0.0.1', () => {
-      const addr = sock.address();
-      if (!addr || typeof addr === 'string') {
-        sock.close();
-        reject(new Error('expected an AddressInfo'));
-        return;
-      }
-      const { port } = addr;
-      sock.close(() => resolve(port));
-    });
-  });
-}
 
 interface Jar {
   cookie: string | null;
