@@ -66,12 +66,15 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     throw new Error('rembric-plugin-core: createSessionProtocol requires an `agent`');
   }
 
-  const missingCredentials = !serverUrl || !apiToken;
-  const disabled = missingCredentials || !slug;
-  if (missingCredentials) {
-    diag('REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing; plugin disabled');
-  } else if (!slug) {
-    diag(`no PROJECT_SLUG in ${cwd ?? '.'}/.rembric; plugin disabled`);
+  const disabledReason =
+    !serverUrl || !apiToken
+      ? 'REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing'
+      : !slug
+        ? `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`
+        : null;
+  const disabled = disabledReason !== null;
+  if (disabledReason) {
+    diag(`${disabledReason}; plugin disabled`);
   }
 
   const baseUrl = serverUrl ? serverUrl.replace(/\/$/, '') : '';
@@ -269,6 +272,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
 
   return {
     disabled,
+    disabledReason,
     baseUrl,
     isSubAgent,
     markSubAgent,

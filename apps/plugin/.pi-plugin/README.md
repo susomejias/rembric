@@ -40,7 +40,7 @@ PROJECT_SLUG=my-app
 
 The extension reads `PROJECT_SLUG` and connects to `/mcp/my-app`, so the server pins that project for the whole session and no tool argument can reach another one. Add `.rembric` to your global gitignore if you prefer not to commit it.
 
-Without credentials, or without a `.rembric`, the extension disables itself with one line on stderr and Pi runs normally.
+Without credentials, or without a `.rembric`, the extension disables itself and Pi runs normally. It says which of the two is missing in a Pi notification, and on stderr.
 
 ## Verify
 

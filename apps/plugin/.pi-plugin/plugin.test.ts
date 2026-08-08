@@ -51,10 +51,13 @@ type RegisteredTool = {
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
+type Notification = { message: string; type?: string };
+
 type Harness = {
   tools: RegisteredTool[];
   handlers: Map<string, Handler>;
   ctx: { cwd: string; sessionManager: { getSessionId: () => string } };
+  notifications: Notification[];
   fire: (event: string, payload?: unknown) => Promise<unknown>;
 };
 
@@ -112,10 +115,16 @@ async function rawRpc(method: string, params: Record<string, unknown>): Promise<
   return JSON.parse(frame ?? body) as unknown;
 }
 
-function makeHarness(sessionId: string, dir = cwd): Harness {
+function makeHarness(sessionId: string, dir = cwd, withUi = true): Harness {
   const tools: RegisteredTool[] = [];
   const handlers = new Map<string, Handler>();
-  const ctx = { cwd: dir, sessionManager: { getSessionId: () => sessionId } };
+  const notifications: Notification[] = [];
+  const ui = { notify: (message: string, type?: string) => notifications.push({ message, type }) };
+  const ctx = {
+    cwd: dir,
+    sessionManager: { getSessionId: () => sessionId },
+    ...(withUi ? { ui } : {}),
+  };
   const api = {
     registerTool: (definition: RegisteredTool) => tools.push(definition),
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -125,6 +134,7 @@ function makeHarness(sessionId: string, dir = cwd): Harness {
     tools,
     handlers,
     ctx,
+    notifications,
     fire: async (event, payload = {}) => {
       const handler = handlers.get(event);
       if (!handler) throw new Error(`no handler registered for ${event}`);
@@ -739,6 +749,79 @@ describe('missing configuration disables the extension', () => {
       fetchSpy.mockRestore();
       stderr.mockRestore();
       process.env.REMBRIC_SERVER_URL = url;
+      process.env.REMBRIC_API_TOKEN = token;
+    }
+  });
+
+  it('names the missing configuration in the harness UI, where the operator can see it', async () => {
+    const token = process.env.REMBRIC_API_TOKEN;
+    delete process.env.REMBRIC_API_TOKEN;
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const harness = makeHarness('pi-no-credentials-ui');
+      await harness.fire('session_start');
+
+      expect(harness.notifications).toHaveLength(1);
+      expect(harness.notifications[0].type).toBe('warning');
+      expect(harness.notifications[0].message).toContain('REMBRIC_API_TOKEN');
+      expect(harness.notifications[0].message).not.toContain(String(token));
+    } finally {
+      stderr.mockRestore();
+      process.env.REMBRIC_API_TOKEN = token;
+    }
+  });
+
+  it('names the slug, not the credentials, when only the slug is missing', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'rembric-pi-noslug-'));
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const harness = makeHarness('pi-no-slug', bare);
+      await harness.fire('session_start');
+
+      expect(harness.notifications).toHaveLength(1);
+      expect(harness.notifications[0].message).toContain('PROJECT_SLUG');
+      // The credentials ARE set here, so naming them would be the wrong reason.
+      expect(harness.notifications[0].message).not.toContain('REMBRIC_API_TOKEN');
+    } finally {
+      stderr.mockRestore();
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a failed handshake in the harness UI', async () => {
+    const url = process.env.REMBRIC_SERVER_URL;
+    const token = process.env.REMBRIC_API_TOKEN;
+    process.env.REMBRIC_SERVER_URL = 'http://127.0.0.1:1';
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const harness = makeHarness('pi-handshake-failed-ui');
+      await harness.fire('session_start');
+
+      // Control: the credentials are present, so this is the discovery path and
+      // not the disabled one.
+      expect(harness.tools).toEqual([]);
+      expect(harness.notifications).toHaveLength(1);
+      expect(harness.notifications[0].type).toBe('error');
+      expect(harness.notifications[0].message).not.toContain(String(token));
+    } finally {
+      stderr.mockRestore();
+      process.env.REMBRIC_SERVER_URL = url;
+    }
+  });
+
+  it('still loads on a harness that supplies no notification channel', async () => {
+    const token = process.env.REMBRIC_API_TOKEN;
+    delete process.env.REMBRIC_API_TOKEN;
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const harness = makeHarness('pi-no-ui-channel', cwd, false);
+      await expect(harness.fire('session_start')).resolves.not.toThrow();
+
+      const lines = stderr.mock.calls.map((call) => String(call[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('REMBRIC_API_TOKEN');
+    } finally {
+      stderr.mockRestore();
       process.env.REMBRIC_API_TOKEN = token;
     }
   });

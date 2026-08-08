@@ -32,6 +32,7 @@ export type SessionProtocolOptions = {
 
 export type SessionProtocol = {
   readonly disabled: boolean;
+  readonly disabledReason: string | null;
   readonly baseUrl: string;
   isSubAgent(sessionId: string): boolean;
   markSubAgent(sessionId: string): void;
