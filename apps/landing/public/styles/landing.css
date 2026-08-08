@@ -610,7 +610,7 @@ a.brand:hover .brand-word {
 }
 .client-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--s-3);
 }
 .client {

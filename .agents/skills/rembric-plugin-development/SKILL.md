@@ -1,23 +1,26 @@
 ---
 name: rembric-plugin-development
-description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode, on edits to `apps/plugin/bin/rembric-bridge.mjs` or `apps/plugin/bin/rembric-dotenv.mjs`, on per-client manifest changes, or on plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
+description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode / Pi, on edits to `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs` or `apps/plugin/bin/rembric-plugin-core.mjs`, on per-client manifest changes, or on plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
 ---
 
 # Rembric plugin development
 
-Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,hermes-agent-plugin,opencode-plugin,plugin-session-protocol}/`. Archived decisions: `openspec/changes/archive/`.
+Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,hermes-agent-plugin,opencode-plugin,pi-plugin,plugin-session-protocol}/`. Archived decisions: `openspec/changes/archive/`.
 
 ## Mandatory workflow
 
 1. **OpenSpec change first.** Run `/opsx:propose` (or amend an existing change). Plugin work always touches ≥2 specs and ≥3 files. Skipping the change is the failure mode that produces drift.
-2. **Two release tracks: `server` + unified `plugin` (no cascade).** release-please runs exactly two components, no `node-workspace`/`linked-versions`/grouping. `server` (`apps/server`, package `@rembric/server`, tag `server-v*`) builds the Docker image. **`plugin`** (`apps/plugin` — the WHOLE tree, no `exclude-paths`, package `@rembric/plugin`, tag `plugin-v*`) carries **one unified version for all four clients**; its `extra-files` update every client carrier in lock-step (`.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.hermes-plugin/plugin.yaml`, `.opencode-plugin/plugin.ts` comment). A change to ANY plugin file bumps the single `plugin` version — claude/codex/opencode/hermes never diverge; the CHANGELOG (scoped by conventional commit) records what actually changed. A `plugin` release NEVER rebuilds the server image (`publish-docker` gates on `server_release_created`). `release-please.yml` carries a `concurrency` guard (`cancel-in-progress: false`) so a rapid second merge can't cancel tag-minting. The former six-component + `node-workspace` cascade was retired (change `unify-plugin-release-track`) after its anchor-tag fragility produced phantom release PRs. Legacy per-client tags (`claude-code-plugin-v*`, …) stay in history, inert.
+2. **Two release tracks: `server` + unified `plugin` (no cascade).** release-please runs exactly two components, no `node-workspace`/`linked-versions`/grouping. `server` (`apps/server`, package `@rembric/server`, tag `server-v*`) builds the Docker image. **`plugin`** (`apps/plugin` — the WHOLE tree, no `exclude-paths`, package `@rembric/plugin`, tag `plugin-v*`) carries **one unified version for all five clients**; its `extra-files` update every client carrier in lock-step (`.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.hermes-plugin/plugin.yaml`, `.opencode-plugin/plugin.ts` comment, `.pi-plugin/package.json`). A change to ANY plugin file bumps the single `plugin` version — claude/codex/opencode/hermes/pi never diverge; the CHANGELOG (scoped by conventional commit) records what actually changed. A `plugin` release NEVER rebuilds the server image (`publish-docker` gates on `server_release_created`), but it IS what publishes `@rembric/pi` to npm (trusted-publishing OIDC, provenance, no long-lived token). `.pi-plugin/` has to live inside `apps/plugin/` for that: release-please attributes a release by the paths of the commits under the component's `path`, so a client outside it would never _cause_ a release and its carrier would only move when something unrelated did. `release-please.yml` carries a `concurrency` guard (`cancel-in-progress: false`) so a rapid second merge can't cancel tag-minting. The former six-component + `node-workspace` cascade was retired (change `unify-plugin-release-track`) after its anchor-tag fragility produced phantom release PRs. Legacy per-client tags (`claude-code-plugin-v*`, …) stay in history, inert.
 3. **End-to-end against `pnpm run dev:docker:up`** before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
 4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
 
-## The two single-source-of-truth rules
+> **No tool watches the per-client manifest dirs for you.** `eslint.config.js` ignores `apps/plugin/*/**`, which matches the dot-directories, and none of them match `pnpm-workspace.yaml::packages` (`apps/*`, `packages/*`) — so `pnpm -r` does not reach them, ESLint does not lint their TypeScript, and any `dependencies` they declare are not installed by the repo's own install (`.claude-plugin/package.json`'s `workspace:*` dep is dead letter today). Their tests run **only** because `apps/server/vitest.config.ts::include` lists a literal glob per client; a new client without its glob leaves a test file written and never executed, and the suite is green on nothing.
+
+## The three single-source-of-truth rules
 
 - **`.rembric` is the only per-repo slug source.** Dotenv file with `PROJECT_SLUG=<lowercase-hyphen>`. Regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`.
-- **`apps/plugin/bin/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. Bridge imports it. opencode plugin imports it (via path rewritten by `install.sh`). Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
+- **`apps/plugin/bin/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. Bridge imports it. opencode plugin imports it (via path rewritten by `install.sh`). Pi extension imports it. Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
+- **`apps/plugin/bin/rembric-plugin-core.mjs` is the only JS/TS implementation** of the nudge strings, `stripPrivateTags`, `truncate`, `diag`, the session HTTP client, the transcript accumulator and the flush helpers. Both JS/TS clients (opencode, Pi) import it, which is what makes the nudge strings byte-identical and the `<private>` redaction identical **by construction** rather than by review. Its `agent` parameter is required with no default: `sessions.agent` is written once per session into append-only rows with no repair verb, so a default misfiles sessions permanently. `rembric-plugin-core.d.mts` is hand-written (`apps/plugin` has no build step and no typecheck) and is the only thing that makes the omission a compile error.
 
 Bash (`apps/plugin/scripts/_api.sh`) and Python (`apps/plugin/.hermes-plugin/__init__.py`) keep their own implementations — cross-language wrappers cost more than the duplication. They MUST agree on the regex value.
 
@@ -29,13 +32,14 @@ Each client has 3–5 non-obvious behaviors that bit us. **Before modifying that
 - **Codex CLI**: `${user_config.*}` is NOT substituted; subprocess env is **cleared** before MCP spawn → MUST list every needed var in `env_vars: [...]`; `${CLAUDE_PLUGIN_ROOT}` doesn't work in MCP args.
 - **Hermes Agent**: `plugin.yaml::hooks: [...]` array **gates lifecycle invocation** — overriding a method without listing the hook is a silent no-op.
 - **opencode**: every named export of a plugin file is invoked as a Plugin function — export ONLY `RembricPlugin`. The bridge MUST live outside `~/.config/opencode/plugins/`. Sub-agent filtering (`parentID || title.endsWith(" subagent)")`) is mandatory.
+- **Pi**: no built-in MCP (its own docs say so, deliberately) → this is the one client whose plugin holds the MCP client, discovering tools with `tools/list`; tools register under provider-safe names (`.`→`_`) because a real provider rejects the whole payload on a dot; shutdown is awaited but **Ctrl-C fires nothing in either mode**; nothing is injected from its settings file, so credentials come from the shell.
 
 ## Shared-vs-divergent discipline
 
 Per memory `01KRNZM2VFCME5HNT8N78HZW18`: shared logic lives in shared paths. Divergence is allowed ONLY when the platform forces it.
 
-- **MUST be shared**: `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs`, `apps/plugin/scripts/*.sh` (Claude+Codex hooks).
-- **Legitimately divergent today**: `hooks/hooks.json` vs `hooks/hooks.codex.json` (env-substitution rules differ); `.claude-plugin/mcp.json` vs `.codex-plugin/mcp.json` (`${CLAUDE_PLUGIN_ROOT}` works in one, not the other); Python in-process provider for Hermes; JS/TS in-process for opencode.
+- **MUST be shared**: `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs`, `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/scripts/*.sh` (Claude+Codex hooks), `apps/plugin/commands/*.md` (Pi consumes them verbatim as prompt templates — reference them, never copy).
+- **Legitimately divergent today**: `hooks/hooks.json` vs `hooks/hooks.codex.json` (env-substitution rules differ); `.claude-plugin/mcp.json` vs `.codex-plugin/mcp.json` (`${CLAUDE_PLUGIN_ROOT}` works in one, not the other); Python in-process provider for Hermes; JS/TS in-process for opencode; the MCP transport in `.pi-plugin/index.ts`, because that host has no MCP client for the bridge to plug into.
 
 Sanity check: `git ls-files apps/plugin/` should show ONE copy of each shared resource. Two paths with near-identical content is a sync bug.
 
@@ -91,8 +95,8 @@ Honest > glossing-over.
 If any answer is "no" or "I don't know", stop and resolve it.
 
 - [ ] OpenSpec change open or amended for this work
-- [ ] Two-track release respected (`server` + unified `plugin`; no node-workspace/cascade; all four clients share the one `plugin` version via `extra-files`; plugin release never rebuilds Docker)
-- [ ] No duplication of `parseDotenv` / `SLUG_RE` / endpoint strings without justification
+- [ ] Two-track release respected (`server` + unified `plugin`; no node-workspace/cascade; all five clients share the one `plugin` version via `extra-files`; plugin release never rebuilds Docker)
+- [ ] No duplication of `parseDotenv` / `SLUG_RE` / the `rembric-plugin-core` helpers / endpoint strings without justification
 - [ ] `pnpm vitest run` + `pnpm run typecheck` + `pnpm run lint` + `openspec validate <change> --strict` all clean
 - [ ] Exercised against `pnpm run dev:docker:up` (or explicitly told the user what isn't verified)
 - [ ] Docs sweep done (README, docs/agents.md, apps/plugin/README.md, in-plugin README, CHANGELOG)

@@ -1,152 +1,132 @@
 # Changelog
 
-All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent, opencode).
+All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi).
 
-The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all four per-client surfaces (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`, and the `// @rembric-plugin-version` comment in `plugin/.opencode-plugin/plugin.ts`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases use git tags of the form `plugin-vX.Y.Z` and are produced via `claude plugin tag --push` run from inside the `plugin/` directory.
+The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
 ## [0.24.0](https://github.com/susomejias/rembric/compare/plugin-v0.23.1...plugin-v0.24.0) (2026-08-05)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **mcp:** correction to the earlier note about the removed `include_global` and `scope` input properties: because every tool input schema is strict, a client that still sends either property is refused with JSON-RPC -32602 as an unknown property — it is NOT ignored. Pinned by the every-tool refusal test in `mcp-integration.test.ts`.
+- **mcp:** correction to the earlier note about the removed `include_global` and `scope` input properties: because every tool input schema is strict, a client that still sends either property is refused with JSON-RPC -32602 as an unknown property — it is NOT ignored. Pinned by the every-tool refusal test in `mcp-integration.test.ts`.
 
 ### Bug Fixes
 
-* **plugin:** stop promising a scope the server retired ([d0c0ac6](https://github.com/susomejias/rembric/commit/d0c0ac68740a0f458d0c8eec30348ed6bcb81d10))
-
+- **plugin:** stop promising a scope the server retired ([d0c0ac6](https://github.com/susomejias/rembric/commit/d0c0ac68740a0f458d0c8eec30348ed6bcb81d10))
 
 ### Documentation
 
-* **mcp:** correct the ignored-vs-refused release note for the removed properties ([9cb5571](https://github.com/susomejias/rembric/commit/9cb5571961e242b00203bbe08d90984e2b35011a))
+- **mcp:** correct the ignored-vs-refused release note for the removed properties ([9cb5571](https://github.com/susomejias/rembric/commit/9cb5571961e242b00203bbe08d90984e2b35011a))
 
 ## [0.23.1](https://github.com/susomejias/rembric/compare/plugin-v0.23.0...plugin-v0.23.1) (2026-07-30)
 
-
 ### Bug Fixes
 
-* **plugin:** stop the jq-less transcript fallback emitting file contents as prose ([7878808](https://github.com/susomejias/rembric/commit/787880823bd0175889143c4c05472ae0747e5be7))
+- **plugin:** stop the jq-less transcript fallback emitting file contents as prose ([7878808](https://github.com/susomejias/rembric/commit/787880823bd0175889143c4c05472ae0747e5be7))
 
 ## [0.23.0](https://github.com/susomejias/rembric/compare/plugin-v0.22.0...plugin-v0.23.0) (2026-07-28)
 
-
 ### Features
 
-* **sessions:** enrich the summary rubric and give it one source ([357ac56](https://github.com/susomejias/rembric/commit/357ac5634de9b9f46ab8d816d7767c8493f9a3a9))
-* **sessions:** extract deterministic facts from a Claude Code transcript ([013238a](https://github.com/susomejias/rembric/commit/013238acb7908b4d7b0b80210c21f09b5161a4a4))
-* **sessions:** move the summary reminder to the end of the turn, grounded in facts ([77564be](https://github.com/susomejias/rembric/commit/77564be5c4cfb3907c515867ed4d176446925113))
-* **sessions:** send extracted facts as the fallback summary body ([5c9e113](https://github.com/susomejias/rembric/commit/5c9e11326313df87a3978895aa570617dbaaba84))
-
+- **sessions:** enrich the summary rubric and give it one source ([357ac56](https://github.com/susomejias/rembric/commit/357ac5634de9b9f46ab8d816d7767c8493f9a3a9))
+- **sessions:** extract deterministic facts from a Claude Code transcript ([013238a](https://github.com/susomejias/rembric/commit/013238acb7908b4d7b0b80210c21f09b5161a4a4))
+- **sessions:** move the summary reminder to the end of the turn, grounded in facts ([77564be](https://github.com/susomejias/rembric/commit/77564be5c4cfb3907c515867ed4d176446925113))
+- **sessions:** send extracted facts as the fallback summary body ([5c9e113](https://github.com/susomejias/rembric/commit/5c9e11326313df87a3978895aa570617dbaaba84))
 
 ### Bug Fixes
 
-* **plugin:** reconcile three specs with the shipped tree, and gate what drifted ([878171b](https://github.com/susomejias/rembric/commit/878171bc0bb42a76a6d6fc3f62e99b13b600791c))
-* **plugin:** set the hook config explicitly in stop-nudge tests ([a9799fa](https://github.com/susomejias/rembric/commit/a9799fa89797dcc9342fbe2d980e8660243d18ae))
-* **sessions:** close a fact-injection hole and three more review findings ([9170804](https://github.com/susomejias/rembric/commit/917080452c1399d80c359a9eb00b283e8cf08d4d))
-* **sessions:** close the five findings the review left open ([78e304e](https://github.com/susomejias/rembric/commit/78e304ec2d898626798776b0867b4395449365e8))
-
+- **plugin:** reconcile three specs with the shipped tree, and gate what drifted ([878171b](https://github.com/susomejias/rembric/commit/878171bc0bb42a76a6d6fc3f62e99b13b600791c))
+- **plugin:** set the hook config explicitly in stop-nudge tests ([a9799fa](https://github.com/susomejias/rembric/commit/a9799fa89797dcc9342fbe2d980e8660243d18ae))
+- **sessions:** close a fact-injection hole and three more review findings ([9170804](https://github.com/susomejias/rembric/commit/917080452c1399d80c359a9eb00b283e8cf08d4d))
+- **sessions:** close the five findings the review left open ([78e304e](https://github.com/susomejias/rembric/commit/78e304ec2d898626798776b0867b4395449365e8))
 
 ### Documentation
 
-* **openspec:** archive ground-session-summaries ([ced66dd](https://github.com/susomejias/rembric/commit/ced66dd4a75508795487dfdc39e433bfd585af8c))
+- **openspec:** archive ground-session-summaries ([ced66dd](https://github.com/susomejias/rembric/commit/ced66dd4a75508795487dfdc39e433bfd585af8c))
 
 ## [0.22.0](https://github.com/susomejias/rembric/compare/plugin-v0.21.0...plugin-v0.22.0) (2026-07-25)
 
-
 ### Features
 
-* **recall:** add relevance channel, abstention, diversity cap, and procedural memory type ([6840d67](https://github.com/susomejias/rembric/commit/6840d6741293aa11cbb0f0380f39653a71456720))
-
+- **recall:** add relevance channel, abstention, diversity cap, and procedural memory type ([6840d67](https://github.com/susomejias/rembric/commit/6840d6741293aa11cbb0f0380f39653a71456720))
 
 ### Bug Fixes
 
-* repair 10 audited defects across sessions, consolidation, and memory retrieval ([cfb5c04](https://github.com/susomejias/rembric/commit/cfb5c047d88335495b5b7e42136dee84cc0cb6f0))
+- repair 10 audited defects across sessions, consolidation, and memory retrieval ([cfb5c04](https://github.com/susomejias/rembric/commit/cfb5c047d88335495b5b7e42136dee84cc0cb6f0))
 
 ## [0.21.0](https://github.com/susomejias/rembric/compare/plugin-v0.20.1...plugin-v0.21.0) (2026-07-17)
 
-
 ### Features
 
-* **installer:** update-all — action=update with no --agent updates every outdated plugin ([a188587](https://github.com/susomejias/rembric/commit/a188587c7dffd31a0920beca327eaf1cd025d733)), closes [#262](https://github.com/susomejias/rembric/issues/262)
-
+- **installer:** update-all — action=update with no --agent updates every outdated plugin ([a188587](https://github.com/susomejias/rembric/commit/a188587c7dffd31a0920beca327eaf1cd025d733)), closes [#262](https://github.com/susomejias/rembric/issues/262)
 
 ### Bug Fixes
 
-* **installer:** exit on ctrl-c in the arrow menu / banner reveal ([11baad7](https://github.com/susomejias/rembric/commit/11baad7227e2773cdfec5e5b0ee625fcf8cdd13a)), closes [#259](https://github.com/susomejias/rembric/issues/259)
-* **installer:** never relax an already-correctly-owned ./data on chown failure ([11e0b78](https://github.com/susomejias/rembric/commit/11e0b789840859d1008448cfb9e4ac07f8e0c5fd))
-* **installer:** repair ./data ownership before bring-up so the server can open its DB ([0e05816](https://github.com/susomejias/rembric/commit/0e05816fd3bbc4cd9175c0a4d37a2a072fbfa313))
-* **plugin:** dotenv trailing trim, full C0 json-escape, no-discard transcript, fail-closed nudge ([f40dd3a](https://github.com/susomejias/rembric/commit/f40dd3a241a16c57cc524b55d4b707e85a431c65)), closes [#260](https://github.com/susomejias/rembric/issues/260)
-* **plugin:** hermes slug precedence, suppression propagation, opencode resume gap ([377fc8d](https://github.com/susomejias/rembric/commit/377fc8d684304d200ac0384864fb4376531b180e))
+- **installer:** exit on ctrl-c in the arrow menu / banner reveal ([11baad7](https://github.com/susomejias/rembric/commit/11baad7227e2773cdfec5e5b0ee625fcf8cdd13a)), closes [#259](https://github.com/susomejias/rembric/issues/259)
+- **installer:** never relax an already-correctly-owned ./data on chown failure ([11e0b78](https://github.com/susomejias/rembric/commit/11e0b789840859d1008448cfb9e4ac07f8e0c5fd))
+- **installer:** repair ./data ownership before bring-up so the server can open its DB ([0e05816](https://github.com/susomejias/rembric/commit/0e05816fd3bbc4cd9175c0a4d37a2a072fbfa313))
+- **plugin:** dotenv trailing trim, full C0 json-escape, no-discard transcript, fail-closed nudge ([f40dd3a](https://github.com/susomejias/rembric/commit/f40dd3a241a16c57cc524b55d4b707e85a431c65)), closes [#260](https://github.com/susomejias/rembric/issues/260)
+- **plugin:** hermes slug precedence, suppression propagation, opencode resume gap ([377fc8d](https://github.com/susomejias/rembric/commit/377fc8d684304d200ac0384864fb4376531b180e))
 
 ## [0.20.1](https://github.com/susomejias/rembric/compare/plugin-v0.20.0...plugin-v0.20.1) (2026-07-15)
 
-
 ### Bug Fixes
 
-* **plugin:** correct awk transcript fallback (regexp constant as function arg) ([10fca8b](https://github.com/susomejias/rembric/commit/10fca8bced5614240695320cab3c59b4ef7f610f))
+- **plugin:** correct awk transcript fallback (regexp constant as function arg) ([10fca8b](https://github.com/susomejias/rembric/commit/10fca8bced5614240695320cab3c59b4ef7f610f))
 
 ## [0.20.0](https://github.com/susomejias/rembric/compare/plugin-v0.19.0...plugin-v0.20.0) (2026-07-13)
 
-
 ### Features
 
-* **mcp:** reinforce explicit sessionId across session-attaching tools ([b14368d](https://github.com/susomejias/rembric/commit/b14368d8c6814840f1c4b88eca5e24c185f84191))
+- **mcp:** reinforce explicit sessionId across session-attaching tools ([b14368d](https://github.com/susomejias/rembric/commit/b14368d8c6814840f1c4b88eca5e24c185f84191))
 
 ## [0.19.0](https://github.com/susomejias/rembric/compare/plugin-v0.18.1...plugin-v0.19.0) (2026-07-13)
 
-
 ### Features
 
-* **plugin:** calibrate curation nudges + Hermes per-turn title parity ([db3092e](https://github.com/susomejias/rembric/commit/db3092ed3e14b5a589661c99d15bf6737aecad65))
-
+- **plugin:** calibrate curation nudges + Hermes per-turn title parity ([db3092e](https://github.com/susomejias/rembric/commit/db3092ed3e14b5a589661c99d15bf6737aecad65))
 
 ### Bug Fixes
 
-* **server:** truncate over-length session summary/title instead of rejecting ([6d77846](https://github.com/susomejias/rembric/commit/6d7784632f28127c89061c6c85278c5f0add0114))
+- **server:** truncate over-length session summary/title instead of rejecting ([6d77846](https://github.com/susomejias/rembric/commit/6d7784632f28127c89061c6c85278c5f0add0114))
 
 ## [0.18.1](https://github.com/susomejias/rembric/compare/plugin-v0.18.0...plugin-v0.18.1) (2026-07-12)
 
-
 ### Bug Fixes
 
-* **plugin:** capture opencode assistant text and stop crashing on injected nudges ([ef4ac49](https://github.com/susomejias/rembric/commit/ef4ac499ced8e13ac2480e20b84491a3d93b158c))
-* **plugin:** log Hermes prefetch/on_turn_start invocation to stderr ([07a92ff](https://github.com/susomejias/rembric/commit/07a92ff9b5157b6febed2ef737ee2b3193601218))
+- **plugin:** capture opencode assistant text and stop crashing on injected nudges ([ef4ac49](https://github.com/susomejias/rembric/commit/ef4ac499ced8e13ac2480e20b84491a3d93b158c))
+- **plugin:** log Hermes prefetch/on_turn_start invocation to stderr ([07a92ff](https://github.com/susomejias/rembric/commit/07a92ff9b5157b6febed2ef737ee2b3193601218))
 
 ## [0.18.0](https://github.com/susomejias/rembric/compare/plugin-v0.17.1...plugin-v0.18.0) (2026-07-12)
 
-
 ### Features
 
-* **plugin:** unify save+summary nudges on one per-turn channel ([5a5cd9b](https://github.com/susomejias/rembric/commit/5a5cd9b6b949a521c5e4a0368da6b141b499746f))
-
+- **plugin:** unify save+summary nudges on one per-turn channel ([5a5cd9b](https://github.com/susomejias/rembric/commit/5a5cd9b6b949a521c5e4a0368da6b141b499746f))
 
 ### Bug Fixes
 
-* **plugin:** document merge-commit requirement for release-please ([7be1784](https://github.com/susomejias/rembric/commit/7be178442800ba06bc3c3f60b0d80631be5f6f26))
+- **plugin:** document merge-commit requirement for release-please ([7be1784](https://github.com/susomejias/rembric/commit/7be178442800ba06bc3c3f60b0d80631be5f6f26))
 
 ## [0.17.1](https://github.com/susomejias/rembric/compare/plugin-v0.17.0...plugin-v0.17.1) (2026-07-12)
 
-
 ### Bug Fixes
 
-* **installer:** drop the removed codex plugin_hooks step ([33c5ece](https://github.com/susomejias/rembric/commit/33c5ece10a864fa439e31cd48cc716f8cffb96cd))
-* **plugin:** stop referencing user_config in shell-form hook commands ([42590d1](https://github.com/susomejias/rembric/commit/42590d11d31ed0a754506dc20e6e9bf1a8391529))
+- **installer:** drop the removed codex plugin_hooks step ([33c5ece](https://github.com/susomejias/rembric/commit/33c5ece10a864fa439e31cd48cc716f8cffb96cd))
+- **plugin:** stop referencing user_config in shell-form hook commands ([42590d1](https://github.com/susomejias/rembric/commit/42590d11d31ed0a754506dc20e6e9bf1a8391529))
 
 ## [0.17.0](https://github.com/susomejias/rembric/compare/plugin-v0.16.2...plugin-v0.17.0) (2026-07-12)
 
-
 ### Features
 
-* improve recall ranking and cross-client plugin parity ([#228](https://github.com/susomejias/rembric/issues/228)) ([42e9809](https://github.com/susomejias/rembric/commit/42e98093c6ea7c9364dcd3eddbd605379368ffd8))
-* **plugin:** proactive save nudges across all four clients ([#232](https://github.com/susomejias/rembric/issues/232)) ([fd17431](https://github.com/susomejias/rembric/commit/fd17431514c61853774a9eb3d38dc8e07a53cd23))
+- improve recall ranking and cross-client plugin parity ([#228](https://github.com/susomejias/rembric/issues/228)) ([42e9809](https://github.com/susomejias/rembric/commit/42e98093c6ea7c9364dcd3eddbd605379368ffd8))
+- **plugin:** proactive save nudges across all four clients ([#232](https://github.com/susomejias/rembric/issues/232)) ([fd17431](https://github.com/susomejias/rembric/commit/fd17431514c61853774a9eb3d38dc8e07a53cd23))
 
 ## [0.16.2](https://github.com/susomejias/rembric/compare/plugin-v0.16.1...plugin-v0.16.2) (2026-07-08)
 
-
 ### Bug Fixes
 
-* **plugin:** harden installer bring-up, hook transport, and bridge pinning ([#217](https://github.com/susomejias/rembric/issues/217)) ([77cbc2f](https://github.com/susomejias/rembric/commit/77cbc2fe6a775bfe5988f60a30950c4ea70a378e))
-* **plugin:** redact &lt;private&gt; spans in bash and python clients ([#216](https://github.com/susomejias/rembric/issues/216)) ([c83bdcb](https://github.com/susomejias/rembric/commit/c83bdcb168bb3969c2471bf26b1aba1b309aa76b))
+- **plugin:** harden installer bring-up, hook transport, and bridge pinning ([#217](https://github.com/susomejias/rembric/issues/217)) ([77cbc2f](https://github.com/susomejias/rembric/commit/77cbc2fe6a775bfe5988f60a30950c4ea70a378e))
+- **plugin:** redact &lt;private&gt; spans in bash and python clients ([#216](https://github.com/susomejias/rembric/issues/216)) ([c83bdcb](https://github.com/susomejias/rembric/commit/c83bdcb168bb3969c2471bf26b1aba1b309aa76b))
 
 ## [0.16.1](https://github.com/susomejias/rembric/compare/plugin-v0.16.0...plugin-v0.16.1) (2026-07-07)
 

@@ -50,7 +50,7 @@ Two failure modes to avoid, both of which have bitten this repo:
 
 - Conventional Commits (commitlint). Never bypass hooks.
 - **Comments in code are minimal by policy** — one line documenting a non-obvious why, never a banner or a restatement. If your tasks tell an implementer to document something, they should point at the spec, not at a code comment block.
-- The plugin tree ships to FOUR clients; a plugin change means one shared resource, not four copies.
+- The plugin tree ships to FIVE clients; a plugin change means one shared resource, not five copies.
 
 ## Report
 

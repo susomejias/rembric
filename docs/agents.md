@@ -1,6 +1,6 @@
 # Agent integration
 
-Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, and **opencode**. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no plugin) — see [ChatGPT](#chatgpt-custom-mcp-connector-over-oauth).
+Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, **opencode**, and **Pi**. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no plugin) — see [ChatGPT](#chatgpt-custom-mcp-connector-over-oauth).
 
 > **Install with the TUI — the single, recommended path.** [`install.sh`](../install.sh) (canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`) is one brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Pin a release with `--ref=<tag>`. The per-client commands in the sections below are what the installer runs under the hood — documented here as the **manual fallback**.
 
@@ -306,7 +306,7 @@ Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider
 
 ### opencode (bundled plugin)
 
-**Primary path: the TUI installer** (`sh install.sh` → Plugins → opencode). The `curl | sh` two-step below is the manual fallback. [opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four clients.
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → opencode). The `curl | sh` two-step below is the manual fallback. [opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four of the five clients (Pi is the exception: it ships no MCP client, so its extension speaks MCP itself).
 
 v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-output capture (`tool.execute.after`); their HTTP endpoints (`/api/<slug>/prompts/passive`, `/api/<slug>/observations/passive`) do not exist on Rembric's API yet and land in a follow-up change.
 
@@ -366,6 +366,64 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 
 opencode does not cache plugins by version. Re-run the curl-pipe-sh command above — the script fetches the latest files from `main` and overwrites the three installed files. Restart opencode.
 
+### Pi (npm-published extension)
+
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → pi). The `pi install` command below is the manual fallback. [Pi](https://pi.dev) is the only client whose Rembric plugin speaks MCP by itself, because Pi ships no MCP client on purpose — verbatim from its own docs (`packages/coding-agent/docs/usage.md:303`): _"It intentionally does not include built-in MCP…"_. So there is no `rembric-bridge.mjs` on this path: the extension opens Streamable HTTP against `${REMBRIC_SERVER_URL}/mcp/<slug>` with `Authorization: Bearer`, calls `tools/list` at startup, registers whatever comes back and proxies each invocation to `tools/call`. It enumerates no tool names, so adding or renaming a server tool needs no extension change.
+
+Session lifecycle, per-turn nudges and `<private>` redaction come from the same shared module the opencode plugin uses (`apps/plugin/bin/rembric-plugin-core.mjs`), registering sessions with `agent='pi'`.
+
+#### Install
+
+```bash
+pi install npm:@rembric/pi
+```
+
+**Never append a version.** A package spec that names a version is treated as pinned, and pinned extensions are skipped by both `pi update --extensions` and `pi update --all` — the update command reports success and freezes you at that version indefinitely.
+
+#### Configure
+
+Pi injects nothing from its own settings file, so the credentials live in the shell environment (as with Hermes and the in-process side of opencode). There is no settings-file alternative:
+
+```bash
+export REMBRIC_SERVER_URL=https://memory.example.com
+export REMBRIC_API_TOKEN=pi-token-XXXXXXXX
+```
+
+Per-project path-scoping uses `.rembric` in each repo, the same convention as every other client:
+
+```
+PROJECT_SLUG=my-app
+```
+
+The extension reads it with the shared parser at startup and builds `/mcp/<slug>`, so the server pins the project on connect. A slug naming no project is refused with `project_not_found` rather than falling back to the default project.
+
+The four shared command files (`apps/plugin/commands/{context,recall,remember,summary}.md`) are exposed as Pi prompt templates verbatim — same frontmatter, same `$ARGUMENTS`, no per-client copies.
+
+#### Verify
+
+1. Start Pi in a repo with a valid `.rembric`.
+2. Ask the agent to list its tools. The Rembric ones appear with underscores (`memory_save`, not `memory.save`); the proxied call still reaches the server under its canonical dotted name.
+3. Save a test memory, then check `/dashboard/memories` for the row.
+4. `/dashboard/sessions` shows a new row with `agent='pi'`.
+
+#### Session close is awaited — except on Ctrl-C
+
+Pi awaits its session-shutdown handler with no timeout, so the final summary POST completes instead of racing process exit (measured against Pi 0.84.1: a 10 s awaited fetch completes, and so does a full MCP `tools/call` issued from inside the handler). SIGTERM and SIGHUP both reach it; SIGKILL runs nothing.
+
+**Ctrl-C does not trigger it, in either mode.** In print mode SIGINT is not registered — `dist/modes/print-mode.js:32` reads `const signals = ["SIGTERM"]`, with SIGHUP wired separately. The interactive TUI behaves the same way, measured rather than assumed: under a pty with keys delivered at t=4 s and stdin held open to t=14 s, Ctrl-C left the handler firing at 13.6 s (the stdin EOF, byte-identical to the no-keys control), while **Ctrl-D fired it at 3.6 s**. Exit with Ctrl-D. The per-turn flush keeps the server's summary current, so a Ctrl-C costs at most the last turn.
+
+#### Troubleshooting
+
+- **No Rembric tools registered, one stderr line naming missing configuration.** `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is unset in the shell that launched Pi. Pi will not read them from its settings file.
+- **`project_not_found` on connect.** `.rembric` names a `PROJECT_SLUG` with no matching project. Create it at `/dashboard/projects` or fix the slug — the server refuses rather than widening the scope.
+- **No session row appears.** Missing or invalid `.rembric`; check stderr for the `[rembric] no project slug` line.
+- **Session ends with no summary.** You exited with Ctrl-C. See above — exit with Ctrl-D.
+- **`pi update --all` reports nothing to update.** The extension was installed with a version suffix and is therefore pinned. Re-run `pi install npm:@rembric/pi` with no version.
+
+#### Updating the extension
+
+Re-run `pi install npm:@rembric/pi` — idempotent, and it always resolves the latest published version. Restart Pi afterwards.
+
 ### Codex CLI (manual config.toml, no plugin)
 
 If you do not want to install the plugin, wire Codex to Rembric directly over Streamable HTTP. The trade-off: the slug is hardcoded in the URL, so you must edit `~/.codex/config.toml` (or maintain multiple `[mcp_servers.X]` blocks) when switching projects.
@@ -406,7 +464,7 @@ The proactive-save protocol embedded in `initialize.instructions` already tells 
 
 ## Private content redaction (`<private>` tags)
 
-All four bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode) redact `<private>…</private>` spans to `[REDACTED]` in every transcript-derived upload — session summaries, pre/post-compact snapshots, and derived titles — **before the payload leaves the client**. Matching is case-insensitive and spans newlines; each span closes at the first `</private>`, and an unclosed `<private>` redacts through end-of-text (fail closed). The server never sees the marked content and does not strip the tags itself, so clients connecting without a bundled plugin do not get this redaction.
+All five bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi) redact `<private>…</private>` spans to `[REDACTED]` in every transcript-derived upload — session summaries, pre/post-compact snapshots, and derived titles — **before the payload leaves the client**. Matching is case-insensitive and spans newlines; each span closes at the first `</private>`, and an unclosed `<private>` redacts through end-of-text (fail closed). The server never sees the marked content and does not strip the tags itself, so clients connecting without a bundled plugin do not get this redaction.
 
 ## Verifying
 

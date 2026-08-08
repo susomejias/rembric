@@ -36,7 +36,7 @@ For migrations, read `CLAUDE.md § Table-rebuild migrations` before proposing on
 - TypeScript strict. No `any` or `as unknown as T` without a justifying comment. No floating promises.
 - **Default to no comments.** Comment only where absence costs a future reader real time: a magic number, a hidden invariant, an ordering constraint, a library quirk. One line. **Never** a banner (`// ─────`, `// === API ===`), never a structural label naming the block below, never a docstring paraphrasing the signature, and **never a reference to the change name, a PR, a task number, or "Decision N"** — those paths move to `archive/` and the reference dies. This is enforced socially and has been raised repeatedly; over-commenting is a real review finding here.
 - Dashboard: timestamps go through `formatTs`; destructive actions use the `data-confirm` modal with attributes on the `<form>` (`danger` irreversible, `warn` reversible); CSS lives in `styles/`, never inline `<style>`.
-- Plugin work: `apps/plugin/` ships to FOUR clients. ONE copy of each shared resource — verify with `git ls-files apps/plugin/`. Consult the `rembric-plugin-development` skill first.
+- Plugin work: `apps/plugin/` ships to FIVE clients. ONE copy of each shared resource — verify with `git ls-files apps/plugin/`. Consult the `rembric-plugin-development` skill first.
 - Adding a dependency: consult the `npm-security-best-practices` skill first. Non-negotiable.
 
 ## Verify before you claim done
