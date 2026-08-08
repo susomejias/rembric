@@ -366,7 +366,7 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 
 opencode does not cache plugins by version. Re-run the curl-pipe-sh command above — the script fetches the latest files from `main` and overwrites the three installed files. Restart opencode.
 
-### Pi (npm-published extension)
+### Pi (npm package)
 
 **Primary path: the TUI installer** (`sh install.sh` → Plugins → pi). The `pi install` command below is the manual fallback. [Pi](https://pi.dev) is the only client whose Rembric plugin speaks MCP by itself, because Pi ships no MCP client on purpose — verbatim from its own docs (`packages/coding-agent/docs/usage.md:303`): _"It intentionally does not include built-in MCP…"_. So there is no `rembric-bridge.mjs` on this path: the extension opens Streamable HTTP against `${REMBRIC_SERVER_URL}/mcp/<slug>` with `Authorization: Bearer`, calls `tools/list` at startup, registers whatever comes back and proxies each invocation to `tools/call`. It enumerates no tool names, so adding or renaming a server tool needs no extension change.
 
