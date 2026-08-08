@@ -1,9 +1,9 @@
 /**
  * The canonical structure of a session summary, defined once.
  *
- * TypeScript surfaces import from here; bash, Python and the opencode plugin keep
- * their own copies for the usual cross-language reason and are held to this text
- * by `invariants.test.ts::"the session-summary rubric has one source"`.
+ * TypeScript surfaces import from here; bash, Python and the shared plugin core
+ * keep their own copies for the usual cross-language reason and are held to this
+ * text by `invariants.test.ts::"the session-summary rubric has one source"`.
  *
  * Only the SHORT form lives here: it is what the TypeScript surfaces interpolate.
  * The long form has no TypeScript consumer — its only consumer is the end-of-turn

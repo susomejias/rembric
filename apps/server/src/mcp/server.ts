@@ -295,7 +295,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_start',
     {
       description:
-        "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode providers POST to the sessions endpoint on startup). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session.",
+        "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode/Pi providers POST to the sessions endpoint). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session.",
       inputSchema: sessionStartSchema,
       outputSchema: sessionStartOutput,
       annotations: WRITE_ANNOTATIONS('Start session'),

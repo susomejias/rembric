@@ -711,7 +711,7 @@ describe('MCP protocol conformance', () => {
     it.each([
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 624],
+      ['memory.session_start', 616],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
       ['memory.save', 1549],
