@@ -18,6 +18,6 @@ Rembric (from _remember + fabric_) is the persistent memory layer beneath AI cod
 ## Key facts
 
 - License: MIT, open source
-- Supported clients: first-class plugins for Claude Code, Codex CLI, Hermes Agent, and opencode; ChatGPT via a custom MCP connector over OAuth 2.1; any other MCP client (Cursor, Windsurf, Claude Desktop, Cline, Goose, Gemini CLI, …) over a plain MCP URL
+- Supported clients: first-class plugins for Claude Code, Codex CLI, Hermes Agent, opencode, and Pi; ChatGPT via a custom MCP connector over OAuth 2.1; any other MCP client (Cursor, Windsurf, Claude Desktop, Cline, Goose, Gemini CLI, …) over a plain MCP URL
 - Core properties: append-only and reversible, scope enforced per-project, deterministic consolidation (no cron, no LLM), built-in operator dashboard
 - Distribution: single Docker image; the landing site is static (no backend)

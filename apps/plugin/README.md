@@ -1,6 +1,6 @@
 # Rembric — agent plugins
 
-Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, four per-client surfaces.
+Memory for AI coding agents, backed by your self-hosted [Rembric](https://github.com/susomejias/rembric) server. One source tree, five per-client surfaces.
 
 **Install everything with the TUI.** The single installer prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version:
 
@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 less rembric-install.sh && sh rembric-install.sh
 ```
 
-It is an orchestrator — it routes to each client's real mechanism (the per-client scripts for Hermes/opencode, the marketplace CLIs for Claude/Codex), which remain available as the manual fallback below.
+It is an orchestrator — it routes to each client's real mechanism (the per-client scripts for Hermes/opencode, the marketplace CLIs for Claude/Codex, the client's own registry CLI for Pi), which remain available as the manual fallback below.
 
 | Client           | Manifest dir        | Docs                                                                       |
 | ---------------- | ------------------- | -------------------------------------------------------------------------- |
@@ -18,6 +18,7 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 | **Codex CLI**    | `.codex-plugin/`    | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
 | **Hermes Agent** | `.hermes-plugin/`   | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)       |
 | **opencode**     | `.opencode-plugin/` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)   |
+| **Pi**           | `.pi-plugin/`       | [`apps/plugin/.pi-plugin/README.md`](./.pi-plugin/README.md)               |
 
 <details>
 <summary><strong>Manual install</strong> (per-client, fallback — what the TUI runs under the hood)</summary>
@@ -28,10 +29,11 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 | **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin add rembric@rembric`                                                                                  |
 | **Hermes Agent** | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                           |
 | **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` then paste the printed MCP block into `~/.config/opencode/opencode.json` |
+| **Pi**           | `pi install npm:@rembric/pi` then export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN` in your shell. Never append a version — a pinned spec is skipped by `pi update --extensions` / `--all`    |
 
 </details>
 
-The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md).
+The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md). For Pi see [`plugin/.pi-plugin/README.md`](./.pi-plugin/README.md).
 
 > **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
 
@@ -149,7 +151,7 @@ Pick something stable, lowercase, hyphen-separated (`acme-foo`, `my-app-api`). F
 
 ## Keeping content out of memory: `<private>` tags
 
-Wrap anything in `<private>…</private>` and every client — Claude Code, Codex CLI, Hermes Agent, opencode — replaces the whole span with `[REDACTED]` **before** any transcript-derived text (session summaries, pre/post-compact snapshots, derived titles) leaves your machine:
+Wrap anything in `<private>…</private>` and every client — Claude Code, Codex CLI, Hermes Agent, opencode, Pi — replaces the whole span with `[REDACTED]` **before** any transcript-derived text (session summaries, pre/post-compact snapshots, derived titles) leaves your machine:
 
 ```
 Connect with <private>postgresql://user:s3cret@db.internal/prod</private> and check the row count.

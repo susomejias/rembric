@@ -48,6 +48,13 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh
 ```
 
+Pi has no repo-side install script — its mechanism is its own CLI (`pi install npm:@rembric/pi` for the registry form, **never** with a version suffix; the local-path form for iterating on a branch is in `apps/plugin/.pi-plugin/README.md`). Note the local-path shape runs **no** dependency install, which is why the extension declares zero runtime dependencies. Credentials are shell-only — this harness injects nothing from its settings file:
+
+```bash
+export REMBRIC_SERVER_URL=http://127.0.0.1:8788
+export REMBRIC_API_TOKEN=<demo-writer-plaintext-from-step-2>
+```
+
 For opencode specifically:
 
 ```bash
@@ -129,6 +136,10 @@ main().catch((e) => {
 pnpm exec tsx /tmp/exercise.ts
 ```
 
+### Pi: tool discovery and session round-trip
+
+The extension holds the MCP client, so "did it connect" and "did it discover" are one question. Confirm the discovered count matches the server's `registerTool` call sites in `apps/server/src/mcp/server.ts` (derive it — do not hard-code), that the registered names carry underscores (`memory_save`), and that a proxied save is readable back by an independent `memory.get` with a fabricated id returning `not_found` as the control. Then end the session **with Ctrl-D, not Ctrl-C** — Ctrl-C does not fire the shutdown handler in either mode — and check for a non-null summary.
+
 ### Dashboard / DB verification
 
 ```bash
@@ -141,7 +152,7 @@ For sub-agent filter changes: send a `session.created` with `parentID` set OR `t
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-bash apps/plugin/.<client>-plugin/uninstall.sh   # works from a local checkout for any client
+bash apps/plugin/.<client>-plugin/uninstall.sh   # opencode + Hermes; Pi has no repo-side script — use its own removal verb
 ```
 
 **Restore the user's agent config file** to its prior state. If they didn't have an `opencode.json` before, delete it. If they did, restore from the backup you (should have) made.

@@ -1,12 +1,16 @@
 /**
  * Build the MCP `initialize.instructions` block.
  *
- * All four clients (Claude Code, Codex CLI, Hermes Agent, opencode) inject
- * this string into the LLM's system prompt on connect; for in-process
- * clients with no per-turn hook it is the ONLY nudging surface. The block
- * is a directive crib-sheet of three proactive flows (SAVE / RECALL /
- * SUMMARIZE) that cite their tools; precise mechanics live in each tool's
- * own `description`.
+ * Four of the five clients let their host own the MCP transport (Claude
+ * Code, Codex CLI, Hermes Agent, opencode), so this string is injected
+ * into the LLM's system prompt on connect; for in-process clients with
+ * no per-turn hook it is the ONLY nudging surface. The fifth, Pi, holds
+ * the MCP client itself, so the string lands in that extension's
+ * `initialize` result rather than in the harness's prompt.
+ *
+ * The block is a directive crib-sheet of
+ * three proactive flows (SAVE / RECALL / SUMMARIZE) that cite their
+ * tools; precise mechanics live in each tool's own `description`.
  *
  * Two variants per scope (project-scoped vs unscoped). The body is the
  * same protocol; only the trailing scope note diverges.

@@ -34,6 +34,18 @@ HOME="$HOME_T" REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 sh "$REPO/install.sh
 test -f "$HOME_T/.config/opencode/plugins/rembric.ts" || echo "FAIL: opencode not installed"
 HOME="$HOME_T" REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 sh "$REPO/install.sh" --agent=opencode --action=uninstall
 test ! -f "$HOME_T/.config/opencode/plugins/rembric.ts" || echo "FAIL: opencode not removed"
+# Pi — registry-CLI backend, no repo-side script. Run this where `pi` is NOT on
+# PATH: the installer must PRINT the command and execute nothing. The printed
+# spec must carry no version even under --ref, because a pinned spec is skipped
+# by the client's own `pi update --extensions` / `--all`.
+OUT=$(HOME="$HOME_T" REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 sh "$REPO/install.sh" --agent=pi --action=install --ref=v0.0.0 2>&1)
+printf '%s\n' "$OUT" | grep -q 'pi install npm:@rembric/pi' || echo "FAIL: pi install command not printed"
+! printf '%s\n' "$OUT" | grep -q '@rembric/pi@' || echo "FAIL: version-pinned spec printed"
+printf '%s\n' "$OUT" | grep -q 'REMBRIC_SERVER_URL' || echo "FAIL: pi post-install env step missing"
+# The status row must never claim a version it cannot read, and update-all must
+# skip an unknown row with `unknown` as the reason and still exit 0.
+HOME="$HOME_T" REMBRIC_SRC="$REPO" sh "$REPO/install.sh" --status --json | grep -q '"pi"' || echo "FAIL: pi absent from --status --json"
+HOME="$HOME_T" REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 sh "$REPO/install.sh" --action=update >/dev/null || echo "FAIL: update-all did not exit 0"
 # server prepare: token generated 64-hex, NO docker started (no --up).
 ( cd "$CWD_T" && REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 sh "$REPO/install.sh" --server --action=install )
 grep -qE '^REMBRIC_ADMIN_TOKEN=[0-9a-f]{64}$' "$CWD_T/.env" || echo "FAIL: token not generated"
@@ -44,9 +56,13 @@ rm -rf "$HOME_T" "$CWD_T"
 
 The arrow-key TUI needs a real `/dev/tty`. Drive it through a pseudo-terminal with `script` and assert the visuals. Keystrokes: `\033[B`=down, `\033[A`=up, `\r`=Enter, `q`=quit.
 
+`script`'s argument form is NOT portable, and the wrong one fails before the installer even starts. util-linux (Linux, CI, containers) takes the command via `-c "<cmd>"`; BSD/macOS takes it as trailing argv. Verified on util-linux 2.41: the BSD form exits with `script: unexpected number of arguments`.
+
 ```bash
 # Navigate: Plugins (down, enter) → quit submenu → quit. Capture and inspect.
-printf '\033[B\rqq' | script -q /dev/null env REMBRIC_SRC="$REPO" sh "$REPO/install.sh" > /tmp/tui.out 2>&1
+# Linux / CI:
+printf '\033[B\rqq' | script -q -c "env REMBRIC_SRC='$REPO' sh '$REPO/install.sh'" /dev/null > /tmp/tui.out 2>&1
+# macOS: printf '\033[B\rqq' | script -q /dev/null env REMBRIC_SRC="$REPO" sh "$REPO/install.sh" > /tmp/tui.out 2>&1
 grep -aq '██' /tmp/tui.out      # lime BLOCK banner (under a tty; the literal "REMBRIC" only shows in the no-color fallback)
 grep -aq '2J' /tmp/tui.out      # screen clears between steps (not stacked)
 grep -aq 'AGENT' /tmp/tui.out  # plugins status table rendered
@@ -91,7 +107,7 @@ Look at, per screen:
 - **Banner/frame** — lime block REMBRIC + `source:` line; resize narrower to find the min width before it wraps badly.
 - **Main menu** — `▸` highlight moves; entering a section **replaces** the screen (banner redraws on top), never stacks; `q` exits with `bye`.
 - **Server → install** — dependency check (docker / docker compose / openssl); blank token → auto-generated 64-hex (printed); `Run … up -d? [y/N]` (decline to stay serverless); `Press Enter to continue…`.
-- **Plugins** — aligned, version-aware status table; install→uninstall an opencode plugin and read the conservative "Left in place" line; Claude/Codex print marketplace commands.
+- **Plugins** — aligned, version-aware status table with a row per client; install→uninstall an opencode plugin and read the conservative "Left in place" line; Claude/Codex print marketplace commands; the Pi row prints `pi install npm:@rembric/pi` and, when its installed version cannot be read, renders `unknown` with the idempotent reinstall as the action, printed as the verb `--action` accepts (`install`, never an invented label like `reinstall`) — never "up to date", never "update available", and no settings-file credential step (that harness injects nothing from its settings file).
 
 Edge cases: `NO_COLOR=1 rbx --help` (no ANSI / plain wordmark); `printf 'REMBRIC_ADMIN_TOKEN=\n' > "$SANDBOX/work/.env" && rbx --server --action=install` (empty-token refill). Optional real server: see Layer 4 but point it at `$SANDBOX/work` and an alt `REMBRIC_PORT`.
 
@@ -104,6 +120,8 @@ Turning feedback into edits — note the screen + the dimension (spacing/alignme
 - **Non-zero exit on an agent action** (`install.sh --agent=… --action=install` exits ≠0) → a `set -e` regression: a helper ended on a false `[ test ]`. The interactive menu would kick the user out at that step.
 - **Empty token written** to `.env`, or a bring-up offered/performed with an empty `REMBRIC_ADMIN_TOKEN`.
 - **Hang under no-tty** (Layer 1/2 never returns) → the no-controlling-terminal path must fall to headless, not block on a key read.
+- **A version-pinned `@rembric/pi@x.y.z` in any printed command** (especially under `--ref`) → the operator's own update commands would then skip the extension and report success forever.
+- **A `pi` status row that reads `up to date` or `update available` while its installed version is undeterminable**, or an update-all run that reinstalls it instead of skipping it with `unknown` as the reason.
 - **Banner/table misalignment** → ANSI escapes counted in `printf` field width; pad on plain text.
 - **Root shim dropping flags/env** → Layer 1 parity test (`root --help` == `plugin --help`; shim server-install generates a token) fails.
 - **Stacked menus instead of screen-replace** → a missing `screen` call before an action/sub-menu.

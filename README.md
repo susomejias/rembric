@@ -25,31 +25,35 @@
 
 ---
 
-> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Hermes Agent, opencode, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
+> **rembric** /ˈrem.brɪk/ — _coined, from_ remember + fabric: the woven memory and lifecycle layer beneath your agents. One brain, one dashboard, one audit trail — shared across every MCP-capable tool: Claude Code, Codex CLI, Hermes Agent, opencode, Pi, Cursor, and beyond. The MCP memory surface is the core; sessions, judgments, consolidation, and the operator dashboard come along in the same single Node process.
 
 ## Supported agents
 
-Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
+Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **Pi** ships no MCP client of its own, so its extension speaks MCP directly and discovers the tool surface at runtime — see [docs/agents.md](./docs/agents.md#pi-npm-published-extension). **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
 
 <table>
   <tr>
-    <td align="center" valign="top" width="20%">
+    <td align="center" valign="top" width="16%">
       <a href="./apps/plugin/README.md"><img src="https://matthiasroder.com/content/images/2026/01/Claude.png?size=120" alt="Claude Code" width="64" height="64" /><br/><b>Claude Code</b></a><br/>
       <sub>native plugin · 4 hooks · MCP</sub>
     </td>
-    <td align="center" valign="top" width="20%">
+    <td align="center" valign="top" width="16%">
       <a href="./apps/plugin/.opencode-plugin/README.md"><img src="https://github.com/opencode-ai.png?size=120" alt="opencode" width="64" height="64" /><br/><b>opencode</b></a><br/>
       <sub>native plugin · MCP</sub>
     </td>
-    <td align="center" valign="top" width="20%">
+    <td align="center" valign="top" width="16%">
       <a href="./docs/agents.md#codex-cli-recommended-bundled-plugin"><img src="https://github.com/openai.png?size=120" alt="Codex CLI" width="64" height="64" /><br/><b>Codex CLI</b></a><br/>
       <sub>native plugin · 4 hooks · MCP</sub>
     </td>
-    <td align="center" valign="top" width="20%">
+    <td align="center" valign="top" width="16%">
       <a href="./apps/plugin/.hermes-plugin/README.md"><img src="https://github.com/NousResearch.png?size=120" alt="Hermes Agent" width="64" height="64" /><br/><b>Hermes Agent</b></a><br/>
       <sub>native provider · MCP</sub>
     </td>
-    <td align="center" valign="top" width="20%">
+    <td align="center" valign="top" width="16%">
+      <a href="./apps/plugin/.pi-plugin/README.md"><img src="https://pi.dev/favicon.svg" alt="Pi" width="64" height="64" /><br/><b>Pi</b></a><br/>
+      <sub>npm extension · own MCP client</sub>
+    </td>
+    <td align="center" valign="top" width="16%">
       <a href="./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth"><img src="https://github.com/openai.png?size=120" alt="ChatGPT" width="64" height="64" /><br/><b>ChatGPT</b></a><br/>
       <sub>custom connector · OAuth · MCP</sub>
     </td>
@@ -457,10 +461,10 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
 
 ```
         ┌──────────────────────────────────────────────────────────────┐
-        │  4 PLUGIN clients — tools AND session lifecycle              │
-        │    Claude Code · Codex CLI · Hermes Agent · opencode          │
+        │  5 PLUGIN clients — tools AND session lifecycle              │
+        │    Claude Code · Codex CLI · Hermes Agent · opencode · Pi    │
         │  Any other MCP client — tools only, no lifecycle             │
-        │    Cursor · Windsurf · Claude Desktop · Cline · Goose · …     │
+        │    Cursor · Windsurf · Claude Desktop · Cline · Goose · …    │
         └───────────┬──────────────────────────────────┬───────────────┘
                     │                                  │
      MCP: HTTP(S) + Bearer                Session lifecycle: HTTP(S)
