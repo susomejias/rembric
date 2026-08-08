@@ -732,6 +732,20 @@ describe('MCP protocol conformance', () => {
       expect(desc).toMatch(/rejected, not clamped/i);
     });
 
+    // A first message states a goal almost by definition, so a trigger keyed on
+    // that fires once per session by construction — which is how this tool came
+    // to be called on nearly every opening turn.
+    it('memory.save_prompt restrains WHEN it is called, not only what to pass', () => {
+      const desc = descriptions.get('memory.save_prompt') ?? '';
+      // Anchored: an unanchored /reusable/i is also satisfied by "reusable
+      // artifact" further down, which left the opening claim uncovered.
+      expect(desc).toMatch(/^Persist a REUSABLE prompt/);
+      expect(desc).toMatch(/do NOT call it routinely/i);
+      expect(desc).toContain('memory.save');
+      expect(desc).toContain('memory.session_summary');
+      expect(desc).not.toMatch(/when the user states a goal/i);
+    });
+
     it('memory.timeline names both window arguments, its bound and the remedy', () => {
       const desc = descriptions.get('memory.timeline') ?? '';
       expect(desc).toContain('before');
