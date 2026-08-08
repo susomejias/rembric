@@ -1,6 +1,6 @@
 ---
 name: rembric-tui-installer-e2e
-description: Runnable end-to-end validation playbook for the Rembric TUI installer — catch breakage before merging/deploying, AND a sandboxed manual walkthrough to evaluate/iterate its UI/UX without polluting your real env. Apply before shipping any change touching `apps/plugin/install.sh`, the repo-root `install.sh` shim, any per-client `install.sh`/`uninstall.sh`, or distribution docs, or when you want to preview/try/demo the installer and polish how it looks and feels. Layered: CI-safe headless (vitest + `sh -n`), local install round-trips, operator interactive pty smoke, an optional full Docker `up` smoke, plus a sandboxed manual UX walkthrough. For the installer contract/what-not-to-break, see `rembric-tui-installer`.
+description: 'Runnable end-to-end validation playbook for the Rembric TUI installer — catch breakage before merging/deploying, AND a sandboxed manual walkthrough to evaluate/iterate its UI/UX without polluting your real env. Apply before shipping any change touching `apps/plugin/install.sh`, the repo-root `install.sh` shim, any per-client `install.sh`/`uninstall.sh`, or distribution docs, or when you want to preview/try/demo the installer and polish how it looks and feels. Layered: CI-safe headless (vitest + `sh -n`), local install round-trips, operator interactive pty smoke, an optional full Docker `up` smoke, plus a sandboxed manual UX walkthrough. For the installer contract/what-not-to-break, see `rembric-tui-installer`.'
 ---
 
 # Rembric TUI installer — e2e validation

@@ -1,5 +1,5 @@
 ---
-name: SQLite Database Expert
+name: sqlite-database-expert
 risk_level: HIGH
 description: Expert in SQLite embedded database development for Tauri/desktop applications with focus on SQL injection prevention, migrations, FTS search, and secure data handling
 version: 1.0.0
