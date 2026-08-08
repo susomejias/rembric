@@ -31,6 +31,16 @@ The four deltas were produced by extracting each enclosing requirement verbatim 
 - [x] 4.1 `openspec validate fix-stale-client-count-surfaces --strict` passes.
 - [x] 4.2 `pnpm run check:delta-freshness` reports exactly **4** body differences, one per modified requirement — the four intended substitutions and nothing else, which is what confirms the verbatim extraction did not silently revert another change's text.
 - [x] 4.3 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` green.
-- [ ] 4.4 Re-run the acceptance grep from `pi-plugin/spec.md:402` and confirm every remaining hit is legitimate or historically scoped.
+- [x] 4.4 Re-run the acceptance grep from `pi-plugin/spec.md:402` and confirm every remaining hit is legitimate or historically scoped. Run as the last step of archiving, because until the deltas merge the stale lines are still in `openspec/specs/`.
 
-  **Only satisfiable after archive.** The three stale spec lines live in `openspec/specs/`, which this change corrects through its deltas at merge time. Until then the grep still returns them, and the scenario `add-pi-plugin` left unsatisfied stays unsatisfied. Run it as the last step of archiving, not during apply.
+  Every client-related hit that survives is correct as written:
+
+  | Surface                                                               | Why it stays                                                                                                                              |
+  | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+  | `.pi-plugin/README.md:7`                                              | "the other four clients" — from Pi's own README this is the right count                                                                   |
+  | `apps/plugin/CHANGELOG.md:141,176`, `apps/server/CHANGELOG.md:63,487` | historically scoped by definition                                                                                                         |
+  | `pi-plugin/spec.md:400-404`                                           | the acceptance scenario itself                                                                                                            |
+  | `tui-installer/spec.md:98`                                            | four installer _surfaces_, not clients                                                                                                    |
+  | `scripts/pi-package.mjs:60`                                           | "the four clients that register the dotted names" — Pi is the only underscored one, so four is right and correcting it would be the error |
+
+  The rest are `all four` followed by `indexes`, `columns`, `arguments`, `memories`, `phases`, `fallbacks` — nouns, not clients.

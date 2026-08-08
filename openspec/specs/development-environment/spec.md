@@ -378,7 +378,7 @@ The repository root SHALL contain a `pnpm-workspace.yaml` that declares a `packa
 The `apps/` directory SHALL contain two workspace members on day one:
 
 - `apps/server/` — the Node MCP+dashboard server (the Docker image target).
-- `apps/plugin/` — the multi-client plugin tree (Claude Code, Codex CLI, Hermes Agent, opencode all under one directory).
+- `apps/plugin/` — the multi-client plugin tree (Claude Code, Codex CLI, Hermes Agent, opencode, Pi all under one directory).
 
 The `packages/` directory SHALL exist (even if initially empty) so the layout convention is in place for future library extractions (e.g., a future `packages/bridge/` npm-published bridge) without requiring a follow-up restructure.
 

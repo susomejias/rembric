@@ -41,7 +41,7 @@ The endpoint SHALL accept a JSON body `{ id: string, cwd?: string, agent?: strin
 
 The server SHALL respond `200 OK` on both insert and upsert paths with body `{ ok: true, sessionId: <id>, scope: 'project', projectId: string, startedAt: string, title: string, created: boolean }`. The `created` field SHALL be `true` for fresh inserts, `false` for idempotent hits.
 
-`scope` SHALL be the literal `'project'` and `projectId` SHALL be non-null: this endpoint is reachable only under a path slug, so it always resolves a project. The previous `'project'|'global'` union and nullable `projectId` described a state this route could not produce even before the global scope was retired, and a field with one reachable value carries no information — but the key is retained rather than removed, because the plugin clients of all four supported agents read this response body and a removed key is a breaking change to a shipped HTTP contract for no gain. Its type narrows; its presence does not change.
+`scope` SHALL be the literal `'project'` and `projectId` SHALL be non-null: this endpoint is reachable only under a path slug, so it always resolves a project. The previous `'project'|'global'` union and nullable `projectId` described a state this route could not produce even before the global scope was retired, and a field with one reachable value carries no information — but the key is retained rather than removed, because the plugin clients of every supported agent read this response body and a removed key is a breaking change to a shipped HTTP contract for no gain. Its type narrows; its presence does not change.
 
 #### Scenario: Fresh insert with valid id and cwd
 
