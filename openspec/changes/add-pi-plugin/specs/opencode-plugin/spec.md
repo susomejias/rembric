@@ -46,12 +46,19 @@ The set of files the invariant scans SHALL be **derived by a repository-wide sea
 - **AND** it exports `parseDotenv`, `readRembricSlug`, and `SLUG_RE` as named exports
 - **AND** `SLUG_RE.source` equals `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`
 
-#### Scenario: Every JS/TS consumer imports from the shared lib
+#### Scenario: Bridge and opencode plugin both import from the shared lib
 
 - **WHEN** the repository is at HEAD
 - **THEN** `apps/plugin/bin/rembric-bridge.mjs` contains an import statement referencing `./rembric-dotenv.mjs`
-- **AND** `apps/plugin/.opencode-plugin/plugin.ts` and `apps/plugin/.pi-plugin/index.ts` each contain an import statement referencing the shared dotenv module
-- **AND** none of those files contains a local `function parseDotenv` or `SLUG_RE = /`
+- **AND** `apps/plugin/.opencode-plugin/plugin.ts` contains an import statement referencing `../bin/rembric-dotenv.mjs`
+- **AND** neither file contains a local `function parseDotenv` or `SLUG_RE = /`
+
+#### Scenario: Every other JS/TS consumer imports from the shared lib too
+
+- **WHEN** the repository is at HEAD
+- **THEN** every JS/TS client entrypoint the invariant scans contains an import statement referencing the shared dotenv module
+- **AND** none of them contains a local `function parseDotenv` or `SLUG_RE = /`
+- **AND** the scanned set includes `apps/plugin/.pi-plugin/index.ts`
 
 #### Scenario: Invariant test catches drift
 

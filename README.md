@@ -29,7 +29,7 @@
 
 ## Supported agents
 
-Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **Pi** ships no MCP client of its own, so its extension speaks MCP directly and discovers the tool surface at runtime — see [docs/agents.md](./docs/agents.md#pi-npm-published-extension). **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
+Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **Pi** ships no MCP client of its own, so its extension speaks MCP directly and discovers the tool surface at runtime — see [docs/agents.md](./docs/agents.md#pi-npm-package). **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
 
 <table>
   <tr>
@@ -51,7 +51,7 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
     </td>
     <td align="center" valign="top" width="16%">
       <a href="./apps/plugin/.pi-plugin/README.md"><img src="https://pi.dev/favicon.svg" alt="Pi" width="64" height="64" /><br/><b>Pi</b></a><br/>
-      <sub>npm extension · own MCP client</sub>
+      <sub>npm package · own MCP client</sub>
     </td>
     <td align="center" valign="top" width="16%">
       <a href="./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth"><img src="https://github.com/openai.png?size=120" alt="ChatGPT" width="64" height="64" /><br/><b>ChatGPT</b></a><br/>
