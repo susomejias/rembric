@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // Tests for the whole installer system: the repo-root `install.sh` shim AND
 // the `apps/plugin/install.sh` orchestrator it forwards to. Co-located with the
@@ -33,14 +34,52 @@ const ROOT_SHIM = join(REPO_ROOT, 'install.sh');
 const MANIFEST = JSON.parse(
   readFileSync(join(REPO_ROOT, '.release-please-manifest.json'), 'utf8'),
 ) as Record<string, string>;
-const PLUGIN_VERSION: Record<string, string> = {
+
+const INSTALLER_SRC = readFileSync(INSTALL_SH, 'utf8');
+
+// The regex requires the installer to keep its single-line `CLIENTS='…'` form.
+const CLIENTS: string[] = (() => {
+  const m = /^CLIENTS='([^']+)'$/m.exec(INSTALLER_SRC);
+  if (!m) throw new Error('apps/plugin/install.sh has no single CLIENTS= definition');
+  return m[1].split(' ');
+})();
+
+// The verbs `--action` accepts, parsed from the installer's single definition
+// so the expectations below cannot drift from what the parser allows. Same
+// single-line requirement as CLIENTS.
+const ACTIONS: string[] = (() => {
+  const m = /^ACTIONS='([^']+)'$/m.exec(INSTALLER_SRC);
+  if (!m) throw new Error('apps/plugin/install.sh has no single ACTIONS= definition');
+  return m[1].split(' ');
+})();
+
+// The status table's ACTION column prints one of these when the state warrants
+// no action at all. Everything else in that column must be an ACTIONS verb.
+const NON_RECOMMENDATIONS = ['up to date', 'ahead', '-'];
+
+// Core tools live in /usr/bin:/bin and no client binary does, so a case that
+// needs a client to look absent points PATH here.
+const CORE_PATH = '/usr/bin:/bin';
+
+// A stub client binary first on PATH, wherever a test needs that client to look
+// present. The real one must never run from the suite — it would install into
+// the developer's own configuration — and the `RAN:` sentinel is what
+// distinguishes "executed" from "merely printed".
+function fakeClientBinDir(name: 'claude' | 'codex' | 'pi'): string {
+  const d = mkdtempSync(join(tmpdir(), 'rembric-fakeclient-'));
+  writeFileSync(join(d, name), `#!/bin/sh\necho "RAN:${name} $*"\n`);
+  chmodSync(join(d, name), 0o755);
+  return d;
+}
+
+const PI_STUB_DIR = fakeClientBinDir('pi');
+afterAll(() => rmSync(PI_STUB_DIR, { recursive: true, force: true }));
+
+const PLUGIN_VERSION: Record<string, string> = Object.fromEntries(
   // All clients ship under the single unified `plugin` release-please component
   // (`apps/plugin`) — one shared version (unify-plugin-release-track).
-  claude: MANIFEST['apps/plugin'],
-  codex: MANIFEST['apps/plugin'],
-  hermes: MANIFEST['apps/plugin'],
-  opencode: MANIFEST['apps/plugin'],
-};
+  CLIENTS.map((c) => [c, MANIFEST['apps/plugin']]),
+);
 
 interface RunOpts {
   cwd?: string;
@@ -97,6 +136,7 @@ describe('argument handling', () => {
     ]) {
       expect(out).toContain(flag);
     }
+    for (const c of CLIENTS) expect(out).toContain(c); // the --agent list derives from CLIENTS
   });
 
   it('no flags (headless) refuses and exits non-zero', () => {
@@ -115,6 +155,34 @@ describe('argument handling', () => {
     const { code, out } = run(['--agent=bogus', '--action=install']);
     expect(code).toBe(2);
     expect(out).toContain('unknown agent');
+  });
+
+  it('an unrecognised --action is refused at parse time, before anything runs', () => {
+    // --yes is on so the run WOULD execute the client CLI if it got that far.
+    const opts = { home, path: `${PI_STUB_DIR}:${CORE_PATH}` };
+    const { code, out } = run(['--agent=pi', '--action=bogus', '--yes'], opts);
+    expect(code).toBe(2);
+    expect(out).toContain('invalid --action=bogus');
+    for (const a of ACTIONS) expect(out).toContain(a); // the error names what is accepted
+    // The pre-fix failure was silent success: no command, no error, and the
+    // post-install "Next" steps printed as if something had been installed.
+    expect(out).not.toContain('RAN:pi');
+    expect(out).not.toContain('Next');
+
+    // Control: the same invocation with an accepted verb does all three.
+    const ok = run(['--agent=pi', '--action=install', '--yes'], opts);
+    expect(ok.code).toBe(0);
+    expect(ok.out).toContain('RAN:pi');
+    expect(ok.out).toContain('Next');
+  });
+
+  it('--server refuses an action it has no backend for', () => {
+    // do_server treats every non-`update` action as install, so accepting
+    // `uninstall` here would install under an "uninstall" heading.
+    const { code, out } = run(['--server', '--action=uninstall'], { cwd: dir });
+    expect(code).toBe(2);
+    expect(out).toContain('--server accepts --action=install|update');
+    expect(existsSync(join(dir, '.env'))).toBe(false);
   });
 });
 
@@ -270,7 +338,7 @@ describe('--action=update with no --agent (update-all)', () => {
   // `--action=update` errored ("--agent requires --action" is backwards —
   // actually it fell through to the usage error because ARG_AGENTS was
   // empty). This section proves the fix: it updates only what has an update
-  // available and never errors, even with nothing installed.
+  // available and never errors.
 
   function ageOpencodePlugin(version: string): void {
     const dir = join(home, '.config', 'opencode', 'plugins');
@@ -293,20 +361,14 @@ describe('--action=update with no --agent (update-all)', () => {
     expect(out).toContain('claude: not installed — skipped');
     expect(out).toContain('codex: not installed — skipped');
     expect(out).toContain('hermes: not installed — skipped');
-    expect(out).toContain('Done: 1 updated, 3 skipped.');
-  });
-
-  it('with nothing installed, updates nothing and still exits 0', () => {
-    const { code, out } = run(['--action=update'], { home });
-    expect(code).toBe(0);
-    expect(out).toContain('Done: 0 updated, 4 skipped.');
+    expect(out).toContain(`Done: 1 updated, ${CLIENTS.length - 1} skipped.`);
   });
 
   it('--agent=all --action=update is an explicit alias for the same behavior', () => {
     ageOpencodePlugin('0.0.1');
     const { code, out } = run(['--agent=all', '--action=update'], { home });
     expect(code).toBe(0);
-    expect(out).toContain('Done: 1 updated, 3 skipped.');
+    expect(out).toContain(`Done: 1 updated, ${CLIENTS.length - 1} skipped.`);
   });
 
   it('an up-to-date agent is skipped as "up to date", not re-updated', () => {
@@ -314,7 +376,353 @@ describe('--action=update with no --agent (update-all)', () => {
     const { code, out } = run(['--action=update'], { home });
     expect(code).toBe(0);
     expect(out).toContain('opencode: up to date — skipped');
-    expect(out).toContain('Done: 0 updated, 4 skipped.');
+    expect(out).toContain(`Done: 0 updated, ${CLIENTS.length} skipped.`);
+  });
+});
+
+describe('the client set has a single definition every surface agrees with', () => {
+  it('is exactly the five supported clients, in a stable order', () => {
+    // The literal contract, and the non-vacuity control for every assertion
+    // below that derives its expectation from CLIENTS.
+    expect(CLIENTS).toEqual(['claude', 'codex', 'hermes', 'opencode', 'pi']);
+  });
+
+  it('no second line in the installer enumerates the client set', () => {
+    const enumerating = INSTALLER_SRC.split('\n').filter(
+      (line) => CLIENTS.filter((c) => new RegExp(`\\b${c}\\b`).test(line)).length >= 4,
+    );
+    expect(enumerating).toEqual([`CLIENTS='${CLIENTS.join(' ')}'`]);
+  });
+
+  it('the interactive agent menu and its index mapping both derive from it', () => {
+    // The arrow-key menu needs a real /dev/tty, so this is asserted at the
+    // source: the entries are the set itself, and the selected index is mapped
+    // back through it rather than through a hand-written case ladder.
+    expect(INSTALLER_SRC).toContain('arrow_menu "Which agent?" "all — update outdated" $CLIENTS');
+    expect(INSTALLER_SRC).toContain('c=$(client_at "$MENU_INDEX")');
+  });
+
+  it('--status --json emits one entry per client, in the same order', () => {
+    const { code, out } = run(['--status', '--json'], { home });
+    expect(code).toBe(0);
+    expect(JSON.parse(out).agents.map((a: { agent: string }) => a.agent)).toEqual(CLIENTS);
+  });
+
+  it('update-all accounts for every client in the set', () => {
+    const { code, out } = run(['--action=update'], { home });
+    expect(code).toBe(0);
+    for (const c of CLIENTS) expect(out).toMatch(new RegExp(`^  ${c}: `, 'm'));
+    expect(out).toContain(`Done: 0 updated, ${CLIENTS.length} skipped.`);
+  });
+
+  it.each(CLIENTS)('--agent=%s is routed to a backend and has post-install steps', (client) => {
+    const { code, out } = run([`--agent=${client}`, '--action=install'], {
+      home,
+      path: `${PI_STUB_DIR}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+    });
+    expect(code).toBe(0);
+    expect(out).not.toContain('unknown agent');
+    expect(out).toContain(`${client} (install)`);
+    // A client in the set with no post_install_notes arm would install and then
+    // say nothing about the wiring it still needs.
+    expect(out).toContain('Next');
+  });
+
+  it('every client has a presence adapter (an unmatched case would report present)', () => {
+    // /usr/bin:/bin holds none of the client binaries and HOME is throwaway, so
+    // every row must read absent. A client missing from client_present's case
+    // falls through, and an empty `case` exits 0 — i.e. reports itself present.
+    const { out } = run(['--status', '--json'], { home, path: '/usr/bin:/bin' });
+    const agents = JSON.parse(out).agents as { agent: string; present: boolean }[];
+    expect(agents.map((a) => a.present)).toEqual(CLIENTS.map(() => false));
+  });
+});
+
+describe('the ACTION column recommends only actions --action accepts', () => {
+  // The three surfaces derived from client_state print different things: the
+  // table prints the recommended VERB, `--status --json` carries the detected
+  // STATE, and update-all names the verb it would take. The column used to
+  // print `reinstall`, which is not a verb the parser accepts — following the
+  // table exited 0 having run nothing, or died inside `eval` under --yes.
+
+  function tableRows(out: string): { agent: string; action: string }[] {
+    return out
+      .split('\n')
+      .map((line) => line.split(/\s{2,}/).filter(Boolean))
+      .filter((cells) => cells.length === 5 && CLIENTS.includes(cells[0]))
+      .map((cells) => ({ agent: cells[0], action: cells[4] }));
+  }
+
+  function writeOpencodePlugin(version: string): void {
+    const d = join(home, '.config', 'opencode', 'plugins');
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, 'rembric.ts'), `// @rembric-plugin-version ${version}\n`);
+  }
+
+  it('no cell in any detectable state is outside the accepted verbs', () => {
+    const withPi = { home, path: `${PI_STUB_DIR}:${CORE_PATH}` };
+    // One scenario per state that reaches the column: not installed (install),
+    // installed-and-old (update), installed-and-current (up to date), ahead of
+    // the published version, and present-but-unreadable (the pi row).
+    const scenarios = [
+      () => undefined,
+      () => writeOpencodePlugin('0.0.1'),
+      () => writeOpencodePlugin(PLUGIN_VERSION.opencode),
+      () => writeOpencodePlugin('99.0.0'),
+    ];
+    const seen = new Set<string>();
+    for (const setup of scenarios) {
+      setup();
+      const rows = tableRows(run(['--status'], withPi).out);
+      // Non-vacuity: an unparsed table would make every assertion below empty.
+      expect(rows.map((r) => r.agent)).toEqual(CLIENTS);
+      for (const row of rows) {
+        expect([...ACTIONS, ...NON_RECOMMENDATIONS]).toContain(row.action);
+        seen.add(row.action);
+      }
+    }
+    // …and the scenarios really did exercise more than one outcome.
+    expect(seen.size).toBeGreaterThan(2);
+  });
+
+  it('following the recommendation the table prints resolves to a real action', () => {
+    const withPi = { home, path: `${PI_STUB_DIR}:${CORE_PATH}` };
+    const pi = tableRows(run(['--status'], withPi).out).find((r) => r.agent === 'pi');
+    expect(pi).toBeDefined();
+    expect(ACTIONS).toContain(pi!.action);
+
+    const followed = run(['--agent=pi', `--action=${pi!.action}`, '--yes'], withPi);
+    expect(followed.code).toBe(0);
+    expect(followed.out).toContain('RAN:pi');
+    expect(followed.out).not.toMatch(/invalid --action|parameter not set|unsupported action/);
+  });
+
+  it.each(ACTIONS)(
+    '--yes with --action=%s reaches a real command, never an unset one',
+    (action) => {
+      const { code, out } = run(['--agent=pi', `--action=${action}`, '--yes'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+      });
+      expect(code).toBe(0);
+      // `cmd: parameter not set` was the --yes symptom of an unmatched action.
+      expect(out).not.toMatch(/parameter not set|unbound variable|unsupported action/);
+      expect(out).toContain('RAN:pi');
+    },
+  );
+
+  it("the CLI backend's action table has one arm per verb and fails closed", () => {
+    // Unreachable from the CLI now that the parser refuses unknown verbs, so it
+    // is asserted at the source: an unmatched POSIX `case` exits 0, which is
+    // what made the original failure silent.
+    const block = /client_cli_cmds\(\)[\s\S]*?\n {2}case "\$action" in\n([\s\S]*?)\n {2}esac/.exec(
+      INSTALLER_SRC,
+    );
+    expect(block).not.toBeNull();
+    const arms = [...block![1].matchAll(/^ {4}([a-z]+|\*)\)/gm)].map((m) => m[1]);
+    expect(arms).toContain('*');
+    expect(arms.filter((a) => a !== '*').sort()).toEqual([...ACTIONS].sort());
+  });
+
+  it('update-all names a verb the parser accepts when it declines to act', () => {
+    const { code, out } = run(['--action=update', '--yes'], {
+      home,
+      path: `${PI_STUB_DIR}:${CORE_PATH}`,
+    });
+    expect(code).toBe(0);
+    const hint = /pi: version unknown — skipped \(use --agent=pi --action=(\S+) to force\)/.exec(
+      out,
+    );
+    expect(hint).not.toBeNull();
+    expect(ACTIONS).toContain(hint![1]);
+  });
+});
+
+describe('pi (registry-CLI backend)', () => {
+  // The third backend: no repo-side script, no marketplace — the client's own
+  // CLI resolving a package from the public npm registry.
+  const piAgent = (root: string): string => join(root, 'npm', 'node_modules', '@rembric', 'pi');
+
+  function installedFixture(agentDir: string, version: string): void {
+    const pkg = piAgent(agentDir);
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, 'package.json'),
+      `${JSON.stringify({ name: '@rembric/pi', version }, null, 2)}\n`,
+    );
+  }
+
+  function piRow(out: string): string {
+    return out.split('\n').find((l) => /^ {2}pi\s/.test(l)) ?? '';
+  }
+
+  it('has no repo-side install or uninstall script', () => {
+    const piPlugin = join(REPO_ROOT, 'apps', 'plugin', '.pi-plugin');
+    expect(existsSync(join(piPlugin, 'install.sh'))).toBe(false);
+    expect(existsSync(join(piPlugin, 'uninstall.sh'))).toBe(false);
+  });
+
+  it('install and update print the SAME unpinned command, even under --ref', () => {
+    const spec = 'pi install npm:@rembric/pi';
+    const ins = run(['--agent=pi', '--action=install'], { home, path: CORE_PATH });
+    const upd = run(['--agent=pi', '--action=update'], { home, path: CORE_PATH });
+    const pinned = run(['--agent=pi', '--action=install', '--ref=v9.9.9'], {
+      home,
+      path: CORE_PATH,
+    });
+    expect(ins.code).toBe(0);
+    expect(upd.code).toBe(0);
+    expect(pinned.code).toBe(0);
+    for (const { out } of [ins, upd, pinned]) {
+      expect(out).toContain(spec);
+      // A version-pinned spec is skipped by the client's own update commands,
+      // so it would freeze the operator while reporting success.
+      expect(out).not.toMatch(/@rembric\/pi@/);
+    }
+    // --ref names a git ref; this artifact comes from the registry.
+    expect(pinned.out).not.toContain('9.9.9');
+  });
+
+  it("uninstall routes to the client's own removal verb and keeps credentials", () => {
+    const { code, out } = run(['--agent=pi', '--action=uninstall'], { home, path: CORE_PATH });
+    expect(code).toBe(0);
+    expect(out).toContain('pi remove npm:@rembric/pi');
+    expect(out).toContain('Left in place');
+    expect(out).not.toContain('Next');
+  });
+
+  it('install prints the shell-environment step and offers no settings-file alternative', () => {
+    const { out } = run(['--agent=pi', '--action=install'], { home, path: CORE_PATH });
+    expect(out).toContain('REMBRIC_SERVER_URL');
+    expect(out).toContain('REMBRIC_API_TOKEN');
+    // Measured: this harness injects nothing from its own settings file, so a
+    // settings-file step would be an invented path.
+    expect(out).not.toMatch(/settings/i);
+  });
+
+  it('update prints only the restart, not the install-only credential step', () => {
+    const { out } = run(['--agent=pi', '--action=update'], { home, path: CORE_PATH });
+    expect(out).toContain('restart Pi');
+    expect(out).not.toContain('REMBRIC_API_TOKEN');
+  });
+
+  it('--yes runs the registry command when the binary is present, and nothing when absent', () => {
+    const present = run(['--agent=pi', '--action=install', '--yes'], {
+      home,
+      path: `${PI_STUB_DIR}:${CORE_PATH}`,
+    });
+    expect(present.code).toBe(0);
+    expect(present.out).toContain('RAN:pi install npm:@rembric/pi');
+
+    const noFlag = run(['--agent=pi', '--action=install'], {
+      home,
+      path: `${PI_STUB_DIR}:${CORE_PATH}`,
+    });
+    expect(noFlag.out).toContain('pi install npm:@rembric/pi'); // printed
+    expect(noFlag.out).not.toContain('RAN:pi'); // never executed
+
+    const absent = run(['--agent=pi', '--action=install', '--yes'], { home, path: CORE_PATH });
+    expect(absent.out).toContain('pi install npm:@rembric/pi');
+    expect(absent.out).not.toContain('RAN:pi');
+  });
+
+  describe('installed-version detection', () => {
+    // Measured against Pi 0.84.1: a user-scope `pi install npm:<pkg>` always
+    // leaves the package manifest under <agentDir>/npm/node_modules/, and that
+    // is the same file Pi reads for its own update check. The other install
+    // vectors (local path, project scope, pre-0.75.1 global) leave no version
+    // on disk at all.
+    it('reads the version from the deterministic location under PI_CODING_AGENT_DIR', () => {
+      const agentDir = join(home, 'piagent');
+      installedFixture(agentDir, '0.0.1');
+      const { out } = run(['--status'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+        env: { PI_CODING_AGENT_DIR: agentDir },
+      });
+      expect(piRow(out)).toContain('0.0.1');
+      expect(piRow(out)).toContain('update');
+
+      installedFixture(agentDir, PLUGIN_VERSION.pi);
+      const current = run(['--status'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+        env: { PI_CODING_AGENT_DIR: agentDir },
+      });
+      expect(piRow(current.out)).toContain('up to date');
+    });
+
+    it('defaults to ~/.pi/agent when PI_CODING_AGENT_DIR is unset', () => {
+      installedFixture(join(home, '.pi', 'agent'), '0.0.2');
+      const { out } = run(['--status'], { home, path: `${PI_STUB_DIR}:${CORE_PATH}` });
+      expect(piRow(out)).toContain('0.0.2');
+    });
+
+    it('reads a prerelease version whole, not truncated to its release core', () => {
+      // The digits-only extraction the other four adapters use returns empty or
+      // a truncated `9.9.9` here, which would make vercmp compare the wrong
+      // value and the table state a version that is not installed.
+      const agentDir = join(home, 'piagent');
+      installedFixture(agentDir, '9.9.9-rc.1');
+      const { out } = run(['--status'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+        env: { PI_CODING_AGENT_DIR: agentDir },
+      });
+      expect(piRow(out)).toContain('9.9.9-rc.1');
+    });
+
+    it('renders unknown + the idempotent install verb when no version is on disk', () => {
+      const { code, out } = run(['--status'], { home, path: `${PI_STUB_DIR}:${CORE_PATH}` });
+      expect(code).toBe(0);
+      expect(piRow(out)).toContain('unknown');
+      // The recommendation under ignorance is the idempotent reinstall, printed
+      // as the verb `--action` accepts so following the table literally works.
+      const action = piRow(out)
+        .trim()
+        .split(/\s{2,}/)
+        .at(-1);
+      expect(action).toBe('install');
+      expect(ACTIONS).toContain(action);
+      // The table's "update available" must never lie: an unreadable version is
+      // neither of the determinate states.
+      expect(piRow(out)).not.toContain('up to date');
+      expect(piRow(out)).not.toContain('update');
+    });
+
+    it('--status --json carries a null version and an unknown action', () => {
+      const { out } = run(['--status', '--json'], { home, path: `${PI_STUB_DIR}:${CORE_PATH}` });
+      const pi = JSON.parse(out).agents.find((a: { agent: string }) => a.agent === 'pi');
+      expect(pi.present).toBe(true);
+      expect(pi.installed).toBeNull(); // a semver or null, never a marker string
+      expect(pi.action).toBe('unknown');
+    });
+  });
+
+  describe('update-all', () => {
+    it('skips an unknown row with unknown as the reason, exits 0, and runs nothing', () => {
+      const { code, out } = run(['--action=update', '--yes'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('pi: version unknown — skipped');
+      // Unattended: reinstalling on ignorance would act on every single run.
+      expect(out).not.toContain('RAN:pi');
+    });
+
+    it('control — the same command DOES update it when the version is readable and old', () => {
+      const agentDir = join(home, 'piagent');
+      installedFixture(agentDir, '0.0.1');
+      const { code, out } = run(['--action=update', '--yes'], {
+        home,
+        path: `${PI_STUB_DIR}:${CORE_PATH}`,
+        env: { PI_CODING_AGENT_DIR: agentDir },
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('RAN:pi install npm:@rembric/pi');
+      expect(out).not.toContain('pi: version unknown');
+    });
   });
 });
 
@@ -327,6 +735,7 @@ describe('opencode installer verifications', () => {
       join(home, '.config', 'opencode', 'opencode.json'),
       join(home, '.config', 'rembric', 'bin', 'rembric-bridge.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-dotenv.mjs'),
+      join(home, '.config', 'rembric', 'bin', 'rembric-plugin-core.mjs'),
     ];
     const first = run(['--agent=opencode', '--action=install'], { home });
     expect(first.code).toBe(0);
@@ -374,21 +783,71 @@ describe('opencode installer verifications', () => {
     expect(out).toContain('rewrite failed');
     expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
   });
+
+  it.each([
+    { label: 'core', good: 'rembric-dotenv.mjs', drifted: 'rembric-plugin-core.mjs' },
+    { label: 'dotenv', good: 'rembric-plugin-core.mjs', drifted: 'rembric-dotenv.mjs' },
+  ])('a drifted $label import aborts even though the other rewrite succeeded', ({ drifted }) => {
+    const drift = mkdtempSync(join(tmpdir(), 'rembric-drift-'));
+    writeFileSync(
+      join(drift, 'plugin.ts'),
+      [
+        '// @rembric-plugin-version 0.0.0',
+        "import { readRembricSlug } from '../bin/rembric-dotenv.mjs';",
+        "import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';",
+        'export const RembricPlugin = () => ({});',
+        '',
+      ]
+        .join('\n')
+        // Drift ONE import out of the sed pattern's reach; the other still rewrites.
+        .replace(`../bin/${drifted}`, `./lib/${drifted}`),
+    );
+    const { code, out } = run([], {
+      home,
+      script: OPENCODE_INSTALL,
+      env: { PLUGIN_SRC: drift, BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin') },
+    });
+    rmSync(drift, { recursive: true, force: true });
+    expect(code).toBe(1);
+    expect(out).toContain('rewrite failed');
+    expect(out).toContain(drifted);
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
+  });
+
+  it('the installed plugin loads, resolving both shared modules from disk', async () => {
+    const ins = run(['--agent=opencode', '--action=install'], { home });
+    expect(ins.code).toBe(0);
+
+    const installed = join(home, '.config', 'opencode', 'plugins', 'rembric.ts');
+    const mod = (await import(installed)) as Record<string, unknown>;
+    expect(typeof mod.RembricPlugin).toBe('function');
+    // Control: only the plugin function is exported. opencode invokes EVERY
+    // named export with the plugin ctx, so a leaked helper crashes on load.
+    expect(Object.keys(mod)).toEqual(['RembricPlugin']);
+  });
+
+  it('every file the install copies is removed by the uninstall', () => {
+    const filesUnder = (root: string): string[] => {
+      const walk = (rel: string): string[] =>
+        readdirSync(join(root, rel), { withFileTypes: true }).flatMap((e) =>
+          e.isDirectory() ? walk(join(rel, e.name)) : [join(rel, e.name)],
+        );
+      return walk('.').sort();
+    };
+
+    expect(run(['--agent=opencode', '--action=install'], { home }).code).toBe(0);
+    const installedFiles = filesUnder(home);
+    expect(installedFiles).toContain('.config/rembric/bin/rembric-plugin-core.mjs');
+
+    expect(run(['--agent=opencode', '--action=uninstall'], { home }).code).toBe(0);
+    // opencode.json is the one documented exception — the uninstaller prints
+    // the mcp.rembric block for the operator to remove by hand rather than
+    // editing a file that may configure other MCP servers.
+    expect(filesUnder(home)).toEqual(['.config/opencode/opencode.json']);
+  });
 });
 
 describe('--yes runs the marketplace command (stubbed client binary)', () => {
-  // A fake `claude`/`codex` first on PATH lets us assert the run-through
-  // headlessly: the stub echoes a sentinel with its args so we can tell
-  // "executed" from "merely printed". Core tools live in /usr/bin:/bin, so the
-  // absent-binary case points PATH there (claude/codex are not system bins).
-  const CORE_PATH = '/usr/bin:/bin';
-  function fakeClientBinDir(name: 'claude' | 'codex'): string {
-    const d = mkdtempSync(join(tmpdir(), 'rembric-fakeclient-'));
-    writeFileSync(join(d, name), `#!/bin/sh\necho "RAN:${name} $*"\n`);
-    chmodSync(join(d, name), 0o755);
-    return d;
-  }
-
   it('--yes executes the claude update command when the claude binary is present', () => {
     const bin = fakeClientBinDir('claude');
     const { code, out } = run(['--agent=claude', '--action=update', '--yes'], {
@@ -482,7 +941,7 @@ describe('agent CLI flags', () => {
     expect(data.server).toHaveProperty('version');
     expect(data.server.latest_release).toBeNull();
     // agents block: one object per agent.
-    expect(data.agents.map((d) => d.agent)).toEqual(['claude', 'codex', 'hermes', 'opencode']);
+    expect(data.agents.map((d) => d.agent)).toEqual(CLIENTS);
     for (const d of data.agents) {
       expect(typeof d.present).toBe('boolean');
       expect(d.available).toBe(PLUGIN_VERSION[d.agent]); // from .release-please-manifest.json at the ref

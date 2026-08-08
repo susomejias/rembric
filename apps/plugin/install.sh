@@ -1,10 +1,11 @@
 #!/bin/sh
-# rembric unified installer — one entry point for the server + all four
-# client plugins (Claude Code, Codex CLI, Hermes Agent, opencode).
+# rembric unified installer — one entry point for the server + all five
+# client plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi).
 #
-# This is an ORCHESTRATOR: it delegates to the per-client install.sh /
-# uninstall.sh (opencode, Hermes) and to the marketplace CLIs (Claude, Codex).
-# It never reimplements a client's install logic.
+# This is an ORCHESTRATOR with three delegation backends: the per-client
+# install.sh / uninstall.sh (opencode, Hermes), the marketplace CLIs (Claude,
+# Codex), and a client CLI resolving a registry package (Pi). It never
+# reimplements a client's install logic.
 #
 # Public one-liner:
 #   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh | sh
@@ -46,11 +47,27 @@ ARG_TOKEN_SET=0
 ARG_PORT=''
 ARG_HELP=0
 
+# ONE definition of the verbs `--action` accepts. It lives above the parser
+# (rather than beside CLIENTS) because the parser refuses anything else before
+# any surface runs, and the status table's ACTION column prints only members of
+# this set — so following the table literally always resolves to a real action.
+ACTIONS='install update uninstall'
+
+is_action() { # $1 name → 0 when it is one of ACTIONS
+  for _ak in $ACTIONS; do [ "$_ak" = "$1" ] && return 0; done
+  return 1
+}
+
 for arg in "$@"; do
   case "$arg" in
     --server) ARG_SERVER=1 ;;
     --agent=*) ARG_AGENTS="${arg#--agent=}" ;;
-    --action=*) ARG_ACTION="${arg#--action=}" ;;
+    --action=*)
+      ARG_ACTION="${arg#--action=}"
+      is_action "$ARG_ACTION" || {
+        printf '[rembric] error: invalid --action=%s (expected one of: %s)\n' "$ARG_ACTION" "$ACTIONS" >&2
+        exit 2
+      } ;;
     --ref=*) REF="${arg#--ref=}" ;;
     --up) ARG_UP=1 ;;
     --yes|-y) ARG_YES=1 ;;
@@ -286,6 +303,26 @@ read_remote() { # $1 repo-relative path → stdout file contents
   _t=$(mktemp); if fetch "$1" "$_t"; then cat "$_t"; rm -f "$_t"; else rm -f "$_t"; return 1; fi
 }
 
+# ONE definition of the client set. The --agent parser, the per-client loops,
+# the interactive agent menu and the usage text all derive from it, so a new
+# client is one edit here plus its adapters. install.test.ts parses this line
+# and asserts every surface agrees.
+CLIENTS='claude codex hermes opencode pi'
+
+is_client() { # $1 name → 0 when it is one of CLIENTS
+  for _ck in $CLIENTS; do [ "$_ck" = "$1" ] && return 0; done
+  return 1
+}
+
+client_at() { # $1 1-based position in CLIENTS → name (empty when out of range)
+  _ci=1
+  for _cn in $CLIENTS; do
+    [ "$_ci" = "$1" ] && { printf '%s' "$_cn"; return 0; }
+    _ci=$((_ci + 1))
+  done
+  return 0
+}
+
 # ── version helpers ─────────────────────────────────────────────────────────
 # Available versions all live in one .release-please-manifest.json fetched at
 # the same ref we install from (so "update available" never lies).
@@ -325,6 +362,21 @@ installed_version() { # $1 client → installed semver or empty
       _rembric_cache_version "${HOME}/.claude/plugins/cache" ".claude-plugin/plugin.json" ;;
     codex)
       _rembric_cache_version "${HOME}/.codex/plugins/cache" ".codex-plugin/plugin.json" ;;
+    pi)
+      # `pi install npm:@rembric/pi` (user scope) always materialises the
+      # package here, and this is the same file Pi reads for its own update
+      # check, so this row tracks exactly what `pi update --extensions` would
+      # do. Its other install vectors (local path, project scope --local,
+      # pre-0.75.1 global) leave no version on disk at all → `unknown`, never a
+      # guess: the table's "update available" must not lie.
+      f="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/npm/node_modules/@rembric/pi/package.json"
+      if [ -f "$f" ]; then
+        # Captures to the closing quote instead of a digits-only class, so a
+        # prerelease (1.2.3-rc.1) is read whole rather than dropped/truncated.
+        sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
+      elif client_present pi; then
+        echo unknown
+      fi ;;
   esac
 }
 
@@ -333,12 +385,13 @@ client_present() { # $1 client → 0 present, 1 absent
     claude)   command -v claude   >/dev/null 2>&1 ;;
     codex)    command -v codex    >/dev/null 2>&1 ;;
     opencode) command -v opencode >/dev/null 2>&1 ;;
+    pi)       command -v pi       >/dev/null 2>&1 ;;
     hermes)   [ -d "${HERMES_HOME:-${HOME}/.hermes}" ] ;;
   esac
 }
 
 component_key() { # $1 client → manifest component key
-  # All four clients ship under the single unified `plugin` release-please
+  # All five clients ship under the single unified `plugin` release-please
   # component (`apps/plugin`) — they share one version, so the "available"
   # version is the same manifest entry for every client. (The per-client
   # manifest keys / node-workspace cascade were retired in
@@ -346,13 +399,42 @@ component_key() { # $1 client → manifest component key
   echo "apps/plugin"
 }
 
-# vercmp $1 installed $2 available → echo: none|update|ahead|unknown
+# vercmp $1 installed $2 available → echo: install|none|update|ahead|unknown
 vercmp() {
   [ -z "$2" ] && { echo unknown; return; }
   [ -z "$1" ] && { echo install; return; }
   [ "$1" = "$2" ] && { echo none; return; }
   hi=$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)
   [ "$hi" = "$2" ] && echo update || echo ahead
+}
+
+# client_state $1 client → sets CS_INSTALLED, CS_AVAILABLE, CS_STATE. The one
+# place the three readings are derived; the status table, --status --json and
+# update-all each only format them. CS_INSTALLED is a semver or empty — never
+# installed_version's `unknown` sentinel, which is not a version and is carried
+# as CS_STATE=unreadable instead, so no surface compares against a marker string.
+client_state() {
+  CS_INSTALLED=$(installed_version "$1" 2>/dev/null || true)
+  CS_AVAILABLE=$(available_version "$(component_key "$1")")
+  if [ "$CS_INSTALLED" = unknown ]; then
+    CS_INSTALLED=''
+    CS_STATE=unreadable
+  else
+    CS_STATE=$(vercmp "$CS_INSTALLED" "$CS_AVAILABLE")
+  fi
+}
+
+# state_action $1 CS_STATE → the ACTIONS verb that resolves it, or empty when
+# nothing can be recommended. The ONE place a state becomes a recommendation:
+# the status table's ACTION column and update-all's force hint both print this,
+# so no surface can name a verb the parser would refuse. An unreadable
+# installed version maps to `install` because that reinstall is idempotent; a
+# missing `available` maps to nothing, since no comparison was possible.
+state_action() {
+  case "$1" in
+    install|unreadable) echo install ;;
+    update)             echo update ;;
+  esac
 }
 
 # ── status table ────────────────────────────────────────────────────────────
@@ -366,19 +448,21 @@ print_table() {
   # Pad on plain text only — ANSI escapes count toward printf field width and
   # would skew the columns; colour wraps the pre-padded cells.
   printf '%s  %-10s %-9s %-11s %-11s %s%s\n' "$BOLD" "AGENT" "DETECTED" "PLUGIN" "LATEST" "ACTION" "$RESET"
-  for c in claude codex hermes opencode; do
+  for c in $CLIENTS; do
     if client_present "$c"; then detc="${LIME}$(printf '%-9s' yes)${RESET}"; else detc="${DIM}$(printf '%-9s' no)${RESET}"; fi
-    inst=$(installed_version "$c" 2>/dev/null || true)
-    avail=$(available_version "$(component_key "$c")")
-    state=$(vercmp "$inst" "$avail")
-    case "$state" in
-      none)    act="${DIM}up to date${RESET}" ;;
-      update)  act="${WARN}update${RESET}" ;;
-      install) act="${LIME}install${RESET}" ;;
-      ahead)   act="${DIM}ahead${RESET}" ;;
-      *)       act="${DIM}-${RESET}" ;;
-    esac
-    printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${avail:--}" "$act"
+    client_state "$c"
+    inst="$CS_INSTALLED"
+    [ "$CS_STATE" = unreadable ] && inst=unknown
+    # A cell that recommends something is always an `--action` verb; the states
+    # that recommend nothing print themselves instead, never a verb.
+    act=$(state_action "$CS_STATE")
+    if [ -n "$act" ]; then
+      if [ "$CS_STATE" = update ]; then act="${WARN}${act}${RESET}"; else act="${LIME}${act}${RESET}"; fi
+    elif [ "$CS_STATE" = none ]; then act="${DIM}up to date${RESET}"
+    elif [ "$CS_STATE" = ahead ]; then act="${DIM}ahead${RESET}"
+    else act="${DIM}-${RESET}"
+    fi
+    printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${CS_AVAILABLE:--}" "$act"
   done
   hr
 }
@@ -447,14 +531,15 @@ do_status() {
     printf '{"server":{"state":"%s","version":%s,"latest_release":%s},"agents":[' \
       "$(server_state)" "$(json_str "$(server_image_version)")" "$(json_str "$(server_latest_release)")"
     _f=1
-    for c in claude codex hermes opencode; do
+    for c in $CLIENTS; do
       if client_present "$c"; then _p=true; else _p=false; fi
-      _inst=$(installed_version "$c" 2>/dev/null || true)
-      _avail=$(available_version "$(component_key "$c")")
-      _state=$(vercmp "$_inst" "$_avail")
+      client_state "$c"
+      # An undeterminable installed version is carried by action=unknown, never
+      # by a non-semver string in the `installed` field.
+      [ "$CS_STATE" = unreadable ] && CS_STATE=unknown
       if [ "$_f" = "1" ]; then _f=0; else printf ','; fi
       printf '{"agent":"%s","present":%s,"installed":%s,"available":%s,"action":"%s"}' \
-        "$c" "$_p" "$(json_str "$_inst")" "$(json_str "$_avail")" "$_state"
+        "$c" "$_p" "$(json_str "$CS_INSTALLED")" "$(json_str "$CS_AVAILABLE")" "$CS_STATE"
     done
     printf ']}\n'
     return 0
@@ -702,7 +787,11 @@ run_client_script() { # $1 client, $2 install|uninstall
   fi
 }
 
-marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
+# client_cli_cmds serves the two CLI-driven backends: the marketplace clients
+# (Claude, Codex) and the registry-CLI client (Pi). The per-client part is the
+# command table below; the print/gating half is shared, so a new CLI-driven
+# client does not bring a second copy of the run-through logic.
+client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   c="$1"; action="$2"
   case "$c" in
     claude)
@@ -715,11 +804,29 @@ marketplace_cmds() { # $1 client, $2 action → print (and optionally run) CLI
       ins="codex plugin add rembric@rembric"
       upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
       rem="codex plugin remove rembric@rembric" ;;
+    pi)
+      # No marketplace step: the artifact comes from the npm registry, so the
+      # spec is the whole command. Install and update are the SAME command, and
+      # it carries no version in any action — a version-pinned spec is skipped
+      # by `pi update --extensions`/`--all`, which would freeze the operator
+      # while reporting success. --ref names a git ref, not a registry version,
+      # and is deliberately not applied here.
+      add=''
+      ins="pi install npm:@rembric/pi"
+      upd="$ins"
+      rem="pi remove npm:@rembric/pi" ;;
+    # An unmatched `case` exits 0, so without this a client with no command
+    # table would print its header and a success, having run nothing.
+    *) printf '[rembric] error: no CLI command table for %s\n' "$c" >&2; return 1 ;;
   esac
   case "$action" in
-    install)   say "  Run:"; say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
+    install)   say "  Run:"; [ -n "$add" ] && say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
     update)    say "  Run:"; say "    ${BOLD}$upd${RESET}"; cmd="$upd"; add='' ;;
     uninstall) say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
+    # Defence in depth behind the parser's ACTIONS check: an unmatched `case`
+    # exits 0, so a verb with no arm here would leave `cmd` unset and either
+    # print nothing while reporting success or die inside the `eval` below.
+    *) printf '[rembric] error: unsupported action %s for %s\n' "$action" "$c" >&2; return 1 ;;
   esac
   # --yes is the headless opt-in: run the marketplace command(s) without a
   # prompt, but only when the client binary is actually present (nothing to run
@@ -774,6 +881,15 @@ post_install_notes() { # $1 client, $2 action (install|update)
       else
         say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
       fi ;;
+    pi)
+      if [ "$action" = "update" ]; then
+        say "  ${BOLD}Next:${RESET} restart Pi so it loads the updated extension."
+      else
+        say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell, then restart Pi."
+        # Pi reads no environment from its own settings file, so there is no
+        # settings-file alternative to offer.
+        say "    ${DIM}the shell environment is the only place Pi reads them from${RESET}"
+      fi ;;
   esac
 }
 
@@ -784,7 +900,10 @@ do_client() { # $1 client, $2 action
     opencode|hermes)
       run_client_script "$c" "$([ "$action" = uninstall ] && echo uninstall || echo install)"
       if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
-    claude|codex) marketplace_cmds "$c" "$action" ;;
+    claude|codex|pi) client_cli_cmds "$c" "$action" ;;
+    # Fail closed: an unmatched `case` exits 0, so a client with no backend
+    # would print its header and its "Next" steps having installed nothing.
+    *) printf '[rembric] error: no backend for %s\n' "$c" >&2; return 1 ;;
   esac
   if [ "$action" != "uninstall" ]; then post_install_notes "$c" "$action"; fi
   return 0
@@ -798,11 +917,9 @@ do_update_all() {
   load_manifest
   say "${BOLD}Updating all plugins with an update available…${RESET}"
   _updated=0; _skipped=0
-  for c in claude codex hermes opencode; do
-    _inst=$(installed_version "$c" 2>/dev/null || true)
-    _avail=$(available_version "$(component_key "$c")")
-    _state=$(vercmp "$_inst" "$_avail")
-    case "$_state" in
+  for c in $CLIENTS; do
+    client_state "$c"
+    case "$CS_STATE" in
       update)
         do_client "$c" update
         _updated=$((_updated + 1)) ;;
@@ -815,8 +932,12 @@ do_update_all() {
       ahead)
         say "  ${DIM}${c}: ahead of the published version — skipped${RESET}"
         _skipped=$((_skipped + 1)) ;;
+      # Update-all runs unattended, so a client whose installed version can
+      # never be confirmed is skipped rather than reinstalled — otherwise it
+      # would act on every single run. Forcing it stays the explicit path.
       *)
-        say "  ${DIM}${c}: version unknown — skipped${RESET}"
+        _force=$(state_action "$CS_STATE")
+        say "  ${DIM}${c}: version unknown — skipped${_force:+ (use --agent=${c} --action=${_force} to force)}${RESET}"
         _skipped=$((_skipped + 1)) ;;
     esac
   done
@@ -840,13 +961,14 @@ Flags:
   --status            print the agent/version table headless (no menu); exit
   --json              machine-readable output for --status
   --server            prepare the server (docker-compose.yml + .env + token)
-  --agent=<a,b,..>   one or more of: claude codex hermes opencode, or 'all'
-  --action=<a>        install | update | uninstall
+  --agent=<a,b,..>    one or more of: $CLIENTS, or 'all'
+  --action=<a>        one of: $ACTIONS  (--server takes install|update only)
   --token=<tok>       admin token for --server (default: auto-generate)
   --port=<n>          REMBRIC_PORT for --server (default: 8787)
   --up                run 'docker compose pull && up -d' after --server (needs docker)
-  --yes, -y           run the Claude/Codex marketplace commands when the client
-                      binary is present (headless opt-in; does not start Docker — use --up)
+  --yes, -y           run the client CLI commands (Claude/Codex marketplace, Pi
+                      registry) when the client binary is present (headless
+                      opt-in; does not start Docker — use --up)
   --ref=<tag>         git ref to install from (default: main)
   -h, --help          this help
 
@@ -906,7 +1028,16 @@ if [ "$ARG_STATUS" = "1" ]; then do_status; exit 0; fi
 if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
   banner
   did=0
-  [ "$ARG_SERVER" = "1" ] && { do_server "${ARG_ACTION:-install}"; did=1; }
+  if [ "$ARG_SERVER" = "1" ]; then
+    # The server has no uninstall backend: do_server treats every non-`update`
+    # action as install, so accepting `uninstall` here would install under an
+    # "uninstall" heading.
+    case "${ARG_ACTION:-install}" in
+      install|update) ;;
+      *) printf '[rembric] error: --server accepts --action=install|update, not %s\n' "$ARG_ACTION" >&2; exit 2 ;;
+    esac
+    do_server "${ARG_ACTION:-install}"; did=1
+  fi
   # `--action=update` with no --agent (or the explicit --agent=all alias)
   # updates every installed plugin that has an update available, skipping
   # the rest — this is the command memory.about advertises as `update_all`.
@@ -915,12 +1046,17 @@ if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
   elif [ -n "$ARG_AGENTS" ]; then
     [ -z "$ARG_ACTION" ] && { printf '[rembric] error: --agent requires --action\n' >&2; usage; exit 2; }
     load_manifest
-    OLDIFS=$IFS; IFS=','
-    for c in $ARG_AGENTS; do
-      case "$c" in claude|codex|hermes|opencode) do_client "$c" "$ARG_ACTION"; did=1 ;;
-        *) printf '[rembric] error: unknown agent %s\n' "$c" >&2; IFS=$OLDIFS; exit 2 ;; esac
+    # Split the comma list ONCE and put IFS back before anything else runs:
+    # CLIENTS is space-separated, so leaving IFS at ',' for the body makes every
+    # downstream split (is_client's, for one) silently see a single word.
+    OLDIFS=$IFS; IFS=','; set -- $ARG_AGENTS; IFS=$OLDIFS
+    for c in "$@"; do
+      if is_client "$c"; then
+        do_client "$c" "$ARG_ACTION"; did=1
+      else
+        printf '[rembric] error: unknown agent %s\n' "$c" >&2; exit 2
+      fi
     done
-    IFS=$OLDIFS
   fi
   [ "$did" = "0" ] && { usage; exit 2; }
   exit 0
@@ -948,11 +1084,14 @@ while :; do
     1)
       screen
       print_table
-      arrow_menu "Which agent?" "all — update outdated" "claude" "codex" "hermes" "opencode"
-      case "$MENU_INDEX" in
-        0) c=''; screen; do_update_all; pause ;;
-        1) c=claude ;; 2) c=codex ;; 3) c=hermes ;; 4) c=opencode ;; *) c='' ;;
-      esac
+      # Unquoted on purpose: one menu entry per client, so the entry order and
+      # the index mapping below both come from CLIENTS.
+      arrow_menu "Which agent?" "all — update outdated" $CLIENTS
+      if [ "$MENU_INDEX" = "0" ]; then
+        c=''; screen; do_update_all; pause
+      else
+        c=$(client_at "$MENU_INDEX")   # -1 (quit) is out of range → empty
+      fi
       if [ -n "$c" ]; then
         screen
         arrow_menu "Action for $c" "install" "update" "uninstall"
