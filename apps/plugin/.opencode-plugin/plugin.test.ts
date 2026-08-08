@@ -812,10 +812,9 @@ describe('RembricPlugin handlers', () => {
         }
       }
 
-      // Inverted on purpose: chat.message is what puts a session into
-      // knownSessions, and session.created returns before that for a
-      // sub-agent — so marking it afterwards is the only way the dispose
-      // loop's sub-agent guard is reachable at all.
+      // Inverted on purpose: session.created returns early for a sub-agent, so
+      // marking it after chat.message is the only way the dispose loop's
+      // sub-agent guard is reachable at all.
       await handlers['chat.message']!(
         { sessionID: 'd-sub' } as never,
         { parts: [{ type: 'text', text: 'sub work' }], message: {} } as never,
@@ -861,10 +860,8 @@ describe('RembricPlugin handlers', () => {
       vi.useRealTimers();
     });
 
-    // The two maps this plugin keys by assistant message id are the state that
-    // would otherwise grow without bound in a long session: forgetSession only
-    // ever reported the SURVIVING entries, so an id the cap pushed out was
-    // retained for the life of the process.
+    // Past the cap is where the two maps keyed by assistant message id can grow
+    // without bound, since forgetSession reports only the surviving entries.
     async function fillPastTheCap(
       handlers: Awaited<ReturnType<typeof RembricPlugin>>,
       sessionId: string,
@@ -903,8 +900,7 @@ describe('RembricPlugin handlers', () => {
     });
 
     it('an assistant turn evicted by later assistant turns is dropped too', async () => {
-      // No user turn at all, so the eviction can only come from the assistant
-      // upsert path — the other call site that pushes an entry into the window.
+      // No user turn at all, so only the assistant upsert path can evict.
       const handlers = await RembricPlugin({ directory: dir } as never);
       await handlers.event!(created('cap-assistant') as never);
       for (let i = 0; i < 400; i++) {
@@ -1123,9 +1119,8 @@ describe('the shared accumulator reports what its per-session cap evicts', () =>
       }
     }
 
-    // No cap size is asserted: what matters is that whatever the window holds,
-    // every entry no longer in it was reported exactly once and in order — that
-    // is what lets a client's per-message state stay bounded too.
+    // No cap size is asserted, only that every entry that left the window was
+    // reported exactly once and in order.
     expect(evicted.length).toBeGreaterThan(0);
     expect(evicted).toEqual(Array.from({ length: evicted.length }, (_, i) => `m-${i}`));
     expect(evicted.length).toBeLessThan(total);
@@ -1204,9 +1199,8 @@ describe('RembricPlugin without credentials', () => {
         await vi.advanceTimersByTimeAsync(1000);
 
         expect(fetchMock).not.toHaveBeenCalled();
-        // Control: the handlers really ran. Nudges are deliberately unaffected
-        // by the missing configuration, so their presence is what tells this
-        // apart from a test that exercised nothing.
+        // Control: nudges are deliberately unaffected by the missing
+        // configuration, so their presence is what proves the handlers ran.
         expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
       } finally {
         vi.useRealTimers();

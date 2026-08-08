@@ -2,10 +2,10 @@
 # rembric unified installer — one entry point for the server + all five
 # client plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi).
 #
-# This is an ORCHESTRATOR with three delegation backends: the per-client
-# install.sh / uninstall.sh (opencode, Hermes), the marketplace CLIs (Claude,
-# Codex), and a client CLI resolving a registry package (Pi). It never
-# reimplements a client's install logic.
+# An ORCHESTRATOR over three delegation backends — the per-client install.sh /
+# uninstall.sh (opencode, Hermes), the marketplace CLIs (Claude, Codex), and a
+# client CLI resolving a registry package (Pi). It never reimplements a client's
+# install logic.
 #
 # Public one-liner:
 #   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh | sh
@@ -47,10 +47,8 @@ ARG_TOKEN_SET=0
 ARG_PORT=''
 ARG_HELP=0
 
-# ONE definition of the verbs `--action` accepts. It lives above the parser
-# (rather than beside CLIENTS) because the parser refuses anything else before
-# any surface runs, and the status table's ACTION column prints only members of
-# this set — so following the table literally always resolves to a real action.
+# ONE definition of the verbs `--action` accepts, read by the parser and by the
+# status table's ACTION column, which may recommend nothing outside this set.
 ACTIONS='install update uninstall'
 
 is_action() { # $1 name → 0 when it is one of ACTIONS
@@ -303,10 +301,9 @@ read_remote() { # $1 repo-relative path → stdout file contents
   _t=$(mktemp); if fetch "$1" "$_t"; then cat "$_t"; rm -f "$_t"; else rm -f "$_t"; return 1; fi
 }
 
-# ONE definition of the client set. The --agent parser, the per-client loops,
-# the interactive agent menu and the usage text all derive from it, so a new
-# client is one edit here plus its adapters. install.test.ts parses this line
-# and asserts every surface agrees.
+# ONE definition of the client set: the parser, the per-client loops, the agent
+# menu and the usage text all derive from it. install.test.ts parses this line,
+# so it has to stay a single-line assignment.
 CLIENTS='claude codex hermes opencode pi'
 
 is_client() { # $1 name → 0 when it is one of CLIENTS
@@ -363,16 +360,12 @@ installed_version() { # $1 client → installed semver or empty
     codex)
       _rembric_cache_version "${HOME}/.codex/plugins/cache" ".codex-plugin/plugin.json" ;;
     pi)
-      # `pi install npm:@rembric/pi` (user scope) always materialises the
-      # package here, and this is the same file Pi reads for its own update
-      # check, so this row tracks exactly what `pi update --extensions` would
-      # do. Its other install vectors (local path, project scope --local,
-      # pre-0.75.1 global) leave no version on disk at all → `unknown`, never a
-      # guess: the table's "update available" must not lie.
+      # Only a user-scope `pi install npm:` leaves a version here; every other
+      # vector leaves none, hence `unknown` rather than a guess.
       f="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/npm/node_modules/@rembric/pi/package.json"
       if [ -f "$f" ]; then
-        # Captures to the closing quote instead of a digits-only class, so a
-        # prerelease (1.2.3-rc.1) is read whole rather than dropped/truncated.
+        # Captures to the closing quote, not a digits-only class, so a prerelease
+        # (1.2.3-rc.1) is read whole.
         sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
       elif client_present pi; then
         echo unknown
@@ -391,11 +384,8 @@ client_present() { # $1 client → 0 present, 1 absent
 }
 
 component_key() { # $1 client → manifest component key
-  # All five clients ship under the single unified `plugin` release-please
-  # component (`apps/plugin`) — they share one version, so the "available"
-  # version is the same manifest entry for every client. (The per-client
-  # manifest keys / node-workspace cascade were retired in
-  # unify-plugin-release-track.)
+  # Every client ships under the single unified `plugin` release-please component,
+  # so the available version is the same manifest entry for all of them.
   echo "apps/plugin"
 }
 
@@ -408,11 +398,9 @@ vercmp() {
   [ "$hi" = "$2" ] && echo update || echo ahead
 }
 
-# client_state $1 client → sets CS_INSTALLED, CS_AVAILABLE, CS_STATE. The one
-# place the three readings are derived; the status table, --status --json and
-# update-all each only format them. CS_INSTALLED is a semver or empty — never
-# installed_version's `unknown` sentinel, which is not a version and is carried
-# as CS_STATE=unreadable instead, so no surface compares against a marker string.
+# client_state $1 client → sets CS_INSTALLED, CS_AVAILABLE, CS_STATE. CS_INSTALLED
+# is a semver or empty, never installed_version's `unknown` sentinel, which is
+# carried as CS_STATE=unreadable so no surface compares against a marker string.
 client_state() {
   CS_INSTALLED=$(installed_version "$1" 2>/dev/null || true)
   CS_AVAILABLE=$(available_version "$(component_key "$1")")
@@ -425,11 +413,9 @@ client_state() {
 }
 
 # state_action $1 CS_STATE → the ACTIONS verb that resolves it, or empty when
-# nothing can be recommended. The ONE place a state becomes a recommendation:
-# the status table's ACTION column and update-all's force hint both print this,
-# so no surface can name a verb the parser would refuse. An unreadable
-# installed version maps to `install` because that reinstall is idempotent; a
-# missing `available` maps to nothing, since no comparison was possible.
+# nothing can be recommended. `unreadable` maps to `install` because that
+# reinstall is idempotent; a missing `available` maps to nothing, since no
+# comparison was possible.
 state_action() {
   case "$1" in
     install|unreadable) echo install ;;
@@ -453,8 +439,8 @@ print_table() {
     client_state "$c"
     inst="$CS_INSTALLED"
     [ "$CS_STATE" = unreadable ] && inst=unknown
-    # A cell that recommends something is always an `--action` verb; the states
-    # that recommend nothing print themselves instead, never a verb.
+    # A cell that recommends something prints an `--action` verb; the states that
+    # recommend nothing print themselves instead.
     act=$(state_action "$CS_STATE")
     if [ -n "$act" ]; then
       if [ "$CS_STATE" = update ]; then act="${WARN}${act}${RESET}"; else act="${LIME}${act}${RESET}"; fi
@@ -787,10 +773,8 @@ run_client_script() { # $1 client, $2 install|uninstall
   fi
 }
 
-# client_cli_cmds serves the two CLI-driven backends: the marketplace clients
-# (Claude, Codex) and the registry-CLI client (Pi). The per-client part is the
-# command table below; the print/gating half is shared, so a new CLI-driven
-# client does not bring a second copy of the run-through logic.
+# Serves both CLI-driven backends — the marketplace clients (Claude, Codex) and
+# the registry-CLI client (Pi) — so only the command table below is per-client.
 client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   c="$1"; action="$2"
   case "$c" in
@@ -805,27 +789,23 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
       upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
       rem="codex plugin remove rembric@rembric" ;;
     pi)
-      # No marketplace step: the artifact comes from the npm registry, so the
-      # spec is the whole command. Install and update are the SAME command, and
-      # it carries no version in any action — a version-pinned spec is skipped
-      # by `pi update --extensions`/`--all`, which would freeze the operator
-      # while reporting success. --ref names a git ref, not a registry version,
-      # and is deliberately not applied here.
+      # Unpinned in every action, because `pi update --extensions`/`--all` skips a
+      # version-pinned spec and would freeze the operator while reporting success.
+      # --ref names a git ref, not a registry version, so it is not applied here.
       add=''
       ins="pi install npm:@rembric/pi"
       upd="$ins"
       rem="pi remove npm:@rembric/pi" ;;
-    # An unmatched `case` exits 0, so without this a client with no command
-    # table would print its header and a success, having run nothing.
+    # An unmatched `case` exits 0, so a client with no table would report success
+    # having run nothing.
     *) printf '[rembric] error: no CLI command table for %s\n' "$c" >&2; return 1 ;;
   esac
   case "$action" in
     install)   say "  Run:"; [ -n "$add" ] && say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
     update)    say "  Run:"; say "    ${BOLD}$upd${RESET}"; cmd="$upd"; add='' ;;
     uninstall) say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
-    # Defence in depth behind the parser's ACTIONS check: an unmatched `case`
-    # exits 0, so a verb with no arm here would leave `cmd` unset and either
-    # print nothing while reporting success or die inside the `eval` below.
+    # A verb with no arm here would leave `cmd` unset and either report success
+    # having printed nothing or die inside the `eval` below.
     *) printf '[rembric] error: unsupported action %s for %s\n' "$action" "$c" >&2; return 1 ;;
   esac
   # --yes is the headless opt-in: run the marketplace command(s) without a
@@ -886,7 +866,7 @@ post_install_notes() { # $1 client, $2 action (install|update)
         say "  ${BOLD}Next:${RESET} restart Pi so it loads the updated extension."
       else
         say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell, then restart Pi."
-        # Pi reads no environment from its own settings file, so there is no
+        # Pi reads no environment from its settings file, so there is no
         # settings-file alternative to offer.
         say "    ${DIM}the shell environment is the only place Pi reads them from${RESET}"
       fi ;;
@@ -901,8 +881,8 @@ do_client() { # $1 client, $2 action
       run_client_script "$c" "$([ "$action" = uninstall ] && echo uninstall || echo install)"
       if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
     claude|codex|pi) client_cli_cmds "$c" "$action" ;;
-    # Fail closed: an unmatched `case` exits 0, so a client with no backend
-    # would print its header and its "Next" steps having installed nothing.
+    # An unmatched `case` exits 0, so a client with no backend would print its
+    # "Next" steps having installed nothing.
     *) printf '[rembric] error: no backend for %s\n' "$c" >&2; return 1 ;;
   esac
   if [ "$action" != "uninstall" ]; then post_install_notes "$c" "$action"; fi
@@ -932,9 +912,8 @@ do_update_all() {
       ahead)
         say "  ${DIM}${c}: ahead of the published version — skipped${RESET}"
         _skipped=$((_skipped + 1)) ;;
-      # Update-all runs unattended, so a client whose installed version can
-      # never be confirmed is skipped rather than reinstalled — otherwise it
-      # would act on every single run. Forcing it stays the explicit path.
+      # Unattended, so an unconfirmable version is skipped rather than
+      # reinstalled on every run; forcing it stays the explicit path.
       *)
         _force=$(state_action "$CS_STATE")
         say "  ${DIM}${c}: version unknown — skipped${_force:+ (use --agent=${c} --action=${_force} to force)}${RESET}"

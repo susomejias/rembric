@@ -1,17 +1,7 @@
 #!/usr/bin/env node
-// Prepares `apps/plugin/.pi-plugin` for publish and asserts what it packs.
-//
-//   node scripts/pi-package.mjs materialize
-//   node scripts/pi-package.mjs assert-pack
-//
-// `materialize` is idempotent: a second run finds the specifiers already
-// repointed and rewrites the resources from their shared originals again.
-//
-// Both halves are explicit CI steps rather than lifecycle scripts: whether a
-// `prepack` runs depends on the cwd of the publish command, because the project
-// `.npmrc` resolves from the nearest `package.json` — so a materialisation
-// hung off `prepack` would silently ship a tarball missing its shared modules.
-// See openspec/specs/supply-chain-hygiene/spec.md.
+// Prepares `apps/plugin/.pi-plugin` for publish (`materialize`, idempotent) and
+// asserts what it packs (`assert-pack`). Both are explicit CI steps and never
+// lifecycle scripts — see openspec/specs/supply-chain-hygiene/spec.md.
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,9 +20,8 @@ const COMMANDS = readdirSync(join(pluginRoot, 'commands'))
   .sort();
 
 const RELATIVE_IMPORT = /from\s+'(\.[^']*)'/g;
-// `index.ts` sits at the package root, so a specifier reaching `../bin/` in the
-// repo has to reach `./bin/` once packed. Both forms are accepted here so
-// assert-pack reads the same module set after materialize rewrote them.
+// Both `../bin/` (repo) and `./bin/` (packed) match, so assert-pack reads the
+// same module set after materialize rewrote the specifiers.
 const PACKABLE_IMPORT = /^\.{1,2}\/bin\/([\w.-]+\.mjs)$/;
 
 function fail(message) {
@@ -40,10 +29,8 @@ function fail(message) {
   process.exit(1);
 }
 
-// Read off index.ts rather than listed: a shared import a hand-written list
-// missed would materialise, pack and publish cleanly, then fail to resolve on
-// the consumer's machine. `import type` and a value import of the same module
-// collapse to one entry.
+// Read off index.ts rather than listed, so a shared import cannot be missed and
+// ship unresolvable. `import type` and a value import collapse to one entry.
 function sharedModules() {
   const specifiers = [...readFileSync(indexPath, 'utf8').matchAll(RELATIVE_IMPORT)].map(
     (m) => m[1],
@@ -69,12 +56,8 @@ function materialize() {
     copyFileSync(join(pluginRoot, 'bin', mod), join(pkgDir, 'bin', mod));
   }
 
-  // The shared templates name the tools the way the server publishes them, and
-  // Pi ships them verbatim to the model through `pi.prompts` — but this client
-  // registers the tools with each dot replaced, so a template telling the model
-  // to call the dotted name names nothing in its registry. Rewritten in the
-  // COPIES only: the shared originals stay exact for the four clients that
-  // register the canonical names, and nothing is duplicated in git.
+  // Rewritten in the COPIES only: the tracked originals must stay canonical for
+  // the four clients that register the dotted names.
   let renamed = 0;
   for (const cmd of COMMANDS) {
     const source = readFileSync(join(pluginRoot, 'commands', cmd), 'utf8');
@@ -94,11 +77,8 @@ function materialize() {
       after = after.split(dev).join(packed);
       rewrote += 1;
     } else if (after.includes(packed)) {
-      // Re-running materialize is normal (a retried CI step, a local publish
-      // rehearsal), and there is nothing left to rewrite. Distinguished from
-      // drift rather than merged with it: real drift is a specifier this step
-      // cannot materialise at all, which sharedModules() already refuses by
-      // name — the two must not share one message.
+      // Re-running materialize is normal and is not drift; drift is a specifier
+      // this step cannot materialise, which sharedModules() refuses by name.
       alreadyPacked += 1;
     } else {
       fail(
@@ -131,8 +111,8 @@ function expectedFiles() {
 }
 
 function assertPack() {
-  // --ignore-scripts so the assertion cannot depend on lifecycle behaviour that
-  // is itself cwd-dependent; the manifest declares none (invariants.test.ts).
+  // --ignore-scripts so the assertion cannot depend on cwd-dependent lifecycle
+  // behaviour; the manifest declares none (invariants.test.ts).
   const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
     cwd: pkgDir,
     encoding: 'utf8',

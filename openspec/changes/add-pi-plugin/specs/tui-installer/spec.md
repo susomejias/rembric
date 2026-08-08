@@ -191,7 +191,9 @@ For Pi the installer SHALL use `pi install npm:@rembric/pi` for install **and fo
 
 Because a `curl | sh` installer is a supply-chain surface, the documentation that publishes the installer command SHALL lead with the download-inspect-run two-step (download the script, inspect it, then run it) as the recommended path, and SHALL offer a tag-pinned URL alternative for reproducibility. On start the installer SHALL print the source ref it is operating against so the user can confirm what they ran.
 
-The installer script itself SHALL NOT acquire an npm dependency, SHALL NOT declare or execute a lifecycle script, and SHALL NOT ship a published binary. Invoking a client's own CLI, which resolves that client's extension from the npm registry, is that **client's** install mechanism and is not an npm dependency of this capability: the installer holds no manifest, no lockfile, and no resolution of its own. Where the installer surfaces such a command, it SHALL name the exact package being installed so the operator can inspect it before consenting, and the outbound-publication requirements of `supply-chain-hygiene` govern what that package is allowed to be.
+No part of this capability SHALL add an npm dependency, a lifecycle script, or a published binary.
+
+Invoking a client's own CLI, which resolves that client's extension from the npm registry, does not breach that: it is the **client's** install mechanism, and this capability holds no manifest, no lockfile and no resolution of its own. Where the installer surfaces such a command, it SHALL name the exact package being installed so the operator can inspect it before consenting, and the outbound-publication requirements of `supply-chain-hygiene` govern what that package is allowed to be.
 
 #### Scenario: Docs present the inspect-first alternative
 

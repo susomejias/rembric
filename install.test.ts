@@ -44,9 +44,8 @@ const CLIENTS: string[] = (() => {
   return m[1].split(' ');
 })();
 
-// The verbs `--action` accepts, parsed from the installer's single definition
-// so the expectations below cannot drift from what the parser allows. Same
-// single-line requirement as CLIENTS.
+// Parsed from the installer's own definition so the expectations cannot drift
+// from what the parser accepts. Same single-line requirement as CLIENTS.
 const ACTIONS: string[] = (() => {
   const m = /^ACTIONS='([^']+)'$/m.exec(INSTALLER_SRC);
   if (!m) throw new Error('apps/plugin/install.sh has no single ACTIONS= definition');
@@ -61,10 +60,9 @@ const NON_RECOMMENDATIONS = ['up to date', 'ahead', '-'];
 // needs a client to look absent points PATH here.
 const CORE_PATH = '/usr/bin:/bin';
 
-// A stub client binary first on PATH, wherever a test needs that client to look
-// present. The real one must never run from the suite — it would install into
-// the developer's own configuration — and the `RAN:` sentinel is what
-// distinguishes "executed" from "merely printed".
+// A stub client binary first on PATH, so the real one never runs from the suite
+// and installs into the developer's own configuration. The `RAN:` sentinel is
+// what distinguishes "executed" from "merely printed".
 function fakeClientBinDir(name: 'claude' | 'codex' | 'pi'): string {
   const d = mkdtempSync(join(tmpdir(), 'rembric-fakeclient-'));
   writeFileSync(join(d, name), `#!/bin/sh\necho "RAN:${name} $*"\n`);
@@ -164,8 +162,6 @@ describe('argument handling', () => {
     expect(code).toBe(2);
     expect(out).toContain('invalid --action=bogus');
     for (const a of ACTIONS) expect(out).toContain(a); // the error names what is accepted
-    // The pre-fix failure was silent success: no command, no error, and the
-    // post-install "Next" steps printed as if something had been installed.
     expect(out).not.toContain('RAN:pi');
     expect(out).not.toContain('Next');
 
@@ -382,8 +378,7 @@ describe('--action=update with no --agent (update-all)', () => {
 
 describe('the client set has a single definition every surface agrees with', () => {
   it('is exactly the five supported clients, in a stable order', () => {
-    // The literal contract, and the non-vacuity control for every assertion
-    // below that derives its expectation from CLIENTS.
+    // Non-vacuity control for every assertion below that derives from CLIENTS.
     expect(CLIENTS).toEqual(['claude', 'codex', 'hermes', 'opencode', 'pi']);
   });
 
@@ -395,9 +390,7 @@ describe('the client set has a single definition every surface agrees with', () 
   });
 
   it('the interactive agent menu and its index mapping both derive from it', () => {
-    // The arrow-key menu needs a real /dev/tty, so this is asserted at the
-    // source: the entries are the set itself, and the selected index is mapped
-    // back through it rather than through a hand-written case ladder.
+    // The arrow-key menu needs a real /dev/tty, so this is asserted at the source.
     expect(INSTALLER_SRC).toContain('arrow_menu "Which agent?" "all — update outdated" $CLIENTS');
     expect(INSTALLER_SRC).toContain('c=$(client_at "$MENU_INDEX")');
   });
@@ -423,15 +416,14 @@ describe('the client set has a single definition every surface agrees with', () 
     expect(code).toBe(0);
     expect(out).not.toContain('unknown agent');
     expect(out).toContain(`${client} (install)`);
-    // A client in the set with no post_install_notes arm would install and then
-    // say nothing about the wiring it still needs.
+    // A client with no post_install_notes arm installs and says nothing about the
+    // wiring it still needs.
     expect(out).toContain('Next');
   });
 
   it('every client has a presence adapter (an unmatched case would report present)', () => {
-    // /usr/bin:/bin holds none of the client binaries and HOME is throwaway, so
-    // every row must read absent. A client missing from client_present's case
-    // falls through, and an empty `case` exits 0 — i.e. reports itself present.
+    // Every row must read absent here, and a client missing from client_present's
+    // `case` falls through to an empty arm, which exits 0 — i.e. reports present.
     const { out } = run(['--status', '--json'], { home, path: '/usr/bin:/bin' });
     const agents = JSON.parse(out).agents as { agent: string; present: boolean }[];
     expect(agents.map((a) => a.present)).toEqual(CLIENTS.map(() => false));
@@ -440,10 +432,8 @@ describe('the client set has a single definition every surface agrees with', () 
 
 describe('the ACTION column recommends only actions --action accepts', () => {
   // The three surfaces derived from client_state print different things: the
-  // table prints the recommended VERB, `--status --json` carries the detected
-  // STATE, and update-all names the verb it would take. The column used to
-  // print `reinstall`, which is not a verb the parser accepts — following the
-  // table exited 0 having run nothing, or died inside `eval` under --yes.
+  // table prints the recommended VERB, `--status --json` the detected STATE, and
+  // update-all the verb it would take.
 
   function tableRows(out: string): { agent: string; action: string }[] {
     return out
@@ -505,16 +495,14 @@ describe('the ACTION column recommends only actions --action accepts', () => {
         path: `${PI_STUB_DIR}:${CORE_PATH}`,
       });
       expect(code).toBe(0);
-      // `cmd: parameter not set` was the --yes symptom of an unmatched action.
       expect(out).not.toMatch(/parameter not set|unbound variable|unsupported action/);
       expect(out).toContain('RAN:pi');
     },
   );
 
   it("the CLI backend's action table has one arm per verb and fails closed", () => {
-    // Unreachable from the CLI now that the parser refuses unknown verbs, so it
-    // is asserted at the source: an unmatched POSIX `case` exits 0, which is
-    // what made the original failure silent.
+    // Unreachable from the CLI while the parser refuses unknown verbs, so it is
+    // asserted at the source: an unmatched POSIX `case` exits 0, silently.
     const block = /client_cli_cmds\(\)[\s\S]*?\n {2}case "\$action" in\n([\s\S]*?)\n {2}esac/.exec(
       INSTALLER_SRC,
     );
@@ -539,8 +527,6 @@ describe('the ACTION column recommends only actions --action accepts', () => {
 });
 
 describe('pi (registry-CLI backend)', () => {
-  // The third backend: no repo-side script, no marketplace — the client's own
-  // CLI resolving a package from the public npm registry.
   const piAgent = (root: string): string => join(root, 'npm', 'node_modules', '@rembric', 'pi');
 
   function installedFixture(agentDir: string, version: string): void {
@@ -575,8 +561,8 @@ describe('pi (registry-CLI backend)', () => {
     expect(pinned.code).toBe(0);
     for (const { out } of [ins, upd, pinned]) {
       expect(out).toContain(spec);
-      // A version-pinned spec is skipped by the client's own update commands,
-      // so it would freeze the operator while reporting success.
+      // A version-pinned spec is skipped by `pi update`, freezing the operator
+      // while reporting success.
       expect(out).not.toMatch(/@rembric\/pi@/);
     }
     // --ref names a git ref; this artifact comes from the registry.
@@ -595,8 +581,8 @@ describe('pi (registry-CLI backend)', () => {
     const { out } = run(['--agent=pi', '--action=install'], { home, path: CORE_PATH });
     expect(out).toContain('REMBRIC_SERVER_URL');
     expect(out).toContain('REMBRIC_API_TOKEN');
-    // Measured: this harness injects nothing from its own settings file, so a
-    // settings-file step would be an invented path.
+    // Pi reads no environment from its settings file, so there is no
+    // settings-file alternative to offer.
     expect(out).not.toMatch(/settings/i);
   });
 
@@ -627,10 +613,8 @@ describe('pi (registry-CLI backend)', () => {
   });
 
   describe('installed-version detection', () => {
-    // Measured against Pi 0.84.1: a user-scope `pi install npm:<pkg>` always
-    // leaves the package manifest under <agentDir>/npm/node_modules/, and that
-    // is the same file Pi reads for its own update check. The other install
-    // vectors (local path, project scope, pre-0.75.1 global) leave no version
+    // A user-scope `pi install npm:<pkg>` leaves the manifest under
+    // <agentDir>/npm/node_modules/; every other install vector leaves no version
     // on disk at all.
     it('reads the version from the deterministic location under PI_CODING_AGENT_DIR', () => {
       const agentDir = join(home, 'piagent');
@@ -659,9 +643,8 @@ describe('pi (registry-CLI backend)', () => {
     });
 
     it('reads a prerelease version whole, not truncated to its release core', () => {
-      // The digits-only extraction the other four adapters use returns empty or
-      // a truncated `9.9.9` here, which would make vercmp compare the wrong
-      // value and the table state a version that is not installed.
+      // The digits-only extraction the other four adapters use returns empty or a
+      // truncated `9.9.9` here, so vercmp would compare a version nobody has.
       const agentDir = join(home, 'piagent');
       installedFixture(agentDir, '9.9.9-rc.1');
       const { out } = run(['--status'], {
@@ -676,16 +659,14 @@ describe('pi (registry-CLI backend)', () => {
       const { code, out } = run(['--status'], { home, path: `${PI_STUB_DIR}:${CORE_PATH}` });
       expect(code).toBe(0);
       expect(piRow(out)).toContain('unknown');
-      // The recommendation under ignorance is the idempotent reinstall, printed
-      // as the verb `--action` accepts so following the table literally works.
       const action = piRow(out)
         .trim()
         .split(/\s{2,}/)
         .at(-1);
       expect(action).toBe('install');
       expect(ACTIONS).toContain(action);
-      // The table's "update available" must never lie: an unreadable version is
-      // neither of the determinate states.
+      // An unreadable version is neither determinate state, so the table must
+      // claim neither.
       expect(piRow(out)).not.toContain('up to date');
       expect(piRow(out)).not.toContain('update');
     });
@@ -707,7 +688,7 @@ describe('pi (registry-CLI backend)', () => {
       });
       expect(code).toBe(0);
       expect(out).toContain('pi: version unknown — skipped');
-      // Unattended: reinstalling on ignorance would act on every single run.
+      // Unattended, so reinstalling on ignorance would act on every run.
       expect(out).not.toContain('RAN:pi');
     });
 
@@ -821,8 +802,8 @@ describe('opencode installer verifications', () => {
     const installed = join(home, '.config', 'opencode', 'plugins', 'rembric.ts');
     const mod = (await import(installed)) as Record<string, unknown>;
     expect(typeof mod.RembricPlugin).toBe('function');
-    // Control: only the plugin function is exported. opencode invokes EVERY
-    // named export with the plugin ctx, so a leaked helper crashes on load.
+    // opencode invokes EVERY named export with the plugin ctx, so a leaked helper
+    // crashes on load.
     expect(Object.keys(mod)).toEqual(['RembricPlugin']);
   });
 
@@ -840,9 +821,8 @@ describe('opencode installer verifications', () => {
     expect(installedFiles).toContain('.config/rembric/bin/rembric-plugin-core.mjs');
 
     expect(run(['--agent=opencode', '--action=uninstall'], { home }).code).toBe(0);
-    // opencode.json is the one documented exception — the uninstaller prints
-    // the mcp.rembric block for the operator to remove by hand rather than
-    // editing a file that may configure other MCP servers.
+    // opencode.json is the documented exception: it may configure other MCP
+    // servers, so the uninstaller prints the block instead of editing it.
     expect(filesUnder(home)).toEqual(['.config/opencode/opencode.json']);
   });
 });

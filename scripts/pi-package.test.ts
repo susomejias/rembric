@@ -14,25 +14,18 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-// The JS twin of install.test.ts's "aborts loudly when the import rewrite
-// no-ops". Both halves of the same mechanism repoint `../bin/` specifiers, and
-// this one fails in the registry — with a tarball already published — rather
-// than in the installing user's face.
-
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PI_INDEX = 'apps/plugin/.pi-plugin/index.ts';
 
-// A tool name as the server publishes it. Pi registers each dot as an
-// underscore, so a template shipped with the dotted form names nothing in the
-// registry the model can see.
+// A tool name as the server publishes it; Pi's registry holds the underscored
+// form, so a template shipped dotted names nothing the model can call.
 const DOTTED_TOOL_NAME = /\b(?:memory|project)\.[a-z]/;
 
 let root: string;
 let shared: string[];
 
-// pi-package.mjs resolves everything from its own location, so a copy of the
-// tree it reads drives it against a throwaway package: the real .pi-plugin is
-// never materialised and the repo's index.ts is never rewritten.
+// pi-package.mjs resolves everything from its own location, so driving a copy of
+// the tree leaves the real .pi-plugin unmaterialised and its index.ts unrewritten.
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'rembric-pipack-'));
   mkdirSync(join(root, 'scripts'), { recursive: true });
@@ -76,9 +69,7 @@ describe('materialize', () => {
   });
 
   it('picks up a shared import added without editing the script', () => {
-    // The derivation is the whole point: a further `../bin/` import has to
-    // travel with no list to keep in sync. rembric-bridge.mjs is a real module
-    // the package does not ship today.
+    // rembric-bridge.mjs is a real module the package does not ship today.
     writeFileSync(
       pkg('index.ts'),
       `import { probe } from '../bin/rembric-bridge.mjs';\n${indexText()}`,
@@ -118,8 +109,8 @@ describe('materialize', () => {
     const originals = readdirSync(join(REPO_ROOT, 'apps', 'plugin', 'commands')).filter((f) =>
       f.endsWith('.md'),
     );
-    // Control: the shared templates really do name the dotted tools, so the
-    // assertion below is about a rewrite that had something to do.
+    // Control: the templates really do name dotted tools, so the assertion below
+    // is about a rewrite that had something to do.
     const dotted = originals.filter((f) =>
       DOTTED_TOOL_NAME.test(readFileSync(join(REPO_ROOT, 'apps', 'plugin', 'commands', f), 'utf8')),
     );
@@ -132,8 +123,7 @@ describe('materialize', () => {
     for (const f of originals) {
       const copy = readFileSync(pkg('commands', f), 'utf8');
       expect(copy, `commands/${f} still names a dotted tool`).not.toMatch(DOTTED_TOOL_NAME);
-      // The originals are the four other clients' source of truth and must not
-      // have been touched in place.
+      // The originals must not have been touched in place.
       expect(readFileSync(join(REPO_ROOT, 'apps', 'plugin', 'commands', f), 'utf8')).toBe(
         readFileSync(join(root, 'apps', 'plugin', 'commands', f), 'utf8'),
       );

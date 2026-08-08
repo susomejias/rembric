@@ -60,7 +60,6 @@ const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
 const stopNudgeShPath = join(here, '..', 'scripts', 'stop-nudge.sh');
 const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
-// The nudge constants live in the one shared JS/TS module, not in any client.
 const pluginCoreMjs = join(here, '..', 'bin', 'rembric-plugin-core.mjs');
 
 function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): string[] {
@@ -271,9 +270,8 @@ describe('nudge cadence numbers lock-step across bash and TS', () => {
   });
 });
 
-// Asserted on the shared core's own emission, the way the bash arm above is
-// asserted on prompt-nudge.sh's stdout: the JS/TS clients contribute only a
-// transport, so this is the only place the order can be pinned for all of them.
+// The JS/TS clients contribute only a transport, so the core's own emission is
+// the only place the order can be pinned for all of them at once.
 describe('the shared JS/TS core emits the due nudges in the bash order', () => {
   // Credentials and a slug so construction stays quiet; nudgesForTurn is pure.
   const core = () =>
