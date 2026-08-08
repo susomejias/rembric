@@ -1404,6 +1404,10 @@ Refine behaviour: when `replaces` is provided, the server SHALL run an atomic SQ
 
 On `replaces=null`/unset, the response SHALL be `{ ok: true, id: <newId>, createdAt: <ts> }`.
 
+The tool's description SHALL constrain WHEN to call it, not only what to pass. The prompt library is curated, so the description SHALL state that the tool is for a prompt worth REUSING, SHALL forbid calling it routinely or once per session as a matter of course, SHALL require either an explicit request from the user or text that is plainly a reusable artifact, and SHALL redirect the two adjacent intents elsewhere (`memory.save` for decisions/fixes/discoveries, `memory.session_summary` for what happened in a session).
+
+The description SHALL additionally rule out the specific false positive that a stated goal is sufficient. A session's first message states a goal almost by definition, so a trigger phrased as "the user states a goal or constraint worth remembering" is satisfied once per session by construction — which is how the tool came to fire on nearly every opening turn while every other surface behaved correctly. The nudge cadence is not the cause and SHALL NOT change: the sessionId reminder that names this tool on turn 1 is required behaviour (see the plugin-session-protocol capability), and it only names the tool — the description is what makes calling it look correct.
+
 #### Scenario: `memory.save_prompt` persists optional title and tags
 
 - **WHEN** the agent calls `memory.save_prompt({ content: "ship the auth refactor by Friday", title: "auth refactor deadline", tags: ["deadline", "auth"] })`
@@ -1451,6 +1455,14 @@ On `replaces=null`/unset, the response SHALL be `{ ok: true, id: <newId>, create
 
 - **WHEN** the agent calls `memory.save_prompt({ content: "save me" })` without a `title`
 - **THEN** the call SHALL be rejected with code `invalid_input` (zod validation failure: title is required)
+
+#### Scenario: The description restrains when the tool is called
+
+- **WHEN** the `memory.save_prompt` tool description is retrieved via `tools/list`
+- **THEN** it SHALL state that the prompt must be reusable
+- **AND** it SHALL forbid calling the tool routinely
+- **AND** it SHALL name `memory.save` and `memory.session_summary` as the destinations for the adjacent intents
+- **AND** it SHALL NOT invite a call on the grounds that the user stated a goal
 
 ### Requirement: The MCP server MUST expose `memory.search_prompts`
 
