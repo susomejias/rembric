@@ -5,12 +5,16 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { stripPrivateTags } from '../bin/rembric-plugin-core.mjs';
+
 type Fixture = { name: string; input: string; expected: string };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(
   readFileSync(join(here, 'redaction-fixtures.json'), 'utf8'),
 ) as Fixture[];
+/** The set's size when the JS/TS arm moved here; a shrunk set is a lost case. */
+const FIXTURE_FLOOR = 13;
 const transcriptSh = join(here, '..', 'scripts', '_transcript.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 
@@ -44,13 +48,28 @@ function pythonRedact(input: string): string {
   return execFileSync('python3', ['-c', program, hermesInit], { input, encoding: 'utf8' });
 }
 
-describe('rembric_redact_private (bash, scripts/_transcript.sh)', () => {
-  for (const fixture of fixtures) {
-    it(fixture.name, () => {
-      expect(bashRedact(fixture.input)).toBe(fixture.expected);
-    });
-  }
+// One loop over one arm list, so an arm cannot quietly assert a subset.
+const arms = [
+  { arm: 'rembric_redact_private (bash, scripts/_transcript.sh)', redact: bashRedact, ok: true },
+  {
+    arm: '_redact_private (python, .hermes-plugin/__init__.py)',
+    redact: pythonRedact,
+    ok: hasPython3,
+  },
+  {
+    arm: 'stripPrivateTags (shared JS/TS core, bin/rembric-plugin-core.mjs)',
+    redact: stripPrivateTags,
+    ok: true,
+  },
+];
 
+describe.each(arms.filter((a) => a.ok))('$arm', ({ redact }) => {
+  it.each(fixtures)('$name', ({ input, expected }) => {
+    expect(redact(input)).toBe(expected);
+  });
+});
+
+describe('bash applies redaction at its choke points', () => {
   it('is applied by the transcript and title choke points before upload text is emitted', () => {
     const src = readFileSync(transcriptSh, 'utf8');
     expect(src).toContain('out="$(rembric_redact_private "$out")"');
@@ -78,10 +97,6 @@ describe('rembric_redact_private (bash, scripts/_transcript.sh)', () => {
   });
 });
 
-describe.runIf(hasPython3)('_redact_private (python, .hermes-plugin/__init__.py)', () => {
-  for (const fixture of fixtures) {
-    it(fixture.name, () => {
-      expect(pythonRedact(fixture.input)).toBe(fixture.expected);
-    });
-  }
+it('the shared fixture set has not shrunk', () => {
+  expect(fixtures.length).toBeGreaterThanOrEqual(FIXTURE_FLOOR);
 });

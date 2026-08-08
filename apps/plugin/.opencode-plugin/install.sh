@@ -1,8 +1,9 @@
 #!/bin/sh
 # rembric opencode plugin installer.
 #
-# Default: download plugin.ts, rembric-bridge.mjs, rembric-dotenv.mjs from
-# the rembric main branch and install them to ~/.config/opencode/plugins/
+# Default: download plugin.ts, rembric-bridge.mjs, rembric-dotenv.mjs,
+# rembric-plugin-core.mjs from the rembric main branch and install them to
+# ~/.config/opencode/plugins/
 # and ~/.config/rembric/bin/. ALSO auto-creates ~/.config/opencode/opencode.json
 # with a `mcp.rembric` block that references the user's shell env vars
 # (`{env:REMBRIC_SERVER_URL}` + `{env:REMBRIC_API_TOKEN}`), so the user only
@@ -29,7 +30,10 @@ OPENCODE_JSON="${OPENCODE_DIR}/opencode.json"
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 PLUGIN_DEST="${OPENCODE_PLUGINS_DIR}/rembric.ts"
 BRIDGE_DEST="${REMBRIC_BIN_DIR}/rembric-bridge.mjs"
-DOTENV_DEST="${REMBRIC_BIN_DIR}/rembric-dotenv.mjs"
+# The modules plugin.ts imports by relative dev-time path. This one list drives
+# the fetch, the import rewrite, the post-rewrite verification and the summary,
+# so adding a shared module is a one-line change here.
+SHARED_LIBS='rembric-dotenv.mjs rembric-plugin-core.mjs'
 
 if ! mkdir -p "$OPENCODE_PLUGINS_DIR" 2>/dev/null; then
   printf '[rembric] error: cannot create %s\n' "$OPENCODE_PLUGINS_DIR" >&2
@@ -62,28 +66,40 @@ fetch_file() {
   return 0
 }
 
-# Fetch the bridge + shared dotenv lib verbatim. The bridge imports
+# Fetch the bridge + every shared lib verbatim. The bridge imports
 # rembric-dotenv.mjs from the same directory, so they MUST land together.
 fetch_file "${BIN_SRC}/rembric-bridge.mjs" "$BRIDGE_DEST" || exit 1
-fetch_file "${BIN_SRC}/rembric-dotenv.mjs" "$DOTENV_DEST" || exit 1
-chmod 644 "$BRIDGE_DEST" "$DOTENV_DEST"
+chmod 644 "$BRIDGE_DEST"
+for lib in $SHARED_LIBS; do
+  fetch_file "${BIN_SRC}/${lib}" "${REMBRIC_BIN_DIR}/${lib}" || exit 1
+  chmod 644 "${REMBRIC_BIN_DIR}/${lib}"
+done
 
-# Fetch plugin.ts into a temp file, then sed-substitute the relative dev-time
-# import (`from '../bin/rembric-dotenv.mjs'`) for the absolute installed path
-# before writing to the final destination. Bun's ESM resolver in opencode
-# 1.15.x accepts absolute paths.
+# Fetch plugin.ts into a temp file, then sed-substitute EVERY relative
+# dev-time shared-module import for its absolute installed path before
+# writing to the final destination. Bun's ESM resolver in opencode 1.15.x
+# accepts absolute paths.
 TMP_PLUGIN="$(mktemp)"
 trap 'rm -f "$TMP_PLUGIN"' EXIT
 fetch_file "${PLUGIN_SRC}/plugin.ts" "$TMP_PLUGIN" || exit 1
-sed "s|'\\.\\./bin/rembric-dotenv\\.mjs'|'${DOTENV_DEST}'|g" "$TMP_PLUGIN" > "$PLUGIN_DEST"
-# If the dev-time import in plugin.ts ever drifts from the sed pattern above,
-# the rewrite silently no-ops and the installed plugin crashes at load. Fail
-# the install loudly instead, leaving no broken file behind.
-if ! grep -qF "$DOTENV_DEST" "$PLUGIN_DEST"; then
-  rm -f "$PLUGIN_DEST"
-  printf '[rembric] error: dotenv import rewrite failed — plugin.ts does not reference %s after sed; removed the broken plugin file\n' "$DOTENV_DEST" >&2
-  exit 1
-fi
+REWRITE=''
+for lib in $SHARED_LIBS; do
+  REWRITE="${REWRITE}s|'\\.\\./bin/$(printf %s "$lib" | sed 's/\./\\./g')'|'${REMBRIC_BIN_DIR}/${lib}'|g
+"
+done
+sed "$REWRITE" "$TMP_PLUGIN" > "$PLUGIN_DEST"
+# If any dev-time import in plugin.ts drifts from its sed pattern above, that
+# rewrite silently no-ops and the installed plugin crashes at load. Every
+# destination is verified, not one: a single-destination guard exits 0 having
+# written a plugin that cannot load.
+for lib in $SHARED_LIBS; do
+  dest="${REMBRIC_BIN_DIR}/${lib}"
+  if ! grep -qF "$dest" "$PLUGIN_DEST"; then
+    rm -f "$PLUGIN_DEST"
+    printf '[rembric] error: import rewrite failed — plugin.ts does not reference %s after sed; removed the broken plugin file\n' "$dest" >&2
+    exit 1
+  fi
+done
 chmod 644 "$PLUGIN_DEST"
 
 # Render the MCP snippet (used for auto-write OR for manual paste).
@@ -175,8 +191,11 @@ cat <<EOF
 
   Plugin:     ${PLUGIN_DEST}
   Bridge:     ${BRIDGE_DEST}
-  Dotenv lib: ${DOTENV_DEST}
 EOF
+
+for lib in $SHARED_LIBS; do
+  printf '  Shared lib: %s\n' "${REMBRIC_BIN_DIR}/${lib}"
+done
 
 case "$AUTO_WROTE_JSON" in
   1)

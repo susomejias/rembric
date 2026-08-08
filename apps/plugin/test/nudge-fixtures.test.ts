@@ -6,11 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { SUMMARY_SECTIONS } from '../../server/src/mcp/summary-rubric.js';
+import {
+  createSessionProtocol,
+  FIRST_PROMPT_NUDGE,
+  SAVE_NUDGE_EVERY,
+  SESSION_ID_NUDGE_TEMPLATE,
+  SUMMARY_NUDGE_EVERY,
+} from '../bin/rembric-plugin-core.mjs';
 
 /**
  * The save/summary nudge texts are the lock-step contract shared with the
- * bash (scripts/prompt-nudge.sh), TS (.opencode-plugin/plugin.ts), and Python
- * (.hermes-plugin/__init__.py) implementations. Bash and TS embed the SAME
+ * bash (scripts/prompt-nudge.sh), JS/TS (bin/rembric-plugin-core.mjs, imported
+ * by every JS/TS client), and Python (.hermes-plugin/__init__.py)
+ * implementations. Bash and the shared JS/TS module embed the SAME
  * `rembric:`-prefixed strings verbatim (asserted directly here); Python
  * wraps both hints in `<memory-hint>...</memory-hint>` tags, so its
  * lock-step check unwraps the tag and compares the shared core text
@@ -52,7 +60,8 @@ const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
 const stopNudgeShPath = join(here, '..', 'scripts', 'stop-nudge.sh');
 const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
-const opencodePluginTs = join(here, '..', '.opencode-plugin', 'plugin.ts');
+// The nudge constants live in the one shared JS/TS module, not in any client.
+const pluginCoreMjs = join(here, '..', 'bin', 'rembric-plugin-core.mjs');
 
 function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): string[] {
   let out = '';
@@ -74,20 +83,6 @@ const hasPython3 = (() => {
     return false;
   }
 })();
-
-function tsSessionIdTemplate(): string {
-  const src = readFileSync(opencodePluginTs, 'utf8');
-  const match = src.match(/const SESSION_ID_NUDGE_TEMPLATE =\s*\n?\s*'((?:[^'\\]|\\.)*)';/);
-  if (!match) throw new Error('SESSION_ID_NUDGE_TEMPLATE not found in plugin.ts');
-  return match[1];
-}
-
-function tsFirstPromptNudge(): string {
-  const src = readFileSync(opencodePluginTs, 'utf8');
-  const match = src.match(/const FIRST_PROMPT_NUDGE =\s*\n?\s*'((?:[^'\\]|\\.)*)';/);
-  if (!match) throw new Error('FIRST_PROMPT_NUDGE not found in plugin.ts');
-  return match[1];
-}
 
 function bashFirstPromptNudge(sessionId: string, counterDir: string): string[] {
   const out = execFileSync('bash', [promptSearchSh], {
@@ -136,12 +131,6 @@ function bashCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
   const file = name === 'SUMMARY_NUDGE_EVERY' ? stopNudgeSh : promptNudgeSh;
   const match = readFileSync(file, 'utf8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
   if (!match) throw new Error(`${name} not found in ${file}`);
-  return Number(match[1]);
-}
-
-function tsCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
-  const match = readFileSync(opencodePluginTs, 'utf8').match(new RegExp(`const ${name} = (\\d+);`));
-  if (!match) throw new Error(`${name} not found in plugin.ts`);
   return Number(match[1]);
 }
 
@@ -218,7 +207,7 @@ describe.runIf(hasPython3)('nudge text lock-step with Python', () => {
 
 describe('sessionId nudge template lock-step across bash, TS, and Python', () => {
   it('bash and TS share the exact rembric:-prefixed sessionId template', () => {
-    expect(tsSessionIdTemplate()).toBe(fixtures.sessionIdTemplate);
+    expect(SESSION_ID_NUDGE_TEMPLATE).toBe(fixtures.sessionIdTemplate);
   });
 
   it.runIf(hasPython3)("Python's template matches once wrapped in <memory-hint>", () => {
@@ -229,7 +218,7 @@ describe('sessionId nudge template lock-step across bash, TS, and Python', () =>
   it('interpolating a known session id produces the same final string for bash and TS', () => {
     const testId = 'sess-lockstep-test-1';
     const expected = fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', testId);
-    expect(tsSessionIdTemplate().replace('{{SESSION_ID}}', testId)).toBe(expected);
+    expect(SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', testId)).toBe(expected);
   });
 });
 
@@ -260,7 +249,7 @@ describe('first-prompt relevance nudge lock-step across bash, TS, and Python', (
   });
 
   it('TS matches the exact fixture text', () => {
-    expect(tsFirstPromptNudge()).toBe(fixtures.firstPromptRelevance);
+    expect(FIRST_PROMPT_NUDGE).toBe(fixtures.firstPromptRelevance);
   });
 
   it.runIf(hasPython3)(
@@ -274,11 +263,53 @@ describe('first-prompt relevance nudge lock-step across bash, TS, and Python', (
 
 describe('nudge cadence numbers lock-step across bash and TS', () => {
   it('SAVE_NUDGE_EVERY matches', () => {
-    expect(tsCadence('SAVE_NUDGE_EVERY')).toBe(bashCadence('SAVE_NUDGE_EVERY'));
+    expect(SAVE_NUDGE_EVERY).toBe(bashCadence('SAVE_NUDGE_EVERY'));
   });
 
   it('SUMMARY_NUDGE_EVERY matches', () => {
-    expect(tsCadence('SUMMARY_NUDGE_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
+    expect(SUMMARY_NUDGE_EVERY).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
+  });
+});
+
+// Asserted on the shared core's own emission, the way the bash arm above is
+// asserted on prompt-nudge.sh's stdout: the JS/TS clients contribute only a
+// transport, so this is the only place the order can be pinned for all of them.
+describe('the shared JS/TS core emits the due nudges in the bash order', () => {
+  // Credentials and a slug so construction stays quiet; nudgesForTurn is pure.
+  const core = () =>
+    createSessionProtocol({
+      agent: 'nudge-order-fixture',
+      serverUrl: 'http://127.0.0.1:1',
+      apiToken: 'unused-no-request-is-made',
+      slug: 'nudge-order',
+    });
+
+  const nudgesOnTurn = (turn: number, sessionId: string): string[] => {
+    const protocol = core();
+    let lines: string[] = [];
+    for (let i = 1; i <= turn; i += 1) {
+      lines = protocol.nudgesForTurn(sessionId, 'a plain prompt about nothing in particular');
+    }
+    return lines;
+  };
+
+  it('emits the sessionId line + the exact fixture save text on turn 5', () => {
+    expect(nudgesOnTurn(SAVE_NUDGE_EVERY, 's-fixture-save')).toEqual([
+      sessionIdLine('s-fixture-save'),
+      fixtures.save,
+    ]);
+  });
+
+  it('emits the relevance line, the sessionId line and the summary text on turn 1, in that order', () => {
+    expect(nudgesOnTurn(1, 's-fixture-summary')).toEqual([
+      fixtures.firstPromptRelevance,
+      sessionIdLine('s-fixture-summary'),
+      fixtures.summary,
+    ]);
+  });
+
+  it('emits nothing on a turn where neither cadence fires', () => {
+    expect(nudgesOnTurn(2, 's-fixture-quiet')).toEqual([]);
   });
 });
 
@@ -442,9 +473,9 @@ describe.runIf(hasPython3)('nudge cadence numbers lock-step with Python', () => 
 });
 
 /**
- * These two were emitted to a model from bash and from opencode's TS with no
- * fixture behind them, so nothing asserted the two copies agreed — the drift
- * surface the shared-fixture requirement exists to close.
+ * These two were emitted to a model from bash and from the JS/TS clients with
+ * no fixture behind them, so nothing asserted the two copies agreed — the
+ * drift surface the shared-fixture requirement exists to close.
  */
 describe('the two script-emitted nudges are in lock-step with their clients', () => {
   const shellLiteral = (file: string, marker: string): string => {
@@ -464,9 +495,8 @@ describe('the two script-emitted nudges are in lock-step with their clients', ()
     expect(shellLiteral('prompt-search.sh', 'User intent: recall')).toBe(fixtures.recall);
   });
 
-  it("opencode's plugin emits the same recall line as bash", () => {
-    const ts = readFileSync(join(here, '..', '.opencode-plugin', 'plugin.ts'), 'utf8');
-    expect(ts).toContain(fixtures.recall);
+  it('the shared JS/TS module emits the same recall line as bash', () => {
+    expect(readFileSync(pluginCoreMjs, 'utf8')).toContain(fixtures.recall);
   });
 });
 

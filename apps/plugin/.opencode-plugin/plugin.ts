@@ -8,14 +8,15 @@
 //
 // Distributed as a single .ts file via plugin/.opencode-plugin/install.sh,
 // which copies this file to ~/.config/opencode/plugins/rembric.ts, the
-// shared bridge to ~/.config/rembric/bin/rembric-bridge.mjs, and the
-// shared dotenv lib to ~/.config/rembric/bin/rembric-dotenv.mjs.
+// shared bridge to ~/.config/rembric/bin/rembric-bridge.mjs, and the two
+// shared libs (rembric-dotenv.mjs, rembric-plugin-core.mjs) to
+// ~/.config/rembric/bin/.
 //
 // Session lifecycle:
 //   - session.created      → POST /api/<slug>/sessions  (idempotent register)
 //   - chat.message         → accumulate user turn; also arms the debounced
 //                            flush session.idle uses (below)
-//   - message.updated      → track message id → role only
+//   - message.updated      → record which message ids are the assistant's
 //   - message.part.updated → accumulate/upsert assistant turn text, keyed by
 //                            part.messageID (see note below)
 //   - session.idle         → debounced (500ms) flush via POST /summary  ← PRIMARY
@@ -43,34 +44,17 @@
 // one-turn lag between in-memory state and dashboard.
 //
 // Slug-resolution helpers (`parseDotenv`, `readRembricSlug`, `SLUG_RE`)
-// live in `rembric-dotenv.mjs`, imported below. install.sh rewrites the
-// relative dev-time path to the absolute installed path before copying.
+// live in `rembric-dotenv.mjs`; the nudge texts, redaction, transcript
+// accumulator and flush helpers shared with every other JS/TS client live
+// in `rembric-plugin-core.mjs`. install.sh rewrites BOTH relative dev-time
+// paths to their absolute installed paths before copying.
 //
 // ONLY `RembricPlugin` is exported. opencode iterates every named export
 // of a plugin module and invokes each with the plugin ctx — exporting
 // helpers would crash on load.
 
 import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
-
-const POST_TIMEOUT_MS = 3000;
-const IDLE_DEBOUNCE_MS = 500;
-const MAX_TRANSCRIPT_CHARS = 19_500;
-const MAX_ENTRY_CHARS = 2000;
-const MAX_ENTRIES_PER_SESSION = 200;
-const MAX_TITLE_CHARS = 100;
-const RECALL_REGEX = /remember|recall|acuérdate|qué hicimos|what did we do/i;
-const RECALL_NUDGE =
-  'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
-const FIRST_PROMPT_NUDGE =
-  'rembric: New session — call memory.context with focus set to this prompt before responding, to surface relevant prior work.';
-const SAVE_NUDGE_EVERY = 5;
-const SAVE_NUDGE =
-  'rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).';
-const SUMMARY_NUDGE_EVERY = 10;
-const SUMMARY_NUDGE =
-  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.';
-const SESSION_ID_NUDGE_TEMPLATE =
-  'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
+import { createSessionProtocol, diag } from '../bin/rembric-plugin-core.mjs';
 
 type EventInput = {
   event: {
@@ -116,8 +100,6 @@ type CompactingOutput = { context: string[] };
 
 type PluginContext = { directory: string };
 
-type TranscriptEntry = { role: 'user' | 'assistant'; text: string; id?: string };
-
 type PluginReturn = {
   event?: (input: EventInput) => Promise<void>;
   'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => Promise<void>;
@@ -128,28 +110,6 @@ type PluginReturn = {
 };
 
 type Plugin = (ctx: PluginContext) => Promise<PluginReturn>;
-
-function diag(line: string): void {
-  process.stderr.write(`[rembric] ${line}\n`);
-}
-
-// Mirrors rembric_redact_private in scripts/_transcript.sh and
-// _redact_private in .hermes-plugin/__init__.py; the shared fixtures in
-// ../test/redaction-fixtures.json keep the three implementations in
-// lock-step. An unclosed <private> redacts through end-of-text: fail
-// closed for a privacy marker (also covers a closing tag cut off by the
-// per-entry truncation applied before this at the call sites).
-function stripPrivateTags(text: string): string {
-  if (!text) return '';
-  return text
-    .replace(/<private>[\s\S]*?<\/private>/gi, '[REDACTED]')
-    .replace(/<private>[\s\S]*$/i, '[REDACTED]');
-}
-
-function truncate(text: string, max: number): string {
-  if (!text) return '';
-  return text.length > max ? text.slice(0, max) + '...' : text;
-}
 
 // opencode validates every pushed part against the real TextPart schema
 // (id/sessionID/messageID all required) before persisting the outgoing user
@@ -176,157 +136,28 @@ function nudgePart(
 }
 
 export const RembricPlugin: Plugin = async (ctx) => {
-  const serverUrl = process.env.REMBRIC_SERVER_URL;
-  const apiToken = process.env.REMBRIC_API_TOKEN;
   const slug = readRembricSlug(ctx.directory);
+  const core = createSessionProtocol({
+    agent: 'opencode',
+    serverUrl: process.env.REMBRIC_SERVER_URL,
+    apiToken: process.env.REMBRIC_API_TOKEN,
+    slug,
+    cwd: ctx.directory,
+  });
 
-  const disabled = !serverUrl || !apiToken;
-  if (disabled) {
-    diag('REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing; plugin disabled');
-  }
-
-  const knownSessions = new Set<string>();
-  const subAgentSessions = new Set<string>();
-  const sessionMessages = new Map<string, TranscriptEntry[]>();
-  const pendingFlush = new Map<string, ReturnType<typeof setTimeout>>();
-  const userTurnCounts = new Map<string, number>();
-  const messageRoles = new Map<string, string>();
+  const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
 
-  const baseUrl = serverUrl ? serverUrl.replace(/\/$/, '') : '';
-
-  async function rembricPost(path: string, body: unknown): Promise<void> {
-    if (disabled || !slug) return;
-    try {
-      const res = await fetch(`${baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(POST_TIMEOUT_MS),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => '');
-        diag(`POST ${path} ${res.status} body=${detail}`);
-      }
-    } catch (err) {
-      diag(`POST ${path} ${(err as Error).message ?? 'error'}`);
-    }
-  }
-
-  async function ensureSession(sessionId: string): Promise<void> {
-    if (!sessionId) return;
-    if (subAgentSessions.has(sessionId)) return;
-    if (knownSessions.has(sessionId)) return;
-    knownSessions.add(sessionId);
-
-    const body: Record<string, unknown> = {
-      id: sessionId,
-      agent: 'opencode',
-    };
-    if (ctx.directory) body.cwd = ctx.directory;
-
-    await rembricPost(`/api/${slug}/sessions`, body);
-  }
-
-  function appendUserMessage(sessionId: string, rawText: string): void {
-    const text = stripPrivateTags(truncate(rawText, MAX_ENTRY_CHARS));
-    if (!text) return;
-    let arr = sessionMessages.get(sessionId);
-    if (!arr) {
-      arr = [];
-      sessionMessages.set(sessionId, arr);
-    }
-    arr.push({ role: 'user', text });
-    while (arr.length > MAX_ENTRIES_PER_SESSION) arr.shift();
-  }
-
-  function upsertAssistantMessage(sessionId: string, messageId: string, rawText: string): void {
-    const text = stripPrivateTags(truncate(rawText, MAX_ENTRY_CHARS));
-    if (!text) return;
-    let arr = sessionMessages.get(sessionId);
-    if (!arr) {
-      arr = [];
-      sessionMessages.set(sessionId, arr);
-    }
-    const existing = arr.findIndex((e) => e.role === 'assistant' && e.id === messageId);
-    if (existing >= 0) {
-      arr[existing] = { role: 'assistant', text, id: messageId };
-    } else {
-      arr.push({ role: 'assistant', text, id: messageId });
-      while (arr.length > MAX_ENTRIES_PER_SESSION) arr.shift();
-    }
-  }
-
-  function formatTranscript(sessionId: string): string {
-    const arr = sessionMessages.get(sessionId) ?? [];
-    const body = arr.map((e) => `${e.role}: ${e.text}`).join('\n\n');
-    if (body.length <= MAX_TRANSCRIPT_CHARS) return body;
-    return body.slice(body.length - MAX_TRANSCRIPT_CHARS);
-  }
-
-  function deriveTitle(sessionId: string): string | undefined {
-    const arr = sessionMessages.get(sessionId) ?? [];
-    const firstUser = arr.find((e) => e.role === 'user');
-    if (!firstUser) return undefined;
-    return firstUser.text.slice(0, MAX_TITLE_CHARS);
-  }
-
-  function buildSummaryBody(sessionId: string): {
-    summary: string;
-    title?: string;
-    final: false;
-  } | null {
-    const summary = formatTranscript(sessionId);
-    if (!summary) return null;
-    const title = deriveTitle(sessionId);
-    const body: { summary: string; title?: string; final: false } = { summary, final: false };
-    if (title) body.title = title;
-    return body;
-  }
-
-  async function flushSessionSummary(sessionId: string): Promise<void> {
-    if (subAgentSessions.has(sessionId)) return;
-    if (!knownSessions.has(sessionId)) return;
-    const body = buildSummaryBody(sessionId);
-    if (!body) return;
-    await rembricPost(`/api/${slug}/sessions/${sessionId}/summary`, body);
-  }
-
-  function scheduleIdleFlush(sessionId: string): void {
-    const prev = pendingFlush.get(sessionId);
-    if (prev) clearTimeout(prev);
-    const timer = setTimeout(() => {
-      pendingFlush.delete(sessionId);
-      void flushSessionSummary(sessionId);
-    }, IDLE_DEBOUNCE_MS);
-    pendingFlush.set(sessionId, timer);
-  }
-
-  function disposeFlushFireAndForget(): void {
-    // server.instance.disposed is fire-and-forget: opencode kills the
-    // subprocess before async handlers complete (verified spike, design.md::
-    // Decision 4 resolved). We dispatch fetches without awaiting and hope
-    // the kernel flushes the TCP packets before SIGKILL. Per-turn
-    // session.idle flush is the primary mechanism — this is a last-chance.
-    if (disabled || !slug) return;
-    for (const sessionId of knownSessions) {
-      if (subAgentSessions.has(sessionId)) continue;
-      const body = buildSummaryBody(sessionId);
-      if (!body) continue;
-      diag(`dispose-flush sessionId=${sessionId} (fire-and-forget)`);
-      void fetch(`${baseUrl}/api/${slug}/sessions/${sessionId}/summary`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      }).catch(() => {
-        // expected — process likely already dying
-      });
+  // Both maps are keyed by assistant message id, so they can only stay bounded
+  // if every way an entry leaves the transcript feeds them: session.deleted
+  // (forgetSession) and the per-session entry cap (the appends' return value).
+  // Without the second, a session past the cap grew both maps without limit.
+  // Typed structurally so no extra import of the core's types is needed.
+  function forgetMessageState(entries: ReadonlyArray<{ id?: string }>): void {
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      assistantMessageIds.delete(entry.id);
+      assistantParts.delete(entry.id);
     }
   }
 
@@ -349,35 +180,21 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
         if (!sessionId) return;
         if (isSubAgent) {
-          subAgentSessions.add(sessionId);
+          core.markSubAgent(sessionId);
           return;
         }
-        await ensureSession(sessionId);
+        await core.ensureSession(sessionId);
       }
 
       if (event.type === 'session.deleted') {
         const info = (event.properties?.info ?? {}) as { id?: string };
         const sessionId = info.id ?? '';
         if (!sessionId) return;
-        knownSessions.delete(sessionId);
-        subAgentSessions.delete(sessionId);
-        for (const entry of sessionMessages.get(sessionId) ?? []) {
-          if (entry.id) {
-            messageRoles.delete(entry.id);
-            assistantParts.delete(entry.id);
-          }
-        }
-        sessionMessages.delete(sessionId);
-        userTurnCounts.delete(sessionId);
-        const pending = pendingFlush.get(sessionId);
-        if (pending) {
-          clearTimeout(pending);
-          pendingFlush.delete(sessionId);
-        }
+        forgetMessageState(core.forgetSession(sessionId));
       }
 
       if (event.type === 'server.instance.disposed') {
-        disposeFlushFireAndForget();
+        core.flushAllFireAndForget();
       }
 
       if (event.type === 'session.compacted') {
@@ -387,18 +204,18 @@ export const RembricPlugin: Plugin = async (ctx) => {
         };
         const sessionId = props.sessionID ?? props.info?.id ?? '';
         if (!sessionId) return;
-        if (subAgentSessions.has(sessionId)) return;
-        if (!knownSessions.has(sessionId)) return;
+        if (core.isSubAgent(sessionId)) return;
+        if (!core.isKnown(sessionId)) return;
         diag(`session.compacted sessionId=${sessionId}`);
-        await flushSessionSummary(sessionId);
+        await core.flushSessionSummary(sessionId);
       }
 
       if (event.type === 'message.updated') {
         const info = (event.properties as MessageUpdatedEventProps | undefined)?.info ?? {};
         const sessionId = info.sessionID ?? '';
-        if (!sessionId || subAgentSessions.has(sessionId)) return;
-        if (!info.id || !info.role) return;
-        messageRoles.set(info.id, info.role);
+        if (!sessionId || core.isSubAgent(sessionId)) return;
+        if (!info.id || info.role !== 'assistant') return;
+        assistantMessageIds.add(info.id);
       }
 
       if (event.type === 'message.part.updated') {
@@ -407,9 +224,9 @@ export const RembricPlugin: Plugin = async (ctx) => {
         const sessionId = part.sessionID ?? '';
         const messageId = part.messageID ?? '';
         if (!sessionId || !messageId || !part.id) return;
-        if (subAgentSessions.has(sessionId)) return;
-        if (!knownSessions.has(sessionId)) return;
-        if (messageRoles.get(messageId) !== 'assistant') return;
+        if (core.isSubAgent(sessionId)) return;
+        if (!core.isKnown(sessionId)) return;
+        if (!assistantMessageIds.has(messageId)) return;
 
         let parts = assistantParts.get(messageId);
         if (!parts) {
@@ -420,24 +237,24 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
         const joined = Array.from(parts.values()).join('\n').trim();
         if (!joined) return;
-        upsertAssistantMessage(sessionId, messageId, joined);
+        forgetMessageState(core.upsertAssistantMessage(sessionId, messageId, joined));
       }
 
       if (event.type === 'session.idle') {
         const props = (event.properties as SessionIdleEventProps | undefined) ?? {};
         const sessionId = props.sessionID ?? '';
         if (!sessionId) return;
-        if (subAgentSessions.has(sessionId)) return;
-        if (!knownSessions.has(sessionId)) return;
-        scheduleIdleFlush(sessionId);
+        if (core.isSubAgent(sessionId)) return;
+        if (!core.isKnown(sessionId)) return;
+        core.scheduleIdleFlush(sessionId);
       }
     },
 
     'chat.message': async (input, output) => {
-      if (subAgentSessions.has(input.sessionID)) return;
+      if (core.isSubAgent(input.sessionID)) return;
 
       // Covers a session resumed without a fresh session.created event.
-      await ensureSession(input.sessionID);
+      await core.ensureSession(input.sessionID);
 
       const fromParts = output.parts
         .filter((p) => p.type === 'text')
@@ -454,39 +271,20 @@ export const RembricPlugin: Plugin = async (ctx) => {
       }
 
       if (!content) return;
-      appendUserMessage(input.sessionID, content);
+      forgetMessageState(core.appendUserMessage(input.sessionID, content));
 
       const messageId = input.messageID ?? output.message.id ?? '';
-      const turn = (userTurnCounts.get(input.sessionID) ?? 0) + 1;
-      userTurnCounts.set(input.sessionID, turn);
-
-      if (turn === 1) {
-        output.parts.push(nudgePart(input.sessionID, messageId, FIRST_PROMPT_NUDGE));
-      }
-      if (RECALL_REGEX.test(content)) {
-        output.parts.push(nudgePart(input.sessionID, messageId, RECALL_NUDGE));
-      }
-
-      const saveFires = turn % SAVE_NUDGE_EVERY === 0;
-      const summaryFires = turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0;
-      if (saveFires || summaryFires) {
-        const sessionIdNudge = SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', input.sessionID);
-        output.parts.push(nudgePart(input.sessionID, messageId, sessionIdNudge));
-      }
-      if (saveFires) {
-        output.parts.push(nudgePart(input.sessionID, messageId, SAVE_NUDGE));
-      }
-      if (summaryFires) {
-        output.parts.push(nudgePart(input.sessionID, messageId, SUMMARY_NUDGE));
+      for (const text of core.nudgesForTurn(input.sessionID, content)) {
+        output.parts.push(nudgePart(input.sessionID, messageId, text));
       }
 
       // Same debounce as session.idle — avoids a second uncoordinated POST.
-      scheduleIdleFlush(input.sessionID);
+      core.scheduleIdleFlush(input.sessionID);
     },
 
     'experimental.session.compacting': async (input, output) => {
       if (input.sessionID) {
-        await ensureSession(input.sessionID);
+        await core.ensureSession(input.sessionID);
       }
 
       output.context.push(

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ONLY `RembricPlugin`; opencode invokes every named export as a Plugin
 // function, so the helpers MUST stay outside plugin.ts's export surface.
 import { parseDotenv, readRembricSlug } from '../bin/rembric-dotenv.mjs';
+import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import { RembricPlugin } from './plugin.js';
 
 const nudgeFixtures = JSON.parse(
@@ -18,6 +19,13 @@ const nudgeFixtures = JSON.parse(
     'utf8',
   ),
 ) as { save: string; summary: string };
+
+function spyOnStderr(sink: string[]) {
+  return vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    sink.push(String(chunk));
+    return true;
+  });
+}
 
 describe('parseDotenv', () => {
   it('returns {} for empty input', () => {
@@ -650,65 +658,559 @@ describe('RembricPlugin handlers', () => {
       vi.useRealTimers();
     }
   });
+
+  function summaryCallsFor(sessionId: string): unknown[][] {
+    return fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith(`/sessions/${sessionId}/summary`),
+    );
+  }
+
+  function jsonBodyOf(call: unknown[]): Record<string, unknown> {
+    return JSON.parse((call[1] as { body: string }).body) as Record<string, unknown>;
+  }
+
+  const created = (id: string, parentID = '', title = 'work') => ({
+    event: { type: 'session.created', properties: { info: { id, parentID, title } } },
+  });
+
+  const assistantText = (sessionId: string, messageId: string, partId: string, text: string) => [
+    {
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: messageId, role: 'assistant', sessionID: sessionId } },
+      },
+    },
+    {
+      event: {
+        type: 'message.part.updated',
+        properties: {
+          part: { id: partId, sessionID: sessionId, messageID: messageId, type: 'text', text },
+        },
+      },
+    },
+  ];
+
+  it('session registration posts agent "opencode" and the context directory as cwd', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('reg-1') as never);
+
+    const registerCalls = fetchMock.mock.calls.filter(
+      ([url]) => url === 'http://localhost:9999/api/demo/sessions',
+    );
+    expect(registerCalls).toHaveLength(1);
+    const body = jsonBodyOf(registerCalls[0]!);
+    expect(body.id).toBe('reg-1');
+    expect(body.agent).toBe('opencode');
+    expect(body.cwd).toBe(dir);
+  });
+
+  it('every POST carries exactly `Bearer <token>` and nothing echoes the token', async () => {
+    const written: string[] = [];
+    const stderrSpy = spyOnStderr(written);
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('auth-1') as never);
+      await handlers['chat.message']!(
+        { sessionID: 'auth-1' } as never,
+        { parts: [{ type: 'text', text: 'do the thing' }], message: {} } as never,
+      );
+      await handlers.event!({
+        event: { type: 'session.compacted', properties: { sessionID: 'auth-1' } },
+      } as never);
+      // The dispose path builds its own fetch init rather than going through
+      // rembricPost, so the header has to be asserted on both.
+      await handlers.event!({ event: { type: 'server.instance.disposed' } } as never);
+
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+      for (const [, init] of fetchMock.mock.calls) {
+        const request = init as { headers: Record<string, string>; body: string };
+        expect(request.headers.Authorization).toBe('Bearer test-token');
+        expect(request.body).not.toContain('test-token');
+      }
+      expect(written.length).toBeGreaterThan(0);
+      for (const line of written) expect(line).not.toContain('test-token');
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('every injected nudge part carries a host-valid prt_ id, session id and message id', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const output = {
+      parts: [{ type: 'text', text: 'recall the auth fix' }],
+      message: { id: 'm-nudge' },
+    };
+    await handlers['chat.message']!(
+      { sessionID: 'prt-1', messageID: 'm-nudge' } as never,
+      output as never,
+    );
+
+    const injected = output.parts.slice(1) as Array<{
+      id?: string;
+      sessionID?: string;
+      messageID?: string;
+    }>;
+    expect(injected.length).toBeGreaterThanOrEqual(3);
+    for (const part of injected) {
+      expect(part.id).toMatch(/^prt_[0-9a-f]{32}$/);
+      expect(part.sessionID).toBe('prt-1');
+      expect(part.messageID).toBe('m-nudge');
+    }
+    expect(new Set(injected.map((p) => p.id)).size).toBe(injected.length);
+  });
+
+  it('the summary title is the first user turn truncated to 100 chars', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const first = `first turn ${'a'.repeat(200)}`;
+    await handlers.event!(created('title-1') as never);
+    await handlers['chat.message']!(
+      { sessionID: 'title-1' } as never,
+      { parts: [{ type: 'text', text: first }], message: {} } as never,
+    );
+    await handlers['chat.message']!(
+      { sessionID: 'title-1' } as never,
+      { parts: [{ type: 'text', text: 'second turn' }], message: {} } as never,
+    );
+    await handlers.event!({
+      event: { type: 'session.compacted', properties: { sessionID: 'title-1' } },
+    } as never);
+
+    const calls = summaryCallsFor('title-1');
+    expect(calls.length).toBeGreaterThan(0);
+    const body = jsonBodyOf(calls[calls.length - 1]!);
+    expect(body.title).toBe(first.slice(0, 100));
+    expect(body.title).toHaveLength(100);
+    expect(body.summary).toContain('second turn');
+  });
+
+  it('the summary body omits title when the session has no user turn', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('title-2') as never);
+    for (const event of assistantText('title-2', 'm-t2', 'p-t2', 'Fixed it.')) {
+      await handlers.event!(event as never);
+    }
+    await handlers.event!({
+      event: { type: 'session.compacted', properties: { sessionID: 'title-2' } },
+    } as never);
+
+    const calls = summaryCallsFor('title-2');
+    expect(calls).toHaveLength(1);
+    const body = jsonBodyOf(calls[0]!);
+    expect(body.summary).toBe('assistant: Fixed it.');
+    expect('title' in body).toBe(false);
+  });
+
+  it('server.instance.disposed dispatches one un-awaited POST per known non-subagent session', async () => {
+    const written: string[] = [];
+    const stderrSpy = spyOnStderr(written);
+    try {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      for (const id of ['d-1', 'd-2']) {
+        await handlers.event!(created(id) as never);
+        for (const event of assistantText(id, `m-${id}`, `p-${id}`, `work on ${id}`)) {
+          await handlers.event!(event as never);
+        }
+      }
+
+      // Inverted on purpose: chat.message is what puts a session into
+      // knownSessions, and session.created returns before that for a
+      // sub-agent — so marking it afterwards is the only way the dispose
+      // loop's sub-agent guard is reachable at all.
+      await handlers['chat.message']!(
+        { sessionID: 'd-sub' } as never,
+        { parts: [{ type: 'text', text: 'sub work' }], message: {} } as never,
+      );
+      await handlers.event!(created('d-sub', 'd-1', 'sub work') as never);
+
+      const registered = fetchMock.mock.calls
+        .filter(([url]) => url === 'http://localhost:9999/api/demo/sessions')
+        .map((call) => jsonBodyOf(call).id);
+      expect(registered).toContain('d-sub');
+
+      const before = fetchMock.mock.calls.length;
+      // Never resolves: an awaited dispose flush would hang the handler.
+      fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+      await handlers.event!({ event: { type: 'server.instance.disposed' } } as never);
+
+      const disposeCalls = fetchMock.mock.calls.slice(before);
+      expect(disposeCalls.map(([url]) => url).sort()).toEqual([
+        'http://localhost:9999/api/demo/sessions/d-1/summary',
+        'http://localhost:9999/api/demo/sessions/d-2/summary',
+      ]);
+      // rembricPost attaches an AbortSignal; the fire-and-forget path does not.
+      for (const [, init] of disposeCalls) {
+        expect((init as { signal?: unknown }).signal).toBeUndefined();
+      }
+
+      const flushLines = written.filter((line) => line.includes('dispose-flush'));
+      expect(flushLines).toHaveLength(2);
+      expect(flushLines.join('')).toContain('sessionId=d-1');
+      expect(flushLines.join('')).toContain('sessionId=d-2');
+      expect(flushLines.join('')).not.toContain('d-sub');
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  describe('the per-session entry cap evicts the per-message state with it', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // The two maps this plugin keys by assistant message id are the state that
+    // would otherwise grow without bound in a long session: forgetSession only
+    // ever reported the SURVIVING entries, so an id the cap pushed out was
+    // retained for the life of the process.
+    async function fillPastTheCap(
+      handlers: Awaited<ReturnType<typeof RembricPlugin>>,
+      sessionId: string,
+      turns: number,
+    ): Promise<void> {
+      for (let turn = 0; turn < turns; turn++) {
+        await handlers['chat.message']!(
+          { sessionID: sessionId } as never,
+          { parts: [{ type: 'text', text: `turn ${turn}` }], message: {} } as never,
+        );
+      }
+    }
+
+    it('a late part for an evicted assistant turn cannot resurrect it', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('cap-evict') as never);
+      for (const event of assistantText('cap-evict', 'm-old', 'p-old', 'OLDEST TURN')) {
+        await handlers.event!(event as never);
+      }
+      await fillPastTheCap(handlers, 'cap-evict', 400);
+
+      const [, latePart] = assistantText('cap-evict', 'm-old', 'p-late', 'RESURRECTED');
+      await handlers.event!(latePart as never);
+      await handlers.event!({
+        event: { type: 'session.compacted', properties: { sessionID: 'cap-evict' } },
+      } as never);
+
+      const calls = summaryCallsFor('cap-evict');
+      expect(calls.length).toBeGreaterThan(0);
+      const summary = jsonBodyOf(calls[calls.length - 1]!).summary as string;
+      // Control: the flush really carried this session's transcript, so the
+      // absence below is not an empty body.
+      expect(summary).toContain('turn 399');
+      expect(summary).not.toContain('OLDEST TURN');
+      expect(summary).not.toContain('RESURRECTED');
+    });
+
+    it('an assistant turn evicted by later assistant turns is dropped too', async () => {
+      // No user turn at all, so the eviction can only come from the assistant
+      // upsert path — the other call site that pushes an entry into the window.
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('cap-assistant') as never);
+      for (let i = 0; i < 400; i++) {
+        for (const event of assistantText('cap-assistant', `m-${i}`, `p-${i}`, `reply ${i}`)) {
+          await handlers.event!(event as never);
+        }
+      }
+
+      const [, latePart] = assistantText('cap-assistant', 'm-0', 'p-0-late', 'RESURRECTED');
+      await handlers.event!(latePart as never);
+      await handlers.event!({
+        event: { type: 'session.compacted', properties: { sessionID: 'cap-assistant' } },
+      } as never);
+
+      const calls = summaryCallsFor('cap-assistant');
+      expect(calls.length).toBeGreaterThan(0);
+      const summary = jsonBodyOf(calls[calls.length - 1]!).summary as string;
+      expect(summary).toContain('reply 399');
+      expect(summary).not.toContain('reply 0\n');
+      expect(summary).not.toContain('RESURRECTED');
+    });
+
+    it('control — a late part for a turn still inside the window is accumulated', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('cap-keep') as never);
+      for (const event of assistantText('cap-keep', 'm-live', 'p-first', 'FIRST PART')) {
+        await handlers.event!(event as never);
+      }
+      await fillPastTheCap(handlers, 'cap-keep', 5);
+
+      const [, latePart] = assistantText('cap-keep', 'm-live', 'p-late', 'SECOND PART');
+      await handlers.event!(latePart as never);
+      await handlers.event!({
+        event: { type: 'session.compacted', properties: { sessionID: 'cap-keep' } },
+      } as never);
+
+      const calls = summaryCallsFor('cap-keep');
+      const summary = jsonBodyOf(calls[calls.length - 1]!).summary as string;
+      expect(summary).toContain('FIRST PART');
+      expect(summary).toContain('SECOND PART');
+    });
+  });
+
+  describe('session.deleted clears the per-session state', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('session.deleted deregisters the session so later events cannot revive it', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-known') as never);
+      await handlers['chat.message']!(
+        { sessionID: 'del-known' } as never,
+        { parts: [{ type: 'text', text: 'first turn' }], message: {} } as never,
+      );
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-known' } } },
+      } as never);
+
+      for (const event of assistantText('del-known', 'm-dk', 'p-dk', 'after deletion')) {
+        await handlers.event!(event as never);
+      }
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-known' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(summaryCallsFor('del-known')).toHaveLength(0);
+    });
+
+    it('session.deleted drops the transcript so a reused id does not inherit it', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-tx') as never);
+      await handlers['chat.message']!(
+        { sessionID: 'del-tx' } as never,
+        { parts: [{ type: 'text', text: 'PRE-DELETION TURN' }], message: {} } as never,
+      );
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-tx' } } },
+      } as never);
+
+      await handlers.event!(created('del-tx') as never);
+      await handlers['chat.message']!(
+        { sessionID: 'del-tx' } as never,
+        { parts: [{ type: 'text', text: 'POST-DELETION TURN' }], message: {} } as never,
+      );
+      await vi.advanceTimersByTimeAsync(500);
+
+      const calls = summaryCallsFor('del-tx');
+      expect(calls.length).toBeGreaterThan(0);
+      const summary = jsonBodyOf(calls[calls.length - 1]!).summary as string;
+      expect(summary).toContain('POST-DELETION TURN');
+      expect(summary).not.toContain('PRE-DELETION TURN');
+    });
+
+    it('session.deleted resets the turn counter so a reused id nudges from turn 1 again', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-turns') as never);
+      for (const turn of [1, 2]) {
+        await handlers['chat.message']!(
+          { sessionID: 'del-turns' } as never,
+          { parts: [{ type: 'text', text: `turn ${turn}` }], message: {} } as never,
+        );
+      }
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-turns' } } },
+      } as never);
+      await handlers.event!(created('del-turns') as never);
+
+      const output = { parts: [{ type: 'text', text: 'fresh turn' }], message: {} };
+      await handlers['chat.message']!({ sessionID: 'del-turns' } as never, output as never);
+      expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
+    });
+
+    it('session.deleted forgets message roles so a stale assistant id is not trusted after reuse', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-roles') as never);
+      for (const event of assistantText('del-roles', 'm-stale', 'p-before', 'BEFORE')) {
+        await handlers.event!(event as never);
+      }
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-roles' } } },
+      } as never);
+      await handlers.event!(created('del-roles') as never);
+
+      const [, partOnly] = assistantText('del-roles', 'm-stale', 'p-after', 'AFTER');
+      await handlers.event!(partOnly as never);
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-roles' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(summaryCallsFor('del-roles')).toHaveLength(0);
+
+      // Control: with the role re-declared, the identical part does accumulate.
+      for (const event of assistantText('del-roles', 'm-stale', 'p-after', 'AFTER')) {
+        await handlers.event!(event as never);
+      }
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-roles' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(summaryCallsFor('del-roles')).toHaveLength(1);
+    });
+
+    it('session.deleted drops accumulated assistant parts so a reused message id cannot resurrect them', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-parts') as never);
+      for (const event of assistantText('del-parts', 'm-p', 'p-a', 'ALPHA')) {
+        await handlers.event!(event as never);
+      }
+      const [, bravo] = assistantText('del-parts', 'm-p', 'p-b', 'BRAVO');
+      await handlers.event!(bravo as never);
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-parts' } } },
+      } as never);
+
+      await handlers.event!(created('del-parts') as never);
+      for (const event of assistantText('del-parts', 'm-p', 'p-a', 'CHARLIE')) {
+        await handlers.event!(event as never);
+      }
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-parts' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(500);
+
+      const calls = summaryCallsFor('del-parts');
+      expect(calls).toHaveLength(1);
+      const summary = jsonBodyOf(calls[0]!).summary as string;
+      expect(summary).toBe('assistant: CHARLIE');
+      expect(summary).not.toContain('BRAVO');
+    });
+
+    it('session.deleted disarms the debounce so an orphaned timer cannot POST after the id is reused', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      await handlers.event!(created('del-timer') as never);
+      await handlers['chat.message']!(
+        { sessionID: 'del-timer' } as never,
+        { parts: [{ type: 'text', text: 'armed turn' }], message: {} } as never,
+      );
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-timer' } } },
+      } as never);
+
+      // Re-registered and re-filled WITHOUT re-arming: neither message.updated
+      // nor message.part.updated touches the debounce, so a POST at t=500ms can
+      // only come from the timer session.deleted was meant to clear.
+      await handlers.event!(created('del-timer') as never);
+      for (const event of assistantText('del-timer', 'm-dt', 'p-dt', 'still here')) {
+        await handlers.event!(event as never);
+      }
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(summaryCallsFor('del-timer')).toHaveLength(0);
+    });
+  });
 });
 
-describe('stripPrivateTags against the shared cross-client fixture set', () => {
-  // Lock-step contract with scripts/_transcript.sh (bash) and
-  // .hermes-plugin/__init__.py (python); exercised through the real
-  // upload path because plugin.ts exports ONLY RembricPlugin.
-  type Fixture = { name: string; input: string; expected: string };
-  const fixtures = (
-    JSON.parse(
-      readFileSync(
-        join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'redaction-fixtures.json'),
-        'utf8',
-      ),
-    ) as Fixture[]
-  ).filter((f) => f.input !== '');
+describe('the shared accumulator reports what its per-session cap evicts', () => {
+  it('reports every entry that left the window, oldest first, and keeps the window bounded', () => {
+    const protocol = createSessionProtocol({
+      agent: 'opencode',
+      serverUrl: 'http://localhost:9999',
+      apiToken: 'test-token',
+      slug: 'demo',
+    });
 
+    const total = 500;
+    const evicted: string[] = [];
+    for (let i = 0; i < total; i++) {
+      for (const entry of protocol.upsertAssistantMessage('cap', `m-${i}`, `entry ${i}`)) {
+        if (entry.id) evicted.push(entry.id);
+      }
+    }
+
+    // No cap size is asserted: what matters is that whatever the window holds,
+    // every entry no longer in it was reported exactly once and in order — that
+    // is what lets a client's per-message state stay bounded too.
+    expect(evicted.length).toBeGreaterThan(0);
+    expect(evicted).toEqual(Array.from({ length: evicted.length }, (_, i) => `m-${i}`));
+    expect(evicted.length).toBeLessThan(total);
+  });
+
+  it('reports nothing when an upsert replaces an entry already in the window', () => {
+    const protocol = createSessionProtocol({
+      agent: 'opencode',
+      serverUrl: 'http://localhost:9999',
+      apiToken: 'test-token',
+      slug: 'demo',
+    });
+    protocol.upsertAssistantMessage('stream', 'm-1', 'Hel');
+    expect(protocol.upsertAssistantMessage('stream', 'm-1', 'Hello, done.')).toEqual([]);
+  });
+});
+
+describe('RembricPlugin without credentials', () => {
   let dir: string;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let written: string[];
+  let stderrSpy: ReturnType<typeof spyOnStderr>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-redaction-'));
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-nocreds-'));
     writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
-    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
-    process.env.REMBRIC_API_TOKEN = 'test-token';
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
     fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
+    written = [];
+    // The diagnostic is written while RembricPlugin is being constructed, so
+    // the spy has to be installed before it runs.
+    stderrSpy = spyOnStderr(written);
   });
 
   afterEach(() => {
+    stderrSpy.mockRestore();
     rmSync(dir, { recursive: true, force: true });
     delete process.env.REMBRIC_SERVER_URL;
     delete process.env.REMBRIC_API_TOKEN;
     vi.restoreAllMocks();
   });
 
-  for (const fixture of fixtures) {
-    it(fixture.name, async () => {
-      const handlers = await RembricPlugin({ directory: dir } as never);
-      const sessionId = 'redact-1';
-      await handlers.event!({
-        event: {
-          type: 'session.created',
-          properties: { info: { id: sessionId, parentID: '', title: 'work' } },
-        },
-      } as never);
-      await handlers['chat.message']!(
-        { sessionID: sessionId } as never,
-        { parts: [{ type: 'text', text: fixture.input }], message: {} } as never,
-      );
-      await handlers.event!({
-        event: { type: 'session.compacted', properties: { sessionID: sessionId } },
-      } as never);
+  const cases = [
+    { label: 'both unset', url: undefined, token: undefined },
+    { label: 'only REMBRIC_SERVER_URL set', url: 'http://localhost:9999', token: undefined },
+    { label: 'only REMBRIC_API_TOKEN set', url: undefined, token: 'test-token' },
+  ];
 
-      const summaryCall = fetchMock.mock.calls.find(
-        ([url]) => typeof url === 'string' && url.includes(`/sessions/${sessionId}/summary`),
-      );
-      expect(summaryCall).toBeDefined();
-      const body = JSON.parse((summaryCall![1] as { body: string }).body) as { summary: string };
-      expect(body.summary).toBe(`user: ${fixture.expected}`);
+  for (const { label, url, token } of cases) {
+    it(`emits one configuration diagnostic and issues no request — ${label}`, async () => {
+      if (url) process.env.REMBRIC_SERVER_URL = url;
+      if (token) process.env.REMBRIC_API_TOKEN = token;
+      vi.useFakeTimers();
+      try {
+        const handlers = await RembricPlugin({ directory: dir } as never);
+        expect(written).toHaveLength(1);
+        expect(written[0]).toContain('REMBRIC_SERVER_URL');
+        expect(written[0]).toContain('REMBRIC_API_TOKEN');
+        expect(written[0]).toContain('plugin disabled');
+        if (token) expect(written[0]).not.toContain(token);
+
+        await handlers.event!({
+          event: {
+            type: 'session.created',
+            properties: { info: { id: 'nc-1', parentID: '', title: 'work' } },
+          },
+        } as never);
+        const output = { parts: [{ type: 'text', text: 'recall the auth fix' }], message: {} };
+        await handlers['chat.message']!({ sessionID: 'nc-1' } as never, output as never);
+        await handlers.event!({
+          event: { type: 'session.idle', properties: { sessionID: 'nc-1' } },
+        } as never);
+        await handlers.event!({ event: { type: 'server.instance.disposed' } } as never);
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        // Control: the handlers really ran. Nudges are deliberately unaffected
+        // by the missing configuration, so their presence is what tells this
+        // apart from a test that exercised nothing.
+        expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   }
 });
