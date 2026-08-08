@@ -770,23 +770,6 @@ describe('unscoped repository read inventory', () => {
   });
 });
 
-/**
- * Plugin version lock-step invariant.
- *
- * The Rembric plugin is shipped to four agent clients (Claude Code, Codex
- * CLI, Hermes Agent, opencode). Each declares its own version in a
- * client-specific surface:
- *   - plugin/.claude-plugin/plugin.json::version
- *   - plugin/.codex-plugin/plugin.json::version
- *   - plugin/.hermes-plugin/plugin.yaml::version (top-level `version: '...'`)
- *   - plugin/.opencode-plugin/plugin.ts (// @rembric-plugin-version <semver>)
- *
- * Operators expect `/plugin update` (Claude Code), Codex's marketplace
- * cache key, and a re-run of the opencode install script to produce the
- * same version everywhere. Drift between the four sources causes silent
- * cache hits and "already at the latest version" messages despite
- * shipped changes.
- */
 describe('opencode plugin dispose-spike result is recorded', () => {
   it('plugin.ts declares the spike outcome in the header', () => {
     const src = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
@@ -806,38 +789,205 @@ describe('opencode plugin dispose-spike result is recorded', () => {
   });
 });
 
-describe('apps/plugin/bin/rembric-dotenv.mjs is the single source of truth for slug parsing', () => {
-  it('plugin.ts and rembric-bridge.mjs import from the shared dotenv lib', () => {
-    const pluginSrc = readFileSync(
-      join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'),
-      'utf8',
-    );
-    const bridgeSrc = readFileSync(join(repoRoot, 'apps/plugin/bin/rembric-bridge.mjs'), 'utf8');
+const OPENCODE_PLUGIN_TS = 'apps/plugin/.opencode-plugin/plugin.ts';
+const REMBRIC_DOTENV_MJS = 'apps/plugin/bin/rembric-dotenv.mjs';
+const REMBRIC_BRIDGE_MJS = 'apps/plugin/bin/rembric-bridge.mjs';
+const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
-    expect(
-      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(pluginSrc),
-      'plugin.ts must import slug helpers from rembric-dotenv.mjs',
-    ).toBe(true);
-    expect(
-      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(bridgeSrc),
-      'rembric-bridge.mjs must import slug helpers from rembric-dotenv.mjs',
-    ).toBe(true);
+/**
+ * Every helper the JS/TS clients share, with the ONE file allowed to define it.
+ * Bash (`apps/plugin/scripts/_transcript.sh`, `_api.sh`) and Python
+ * (`.hermes-plugin/__init__.py`) keep their own implementations; the shared
+ * fixtures are what hold those three languages in agreement.
+ */
+const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: string }> = [
+  {
+    symbol: 'parseDotenv',
+    definition: /\bfunction\s+parseDotenv\b/,
+    canonical: REMBRIC_DOTENV_MJS,
+  },
+  { symbol: 'SLUG_RE', definition: /\bSLUG_RE\s*=\s*\//, canonical: REMBRIC_DOTENV_MJS },
+  {
+    symbol: 'stripPrivateTags',
+    definition: /\bfunction\s+stripPrivateTags\b/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  { symbol: 'truncate', definition: /\bfunction\s+truncate\b/, canonical: REMBRIC_PLUGIN_CORE_MJS },
+  {
+    symbol: 'underscoreToolNames',
+    definition: /\bfunction\s+underscoreToolNames\b/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'rembricPost',
+    definition: /\bfunction\s+rembricPost\b/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'RECALL_NUDGE',
+    definition: /\bconst\s+RECALL_NUDGE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'FIRST_PROMPT_NUDGE',
+    definition: /\bconst\s+FIRST_PROMPT_NUDGE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'SAVE_NUDGE',
+    definition: /\bconst\s+SAVE_NUDGE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'SUMMARY_NUDGE',
+    definition: /\bconst\s+SUMMARY_NUDGE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+  {
+    symbol: 'SESSION_ID_NUDGE_TEMPLATE',
+    definition: /\bconst\s+SESSION_ID_NUDGE_TEMPLATE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
+];
 
-    for (const [name, src] of [
-      ['plugin.ts', pluginSrc],
-      ['rembric-bridge.mjs', bridgeSrc],
-    ] as const) {
-      if (/\bfunction\s+parseDotenv\b/.test(src)) {
-        throw new Error(
-          `${name} defines its own parseDotenv — must import from rembric-dotenv.mjs instead.`,
-        );
-      }
-      if (/\bSLUG_RE\s*=\s*\//.test(src)) {
-        throw new Error(
-          `${name} defines its own SLUG_RE — must import from rembric-dotenv.mjs instead.`,
-        );
-      }
+// Tests are excluded because two of them legitimately re-declare the nudge
+// constants as their own expected values (apps/plugin/test/prompt-search.test.ts).
+// Declaration files are excluded because they carry no runtime code, so an
+// `export declare function` in one is a type for the canonical implementation,
+// never a second copy of it.
+const PLUGIN_JS_PATHSPECS = [
+  'apps/plugin/*.ts',
+  'apps/plugin/*.mts',
+  'apps/plugin/*.mjs',
+  'apps/plugin/*.js',
+  ':!*.test.ts',
+  ':!*.test.mts',
+  ':!*.test.mjs',
+  ':!*.d.mts',
+];
+
+describe('the JS/TS plugin clients share one implementation of each protocol helper', () => {
+  // NOTE: derived from `git grep`, so it only sees TRACKED files — a new client
+  // passes until it is staged. That is the correct trade: the alternative walks
+  // the working tree and flags scratch files.
+  const scanned = execSync(
+    `git -C ${repoRoot} grep -l -E '.' -- ${PLUGIN_JS_PATHSPECS.map((p) => `'${p}'`).join(' ')} || true`,
+    { encoding: 'utf8' },
+  )
+    .split('\n')
+    .filter(Boolean);
+
+  // Derived, not listed: each JS/TS client's entrypoint lives in its own
+  // `apps/plugin/.<client>-plugin/` package dir, so a client added later is
+  // covered by the assertions below on the day it lands.
+  const clients = scanned.filter((f) => /^apps\/plugin\/\.[\w-]+-plugin\//.test(f));
+
+  it('the scanned file list is non-empty and covers every JS/TS client', () => {
+    expect(
+      scanned.length,
+      'the pathspec matched nothing, so the per-helper assertions below would prove nothing',
+    ).toBeGreaterThan(0);
+    expect(
+      clients.length,
+      `fewer than the two known JS/TS clients matched, so the client assertions below would prove little; scanned: ${scanned.join(', ')}`,
+    ).toBeGreaterThanOrEqual(2);
+    // The bin/ modules stay an explicit list: unlike the client set they are a
+    // closed set, so losing one is a regression rather than a rename.
+    for (const known of [REMBRIC_DOTENV_MJS, REMBRIC_BRIDGE_MJS, REMBRIC_PLUGIN_CORE_MJS]) {
+      expect(scanned, `${known} is no longer scanned`).toContain(known);
     }
+    expect(scanned.filter((f) => f.includes('.test.'))).toEqual([]);
+  });
+
+  it('each shared helper is defined in exactly one scanned file', () => {
+    const sources = new Map(scanned.map((f) => [f, readFileSync(join(repoRoot, f), 'utf8')]));
+    for (const { symbol, definition, canonical } of SHARED_JS_HELPERS) {
+      const definers = scanned.filter((f) => definition.test(sources.get(f)!));
+      const located = definers.map((f) => {
+        const lines = sources.get(f)!.split('\n');
+        return `${f}:${lines.findIndex((l) => definition.test(l)) + 1}`;
+      });
+      expect(
+        definers,
+        `${symbol} must have exactly one JS/TS definition, in ${canonical}; found ${located.join(', ') || 'none'}`,
+      ).toEqual([canonical]);
+    }
+  });
+
+  it('plugin.ts and rembric-bridge.mjs import the slug helpers instead of redefining them', () => {
+    for (const rel of [OPENCODE_PLUGIN_TS, REMBRIC_BRIDGE_MJS]) {
+      expect(
+        /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(readFileSync(join(repoRoot, rel), 'utf8')),
+        `${rel} must import slug helpers from rembric-dotenv.mjs`,
+      ).toBe(true);
+    }
+  });
+
+  it('every JS/TS client imports the protocol core instead of reimplementing it', () => {
+    for (const rel of clients) {
+      expect(
+        /from\s+['"][^'"]*rembric-plugin-core\.mjs['"]/.test(
+          readFileSync(join(repoRoot, rel), 'utf8'),
+        ),
+        `${rel} must import the session protocol from rembric-plugin-core.mjs`,
+      ).toBe(true);
+    }
+  });
+});
+
+const PI_PACKAGE_JSON = 'apps/plugin/.pi-plugin/package.json';
+
+// `prepack`/`prepare`/`prepublishOnly` run at pack time, the install trio on a
+// consumer's machine. `@rembric/pi` is the only package this repo publishes.
+const FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS = [
+  'prepack',
+  'prepare',
+  'prepublishOnly',
+  'preinstall',
+  'install',
+  'postinstall',
+];
+
+describe('the published @rembric/pi package', () => {
+  const manifest = JSON.parse(readFileSync(join(repoRoot, PI_PACKAGE_JSON), 'utf8')) as {
+    name?: string;
+    files?: unknown;
+    private?: unknown;
+    scripts?: Record<string, string>;
+  };
+
+  it('is the manifest these assertions think they are reading', () => {
+    expect(manifest.name, `${PI_PACKAGE_JSON} is not the @rembric/pi manifest`).toBe('@rembric/pi');
+  });
+
+  it('declares no lifecycle script of its own', () => {
+    const declared = FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS.filter(
+      (key) => manifest.scripts?.[key] !== undefined,
+    );
+    expect(
+      declared,
+      `${PI_PACKAGE_JSON} declares ${declared.join(', ')}; materialise in an explicit CI step instead. Why: scripts/pi-package.mjs and openspec/specs/supply-chain-hygiene/spec.md.`,
+    ).toEqual([]);
+  });
+
+  it('bounds its tarball with a non-empty files allowlist and is publishable', () => {
+    expect(
+      manifest.files,
+      `${PI_PACKAGE_JSON} must declare a files allowlist; scripts/pi-package.mjs assert-pack checks it against the expected tarball`,
+    ).toEqual(expect.arrayContaining([expect.any(String)]));
+    expect(manifest.private, `${PI_PACKAGE_JSON} must not be private`).toBeUndefined();
+  });
+
+  it('tracks only its four development files, so materialised resources cannot be committed', () => {
+    const tracked = execSync(`git ls-files ${dirname(PI_PACKAGE_JSON)}`, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean)
+      .map((p) => p.slice(dirname(PI_PACKAGE_JSON).length + 1))
+      .sort();
+    expect(tracked).toEqual(['README.md', 'index.ts', 'package.json', 'plugin.test.ts']);
   });
 });
 
@@ -1061,7 +1211,7 @@ describe('summary truncation keeps the same side in every layer', () => {
       head: /\$\{out:0:\$RBR_TRANSCRIPT_MAX_CHARS\}/,
     },
     {
-      file: 'apps/plugin/.opencode-plugin/plugin.ts',
+      file: REMBRIC_PLUGIN_CORE_MJS,
       tail: /body\.slice\(body\.length - MAX_TRANSCRIPT_CHARS\)/,
       head: /body\.slice\(0, MAX_TRANSCRIPT_CHARS\)/,
     },
@@ -1113,7 +1263,7 @@ describe('the session-summary rubric has one source', () => {
     'apps/plugin/scripts/stop-nudge.sh',
     'apps/plugin/scripts/post-compact.sh',
     'apps/plugin/commands/summary.md',
-    'apps/plugin/.opencode-plugin/plugin.ts',
+    REMBRIC_PLUGIN_CORE_MJS,
     'apps/plugin/.hermes-plugin/__init__.py',
   ];
 

@@ -5,23 +5,30 @@
 
 set -u
 
-PLUGIN_DEST="${HOME}/.config/opencode/plugins/rembric.ts"
-BRIDGE_DEST="${HOME}/.config/rembric/bin/rembric-bridge.mjs"
-DOTENV_DEST="${HOME}/.config/rembric/bin/rembric-dotenv.mjs"
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 REMBRIC_DIR="${HOME}/.config/rembric"
+PLUGIN_DEST="${HOME}/.config/opencode/plugins/rembric.ts"
+BRIDGE_DEST="${REMBRIC_BIN_DIR}/rembric-bridge.mjs"
+# Must stay in step with install.sh's list, which is what put these on disk.
+SHARED_LIBS='rembric-dotenv.mjs rembric-plugin-core.mjs'
 
 removed=''
 absent=''
-for target in "$PLUGIN_DEST" "$BRIDGE_DEST" "$DOTENV_DEST"; do
-  if [ -e "$target" ]; then
-    rm -f "$target"
-    removed="${removed}    ${target}
+drop() {
+  if [ -e "$1" ]; then
+    rm -f "$1"
+    removed="${removed}    ${1}
 "
   else
-    absent="${absent}    ${target}
+    absent="${absent}    ${1}
 "
   fi
+}
+
+drop "$PLUGIN_DEST"
+drop "$BRIDGE_DEST"
+for lib in $SHARED_LIBS; do
+  drop "${REMBRIC_BIN_DIR}/${lib}"
 done
 
 rmdir "$REMBRIC_BIN_DIR" 2>/dev/null || true
