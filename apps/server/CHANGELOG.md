@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.27.1](https://github.com/susomejias/rembric/compare/server-v0.27.0...server-v0.27.1) (2026-08-08)
+
+
+### Features
+
+* **plugin:** add the Pi harness as a fifth client ([083ebb0](https://github.com/susomejias/rembric/commit/083ebb045a6f4c59ff9a6bd3d89111dea6ba4e5e))
+
+
+### Refactor
+
+* **plugin:** extract the shared session-protocol core ([6b68e8d](https://github.com/susomejias/rembric/commit/6b68e8d0e834cc9da4808a8e3e0bb6b6b280c7cc))
+
+
+### Documentation
+
+* cut the comments that restate code or repeat the spec ([4745b3d](https://github.com/susomejias/rembric/commit/4745b3dda8056e4e42937ce4dc16a8112e0ae7e9))
+* five clients, and what makes the fifth different ([533a8b0](https://github.com/susomejias/rembric/commit/533a8b0643b027de9f2527ab8d74482750001340))
+
 ## [0.27.0](https://github.com/susomejias/rembric/compare/server-v0.26.0...server-v0.27.0) (2026-08-06)
 
 
