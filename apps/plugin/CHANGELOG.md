@@ -4,6 +4,25 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.25.0](https://github.com/susomejias/rembric/compare/plugin-v0.24.0...plugin-v0.25.0) (2026-08-08)
+
+
+### Features
+
+* **installer:** route Pi through the client's own registry CLI ([ee1ebd1](https://github.com/susomejias/rembric/commit/ee1ebd131fee1604029eda8517b00c2df48c0713))
+* **plugin:** add the Pi harness as a fifth client ([083ebb0](https://github.com/susomejias/rembric/commit/083ebb045a6f4c59ff9a6bd3d89111dea6ba4e5e))
+
+
+### Refactor
+
+* **plugin:** extract the shared session-protocol core ([6b68e8d](https://github.com/susomejias/rembric/commit/6b68e8d0e834cc9da4808a8e3e0bb6b6b280c7cc))
+
+
+### Documentation
+
+* cut the comments that restate code or repeat the spec ([4745b3d](https://github.com/susomejias/rembric/commit/4745b3dda8056e4e42937ce4dc16a8112e0ae7e9))
+* five clients, and what makes the fifth different ([533a8b0](https://github.com/susomejias/rembric/commit/533a8b0643b027de9f2527ab8d74482750001340))
+
 ## [0.24.0](https://github.com/susomejias/rembric/compare/plugin-v0.23.1...plugin-v0.24.0) (2026-08-05)
 
 ### ⚠ BREAKING CHANGES
