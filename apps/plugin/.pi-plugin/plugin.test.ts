@@ -25,13 +25,6 @@ import {
 
 import rembric from './index.js';
 
-/**
- * The extension is exercised against a REAL in-process MCP server over a
- * temporary SQLite file, through its own hand-rolled Streamable HTTP client —
- * the transport is the thing most likely to break, so mocking it would test
- * nothing that ships.
- */
-
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
 
@@ -70,13 +63,10 @@ let sessions: AgentSessionsService;
 let baseUrl: string;
 let cwd: string;
 
-/**
- * An independently written wire client, so a defect in the extension's own
- * decoder cannot also corrupt the reference it is compared against. The SDK
- * client is deliberately not used: this file lives outside the server
- * workspace, where Vite inlines that package instead of externalising it and
- * its transitive imports do not resolve.
- */
+// An independently written wire client, so a defect in the extension's own
+// decoder cannot corrupt the reference it is compared against. The MCP SDK
+// client cannot be used here: outside the server workspace Vite inlines it and
+// its transitive imports do not resolve.
 async function rawRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${ADMIN_TOKEN}`,
@@ -176,11 +166,8 @@ async function callThroughExtension(
   }
 }
 
-/**
- * A dotted tool name in a model-facing string. Written out here rather than
- * imported so the assertions do not depend on the same pattern the code under
- * test uses to rewrite them.
- */
+// Written out rather than imported, so the assertions do not depend on the same
+// pattern the code under test rewrites with.
 const DOTTED_TOOL_NAME = /\b(?:memory|project)\.[a-z]/;
 
 function withoutDescriptions(node: unknown): unknown {
@@ -273,9 +260,8 @@ describe('tool discovery over the extension’s own MCP transport', () => {
     for (const tool of discovered) {
       const registered = toolNamed(harness, tool.name);
       expect(registered.description).toBe(underscoreToolNames(tool.description ?? tool.name));
-      // Compared with every `description` removed from both sides, so this
-      // asserts the schema is otherwise untouched without re-implementing the
-      // rewrite under test.
+      // Every `description` removed from both sides, so this asserts the rest of
+      // the schema is untouched without re-implementing the rewrite under test.
       expect(withoutDescriptions(registered.parameters)).toEqual(
         withoutDescriptions(tool.inputSchema),
       );
@@ -298,9 +284,8 @@ describe('tool discovery over the extension’s own MCP transport', () => {
   });
 
   it('every dotted tool the server publishes is covered by the shared rename', () => {
-    // The registration replaces every dot; the rename that rewrites guidance
-    // knows the server's namespaces by name. A namespace the rename misses
-    // would ship guidance the registry cannot satisfy, and fails here.
+    // Registration replaces every dot; the rename that rewrites guidance knows
+    // the namespaces by name, so a namespace it misses fails here.
     for (const tool of harness.tools) {
       expect(
         underscoreToolNames(tool.label),
@@ -435,8 +420,8 @@ describe('session registration and nudges', () => {
     const harness = await startedHarness(sessionId);
 
     // `cwd` is asserted on the request body because the server keeps it only
-    // long enough to derive a placeholder title; `agent` is asserted on the
-    // row, which is where a wrong value would be permanent.
+    // long enough to derive a placeholder title; `agent` on the row, where a
+    // wrong value would be permanent.
     const posted: Array<Record<string, unknown>> = [];
     const realFetch = globalThis.fetch;
     const spy = vi
@@ -495,7 +480,6 @@ describe('session registration and nudges', () => {
       systemPrompt: 'BASE PROMPT',
     })) as { message: { content: string }; systemPrompt: string };
 
-    // Both surfaces: the per-turn nudges and the forwarded server instructions.
     for (const text of [result.message.content, result.systemPrompt]) {
       expect(text).not.toMatch(DOTTED_TOOL_NAME);
       const named = [...text.matchAll(/\b(?:memory|project)_[a-z0-9_]+/g)].map((m) => m[0]);
@@ -535,8 +519,8 @@ describe('the server’s own usage instructions reach the model', () => {
     })) as { systemPrompt: string };
     expect(occurrences(first.systemPrompt)).toBe(1);
 
-    // Pi hands each turn its base prompt, so this stands in for a host that
-    // ever hands back the modified one instead.
+    // Stands in for a host that hands back the modified prompt instead of the
+    // base one Pi hands each turn.
     const second = (await harness.fire('before_agent_start', {
       prompt: 'turn two',
       systemPrompt: first.systemPrompt,
@@ -587,8 +571,8 @@ describe('summary flushes', () => {
 
     await harness.fire('session_shutdown');
 
-    // No polling, deliberately: a fire-and-forget flush would still be in
-    // flight here, which is exactly the difference being asserted.
+    // No polling, deliberately: a fire-and-forget flush would still be in flight
+    // here, which is the difference being asserted.
     const summary = summaryOf(sessionId);
     expect(summary).toContain('work happened here');
     expect(summary).toContain('and here is the reply');
@@ -612,9 +596,8 @@ describe('summary flushes', () => {
       await harness.fire('session_shutdown');
       expect(posts).toHaveLength(1);
 
-      // Arming the debounce again after shutdown stands in for the timer a
-      // settle just before it leaves behind: either way the flush that fires
-      // must find the session gone rather than re-send what already landed.
+      // Stands in for the timer a settle just before shutdown leaves behind: the
+      // flush that fires must find the session gone.
       await harness.fire('agent_settled');
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(posts).toHaveLength(1);
@@ -641,11 +624,8 @@ describe('summary flushes', () => {
   });
 });
 
-/**
- * Answers the handshake and then swallows the DELETE, so the only thing that
- * ends the teardown request is the client's own budget — which is what the
- * timing assertion below reads.
- */
+// Answers the handshake and then swallows the DELETE, so only the client's own
+// budget ends the teardown request — which is what the timing below reads.
 async function startHalfDeadServer(): Promise<{
   url: string;
   seen: string[];
@@ -714,9 +694,8 @@ describe('shutdown teardown budget', () => {
     try {
       const harness = makeHarness('pi-close-budget');
       await harness.fire('session_start');
-      // Control: the handshake landed, so the transport holds an mcp-session-id
-      // and close() really issues the DELETE this measures. Without it a
-      // close() that returned early would look like a fast teardown.
+      // Control: without it, a close() that returned early before issuing the
+      // DELETE would read as a fast teardown.
       expect(stub.seen).toContain('initialize');
 
       const started = Date.now();
@@ -765,8 +744,8 @@ describe('missing configuration disables the extension', () => {
   });
 
   it('a server that accepts and never answers fails discovery instead of hanging startup', async () => {
-    // Accepts the connection and never replies: a refused connection would
-    // fail on its own, so it cannot tell whether discovery is bounded.
+    // Accepts and never replies: a refused connection fails on its own and so
+    // cannot tell whether discovery is bounded.
     const accepted = new Set<Socket>();
     const blackHole = createSocketServer((socket) => accepted.add(socket));
     await new Promise<void>((resolve) => blackHole.listen(0, '127.0.0.1', resolve));
@@ -789,8 +768,8 @@ describe('missing configuration disables the extension', () => {
       stderr.mockRestore();
       delete process.env.REMBRIC_DISCOVERY_TIMEOUT_MS;
       process.env.REMBRIC_SERVER_URL = url;
-      // The aborted request leaves an accepted socket, and `close` waits for
-      // every connection to end.
+      // `close` waits for every connection to end, and the aborted request left
+      // an accepted socket behind.
       for (const socket of accepted) socket.destroy();
       await new Promise<void>((resolve) => blackHole.close(() => resolve()));
     }

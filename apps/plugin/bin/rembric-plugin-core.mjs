@@ -1,17 +1,9 @@
-// Shared session-protocol core for Rembric's JS/TS agent clients: the single
-// JS/TS implementation of the per-turn nudge texts and their cadences,
-// `<private>` redaction, truncation, the stderr diagnostic, the session HTTP
-// client, the transcript accumulator and the flush helpers (enforced by the
-// single-implementation invariant in apps/server/src/test/invariants.test.ts).
+// The single JS/TS implementation of the cross-client session protocol; the
+// bash and Python clients keep their own, held in agreement by the shared
+// fixtures in `apps/plugin/test/`. Enforced by apps/server/src/test/invariants.test.ts.
 //
-// Bash (`apps/plugin/scripts/_transcript.sh`, `_api.sh`) and Python
-// (`apps/plugin/.hermes-plugin/__init__.py`) keep their own implementations —
-// cross-language wrapping costs more than the duplication — and are held in
-// agreement by the shared fixtures in `apps/plugin/test/`.
-//
-// Each client's install.sh rewrites the relative dev-time import of this
-// file to its absolute installed path (~/.config/rembric/bin/) while
-// copying, exactly as it already does for rembric-dotenv.mjs.
+// Each client's install.sh rewrites the relative dev-time import of this file
+// to its installed path under ~/.config/rembric/bin/ while copying.
 
 export const POST_TIMEOUT_MS = 3000;
 const IDLE_DEBOUNCE_MS = 500;
@@ -34,19 +26,9 @@ export const SUMMARY_NUDGE =
 export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 
-// The server publishes dotted tool names, and the texts above (plus the prompt
-// templates in ../commands and the server's own `initialize.instructions`) name
-// them that way because four of the five clients register them verbatim. A
-// client whose provider refuses a dot registers them underscored instead, and
-// then every string it injects or publishes has to name the form its registry
-// actually holds — otherwise every piece of guidance the model gets cites a
-// tool that does not exist and it has to guess. One rename, used by both the
-// client and the packaging step, so the two cannot diverge.
-//
 // `memory` and `project` are the server's two tool namespaces; a dotted word
-// outside them is prose or a filename and is left alone. The Pi client's test
-// asserts this list still covers every tool the server publishes, so a third
-// namespace fails on the day it lands.
+// outside them is prose or a filename and must be left alone. The Pi client's
+// test asserts this list still covers every tool the server publishes.
 const DOTTED_TOOL_NAME = /\b(memory|project)\.([a-z][a-z0-9_]*)/g;
 
 export function underscoreToolNames(text) {
@@ -62,12 +44,9 @@ export function diag(line) {
   process.stderr.write(`[rembric] ${line}\n`);
 }
 
-// Mirrors rembric_redact_private in scripts/_transcript.sh and
-// _redact_private in .hermes-plugin/__init__.py; the shared fixtures in
-// ../test/redaction-fixtures.json keep the three implementations in
-// lock-step. An unclosed <private> redacts through end-of-text: fail
-// closed for a privacy marker (also covers a closing tag cut off by the
-// per-entry truncation applied before this at the call sites).
+// An unclosed <private> redacts through end-of-text: fail closed for a privacy
+// marker, which also covers a closing tag cut off by the per-entry truncation
+// the call sites apply before this.
 export function stripPrivateTags(text) {
   if (!text) return '';
   return text
@@ -81,9 +60,8 @@ function truncate(text, max) {
 }
 
 export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd }) {
-  // No default, deliberately: `sessions.agent` is written once per session
-  // into append-only storage and there is no repair verb, so a defaulted
-  // value would misattribute every session of a miswired client forever.
+  // No default: `sessions.agent` is append-only with no repair verb, so a
+  // defaulted value misattributes a miswired client's sessions forever.
   if (!agent) {
     throw new Error('rembric-plugin-core: createSessionProtocol requires an `agent`');
   }
@@ -149,8 +127,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     await rembricPost(`/api/${slug}/sessions`, body);
   }
 
-  // The whole per-turn nudge policy, emitted in the order the clients inject
-  // it. A client contributes only its transport.
   function nudgesForTurn(sessionId, prompt) {
     const turn = (userTurnCounts.get(sessionId) ?? 0) + 1;
     userTurnCounts.set(sessionId, turn);
@@ -178,10 +154,8 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return arr;
   }
 
-  // Every append returns what the per-session cap pushed out, for the same
-  // reason forgetSession does: a client that keys per-message state off these
-  // entries (opencode's assistantMessageIds/assistantParts) can only bound
-  // that state if it is told which entries left the window.
+  // Returns what the per-session cap pushed out: a client keying per-message
+  // state off these entries can only bound it if told which ones left.
   function pushEntry(sessionId, entry) {
     const arr = entriesFor(sessionId);
     arr.push(entry);
@@ -255,12 +229,9 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     pendingFlush.set(sessionId, timer);
   }
 
-  // The un-awaited counterpart of flushSessionSummary, for a host that kills
-  // the process before async handlers settle (opencode's
-  // server.instance.disposed). Dispatches without awaiting and without an
-  // AbortSignal, hoping the kernel flushes the packets first; a host that
-  // awaits its shutdown handler must use flushSessionSummary instead, whose
-  // landing is a guarantee rather than a race.
+  // For a host that kills the process before async handlers settle (opencode's
+  // server.instance.disposed): no await and no AbortSignal, so landing is a
+  // race. A host that awaits its shutdown handler must use flushSessionSummary.
   function flushAllFireAndForget() {
     if (disabled) return;
     for (const sessionId of knownSessions) {
@@ -281,8 +252,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     }
   }
 
-  // Returns the transcript entries it dropped, so a client can evict the
-  // per-message state it keys off them without reaching into this module.
+  // Returns the entries it dropped, for the same reason pushEntry does.
   function forgetSession(sessionId) {
     knownSessions.delete(sessionId);
     subAgentSessions.delete(sessionId);

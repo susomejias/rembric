@@ -794,12 +794,8 @@ const REMBRIC_DOTENV_MJS = 'apps/plugin/bin/rembric-dotenv.mjs';
 const REMBRIC_BRIDGE_MJS = 'apps/plugin/bin/rembric-bridge.mjs';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
-/**
- * Every helper the JS/TS clients share, with the ONE file allowed to define it.
- * Bash (`apps/plugin/scripts/_transcript.sh`, `_api.sh`) and Python
- * (`.hermes-plugin/__init__.py`) keep their own implementations; the shared
- * fixtures are what hold those three languages in agreement.
- */
+// Every helper the JS/TS clients share, with the ONE file allowed to define it.
+// The bash and Python clients keep their own, held in agreement by the fixtures.
 const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: string }> = [
   {
     symbol: 'parseDotenv',
@@ -850,11 +846,9 @@ const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: 
   },
 ];
 
-// Tests are excluded because two of them legitimately re-declare the nudge
-// constants as their own expected values (apps/plugin/test/prompt-search.test.ts).
-// Declaration files are excluded because they carry no runtime code, so an
-// `export declare function` in one is a type for the canonical implementation,
-// never a second copy of it.
+// Tests are excluded because some legitimately re-declare the nudge constants as
+// their expected values; `.d.mts` because a declaration is a type for the
+// canonical implementation, never a second copy of it.
 const PLUGIN_JS_PATHSPECS = [
   'apps/plugin/*.ts',
   'apps/plugin/*.mts',
@@ -867,9 +861,8 @@ const PLUGIN_JS_PATHSPECS = [
 ];
 
 describe('the JS/TS plugin clients share one implementation of each protocol helper', () => {
-  // NOTE: derived from `git grep`, so it only sees TRACKED files — a new client
-  // passes until it is staged. That is the correct trade: the alternative walks
-  // the working tree and flags scratch files.
+  // `git grep` sees TRACKED files only, so a new client passes until it is
+  // staged; the alternative walks the working tree and flags scratch files.
   const scanned = execSync(
     `git -C ${repoRoot} grep -l -E '.' -- ${PLUGIN_JS_PATHSPECS.map((p) => `'${p}'`).join(' ')} || true`,
     { encoding: 'utf8' },
@@ -877,9 +870,8 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     .split('\n')
     .filter(Boolean);
 
-  // Derived, not listed: each JS/TS client's entrypoint lives in its own
-  // `apps/plugin/.<client>-plugin/` package dir, so a client added later is
-  // covered by the assertions below on the day it lands.
+  // Derived from the `.<client>-plugin/` directory shape, so a client added later
+  // is covered on the day it lands.
   const clients = scanned.filter((f) => /^apps\/plugin\/\.[\w-]+-plugin\//.test(f));
 
   it('the scanned file list is non-empty and covers every JS/TS client', () => {
@@ -891,8 +883,8 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
       clients.length,
       `fewer than the two known JS/TS clients matched, so the client assertions below would prove little; scanned: ${scanned.join(', ')}`,
     ).toBeGreaterThanOrEqual(2);
-    // The bin/ modules stay an explicit list: unlike the client set they are a
-    // closed set, so losing one is a regression rather than a rename.
+    // Explicit list: unlike the client set these are closed, so losing one is a
+    // regression rather than a rename.
     for (const known of [REMBRIC_DOTENV_MJS, REMBRIC_BRIDGE_MJS, REMBRIC_PLUGIN_CORE_MJS]) {
       expect(scanned, `${known} is no longer scanned`).toContain(known);
     }
@@ -937,8 +929,8 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
 
 const PI_PACKAGE_JSON = 'apps/plugin/.pi-plugin/package.json';
 
-// `prepack`/`prepare`/`prepublishOnly` run at pack time, the install trio on a
-// consumer's machine. `@rembric/pi` is the only package this repo publishes.
+// `prepack`/`prepare`/`prepublishOnly` run at pack time; the install trio runs on
+// a consumer's machine.
 const FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS = [
   'prepack',
   'prepare',

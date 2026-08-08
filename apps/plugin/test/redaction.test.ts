@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(
   readFileSync(join(here, 'redaction-fixtures.json'), 'utf8'),
 ) as Fixture[];
-/** The set's size when the JS/TS arm moved here; a shrunk set is a lost case. */
+/** A shrunk fixture set is a lost case, not a passing suite. */
 const FIXTURE_FLOOR = 13;
 const transcriptSh = join(here, '..', 'scripts', '_transcript.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');

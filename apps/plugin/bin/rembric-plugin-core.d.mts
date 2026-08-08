@@ -1,8 +1,6 @@
-// Hand-written companion to rembric-plugin-core.mjs. `apps/plugin` has no
-// build step and no typecheck, so nothing generates this — it is the only
-// type surface the TypeScript clients (opencode's plugin.ts, Pi's index.ts)
-// see over the shared core, and the only thing that makes a missing `agent`
-// a compile error rather than a silently misattributed session.
+// Hand-written: `apps/plugin` has no build step, so nothing generates this from
+// rembric-plugin-core.mjs, and it is the only type surface the TypeScript
+// clients see over the shared core.
 
 export declare const MAX_TRANSCRIPT_CHARS: number;
 export declare const POST_TIMEOUT_MS: number;

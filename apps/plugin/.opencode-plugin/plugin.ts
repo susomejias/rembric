@@ -4,54 +4,15 @@
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
 //
-// Rembric plugin for opencode (https://opencode.ai).
+// Rembric plugin for opencode (https://opencode.ai). install.sh rewrites both
+// relative dev-time import paths below to their installed paths while copying.
 //
-// Distributed as a single .ts file via plugin/.opencode-plugin/install.sh,
-// which copies this file to ~/.config/opencode/plugins/rembric.ts, the
-// shared bridge to ~/.config/rembric/bin/rembric-bridge.mjs, and the two
-// shared libs (rembric-dotenv.mjs, rembric-plugin-core.mjs) to
-// ~/.config/rembric/bin/.
+// message.updated, message.part.updated and session.idle dispatch via the
+// `event` hook, never as top-level Hooks keys. Assistant text arrives only via
+// message.part.updated's `properties.part` — `message.updated` carries no `parts`.
 //
-// Session lifecycle:
-//   - session.created      → POST /api/<slug>/sessions  (idempotent register)
-//   - chat.message         → accumulate user turn; also arms the debounced
-//                            flush session.idle uses (below)
-//   - message.updated      → record which message ids are the assistant's
-//   - message.part.updated → accumulate/upsert assistant turn text, keyed by
-//                            part.messageID (see note below)
-//   - session.idle         → debounced (500ms) flush via POST /summary  ← PRIMARY
-//   - server.instance.disposed → fire-and-forget POST /summary  ← BEST-EFFORT
-//   - session.deleted      → clean in-memory state
-//
-// message.updated, message.part.updated, and session.idle are Event union
-// members, dispatched via the `event` hook — NOT top-level Hooks keys
-// (opencode never invokes those).
-//
-// message.updated's `properties.info` (a Message = UserMessage |
-// AssistantMessage in @opencode-ai/sdk) carries NO `parts` field — only
-// metadata (id, role, cost, tokens...). Assistant TEXT only ever arrives via
-// message.part.updated's `properties.part`, keyed by `part.messageID`. An
-// earlier version read `info.parts` (never existed) and silently captured
-// zero assistant text forever; confirmed against the real installed
-// @opencode-ai/sdk@1.17.18 types after a live session showed user-only
-// transcripts.
-//
-// Why two flush paths? opencode kills the subprocess on
-// server.instance.disposed BEFORE async handlers complete (spike verified
-// 2026-05-19 — see design.md::Decision 4 resolved). The per-turn flush
-// keeps the server's summary current at all times; the dispose call is a
-// last-chance opportunity that may or may not land. Worst case: at-most-
-// one-turn lag between in-memory state and dashboard.
-//
-// Slug-resolution helpers (`parseDotenv`, `readRembricSlug`, `SLUG_RE`)
-// live in `rembric-dotenv.mjs`; the nudge texts, redaction, transcript
-// accumulator and flush helpers shared with every other JS/TS client live
-// in `rembric-plugin-core.mjs`. install.sh rewrites BOTH relative dev-time
-// paths to their absolute installed paths before copying.
-//
-// ONLY `RembricPlugin` is exported. opencode iterates every named export
-// of a plugin module and invokes each with the plugin ctx — exporting
-// helpers would crash on load.
+// ONLY `RembricPlugin` is exported: opencode invokes every named export of a
+// plugin module with the plugin ctx, so a helper export crashes on load.
 
 import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
 import { createSessionProtocol, diag } from '../bin/rembric-plugin-core.mjs';
@@ -113,19 +74,14 @@ type Plugin = (ctx: PluginContext) => Promise<PluginReturn>;
 
 // opencode validates every pushed part against the real TextPart schema
 // (id/sessionID/messageID all required) before persisting the outgoing user
-// message. A bare `{ type: 'text', text }` fails that validation and takes
-// down the whole turn with a hard server error — confirmed live: `opencode
-// run` crashed on turn 1 (the unconditional SUMMARY_NUDGE) with
-// `EventV2.InvalidDurableEvent: Expected string aggregate field sessionID`,
-// and a `--pure` (no plugins) run of the same message succeeded cleanly.
+// message; a bare `{ type: 'text', text }` fails it and takes down the turn.
 function nudgePart(
   sessionId: string,
   messageId: string,
   text: string,
 ): { id: string; sessionID: string; messageID: string; type: 'text'; text: string } {
-  // opencode's own id scheme prefixes every entity type (ses_, msg_, prt_...)
-  // and validates the prefix on write — confirmed live: a bare crypto.randomUUID()
-  // (no prefix) was rejected with `SchemaError: Expected a string starting with "prt"`.
+  // opencode validates the entity-type id prefix on write, so a bare UUID is
+  // rejected.
   return {
     id: `prt_${crypto.randomUUID().replace(/-/g, '')}`,
     sessionID: sessionId,
@@ -148,11 +104,9 @@ export const RembricPlugin: Plugin = async (ctx) => {
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
 
-  // Both maps are keyed by assistant message id, so they can only stay bounded
-  // if every way an entry leaves the transcript feeds them: session.deleted
-  // (forgetSession) and the per-session entry cap (the appends' return value).
-  // Without the second, a session past the cap grew both maps without limit.
-  // Typed structurally so no extra import of the core's types is needed.
+  // Both maps are keyed by assistant message id, so they stay bounded only if
+  // every way an entry leaves the transcript feeds this: session.deleted
+  // (forgetSession) and the per-session cap (the appends' return value).
   function forgetMessageState(entries: ReadonlyArray<{ id?: string }>): void {
     for (const entry of entries) {
       if (!entry.id) continue;

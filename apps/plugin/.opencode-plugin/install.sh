@@ -30,9 +30,8 @@ OPENCODE_JSON="${OPENCODE_DIR}/opencode.json"
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 PLUGIN_DEST="${OPENCODE_PLUGINS_DIR}/rembric.ts"
 BRIDGE_DEST="${REMBRIC_BIN_DIR}/rembric-bridge.mjs"
-# The modules plugin.ts imports by relative dev-time path. This one list drives
-# the fetch, the import rewrite, the post-rewrite verification and the summary,
-# so adding a shared module is a one-line change here.
+# The modules plugin.ts imports by relative dev-time path; this one list drives
+# the fetch, the import rewrite, its verification and the summary.
 SHARED_LIBS='rembric-dotenv.mjs rembric-plugin-core.mjs'
 
 if ! mkdir -p "$OPENCODE_PLUGINS_DIR" 2>/dev/null; then
@@ -75,10 +74,8 @@ for lib in $SHARED_LIBS; do
   chmod 644 "${REMBRIC_BIN_DIR}/${lib}"
 done
 
-# Fetch plugin.ts into a temp file, then sed-substitute EVERY relative
-# dev-time shared-module import for its absolute installed path before
-# writing to the final destination. Bun's ESM resolver in opencode 1.15.x
-# accepts absolute paths.
+# Every relative dev-time import is rewritten to its absolute installed path,
+# which Bun's ESM resolver in opencode 1.15.x accepts.
 TMP_PLUGIN="$(mktemp)"
 trap 'rm -f "$TMP_PLUGIN"' EXIT
 fetch_file "${PLUGIN_SRC}/plugin.ts" "$TMP_PLUGIN" || exit 1
@@ -88,10 +85,8 @@ for lib in $SHARED_LIBS; do
 "
 done
 sed "$REWRITE" "$TMP_PLUGIN" > "$PLUGIN_DEST"
-# If any dev-time import in plugin.ts drifts from its sed pattern above, that
-# rewrite silently no-ops and the installed plugin crashes at load. Every
-# destination is verified, not one: a single-destination guard exits 0 having
-# written a plugin that cannot load.
+# An import that drifts from its sed pattern above no-ops silently and crashes
+# the installed plugin at load, so EVERY destination is verified, not one.
 for lib in $SHARED_LIBS; do
   dest="${REMBRIC_BIN_DIR}/${lib}"
   if ! grep -qF "$dest" "$PLUGIN_DEST"; then
