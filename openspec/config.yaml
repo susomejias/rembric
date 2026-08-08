@@ -9,8 +9,8 @@ context: |
   is the core; sessions, judgments, projects, consolidation, and an operator
   dashboard come along in the same single Node process backed by one SQLite
   file. Multi-client by construction (Claude Code, Codex CLI, Hermes Agent,
-  generic MCP). Distributed exclusively as a Docker image at
-  ghcr.io/susomejias/rembric. MIT license, open-source on GitHub.
+  opencode, Pi, generic MCP). The server is distributed exclusively as a Docker
+  image at ghcr.io/susomejias/rembric. MIT license, open-source on GitHub.
 
   Tech stack:
     - TypeScript strict (no any without a justifying comment, no floating promises)
@@ -42,11 +42,22 @@ context: |
       project consult BOTH sources via resolveEffectiveProject / scopeFromContext.
 
   Cross-client distribution:
-    - One shared plugin tree at plugin/ feeds three marketplaces:
+    - One shared plugin tree at apps/plugin/ feeds five clients:
       Claude Code (.claude-plugin/), Codex CLI (.codex-plugin/),
-      Hermes Agent (.hermes-plugin/). Per-client divergence ONLY when the
-      platform forces it (e.g., Codex doesn't substitute ${CLAUDE_PLUGIN_ROOT},
-      uses env_vars instead of env-map interpolation).
+      Hermes Agent (.hermes-plugin/), opencode (.opencode-plugin/) and
+      Pi (.pi-plugin/, also published to npm as @rembric/pi). Per-client
+      divergence ONLY when the platform forces it (e.g., Codex doesn't
+      substitute ${CLAUDE_PLUGIN_ROOT}, uses env_vars instead of env-map
+      interpolation).
+    - The TUI installer (apps/plugin/install.sh, fronted by the repo-root
+      install.sh shim) is the single install/upgrade/uninstall path for the
+      server and every client plugin. Per-client commands are its backend and
+      are documented only as manual fallback.
+    - release-please runs exactly two components: `server` (apps/server/,
+      tag server-vX.Y.Z, Docker image) and `plugin` (the whole apps/plugin/
+      tree, tag plugin-vX.Y.Z). All five clients share the one `plugin`
+      version, kept in lock-step by that component's extra-files. No
+      node-workspace / linked-versions grouping, so no cascade.
     - Shared logic lives in the HTTP API contract (src/server/api-router.ts).
       Per-client adapters MAY be written in any language; they implement the
       same set of POSTs against the same endpoints.

@@ -35,6 +35,7 @@ jobs:
       # apps/server-specific outputs (release-please prefixes per-path outputs)
       server_release_created: ${{ steps.release.outputs['apps/server--release_created'] }}
       server_tag_name: ${{ steps.release.outputs['apps/server--tag_name'] }}
+      plugin_release_created: ${{ steps.release.outputs['apps/plugin--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -48,7 +49,7 @@ jobs:
     # auto-issued token).
     #
     # Gating: only runs when the `server` component was released. A `plugin`
-    # release (the unified plugin track covering all four clients) does NOT
+    # release (the unified plugin track covering all five clients) does NOT
     # trigger Docker publish.
     needs: release-please
     if: ${{ needs.release-please.outputs.server_release_created == 'true' || github.event.inputs.force_publish == 'true' }}
@@ -60,3 +61,43 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  publish-npm:
+    # `@rembric/pi` is a version carrier of the `plugin` component, not a
+    # component of its own: a plugin release is the only trigger, and the version
+    # in the manifest at this commit is already the released one.
+    needs: release-please
+    if: ${{ needs.release-please.outputs.plugin_release_created == 'true' }}
+    runs-on: ubuntu-latest
+    # id-token is the OIDC identity for trusted publishing, scoped to this job so
+    # no other job in the run can mint a publish token. No NPM_TOKEN by policy —
+    # openspec/specs/supply-chain-hygiene/spec.md.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.x.
+      - run: npm install -g npm@^11.5.1
+
+      # The extension imports the shared core and dotenv module from
+      # apps/plugin/bin/ and references the shared command markdown, both of
+      # which sit outside the package root. An explicit step copies them in and
+      # rewrites the imports — never a `prepack`, whose execution depends on the
+      # publish command's cwd (openspec/specs/supply-chain-hygiene/spec.md).
+      - name: Materialise shared resources into the package
+        run: node scripts/pi-package.mjs materialize
+
+      - name: Assert the tarball contents
+        run: node scripts/pi-package.mjs assert-pack
+
+      - name: Publish @rembric/pi
+        working-directory: apps/plugin/.pi-plugin
+        # --access public: a scoped package defaults to restricted on first publish.
+        run: npm publish --provenance --access public

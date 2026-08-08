@@ -2,23 +2,26 @@
 
 Releases are fully automated. You never tag, bump, or publish by hand.
 
-## Five release-please components
+## Two release-please components
 
-The monorepo restructure introduced one release-please component per deliverable. `release-please-config.json` is the source of truth.
+`release-please-config.json` is the source of truth. It declares exactly two components — one per deliverable — and **no** grouping plugin (`node-workspace`, `linked-versions`), so there is no cascade or anchor-tag dependency between them.
 
-| Component            | Path                            | Tag format                  | npm package-name              | Bumps when commits touch…                                                                                  |
-| -------------------- | ------------------------------- | --------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `server`             | `apps/server/`                  | `server-vX.Y.Z`             | `@rembric/server`             | anything under `apps/server/`                                                                              |
-| `claude-code-plugin` | `apps/plugin/.claude-plugin/`   | `claude-code-plugin-vX.Y.Z` | `@rembric/plugin-claude-code` | `apps/plugin/.claude-plugin/`, or shared `apps/plugin/{bin,hooks,commands,scripts}/` (cascades from group) |
-| `codex-plugin`       | `apps/plugin/.codex-plugin/`    | `codex-plugin-vX.Y.Z`       | `@rembric/plugin-codex`       | `apps/plugin/.codex-plugin/`, or the same shared paths (cascades from group)                               |
-| `hermes-plugin`      | `apps/plugin/.hermes-plugin/`   | `hermes-plugin-vX.Y.Z`      | `@rembric/plugin-hermes`      | only `apps/plugin/.hermes-plugin/`                                                                         |
-| `opencode-plugin`    | `apps/plugin/.opencode-plugin/` | `opencode-plugin-vX.Y.Z`    | `@rembric/plugin-opencode`    | only `apps/plugin/.opencode-plugin/`                                                                       |
+| Component | Path           | Tag format      | npm package-name  | Bumps when commits touch…                                        |
+| --------- | -------------- | --------------- | ----------------- | ---------------------------------------------------------------- |
+| `server`  | `apps/server/` | `server-vX.Y.Z` | `@rembric/server` | anything under `apps/server/`                                    |
+| `plugin`  | `apps/plugin/` | `plugin-vX.Y.Z` | `@rembric/plugin` | anything under `apps/plugin/` — a shared asset or any client dir |
 
-`claude-code-plugin` and `codex-plugin` are linked via the `bridge-bundlers` `linked-versions` group, so they always release together at the same version — they share the bridge entry point (`apps/plugin/bin/`), hook scripts (`apps/plugin/scripts/`), and command/hook manifests.
+The `plugin` component covers the **whole** `apps/plugin/` tree (it declares no `exclude-paths`), and its single version is shared by all five clients: Claude Code, Codex CLI, Hermes Agent, opencode, and Pi. The component's `extra-files` rewrite every client's version carrier in lock-step:
 
-`hermes-plugin` and `opencode-plugin` bump **independently** of the bridge. Their `install.sh` re-fetches `apps/plugin/bin/rembric-{bridge,dotenv}.mjs` (and `apps/plugin/scripts/_api.sh` is not used by them) from `main` at install time, so shared-`bin/` updates reach those users on the next install without a coordinated release.
+- `.claude-plugin/{package,plugin}.json`
+- `.codex-plugin/{package,plugin}.json`
+- `.hermes-plugin/plugin.yaml`
+- the `// @rembric-plugin-version` comment in `.opencode-plugin/plugin.ts`
+- `.pi-plugin/package.json` — also the version published to npm as `@rembric/pi`
 
-The first release after the restructure is **`server-v0.18.0`** — there is no rolled-up "Rembric vX.Y.Z" anymore.
+So a fix scoped to one client bumps the number every other client reports. That is deliberate: `apps/plugin/CHANGELOG.md`, scoped by conventional commit, is what records which client actually changed.
+
+The retired per-client components (`claude-code-plugin`, `codex-plugin`, `hermes-plugin`, `opencode-plugin`, `plugin-shared`) and their tags remain in git history, inert; release-please no longer creates them. Legacy pre-restructure `vX.Y.Z` tags remain too — `ghcr.io/susomejias/rembric:v0.17.0` stays pullable. There is no rolled-up "Rembric vX.Y.Z" release line.
 
 ## The flow
 
@@ -27,21 +30,29 @@ The first release after the restructure is **`server-v0.18.0`** — there is no 
    on main                ─▶    one or more "release: <component> vX.Y.Z"  ─▶   tags + GH releases
                                 PRs (one per affected component)                       │
                                                                               release-please.yml
-                                                                              checks: did `server`
-                                                                              release?
-                                                                                       │ yes
-                                                                                       ▼
-                                                                              docker-publish.yml (workflow_call)
-                                                                              pushes ghcr.io/susomejias/rembric:<server-tag>
+                                                                              checks which component
+                                                                              released
+                                                                             ┌─────────┴─────────┐
+                                                                     server │                   │ plugin
+                                                                            ▼                   ▼
+                                                             docker-publish.yml        publish-npm job
+                                                             (workflow_call)           npm publish --provenance
+                                                             ghcr.io/susomejias/       @rembric/pi
+                                                             rembric:<server-tag>
 ```
 
-Plugin-only releases (`claude-code-plugin`, `codex-plugin`, `hermes-plugin`, `opencode-plugin`) do **not** trigger Docker publish. The gate lives in `.github/workflows/release-please.yml`:
+Both gates live in `.github/workflows/release-please.yml`, one per component:
 
 ```yaml
+# publish-docker — rebuilds the server image
 needs.release-please.outputs.server_release_created == 'true'
+# publish-npm — publishes @rembric/pi (the Pi client extension)
+needs.release-please.outputs.plugin_release_created == 'true'
 ```
 
-If a single commit touches both server and plugin paths, release-please opens separate PRs per component; merging the server PR is what triggers Docker.
+A `plugin` release does **not** rebuild the server image, and a `server` release publishes **nothing** to npm. The npm publish authenticates via trusted-publishing OIDC (`permissions: id-token: write`, scoped to the `publish-npm` job) and carries provenance; there is no stored registry token, and introducing one requires an OpenSpec change against `supply-chain-hygiene`.
+
+If a single commit touches both server and plugin paths, release-please opens separate PRs per component; merging the server PR is what triggers Docker, and merging the plugin PR is what triggers the npm publish.
 
 ## Day-to-day
 
@@ -56,12 +67,14 @@ Scope the commit so the path is unambiguous. Examples:
 
 ```bash
 git commit -m "feat(consolidation): add drift heuristic for tag overlap"     # → server
-git commit -m "fix(bridge): handle missing PWD"                              # → claude-code-plugin + codex-plugin (linked)
-git commit -m "feat(opencode): per-session summary on dispose"               # → opencode-plugin only
-git commit -m "fix(hermes): tighten is_available 401 handling"               # → hermes-plugin only
+git commit -m "fix(bridge): handle missing PWD"                              # → plugin
+git commit -m "feat(opencode): per-session summary on dispose"               # → plugin
+git commit -m "fix(hermes): tighten is_available 401 handling"               # → plugin
 ```
 
-**To cut a release**: merge the relevant release PR. Merging the `server` PR triggers `docker-publish.yml`; the multi-arch image lands at `ghcr.io/susomejias/rembric:<server-version>` ~5–8 minutes later.
+Every client lives under `apps/plugin/`, so any of the last three bumps the one shared `plugin` version; the scope is what tells the CHANGELOG which client changed.
+
+**To cut a release**: merge the relevant release PR. Merging the `server` PR triggers `docker-publish.yml`; the multi-arch image lands at `ghcr.io/susomejias/rembric:<server-version>` ~5–8 minutes later. Merging the `plugin` PR triggers `publish-npm`; `@rembric/pi` appears on the registry at the same version as the `plugin-vX.Y.Z` tag.
 
 ## On the server
 
