@@ -42,7 +42,8 @@
         ".codex-plugin/package.json",
         ".codex-plugin/plugin.json",
         ".hermes-plugin/plugin.yaml",
-        { "type": "generic", "path": ".opencode-plugin/plugin.ts" }
+        { "type": "generic", "path": ".opencode-plugin/plugin.ts" },
+        ".pi-plugin/package.json"
       ],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
