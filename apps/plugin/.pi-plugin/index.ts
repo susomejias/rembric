@@ -30,9 +30,13 @@ type ToolDefinition = {
   ) => Promise<ToolExecuteResult>;
 };
 
+// `ui` is optional because the extension is installed into whatever harness
+// version the operator has, and a missing diagnostic channel must not cost them
+// a working extension.
 type ExtensionContext = {
   cwd: string;
   sessionManager: { getSessionId: () => string };
+  ui?: { notify: (message: string, type?: 'info' | 'warning' | 'error') => void };
 };
 
 type BeforeAgentStartEvent = { prompt?: string; systemPrompt?: string };
@@ -238,7 +242,13 @@ export default function rembric(pi: ExtensionApi): void {
       slug,
       cwd,
     });
-    if (protocol.disabled) return;
+    if (protocol.disabled) {
+      ctx.ui?.notify(
+        `Rembric is off — ${protocol.disabledReason}. Fix it and restart Pi.`,
+        'warning',
+      );
+      return;
+    }
 
     const client = createMcpClient(`${protocol.baseUrl}/mcp/${slug}`, apiToken);
     core = protocol;
@@ -271,7 +281,9 @@ export default function rembric(pi: ExtensionApi): void {
         });
       }
     } catch (err) {
-      diag(`tool discovery failed: ${err instanceof Error ? err.message : 'error'}`);
+      const detail = err instanceof Error ? err.message : 'error';
+      diag(`tool discovery failed: ${detail}`);
+      ctx.ui?.notify(`Rembric tools unavailable — ${detail}`, 'error');
     }
   });
 
