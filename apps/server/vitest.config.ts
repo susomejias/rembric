@@ -9,7 +9,9 @@ export default defineConfig({
     // runs exactly once per CI run, via e2e:installer only.
     include: [
       'src/**/*.test.ts',
-      '../plugin/.opencode-plugin/*.test.ts',
+      // One pattern for every per-client package dir, so a client's test file
+      // cannot exist without being run.
+      '../plugin/.*-plugin/*.test.ts',
       '../plugin/test/*.test.ts',
       '../../install.test.ts',
       '../../scripts/*.test.ts',
