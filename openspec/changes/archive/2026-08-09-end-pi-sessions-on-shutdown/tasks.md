@@ -102,12 +102,16 @@ The fake harness supplies `reason` itself, so it cannot prove the harness delive
 
 ## 9. Verification
 
-- [ ] 9.1 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` all green. The Pi arm runs only because `apps/server/vitest.config.ts::include` lists `'../plugin/.pi-plugin/*.test.ts'` — confirm the new arms actually executed by reading the reported test count, not by assuming.
-- [ ] 9.2 `pnpm run eval` is **not** required: retrieval, ranking and the entity pipeline are untouched. State it rather than skipping it silently.
-- [ ] 9.3 `pnpm vitest run apps/server/src/test/invariants.test.ts` — the single-JS/TS-implementation invariant derives its file list by search, so confirm it still passes with `endSession` added and that it would flag a second copy (the mutation in 4.x does not cover this; a hand check of one deliberately-duplicated line is enough, restored immediately).
-- [ ] 9.4 `openspec validate end-pi-sessions-on-shutdown --strict` passes.
-- [ ] 9.5 `pnpm run check:delta-freshness` reports exactly **3 requirements** whose detail lists **4 body lines** total — the two counts the tool prints in different places: its summary line counts requirements, the `REVIEW` detail counts lines. The four are `pi-plugin`'s import enumeration (1), the lifecycle matrix's two preamble lines (2), and the shared-core enumeration (1). A fifth line, or a fourth requirement, means a delta silently reverted text another change published.
-- [ ] 9.6 `pnpm run check:spec-provenance` green (CI is the gate; run it locally before pushing).
+- [x] 9.1 `pnpm run typecheck` · `pnpm run lint` · `pnpm test` all green. The Pi arm runs only because `apps/server/vitest.config.ts::include` lists `'../plugin/.pi-plugin/*.test.ts'` — confirm the new arms actually executed by reading the reported test count, not by assuming.
+- [x] 9.2 `pnpm run eval` is **not** required: retrieval, ranking and the entity pipeline are untouched. State it rather than skipping it silently.
+- [x] 9.3 `pnpm vitest run apps/server/src/test/invariants.test.ts` — the single-JS/TS-implementation invariant derives its file list by search, so confirm it still passes with `endSession` added and that it would flag a second copy (the mutation in 4.x does not cover this; a hand check of one deliberately-duplicated line is enough, restored immediately).
+- [x] 9.4 `openspec validate end-pi-sessions-on-shutdown --strict` passes.
+- [x] 9.5 `pnpm run check:delta-freshness` reports exactly **3 requirements** whose detail lists **4 body lines** total — the two counts the tool prints in different places: its summary line counts requirements, the `REVIEW` detail counts lines. The four are `pi-plugin`'s import enumeration (1), the lifecycle matrix's two preamble lines (2), and the shared-core enumeration (1). A fifth line, or a fourth requirement, means a delta silently reverted text another change published.
+- [x] 9.6 `pnpm run check:spec-provenance` green (CI is the gate; run it locally before pushing).
+
+  **9.2 stated, not skipped**: `pnpm run eval` was not run. Retrieval, ranking and the entity pipeline are untouched by this change — it adds one client-side HTTP call and a branch in a shutdown handler.
+
+  **9.3 resolved in the other direction.** The applier flagged that `SHARED_JS_HELPERS` would not have caught a duplicated `endSession`: it was a hand-written list of 11 symbols, so 20 of the core's 25 functions were unenforced even though `plugin-session-protocol/spec.md:532` requires single-implementation for the flush helpers and the transcript accumulator among others. Rather than add one entry and narrow this task's claim, the list was replaced by an assertion derived from the core's own `function` declarations — shipped separately as `fix(test): derive the shared-helper invariant from the core, not a hand list`, because it fixes a pre-existing spec violation unrelated to Pi. A duplicated `flushSessionSummary` was NOT CAUGHT before that commit and is caught after.
 
 ## 10. Deferred, recorded so it is not lost
 
