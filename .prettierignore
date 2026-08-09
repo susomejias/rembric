@@ -6,6 +6,9 @@ data/
 *.db
 *.db-*
 package-lock.json
+# release-please reserializes these manifests; it owns their JSON layout.
+apps/plugin/.claude-plugin/plugin.json
+apps/plugin/.codex-plugin/plugin.json
 .husky/_
 openspec/changes/**/specs/
 
