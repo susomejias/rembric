@@ -26,6 +26,7 @@ import type { ProjectsService } from '../services/projects.js';
  *   - existing slug + already active       → push to pendingSuggestedSlugs
  *   - non-existing slug                    → push to pendingSuggestedSlugs
  *   - timeout / error                      → no-op (silent fall-through)
+ *   - `roots/list_changed` was received    → re-derive suggestions only, once
  *
  * Auto-detection NEVER creates projects and NEVER switches an already
  * active project. The agent must call `project.use({slug, …})` to make
@@ -35,29 +36,50 @@ import type { ProjectsService } from '../services/projects.js';
 // Binds only a client that advertises `roots` and then declines to answer.
 const ROOTS_LIST_TIMEOUT_MS = 2500;
 
+interface DiscoveryState {
+  /**
+   * One slot per `(tokenId, mcpSessionId)` records whether discovery reached a
+   * DEFINITIVE outcome, so subsequent tool calls do not re-issue `roots/list`.
+   * An attempt that produced no answer leaves it unconsumed — see
+   * `markDiscoveryRun`'s call sites. Keyed by token because nothing binds a
+   * transport to the token that initialised it.
+   */
+  answered: Set<string>;
+  /** A `roots/list_changed` arrived and no tool call has served it yet. */
+  refreshPending: boolean;
+}
+
 /**
- * One slot per `(tokenId, mcpSessionId)` records whether discovery reached a
- * DEFINITIVE outcome, so subsequent tool calls do not re-issue `roots/list`.
- * An attempt that produced no answer leaves it unconsumed — see
- * `markDiscoveryRun`'s call sites.
+ * Owned by the connection's server instance — `McpTransportManager.getOrCreate`
+ * builds exactly one per transport, so per-server state is per-transport state
+ * that no other transport can reach and that is released with its owner.
  */
-const discoveryRunForTransport = new Set<string>();
+const stateByServer = new WeakMap<McpServer, DiscoveryState>();
+
+function discoveryState(server: McpServer): DiscoveryState {
+  let state = stateByServer.get(server);
+  if (!state) {
+    state = { answered: new Set(), refreshPending: false };
+    stateByServer.set(server, state);
+  }
+  return state;
+}
 
 function transportKey(tokenId: string, mcpSessionId: string): string {
   return `${tokenId}::${mcpSessionId}`;
 }
 
-export function markDiscoveryRun(tokenId: string, mcpSessionId: string): void {
-  discoveryRunForTransport.add(transportKey(tokenId, mcpSessionId));
+export function markDiscoveryRun(server: McpServer, tokenId: string, mcpSessionId: string): void {
+  discoveryState(server).answered.add(transportKey(tokenId, mcpSessionId));
 }
 
-export function isDiscoveryRun(tokenId: string, mcpSessionId: string): boolean {
-  return discoveryRunForTransport.has(transportKey(tokenId, mcpSessionId));
+export function isDiscoveryRun(server: McpServer, tokenId: string, mcpSessionId: string): boolean {
+  return discoveryState(server).answered.has(transportKey(tokenId, mcpSessionId));
 }
 
-/** Test-only helper. */
-export function resetDiscoveryState(): void {
-  discoveryRunForTransport.clear();
+/** All a `roots/list_changed` handler can do: it has no tool call to send under. */
+export function markRefreshPending(server: McpServer): void {
+  discoveryState(server).refreshPending = true;
 }
 
 export interface RootsDiscoveryDeps {
@@ -80,8 +102,9 @@ export interface RootsDiscoveryContext {
 }
 
 /**
- * Single-flight wrapper: the router holds the promise only while an attempt is
- * in flight, so a settled one cannot short-circuit a later call's retry.
+ * Runs discovery while the slot is unconsumed, and otherwise serves a pending
+ * `roots/list_changed` refresh — which lands here rather than in the
+ * notification handler because it needs an in-flight tool call to be delivered.
  */
 export async function ensureRootsDiscoveryRun(
   deps: RootsDiscoveryDeps,
@@ -93,8 +116,31 @@ export async function ensureRootsDiscoveryRun(
     await pending;
     return;
   }
-  if (isDiscoveryRun(ctx.tokenId, ctx.mcpSessionId)) return;
-  const promise = maybeDiscoverViaRoots(deps, ctx).catch(() => undefined);
+  const state = discoveryState(deps.server);
+  if (!isDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId)) {
+    // Discovery's own `roots/list` already reflects the new roots, so it
+    // discharges the refresh rather than adding a second request.
+    state.refreshPending = false;
+    await singleFlight(deps, ctx, () => maybeDiscoverViaRoots(deps, ctx));
+    return;
+  }
+  if (!state.refreshPending) return;
+  // Consumed by the ATTEMPT, unlike the discovery slot: retrying until answered
+  // would make every later tool call on a silent client pay the budget again.
+  state.refreshPending = false;
+  await singleFlight(deps, ctx, () => refreshRootsAfterChange(deps, ctx));
+}
+
+/**
+ * The router holds the promise only while an attempt is in flight, so a settled
+ * one cannot short-circuit a later call's retry.
+ */
+async function singleFlight(
+  deps: RootsDiscoveryDeps,
+  ctx: RootsDiscoveryContext,
+  attempt: () => Promise<void>,
+): Promise<void> {
+  const promise = attempt().catch(() => undefined);
   deps.router.setDiscoveryPromise(ctx.tokenId, ctx.mcpSessionId, promise);
   try {
     await promise;
@@ -108,11 +154,11 @@ export async function maybeDiscoverViaRoots(
   ctx: RootsDiscoveryContext,
 ): Promise<void> {
   if (ctx.pathSlug) return;
-  if (isDiscoveryRun(ctx.tokenId, ctx.mcpSessionId)) return;
+  if (isDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId)) return;
 
   const caps = deps.server.server.getClientCapabilities();
   if (!caps?.roots) {
-    markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+    markDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId);
     return;
   }
 
@@ -120,11 +166,11 @@ export async function maybeDiscoverViaRoots(
   try {
     res = await deps.server.server.listRoots(undefined, listRootsOptions(ctx));
   } catch (err) {
-    if (isAnswerFromClient(err)) markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+    if (isAnswerFromClient(err)) markDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId);
     // Swallowed: discovery must never break a request.
     return;
   }
-  markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+  markDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId);
   const firstRoot = res.roots[0];
   if (!firstRoot) return;
   const slug = deriveSlugFromUri(firstRoot.uri);

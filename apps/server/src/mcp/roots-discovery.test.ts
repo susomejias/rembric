@@ -5,7 +5,7 @@ import {
   type ListRootsResult,
   type RequestId,
 } from '@modelcontextprotocol/sdk/types.js';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { SessionRouter } from '../server/session-router.js';
 
@@ -13,8 +13,8 @@ import {
   deriveSlugFromUri,
   ensureRootsDiscoveryRun,
   isDiscoveryRun,
+  markRefreshPending,
   maybeDiscoverViaRoots,
-  resetDiscoveryState,
   type RootsDiscoveryContext,
   type RootsDiscoveryDeps,
 } from './roots-discovery.js';
@@ -116,23 +116,19 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
     };
   }
 
-  beforeEach(() => {
-    resetDiscoveryState();
-  });
-
   it('consumes the slot when the client answers with a root naming a project', async () => {
     const h = harness({
       listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
     expect(h.router.get(h.ctx.tokenId, h.ctx.mcpSessionId)?.projectId).toBe('p-known');
   });
 
   it('consumes the slot when the client answers with an empty root list', async () => {
     const h = harness({ listRoots: () => Promise.resolve({ roots: [] }) });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
   });
 
   it('consumes the slot when the client returns a JSON-RPC error', async () => {
@@ -140,13 +136,13 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
       listRoots: () => Promise.reject(new McpError(ErrorCode.MethodNotFound, 'no roots here')),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
   });
 
   it('consumes the slot when the client advertises no roots capability', async () => {
     const h = harness({ roots: false });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
     expect(h.listRootsCalls()).toBe(0);
   });
 
@@ -156,7 +152,7 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
         Promise.reject(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out')),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
   });
 
   it('leaves the slot unconsumed when the transport cannot route the request', async () => {
@@ -164,7 +160,7 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
       listRoots: () => Promise.reject(new Error('No connection established for request ID: 7')),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
-    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
+    expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
   });
 
   it('stamps the in-flight tool call id on the request, and omits it when there is none', async () => {
@@ -226,5 +222,52 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
     release({ roots: [{ uri: 'file:///x/known' }] });
     await both;
     expect(h.listRootsCalls()).toBe(1);
+  });
+
+  /**
+   * Two DISTINCT fake servers: reusing one for "two transports" would share the
+   * state record and silently invert what these arms assert.
+   */
+  describe('per-transport ownership of the state record', () => {
+    it('a refresh pending on one transport does not reach another', async () => {
+      let aRoot = 'file:///x/known';
+      const a = harness({ listRoots: () => Promise.resolve({ roots: [{ uri: aRoot }] }) });
+      const b = harness({
+        listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
+      });
+      await ensureRootsDiscoveryRun(a.deps, a.ctx);
+      await ensureRootsDiscoveryRun(b.deps, b.ctx);
+      expect(a.listRootsCalls()).toBe(1);
+      expect(b.listRootsCalls()).toBe(1);
+
+      aRoot = 'file:///x/elsewhere';
+      markRefreshPending(a.deps.server);
+
+      await ensureRootsDiscoveryRun(b.deps, b.ctx);
+      expect(b.listRootsCalls(), 'B was re-asked for A’s notification').toBe(1);
+      expect(b.router.get(b.ctx.tokenId, b.ctx.mcpSessionId)?.pendingSuggestedSlugs).toEqual([]);
+
+      await ensureRootsDiscoveryRun(a.deps, a.ctx);
+      expect(a.listRootsCalls()).toBe(2);
+      const entry = a.router.get(a.ctx.tokenId, a.ctx.mcpSessionId);
+      expect(entry?.pendingSuggestedSlugs).toEqual(['elsewhere']);
+      expect(entry?.projectId).toBe('p-known');
+    });
+
+    it('drops the state record with the server that owns it', async () => {
+      const h = harness({
+        listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
+      });
+      await maybeDiscoverViaRoots(h.deps, h.ctx);
+      expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+      // A new connection reusing the same identity tuple starts cold, so no
+      // sentinel outlives the transport it describes.
+      const reconnected = harness({
+        listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
+      });
+      expect(isDiscoveryRun(reconnected.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(
+        false,
+      );
+    });
   });
 });

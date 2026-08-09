@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.3](https://github.com/susomejias/rembric/compare/server-v0.27.2...server-v0.27.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **mcp:** give the roots-discovery state an owner, and refresh under a tool call ([a679cde](https://github.com/susomejias/rembric/commit/a679cdee255dc5334be371f1d1c1cf6ea3c31714))
+* **mcp:** route roots/list over the tool call's own stream so it is delivered ([7ec53fe](https://github.com/susomejias/rembric/commit/7ec53fe926cc67ce8c361b59312f67189cdc3d01))
+
 ## [0.27.2](https://github.com/susomejias/rembric/compare/server-v0.27.1...server-v0.27.2) (2026-08-09)
 
 
