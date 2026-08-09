@@ -906,6 +906,38 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     }
   });
 
+  // Derived rather than enumerated: the hand-written list above covers whichever
+  // symbols someone remembered, which left 20 of the core's 25 functions
+  // unenforced — a duplicated `flushSessionSummary` passed the whole suite.
+  it('no other scanned file defines a function the protocol core owns', () => {
+    const coreSrc = readFileSync(join(repoRoot, REMBRIC_PLUGIN_CORE_MJS), 'utf8');
+    const owned = [
+      ...new Set(
+        [...coreSrc.matchAll(/(?:^|\s)(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g)].map(
+          (m) => m[1],
+        ),
+      ),
+    ];
+    expect(
+      owned.length,
+      'no function names parsed out of the core, so the assertion below would pass vacuously',
+    ).toBeGreaterThan(10);
+
+    const offenders: string[] = [];
+    for (const rel of scanned.filter((f) => f !== REMBRIC_PLUGIN_CORE_MJS)) {
+      const lines = readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+      for (const name of owned) {
+        const re = new RegExp(`(?:^|\\s)(?:async\\s+)?function\\s+${name}\\b`);
+        const at = lines.findIndex((l) => re.test(l));
+        if (at >= 0) offenders.push(`${rel}:${at + 1} defines ${name}`);
+      }
+    }
+    expect(
+      offenders,
+      `import these from ${REMBRIC_PLUGIN_CORE_MJS} instead of redefining them: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
   it('plugin.ts and rembric-bridge.mjs import the slug helpers instead of redefining them', () => {
     for (const rel of [OPENCODE_PLUGIN_TS, REMBRIC_BRIDGE_MJS]) {
       expect(
