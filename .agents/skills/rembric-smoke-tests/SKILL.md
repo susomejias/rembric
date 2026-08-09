@@ -100,7 +100,21 @@ in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bar
 
   `-ne` disables discovery so the operator's installed extension cannot interfere; `-e` still honours the explicit path.
 
-- **Claude Code** — **does not work headless.** Measured: `claude -p --plugin-dir <worktree>/apps/plugin` loads no plugin — no row, no `REMBRIC_DEBUG` diagnostic, nothing about plugins or hooks under `--debug`. Print mode appears not to run plugin hooks. Its scripts are the same ones the Codex arm exercises (the repo forbids per-client variants), so the residual gap is the `hooks.json` wiring; say so rather than claiming coverage.
+- **Claude Code** — works headless, through a marketplace and never through `--plugin-dir`:
+
+  ```bash
+  export CLAUDE_CONFIG_DIR=<scratch>/claudehome     # isolated; ~/.claude untouched
+  claude plugin marketplace add <worktree>
+  claude plugin install rembric@rembric --config server_url=http://localhost:<port> --config api_token=<token>
+  claude -p --output-format json "..."              # session_id is in the JSON
+  claude -p --resume <session-id> --output-format json "..."
+  ```
+
+  `--plugin-dir <worktree>/apps/plugin` loads **nothing** — no row, no `REMBRIC_DEBUG` diagnostic, nothing under `--debug`. That silence reads exactly like "print mode does not run hooks", and a first attempt here concluded precisely that and was wrong: `-p` runs hooks fine once the plugin is installed. The `--config` keys are the plugin's own (`server_url`, `api_token`), not the environment variable names.
+
+  The general lesson, since it cost two wrong conclusions on two clients: **install through the client's own marketplace into an isolated config dir.** Reach for that before any load-by-path flag.
+
+- **opencode** — it has what an arm needs (`opencode run -s <session-id>` / `-c`), but its plugin directory comes from `$HOME` (`${HOME}/.config/opencode`), so isolating the install means running with a scratch `HOME`. Agent harnesses commonly refuse that, since `HOME` also redirects git configuration. Either get that permission explicitly or leave the arm to an operator — do not install into the real `~/.config/opencode` just to verify.
 
 - **Running a hook script directly** (to time it, or to drive one event): invoke it with **`bash`, not `sh`**. The scripts read `${BASH_SOURCE[0]}` under `set -u`, so a POSIX shell aborts into their own `trap … ERR` and exits 0 in about 2 ms having done nothing.
 
