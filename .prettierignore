@@ -16,3 +16,4 @@ openspec/changes/**/specs/
 .claude/skills/openspec-explore/
 .claude/skills/openspec-propose/
 .agents/skills/skill-creator/
+.claude/worktrees/
