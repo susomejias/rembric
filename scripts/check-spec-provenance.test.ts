@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   affectedCapabilities,
@@ -15,6 +15,44 @@ import {
 } from './check-spec-provenance.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * `cwd` does NOT isolate a git child: `GIT_DIR` overrides it, and git exports
+ * `GIT_DIR` and `GIT_INDEX_FILE` to every hook. Run under a pre-push hook these
+ * fixtures therefore committed into the real repository — observed moving HEAD
+ * and truncating the index to the fixture's single file.
+ */
+const GIT_ENV_KEYS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+] as const;
+
+const ISOLATED_GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  ...Object.fromEntries(GIT_ENV_KEYS.map((k) => [k, undefined])),
+};
+
+// Scrubbing the spawn env is not enough: these tests also call library helpers
+// that shell out to git in-process, and those inherit `process.env`. Clear the
+// variables for the whole file so neither route can escape to the real repo.
+const savedGitEnv: Partial<Record<(typeof GIT_ENV_KEYS)[number], string>> = {};
+beforeAll(() => {
+  for (const key of GIT_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) savedGitEnv[key] = value;
+    delete process.env[key];
+  }
+});
+afterAll(() => {
+  for (const key of GIT_ENV_KEYS) {
+    const value = savedGitEnv[key];
+    if (value !== undefined) process.env[key] = value;
+  }
+});
 
 const nameStatus = (...lines: string[]) => parseNameStatus(`${lines.join('\n')}\n`);
 
@@ -229,7 +267,7 @@ describe('the predicate needs no git history', () => {
 
 describe('resolveRange', () => {
   const run = (args: string[], cwd: string) => {
-    const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: ISOLATED_GIT_ENV });
     if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
     return r.stdout.trim();
   };
@@ -248,7 +286,10 @@ describe('resolveRange', () => {
       run([...env, 'commit', '-q', '--allow-empty', '-m', 'base moved on'], dir);
       const base = run(['rev-parse', 'HEAD'], dir);
 
-      const ancestry = spawnSync('git', ['merge-base', '--is-ancestor', base, head], { cwd: dir });
+      const ancestry = spawnSync('git', ['merge-base', '--is-ancestor', base, head], {
+        cwd: dir,
+        env: ISOLATED_GIT_ENV,
+      });
       expect(ancestry.status).toBe(1);
       expect(resolveRange(base, head, dir)).toEqual({ ok: true });
       expect(resolveRange(root, head, dir)).toEqual({ ok: true });
@@ -284,6 +325,7 @@ describe('CLI', () => {
       const r = spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
         cwd: dir,
         encoding: 'utf8',
+        env: ISOLATED_GIT_ENV,
       });
       if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
       return r.stdout.trim();
@@ -301,6 +343,8 @@ describe('CLI', () => {
       spawnSync(process.execPath, [SCRIPT, '--base', base, '--head', 'HEAD'], {
         cwd: dir,
         encoding: 'utf8',
+        // The script shells out to git itself, so it needs the same isolation.
+        env: ISOLATED_GIT_ENV,
       });
     return { dir, git, write, cli };
   }
@@ -327,6 +371,7 @@ describe('CLI', () => {
       const empty = spawnSync(process.execPath, [SCRIPT, '--base', 'HEAD', '--head', 'HEAD'], {
         cwd: repo.dir,
         encoding: 'utf8',
+        env: ISOLATED_GIT_ENV,
       });
       expect(empty.status, empty.stdout + empty.stderr).toBe(2);
       expect(empty.stderr).toContain('"HEAD..HEAD" holds no commits');
@@ -338,6 +383,7 @@ describe('CLI', () => {
       const held = spawnSync(process.execPath, [SCRIPT, '--base', 'HEAD~1', '--head', 'HEAD'], {
         cwd: repo.dir,
         encoding: 'utf8',
+        env: ISOLATED_GIT_ENV,
       });
       expect(held.status, held.stdout).toBe(1);
       expect(isEmptyRange('HEAD~1', 'HEAD', repo.dir)).toBe(false);
