@@ -5,7 +5,11 @@
 #   - rembric_parse_dotenv <path>     → echoes "KEY=VALUE\n..." pairs
 #   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
-#                                       with Authorization: Bearer ${REMBRIC_API_TOKEN}
+#                                       with Authorization: Bearer ${REMBRIC_API_TOKEN}.
+#                                       Budget defaults to 3s; REMBRIC_POST_MAX_TIME
+#                                       tightens it for a host-imposed shorter one
+#                                       (Codex's SessionEnd allows 3s for the WHOLE
+#                                       handler, transcript read and diagnostic included).
 #   - rembric_turn_count <name> <id>  → echoes the atomic per-session turn count
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
@@ -76,7 +80,7 @@ rembric_post() {
   response="$(curl -s -X POST \
     -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
     -H "Content-Type: application/json" \
-    --max-time 3 \
+    --max-time "${REMBRIC_POST_MAX_TIME:-3}" \
     -d "$body" \
     -w '\n%{http_code}' \
     "$url")" || rc=$?

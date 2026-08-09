@@ -75,6 +75,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_POST_MAX_TIME=2 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-end.sh codex-cli",
+            "timeout": 3
+          }
+        ]
+      }
     ]
   }
 }

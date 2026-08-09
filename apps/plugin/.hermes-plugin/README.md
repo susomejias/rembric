@@ -111,11 +111,14 @@ Every candidate is validated against the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a
 
 ## Lifecycle (what the plugin actually does)
 
-The provider implements three lifecycle methods that map 1:1 to Rembric's HTTP session endpoints:
+The provider implements four lifecycle methods that map onto Rembric's HTTP session endpoints:
 
-- `initialize(session_id, cwd)` → `POST /api/<slug>/sessions` with `{id, cwd, agent: "hermes"}`.
+- `initialize(session_id, cwd)` → `POST /api/<slug>/sessions` with `{id, cwd, agent: "hermes"}`, then `POST /api/<slug>/sessions/<id>/resume`.
 - `on_pre_compress(messages)` → joins messages into a transcript, caps at 20,000 chars, `POST /api/<slug>/sessions/<id>/summary`.
+- `on_session_switch(new_id, ...)` → `POST /api/<slug>/sessions/<cached id>/end` when the id actually changed, then the same ensure-and-resume pair for the new id.
 - `on_session_end(messages)` → `POST /api/<slug>/sessions/<id>/end`.
+
+The resume runs once per session id per process, always straight after that id's first ensure. It revives a row a previous Hermes process left `ended` (or the stale sweep left `abandoned`) so a session resumed from the CLI keeps attaching memories to its own row instead of writing them with a null `session_id`; on a row that is already active the server treats it as a no-op. A failed ensure suppresses it.
 
 `system_prompt_block()` returns the unified Rembric nudge — the same SAVE/RECALL/SUMMARIZE text the server hands MCP clients via the `initialize.instructions` block. Hermes does not consume that MCP block and exposes no per-turn hook, so this method is its only nudging surface; the text is kept byte-identical to the server's `buildInstructions()` BASE.
 

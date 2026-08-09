@@ -367,7 +367,7 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 - **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
 - **MCP connection error in opencode.** Verify the bridge is reachable: `REMBRIC_SERVER_URL=... REMBRIC_API_TOKEN=... node ~/.config/rembric/bin/rembric-bridge.mjs`. Should print one diagnostic line and connect via `mcp-remote`.
 - **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in `subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
-- **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. Same steady state as Codex CLI.
+- **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. opencode is now the only client in this state — Codex CLI does have `SessionEnd` and reaches `ended` on a normal close.
 
 #### Updating the plugin
 
