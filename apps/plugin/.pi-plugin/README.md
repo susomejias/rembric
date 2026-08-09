@@ -86,6 +86,25 @@ Re-running the unpinned install is the update: it is idempotent, and because the
 | A slash command stays literal                          | The extension is not installed, or prompt templates are disabled (`--no-prompt-templates`) | `pi list` should show `@rembric/pi`                                                          |
 | The last turn is missing from the dashboard summary    | The session was ended with Ctrl-C — see below                                              | Exit with Ctrl-D; the per-turn flush means at most the final turn is lost                    |
 
+## Session close
+
+Pi reports _why_ it is shutting down, and the reason decides whether the session is closed or left open:
+
+| Shutdown reason                                                                  | Session row                                 |
+| -------------------------------------------------------------------------------- | ------------------------------------------- |
+| `quit` — you exit Pi                                                             | `ended`                                     |
+| `new`, `fork`, or a `resume` of a different session (`/new`, `/fork`, `/resume`) | the replaced session is `ended`             |
+| `reload`, or a `resume` of the session already open                              | stays `active` — the same session continues |
+| any other reason this extension does not recognise                               | stays `active`                              |
+
+Closing the replaced session is what keeps memories attributed. Faced with two `active` sessions for the same token and project, the server refuses to guess which one a memory belongs to — so while both rows are open, every memory saved after a `/new` lands with no session attached. Ending the old row removes the ambiguity.
+
+A `reload` is the same session continuing, and a session that has ended never goes back to `active`. Ending there would cost the attribution of every later save in that Pi process, which is also why an unrecognised reason leaves the row open: not ending is recoverable, ending wrongly is not.
+
+One consequence worth knowing: **resuming a session that already ended does not re-attach it.** Its row is terminal, so new memories are not attributed to it automatically — ask the agent to pass that session's id explicitly when saving. Late summary and title writes still land, and the row reads `ended` in `…/dashboard/sessions`, so the situation is visible rather than silent.
+
+An exit that runs no shutdown handler leaves the row `active`; the server retires it as `abandoned` on its own later.
+
 ### Ctrl-C does not close the session
 
 Pi runs its shutdown handler — where the final summary is written — on a clean exit, on Ctrl-D, on `SIGTERM` and on `SIGHUP`. It does **not** run it on Ctrl-C, in either print or interactive mode.

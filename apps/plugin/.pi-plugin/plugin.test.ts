@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../../server/src/db/repositories/index.js';
+import type { Project } from '../../server/src/db/schema/projects.js';
 import { buildInstructions } from '../../server/src/mcp/instructions.js';
 import { type BootstrappedServer, createServer } from '../../server/src/server/index.js';
 import { AgentSessionsService } from '../../server/src/services/agent-sessions.js';
 import { ProjectsService } from '../../server/src/services/projects.js';
+import { TokensService } from '../../server/src/services/tokens.js';
 import { createTestDb } from '../../server/src/test/db.js';
 import { FakeEmbedder } from '../../server/src/test/embedder.js';
 import { findFreePort } from '../../server/src/test/net.js';
@@ -56,13 +58,19 @@ type Notification = { message: string; type?: string };
 type Harness = {
   tools: RegisteredTool[];
   handlers: Map<string, Handler>;
-  ctx: { cwd: string; sessionManager: { getSessionId: () => string } };
+  ctx: {
+    cwd: string;
+    sessionManager: { getSessionId: () => string; getSessionFile: () => string | undefined };
+  };
   notifications: Notification[];
   fire: (event: string, payload?: unknown) => Promise<unknown>;
 };
 
 let server: BootstrappedServer;
 let sessions: AgentSessionsService;
+let repos: ReturnType<typeof createRepositories>;
+let tokens: TokensService;
+let project: Project;
 let baseUrl: string;
 let cwd: string;
 
@@ -115,14 +123,16 @@ async function rawRpc(method: string, params: Record<string, unknown>): Promise<
   return JSON.parse(frame ?? body) as unknown;
 }
 
-function makeHarness(sessionId: string, dir = cwd, withUi = true): Harness {
+function makeHarness(sessionId: string, dir = cwd, withUi = true, sessionFile?: string): Harness {
   const tools: RegisteredTool[] = [];
   const handlers = new Map<string, Handler>();
   const notifications: Notification[] = [];
   const ui = { notify: (message: string, type?: string) => notifications.push({ message, type }) };
   const ctx = {
     cwd: dir,
-    sessionManager: { getSessionId: () => sessionId },
+    // `string | undefined`, as the harness declares it: a session file is absent
+    // until the manager has one, and the self-resume guard must survive that.
+    sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
     ...(withUi ? { ui } : {}),
   };
   const api = {
@@ -143,8 +153,8 @@ function makeHarness(sessionId: string, dir = cwd, withUi = true): Harness {
   };
 }
 
-async function startedHarness(sessionId: string): Promise<Harness> {
-  const harness = makeHarness(sessionId);
+async function startedHarness(sessionId: string, sessionFile?: string): Promise<Harness> {
+  const harness = makeHarness(sessionId, cwd, true, sessionFile);
   await harness.fire('session_start');
   return harness;
 }
@@ -224,10 +234,11 @@ beforeAll(async () => {
   );
   baseUrl = `http://127.0.0.1:${port}`;
 
-  const repos = createRepositories(server.dbHandle.db);
+  repos = createRepositories(server.dbHandle.db);
   const projects = new ProjectsService(repos);
-  projects.findBySlug(PROJECT_SLUG) ?? projects.create({ slug: PROJECT_SLUG });
+  project = projects.findBySlug(PROJECT_SLUG) ?? projects.create({ slug: PROJECT_SLUG });
   sessions = new AgentSessionsService(repos, server.dbHandle.db);
+  tokens = new TokensService(repos, server.dbHandle.db);
 
   cwd = mkdtempSync(join(tmpdir(), 'rembric-pi-cwd-'));
   writeFileSync(join(cwd, '.rembric'), `PROJECT_SLUG=${PROJECT_SLUG}\n`);
@@ -634,18 +645,212 @@ describe('summary flushes', () => {
   });
 });
 
+describe('the shutdown reason decides whether the session is ended', () => {
+  async function shutdownAfterOneTurn(
+    sessionId: string,
+    payload: { reason?: string; targetSessionFile?: string },
+    sessionFile?: string,
+  ): Promise<void> {
+    const harness = await startedHarness(sessionId, sessionFile);
+    await harness.fire('before_agent_start', { prompt: `work under ${sessionId}` });
+    await harness.fire('message_end', {
+      message: { role: 'assistant', content: [{ type: 'text', text: 'and the reply' }] },
+    });
+    await harness.fire('session_shutdown', payload);
+  }
+
+  for (const reason of ['quit', 'new', 'resume', 'fork']) {
+    it(`ends the session on reason ${reason}`, async () => {
+      const sessionId = `pi-shutdown-${reason}`;
+      await shutdownAfterOneTurn(sessionId, { reason });
+
+      const row = sessions.getById(sessionId);
+      expect(row?.status).toBe('ended');
+      expect(row?.endedAt).toBeTruthy();
+      expect(row?.summary).toContain(`work under ${sessionId}`);
+    });
+  }
+
+  it('does not end the session on reason reload, and the transcript still lands', async () => {
+    const sessionId = 'pi-shutdown-reload';
+    await shutdownAfterOneTurn(sessionId, { reason: 'reload' });
+
+    const row = sessions.getById(sessionId);
+    expect(row?.status).toBe('active');
+    expect(row?.endedAt ?? null).toBeNull();
+    // Without this a handler that did nothing at all would pass the arm.
+    expect(row?.summary).toContain(`work under ${sessionId}`);
+  });
+
+  it('does not end the session when the resume names the session file already open', async () => {
+    const sessionId = 'pi-shutdown-self-resume';
+    const file = '/tmp/pi-sessions/self-resume.jsonl';
+    await shutdownAfterOneTurn(sessionId, { reason: 'resume', targetSessionFile: file }, file);
+
+    const row = sessions.getById(sessionId);
+    expect(row?.status).toBe('active');
+    expect(row?.summary).toContain(`work under ${sessionId}`);
+  });
+
+  it('the control — a resume naming a different session file still ends it', async () => {
+    const sessionId = 'pi-shutdown-other-resume';
+    await shutdownAfterOneTurn(
+      sessionId,
+      { reason: 'resume', targetSessionFile: '/tmp/pi-sessions/another.jsonl' },
+      '/tmp/pi-sessions/mine.jsonl',
+    );
+
+    expect(sessions.getById(sessionId)?.status).toBe('ended');
+  });
+
+  it('does not end the session on an unrecognised reason', async () => {
+    const sessionId = 'pi-shutdown-teleport';
+    await shutdownAfterOneTurn(sessionId, { reason: 'teleport' });
+
+    const row = sessions.getById(sessionId);
+    expect(row?.status).toBe('active');
+    expect(row?.summary).toContain(`work under ${sessionId}`);
+  });
+
+  it('does not end the session when the event carries no reason', async () => {
+    const sessionId = 'pi-shutdown-no-reason';
+    await shutdownAfterOneTurn(sessionId, {});
+
+    const row = sessions.getById(sessionId);
+    expect(row?.status).toBe('active');
+    expect(row?.summary).toContain(`work under ${sessionId}`);
+  });
+
+  it('ends a session with no turns, posting an empty body and leaving the summary null', async () => {
+    const sessionId = 'pi-shutdown-empty';
+    const harness = await startedHarness(sessionId);
+    // Registers the session while leaving the transcript accumulator empty.
+    await harness.fire('before_agent_start', { prompt: '' });
+
+    const bodies: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(`/sessions/${sessionId}/end`)) {
+          bodies.push(String(init?.body ?? ''));
+        }
+        return realFetch(input, init);
+      });
+    try {
+      await harness.fire('session_shutdown', { reason: 'quit' });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(bodies).toEqual(['{}']);
+    const row = sessions.getById(sessionId);
+    expect(row?.status).toBe('ended');
+    expect(row?.summary).toBeNull();
+  });
+
+  it('issues exactly one session write on a quit, and it is the end path', async () => {
+    const sessionId = 'pi-shutdown-one-request';
+    const harness = await startedHarness(sessionId);
+    await harness.fire('before_agent_start', { prompt: 'one turn before the quit' });
+
+    const paths: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(`/sessions/${sessionId}`)) paths.push(new URL(url).pathname);
+        return realFetch(input, init);
+      });
+    try {
+      await harness.fire('session_shutdown', { reason: 'quit' });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(paths).toEqual([`/api/${PROJECT_SLUG}/sessions/${sessionId}/end`]);
+  });
+});
+
+describe('the successor session attributes its memories', () => {
+  // A token of its own per arm: every other session in this file is active on
+  // the admin token, and `findActiveForTransport` resolves nothing while more
+  // than one active row matches the pair — which would make both arms below
+  // pass for a reason that has nothing to do with the reason gate.
+  async function saveThroughSuccessor(
+    reason: string,
+  ): Promise<{ savedSessionId: string | null; attributedToSuccessor: number }> {
+    const minted = tokens.create({
+      name: `pi-ambiguity-${reason}`,
+      project,
+      access: 'write',
+    });
+    const previous = process.env.REMBRIC_API_TOKEN;
+    process.env.REMBRIC_API_TOKEN = minted.plaintext;
+    try {
+      const first = `pi-ambiguity-a-${reason}`;
+      const successor = `pi-ambiguity-b-${reason}`;
+
+      const a = await startedHarness(first);
+      await a.fire('before_agent_start', { prompt: 'the replaced session did some work' });
+      await a.fire('session_shutdown', { reason });
+
+      const b = await startedHarness(successor);
+      await b.fire('before_agent_start', { prompt: 'the successor session' });
+
+      const save = await callThroughExtension(toolNamed(b, 'memory.save'), {
+        type: 'project',
+        title: `attribution after ${reason}`,
+        content: 'saved without naming a sessionId',
+      });
+      expect(save.refused).toBe(false);
+
+      return {
+        savedSessionId: repos.memory.unsafeGetById(savedId(save.text))?.sessionId ?? null,
+        attributedToSuccessor: repos.memory.adminListBySession(successor).length,
+      };
+    } finally {
+      process.env.REMBRIC_API_TOKEN = previous;
+    }
+  }
+
+  it('a save with no sessionId lands on the successor once the replaced session ended', async () => {
+    const { savedSessionId, attributedToSuccessor } = await saveThroughSuccessor('new');
+
+    expect(savedSessionId).toBe('pi-ambiguity-b-new');
+    expect(attributedToSuccessor).toBeGreaterThan(0);
+  });
+
+  it('the control — without the end, both rows stay active and the save attributes nothing', async () => {
+    const { savedSessionId, attributedToSuccessor } = await saveThroughSuccessor('reload');
+
+    expect(savedSessionId).toBeNull();
+    expect(attributedToSuccessor).toBe(0);
+  });
+});
+
 // Answers the handshake and then swallows the DELETE, so only the client's own
 // budget ends the teardown request — which is what the timing below reads.
 async function startHalfDeadServer(): Promise<{
   url: string;
   seen: string[];
+  paths: string[];
   close: () => Promise<void>;
 }> {
   const seen: string[] = [];
+  const paths: string[] = [];
   const held = new Set<ServerResponse>();
   const server = createHttpServer((req, res) => {
+    paths.push(req.url ?? '');
     if (req.method === 'DELETE') {
       seen.push('DELETE');
+      held.add(res);
+      return;
+    }
+    // The awaited session write is swallowed too, so the teardown below measures
+    // the client's own budget on both requests it makes on the way out.
+    if (req.url?.endsWith('/end') || req.url?.endsWith('/summary')) {
       held.add(res);
       return;
     }
@@ -688,6 +893,7 @@ async function startHalfDeadServer(): Promise<{
   return {
     url: `http://127.0.0.1:${port}`,
     seen,
+    paths,
     close: async () => {
       for (const res of held) res.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -696,27 +902,33 @@ async function startHalfDeadServer(): Promise<{
 }
 
 describe('shutdown teardown budget', () => {
-  it('bounds the transport DELETE by the flush budget, not the discovery one', async () => {
+  it('bounds the quit teardown by the flush budget, not the discovery one', async () => {
     const stub = await startHalfDeadServer();
+    const sessionId = 'pi-close-budget';
     const url = process.env.REMBRIC_SERVER_URL;
     process.env.REMBRIC_SERVER_URL = stub.url;
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     try {
-      const harness = makeHarness('pi-close-budget');
+      const harness = makeHarness(sessionId);
       await harness.fire('session_start');
       // Control: without it, a close() that returned early before issuing the
       // DELETE would read as a fast teardown.
       expect(stub.seen).toContain('initialize');
+      // One turn, so the quit branch has a session to end and its POST is really
+      // issued rather than skipped as unknown.
+      await harness.fire('before_agent_start', { prompt: 'one turn before the quit' });
 
       const started = Date.now();
-      await harness.fire('session_shutdown');
+      await harness.fire('session_shutdown', { reason: 'quit' });
       const elapsed = Date.now() - started;
 
       expect(stub.seen).toContain('DELETE');
+      expect(stub.paths).toContain(`/api/${PROJECT_SLUG}/sessions/${sessionId}/end`);
+      expect(stub.paths.filter((p) => p.endsWith('/summary'))).toEqual([]);
       expect(elapsed, 'the DELETE was not awaited at all').toBeGreaterThan(POST_TIMEOUT_MS / 2);
       expect(
         elapsed,
-        `Ctrl-D waited ${elapsed}ms on a dead server; the flush budget is ${POST_TIMEOUT_MS}ms`,
+        `the quit waited ${elapsed}ms on a dead server; the flush budget is ${POST_TIMEOUT_MS}ms`,
       ).toBeLessThan(POST_TIMEOUT_MS * 2);
     } finally {
       stderr.mockRestore();

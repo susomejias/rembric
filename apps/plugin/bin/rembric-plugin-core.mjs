@@ -222,6 +222,15 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     await rembricPost(`/api/${slug}/sessions/${sessionId}/summary`, body);
   }
 
+  // `{}` rather than a skip on an empty accumulator: a session with no turns
+  // must still reach `ended`. One request, never `/summary` then `/end` — each
+  // is bounded by POST_TIMEOUT_MS, so a pair doubles a quitting user's wait.
+  async function endSession(sessionId) {
+    if (subAgentSessions.has(sessionId)) return;
+    if (!knownSessions.has(sessionId)) return;
+    await rembricPost(`/api/${slug}/sessions/${sessionId}/end`, buildSummaryBody(sessionId) ?? {});
+  }
+
   function scheduleIdleFlush(sessionId) {
     const prev = pendingFlush.get(sessionId);
     if (prev) clearTimeout(prev);
@@ -283,6 +292,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     appendAssistantMessage,
     upsertAssistantMessage,
     flushSessionSummary,
+    endSession,
     scheduleIdleFlush,
     flushAllFireAndForget,
     forgetSession,

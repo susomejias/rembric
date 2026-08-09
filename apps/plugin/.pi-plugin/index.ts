@@ -35,7 +35,7 @@ type ToolDefinition = {
 // a working extension.
 type ExtensionContext = {
   cwd: string;
-  sessionManager: { getSessionId: () => string };
+  sessionManager: { getSessionId: () => string; getSessionFile?: () => string | undefined };
   ui?: { notify: (message: string, type?: 'info' | 'warning' | 'error') => void };
 };
 
@@ -50,6 +50,11 @@ type MessageEndEvent = {
   message?: { role?: string; content?: unknown };
 };
 
+// `reason` is a plain optional string, not the harness's five-member union: a
+// union types the non-member branch out of existence, and that branch is what
+// keeps a future sixth reason from ending a session that is still running.
+type SessionShutdownEvent = { reason?: string; targetSessionFile?: string };
+
 type ExtensionApi = {
   registerTool: (definition: ToolDefinition) => void;
   on: <E>(event: string, handler: (event: E, ctx: ExtensionContext) => unknown) => void;
@@ -60,6 +65,11 @@ type DiscoveredTool = { name: string; description?: string; inputSchema: JsonSch
 const CLIENT_NAME = 'rembric-pi';
 const PROTOCOL_VERSION = '2025-06-18';
 const DISCOVERY_TIMEOUT_MS = 10_000;
+
+// Membership, never `reason !== 'reload'`: an unrecognised reason must fail
+// toward not ending, because no path returns a session to `active` while a
+// session left active is retired by the server's stale-active sweep.
+const CLOSING_SHUTDOWN_REASONS = new Set(['quit', 'new', 'resume', 'fork']);
 
 // One deadline for the whole handshake, not one per request: the harness awaits
 // the factory and `session_start`, so per-request timeouts would sum. Read per
@@ -225,6 +235,16 @@ function assistantText(content: unknown): string {
     .trim();
 }
 
+// Resuming the session already open emits `reason: "resume"` with the same id,
+// so the reason alone cannot tell replacement-by-another from replacement-by-
+// itself. Compared only when the event names a file: on `quit` it is absent, and
+// a bare comparison would read `undefined === undefined` and suppress the end.
+function isSelfResume(event: SessionShutdownEvent, ctx: ExtensionContext): boolean {
+  const target = event.targetSessionFile;
+  if (typeof target !== 'string' || target.length === 0) return false;
+  return target === ctx.sessionManager.getSessionFile?.();
+}
+
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
@@ -325,10 +345,14 @@ export default function rembric(pi: ExtensionApi): void {
     core.scheduleIdleFlush(ctx.sessionManager.getSessionId());
   });
 
-  pi.on('session_shutdown', async (_event, ctx) => {
+  pi.on('session_shutdown', async (event: SessionShutdownEvent, ctx) => {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
-    await Promise.all([core.flushSessionSummary(sessionId), mcp?.close()]);
+    const closes = CLOSING_SHUTDOWN_REASONS.has(event.reason ?? '') && !isSelfResume(event, ctx);
+    await Promise.all([
+      closes ? core.endSession(sessionId) : core.flushSessionSummary(sessionId),
+      mcp?.close(),
+    ]);
     // After the flush, and only reachable on a teardown the process survives:
     // otherwise a pending debounce timer re-POSTs what just landed.
     core.forgetSession(sessionId);

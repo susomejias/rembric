@@ -44,6 +44,7 @@ export type SessionProtocol = {
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];
   upsertAssistantMessage(sessionId: string, messageId: string, rawText: string): TranscriptEntry[];
   flushSessionSummary(sessionId: string): Promise<void>;
+  endSession(sessionId: string): Promise<void>;
   scheduleIdleFlush(sessionId: string): void;
   flushAllFireAndForget(): void;
   forgetSession(sessionId: string): TranscriptEntry[];
