@@ -6,8 +6,8 @@
 #
 # Pure side effect: raw per-turn transcript sync to /summary. Claude Code
 # omits `final` entirely (never sent as true); Codex sends `final:false`
-# explicitly (Codex has no SessionEnd — see session-end.sh's comment on why
-# its session row stays `active`). Either way, a curated
+# explicitly, so a per-turn sync never locks the column against the curated
+# summary its SessionEnd may still write. Either way, a curated
 # memory.session_summary (final:true) always wins via the server's
 # last-final-wins precedence.
 #

@@ -35,7 +35,7 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md). For Pi see [`plugin/.pi-plugin/README.md`](./.pi-plugin/README.md).
 
-> **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 5 hooks via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
+> **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 6 hook types via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
 
 ## What you get
 
@@ -43,7 +43,7 @@ The rest of this file is the Claude Code plugin reference. For Codex see [`docs/
 - **A tiny stdio bridge** (`bin/rembric-bridge.mjs`, ~80 LOC) that reads `PROJECT_SLUG` from a `.rembric` file at the project root and path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the correct project on connect. No agent-side `project.use` call, no router-fallback codepath.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
 - **Eight lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
-  - `SessionStart` (matcher `startup|resume|clear`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent). Also nudges the agent to load recent context.
+  - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context.
   - `SessionStart` (matcher `compact`) injects a multi-line nudge into the post-compact model context directing it to call `memory.session_summary` and `memory.context` if detail is missing.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
   - `UserPromptSubmit` (matcher-less, every prompt) carries a unified per-turn nudge: a save reminder every 5th turn plus a session-summary reminder on turn 1 and every 10th turn after, on plain stdout.
