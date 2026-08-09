@@ -57,7 +57,7 @@ A session row whose `status` is `ended` or `abandoned` SHALL accept `summary` an
 
 Late writes SHALL be subject to the existing `summary_final` / `title_final` precedence rules with ONE deviation: on a terminal row an already-`final` column SHALL NOT be replaced, not even by a `final:true` write. On an `active` row last-final-wins is unchanged. The deviation exists because unbounded lateness makes the alternative lossy in a way sessions cannot recover from: a resumed host session reuses its id, its agent's obligatory `memory.session_summary` sends `final:true`, and sessions have no `replaces` chain or `consolidation_ops` journal, so the displaced handoff is gone with no audit trail. Before late writes were permitted the same call was rejected and the text survived; the first curated value therefore stands. A `final:false` write against an already-`final` column remains a silent no-op and is NOT an error.
 
-The cap precondition (`SUMMARY_MAX_CHARS`), the `NUL`-byte rejection, the `title` length bound and the cross-token mask (`session_not_found`) SHALL be evaluated in the service exactly as on an `active` row and BEFORE any column is written. The project-mismatch mask (`session_not_found`) SHALL be evaluated at the HTTP-handler and MCP-tool boundary. The soft-delete rejection (`session_deleted`) SHALL be evaluated at that boundary AND in the service: the boundary check is the one that produces the operator-facing message, and the service check exists because removing the `status !== 'active'` rejection also removed the backstop that incidentally protected a soft-deleted terminal row from a caller that forgot the gate.
+The cap precondition (`SUMMARY_MAX_CHARS`), the `NUL`-byte rejection, the `title` length bound and the cross-token mask (`session_not_found`) SHALL be evaluated in the service exactly as on an `active` row and BEFORE any column is written. The project-mismatch mask (`session_not_found`) SHALL be evaluated at the HTTP-handler and MCP-tool boundary. The soft-delete rejection (`session_deleted`) SHALL be evaluated at that boundary AND in the service, and the service's evaluation SHALL be the binding one: the boundary check runs before the request body is awaited and can therefore be stale by the time the write happens, so the service re-reads and decides. That service check is NOT specific to terminal rows — it sits ahead of the `status` branch and covers the `active` path identically; the full rule is stated once, under "Sessions MAY be soft-deleted while preserving the audit trail" in this capability. It exists because removing the `status !== 'active'` rejection also removed the backstop that incidentally protected a soft-deleted terminal row from a caller that forgot the gate, and because the gate a caller does remember is not fresh.
 
 A late write SHALL NOT mutate `status`, `ended_at`, or `last_activity_at`. In particular `end()` on an `abandoned` row SHALL apply the summary/title writes and SHALL NOT flip `status` to `'ended'` and SHALL NOT write `ended_at`: `ended_at` remains write-once and the retirement sweep's classification of how the session died stands. `last_activity_at` is deliberately excluded because it exists solely to drive stale-active retirement and transport resolution, both of which filter `status = 'active'`.
 
@@ -350,6 +350,12 @@ The `agent_sessions` table SHALL gain a nullable column `deleted_at TIMESTAMP`. 
 
 `AgentSessionsService.findById(...)` SHALL NOT filter on `deleted_at` or on `sessionHasContent`. The detail surface must still be able to open and act on (e.g. undelete) any row regardless of content.
 
+Every service write path that mutates a session's own columns SHALL refuse a soft-deleted row. Specifically `AgentSessionsService.end` and `AgentSessionsService.writeSummary` SHALL throw `DomainError('session_deleted', <message>)` when the row they resolved has `deleted_at IS NOT NULL`, on the `active` branch and the terminal branch alike, and SHALL evaluate that condition against the row read inside the same synchronous tick as the `UPDATE` — after the cross-token mask and before the `status` branch, so that exactly one evaluation covers both branches.
+
+The placement is load-bearing, not stylistic. Both HTTP callers await the request body between their own soft-delete gate and the service call (`POST /api/<slug>/sessions/:id/summary` and `.../end`), and that body may carry up to `SUMMARY_MAX_CHARS`, so a check taken on an earlier tick can be invalidated before the write lands. A caller-side gate is therefore advisory — it exists to produce the operator-facing message early — and the service's own re-read is the evaluation that decides. A row soft-deleted after a caller's gate passed SHALL be rejected rather than mutated.
+
+`softDelete` and `undelete` are exempt, being the paths by which `deleted_at` moves. The status-only reconciliation paths `abandonInactiveSince` and `markAbandoned` are also outside this requirement: they write `status` and `ended_at` only, and whether they should additionally skip soft-deleted rows is not decided here.
+
 #### Scenario: softDelete sets deleted_at and hides the row from default list
 
 - **GIVEN** an active session with `id = <S>` whose `deleted_at` is NULL
@@ -378,6 +384,33 @@ The `agent_sessions` table SHALL gain a nullable column `deleted_at TIMESTAMP`. 
 - **GIVEN** a memory whose `session_id` references session `<S>`
 - **WHEN** session `<S>` is soft-deleted
 - **THEN** the memory's `session_id` SHALL remain unchanged and SHALL continue to point at `<S>`
+
+#### Scenario: `end()` refuses a soft-deleted active row
+
+- **GIVEN** session `<S>` with `status='active'`, `ended_at IS NULL` and `deleted_at IS NOT NULL`
+- **WHEN** `agentSessions.end(<S>, { tokenId: <owning token> })` is called
+- **THEN** the call SHALL throw `DomainError('session_deleted', <message>)`
+- **AND** the row SHALL NOT be mutated: `status` SHALL remain `'active'`, `ended_at` SHALL remain NULL, and `summary`/`title` SHALL be unchanged
+
+#### Scenario: `writeSummary()` refuses a soft-deleted active row
+
+- **GIVEN** session `<S>` with `status='active'` and `deleted_at IS NOT NULL`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: <owning token>, summary: 'anything' })` is called
+- **THEN** the call SHALL throw `DomainError('session_deleted', <message>)`
+- **AND** `summary`, `title` and `last_activity_at` SHALL all be unchanged
+
+#### Scenario: The refusal is identical on a terminal row
+
+- **GIVEN** session `<S>` with `deleted_at IS NOT NULL` and `status` of either `'ended'` or `'abandoned'`
+- **WHEN** `agentSessions.end(<S>, …)` or `agentSessions.writeSummary(<S>, …)` is called by the owning token
+- **THEN** the call SHALL throw `DomainError('session_deleted', <message>)` and SHALL NOT emit an `UPDATE`
+
+#### Scenario: A soft-delete landing between a caller's gate and the write is still rejected
+
+- **GIVEN** session `<S>` whose `deleted_at` is NULL at the moment a caller runs its own soft-delete gate
+- **WHEN** `<S>` is soft-deleted before that caller reaches `end()` or `writeSummary()`, and the call then proceeds
+- **THEN** the service SHALL reject with `session_deleted` on the strength of its own re-read
+- **AND** the row SHALL NOT be mutated, whatever its `status` was
 
 ### Requirement: The dashboard MUST surface Delete + Undelete actions per session
 

@@ -220,7 +220,7 @@ The endpoint SHALL first check that the connected token's scope authorizes `writ
 1. Apply any provided summary/title writes subject to the precedence rules (after the truncation helpers have run).
 2. Set `ended_at = now` and `status = 'ended'`.
 
-Soft-deleted rows SHALL be rejected with `session_deleted`. Rows in **either** terminal state (`ended` or `abandoned`) SHALL be treated as an idempotent no-op with respect to lifecycle: any summary/title fields in the body are still applied subject to precedence (with truncation), but `status`, `ended_at` and `last_activity_at` SHALL NOT be re-written — in particular an `abandoned` row SHALL NOT be promoted to `ended`, because `ended_at` is write-once and the sweep's classification is the audit record of how the session died. `session_already_ended` SHALL NOT be a possible response code for this endpoint. The response SHALL be `{ ok: true, sessionId, endedAt, summary, title }`.
+Soft-deleted rows SHALL be rejected with `session_deleted`, and that rejection SHALL carry HTTP status `409` — the same status `/summary` already specifies for the identical condition — whether the code is produced by the handler's own pre-body gate or thrown by `agentSessions.end`. The handler's gate runs before the request body is awaited, so it is advisory; the binding evaluation is the service's, taken against the row it re-reads immediately before writing (see "Sessions MAY be soft-deleted while preserving the audit trail" in the `sessions` capability). A row soft-deleted after the gate passed but before the write SHALL therefore be rejected rather than mutated, on the active branch and the terminal branch alike, and SHALL NOT surface as `500`. Rows in **either** terminal state (`ended` or `abandoned`) SHALL be treated as an idempotent no-op with respect to lifecycle: any summary/title fields in the body are still applied subject to precedence (with truncation), but `status`, `ended_at` and `last_activity_at` SHALL NOT be re-written — in particular an `abandoned` row SHALL NOT be promoted to `ended`, because `ended_at` is write-once and the sweep's classification is the audit record of how the session died. `session_already_ended` SHALL NOT be a possible response code for this endpoint. The response SHALL be `{ ok: true, sessionId, endedAt, summary, title }`.
 
 #### Scenario: Active session closed with no body
 
@@ -274,6 +274,15 @@ Soft-deleted rows SHALL be rejected with `session_deleted`. Rows in **either** t
 
 - **WHEN** the resolution rules apply
 - **THEN** the server SHALL respond with the same error codes (`session_not_found`, `session_deleted`)
+- **AND** `session_not_found` SHALL carry status `404` and `session_deleted` SHALL carry status `409`
+
+#### Scenario: Session soft-deleted after the gate but before the write
+
+- **GIVEN** an `active` session `<S>` whose `deleted_at` is NULL when the handler's soft-delete gate runs
+- **WHEN** `<S>` is soft-deleted (e.g. from the dashboard) while the handler is still awaiting the request body, and the body then completes
+- **THEN** the server SHALL respond `409` with `{ ok: false, code: 'session_deleted' }`
+- **AND** the row SHALL NOT be mutated: `status` SHALL remain `'active'`, `ended_at` SHALL remain NULL, and `summary`/`title` SHALL be unchanged
+- **AND** when `<S>`'s status is `ended` or `abandoned` instead, the response SHALL likewise be `409` and NOT `500`
 
 #### Scenario: Session belongs to a different project than the connected slug (archived-project bypass)
 
