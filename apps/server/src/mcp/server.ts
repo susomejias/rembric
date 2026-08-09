@@ -67,6 +67,7 @@ import {
   suggestTopicKeyOutput,
   suggestTopicKeySchema,
 } from './relations-tools.js';
+import { markRefreshPending } from './roots-discovery.js';
 import {
   buildSessionHandlers,
   sessionEndOutput,
@@ -513,26 +514,10 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     relationsHandlers.compare,
   );
 
-  // ── notifications/roots/list_changed ───────────────────────────────
-  // The client emits this notification when its workspace roots change.
-  // We re-derive the candidate slug but NEVER auto-switch — the agent
-  // observes the updated suggestedSlugs via project.current and decides
-  // explicitly (matches the spec scenario "list_changed updates
-  // suggestions but does not switch").
-  server.server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
-    // No request context is available in the notification handler — we
-    // don't have a tokenId / mcpSessionId here. The next `project.current`
-    // call will re-trigger discovery because list_changed clears the
-    // already-discovered flag for the affected transport.
-    //
-    // For simplicity (and to satisfy the spec's "never auto-switches"
-    // contract), we just clear the discovery sentinel; subsequent
-    // `project.current` calls will issue a fresh `roots/list` and update
-    // suggestedSlugs accordingly. A finer-grained per-transport reset is
-    // a follow-up; today the global reset is safe because discovery is
-    // idempotent and cheap.
-    const { resetDiscoveryState } = await import('./roots-discovery.js');
-    resetDiscoveryState();
+  server.server.setNotificationHandler(RootsListChangedNotificationSchema, () => {
+    // Recorded, not acted on: with no tool call in flight, a `roots/list` sent
+    // from here would not be routed to the client.
+    markRefreshPending(server);
   });
 
   return server;

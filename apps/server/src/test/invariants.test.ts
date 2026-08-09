@@ -1217,6 +1217,30 @@ describe('MCP tool-handler module layout invariant', () => {
   });
 });
 
+// Per-transport discovery state in a module-level registry only misbehaves
+// observably when two transports are live, so a re-introduced global would pass
+// every single-transport test. Asserted here as well as behaviourally.
+describe('roots-discovery state ownership invariant', () => {
+  const src = readFileSync(join(srcRoot, 'mcp/roots-discovery.ts'), 'utf8');
+
+  it('declares no module-level mutable registry of per-transport state', () => {
+    const registries = src.match(/^(?:const|let|var)\s+\w+[^=\n]*=\s*new\s+(?:Set|Map|Array)\b/gm);
+    expect(registries, 'per-transport state must hang off the connection, not the module').toBe(
+      null,
+    );
+  });
+
+  it('owns that state through a WeakMap keyed by the connection server', () => {
+    // The anti-vacuity control for the assertion above: without it, deleting the
+    // ownership mechanism outright would also pass.
+    expect(/^const\s+\w+\s*=\s*new\s+WeakMap<McpServer,/m.test(src)).toBe(true);
+  });
+
+  it('clears no collection, so no helper can reset every transport at once', () => {
+    expect(src).not.toMatch(/\.clear\(\)/);
+  });
+});
+
 // A summary payload is trimmed twice: once by the client that sends it, once by
 // the server that stores it. Two tail-cuts are idempotent — the result is the
 // last min(bounds) characters — so the bounds are free to disagree. The SIDES

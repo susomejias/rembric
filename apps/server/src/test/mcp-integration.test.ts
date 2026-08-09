@@ -3262,12 +3262,23 @@ describe('roots discovery routing (real server)', () => {
     return new ProjectsService(createRepositories(server.dbHandle.db)).create({ slug });
   }
 
+  interface RootsConnection {
+    client: Client;
+    clientMethods: string[];
+    rootsCalls: () => number;
+    /** Change what the client's `roots/list` handler answers; `null` = empty list. */
+    setRoot: (uri: string | null) => void;
+  }
+
   async function connectRoots(opts: {
     rootUri: string;
     advertiseRoots?: boolean;
+    listChanged?: boolean;
     suppressStandaloneStream?: boolean;
     dropFirstRootsList?: boolean;
-  }): Promise<{ client: Client; clientMethods: string[]; rootsCalls: () => number }> {
+    /** Answer this many `roots/list` requests, then go silent forever. */
+    answerLimit?: number;
+  }): Promise<RootsConnection> {
     const clientMethods: string[] = [];
     const guardedFetch: FetchLike = (url, init) => {
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -3285,25 +3296,38 @@ describe('roots discovery routing (real server)', () => {
       fetch: guardedFetch,
       requestInit: { headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } },
     });
+    const roots = opts.listChanged === true ? { listChanged: true } : {};
     const client = new Client(
       { name: 'roots-routing-client', version: '0.0.0' },
-      { capabilities: advertiseRoots ? { roots: {} } : {} },
+      { capabilities: advertiseRoots ? { roots } : {} },
     );
     let calls = 0;
+    let rootUri: string | null = opts.rootUri;
     if (advertiseRoots) {
       client.setRequestHandler(ListRootsRequestSchema, async () => {
         calls += 1;
-        if (opts.dropFirstRootsList === true && calls === 1) {
+        const silentFrom = opts.answerLimit;
+        if (
+          (opts.dropFirstRootsList === true && calls === 1) ||
+          (silentFrom !== undefined && calls > silentFrom)
+        ) {
           // No answer of ANY kind, so the server's own budget expires. A
           // rejection would instead be an answer, which legitimately consumes
           // the once-only discovery slot.
           await new Promise(() => {});
         }
-        return { roots: [{ uri: opts.rootUri, name: opts.rootUri }] };
+        return rootUri === null ? { roots: [] } : { roots: [{ uri: rootUri, name: rootUri }] };
       });
     }
     await client.connect(transport);
-    return { client, clientMethods, rootsCalls: () => calls };
+    return {
+      client,
+      clientMethods,
+      rootsCalls: () => calls,
+      setRoot: (uri) => {
+        rootUri = uri;
+      },
+    };
   }
 
   async function contextScope(client: Client): Promise<string> {
@@ -3313,6 +3337,29 @@ describe('roots discovery routing (real server)', () => {
     })) as ToolResult;
     expect(result.isError).toBeFalsy();
     return (readJson(result) as { scope: string }).scope;
+  }
+
+  interface CurrentProject {
+    slug: string | null;
+    projectId: string | null;
+    source: string;
+    suggestedSlugs: string[];
+  }
+
+  async function projectCurrent(client: Client): Promise<CurrentProject> {
+    const result = (await client.callTool({
+      name: 'project.current',
+      arguments: {},
+    })) as ToolResult;
+    expect(result.isError).toBeFalsy();
+    return readJson(result) as CurrentProject;
+  }
+
+  /** End-to-end tool-call latency at the SDK client — the only instrument used below. */
+  async function timedScope(client: Client): Promise<{ scope: string; ms: number }> {
+    const started = performance.now();
+    const scope = await contextScope(client);
+    return { scope, ms: performance.now() - started };
   }
 
   // Cold arm — the control. Must be the first test in this describe: it is the
@@ -3379,5 +3426,207 @@ describe('roots discovery routing (real server)', () => {
     expect(await contextScope(client)).toBe(`project:${dflt.id}`);
     expect(rootsCalls()).toBe(0);
     await client.close();
+  });
+
+  /**
+   * `notifications/roots/list_changed`. The notification's POST is answered 202
+   * only after the server transport has dispatched it, so no arm below needs to
+   * wait for the flag to land.
+   */
+  describe('roots/list_changed lifecycle', () => {
+    // Control for every arm below: it passes on both sides of the change, so a
+    // harness that never reaches the discovery path is distinguishable from a
+    // correct one.
+    it('asks once and suggests nothing across three scope-resolving calls', async () => {
+      const project = createProject('probe-control');
+      const { client, rootsCalls } = await connectRoots({
+        rootUri: `file:///tmp/${project.slug}`,
+        listChanged: true,
+      });
+      for (let i = 0; i < 3; i += 1) {
+        expect(await contextScope(client)).toBe(`project:${project.id}`);
+      }
+      expect(rootsCalls()).toBe(1);
+      expect(await projectCurrent(client)).toMatchObject({
+        projectId: project.id,
+        source: 'roots',
+        suggestedSlugs: [],
+      });
+      await client.close();
+    });
+
+    it('leaves an unrelated transport untouched when another one emits list_changed', async () => {
+      const pa = createProject('probe-d2-a');
+      const pb = createProject('probe-d2-b');
+      const a = await connectRoots({ rootUri: `file:///tmp/${pa.slug}`, listChanged: true });
+      const b = await connectRoots({ rootUri: `file:///tmp/${pb.slug}`, listChanged: true });
+      expect(await contextScope(a.client)).toBe(`project:${pa.id}`);
+      expect(await contextScope(b.client)).toBe(`project:${pb.id}`);
+      const before = await projectCurrent(b.client);
+      expect(before).toMatchObject({ projectId: pb.id, source: 'roots', suggestedSlugs: [] });
+      expect(b.rootsCalls()).toBe(1);
+
+      await a.client.sendRootsListChanged();
+
+      expect(await contextScope(b.client)).toBe(`project:${pb.id}`);
+      expect(b.rootsCalls(), 'B was re-asked because A changed folders').toBe(1);
+      expect(await projectCurrent(b.client)).toEqual(before);
+
+      await a.client.close();
+      await b.client.close();
+    });
+
+    it('refreshes the emitting transport suggestions without switching its project', async () => {
+      const oldProject = createProject('probe-d1-old');
+      const newProject = createProject('probe-d1-new');
+      const a = await connectRoots({
+        rootUri: `file:///tmp/${oldProject.slug}`,
+        listChanged: true,
+      });
+      expect(await contextScope(a.client)).toBe(`project:${oldProject.id}`);
+      expect((await projectCurrent(a.client)).suggestedSlugs).toEqual([]);
+
+      a.setRoot(`file:///tmp/${newProject.slug}`);
+      await a.client.sendRootsListChanged();
+
+      expect(await projectCurrent(a.client)).toMatchObject({
+        projectId: oldProject.id,
+        source: 'roots',
+        suggestedSlugs: [newProject.slug],
+      });
+      expect(a.rootsCalls()).toBe(2);
+      await a.client.close();
+    });
+
+    it('spends one roots/list budget in total for a list_changed the client never answers', async () => {
+      const project = createProject('probe-gone-quiet');
+      const a = await connectRoots({
+        rootUri: `file:///tmp/${project.slug}`,
+        listChanged: true,
+        answerLimit: 1,
+      });
+      expect(await contextScope(a.client)).toBe(`project:${project.id}`);
+      const warm = await timedScope(a.client);
+      expect(warm.scope).toBe(`project:${project.id}`);
+      expect(warm.ms, 'warm baseline must not touch the budget').toBeLessThan(500);
+      expect(a.rootsCalls()).toBe(1);
+
+      await a.client.sendRootsListChanged();
+
+      // The first call after the notification may spend one budget — the
+      // accepted cost of one attempt per notification.
+      const first = await timedScope(a.client);
+      const second = await timedScope(a.client);
+      expect(first.scope).toBe(`project:${project.id}`);
+      expect(second.scope).toBe(`project:${project.id}`);
+      expect(
+        second.ms,
+        `warm ${warm.ms.toFixed(0)}ms, first-after ${first.ms.toFixed(0)}ms, ` +
+          `roots/list count ${a.rootsCalls()}`,
+      ).toBeLessThan(500);
+      expect(a.rootsCalls()).toBe(2);
+      expect(await projectCurrent(a.client)).toMatchObject({
+        projectId: project.id,
+        source: 'roots',
+      });
+      await a.client.close();
+    }, 30_000);
+
+    it('suggests an existing project on refresh without activating it', async () => {
+      const dflt = defaultProject(server.dbHandle);
+      const target = createProject('probe-refresh-target');
+      const a = await connectRoots({
+        rootUri: 'file:///tmp/probe-refresh-unknown',
+        listChanged: true,
+      });
+      expect(await contextScope(a.client)).toBe(`project:${dflt.id}`);
+      expect(await projectCurrent(a.client)).toMatchObject({
+        projectId: dflt.id,
+        source: 'default',
+        suggestedSlugs: ['probe-refresh-unknown'],
+      });
+
+      a.setRoot(`file:///tmp/${target.slug}`);
+      await a.client.sendRootsListChanged();
+
+      expect(await projectCurrent(a.client)).toMatchObject({
+        projectId: dflt.id,
+        source: 'default',
+        suggestedSlugs: [target.slug],
+      });
+      expect(a.rootsCalls()).toBe(2);
+      await a.client.close();
+    });
+
+    it('clears a stale suggestion when the refreshed roots are empty', async () => {
+      const a = await connectRoots({ rootUri: 'file:///tmp/probe-stale-empty', listChanged: true });
+      expect((await projectCurrent(a.client)).suggestedSlugs).toEqual(['probe-stale-empty']);
+
+      a.setRoot(null);
+      await a.client.sendRootsListChanged();
+
+      expect((await projectCurrent(a.client)).suggestedSlugs).toEqual([]);
+      await a.client.close();
+    });
+
+    it('clears a stale suggestion when no slug can be derived from the refreshed roots', async () => {
+      const a = await connectRoots({ rootUri: 'file:///tmp/probe-stale-bad', listChanged: true });
+      expect((await projectCurrent(a.client)).suggestedSlugs).toEqual(['probe-stale-bad']);
+
+      a.setRoot('file:///');
+      await a.client.sendRootsListChanged();
+
+      expect((await projectCurrent(a.client)).suggestedSlugs).toEqual([]);
+      await a.client.close();
+    });
+
+    it('runs ordinary discovery for a list_changed that precedes any answered discovery', async () => {
+      const dflt = defaultProject(server.dbHandle);
+      const project = createProject('probe-unanswered-then-changed');
+      const a = await connectRoots({
+        rootUri: `file:///tmp/${project.slug}`,
+        listChanged: true,
+        dropFirstRootsList: true,
+      });
+      expect(await contextScope(a.client)).toBe(`project:${dflt.id}`);
+      expect(a.rootsCalls()).toBe(1);
+
+      await a.client.sendRootsListChanged();
+
+      expect(await contextScope(a.client)).toBe(`project:${project.id}`);
+      // One request for that tool call, not one for discovery and one for the refresh.
+      expect(a.rootsCalls()).toBe(2);
+      expect(await projectCurrent(a.client)).toMatchObject({
+        projectId: project.id,
+        source: 'roots',
+      });
+      await a.client.close();
+    }, 30_000);
+
+    it('delivers the refreshing roots/list while the client never opens the standalone stream', async () => {
+      const oldProject = createProject('probe-refresh-nostream-old');
+      const newProject = createProject('probe-refresh-nostream-new');
+      const from = httpLog.length;
+      const a = await connectRoots({
+        rootUri: `file:///tmp/${oldProject.slug}`,
+        listChanged: true,
+        suppressStandaloneStream: true,
+      });
+      expect(await contextScope(a.client)).toBe(`project:${oldProject.id}`);
+
+      a.setRoot(`file:///tmp/${newProject.slug}`);
+      await a.client.sendRootsListChanged();
+      const after = await projectCurrent(a.client);
+      const mine = httpLog.slice(from);
+
+      expect(a.clientMethods, 'the client did attempt the standalone GET').toContain('GET');
+      expect(mine.filter((line) => line.startsWith('GET /mcp'))).toEqual([]);
+      expect(mine.some((line) => line.startsWith('POST /mcp'))).toBe(true);
+      expect(after).toMatchObject({
+        projectId: oldProject.id,
+        suggestedSlugs: [newProject.slug],
+      });
+      await a.client.close();
+    });
   });
 });
