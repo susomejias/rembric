@@ -64,11 +64,12 @@ describe('AgentSessionsService', () => {
     expect(ended.summary).toBeNull();
   });
 
-  it('summarize transitions to ended and persists the summary', () => {
+  it('end with a summary transitions and persists it', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    const updated = sessions.summarize(s.id, {
+    const updated = sessions.end(s.id, {
       tokenId,
       summary: '## Goal\nwrap it up',
+      final: true,
     });
     expect(updated.status).toBe('ended');
     expect(updated.summary).toBe('## Goal\nwrap it up');
@@ -78,13 +79,6 @@ describe('AgentSessionsService', () => {
   it('refuses end from a different token (masks as session_not_found)', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
     expect(() => sessions.end(s.id, { tokenId: otherTokenId })).toThrow(/not found/i);
-  });
-
-  it('refuses summarize from a different token (masks as session_not_found)', () => {
-    const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    expect(() => sessions.summarize(s.id, { tokenId: otherTokenId, summary: 'x' })).toThrow(
-      /not found/i,
-    );
   });
 
   it('double-end is idempotent on already-ended sessions', () => {
@@ -99,9 +93,15 @@ describe('AgentSessionsService', () => {
     expect(second.endedAt?.getTime()).toBe(firstEndedAt);
   });
 
-  it('summarize rejects an empty summary string', () => {
+  it('end rejects an empty summary string', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    expect(() => sessions.summarize(s.id, { tokenId, summary: '   ' })).toThrow(/non-empty/);
+    expect(() => sessions.end(s.id, { tokenId, summary: '   ' })).toThrow(/non-empty/);
+    expect(sessions.getById(s.id)?.status).toBe('active');
+  });
+
+  it('writeSummary rejects an empty summary string', () => {
+    const s = sessions.start({ tokenId, projectId, agent: 'claude' });
+    expect(() => sessions.writeSummary(s.id, { tokenId, summary: '   ' })).toThrow(/non-empty/);
   });
 
   describe('summary length cap (SUMMARY_MAX_CHARS)', () => {
@@ -138,9 +138,9 @@ describe('AgentSessionsService', () => {
       expect(after?.summary).toBeNull();
     });
 
-    it('summarize (legacy wrapper) inherits the cap', () => {
+    it('the cap applies even when the write is final', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-      expect(() => sessions.summarize(s.id, { tokenId, summary: tooLong })).toThrow(cap);
+      expect(() => sessions.end(s.id, { tokenId, summary: tooLong, final: true })).toThrow(cap);
       const after = sessions.getById(s.id);
       expect(after?.status).toBe('active');
     });
@@ -681,7 +681,7 @@ describe('AgentSessionsService', () => {
 
     it('skips sessions with a summary written', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'with-summary' });
-      sessions.summarize(s.id, { tokenId, summary: 'this session did something' });
+      sessions.end(s.id, { tokenId, summary: 'this session did something', final: true });
       db.handle.raw
         .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
         .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
@@ -751,7 +751,7 @@ describe('AgentSessionsService', () => {
       endAndBackdate(withMemory.id, 2 * 60 * 60 * 1000);
 
       const withSummary = sessions.start({ tokenId, projectId, agent: 'with-summary' });
-      sessions.summarize(withSummary.id, { tokenId, summary: 'did the thing' });
+      sessions.end(withSummary.id, { tokenId, summary: 'did the thing', final: true });
       db.handle.raw
         .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
         .run(Date.now() - 2 * 60 * 60 * 1000, withSummary.id);
@@ -779,7 +779,7 @@ describe('AgentSessionsService', () => {
 
     it('includes a session that has a summary written', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'has-summary' });
-      sessions.summarize(s.id, { tokenId, summary: 'goal: x' });
+      sessions.end(s.id, { tokenId, summary: 'goal: x', final: true });
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(true);
     });
@@ -858,7 +858,7 @@ describe('AgentSessionsService', () => {
 
     it('filter-then-truncate: backfills past newer empty sessions', () => {
       const useful = sessions.start({ tokenId, projectId, agent: 'useful-old' });
-      sessions.summarize(useful.id, { tokenId, summary: 'older but useful' });
+      sessions.end(useful.id, { tokenId, summary: 'older but useful', final: true });
 
       // Three empty sessions started AFTER `useful`. Backdating started_at
       // via raw SQL to guarantee ordering on fast machines.
@@ -880,7 +880,7 @@ describe('AgentSessionsService', () => {
 
     it('soft-deleted session with content is still excluded', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'deleted-with-content' });
-      sessions.summarize(s.id, { tokenId, summary: 'had value, then deleted' });
+      sessions.end(s.id, { tokenId, summary: 'had value, then deleted', final: true });
       sessions.softDelete(s.id, { adminBypass: true });
       const recent = sessions.recentForContext({ projectId, limit: 25 });
       expect(recent.some((r) => r.id === s.id)).toBe(false);
@@ -939,7 +939,6 @@ describe('AgentSessionsService', () => {
           () => sessions.writeSummary(id, { tokenId, title: 'late title', final: true }),
           () => sessions.end(id, { tokenId }),
           () => sessions.end(id, { tokenId, summary: 'late via end', final: true }),
-          () => sessions.summarize(id, { tokenId, summary: 'late via summarize' }),
           () => sessions.markAbandoned(id, { adminBypass: true }),
           () => sessions.touchActivity(id),
           () => sessions.abandonStale({ olderThanMs: 0 }),

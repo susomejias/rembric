@@ -8,3 +8,11 @@ data/
 package-lock.json
 .husky/_
 openspec/changes/**/specs/
+
+**/CHANGELOG.md
+.claude/commands/opsx/
+.claude/skills/openspec-apply-change/
+.claude/skills/openspec-archive-change/
+.claude/skills/openspec-explore/
+.claude/skills/openspec-propose/
+.agents/skills/skill-creator/

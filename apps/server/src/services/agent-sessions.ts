@@ -92,7 +92,7 @@ function assertSummaryWithinCap(callsite: string, summary: string | undefined): 
  *     a `final:true` write locks the column; subsequent `final:false`
  *     writes are no-ops; subsequent `final:true` writes replace
  *
- * Cross-token access is rejected by `end`, `summarize`, and `writeSummary`
+ * Cross-token access is rejected by `end` and `writeSummary`
  * (the same token that opened the session must close it) to prevent a
  * misbehaving token from closing another agent's session.
  */
@@ -141,11 +141,6 @@ export interface EndSessionInput {
   title?: string;
   /** Precedence flag for summary/title writes. Defaults to false. */
   final?: boolean;
-}
-
-export interface SummarizeSessionInput {
-  tokenId: string;
-  summary: string;
 }
 
 export interface WriteSummaryInput {
@@ -388,24 +383,6 @@ export class AgentSessionsService {
       );
     }
     return updated;
-  }
-
-  /**
-   * Back-compat wrapper. New callers SHOULD use `writeSummary` (no
-   * transition) followed by `end` (transition) instead. This wrapper
-   * stays for in-tree callers that still expect the old combined
-   * behaviour; remove in a follow-up change once those are migrated.
-   */
-  summarize(sessionId: string, input: SummarizeSessionInput): AgentSession {
-    if (input.summary.trim().length === 0) {
-      throw new DomainError('invalid_input', 'sessions.summarize: summary must be non-empty');
-    }
-    assertSummaryWithinCap('sessions.summarize', input.summary);
-    return this.end(sessionId, {
-      tokenId: input.tokenId,
-      summary: input.summary,
-      final: true,
-    });
   }
 
   getById(sessionId: string): AgentSession | undefined {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.27.2](https://github.com/susomejias/rembric/compare/server-v0.27.1...server-v0.27.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **dashboard:** name every client on every surface, and pin the one that drifted ([b9b7418](https://github.com/susomejias/rembric/commit/b9b74186e9244a32fe7ab15c43a6ddf14b915447))
+* **mcp:** name Pi in the session_start description an agent reads each session ([25bd6d2](https://github.com/susomejias/rembric/commit/25bd6d21aa938cfe9eb8494e05e1d149efb9fb24))
+* **mcp:** stop save_prompt firing on every session's first turn ([965e1fc](https://github.com/susomejias/rembric/commit/965e1fc3c46b5c20899a631103cb741548441fb2))
+* **sessions:** refuse a soft-deleted row at the write, not only at the boundary ([7754fbb](https://github.com/susomejias/rembric/commit/7754fbbc58af1a6b2b3e6b6c9ab6bf3463dd328c))
+* **test:** derive the shared-helper invariant from the core, not a hand list ([bc2b6f7](https://github.com/susomejias/rembric/commit/bc2b6f70dfb767582b156bdaea16718e418394eb))
+
+
+### Refactor
+
+* **sessions:** retire the summarize() back-compat wrapper ([749703a](https://github.com/susomejias/rembric/commit/749703ab6b0131d894a96c89cd50dac0d34551c6))
+
 ## [0.27.1](https://github.com/susomejias/rembric/compare/server-v0.27.0...server-v0.27.1) (2026-08-08)
 
 
