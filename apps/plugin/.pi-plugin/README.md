@@ -66,6 +66,8 @@ pi install npm:@rembric/pi
 
 Re-running the unpinned install is the update: it is idempotent, and because the spec carries no version it is also what `pi update --all` will move for you.
 
+For a temporary rollback after a broken release, see the [emergency plugin rollback](../../../docs/agents.md#emergency-plugin-rollback) runbook.
+
 ## What you get
 
 - **Every Rembric tool**, discovered from the server at session start and registered under a provider-safe name — the server's `memory.save` is registered as `memory_save`, and the call is issued to the server under its own dotted name. Providers reject a tool name containing a dot outright, rejecting the whole payload with it, so the mapping is not cosmetic. Every name you or the model sees in this client is the underscored one: tool descriptions, slash commands, nudges and the server's own usage instructions are all rewritten to match the registry, so nothing tells the model to call a tool that is not there.

@@ -81,6 +81,8 @@ The slug regex is `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Invalid slugs are reje
 
 Use the TUI installer (`Plugins → opencode → update`). Manual fallback — opencode does not cache plugins by version, so re-run the curl-pipe-sh command above; it fetches the latest files from `main` and overwrites the installed files. Restart opencode.
 
+For a temporary rollback after a broken release, see the [emergency plugin rollback](../../../docs/agents.md#emergency-plugin-rollback) runbook.
+
 ## Uninstall
 
 Use the TUI installer (`Plugins → opencode → uninstall`). Manual fallback:

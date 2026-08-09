@@ -119,6 +119,8 @@ If the version field hasn't been bumped but you know new code shipped (or your e
 
 You can also blow away the cache directly: `rm -rf ~/.claude/plugins/cache` (Claude Code rebuilds it on next install).
 
+For a temporary rollback after a broken release, see the [emergency plugin rollback](../../docs/agents.md#emergency-plugin-rollback) runbook.
+
 ### As the plugin author (local iteration)
 
 ```bash

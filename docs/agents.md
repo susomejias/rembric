@@ -22,14 +22,14 @@ Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown
 
 Every tool call is authorized against the token's scope and the connection's effective (resolved) scope — not just at connection time. A call with insufficient scope fails with `forbidden`; a `memory.judge`/`memory.compare` target outside the effective scope fails with `not_found` (existence never leaks across scopes).
 
-| Token scope           | Can call                                             | Cannot call                                                                          | `across_projects` reaches |
-| --------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------- |
-| `*`                   | Every tool, any scope                                | —                                                                                    | every project             |
-| `read:*`              | Every read-classified tool, any scope                | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) | every project             |
-| `projects`            | Every tool, scoped to the projects the token names   | Any tool whose effective scope resolves outside that set                             | exactly those projects    |
-| `read:projects`       | Read-classified tools, scoped to that same set       | Writes, and reads whose effective scope resolves outside that set                    | exactly those projects    |
-| `project:<id>`        | Every tool, scoped to project `<id>` only            | Any tool whose effective scope resolves to another project                           | that one project          |
-| `read:project:<id>`   | Read-classified tools, scoped to project `<id>` only | Writes, and reads whose effective scope resolves to another project                  | that one project          |
+| Token scope         | Can call                                             | Cannot call                                                                          | `across_projects` reaches |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------- |
+| `*`                 | Every tool, any scope                                | —                                                                                    | every project             |
+| `read:*`            | Every read-classified tool, any scope                | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) | every project             |
+| `projects`          | Every tool, scoped to the projects the token names   | Any tool whose effective scope resolves outside that set                             | exactly those projects    |
+| `read:projects`     | Read-classified tools, scoped to that same set       | Writes, and reads whose effective scope resolves outside that set                    | exactly those projects    |
+| `project:<id>`      | Every tool, scoped to project `<id>` only            | Any tool whose effective scope resolves to another project                           | that one project          |
+| `read:project:<id>` | Read-classified tools, scoped to project `<id>` only | Writes, and reads whose effective scope resolves to another project                  | that one project          |
 
 Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write. Mint a `projects` / `read:projects` token by ticking two or more projects on the create form — see [Tokens that reach several projects](./updates.md#tokens-that-reach-several-projects).
 
@@ -179,21 +179,21 @@ After trusting the hooks, the `/plugins` panel for `rembric` shows the hook coun
 
 ##### Symptom → cause table
 
-| Symptom in Codex                                                                                                                | Cause                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/dashboard/sessions` stays empty after Codex sessions                                                                          | Hooks have not been approved via `/hooks` yet. MCP can still work while hooks silently no-op.                                                       |
-| `/plugins` panel shows `Hooks: No plugin hooks`                                                                                 | You're on a `codex-cli` release old enough to still gate hooks behind a feature flag — run `codex features list` to check, and upgrade Codex if so.                                                             |
-| Startup banner _"N hooks need review"_ keeps appearing across launches                                                          | Not all hooks approved yet. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                  |
+| Symptom in Codex                                                                                                                | Cause                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/dashboard/sessions` stays empty after Codex sessions                                                                          | Hooks have not been approved via `/hooks` yet. MCP can still work while hooks silently no-op.                                                                                                                                                                                            |
+| `/plugins` panel shows `Hooks: No plugin hooks`                                                                                 | You're on a `codex-cli` release old enough to still gate hooks behind a feature flag — run `codex features list` to check, and upgrade Codex if so.                                                                                                                                      |
+| Startup banner _"N hooks need review"_ keeps appearing across launches                                                          | Not all hooks approved yet. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                                                                                                             |
 | Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`) | Codex applies a `looks_like_json` heuristic to hook stdout and rejects anything it reads as malformed JSON. The scripts emit plain text prefixed `rembric:` precisely so the heuristic does not fire, so this points at a nudge whose prefix was dropped, not at a missing JSON wrapper. |
 
 #### Using both Claude Code and Codex on the same machine
 
 The two clients pick up credentials from different places — keep both configured:
 
-| Client          | Where to put credentials                                                                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client          | Where to put credentials                                                                                                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Claude Code** | Install wizard (`/plugin install rembric@rembric`) → keychain. Hooks pick them up automatically via the `CLAUDE_PLUGIN_OPTION_*` env vars Claude Code injects into every hook subprocess. **No shell exports required.** |
-| **Codex CLI**   | `export REMBRIC_SERVER_URL=…` and `export REMBRIC_API_TOKEN=…` in your shell rc. Bridge and hooks both read process env. **No wizard exists.**                      |
+| **Codex CLI**   | `export REMBRIC_SERVER_URL=…` and `export REMBRIC_API_TOKEN=…` in your shell rc. Bridge and hooks both read process env. **No wizard exists.**                                                                           |
 
 If you only use one client, set up just that one. If you use both, you need both — the wizard input does NOT propagate to Codex's process, and the shell exports are NOT consumed by Claude Code's hooks (Claude Code substitutes from the keychain, not from `process.env`). Same Rembric server, same token, two configuration surfaces.
 
@@ -216,11 +216,10 @@ The Codex CLI has no dedicated per-plugin `update` verb, so re-running `codex pl
 
 > **Plugin `0.6.0+` required against Rembric `0.13.0+`.** The provider's `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` to `/healthz` (the server made the endpoint bearer-gated in `0.13.0`). The env var was already required for every other call; this just tightens an existing requirement. Running plugin `0.5.x` against server `0.13+` will silently disable the memory provider — upgrade in lock-step.
 
-
-| Piece                            | What it does                                                | Wired via                                                                  |
-| -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **`memory.provider: rembric`**   | Auto session create / summary-on-compact / end-on-close     | The Python provider plugin (this section)                                  |
-| **`mcp_servers.rembric`**        | Full memory tool surface (save/search/get/context/judge/…)  | The shared `bin/rembric-bridge.mjs` invoked as a stdio MCP server          |
+| Piece                          | What it does                                               | Wired via                                                         |
+| ------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------- |
+| **`memory.provider: rembric`** | Auto session create / summary-on-compact / end-on-close    | The Python provider plugin (this section)                         |
+| **`mcp_servers.rembric`**      | Full memory tool surface (save/search/get/context/judge/…) | The shared `bin/rembric-bridge.mjs` invoked as a stdio MCP server |
 
 Install with one shell command — no `git clone` of rembric required:
 
@@ -239,7 +238,15 @@ Then drop this block into `~/.hermes/config.yaml`:
 mcp_servers:
   rembric:
     command: npx
-    args: ["-y", "mcp-remote@latest", "${REMBRIC_SERVER_URL}/mcp", "--header", "Authorization: Bearer ${REMBRIC_API_TOKEN}", "--allow-http"]
+    args:
+      [
+        '-y',
+        'mcp-remote@latest',
+        '${REMBRIC_SERVER_URL}/mcp',
+        '--header',
+        'Authorization: Bearer ${REMBRIC_API_TOKEN}',
+        '--allow-http',
+      ]
 
 memory:
   provider: rembric
@@ -280,27 +287,27 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pic
 
 #### Symptom → cause table
 
-| Symptom in Hermes                                                                                | Cause                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `hermes plugins install rembric` skipped the env prompts                                          | The three `REMBRIC_*` vars are already set in the parent shell. This is by design — Hermes only prompts for vars not in env. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install.                       |
-| MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`                    | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` AND `cat ~/.hermes/.env \| grep REMBRIC_` shows all three vars.                                                                |
-| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty        | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission. |
-| stderr shows `[rembric] no project slug for session …; skipping session POST`                    | None of the four cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` in `~/.hermes/.env` (or re-run `hermes plugins install rembric` to be prompted).                                                                                                       |
-| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                                    | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                    |
-| MCP tools fail and `hermes memory status` reports `rembric: Missing`                             | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                                                                                                              |
-| Provider tracks slug `A`, MCP bridge tracks slug `B`                                              | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.                                                                                  |
-| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                              | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                |
-| `hermes plugins update rembric` reports nothing to update                                        | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                                                                                                            |
+| Symptom in Hermes                                                                         | Cause                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hermes plugins install rembric` skipped the env prompts                                  | The three `REMBRIC_*` vars are already set in the parent shell. This is by design — Hermes only prompts for vars not in env. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install.                                          |
+| MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`             | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` AND `cat ~/.hermes/.env \| grep REMBRIC_` shows all three vars.                                                                                   |
+| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission. |
+| stderr shows `[rembric] no project slug for session …; skipping session POST`             | None of the four cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` in `~/.hermes/.env` (or re-run `hermes plugins install rembric` to be prompted).                                                                                                                         |
+| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                             | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                                      |
+| MCP tools fail and `hermes memory status` reports `rembric: Missing`                      | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                                                                                                                                |
+| Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.                                                                                                     |
+| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                       | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                 |
+| `hermes plugins update rembric` reports nothing to update                                 | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                                                                                                                              |
 
 #### Using Hermes alongside Claude Code or Codex on the same machine
 
 Credentials, slug source, and update flow are independent per client. The Rembric server side is identical — same token, same `/api/<slug>/sessions(*)` endpoints. The clients just configure their adapters differently:
 
-| Client          | Credentials from                                  | Slug from                                                          | Update                                                                                        |
-| --------------- | ------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| **Claude Code** | Wizard → keychain (`${user_config.*}`)             | `.rembric` file via the bridge                                     | `/plugin update rembric@rembric`                                                              |
-| **Codex CLI**   | Shell env (`export REMBRIC_*`)                     | `.rembric` file via the bridge                                     | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart       |
-| **Hermes Agent**| Shell env OR `~/.rembric/.env` preload             | Cascade (env / `rembric.json` / `.rembric` / URL parse)            | Re-run the curl-installer                                                                     |
+| Client           | Credentials from                       | Slug from                                               | Update                                                                                   |
+| ---------------- | -------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Claude Code**  | Wizard → keychain (`${user_config.*}`) | `.rembric` file via the bridge                          | `/plugin update rembric@rembric`                                                         |
+| **Codex CLI**    | Shell env (`export REMBRIC_*`)         | `.rembric` file via the bridge                          | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
+| **Hermes Agent** | Shell env OR `~/.rembric/.env` preload | Cascade (env / `rembric.json` / `.rembric` / URL parse) | Re-run the curl-installer                                                                |
 
 Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).
 
@@ -359,7 +366,7 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 
 - **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
 - **MCP connection error in opencode.** Verify the bridge is reachable: `REMBRIC_SERVER_URL=... REMBRIC_API_TOKEN=... node ~/.config/rembric/bin/rembric-bridge.mjs`. Should print one diagnostic line and connect via `mcp-remote`.
-- **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in ` subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
+- **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in `subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
 - **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. Same steady state as Codex CLI.
 
 #### Updating the plugin
@@ -429,6 +436,59 @@ The trade-off: **resuming a session that already ended lands on a terminal row**
 #### Updating the extension
 
 Re-run `pi install npm:@rembric/pi` — idempotent, and it always resolves the latest published version. Restart Pi afterwards.
+
+## Emergency plugin rollback
+
+<details>
+<summary>Temporarily return one client plugin to a previous <code>plugin-vX.Y.Z</code> release</summary>
+
+Use this only to mitigate a broken plugin release while its fix is being prepared. Pick an existing unified `plugin-vX.Y.Z` tag, restart the affected client after the rollback, and return to `main` as soon as the fix is available. A tag is a pin: it does not receive later plugin updates.
+
+### Claude Code
+
+Do **not** remove the marketplace: replacing its source preserves the installed plugin and its enabled state.
+
+```sh
+claude plugin marketplace add susomejias/rembric@plugin-vX.Y.Z
+claude plugin update rembric@rembric
+```
+
+Restart Claude Code. When the fix is available, replace `plugin-vX.Y.Z` with `main` in the first command and run the update again.
+
+### Codex CLI
+
+Codex requires the marketplace source to be replaced. The plugin is inactive between the removal and the final install, so run all three commands together. If either of the last two fails, repeat the same sequence with `main` to recover.
+
+```sh
+codex plugin marketplace remove rembric
+codex plugin marketplace add susomejias/rembric@plugin-vX.Y.Z
+codex plugin add rembric@rembric
+```
+
+Restart Codex and review hooks again if prompted. When the fix is available, repeat the sequence with `main` instead of the tag.
+
+### Hermes Agent and opencode
+
+The canonical installer already accepts a release ref. Replace `<agent>` with `hermes` or `opencode`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/plugin-vX.Y.Z/install.sh \
+  | REMBRIC_NONINTERACTIVE=1 sh -s -- --agent=<agent> --action=update --ref=plugin-vX.Y.Z
+```
+
+Restart the client. After the fix, run its ordinary TUI-installer update without `--ref` to return to `main`.
+
+### Pi
+
+This is the only intentional exception to Pi's normal unpinned install:
+
+```sh
+pi install npm:@rembric/pi@X.Y.Z
+```
+
+Restart Pi. A versioned npm spec is pinned and Pi skips it during normal updates. After the fix, unpin it with `pi install npm:@rembric/pi` and restart Pi again.
+
+</details>
 
 ### Codex CLI (manual config.toml, no plugin)
 
