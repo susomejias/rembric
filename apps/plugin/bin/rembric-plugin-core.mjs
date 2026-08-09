@@ -85,8 +85,9 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const pendingFlush = new Map();
   const userTurnCounts = new Map();
 
+  /** Reports delivery so a caller can skip a follow-up; never throws. */
   async function rembricPost(path, body) {
-    if (disabled) return;
+    if (disabled) return false;
     try {
       const res = await fetch(`${baseUrl}${path}`, {
         method: 'POST',
@@ -100,9 +101,12 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
         diag(`POST ${path} ${res.status} body=${detail}`);
+        return false;
       }
+      return true;
     } catch (err) {
       diag(`POST ${path} ${err?.message ?? 'error'}`);
+      return false;
     }
   }
 
@@ -127,7 +131,11 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     const body = { id: sessionId, agent };
     if (cwd) body.cwd = cwd;
 
-    await rembricPost(`/api/${slug}/sessions`, body);
+    const ensured = await rembricPost(`/api/${slug}/sessions`, body);
+    // Strictly after the ensure, which recreates a row the empty-session purge
+    // removed; skipped when it did not land, since that failure is also a
+    // resume failure.
+    if (ensured) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
   }
 
   function nudgesForTurn(sessionId, prompt) {

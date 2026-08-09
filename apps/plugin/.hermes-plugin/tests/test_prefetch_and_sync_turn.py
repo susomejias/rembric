@@ -329,9 +329,11 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
         provider = self._provider()
         provider.initialize("01PRIMARY", cwd=str(self.tmp / "cwd"), agent_context="primary")
-        self.assertEqual(mock_urlopen.call_count, 1)
+        self.assertEqual(mock_urlopen.call_count, 2)
         url, _ = _captured_post(mock_urlopen)
         self.assertTrue(url.endswith("/sessions"))
+        url_resume, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertTrue(url_resume.endswith("/sessions/01PRIMARY/resume"))
 
 
 if __name__ == "__main__":

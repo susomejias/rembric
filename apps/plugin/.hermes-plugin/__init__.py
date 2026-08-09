@@ -315,6 +315,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._prefetch_cache: dict[str, str] = {}
         self._sync_lock: threading.Lock = threading.Lock()
         self._suppressed: bool = False
+        self._ensured_session_ids: set[str] = set()
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
@@ -365,12 +366,27 @@ class RembricMemoryProvider(MemoryProvider):
                 "skipping session POST"
             )
         else:
-            _api_post(
-                self._base,
-                self._slug,
-                "/sessions",
-                {"id": session_id, "cwd": cwd, "agent": "hermes"},
-            )
+            self._ensure_session(session_id, cwd)
+
+    def _ensure_session(self, session_id: str, cwd: str) -> None:
+        """Register the session row, then resume it on the first ensure of this id.
+
+        A failed ensure suppresses the resume, and the id is remembered either
+        way so neither call is retried.
+        """
+        base, slug = self._base, self._slug
+        if not base or not slug:
+            return
+        first_ensure = session_id not in self._ensured_session_ids
+        self._ensured_session_ids.add(session_id)
+        ensured = _api_post(
+            base,
+            slug,
+            "/sessions",
+            {"id": session_id, "cwd": cwd, "agent": "hermes"},
+        )
+        if ensured and first_ensure:
+            _api_post(base, slug, f"/sessions/{session_id}/resume", {})
 
     def get_tool_schemas(self) -> list[dict]:
         return []
@@ -596,18 +612,19 @@ class RembricMemoryProvider(MemoryProvider):
         reset: bool = False,
         **kwargs: Any,
     ) -> None:
-        # Hermes fires this on context compression, /resume, /branch,
-        # /reset, /new — any path that reassigns AIAgent.session_id without
-        # tearing the provider down. Without overriding, self._session_id
-        # becomes stale and every subsequent lifecycle POST hits the wrong
-        # row.
+        # Hermes fires this on context compression, /resume, /branch, /reset,
+        # /new, /undo and the gateway rewind — any path that reassigns or
+        # re-anchors AIAgent.session_id without tearing the provider down.
+        # Without overriding, self._session_id becomes stale and every
+        # subsequent lifecycle POST hits the wrong row.
         #
-        # Close the previously-cached session in ALL cases, not just when
-        # Hermes passes a populated parent_session_id. /reset and /new use
-        # parent_session_id="" by upstream contract (clean restart, no
-        # continuation lineage) — if we keyed off parent_session_id alone,
-        # the old session would stay `active` forever and never accumulate
-        # its summary. Trust our own cached id instead.
+        # The id does NOT always rotate: measured against hermes_agent 0.19.0,
+        # in-place compression, /undo and the gateway rewind all pass back the
+        # id we already hold. Keying the /end off our own cached id is what
+        # makes those three no-ops. parent_session_id cannot serve as the
+        # discriminator — it is populated on /reset and /new (the host passes
+        # `old_session_id or ""` there) and empty on /undo and the gateway
+        # rewind, so it tracks neither continuation nor restart.
         del kwargs
         _stderr(
             f"[rembric] on_session_switch: new={new_session_id} "
@@ -638,17 +655,8 @@ class RembricMemoryProvider(MemoryProvider):
             self._prefetch_cache.pop(old_id, None)
             self._reset_turn_state()
         self._session_id = new_session_id
-        if self._slug and self._base and new_session_id and not self._suppressed:
-            _api_post(
-                self._base,
-                self._slug,
-                "/sessions",
-                {
-                    "id": new_session_id,
-                    "cwd": self._cwd or os.getcwd(),
-                    "agent": "hermes",
-                },
-            )
+        if new_session_id and not self._suppressed:
+            self._ensure_session(new_session_id, self._cwd or os.getcwd())
 
     def on_memory_write(
         self, action: str, target: str, content: str, **kwargs: Any

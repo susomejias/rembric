@@ -10,7 +10,9 @@
 # 1. Reads `session_id` and `cwd` from hook stdin JSON.
 # 2. Resolves the Rembric project from `${cwd}/.rembric` (PROJECT_SLUG).
 # 3. POSTs `/api/<slug>/sessions {id, cwd, agent}` to create or upsert the row.
-# 4. Emits a nudge so the agent reloads memory.context if relevant.
+# 4. POSTs `/api/<slug>/sessions/<id>/resume`, which returns an ended or
+#    abandoned row to `active` and is a no-op on one that is already active.
+# 5. Emits a nudge so the agent reloads memory.context if relevant.
 #
 # Failure modes (missing slug, server unreachable, malformed input) all
 # fall through to a silent skip + nudge — the host session continues.
@@ -39,6 +41,10 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   AGENT_ESC="$(rembric_json_escape "$AGENT")"
   rembric_post "/api/${SLUG}/sessions" \
     "{\"id\":\"${ID_ESC}\",\"cwd\":\"${CWD_ESC}\",\"agent\":\"${AGENT_ESC}\"}"
+  # Ensure-then-resume, in that order: a row purgeEmpty removed is recreated by
+  # the ensure and the resume then no-ops against it. Never gated on `source` —
+  # no host reports a resume on a cold start, which is the case this repairs.
+  rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
 echo 'rembric: If this is a continuation of recent work, call memory.context before responding.'
