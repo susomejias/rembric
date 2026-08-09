@@ -109,6 +109,12 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      # lint-staged formats only STAGED files, so a file whose formatting drifts
+      # any other way is never corrected. That gap is how 18 files went red
+      # unnoticed; this step is what keeps them green.
+      - name: Format
+        run: pnpm run format:check
+
       - name: Typecheck
         run: pnpm run typecheck
 
