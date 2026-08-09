@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.28.0](https://github.com/susomejias/rembric/compare/server-v0.27.3...server-v0.28.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sessions:** `ended_at` is now write-once per terminal transition rather than per row, and is cleared on resume. Preserving it preserved nothing — every writer matches `status='active'` and overwrites it at the next close — while leaving five read surfaces reporting an `Ended` timestamp on a live row. The discarded value is reported once, as `previousEndedAt` in the resume response, and is not retained.
+
+### Features
+
+* **sessions:** return a closed session to active ([63cd3bc](https://github.com/susomejias/rembric/commit/63cd3bc62e315eeb7ef3c7923673c4fab4a084ef)), closes [#326](https://github.com/susomejias/rembric/issues/326)
+
 ## [0.27.3](https://github.com/susomejias/rembric/compare/server-v0.27.2...server-v0.27.3) (2026-08-09)
 
 
