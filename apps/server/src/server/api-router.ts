@@ -357,6 +357,7 @@ function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 500 {
     case 'project_switch_requires_confirm':
     case 'id_collision':
     case 'conflict':
+    case 'session_deleted':
       return 409;
     default:
       return 500;

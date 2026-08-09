@@ -259,11 +259,6 @@ export class AgentSessionsService {
    * The one late-write path for a row that is already `ended` or
    * `abandoned`. */
   private writeTerminalFields(existing: AgentSession, input: PrecedenceInput): AgentSession {
-    // The `status !== 'active'` throw used to backstop the callers' gates. It is
-    // gone, so this path owns the check for the rows it newly reaches.
-    if (existing.deletedAt) {
-      throw new DomainError('session_deleted', `session '${existing.id}' was soft-deleted`);
-    }
     // No lastActivityAt stamp, unlike the active path: it only drives
     // stale-active retirement and transport resolution, both status='active'.
     const set = precedenceSet(existing, input);
@@ -319,6 +314,12 @@ export class AgentSessionsService {
     if (existing.tokenId !== input.tokenId) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
+    if (existing.deletedAt) {
+      throw new DomainError(
+        'session_deleted',
+        `sessions.writeSummary: session '${sessionId}' was soft-deleted`,
+      );
+    }
     if (existing.status !== 'active') {
       return this.writeTerminalFields(existing, input);
     }
@@ -359,6 +360,15 @@ export class AgentSessionsService {
     }
     if (existing.tokenId !== input.tokenId) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    // This read is the fresh one: the boundary check ran before an awaited body
+    // upload, so only a re-read inside this tick can see a delete that landed
+    // in between.
+    if (existing.deletedAt) {
+      throw new DomainError(
+        'session_deleted',
+        `sessions.end: session '${sessionId}' was soft-deleted`,
+      );
     }
     if (existing.status !== 'active') {
       return this.writeTerminalFields(existing, input);

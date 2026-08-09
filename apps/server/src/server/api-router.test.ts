@@ -807,3 +807,136 @@ describe('createApiRouter', () => {
     });
   });
 });
+
+// The boundary check runs before an awaited body upload, so a soft-delete can
+// land between it and the write. These arms drive that interleave; the guard
+// they cover lives in the service, whose own re-read is the fresh one.
+describe('a soft-delete landing between the boundary check and the write', () => {
+  const RACE_SESSION = 'race-session-0001';
+
+  class SignallingSessions extends AgentSessionsService {
+    public checkReads = 0;
+    public onFirstRead: (() => void) | null = null;
+    override getById(sessionId: string) {
+      const row = super.getById(sessionId);
+      this.checkReads += 1;
+      if (this.checkReads === 1) this.onFirstRead?.();
+      return row;
+    }
+  }
+
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  // Only pulled when the handler calls `c.req.json()`, i.e. strictly after the
+  // boundary check returned. Signalling from `start` instead fires at Request
+  // construction, which makes every arm look clean and the defect look absent.
+  function stalledBody(payload: string, gate: Promise<void>) {
+    const full = new TextEncoder().encode(payload);
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(full.slice(0, 4));
+        await gate;
+        controller.enqueue(full.slice(4));
+        controller.close();
+      },
+    });
+  }
+
+  async function raceCall(path: string, payload: string, interleave: (() => void) | null) {
+    const sessions = new SignallingSessions(createRepositories(db.handle.db), db.handle.db);
+    const checked = deferred();
+    sessions.onFirstRead = () => checked.resolve();
+    const gate = deferred();
+    const app = createApiRouter({ agentSessions: sessions, memory, tokens, projects });
+    const req = Promise.resolve(
+      app.request(path, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${projectScopedToken.plaintext}`,
+        },
+        body: stalledBody(payload, gate.promise),
+        // undici needs this for a streaming body.
+        duplex: 'half',
+      }),
+    );
+    const reached = await Promise.race([checked.promise.then(() => true), req.then(() => false)]);
+    if (reached && interleave) interleave();
+    gate.resolve();
+    const res = await req;
+    let body: Record<string, unknown>;
+    try {
+      body = (await res.json()) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    return { status: res.status, body, reachedTheWindow: reached };
+  }
+
+  beforeEach(() => {
+    agentSessions.ensure({
+      id: RACE_SESSION,
+      tokenId: projectScopedToken.id,
+      projectId,
+      agent: 'probe',
+    });
+  });
+
+  it('CONTROL: without an interleave the write still succeeds', async () => {
+    const r = await raceCall(
+      `/${projectSlug}/sessions/${RACE_SESSION}/end`,
+      JSON.stringify({ summary: 'control one' }),
+      null,
+    );
+    expect(r.status).toBe(200);
+    expect(agentSessions.getById(RACE_SESSION)?.status).toBe('ended');
+  });
+
+  it('CONTROL: a row deleted before the request is refused', async () => {
+    agentSessions.softDelete(RACE_SESSION, { tokenId: projectScopedToken.id });
+    const r = await raceCall(
+      `/${projectSlug}/sessions/${RACE_SESSION}/end`,
+      JSON.stringify({ summary: 'pre-deleted' }),
+      null,
+    );
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('session_deleted');
+  });
+
+  for (const [label, path] of [
+    ['end', 'end'],
+    ['summary', 'summary'],
+  ] as const) {
+    it(`/${label} on an active row refuses a delete that lands inside the window`, async () => {
+      const r = await raceCall(
+        `/${projectSlug}/sessions/${RACE_SESSION}/${path}`,
+        JSON.stringify({ summary: 'raced onto a deleted row' }),
+        () => agentSessions.softDelete(RACE_SESSION, { tokenId: projectScopedToken.id }),
+      );
+      // Without this the interleave never landed inside the window and the
+      // assertions below would pass for the wrong reason.
+      expect(r.reachedTheWindow).toBe(true);
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('session_deleted');
+      const row = agentSessions.getById(RACE_SESSION);
+      expect(row?.status).toBe('active');
+      expect(row?.summary).toBeNull();
+    });
+
+    it(`/${label} on a terminal row reports the delete as 409, not 500`, async () => {
+      agentSessions.end(RACE_SESSION, { tokenId: projectScopedToken.id });
+      const r = await raceCall(
+        `/${projectSlug}/sessions/${RACE_SESSION}/${path}`,
+        JSON.stringify({ summary: 'raced onto a deleted terminal row' }),
+        () => agentSessions.softDelete(RACE_SESSION, { tokenId: projectScopedToken.id }),
+      );
+      expect(r.reachedTheWindow).toBe(true);
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('session_deleted');
+    });
+  }
+});
