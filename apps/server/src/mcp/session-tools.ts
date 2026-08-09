@@ -9,6 +9,7 @@ import { projectScope, type Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,
+  assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
@@ -21,8 +22,8 @@ import { ok } from './result.js';
 
 /**
  * Session-lifecycle MCP tools: session_start / session_end / session_summary
- * / session_get. The schemas are `Record<string, ZodType>` (what the MCP
- * SDK's `server.tool()` expects).
+ * / session_resume / session_get. The schemas are `Record<string, ZodType>`
+ * (what the MCP SDK's `server.tool()` expects).
  */
 
 export const sessionStartSchema = {
@@ -39,6 +40,14 @@ export const sessionSummarySchema = {
   sessionId: z.string().min(1).optional(),
   summary: z.string().min(1).max(SUMMARY_MAX_CHARS, `summary must be ≤${SUMMARY_MAX_CHARS} chars`),
   title: z.string().min(1).max(100).optional(),
+};
+
+// No `.optional()`, unlike session_end/session_summary: there is no terminal
+// row to fall back to (the router binding was cleared on end, and the active
+// lookup filters `status = 'active'`), so a fallback could only guess by
+// recency.
+export const sessionResumeSchema = {
+  sessionId: z.string().min(1),
 };
 
 export const sessionGetSchema = {
@@ -79,6 +88,17 @@ export const sessionSummaryOutput = {
   titleFinal: z.boolean(),
 };
 
+export const sessionResumeOutput = {
+  ok: z.literal(true),
+  sessionId: z.string(),
+  status: z.literal('active'),
+  startedAt: z.string(),
+  resumedAt: z.string(),
+  previousStatus: z.string(),
+  previousEndedAt: z.string().nullable(),
+  title: z.string().nullable(),
+};
+
 export const sessionGetOutput = {
   id: z.string(),
   agent: z.string(),
@@ -94,6 +114,7 @@ export function buildSessionHandlers(deps: SessionToolDeps) {
     sessionStart: handleSessionStart.bind(null, deps),
     sessionEnd: handleSessionEnd.bind(null, deps),
     sessionSummary: handleSessionSummary.bind(null, deps),
+    sessionResume: handleSessionResume.bind(null, deps),
     sessionGet: handleSessionGet.bind(null, deps),
   };
 }
@@ -276,6 +297,44 @@ async function handleSessionSummary(
       title: updated.title,
       summaryFinal: updated.summaryFinal,
       titleFinal: updated.titleFinal,
+    });
+  } catch (err) {
+    return errToMcp(err);
+  }
+}
+
+async function handleSessionResume(deps: SessionToolDeps, args: { sessionId: string }) {
+  const ctx = getRequestContext();
+  let scope: Scope;
+  try {
+    scope = await requireScope(deps, 'write');
+  } catch (err) {
+    return errToMcp(err);
+  }
+  try {
+    assertExplicitSessionOwned(deps.agentSessions, args.sessionId, scope.projectId);
+    const before = deps.agentSessions.getById(args.sessionId);
+    if (!before) {
+      return mcpError('session_not_found', `session '${args.sessionId}' not found`);
+    }
+    const resumed = deps.agentSessions.resume(args.sessionId, { tokenId: ctx.token.id });
+    const key = routerKey();
+    // The pin is what makes attribution unambiguous: `resolveSessionId` reads
+    // the router entry before the sole-active-session fallback, which refuses
+    // to resolve whenever a second session is live for the same (token,
+    // project). Set on the already-active no-op path too.
+    if (key) {
+      deps.router.setActiveSession(key.tokenId, key.mcpSessionId, resumed.id);
+    }
+    return ok({
+      ok: true,
+      sessionId: resumed.id,
+      status: resumed.status,
+      startedAt: resumed.startedAt,
+      resumedAt: resumed.lastActivityAt ?? resumed.startedAt,
+      previousStatus: before.status,
+      previousEndedAt: before.endedAt,
+      title: resumed.title,
     });
   } catch (err) {
     return errToMcp(err);

@@ -794,6 +794,21 @@ describe('MCP protocol conformance', () => {
       expect(desc).toMatch(/reused:true.*ADOPTED/i);
     });
 
+    it('memory.session_resume names every field its outputSchema requires', () => {
+      const desc = descriptions.get('memory.session_resume') ?? '';
+      const required = requiredBySchema.get('memory.session_resume') ?? [];
+      // Read from the live schema rather than restated here, so a field added
+      // to it is covered on the day it lands. Two are named explicitly because
+      // they are the only report of a value the row does not retain, and the
+      // pins below would pass over an empty required list without them.
+      expect(required).toContain('previousStatus');
+      expect(required).toContain('previousEndedAt');
+      for (const field of required) {
+        expect(desc, `${field} unnamed in the description`).toContain(field);
+      }
+      expect(desc).toMatch(/previousEndedAt` is NOT retained/);
+    });
+
     it('no description promises a clamp receipt, and none lists one in its return shape', () => {
       for (const [name, desc] of descriptions) {
         expect(desc, name).not.toMatch(/clamped\s*:\s*true/i);
@@ -1058,6 +1073,7 @@ describe('MCP protocol conformance', () => {
       'memory.session_start',
       'memory.session_summary',
       'memory.session_end',
+      'memory.session_resume',
       'memory.judge',
       'memory.compare',
       'project.use',
@@ -2356,6 +2372,98 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     expect(got.isError).toBe(true);
     expect((readJson(got) as { code?: string }).code).toBe('not_found');
+    await client.close();
+  });
+
+  // `status` and `ended_at` are one fact read from two columns: a reader may
+  // rely on `ended_at IS NOT NULL` iff `status <> 'active'`, before and after a
+  // resume alike. `memory.timeline` reports neither, so what it must not break
+  // is the session thread the pair belongs to.
+  it('a resumed session reads back as active with no endedAt, and its memory timeline stays one thread', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-resume-readback') ??
+      projects.create({ slug: 'integration-resume-readback' });
+    const client = await connect({ projectSlug: project.slug });
+
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const first = (await client.callTool({
+      name: 'memory.save',
+      arguments: { type: 'feedback', title: 'before the end', content: 'resume-thread-first' },
+    })) as ToolResult;
+    const firstSaved = readJson(first) as { id: string };
+
+    await client.callTool({ name: 'memory.session_end', arguments: { sessionId } });
+
+    // Control: the pair moves together, so it must read `ended` + a timestamp
+    // here for the post-resume read to be evidence of anything.
+    const closed = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId },
+    })) as ToolResult;
+    const closedPayload = readJson(closed) as { status: string; endedAt: string | null };
+    expect(closedPayload.status).toBe('ended');
+    expect(closedPayload.endedAt).toEqual(expect.any(String));
+
+    // Saved while nothing is bound: `memory.session_end` cleared the transport
+    // binding, so this one belongs to no session — the control that the thread
+    // below is keyed on the session and not on recency. `fallback` is how the
+    // wire reports that, since no read surface publishes a memory's session id.
+    const orphan = (await client.callTool({
+      name: 'memory.save',
+      arguments: { type: 'feedback', title: 'between stints', content: 'resume-thread-orphan' },
+    })) as ToolResult;
+    const orphanSaved = readJson(orphan) as { id: string };
+    const orphanTl = (await client.callTool({
+      name: 'memory.timeline',
+      arguments: { memoryId: orphanSaved.id, before: 5, after: 5 },
+    })) as ToolResult;
+    expect((readJson(orphanTl) as { fallback: string | null }).fallback).toBe('time_window');
+
+    const resumed = (await client.callTool({
+      name: 'memory.session_resume',
+      arguments: { sessionId },
+    })) as ToolResult;
+    expect(resumed.isError).toBeFalsy();
+
+    const reread = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId },
+    })) as ToolResult;
+    const rereadPayload = readJson(reread) as { status: string; endedAt: string | null };
+    expect(rereadPayload.status).toBe('active');
+    expect(rereadPayload.endedAt).toBeNull();
+
+    const second = (await client.callTool({
+      name: 'memory.save',
+      arguments: { type: 'feedback', title: 'after the resume', content: 'resume-thread-second' },
+    })) as ToolResult;
+    const secondSaved = readJson(second) as { id: string };
+
+    // The neighbours of a session-attached pivot are queried by that session's
+    // id, so the post-resume save appearing here — carrying `<S>` — is the two
+    // stints reading as one thread, with the orphan excluded.
+    const tl = (await client.callTool({
+      name: 'memory.timeline',
+      arguments: { memoryId: firstSaved.id, before: 5, after: 5 },
+    })) as ToolResult;
+    expect(tl.isError).toBeFalsy();
+    const tlPayload = readJson(tl) as {
+      before: { id: string }[];
+      after: { id: string; sessionId: string | null }[];
+      fallback: string | null;
+    };
+    expect(tlPayload.fallback).toBeNull();
+    expect(tlPayload.after.map((m) => m.id)).toEqual([secondSaved.id]);
+    expect(tlPayload.after[0]?.sessionId).toBe(sessionId);
+    expect(tlPayload.before).toEqual([]);
+
+    await client.callTool({ name: 'memory.session_end', arguments: { sessionId } });
     await client.close();
   });
 

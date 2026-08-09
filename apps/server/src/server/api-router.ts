@@ -76,6 +76,11 @@ const sessionEndSchema = z.object({
   final: z.boolean().optional(),
 });
 
+// Strict, unlike `sessionPostSchema`: a resume misspelled onto a body field of
+// the ensure endpoint would be discarded with a 200 the client cannot tell from
+// success, which is the reason this is a route at all.
+const sessionResumeSchema = z.object({}).strict();
+
 const RECALL_SNIPPET_CHARS = 240;
 
 const memoryRecallSchema = z.object({
@@ -211,6 +216,51 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         endedAt: updated.endedAt?.toISOString() ?? null,
         summary: updated.summary,
         title: updated.title,
+      });
+    } catch (err) {
+      return domainErr(c, err);
+    }
+  });
+
+  app.post('/:slug/sessions/:id/resume', async (c) => {
+    const ctx = c.get('rembricCtx');
+    if (!ctx.project) {
+      return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
+    }
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
+    const sessionId = c.req.param('id');
+    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, ctx.project.id);
+    if (blocked) {
+      return c.json(blocked.body, blocked.status);
+    }
+    const body = await readJson(c);
+    const parsed = sessionResumeSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
+    }
+    try {
+      // Re-read rather than reuse the boundary check, which returns null on
+      // success: `previousEndedAt` is the only report of a value the update
+      // discards and the server does not retain.
+      const before = deps.agentSessions.getById(sessionId);
+      if (!before) {
+        throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+      }
+      const resumed = deps.agentSessions.resume(sessionId, { tokenId: ctx.token.id });
+      return c.json({
+        ok: true,
+        sessionId: resumed.id,
+        status: resumed.status,
+        startedAt: resumed.startedAt.toISOString(),
+        resumedAt: (resumed.lastActivityAt ?? resumed.startedAt).toISOString(),
+        previousStatus: before.status,
+        previousEndedAt: before.endedAt?.toISOString() ?? null,
+        title: resumed.title,
       });
     } catch (err) {
       return domainErr(c, err);

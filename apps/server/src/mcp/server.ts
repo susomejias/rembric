@@ -73,6 +73,8 @@ import {
   sessionEndSchema,
   sessionGetOutput,
   sessionGetSchema,
+  sessionResumeOutput,
+  sessionResumeSchema,
   sessionStartOutput,
   sessionStartSchema,
   sessionSummaryOutput,
@@ -325,6 +327,17 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Save session summary'),
     },
     sessionHandlers.sessionSummary,
+  );
+  registerTool(
+    'memory.session_resume',
+    {
+      description:
+        "Return an already-closed session to active, so a resumed conversation reattaches to its original row instead of running unattributed or forking a second one. Call it when you are continuing a conversation whose Rembric session was ended or abandoned (the retirement sweep abandons idle sessions) and you know that session's id — never invent one. Args: { sessionId } — REQUIRED, with no fallback: an omitted id is rejected with invalid_input rather than guessed by recency. Returns: { ok: true, sessionId, status ('active'), startedAt, resumedAt (the new activity stamp; unchanged when the session was already active), previousStatus, previousEndedAt, title }. `previousStatus` and `previousEndedAt` report what this call discarded — `previousEndedAt` is NOT retained on the row afterwards, so this response is the only place it is ever reported. On success the session becomes this connection's session, so later memory.save calls attach to it with no sessionId argument. Resuming an already-active session succeeds and mutates nothing. Errors: session_not_found (unknown id, or a session belonging to another token or project), session_deleted (an operator soft-deleted it — ask them to undelete it).",
+      inputSchema: sessionResumeSchema,
+      outputSchema: sessionResumeOutput,
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Resume session'),
+    },
+    sessionHandlers.sessionResume,
   );
   registerTool(
     'memory.context',

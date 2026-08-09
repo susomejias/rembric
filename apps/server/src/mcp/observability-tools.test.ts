@@ -2,8 +2,8 @@ import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import type { Token } from '../db/schema/tokens.js';
+import { createRepositories } from '../db/repositories/index.js';
+import { tokens as tokensTable, type Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -155,62 +155,68 @@ describe('doctor consolidation.lastRunOps contract', () => {
   });
 });
 
+const TEST_TOKEN_ID = 'tk_observability_test';
+
+function fakeContext(): RequestContext {
+  const token: Token = {
+    id: TEST_TOKEN_ID,
+    name: 'tester',
+    hash: 'hash',
+    scope: '*',
+    projectId: null,
+    createdAt: new Date(),
+    expiresAt: null,
+    revokedAt: null,
+  };
+  return {
+    token,
+    scope: '*',
+    memberProjectIds: [],
+    project: null,
+    requestedSlug: null,
+    mcpSessionId: null,
+  };
+}
+
+function makeObservability(db: TestDb) {
+  const repos = createRepositories(db.handle.db);
+  const memory = new MemoryService(repos, db.handle.db);
+  const relations = new RelationsService(repos, db.handle.db);
+  const projects = new ProjectsService(repos);
+  const agentSessions = new AgentSessionsService(repos, db.handle.db);
+  const handlers = buildObservabilityHandlers({
+    memory,
+    agentSessions,
+    repos,
+    router: new SessionRouter(),
+    projects,
+    doctor: () => ({
+      db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
+      embeddings: { model: 'test', backlog: 0 },
+      entities: { backlog: 0 },
+      consolidation: { lastRunAt: null, lastRunOps: {} },
+      sessions: { active: 0 },
+      review: { needsReview: 0, pendingJudgments: 0 },
+      warnings: [],
+    }),
+    relations,
+    candidates: { perSaveMax: 5 },
+    // No embedNow: exercises the FTS-only detection path deterministically,
+    // matching save-time-candidates.test.ts's own no-embedder convention.
+  });
+  return { repos, memory, agentSessions, handlers };
+}
+
 describe('memory.capture_passive — handler-level (fix-audited-defects)', () => {
   let db: TestDb;
   let defaultScope: Scope;
-  let repos: Repositories;
   let memory: MemoryService;
   let handlers: ReturnType<typeof buildObservabilityHandlers>;
-
-  function fakeContext(): RequestContext {
-    const token: Token = {
-      id: 'tk_capture_passive_test',
-      name: 'tester',
-      hash: 'hash',
-      scope: '*',
-      projectId: null,
-      createdAt: new Date(),
-      expiresAt: null,
-      revokedAt: null,
-    };
-    return {
-      token,
-      scope: '*',
-      memberProjectIds: [],
-      project: null,
-      requestedSlug: null,
-      mcpSessionId: null,
-    };
-  }
 
   beforeEach(() => {
     db = createTestDb();
     defaultScope = defaultProjectScope(db.handle);
-    repos = createRepositories(db.handle.db);
-    memory = new MemoryService(repos, db.handle.db);
-    const relations = new RelationsService(repos, db.handle.db);
-    const projects = new ProjectsService(repos);
-    const agentSessions = new AgentSessionsService(repos, db.handle.db);
-    handlers = buildObservabilityHandlers({
-      memory,
-      agentSessions,
-      repos,
-      router: new SessionRouter(),
-      projects,
-      doctor: () => ({
-        db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
-        embeddings: { model: 'test', backlog: 0 },
-        entities: { backlog: 0 },
-        consolidation: { lastRunAt: null, lastRunOps: {} },
-        sessions: { active: 0 },
-        review: { needsReview: 0, pendingJudgments: 0 },
-        warnings: [],
-      }),
-      relations,
-      candidates: { perSaveMax: 5 },
-      // No embedNow: exercises the FTS-only detection path deterministically,
-      // matching save-time-candidates.test.ts's own no-embedder convention.
-    });
+    ({ memory, handlers } = makeObservability(db));
   });
 
   afterEach(() => db.cleanup());
@@ -297,6 +303,68 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     );
     expect(parse<{ candidatesDetected: number }>(empty).candidatesDetected).toBe(0);
   });
+});
+
+describe('memory.stats — sessionsByStatus across a resume', () => {
+  let db: TestDb;
+  let projectId: string;
+  let agentSessions: AgentSessionsService;
+  let handlers: ReturnType<typeof buildObservabilityHandlers>;
+
+  type StatusCounts = Record<'active' | 'ended' | 'abandoned', number>;
+
+  async function sessionsByStatus(): Promise<StatusCounts> {
+    const r = await runWithContext(fakeContext(), () => handlers.stats());
+    return parse<{ sessionsByStatus: StatusCounts }>(r).sessionsByStatus;
+  }
+
+  beforeEach(() => {
+    db = createTestDb();
+    projectId = defaultProjectScope(db.handle).projectId;
+    db.handle.db
+      .insert(tokensTable)
+      .values({
+        id: TEST_TOKEN_ID,
+        name: 'tester',
+        hash: 'hash',
+        scope: '*',
+        createdAt: new Date(500),
+      })
+      .run();
+    ({ agentSessions, handlers } = makeObservability(db));
+  });
+
+  afterEach(() => db.cleanup());
+
+  // The counter stops being monotonic once a terminal row can be revived:
+  // `ended` and `abandoned` can now decrease. Pinned so a future reader does
+  // not restore a monotonicity assumption memory.stats never guaranteed.
+  it.each(['ended', 'abandoned'] as const)(
+    'a resume moves one row out of %s and into active',
+    async (terminal) => {
+      agentSessions.ensure({
+        id: 'sess-stats-resume',
+        tokenId: TEST_TOKEN_ID,
+        projectId,
+        agent: 'claude-code',
+      });
+      if (terminal === 'ended') {
+        agentSessions.end('sess-stats-resume', { tokenId: TEST_TOKEN_ID });
+      } else {
+        agentSessions.markAbandoned('sess-stats-resume', { adminBypass: true });
+      }
+
+      const before = await sessionsByStatus();
+      expect(before[terminal]).toBe(1);
+      expect(before.active).toBe(0);
+
+      agentSessions.resume('sess-stats-resume', { tokenId: TEST_TOKEN_ID });
+
+      const after = await sessionsByStatus();
+      expect(after[terminal]).toBe(before[terminal] - 1);
+      expect(after.active).toBe(before.active + 1);
+    },
+  );
 });
 
 function parse<T>(resp: unknown): T {
