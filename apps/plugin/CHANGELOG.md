@@ -4,6 +4,18 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.25.3](https://github.com/susomejias/rembric/compare/plugin-v0.25.2...plugin-v0.25.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **pi:** use OG image in package gallery ([f79954a](https://github.com/susomejias/rembric/commit/f79954a1f863beafffad40fc94b4e25c64b70337))
+
+
+### Documentation
+
+* **plugins:** add emergency rollback runbook ([c2b773d](https://github.com/susomejias/rembric/commit/c2b773ddf7abe8d3c31a2221f15f4fdd5f89b7bc))
+
 ## [0.25.2](https://github.com/susomejias/rembric/compare/plugin-v0.25.1...plugin-v0.25.2) (2026-08-09)
 
 
