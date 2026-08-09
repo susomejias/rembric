@@ -2,7 +2,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear",
+        "matcher": "startup|resume|clear|fork",
         "hooks": [
           {
             "type": "command",
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-end.sh"
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/session-end.sh claude-code"
           }
         ]
       }

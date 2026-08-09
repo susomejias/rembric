@@ -97,7 +97,7 @@ Removes the plugin file and bridge file. Does **not** touch `opencode.json` — 
 
 - **Sessions don't appear in the dashboard.** Most likely cause: missing or invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug for session …`. Add a valid `.rembric` to the repo root.
 - **opencode reports an MCP connection error.** Check the bridge can reach the server: `REMBRIC_SERVER_URL='http://...' REMBRIC_API_TOKEN='...' node ~/.config/rembric/bin/rembric-bridge.mjs` should print one diagnostic line and then connect via `mcp-remote`. If it exits 1 with a missing-env error, the placeholders in `opencode.json` weren't filled in.
-- **Session never transitions to `'ended'`.** Expected. opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. Same steady state as Codex CLI.
+- **Session never transitions to `'ended'`.** Expected. opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. opencode is now the only client in this state — Codex CLI does have `SessionEnd` and reaches `ended` on a normal close.
 - **Tested with**: opencode CLI ≥ 1.15.5. If you run an older opencode, the event handler API may not match — the plugin will fail to load and opencode will log a TypeScript error.
 
 ## Files this plugin owns

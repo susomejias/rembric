@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
  * trust prompt counts handlers while its docs count event types.
  */
 
-type HookHandler = { type: string; command: string; async?: boolean };
+type HookHandler = { type: string; command: string; async?: boolean; timeout?: number };
 type HookGroup = { matcher?: string; hooks: HookHandler[] };
 type HookManifest = { hooks: Record<string, HookGroup[]> };
 
@@ -51,9 +51,15 @@ describe('hooks.json (Claude Code)', () => {
     expect(claudeHooks.PostToolUse).toBeUndefined();
   });
 
-  it('declares exactly the two literal SessionStart matchers', () => {
+  // `fork` fires for --fork-session, /fork and /branch from v2.1.214 (before
+  // that the same action arrived as `resume`). Omitting it means a forked
+  // conversation fires NO hook at all: no row, no nudge, session_id NULL for
+  // its whole life. Codex declares no `fork` source, so its manifest keeps
+  // three; both sides are pinned so a "consistency" fix cannot give Codex a
+  // matcher it never emits.
+  it('declares exactly the two literal SessionStart matchers, the registration group including fork', () => {
     expect(claudeHooks.SessionStart.map((group) => group.matcher)).toEqual([
-      'startup|resume|clear',
+      'startup|resume|clear|fork',
       'compact',
     ]);
   });
@@ -84,22 +90,49 @@ describe('hooks.json (Claude Code)', () => {
 });
 
 describe('hooks.codex.json (Codex CLI)', () => {
-  it('declares exactly five event types', () => {
+  it('declares exactly six event types', () => {
     expect(eventTypes(codexHooks)).toEqual(
-      ['SessionStart', 'UserPromptSubmit', 'Stop', 'PreCompact', 'PostCompact'].sort(),
+      [
+        'SessionStart',
+        'UserPromptSubmit',
+        'Stop',
+        'PreCompact',
+        'PostCompact',
+        'SessionEnd',
+      ].sort(),
     );
   });
 
-  it('carries exactly eight handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(8);
+  it('carries exactly nine handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(9);
   });
 
-  it('declares neither SessionEnd nor PostToolUse', () => {
-    expect(codexHooks.SessionEnd).toBeUndefined();
+  it('declares no PostToolUse entry', () => {
     expect(codexHooks.PostToolUse).toBeUndefined();
   });
 
-  it('declares exactly the two literal SessionStart matchers', () => {
+  // `matcher` filters SessionEnd's `reason`, whose only current value is
+  // `other`, so declaring one would only ever narrow the event to nothing.
+  it('declares a matcher-less SessionEnd entry', () => {
+    expect(codexHooks.SessionEnd).toHaveLength(1);
+    expect(Object.keys(codexHooks.SessionEnd[0])).toEqual(['hooks']);
+    expect(codexHooks.SessionEnd[0].hooks).toHaveLength(1);
+  });
+
+  // Codex allows SessionEnd 1 second by default and 3 at most, against 600 for
+  // every other hook. The declared maximum alone still lets one hanging request
+  // eat the whole budget, so the POST is separately capped below it — a hanging
+  // server then yields the stderr diagnostic instead of a handler killed with
+  // no record. Both halves are asserted, plus the control that 3 is the ceiling.
+  it('fits the SessionEnd handler inside the event budget', () => {
+    const entry = codexHooks.SessionEnd[0].hooks[0];
+    expect(entry.timeout).toBe(3);
+    const postBudget = Number(/REMBRIC_POST_MAX_TIME=(\d+)/.exec(entry.command)?.[1]);
+    expect(postBudget).toBeLessThan(entry.timeout as number);
+    expect(entry.timeout as number).toBeLessThanOrEqual(3);
+  });
+
+  it('declares exactly the two literal SessionStart matchers, without fork', () => {
     expect(codexHooks.SessionStart.map((group) => group.matcher)).toEqual([
       'startup|resume|clear',
       'compact',
@@ -185,7 +218,7 @@ describe('every hook invokes the script the spec names', () => {
       'SessionStart command scripts/post-compact.sh claude-code',
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
-      'SessionEnd command scripts/session-end.sh',
+      'SessionEnd command scripts/session-end.sh claude-code',
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
       'Stop command scripts/stop-sync.sh claude-code',
@@ -203,7 +236,17 @@ describe('every hook invokes the script the spec names', () => {
       'Stop command scripts/stop-nudge.sh codex-cli',
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
+      'SessionEnd command scripts/session-end.sh codex-cli',
     ]);
+  });
+
+  // Both manifests wire the same scripts, diverging only through the agent-name
+  // argument. A per-client copy is the shape that lets the two drift, so its
+  // absence is asserted rather than left to review.
+  it('ships no per-client script variant', () => {
+    expect(readdirSync(join(here, '..', 'scripts')).filter((f) => f.endsWith('.codex.sh'))).toEqual(
+      [],
+    );
   });
 
   // An event declaring an empty `hooks` array satisfied both the event-set and

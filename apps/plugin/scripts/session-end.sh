@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# SessionEnd hook — Claude Code only.
+# SessionEnd hook — shared by Claude Code and Codex CLI.
 #
 # Fires once when the host session truly ends (terminal close, /exit,
 # /clear, logout). Per code.claude.com/docs/en/hooks, SessionEnd stdin
 # carries {session_id, transcript_path, cwd, hook_event_name, reason}.
+# Codex fires the same event for the main thread only (never a subagent)
+# per learn.chatgpt.com/docs/hooks, with the same stdin fields.
 #
-# This is the FALLBACK summary writer for the Claude Code case where the
-# agent did not call memory.session_summary mid-session. We read the
-# transcript JSONL, format it, derive a title from the first assistant
-# message, and POST /end {summary, title, final:false}. The server's
-# write-once-with-final precedence preserves any model-authored summary
-# (which would have arrived with final:true) and only falls back to this
-# raw transcript when no final summary exists.
+# Usage: session-end.sh [agent-name]
+#   agent-name selects the per-client transcript parser:
+#     "claude-code" (default) → _transcript.sh::*_claude_code helpers
+#     "codex-cli"             → _transcript.sh::*_codex_cli helpers
 #
-# Codex CLI has no equivalent hook event — Codex uses Stop per-turn
-# (see stop-sync.sh codex-cli) and sessions stay active until abandonStale.
+# This is the FALLBACK summary writer for the case where the agent did not
+# call memory.session_summary mid-session. We read the transcript JSONL,
+# format it, derive a title from the first assistant message, and POST
+# /end {summary, title, final:false}. The server's write-once-with-final
+# precedence preserves any model-authored summary (which would have arrived
+# with final:true) and only falls back to this raw transcript when no final
+# summary exists.
+#
+# Codex allows this ONE event 1 second by default and 3 seconds at most,
+# against 600 for every other hook, so hooks.codex.json declares both
+# "timeout": 3 and REMBRIC_POST_MAX_TIME=2 to leave room for the transcript
+# read and the failure diagnostic. When the budget kills the handler the row
+# stays active and abandonStale retires it, exactly as before.
 #
 # SessionEnd stdout is NOT injected into the model's context (the model
 # is already gone), so we emit nothing.
@@ -26,6 +36,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_api.sh"
 # shellcheck source=./_transcript.sh
 source "${SCRIPT_DIR}/_transcript.sh"
+
+AGENT="${1:-${REMBRIC_AGENT:-claude-code}}"
 
 INPUT=""
 if [ ! -t 0 ]; then
@@ -44,8 +56,16 @@ fi
 SUMMARY=""
 TITLE=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-  TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  case "$AGENT" in
+    codex-cli)
+      SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      ;;
+    *)
+      SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      ;;
+  esac
 fi
 
 if [ -n "$SUMMARY" ]; then
