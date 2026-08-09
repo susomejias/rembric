@@ -504,7 +504,9 @@ The second condition is a stronger guarantee than the equivalent opencode condit
 
 A per-turn debounced flush SHALL also run, as for the other in-process clients, so the server's summary is current at all times and any loss is bounded to one turn.
 
-**One documented exception:** an interrupt does not reach the shutdown handler in either mode. In print mode SIGINT is not registered as a signal (`dist/modes/print-mode.js:32`, `const signals = ["SIGTERM"]`, with SIGHUP wired separately). In the interactive TUI the interrupt byte is a keypress and is measured not to exit: under a pty with keys at t=4 s and stdin held open to t=14 s, Ctrl-C left the handler firing at 13.6 s (the stdin EOF, byte-identical to the no-keys control) while Ctrl-D fired it at 3.6 s. So a Ctrl-C loses the final flush in both modes, Ctrl-D does not, and the per-turn flush bounds the loss to one turn. Convergence after a Ctrl-C is therefore out of scope in exactly the way a hard crash already is.
+**The exception is narrower than this capability first published, and is stated per exit path.** In the interactive TUI an interrupt **does** reach the handler when it is pressed twice within 500 ms: measured against 0.84.1 with timed stdin, that arm fired `session_shutdown` at **5809 ms** against a no-keys stdin-EOF baseline of **10577 ms**, so the session converges exactly as it does on Ctrl-D. Two presses 1500 ms apart landed at **11839 ms** — the EOF — so a single press still reaches nothing. The full measurement, the three qualifiers it depends on, and the retraction of the earlier "in either mode" reading live in the `pi-plugin` capability and are not restated here.
+
+What remains out of scope for convergence, in exactly the way a hard crash already is: a single interrupt press followed by a kill, print-mode SIGINT (read from `dist/modes/print-mode.js:32-44`, which registers `["SIGTERM"]` plus SIGHUP — a source read, not an executed measurement), and SIGKILL. For those the per-turn flush bounds the summary loss to one turn, and the row stays `active` until the stale-active sweep retires it.
 
 #### Scenario: Cooperating agent
 

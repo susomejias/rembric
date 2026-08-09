@@ -220,59 +220,6 @@ Consequently `pi.prompts` SHALL name **only** the materialised location. Pointin
 - **WHEN** the operator types the same slash command
 - **THEN** it SHALL remain literal text and SHALL NOT expand
 
-### Requirement: Session close is awaited, with the interrupt exception recorded
-
-The harness awaits its session-shutdown handler without a timeout (measured against 0.84.1: a 300 ms awaited fetch completes, a 10 s one completes, and an MCP `tools/call` issued from inside the handler completes; SIGTERM and SIGHUP both reach it; the control — SIGKILL — runs nothing). This client SHALL therefore perform its final session flush as an **awaited** call and SHALL NOT use the fire-and-forget dispose flush the opencode client requires.
-
-On a shutdown whose reason closes the session (see "The shutdown reason decides whether the session is ended"), that awaited call SHALL be **one** request: `POST /api/<slug>/sessions/<id>/end` with body `{summary, title, final:false}` built by the same summary-body builder the per-turn flush uses, or `{}` when that builder yields nothing because the transcript accumulator is empty. On a shutdown that does not close the session it SHALL remain the summary POST it is today.
-
-The end SHALL NOT be split into a summary POST followed by an end POST. Because the handler is awaited, the risk this design manages is **exit latency**, not a dropped write: every POST is bounded by `POST_TIMEOUT_MS`, so two sequential POSTs double the worst case a quitting user waits on an unreachable server and exceed the teardown budget this capability's tests assert. One request also removes the question of what a half-completed pair means, and matches `apps/plugin/scripts/session-end.sh`, the one shutdown path in this repository with production mileage.
-
-The end SHALL be the last write this client makes for that session. Precedence is asymmetric across the terminal boundary — active rows are last-final-wins, terminal rows are first-final-wins (see the `sessions` capability) — so a curated `memory.session_summary` arriving after an end is silently dropped. A client SHALL NOT end a session it may still write to.
-
-The shared core SHALL expose both the awaited flush and the fire-and-forget variant so each client uses the one its host's shutdown semantics justify. Copying the fire-and-forget path into this client would discard a measured guarantee for symmetry alone and SHALL NOT be done.
-
-**Known edge, recorded rather than assumed benign:** SIGINT does **not** trigger the shutdown handler in print mode — `dist/modes/print-mode.js:32` reads `const signals = ["SIGTERM"]`, with SIGHUP wired separately — so a Ctrl-C in print mode loses the session close. The interactive TUI behaves the same way, and this was measured rather than inferred: driving a real TUI under a pty with keys delivered at t=4 s and stdin held open until t=14 s, Ctrl-C left the shutdown handler running at **13.6 s** (i.e. the stdin EOF fired it, not the key), byte-identical to the no-keys control, while Ctrl-D fired it at **3.6 s**. The Ctrl-D arm proves the byte channel worked, so the interrupt byte arrived and was simply not treated as an exit. A first version of this probe reported Ctrl-C as working; it was an instrument artefact, because closing stdin ended the session regardless — the control that must fail is what exposed it.
-
-Therefore: **Ctrl-C is not a reliable session-close path in either mode**; Ctrl-D, SIGTERM and SIGHUP are, and all three are awaited. The per-turn flush bounds the loss at one turn.
-
-#### Scenario: Shutdown flush completes
-
-- **GIVEN** a session with accumulated transcript entries
-- **WHEN** the harness shuts the session down via its normal exit path or SIGTERM
-- **THEN** the summary POST SHALL complete before the process exits
-- **AND** the server SHALL hold a non-null summary for that session
-
-#### Scenario: The closing shutdown issues exactly one request
-
-- **GIVEN** a session with accumulated transcript entries
-- **WHEN** the harness shuts the session down with a reason in the end-set
-- **THEN** the extension SHALL issue exactly one session-write request, to the end path, carrying the accumulated summary and derived title with `final:false`
-- **AND** it SHALL NOT also issue a request to the summary path for that session
-
-#### Scenario: An empty transcript still ends the session
-
-- **GIVEN** a registered session whose transcript accumulator is empty
-- **WHEN** the harness shuts the session down with a reason in the end-set
-- **THEN** the extension SHALL POST the end path with an empty JSON body
-- **AND** the row SHALL have `status = 'ended'` with `summary` still null
-
-#### Scenario: The teardown budget holds against an unreachable server
-
-- **GIVEN** a server that accepts connections and never answers
-- **WHEN** the harness shuts the session down with `reason: "quit"`
-- **THEN** the elapsed teardown SHALL stay within the budget this capability's test asserts, measured as the end-to-end handler wall-clock rather than the timing of the request in isolation
-
-#### Scenario: SIGKILL runs nothing (the discriminating control)
-
-- **WHEN** the process receives SIGKILL
-- **THEN** no shutdown handler SHALL run and no summary POST SHALL be issued
-
-#### Scenario: Ctrl-C is documented as lossy in both modes
-
-- **WHEN** the extension's README or the client documentation describes session capture
-- **THEN** it SHALL state that a Ctrl-C does not trigger the session close in either print or interactive mode, that Ctrl-D does, and that the per-turn flush bounds the loss to one turn
-
 ### Requirement: Tools are registered under provider-safe names and proxied to the canonical dotted name
 
 Every tool this extension registers SHALL carry a name matching `^[a-zA-Z0-9_-]+$`, derived from the server's canonical name by replacing each `.` with `_`. The extension SHALL retain the canonical name and SHALL issue `tools/call` with it, so the server only ever receives its own tool names.
@@ -531,3 +478,84 @@ No requirement in this capability SHALL assert that every Pi session reaches a t
 - **WHEN** the process is SIGKILLed
 - **THEN** no shutdown handler SHALL run and no end SHALL be issued
 - **AND** the row SHALL remain `active` until the stale-active retirement sweep flips it to `abandoned`
+
+### Requirement: Session close is awaited, and each exit path is named with the evidence for it
+
+The harness awaits its session-shutdown handler without a timeout (measured against 0.84.1: a 300 ms awaited fetch completes, a 10 s one completes, and an MCP `tools/call` issued from inside the handler completes; SIGTERM and SIGHUP both reach it; the control — SIGKILL — runs nothing). This client SHALL therefore perform its final session flush as an **awaited** call and SHALL NOT use the fire-and-forget dispose flush the opencode client requires.
+
+On a shutdown whose reason closes the session (see "The shutdown reason decides whether the session is ended"), that awaited call SHALL be **one** request: `POST /api/<slug>/sessions/<id>/end` with body `{summary, title, final:false}` built by the same summary-body builder the per-turn flush uses, or `{}` when that builder yields nothing because the transcript accumulator is empty. On a shutdown that does not close the session it SHALL remain the summary POST it is today.
+
+The end SHALL NOT be split into a summary POST followed by an end POST. Because the handler is awaited, the risk this design manages is **exit latency**, not a dropped write: every POST is bounded by `POST_TIMEOUT_MS`, so two sequential POSTs double the worst case a quitting user waits on an unreachable server and exceed the teardown budget this capability's tests assert. One request also removes the question of what a half-completed pair means, and matches `apps/plugin/scripts/session-end.sh`, the one shutdown path in this repository with production mileage.
+
+The end SHALL be the last write this client makes for that session. Precedence is asymmetric across the terminal boundary — active rows are last-final-wins, terminal rows are first-final-wins (see the `sessions` capability) — so a curated `memory.session_summary` arriving after an end is silently dropped. A client SHALL NOT end a session it may still write to.
+
+The shared core SHALL expose both the awaited flush and the fire-and-forget variant so each client uses the one its host's shutdown semantics justify. Copying the fire-and-forget path into this client would discard a measured guarantee for symmetry alone and SHALL NOT be done.
+
+**Two Ctrl-C presses within 500 ms DO close the session, and no surface SHALL state otherwise.** In the interactive TUI, with the prompt focused and on the default `app.clear` binding, `handleCtrlC()` calls the same `void this.shutdown()` that `handleCtrlD()` calls when `now - this.lastSigintTime < 500` (`dist/modes/interactive/interactive-mode.js:3048-3059`); `shutdown()` awaits `runtimeHost.dispose()` before `process.exit(0)` (`:3100`). The emitted reason is `quit`, already in this client's end-set, so the session ends correctly with no code change. Pi advertises the key itself in its startup banner (`:667`, `${keyText("app.clear")} twice` "to exit").
+
+Measured against 0.84.1 under `script -q` with timed stdin, `HOME` redirected and no server running, recording `Date.now()-t0` on `session_shutdown`:
+
+| Arm                                        | `session_shutdown` fired at | Reason |
+| ------------------------------------------ | --------------------------- | ------ |
+| No keys at all (baseline — stdin EOF only) | 10577 ms                    | `quit` |
+| Two Ctrl-C 200 ms apart                    | **5809 ms**                 | `quit` |
+| Two Ctrl-C 1500 ms apart                   | 11839 ms                    | `quit` |
+
+The 200 ms arm fires ~4.8 s before anything the baseline can produce, so only the key explains it; 11839 − 10577 ≈ the 1300 ms of extra key spacing, which is the table checking itself. **`reason` cannot discriminate and never could** — every arm reports `quit`, because the EOF exit and the key exit both terminate through `runtimeHost.dispose()` — so a probe asserting the reason, or merely that the handler ran, passes on the baseline too. Only elapsed time discriminates, and any future re-measurement SHALL be timed against a no-keys baseline.
+
+All three qualifiers above are load-bearing and SHALL be carried wherever this is documented: **twice within 500 ms** (`:3048`'s guard), **in the interactive TUI with the prompt focused** (the handler binds to the default editor, `:2223`; an overlay routes the key elsewhere and is unmeasured), and **on the default binding** (`dist/core/keybindings.js:8`, user-rebindable).
+
+**The exits that reach no handler, each stated with its evidence grade:**
+
+- **A single Ctrl-C press, or two spaced beyond the window** (measured): the 1500 ms arm above lands at the stdin EOF, so the key contributed nothing. A single press clears the editor and arms the window; it SHALL NOT be documented as exiting.
+- **Print-mode SIGINT** (**source read, not executed**): `dist/modes/print-mode.js:32-44` registers `["SIGTERM"]` plus SIGHUP, and `SIGINT` appears nowhere in that file. This claim is labelled rather than presented as measured, because three attempts to execute it failed their control arm and were discarded — inside a requirement whose interactive half was overturned by a run, an unexecuted read SHALL NOT be presented as a measurement.
+- **SIGKILL and OS-level crashes** (measured — the discriminating control below).
+
+For those paths the per-turn flush bounds the **summary** loss at one turn. It bounds nothing about `status`: a process that reaches no handler leaves its row `active` until the server's stale-active sweep retires it as `abandoned`, and no flush changes that.
+
+#### Scenario: Shutdown flush completes
+
+- **GIVEN** a session with accumulated transcript entries
+- **WHEN** the harness shuts the session down via its normal exit path or SIGTERM
+- **THEN** the summary POST SHALL complete before the process exits
+- **AND** the server SHALL hold a non-null summary for that session
+
+#### Scenario: The closing shutdown issues exactly one request
+
+- **GIVEN** a session with accumulated transcript entries
+- **WHEN** the harness shuts the session down with a reason in the end-set
+- **THEN** the extension SHALL issue exactly one session-write request, to the end path, carrying the accumulated summary and derived title with `final:false`
+- **AND** it SHALL NOT also issue a request to the summary path for that session
+
+#### Scenario: An empty transcript still ends the session
+
+- **GIVEN** a registered session whose transcript accumulator is empty
+- **WHEN** the harness shuts the session down with a reason in the end-set
+- **THEN** the extension SHALL POST the end path with an empty JSON body
+- **AND** the row SHALL have `status = 'ended'` with `summary` still null
+
+#### Scenario: The teardown budget holds against an unreachable server
+
+- **GIVEN** a server that accepts connections and never answers
+- **WHEN** the harness shuts the session down with `reason: "quit"`
+- **THEN** the elapsed teardown SHALL stay within the budget this capability's test asserts, measured as the end-to-end handler wall-clock rather than the timing of the request in isolation
+
+#### Scenario: SIGKILL runs nothing (the discriminating control)
+
+- **WHEN** the process receives SIGKILL
+- **THEN** no shutdown handler SHALL run and no summary POST SHALL be issued
+
+#### Scenario: The interrupt is documented by what was measured, not by mode
+
+- **WHEN** the extension's README, the client documentation, or the plugin-development skill describes session capture or how to exit
+- **THEN** it SHALL state that in the interactive TUI two Ctrl-C presses within 500 ms run the same awaited shutdown that Ctrl-D runs, so the session is closed and nothing beyond the current turn is at risk
+- **AND** it SHALL carry all three qualifiers — twice within 500 ms, interactive TUI with the prompt focused, default binding
+- **AND** it SHALL NOT state that a single Ctrl-C press exits, nor that an interrupt fails to close the session in the interactive TUI
+- **AND** where it names print-mode SIGINT it SHALL attribute that to Pi's source rather than to a measurement
+
+#### Scenario: No operator surface attributes a lost turn to an interactive Ctrl-C
+
+- **WHEN** a troubleshooting entry explains a session whose last turn is missing, or a session row with no summary
+- **THEN** the cause it names SHALL be one of the exits measured or read to reach no handler — SIGKILL, an OS-level crash, or an interrupted print-mode run
+- **AND** it SHALL NOT name a Ctrl-C in the interactive TUI as the cause
+- **AND** it SHALL NOT name a cause for which this capability records no evidence
