@@ -472,6 +472,7 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.session_start': {},
   'memory.session_end': {},
   'memory.session_summary': { summary: 's' },
+  'memory.session_resume': { sessionId: 'placeholder' },
   'memory.context': {},
   'memory.session_get': { sessionId: 'placeholder' },
   'memory.timeline': { memoryId: 'placeholder' },

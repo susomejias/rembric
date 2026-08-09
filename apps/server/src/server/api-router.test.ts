@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
+import { buildSessionHandlers } from '../mcp/session-tools.js';
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -11,6 +12,8 @@ import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { createApiRouter } from './api-router.js';
+import { runWithContext, type RequestContext } from './request-context.js';
+import { SessionRouter } from './session-router.js';
 
 let db: TestDb;
 let agentSessions: AgentSessionsService;
@@ -689,6 +692,378 @@ describe('createApiRouter', () => {
       expect(row?.status).toBe('abandoned');
       expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
       expect(row?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
+    });
+  });
+
+  describe('no session route resumes a terminal row', () => {
+    async function terminalSession(id: string, terminal: 'ended' | 'abandoned') {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id },
+      });
+      if (terminal === 'ended') {
+        await call(app, 'POST', `/${projectSlug}/sessions/${id}/end`, {
+          token: adminToken.plaintext,
+        });
+      } else {
+        agentSessions.markAbandoned(id, { adminBypass: true });
+      }
+      return app;
+    }
+
+    it.each(['ended', 'abandoned'] as const)(
+      'the ensure POST reports created: false and leaves the row %s',
+      async (terminal) => {
+        const id = `sess-ensure-${terminal}`;
+        const app = await terminalSession(id, terminal);
+        const before = agentSessions.getById(id);
+
+        const r = await call(app, 'POST', `/${projectSlug}/sessions`, {
+          token: adminToken.plaintext,
+          body: { id },
+        });
+
+        expect(r.status).toBe(200);
+        expect(r.body.created).toBe(false);
+        expect(r.body.sessionId).toBe(id);
+        const row = agentSessions.getById(id);
+        expect(row?.status).toBe(terminal);
+        expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+      },
+    );
+
+    it('neither /summary nor /end revives it either, and the row is resumable all along', async () => {
+      const id = 'sess-no-http-resume';
+      const app = await terminalSession(id, 'ended');
+      const before = agentSessions.getById(id);
+
+      for (const path of [
+        `/${projectSlug}/sessions/${id}/summary`,
+        `/${projectSlug}/sessions/${id}/end`,
+      ]) {
+        const r = await call(app, 'POST', path, {
+          token: adminToken.plaintext,
+          body: { summary: 'still talking' },
+        });
+        expect(r.status).toBe(200);
+        const row = agentSessions.getById(id);
+        expect(row?.status).toBe('ended');
+        expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+      }
+
+      // Control: the row was revivable the whole time — only the service verb
+      // does it, so the assertions above are about the routes, not the fixture.
+      agentSessions.resume(id, { tokenId: adminToken.id });
+      const resumed = agentSessions.getById(id);
+      expect(resumed?.status).toBe('active');
+      expect(resumed?.endedAt).toBeNull();
+    });
+  });
+
+  describe('every session route is classified as resuming or not', () => {
+    /**
+     * Keyed by the Hono pattern the router registers, and asserted set-equal to
+     * it below: the previous shape enumerated only `/summary` and `/end`, so a
+     * new route that revived a terminal row would have passed unnoticed.
+     */
+    const SESSION_ROUTES: Record<
+      string,
+      { resumesTerminalRows: boolean; body: (id: string) => unknown }
+    > = {
+      '/:slug/sessions': { resumesTerminalRows: false, body: (id) => ({ id }) },
+      '/:slug/sessions/:id/summary': {
+        resumesTerminalRows: false,
+        body: () => ({ summary: 'still talking' }),
+      },
+      '/:slug/sessions/:id/end': { resumesTerminalRows: false, body: () => ({}) },
+      '/:slug/sessions/:id/resume': { resumesTerminalRows: true, body: () => ({}) },
+    };
+
+    it('the classification covers exactly the POST routes the router registers', () => {
+      const registered = makeApp()
+        .routes.filter((r) => r.method === 'POST' && r.path.startsWith('/:slug/sessions'))
+        .map((r) => r.path);
+      expect([...new Set(registered)].sort()).toEqual(Object.keys(SESSION_ROUTES).sort());
+    });
+
+    for (const [route, spec] of Object.entries(SESSION_ROUTES)) {
+      const verb = spec.resumesTerminalRows ? 'returns' : 'does not return';
+      it(`POST ${route} ${verb} an ended row to active`, async () => {
+        const id = `sess-class-${route.replace(/[^a-z]/g, '') || 'root'}`;
+        agentSessions.ensure({ id, tokenId: adminToken.id, projectId, agent: 'probe' });
+        agentSessions.end(id, { tokenId: adminToken.id });
+        const before = agentSessions.getById(id);
+        expect(before?.status).toBe('ended');
+
+        const path = `/${projectSlug}${route.replace('/:slug', '').replace(':id', id)}`;
+        const r = await call(makeApp(), 'POST', path, {
+          token: adminToken.plaintext,
+          body: spec.body(id),
+        });
+
+        expect(r.status).toBe(200);
+        const row = agentSessions.getById(id);
+        if (spec.resumesTerminalRows) {
+          expect(row?.status).toBe('active');
+          expect(row?.endedAt).toBeNull();
+        } else {
+          expect(row?.status).toBe('ended');
+          expect(row?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+        }
+      });
+    }
+  });
+
+  describe('POST /:slug/sessions/:id/resume', () => {
+    function terminalSession(id: string, terminal: 'ended' | 'abandoned') {
+      agentSessions.ensure({ id, tokenId: adminToken.id, projectId, agent: 'probe' });
+      if (terminal === 'ended') {
+        agentSessions.end(id, { tokenId: adminToken.id });
+      } else {
+        agentSessions.markAbandoned(id, { adminBypass: true });
+      }
+      return agentSessions.getById(id)!;
+    }
+
+    it('returns an ended session to active and reports what it discarded', async () => {
+      const id = 'sess-resume-ended';
+      const before = terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(200);
+      const { resumedAt, ...reported } = r.body;
+      expect(reported).toEqual({
+        ok: true,
+        sessionId: id,
+        status: 'active',
+        startedAt: before.startedAt.toISOString(),
+        previousStatus: 'ended',
+        previousEndedAt: before.endedAt!.toISOString(),
+        title: before.title,
+      });
+      const row = agentSessions.getById(id);
+      expect(resumedAt).toBe(row?.lastActivityAt?.toISOString());
+      expect(row?.status).toBe('active');
+      expect(row?.endedAt).toBeNull();
+    });
+
+    it('resumes an abandoned session identically, differing only in previousStatus', async () => {
+      const id = 'sess-resume-abandoned';
+      const before = terminalSession(id, 'ended');
+
+      const fromEnded = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+      const afterEnded = agentSessions.getById(id)!;
+
+      agentSessions.markAbandoned(id, { adminBypass: true });
+      const fromAbandoned = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+      const afterAbandoned = agentSessions.getById(id)!;
+
+      expect(fromAbandoned.body.previousStatus).toBe('abandoned');
+      expect(fromEnded.body.previousStatus).toBe('ended');
+      // The two timestamps are the two transitions' own clocks, not a
+      // difference in what the route reports.
+      const normalizeResponse = (body: Record<string, unknown>) => ({
+        ...body,
+        previousStatus: 'ended',
+        previousEndedAt: null,
+        resumedAt: null,
+      });
+      expect(normalizeResponse(fromAbandoned.body)).toEqual(normalizeResponse(fromEnded.body));
+      expect(fromAbandoned.body.previousEndedAt).not.toBeNull();
+      expect(fromEnded.body.previousEndedAt).not.toBeNull();
+      // `last_activity_at` is the one column a second resume must move.
+      expect({ ...afterAbandoned, lastActivityAt: null }).toEqual({
+        ...afterEnded,
+        lastActivityAt: null,
+      });
+      expect(afterAbandoned.lastActivityAt).not.toBeNull();
+      expect(before.endedAt).not.toBeNull();
+    });
+
+    it('is a success no-op on an already-active row, leaving last_activity_at alone', async () => {
+      const id = 'sess-resume-noop';
+      agentSessions.ensure({ id, tokenId: adminToken.id, projectId, agent: 'probe' });
+      const before = agentSessions.getById(id)!;
+      expect(before.lastActivityAt).not.toBeNull();
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(200);
+      expect(r.body.previousStatus).toBe('active');
+      expect(r.body.previousEndedAt).toBeNull();
+      expect(r.body.resumedAt).toBe(before.lastActivityAt!.toISOString());
+      const after = agentSessions.getById(id)!;
+      expect(after.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+      expect(after).toEqual(before);
+    });
+
+    it('refuses an unknown property, with the {} control succeeding in the same run', async () => {
+      const id = 'sess-resume-strict';
+      terminalSession(id, 'ended');
+
+      const rejected = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: { epoch: 3 },
+      });
+
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.code).toBe('invalid_input');
+      expect(rejected.body.message).toContain('epoch');
+      expect(agentSessions.getById(id)?.status).toBe('ended');
+
+      const accepted = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+      expect(accepted.status).toBe(200);
+      expect(agentSessions.getById(id)?.status).toBe('active');
+    });
+
+    it('accepts an absent body, as the bash helper sends', async () => {
+      const id = 'sess-resume-nobody';
+      terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+      });
+
+      expect(r.status).toBe(200);
+      expect(agentSessions.getById(id)?.status).toBe('active');
+    });
+
+    it('409 session_deleted on a soft-deleted row, which stays deleted and terminal', async () => {
+      const id = 'sess-resume-deleted';
+      terminalSession(id, 'ended');
+      agentSessions.softDelete(id, { tokenId: adminToken.id });
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('session_deleted');
+      const row = agentSessions.getById(id);
+      expect(row?.deletedAt).not.toBeNull();
+      expect(row?.status).toBe('ended');
+    });
+
+    it('404 session_not_found when the row belongs to another token, never 403', async () => {
+      const id = 'sess-resume-othertoken';
+      const before = terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: projectScopedToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('session_not_found');
+      expect(agentSessions.getById(id)).toEqual(before);
+    });
+
+    it('404 session_not_found when the row belongs to another project', async () => {
+      const other = projects.create({ slug: 'resume-other-proj' });
+      const id = 'sess-resume-otherproj';
+      agentSessions.ensure({
+        id,
+        tokenId: adminToken.id,
+        projectId: other.id,
+        agent: 'probe',
+      });
+      agentSessions.end(id, { tokenId: adminToken.id });
+      const before = agentSessions.getById(id);
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('session_not_found');
+      expect(agentSessions.getById(id)).toEqual(before);
+    });
+
+    it('403 forbidden for a read-only token, leaving the row terminal', async () => {
+      const readOnly = tokens.create({
+        name: 'resume-read-only',
+        project: projects.getById(projectId)!,
+        access: 'read',
+      });
+      const id = 'sess-resume-readonly';
+      const before = terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: readOnly.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('forbidden');
+      expect(agentSessions.getById(id)).toEqual(before);
+    });
+
+    it('404 on the path-less /sessions/:id/resume', async () => {
+      const id = 'sess-resume-noslug';
+      terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('not_found');
+      expect(agentSessions.getById(id)?.status).toBe('ended');
+    });
+
+    it('does not pin the SessionRouter, though memory.session_resume on the same row does', async () => {
+      const tokenRow = db.handle.db
+        .select()
+        .from(tokensSchema)
+        .where(eq(tokensSchema.id, adminToken.id))
+        .get()!;
+      const router = new SessionRouter();
+      const handlers = buildSessionHandlers({ agentSessions, projects, router });
+      const mcpSessionId = 'mcp-transport-1';
+      const ctx: RequestContext = {
+        token: tokenRow,
+        scope: '*',
+        memberProjectIds: [],
+        project: projects.getById(projectId)!,
+        requestedSlug: projectSlug,
+        mcpSessionId,
+      };
+      const id = 'sess-resume-router';
+      terminalSession(id, 'ended');
+
+      const r = await call(makeApp(), 'POST', `/${projectSlug}/sessions/${id}/resume`, {
+        token: adminToken.plaintext,
+        body: {},
+      });
+      expect(r.status).toBe(200);
+      expect(router.get(tokenRow.id, mcpSessionId)?.rembricSessionId ?? null).toBeNull();
+
+      agentSessions.end(id, { tokenId: adminToken.id });
+      const mcp = (await runWithContext(ctx, () =>
+        handlers.sessionResume({ sessionId: id }),
+      )) as unknown as { isError?: boolean };
+      expect(mcp.isError).toBeFalsy();
+      expect(router.get(tokenRow.id, mcpSessionId)?.rembricSessionId).toBe(id);
     });
   });
 

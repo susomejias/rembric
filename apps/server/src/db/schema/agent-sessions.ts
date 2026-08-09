@@ -15,21 +15,21 @@ import { tokens } from './tokens.js';
  * Append-only contract:
  *
  *   - immutable: id, token_id, project_id, agent, started_at
- *   - mutable status FSM: active → ended | abandoned (terminal)
- *   - mutable once: ended_at
+ *   - mutable status FSM: active → ended | abandoned → active
+ *   - mutable once per terminal transition, cleared on resume: ended_at
  *   - mutable with `final`-flag precedence: summary, title
  *     (a `final:true` write locks the value; subsequent `final:false`
  *      writes are ignored; subsequent `final:true` writes replace)
  *
  * Status transitions:
  *
- *   active    -> ended       (memory.session_end / POST /end)
- *   active    -> abandoned   (startup sweep for stale rows)
- *   ended     -> (terminal)
- *   abandoned -> (terminal)
+ *   active            -> ended       (memory.session_end / POST /end)
+ *   active            -> abandoned   (startup sweep for stale rows)
+ *   ended | abandoned -> active      (memory.session_resume, the only
+ *                                     edge back; `ended_at` is cleared)
  *
- * Terminal is terminal for `status`/`ended_at` only: both terminal states
- * still accept `summary`/`title` writes under the `final` precedence.
+ * A terminal row still accepts `summary`/`title` writes under the `final`
+ * precedence, and moves `status`/`ended_at` only through `resume`.
  *
  * `memory.session_id` and `confirmations.session_id` reference this
  * table. Both columns are nullable for backwards-compat with pre-v0.5

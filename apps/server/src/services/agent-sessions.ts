@@ -87,7 +87,8 @@ function assertSummaryWithinCap(callsite: string, summary: string | undefined): 
  * Append-only contract:
  *   - Never DELETE a row
  *   - Never UPDATE `agent`, `token_id`, `project_id`, `started_at`
- *   - Only flip `status` and write `ended_at` once
+ *   - Flip `status` only along the FSM, and write `ended_at` once per
+ *     terminal transition — `resume` clears it on the way back to `active`
  *   - `summary` and `title` are mutable subject to `final`-flag precedence:
  *     a `final:true` write locks the column; subsequent `final:false`
  *     writes are no-ops; subsequent `final:true` writes replace
@@ -381,6 +382,46 @@ export class AgentSessionsService {
         'session_already_ended',
         `session '${sessionId}' was concurrently ended`,
       );
+    }
+    return updated;
+  }
+
+  /**
+   * The ONLY path back to `active`, reached only by `memory.session_resume`
+   * naming the row. `ended` and `abandoned` behave identically: `abandoned`
+   * is the steady state for the clients that never post `/end`, and the
+   * outcome of stale-active retirement for the rest.
+   */
+  resume(sessionId: string, input: { tokenId: string }): AgentSession {
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.tokenId !== input.tokenId) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    // Read in this tick, like `end`: the tool-boundary gate ran before the
+    // request body was awaited and can be stale by now.
+    if (existing.deletedAt) {
+      throw new DomainError(
+        'session_deleted',
+        `sessions.resume: session '${sessionId}' was soft-deleted at ${existing.deletedAt.toISOString()}`,
+      );
+    }
+    if (existing.status === 'active') {
+      return existing;
+    }
+    const ts = this.now();
+    // `lastActivityAt` is required, not cosmetic: `abandonInactiveSince`
+    // compares COALESCE(last_activity_at, started_at) against its cutoff, so
+    // an unstamped revival is retired again by the next sweep pass.
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      { status: 'active', endedAt: null, lastActivityAt: ts },
+      { requireActive: false },
+    );
+    if (!updated) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
     return updated;
   }

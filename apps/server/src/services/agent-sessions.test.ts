@@ -6,6 +6,7 @@ import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
+import { DomainError } from './errors.js';
 import { ProjectsService } from './projects.js';
 import { projectScope } from './scope.js';
 import { TokensService } from './tokens.js';
@@ -917,6 +918,99 @@ describe('AgentSessionsService', () => {
     });
   });
 
+  describe('resume', () => {
+    const START = new Date('2026-02-01T08:00:00.000Z');
+    const LATER = new Date('2026-02-04T09:30:00.000Z');
+
+    let repos: ReturnType<typeof createRepositories>;
+    let clock: Date;
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      repos = createRepositories(db.handle.db);
+      clock = START;
+      svc = new AgentSessionsService(repos, db.handle.db, () => clock);
+    });
+
+    /** Terminal row at START carrying a curated summary and title. */
+    function terminal(status: 'ended' | 'abandoned') {
+      const s = svc.start({ tokenId, projectId, agent: 'claude', description: 'seeded' });
+      svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'curated handoff',
+        title: 'Fix the reaper',
+        final: true,
+      });
+      return status === 'ended'
+        ? svc.end(s.id, { tokenId })
+        : svc.markAbandoned(s.id, { adminBypass: true });
+    }
+
+    function codeOf(fn: () => unknown): string {
+      try {
+        fn();
+      } catch (err) {
+        return err instanceof DomainError ? err.code : 'not-a-domain-error';
+      }
+      return 'no-throw';
+    }
+
+    for (const status of ['ended', 'abandoned'] as const) {
+      it(`returns a ${status} row to active, clearing ended_at and stamping activity`, () => {
+        const before = terminal(status);
+        expect(before.endedAt?.getTime()).toBe(START.getTime());
+        clock = LATER;
+
+        const resumed = svc.resume(before.id, { tokenId });
+
+        expect(resumed.status).toBe('active');
+        expect(resumed.endedAt).toBeNull();
+        expect(resumed.lastActivityAt?.getTime()).toBe(LATER.getTime());
+        expect(svc.getById(before.id)).toEqual(resumed);
+      });
+    }
+
+    it('masks another token’s session as session_not_found without mutating it', () => {
+      const before = terminal('ended');
+      expect(codeOf(() => svc.resume(before.id, { tokenId: otherTokenId }))).toBe(
+        'session_not_found',
+      );
+      expect(svc.getById(before.id)).toEqual(before);
+    });
+
+    it('throws session_not_found for an unknown id', () => {
+      expect(codeOf(() => svc.resume('does-not-exist', { tokenId }))).toBe('session_not_found');
+    });
+
+    it('refuses a soft-deleted row and leaves deleted_at set', () => {
+      const before = terminal('abandoned');
+      svc.softDelete(before.id, { adminBypass: true });
+      const deleted = svc.getById(before.id);
+      clock = LATER;
+
+      expect(codeOf(() => svc.resume(before.id, { tokenId }))).toBe('session_deleted');
+
+      const after = svc.getById(before.id);
+      expect(after?.deletedAt?.getTime()).toBe(deleted?.deletedAt?.getTime());
+      expect(after?.status).toBe('abandoned');
+      expect(after?.endedAt?.getTime()).toBe(START.getTime());
+      expect(after?.lastActivityAt?.getTime()).toBe(START.getTime());
+    });
+
+    it('is a no-op success on an already-active row, emitting no UPDATE', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'live' });
+      clock = LATER;
+      const spy = vi.spyOn(repos.agentSessions, 'updateById');
+
+      const resumed = svc.resume(s.id, { tokenId });
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(resumed).toEqual(s);
+      expect(resumed.lastActivityAt?.getTime()).toBe(START.getTime());
+      spy.mockRestore();
+    });
+  });
+
   // Runtime rather than grep: a mutation test showed a counting invariant over
   // `requireActive: false` passes when a revival is added inside the terminal
   // write path itself. Driving every mutating verb is the only form that fails.
@@ -929,7 +1023,7 @@ describe('AgentSessionsService', () => {
     }
 
     for (const status of ['ended', 'abandoned'] as const) {
-      it(`no verb moves a ${status} row back to active or rewrites ended_at`, () => {
+      it(`no verb but resume moves a ${status} row back to active or rewrites ended_at`, () => {
         const id = terminal(status);
         const before = sessions.getById(id)!;
 
@@ -955,5 +1049,195 @@ describe('AgentSessionsService', () => {
         }
       });
     }
+
+    // The ninth verb, asserted positively rather than appended to the refusal
+    // list above: it is the one allowed to move `status` and `ended_at`, so
+    // every OTHER column is named individually. A count of changed columns
+    // would not distinguish "moved three" from "moved three others".
+    describe('resume is the one verb that may move them', () => {
+      const START = new Date('2026-03-01T07:00:00.000Z');
+      const RESUMED_AT = new Date('2026-03-05T18:45:00.000Z');
+
+      let clock: Date;
+      let svc: AgentSessionsService;
+
+      beforeEach(() => {
+        clock = START;
+        svc = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db, () => clock);
+      });
+
+      /** Every column non-null before the resume, so identity is not vacuous. */
+      function terminalWithContent(status: 'ended' | 'abandoned') {
+        const s = svc.start({
+          tokenId,
+          projectId,
+          agent: `t-${status}`,
+          description: 'seeded goal',
+        });
+        svc.writeSummary(s.id, {
+          tokenId,
+          summary: 'curated handoff',
+          title: 'Fix the reaper',
+          final: true,
+        });
+        return status === 'ended'
+          ? svc.end(s.id, { tokenId })
+          : svc.markAbandoned(s.id, { adminBypass: true });
+      }
+
+      for (const status of ['ended', 'abandoned'] as const) {
+        it(`moves exactly status, ended_at and last_activity_at on a ${status} row`, () => {
+          const before = terminalWithContent(status);
+          clock = RESUMED_AT;
+
+          svc.resume(before.id, { tokenId });
+          const after = svc.getById(before.id)!;
+
+          expect(before.status).toBe(status);
+          expect(after.status).toBe('active');
+          expect(before.endedAt?.getTime()).toBe(START.getTime());
+          expect(after.endedAt).toBeNull();
+          expect(before.lastActivityAt?.getTime()).toBe(START.getTime());
+          expect(after.lastActivityAt?.getTime()).toBe(RESUMED_AT.getTime());
+
+          expect(after.id).toBe(before.id);
+          expect(after.agent).toBe(before.agent);
+          expect(after.tokenId).toBe(before.tokenId);
+          expect(after.projectId).toBe(before.projectId);
+          expect(after.description).toBe('seeded goal');
+          expect(after.description).toBe(before.description);
+          expect(after.startedAt.getTime()).toBe(before.startedAt.getTime());
+          expect(after.summary).toBe('curated handoff');
+          expect(after.summary).toBe(before.summary);
+          expect(after.summaryFinal).toBe(true);
+          expect(after.summaryFinal).toBe(before.summaryFinal);
+          expect(after.title).toBe('Fix the reaper');
+          expect(after.title).toBe(before.title);
+          expect(after.titleFinal).toBe(true);
+          expect(after.titleFinal).toBe(before.titleFinal);
+          expect(before.deletedAt).toBeNull();
+          expect(after.deletedAt).toBeNull();
+        });
+      }
+
+      it('does not launder a death: markAbandoned still refuses an ended row, and needs a resume first', () => {
+        const before = terminalWithContent('ended');
+
+        expect(() => svc.markAbandoned(before.id, { adminBypass: true })).toThrow(/already ended/);
+        expect(svc.getById(before.id)?.status).toBe('ended');
+
+        clock = RESUMED_AT;
+        svc.resume(before.id, { tokenId });
+        const abandoned = svc.markAbandoned(before.id, { adminBypass: true });
+
+        expect(abandoned.status).toBe('abandoned');
+        expect(abandoned.endedAt?.getTime()).toBe(RESUMED_AT.getTime());
+        expect(abandoned.endedAt?.getTime()).not.toBe(before.endedAt?.getTime());
+      });
+    });
+  });
+
+  describe('resume, as its consumers see it', () => {
+    const START = new Date('2026-04-01T00:00:00.000Z');
+    const ABANDON_WINDOW_MS = 24 * 3600 * 1000;
+    const LATER = new Date(START.getTime() + 2 * ABANDON_WINDOW_MS);
+
+    let repos: ReturnType<typeof createRepositories>;
+    let clock: Date;
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      repos = createRepositories(db.handle.db);
+      clock = START;
+      svc = new AgentSessionsService(repos, db.handle.db, () => clock);
+    });
+
+    /** Active row that passes `recentForContext`'s curated-summary filter. */
+    function curated(agent: string) {
+      const s = svc.start({ tokenId, projectId, agent });
+      svc.writeSummary(s.id, { tokenId, summary: `${agent} handoff`, title: agent, final: true });
+      return s;
+    }
+
+    it('survives the very sweep that abandoned it, re-run over the same window', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'reaped' });
+      clock = LATER;
+
+      expect(svc.abandonStale({ olderThanMs: ABANDON_WINDOW_MS }).abandoned).toBe(1);
+      expect(svc.getById(s.id)?.status).toBe('abandoned');
+
+      svc.resume(s.id, { tokenId });
+
+      expect(svc.abandonStale({ olderThanMs: ABANDON_WINDOW_MS }).abandoned).toBe(0);
+      const after = svc.getById(s.id);
+      expect(after?.status).toBe('active');
+      expect(after?.endedAt).toBeNull();
+      expect(after?.lastActivityAt?.getTime()).toBe(LATER.getTime());
+    });
+
+    it('leaves the purgeable-empty set it was demonstrably in beforehand', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'empty' });
+      svc.end(s.id, { tokenId });
+      clock = LATER;
+      const cutoff = LATER.getTime();
+
+      expect(repos.agentSessions.findPurgeableEmptyIds(cutoff)).toEqual([s.id]);
+      expect(svc.countPurgeableEmpty()).toBe(1);
+
+      svc.resume(s.id, { tokenId });
+
+      expect(repos.agentSessions.findPurgeableEmptyIds(cutoff)).toEqual([]);
+      expect(svc.countPurgeableEmpty()).toBe(0);
+    });
+
+    it('appears exactly once in recentForContext, keeping its id and startedAt', () => {
+      const s = curated('resumed-once');
+      svc.end(s.id, { tokenId });
+      clock = LATER;
+      svc.resume(s.id, { tokenId });
+
+      const mine = svc.recentForContext({ projectId, limit: 25 }).filter((r) => r.id === s.id);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]?.startedAt.getTime()).toBe(START.getTime());
+      expect(mine[0]?.status).toBe('active');
+      expect(mine[0]?.endedAt).toBeNull();
+    });
+
+    // The accepted limitation of `started_at DESC` ordering, pinned positively
+    // so it cannot be "fixed" without a change: recency of activity is not the
+    // sort key, and a resume does not promote a session.
+    it('does not re-sort to the head of recentForContext on resume', () => {
+      const older = curated('older-then-resumed');
+      svc.end(older.id, { tokenId });
+      clock = new Date(START.getTime() + ABANDON_WINDOW_MS);
+      const newer = curated('newer');
+      clock = LATER;
+      svc.resume(older.id, { tokenId });
+
+      expect(svc.recentForContext({ projectId, limit: 25 }).map((r) => r.id)).toEqual([
+        newer.id,
+        older.id,
+      ]);
+      expect(svc.getById(older.id)?.startedAt.getTime()).toBe(START.getTime());
+    });
+
+    it('markAbandoned still refuses an ended row that was never resumed', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'ended-not-resumed' });
+      const before = svc.end(s.id, { tokenId });
+      clock = LATER;
+
+      let code = 'no-throw';
+      try {
+        svc.markAbandoned(s.id, { adminBypass: true });
+      } catch (err) {
+        code = err instanceof DomainError ? err.code : 'not-a-domain-error';
+      }
+      expect(code).toBe('session_already_ended');
+
+      const after = svc.getById(s.id);
+      expect(after?.status).toBe('ended');
+      expect(after?.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+      expect(after?.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+    });
   });
 });
