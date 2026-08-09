@@ -804,8 +804,9 @@ function renderLogin(error: string | null, next: string | null = null): string {
           <span><span class="bn"></span> CLAUDE CODE</span>
           <span><span class="bn"></span> OPENCODE</span>
           <span><span class="bn"></span> CODEX CLI</span>
-          <span><span class="bn"></span> MCP CLIENTS</span>
+          <span><span class="bn"></span> PI</span>
           <span><span class="bn"></span> HERMES</span>
+          <span><span class="bn"></span> MCP CLIENTS</span>
         </div>
       </div>
       <div class="right">

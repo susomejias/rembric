@@ -150,6 +150,15 @@ function textOf(cell: string): string {
   return cell.replace(/<[^>]*>/g, '').trim();
 }
 
+/** Labels of the login page's `.clients` footer, in render order. */
+function loginClientLabels(html: string): string[] {
+  const container = /<div class="clients\b[^"]*"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1];
+  if (container === undefined) return [];
+  return [...container.matchAll(/<span class="bn"><\/span>([^<]*)<\/span>/g)].map((m) =>
+    (m[1] ?? '').trim(),
+  );
+}
+
 /** Second connection onto the running server's data dir, for fixtures and assertions. */
 async function withDataDb<T>(dataDir: string, fn: (handle: DbHandle) => T): Promise<T> {
   const { createDb } = await import('../db/index.js');
@@ -196,6 +205,15 @@ describe('dashboard E2E', () => {
     const body = await res.text();
     expect(body).toContain('Admin token');
     expect(body).toContain(`v${REMBRIC_VERSION}`);
+  });
+
+  it('login page names every client, in a stable order', async () => {
+    const jar: CookieJar = { cookie: null };
+    const res = await get(baseUrl, '/dashboard/login', jar);
+    const labels = loginClientLabels(await res.text());
+    // Non-vacuity control: an empty parse would satisfy any ordering assertion.
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).toEqual(['CLAUDE CODE', 'OPENCODE', 'CODEX CLI', 'PI', 'HERMES', 'MCP CLIENTS']);
   });
 
   it('home page redirects unauthenticated users to login', async () => {

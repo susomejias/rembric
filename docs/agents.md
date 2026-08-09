@@ -35,7 +35,7 @@ Recommended: the shipped client plugins default to `*` or a matching `project:<i
 
 **OAuth 2.1 — no static token.** OAuth-capable clients (Claude Code as a remote MCP server, ChatGPT custom connectors) can connect without minting a token: set `REMBRIC_PUBLIC_URL` (the https issuer; `http://localhost` allowed for local testing) and the server runs the authorization-code + PKCE flow itself. The client points at the same `…/mcp[/<slug>]` URL with **no `Authorization` header**; the first connect opens a consent screen where you sign in with the admin token and approve, after which the client manages the token (refresh included). It is off unless `REMBRIC_PUBLIC_URL` is set, and the static-token path above is unchanged — both kinds of token authenticate `/mcp` identically.
 
-The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` (Claude Code, Codex CLI) inject it into the system prompt. Other clients still get the same protocol via each tool's description.
+The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` — Claude Code, Codex CLI and Pi among them — inject it into the system prompt. Other clients still get the same protocol via each tool's description.
 
 ## Searching across projects
 
@@ -340,7 +340,7 @@ Paste the printed MCP block into `~/.config/opencode/opencode.json` (or per proj
 }
 ```
 
-Per-project path-scoping uses `.rembric` in each repo (same convention as Claude / Codex / Hermes):
+Per-project path-scoping uses `.rembric` in each repo (the same convention as every other client):
 
 ```
 PROJECT_SLUG=my-app

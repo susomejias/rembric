@@ -74,10 +74,10 @@ commit to a backward-compatible patch on older minors before v1.0.0.
 
 In scope:
 
-- The Rembric server (everything under `src/`).
+- The Rembric server (everything under `apps/server/src/`).
 - The shipped Docker image (`ghcr.io/susomejias/rembric:*`).
-- The shared plugin tree (`plugin/`) consumed by the Claude Code / Codex /
-  Hermes marketplaces.
+- The shared plugin tree (`apps/plugin/`) and every client plugin built from
+  it: Claude Code, Codex CLI, Hermes Agent, opencode, and Pi.
 - The MCP tool surface and the HTTP API exposed at `/mcp`, `/mcp/<slug>`,
   `/api/<slug>/sessions*`, `/dashboard*`, `/healthz`, and the OAuth 2.1
   endpoints (`/authorize`, `/token`, `/register`, `/revoke`,

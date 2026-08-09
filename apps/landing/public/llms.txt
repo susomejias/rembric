@@ -8,7 +8,7 @@ Rembric (from _remember + fabric_) is the persistent memory layer beneath AI cod
 
 - [GitHub repository](https://github.com/susomejias/rembric): source code, README, and architecture overview
 - [Quickstart](https://github.com/susomejias/rembric#quickstart): one-command install and first run
-- [Agent integration](https://github.com/susomejias/rembric/blob/main/docs/agents.md): per-client MCP setup — Claude Code, Codex CLI, Hermes Agent, opencode, ChatGPT (OAuth connector), Cursor, Windsurf, and any other MCP client
+- [Agent integration](https://github.com/susomejias/rembric/blob/main/docs/agents.md): per-client MCP setup — Claude Code, Codex CLI, Hermes Agent, opencode, Pi, ChatGPT (OAuth connector), Cursor, Windsurf, and any other MCP client
 
 ## Install
 

@@ -64,7 +64,7 @@ Drop a `.rembric` file at each repo root:
 PROJECT_SLUG=my-app
 ```
 
-The bridge subprocess reads this file at spawn time and connects to `/mcp/my-app` automatically. The same convention is used by Claude Code, Codex CLI, and Hermes Agent — one file, all clients.
+The bridge subprocess reads this file at spawn time and connects to `/mcp/my-app` automatically. The same convention is used by every client Rembric ships a plugin for — one file, all clients.
 
 Without `.rembric`, the plugin no-ops cleanly: lifecycle POSTs are skipped, the MCP bridge falls back to path-less `/mcp`, and the agent still works — that connection resolves to the server's default project.
 

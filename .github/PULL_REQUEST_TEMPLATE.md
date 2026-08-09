@@ -36,7 +36,7 @@ spec-driven workflow by reviewer judgement.
 - [ ] Changes are scoped: one conceptual change per PR.
 - [ ] New tests cover new behaviour; coverage gates still pass (≥90% stmts / ≥85% rest).
 - [ ] No new dependency added without consulting [`.agents/skills/npm-security-best-practices/SKILL.md`](../.agents/skills/npm-security-best-practices/SKILL.md).
-- [ ] Any change touching `plugin/` bumps the version in **all three** manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `plugin/.hermes-plugin/plugin.yaml`) and `plugin/CHANGELOG.md`.
+- [ ] Changes touching `apps/plugin/` carry **no** hand-edited version bump: release-please owns every version carrier and moves them in lock-step from the conventional-commit type.
 - [ ] No tokens, API keys, private hostnames, LAN IPs, or maintainer home-directory paths committed (see `openspec/config.yaml::rules.tasks`).
 - [ ] If this PR closes an issue, the body includes `Closes #<n>`.
 

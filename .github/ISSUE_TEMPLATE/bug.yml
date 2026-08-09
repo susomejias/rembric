@@ -63,6 +63,8 @@ body:
         - Claude Code
         - Codex CLI
         - Hermes Agent
+        - opencode
+        - Pi
         - Other MCP client
         - Dashboard only
         - Server-side / no client involved

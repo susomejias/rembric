@@ -1,12 +1,12 @@
 /**
  * Build the MCP `initialize.instructions` block.
  *
- * Four of the five clients let their host own the MCP transport (Claude
- * Code, Codex CLI, Hermes Agent, opencode), so this string is injected
- * into the LLM's system prompt on connect; for in-process clients with
- * no per-turn hook it is the ONLY nudging surface. The fifth, Pi, holds
- * the MCP client itself, so the string lands in that extension's
- * `initialize` result rather than in the harness's prompt.
+ * Clients that consume the block — Claude Code, Codex CLI and Pi among
+ * them — inject this string into the LLM's system prompt on connect. Pi
+ * holds the MCP client itself and appends the string to the harness's
+ * own system prompt each turn. Hermes never reads the block: its Python
+ * provider restates this text from `system_prompt_block`, and that copy
+ * MUST stay byte-identical, so an edit here is an edit there too.
  *
  * The block is a directive crib-sheet of
  * three proactive flows (SAVE / RECALL / SUMMARIZE) that cite their

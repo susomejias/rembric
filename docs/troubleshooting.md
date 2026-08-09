@@ -102,7 +102,7 @@ See [docs/relations.md](./relations.md).
 
 The protocol-teaching `instructions` block fires at handshake but some MCP clients ignore the field. Confirm:
 
-1. The client honors `initialize.instructions` (Claude Code and Codex CLI do).
+1. The client honors `initialize.instructions` (Claude Code, Codex CLI and Pi do).
 2. `tools/list` returns `memory.session_summary` with a description.
 
 Workaround: paste the summary protocol into the client's per-project rules file.

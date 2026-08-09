@@ -12,7 +12,7 @@ Server lives on a different machine than your agent. The compose file ships conf
 
 ```
 ┌─ your laptop ──────────────────┐    ┌─ LXC / NAS / server ──────────────────┐
-│ Claude Code / Codex / Hermes   │    │ docker container "rembric"            │
+│ your coding agent              │    │ docker container "rembric"            │
 │       │                        │    │   bind: 0.0.0.0:8787:8787 (default)   │
 │       │ Tailscale / VPN / LAN  │ ─► │   volume: ./data → /data              │
 │       │                        │    │   env_file: .env                      │
@@ -36,7 +36,7 @@ If Rembric and your agent live on the same machine and you want the stricter pos
 ```
 ┌─ your laptop / dev box ───────────────────────────┐
 │                                                   │
-│  Claude Code / Codex / Hermes                     │
+│  your coding agent                                │
 │         │                                         │
 │         │  bridge stdio↔HTTP                      │
 │         ▼                                         │

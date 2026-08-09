@@ -406,7 +406,7 @@ const ERRNOS: readonly string[] = [
 /** JIRA-style prefixes, none of them in the extractor's standards denylist. */
 const TICKET_PREFIXES: readonly string[] = ['RBR', 'OPS', 'PLT', 'SRE', 'DEV', 'INF'];
 
-const AGENTS: readonly string[] = ['claude-code', 'codex-cli', 'hermes', 'opencode'];
+const AGENTS: readonly string[] = ['claude-code', 'codex-cli', 'hermes', 'opencode', 'pi'];
 
 function hex(rng: () => number, n: number): string {
   let out = '';
