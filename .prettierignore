@@ -8,3 +8,17 @@ data/
 package-lock.json
 .husky/_
 openspec/changes/**/specs/
+
+# Written by release-please on every release, in conventional-changelog's own
+# style: it emits `*` list markers where prettier wants `-`, so formatting these
+# is a fight that reopens at the next release rather than a fix.
+**/CHANGELOG.md
+
+# Installed by the OpenSpec CLI (`openspec update`) and by the skill library.
+# Our formatting would be overwritten by whichever tool owns the file next.
+.claude/commands/opsx/
+.claude/skills/openspec-apply-change/
+.claude/skills/openspec-archive-change/
+.claude/skills/openspec-explore/
+.claude/skills/openspec-propose/
+.agents/skills/skill-creator/
