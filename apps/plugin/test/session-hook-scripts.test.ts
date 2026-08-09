@@ -72,7 +72,16 @@ async function runFull(
 ): Promise<{ stdout: string; stderr: string }> {
   const child = execFileAsync('bash', [join(scripts, script), ...args], {
     encoding: 'utf8',
-    env: { ...process.env, REMBRIC_SERVER_URL: serverUrl, REMBRIC_API_TOKEN: 'test-token' },
+    // The shipped 3s POST cap is a production budget, not a test one: under the
+    // full suite's worker load curl can hit it, the request never reaches the
+    // stub, and an assertion on `requests[0]` fails intermittently. The cap has
+    // its own describe below, which sets the value explicitly.
+    env: {
+      ...process.env,
+      REMBRIC_SERVER_URL: serverUrl,
+      REMBRIC_API_TOKEN: 'test-token',
+      REMBRIC_POST_MAX_TIME: '30',
+    },
   });
   child.child.stdin?.end(stdin);
   return child;
