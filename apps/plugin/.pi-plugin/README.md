@@ -76,15 +76,15 @@ Re-running the unpinned install is the update: it is idempotent, and because the
 
 ## Troubleshooting
 
-| Symptom                                                | Cause                                                                                      | Fix                                                                                          |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| No `memory_*` tools in the session                     | `REMBRIC_SERVER_URL` / `REMBRIC_API_TOKEN` not exported in this shell                      | A startup notification names the one that is missing; export both and restart Pi             |
-| `[rembric] no PROJECT_SLUG in …`                       | No `.rembric` at the directory Pi was started in                                           | Create it with `PROJECT_SLUG=<slug>`; the slug must name a project that exists on the server |
-| `[rembric] tool discovery failed: … project_not_found` | The slug names no project on the server — deliberately refused rather than widened         | Create the project at `…/dashboard/projects`, or fix the slug                                |
-| `[rembric] tool discovery failed: … HTTP 401`          | Token is wrong, revoked, or not authorised for that project                                | Issue a new one at `…/dashboard/tokens`                                                      |
-| Tools present but every call fails                     | Server reachable at discovery, not at call time (container restarted, tunnel dropped)      | `curl -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz`             |
-| A slash command stays literal                          | The extension is not installed, or prompt templates are disabled (`--no-prompt-templates`) | `pi list` should show `@rembric/pi`                                                          |
-| The last turn is missing from the dashboard summary    | The session was ended with Ctrl-C — see below                                              | Exit with Ctrl-D; the per-turn flush means at most the final turn is lost                    |
+| Symptom                                                | Cause                                                                                                          | Fix                                                                                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| No `memory_*` tools in the session                     | `REMBRIC_SERVER_URL` / `REMBRIC_API_TOKEN` not exported in this shell                                          | A startup notification names the one that is missing; export both and restart Pi                                                  |
+| `[rembric] no PROJECT_SLUG in …`                       | No `.rembric` at the directory Pi was started in                                                               | Create it with `PROJECT_SLUG=<slug>`; the slug must name a project that exists on the server                                      |
+| `[rembric] tool discovery failed: … project_not_found` | The slug names no project on the server — deliberately refused rather than widened                             | Create the project at `…/dashboard/projects`, or fix the slug                                                                     |
+| `[rembric] tool discovery failed: … HTTP 401`          | Token is wrong, revoked, or not authorised for that project                                                    | Issue a new one at `…/dashboard/tokens`                                                                                           |
+| Tools present but every call fails                     | Server reachable at discovery, not at call time (container restarted, tunnel dropped)                          | `curl -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz`                                                  |
+| A slash command stays literal                          | The extension is not installed, or prompt templates are disabled (`--no-prompt-templates`)                     | `pi list` should show `@rembric/pi`                                                                                               |
+| The last turn is missing from the dashboard summary    | The process exited without reaching the shutdown handler: `SIGKILL`, a crash, or an interrupted print-mode run | Nothing to recover for that session — the per-turn flush bounds the loss to the final turn, and the row is retired as `abandoned` |
 
 ## Session close
 
@@ -105,13 +105,15 @@ One consequence worth knowing: **resuming a session that already ended does not 
 
 An exit that runs no shutdown handler leaves the row `active`; the server retires it as `abandoned` on its own later.
 
-### Ctrl-C does not close the session
+### Exiting: Ctrl-D, or Ctrl-C twice
 
-Pi runs its shutdown handler — where the final summary is written — on a clean exit, on Ctrl-D, on `SIGTERM` and on `SIGHUP`. It does **not** run it on Ctrl-C, in either print or interactive mode.
+Pi runs its shutdown handler — where the final summary is written — on a clean exit, on Ctrl-D, on `SIGTERM` and on `SIGHUP`. **Two Ctrl-C presses within 500 ms of each other run the same handler**, in the interactive TUI with the prompt focused and on the default `app.clear` binding (the key Pi's own startup banner advertises for exiting). The session is closed either way, and nothing beyond the current turn is at risk.
 
-In print mode this is visible in Pi's own source: `dist/modes/print-mode.js:32` reads `const signals = ["SIGTERM"]`, with `SIGHUP` wired separately and `SIGINT` never registered. The interactive TUI was measured the same way and behaves the same: with keys delivered at t=4 s and stdin held open until t=14 s, Ctrl-C left the shutdown handler firing at 13.6 s — that is the stdin EOF, byte-identical to the run that sent no keys at all — while Ctrl-D fired it at 3.6 s.
+A **single** press is not an exit: it clears the prompt and arms the 500 ms window. Measured against Pi 0.84.1 with timed stdin, the two-presses-200 ms-apart arm fired the shutdown handler at 5.8 s, against a no-keys baseline — the stdin EOF alone — of 10.6 s; two presses 1.5 s apart landed on that same EOF at 11.8 s, so the slow pair contributed nothing.
 
-Nothing is lost beyond the current turn, because the transcript is flushed after every turn. **Ctrl-D is the clean exit.** `SIGKILL` runs nothing at all, by design.
+Print mode is the exception, and this one is read from Pi's source rather than measured: `dist/modes/print-mode.js:32-44` registers `["SIGTERM"]` plus `SIGHUP`, and `SIGINT` appears nowhere in that file. `SIGKILL` runs nothing at all, by design.
+
+**Ctrl-D remains the simplest exit** — one keystroke, no timing window, and it does not depend on how you have bound your keys.
 
 ## Source
 

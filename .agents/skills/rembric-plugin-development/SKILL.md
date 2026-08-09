@@ -32,7 +32,7 @@ Each client has 3–5 non-obvious behaviors that bit us. **Before modifying that
 - **Codex CLI**: `${user_config.*}` is NOT substituted; subprocess env is **cleared** before MCP spawn → MUST list every needed var in `env_vars: [...]`; `${CLAUDE_PLUGIN_ROOT}` doesn't work in MCP args.
 - **Hermes Agent**: `plugin.yaml::hooks: [...]` array **gates lifecycle invocation** — overriding a method without listing the hook is a silent no-op.
 - **opencode**: every named export of a plugin file is invoked as a Plugin function — export ONLY `RembricPlugin`. The bridge MUST live outside `~/.config/opencode/plugins/`. Sub-agent filtering (`parentID || title.endsWith(" subagent)")`) is mandatory.
-- **Pi**: no built-in MCP (its own docs say so, deliberately) → this is the one client whose plugin holds the MCP client, discovering tools with `tools/list`; tools register under provider-safe names (`.`→`_`) because a real provider rejects the whole payload on a dot; shutdown is awaited but **Ctrl-C fires nothing in either mode**; nothing is injected from its settings file, so credentials come from the shell.
+- **Pi**: no built-in MCP (its own docs say so, deliberately) → this is the one client whose plugin holds the MCP client, discovering tools with `tools/list`; tools register under provider-safe names (`.`→`_`) because a real provider rejects the whole payload on a dot; shutdown is awaited and **two Ctrl-C presses within 500 ms fire it in the interactive TUI** (a single press does not, and print mode registers no SIGINT); nothing is injected from its settings file, so credentials come from the shell.
 
 ## Shared-vs-divergent discipline
 

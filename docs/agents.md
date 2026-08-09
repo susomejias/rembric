@@ -406,7 +406,7 @@ The four shared command files (`apps/plugin/commands/{context,recall,remember,su
 3. Save a test memory, then check `/dashboard/memories` for the row.
 4. `/dashboard/sessions` shows a new row with `agent='pi'`.
 
-#### Session close is awaited — except on Ctrl-C
+#### Session close is awaited, and each exit path is named
 
 Pi awaits its session-shutdown handler with no timeout, so the final summary POST completes instead of racing process exit (measured against Pi 0.84.1: a 10 s awaited fetch completes, and so does a full MCP `tools/call` issued from inside the handler). SIGTERM and SIGHUP both reach it; SIGKILL runs nothing.
 
@@ -416,14 +416,14 @@ Ending on replacement is what keeps attribution working. Session resolution is s
 
 The trade-off: **resuming a session that already ended lands on a terminal row**, where auto-attach is off. A `memory.save` there needs an explicit `sessionId` to be attributed; late summary and title writes are still accepted, and `/dashboard/sessions` shows the row as `ended`. Claude Code has always behaved this way through the same server path. An exit that reaches no handler leaves the row `'active'` until `abandonStale` retires it as `abandoned`, the same steady state as Codex CLI and opencode.
 
-**Ctrl-C does not trigger it, in either mode.** In print mode SIGINT is not registered — `dist/modes/print-mode.js:32` reads `const signals = ["SIGTERM"]`, with SIGHUP wired separately. The interactive TUI behaves the same way, measured rather than assumed: under a pty with keys delivered at t=4 s and stdin held open to t=14 s, Ctrl-C left the handler firing at 13.6 s (the stdin EOF, byte-identical to the no-keys control), while **Ctrl-D fired it at 3.6 s**. Exit with Ctrl-D. The per-turn flush keeps the server's summary current, so a Ctrl-C costs at most the last turn.
+**Which interrupts reach that handler.** In the interactive TUI, with the prompt focused and on the default `app.clear` binding, **two Ctrl-C presses within 500 ms** run the same awaited shutdown Ctrl-D runs, so the session is closed and nothing beyond the current turn is at risk — measured against Pi 0.84.1 with timed stdin: that arm fired the handler at **5809 ms**, against a no-keys baseline (stdin EOF alone) of **10577 ms**, while two presses 1500 ms apart landed on that EOF at **11839 ms**. A **single** press therefore exits nothing; it clears the prompt and arms the window. Print mode never registers SIGINT — `dist/modes/print-mode.js:32-44` registers `["SIGTERM"]` plus SIGHUP and names `SIGINT` nowhere — which is read from Pi's source, not executed. Ctrl-D stays the simplest exit: one keystroke, no timing window, and it works in both modes.
 
 #### Troubleshooting
 
 - **No Rembric tools registered, one stderr line naming missing configuration.** `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is unset in the shell that launched Pi. Pi will not read them from its settings file.
 - **`project_not_found` on connect.** `.rembric` names a `PROJECT_SLUG` with no matching project. Create it at `/dashboard/projects` or fix the slug — the server refuses rather than widening the scope.
 - **No session row appears.** Missing or invalid `.rembric`; check stderr for the `[rembric] no project slug` line.
-- **Session ends with no summary.** You exited with Ctrl-C. See above — exit with Ctrl-D.
+- **The session row stays `active` and its summary is one turn stale.** The process exited without reaching the shutdown handler: a `SIGKILL`, an OS-level crash, or an interrupted print-mode run. Nothing closes the row from the client side — `abandonStale` retires it as `abandoned` later — and the per-turn flush bounds the summary loss to the final turn.
 - **`pi update --all` reports nothing to update.** The extension was installed with a version suffix and is therefore pinned. Re-run `pi install npm:@rembric/pi` with no version.
 
 #### Updating the extension

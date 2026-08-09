@@ -138,7 +138,7 @@ pnpm exec tsx /tmp/exercise.ts
 
 ### Pi: tool discovery and session round-trip
 
-The extension holds the MCP client, so "did it connect" and "did it discover" are one question. Confirm the discovered count matches the server's `registerTool` call sites in `apps/server/src/mcp/server.ts` (derive it — do not hard-code), that the registered names carry underscores (`memory_save`), and that a proxied save is readable back by an independent `memory.get` with a fabricated id returning `not_found` as the control. Then end the session **with Ctrl-D, not Ctrl-C** — Ctrl-C does not fire the shutdown handler in either mode — and check for a non-null summary.
+The extension holds the MCP client, so "did it connect" and "did it discover" are one question. Confirm the discovered count matches the server's `registerTool` call sites in `apps/server/src/mcp/server.ts` (derive it — do not hard-code), that the registered names carry underscores (`memory_save`), and that a proxied save is readable back by an independent `memory.get` with a fabricated id returning `not_found` as the control. Then end the session **with Ctrl-D** — one keystroke, no timing window, and it works in both modes, whereas Ctrl-C only exits the TUI when pressed twice within 500 ms — and check for a non-null summary.
 
 ### Dashboard / DB verification
 
