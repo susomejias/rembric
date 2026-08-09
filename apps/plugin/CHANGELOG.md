@@ -4,6 +4,23 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.26.0](https://github.com/susomejias/rembric/compare/plugin-v0.25.3...plugin-v0.26.0) (2026-08-09)
+
+
+### Features
+
+* **plugin:** resume the session each client re-attaches to ([52fb35f](https://github.com/susomejias/rembric/commit/52fb35f903e6acd2341e44989841ba37fea1ace4)), closes [#326](https://github.com/susomejias/rembric/issues/326)
+
+
+### Bug Fixes
+
+* **plugin:** close Codex sessions and register Claude Code forks ([98818c1](https://github.com/susomejias/rembric/commit/98818c1e2fa4c7f29d26647dab98599efef332b0)), closes [#326](https://github.com/susomejias/rembric/issues/326)
+
+
+### Documentation
+
+* **openspec:** archive resume-closed-sessions ([c9b967c](https://github.com/susomejias/rembric/commit/c9b967c1c1c4be1ec1593201c24e42d57427a4c0)), closes [#326](https://github.com/susomejias/rembric/issues/326)
+
 ## [0.25.3](https://github.com/susomejias/rembric/compare/plugin-v0.25.2...plugin-v0.25.3) (2026-08-09)
 
 
