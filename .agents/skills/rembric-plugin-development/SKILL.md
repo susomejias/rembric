@@ -79,7 +79,9 @@ Minimum required steps:
 3. Exercise the lifecycle path your change affects. The exact commands per client (opencode `mcp list`, tsx-driven handler invocation, dashboard SQLite verification, etc.) are in [references/e2e-walkthrough.md](./references/e2e-walkthrough.md).
 4. Tear down: `docker compose ... down`, uninstall, restore user's config file to its prior state (placeholders if it didn't exist before).
 
-**If you cannot drive the agent TUI** (live LLM cost, or you're testing keychain integration you can't script):
+**Prefer the isolated variant of steps 2-4 when the client's CLI supports it** — scratch `HOME`, per-run extension load instead of install, deliberately invalid API key. It touches none of the operator's config, so there is nothing to restore and no half-restored state to leave behind, and it costs no LLM calls. Six rails plus the paired-control method: [references/e2e-walkthrough.md § 5b](./references/e2e-walkthrough.md).
+
+**If you still cannot drive the agent TUI** (a client with no per-run load, or keychain integration you can't script):
 
 - **Direct handler invocation via `pnpm exec tsx`** covers ~95% of the handler logic. Pattern from `add-opencode-plugin`: import the installed plugin module, set env vars, call handlers with mock inputs that mirror the platform's event shape.
 - **Tell the user explicitly** what you DID verify vs what you DID NOT. Don't say "verified e2e" when you only ran unit tests. List the manual smoke steps the user should run.
