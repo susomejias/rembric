@@ -74,13 +74,32 @@ for (const change of activeChanges()) {
     const delta = readFileSync(deltaPath, 'utf8');
     const published = readFileSync(publishedPath, 'utf8');
 
+    // `## RENAMED Requirements` is applied by `openspec archive` BEFORE the
+    // MODIFIED merge, so a delta may legitimately carry a MODIFIED block under
+    // a header the published spec does not have yet. Without this, the repo's
+    // own documented rename mechanism fails this gate with a false positive.
+    const renamedBlock = delta.split('## RENAMED Requirements')[1]?.split('\n## ')[0] ?? '';
+    const renamedFrom = new Map();
+    {
+      let from = null;
+      for (const line of renamedBlock.split('\n')) {
+        const f = /^-\s*FROM:\s*`(### Requirement: .*)`\s*$/.exec(line);
+        if (f) from = f[1];
+        const t = /^-\s*TO:\s*`(### Requirement: .*)`\s*$/.exec(line);
+        if (t && from) {
+          renamedFrom.set(t[1], from);
+          from = null;
+        }
+      }
+    }
+
     const afterMarker = delta.split('## MODIFIED Requirements')[1];
     if (afterMarker === undefined) continue;
     const modifiedBlock = afterMarker.split('\n## ')[0];
 
     for (const [, name] of modifiedBlock.matchAll(/^### Requirement: (.*)$/gm)) {
       const header = `### Requirement: ${name}`;
-      const publishedSlice = sliceRequirement(published, header);
+      const publishedSlice = sliceRequirement(published, renamedFrom.get(header) ?? header);
       if (publishedSlice === null) {
         problems.push(
           `${change} / ${capability}: MODIFIED header not found in the published spec, so ` +
