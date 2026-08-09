@@ -163,7 +163,7 @@ To keep `session-start.sh`, `post-compact.sh`, `session-end.sh`, `pre-compact.sh
 - Resolves `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from the environment.
 - Exposes `rembric_parse_dotenv`, which parses `${cwd}/.rembric` for `PROJECT_SLUG` (reusing the same dotenv parser logic as the bridge). The parser SHALL trim BOTH leading and trailing whitespace from each value before quote-stripping — trailing whitespace SHALL NOT be left in the parsed value, and this trim SHALL also strip a trailing carriage return, so a `.rembric` file saved with CRLF line endings resolves to the same slug the JS bridge (`bin/rembric-dotenv.mjs`, which trims both sides) resolves.
 - Exposes `rembric_read_project_slug <cwd>`, the wrapper every hook script actually calls to go from a working directory to a validated slug.
-- Exposes `rembric_post <path> <json-body>`, which issues `curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --max-time 3 -d "$body" -w '\n%{http_code}' "$URL"`. It SHALL use `-s` and NOT `-f`: the status code is captured via `-w` and split off the response, so that a non-2xx response can be reported with its body in the stderr diagnostic required by `plugin-session-protocol`'s failed-POST requirement. `-f` would suppress exactly that body. An empty body argument SHALL be normalised to `{}`.
+- Exposes `rembric_post <path> <json-body>`, which issues `curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --max-time "${REMBRIC_POST_MAX_TIME:-3}" -d "$body" -w '\n%{http_code}' "$URL"`. The budget SHALL be overridable through `REMBRIC_POST_MAX_TIME` and SHALL default to `3` when unset, so a caller running under a host-imposed budget tighter than 3 seconds can fit the request inside it. Codex's `SessionEnd` is the case that forces this: the host allows that one event 1 second by default and 3 seconds at most, against 600 for every other hook, so a fixed 3-second POST consumes the entire budget and leaves nothing for the transcript read or the failure diagnostic (`codex-distribution`). A caller SHALL set the variable only where a tighter budget applies; every other script inherits the default and SHALL NOT restate it. It SHALL use `-s` and NOT `-f`: the status code is captured via `-w` and split off the response, so that a non-2xx response can be reported with its body in the stderr diagnostic required by `plugin-session-protocol`'s failed-POST requirement. `-f` would suppress exactly that body. An empty body argument SHALL be normalised to `{}`.
 - Exposes `rembric_turn_count <counter-name> <session-id>`, an atomic per-session turn counter. Each caller passes a distinct `counter-name` so independent cadences never double-increment one another (`rembric-turnnudge` for `prompt-nudge.sh`, `rembric-relevance-prefetch` for `prompt-search.sh`). It SHALL append one byte and count the file's bytes rather than read-increment-write, because a single `O_APPEND` write is atomic across concurrent invocations. It SHALL echo the new count, or NOTHING when the counter is unreadable — callers MUST treat empty as fail-closed, since defaulting to `0` satisfies every modulo and equality check at once and would fire every nudge on every turn.
 - Exposes `rembric_json_escape <string>` that escapes for embedding in a JSON value: backslash, double quote, and every control character in the range U+0000–U+001F. `\n`, `\r`, and `\t` SHALL use their short escape forms; every other character in that range (e.g. an ANSI escape from pasted colored terminal output) SHALL be escaped as `\u00XX` so the output is always valid JSON. Characters at or above U+0020 (including `\x7f`/DEL, which JSON does not require escaping) SHALL be left untouched.
 - Exposes stdin-field extractors `rembric_session_id_from_stdin_json`, `rembric_cwd_from_stdin_json`, `rembric_transcript_path_from_stdin_json`, `rembric_prompt_from_stdin_json` (the `prompt` field, consumed by `prompt-search.sh`'s keyword self-filter), and `rembric_compaction_summary_from_stdin_json`. The compaction-summary extractor SHALL prefer `compaction_summary` and SHALL fall back to `compactionSummary` (in case Codex uses camelCase, per the same precedent that `session_id`/`sessionId` already follows).
@@ -181,6 +181,14 @@ Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript
 - **THEN** each SHALL start with `source "${SCRIPT_DIR}/_api.sh"` (where `SCRIPT_DIR` is the script's own directory)
 - **AND** each SHALL also `source "${SCRIPT_DIR}/_transcript.sh"` (transcript handling needed)
 - **AND** neither SHALL inline a literal `curl` invocation outside the helper
+
+#### Scenario: The POST budget is overridable and defaults to 3
+
+- **GIVEN** `REMBRIC_POST_MAX_TIME` is unset
+- **WHEN** `rembric_post` runs
+- **THEN** the curl invocation SHALL carry `--max-time 3`
+- **AND** when the variable is set to `2`, the same invocation SHALL carry `--max-time 2`
+- **AND** the value SHALL be read at call time, so a per-hook override in a manifest's `command` string takes effect
 
 #### Scenario: rembric_post reports a non-2xx with its body
 
@@ -421,22 +429,27 @@ Every string emitted to a model by the plugin SHALL be English. Each such string
 
 ### Requirement: The plugin SHALL ship six hook event types across nine handler entries at `apps/plugin/hooks/hooks.json`
 
-The plugin's hook catalog SHALL declare exactly six event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear`, one for `compact`), `UserPromptSubmit` (TWO entries, NEITHER carrying a `matcher` key — the recall/first-prompt entry and the per-turn save nudge), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop` (TWO entries — an asynchronous raw sync and a synchronous end-of-turn reminder). That is **nine handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` unified nudge in the `proactive-save-nudges` change).
+The plugin's hook catalog SHALL declare exactly six event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear|fork`, one for `compact`), `UserPromptSubmit` (TWO entries, NEITHER carrying a `matcher` key — the recall/first-prompt entry and the per-turn save nudge), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop` (TWO entries — an asynchronous raw sync and a synchronous end-of-turn reminder). That is **nine handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` unified nudge in the `proactive-save-nudges` change).
 
 Both counts SHALL be asserted as an exact set, not a containment check: a `toContain`-style assertion cannot catch a spec or manifest that wrongly claims an event type is _absent_, which is the defect class this requirement replaces. The handler count is stated separately from the event-type count because Codex's per-hook trust prompt counts handlers while its documentation counts event types (see `codex-distribution`).
+
+The first matcher group SHALL include `fork`, and its omission was a defect rather than a decision. Claude Code documents five `SessionStart` sources — `startup`, `resume`, `clear`, `compact` and `fork` — where `fork` fires for "a new session forked from an existing one: `--fork-session` with `--resume` or `--continue`, the `/fork` background copy, or `/branch`", with the note "Before v2.1.214, forked sessions reported source `"resume"`". A matcher group that omits it means a forked conversation fires NO hook of this plugin at all: no row is registered, no nudge is emitted, and every `memory.save` for the life of that conversation persists `session_id = NULL`. A forked session is a NEW session rather than a resumed one — `--fork-session` is documented as "When resuming, create a new session ID instead of reusing the original" — so it belongs in the registration group alongside `startup`, not in a branch of its own.
+
+Both `SessionStart` groups SHALL follow their `/sessions` ensure with one `POST /api/<slug>/sessions/<session_id>/resume`, unconditionally and without inspecting `source`. That rule is uniform across all five clients and is specified once in `plugin-session-protocol`'s lifecycle mapping; this capability records only that both of this client's ensure sites honour it.
 
 `PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit throttled plain-stdout reminders. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
 
 The historical reason a `Stop` hook was once removed was a **semantic bug**, not a structural prohibition on `Stop` itself: Claude Code's `Stop` fires once per assistant turn (verified against `code.claude.com/docs/en/hooks`), not at session end. The prior `Stop` hook posted to `/end` (session termination), so the first turn prematurely transitioned the session to `ended` and every subsequent turn's call failed silently. `SessionEnd` remains the correct lifecycle hook for one-per-session terminal behaviour. The `Stop` hook required here never posts to `/end` and never transitions session status — it cannot trigger that bug. `Stop` now carries a SECOND entry that IS model-facing, and the decision `proactive-save-nudges` recorded is **narrowed rather than reversed**. That change declined `Stop` on forced-continuation risk, which is a property of the host's BLOCKING decision, not of the event. A non-interrupting `hookSpecificOutput.additionalContext` reminder carries the same text at the same moment and cannot hold a turn open, so the risk that justified declining does not apply to it. The two `Stop` entries therefore have opposite obligations and SHALL NOT be merged: the raw sync stays asynchronous so it never delays the turn, and the reminder MUST NOT be asynchronous, because an asynchronous handler is fire-and-forget by the host's contract and cannot contribute feedback at all. Wiring the reminder asynchronously silently forfeits it. Neither entry ever posts to `/end` or transitions session status. Behaviour is specified in `plugin-session-protocol`.
 
-#### SessionStart (matcher: startup|resume|clear)
+#### SessionStart (matcher: startup|resume|clear|fork)
 
 - Type: `command`.
-- Matcher: `startup|resume|clear`.
+- Matcher: `startup|resume|clear|fork`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh claude-code`.
-- The script SHALL read `session_id`, `cwd`, and `source` from hook stdin.
+- The script SHALL read `session_id`, `cwd`, and `source` from hook stdin. It SHALL NOT branch on `source`: all four matched values register a row, and `fork` carries a new session id, so registration is the correct response to every one of them.
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
+- Immediately afterwards, and only when the ensure was attempted, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. On a fresh row that is a documented no-op; on a row a previous run ended or the sweep abandoned, it is what returns the conversation's memories to it.
 - The script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout.
 - Output cap: ≤30 tokens (measured 22.25 — 89 bytes newline-exclusive, the convention pinned below; the one budget in this capability that held as originally written).
 
@@ -446,7 +459,7 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 - Matcher: `compact`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code`.
 - The script SHALL read `session_id` and `cwd` from hook stdin (slug resolution piggybacks on `.rembric` as elsewhere).
-- When both `session_id` and a valid slug resolve, the script SHALL re-POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` as an idempotent session-row ensure, covering the case where the stale sweep abandoned the row between the pre-compact moment and the resume. This hook is NOT stdout-only.
+- When both `session_id` and a valid slug resolve, the script SHALL re-POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` as an idempotent session-row ensure, and SHALL then POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. The pair is what covers the case where the stale sweep abandoned the row between the pre-compact moment and the resume; the ensure alone never could, because the ensure path returns a terminal row untouched (`http-api`). This hook is NOT stdout-only.
 - The script SHALL emit an imperative instruction block to stdout, prefixed `rembric:` so Codex's `looks_like_json` heuristic does not flag it. The instruction SHALL direct the model to: (1) call `memory.session_summary({title, summary})` with the compact summary it just produced (which appears in its context above the hook output), specifying Title (≤100 chars, descriptive) and Summary; (2) call `memory.context` or `memory.search` if it needs prior context to continue. The section list SHALL be the one canonical structure defined in `sessions`, carried verbatim rather than restated.
 - Output cap: ≤150 tokens. `plugin-session-protocol` asserts the same number and the two SHALL be changed together.
 - This stdout IS injected into the model's context, because `SessionStart` is one of the events documented as carrying stdout into context.
@@ -470,7 +483,7 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 #### SessionEnd
 
 - Type: `command`.
-- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh`.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh claude-code`. The agent-name argument SHALL be passed explicitly rather than left to the script's default, because Codex CLI wires the same single script with `codex-cli` to select its own transcript parser (`codex-distribution`), and a bare invocation on one client against an argument on the other is the shape that lets the two drift.
 - The script SHALL read `session_id`, `cwd`, `transcript_path`, and `reason` from hook stdin.
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
 - When both resolve, the script SHALL read `transcript_path` if the file exists, format the transcript via the shared `_transcript.sh` helper (oldest-first `role: content` lines, truncated to 19500 chars), extract a title from the first non-empty assistant message (truncated to 100 chars), and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body `{"summary": "<formatted>", "title": "<derived>", "final": false}`.
@@ -516,13 +529,31 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 - **GIVEN** the plugin is installed, `${cwd}/.rembric` contains `PROJECT_SLUG=foo`, project `foo` exists, and `REMBRIC_SERVER_URL` is reachable
 - **WHEN** Claude Code fires the `SessionStart` hook (`source: startup`) with stdin `{"session_id": "claude-sess-abc12345", "cwd": "/home/u/foo"}` at 22:14 UTC
 - **THEN** the script SHALL POST to `${REMBRIC_SERVER_URL}/api/foo/sessions` with body `{"id": "claude-sess-abc12345", "cwd": "/home/u/foo", "agent": "claude-code"}`
+- **AND** SHALL then POST `${REMBRIC_SERVER_URL}/api/foo/sessions/claude-sess-abc12345/resume` with body `{}`, which succeeds as a no-op reporting `previousStatus: 'active'`
 - **AND** the server SHALL insert a row with `title = 'foo · 22:14 UTC'`, `title_final = false`
 - **AND** the script SHALL still emit the `rembric: If this is a continuation...` nudge on stdout
+
+#### Scenario: A resumed Claude Code session returns its row to active
+
+- **GIVEN** session `<S>` was registered in a previous run and its row is now `ended` (its `SessionEnd` hook fired) or `abandoned` (the stale sweep flipped it)
+- **WHEN** the operator runs `claude --resume <S>` and `SessionStart` fires with `source: "resume"` and the SAME `session_id`
+- **THEN** `session-start.sh` SHALL POST the ensure and then the resume
+- **AND** the row SHALL be `status='active'` with `ended_at IS NULL`
+- **AND** the control SHALL pass in the same run: without the resume POST the row stays terminal and a subsequent `memory.save` on that transport persists `session_id = NULL`
+
+#### Scenario: A forked session is registered as a new session
+
+- **GIVEN** the operator runs `claude --resume <S> --fork-session`, which the host documents as creating a new session id
+- **WHEN** `SessionStart` fires with `source: "fork"` and a session id `<F>` different from `<S>`
+- **THEN** the `startup|resume|clear|fork` matcher group SHALL match, and `session-start.sh` SHALL register `<F>` as a new row
+- **AND** the resume that follows SHALL succeed as a no-op against `<F>`
+- **AND** `<S>` SHALL be left in whatever state it was already in — a fork SHALL NOT revive the session it was forked from
+- **AND** the control SHALL pass in the same run: with `fork` absent from every matcher, no hook fires and no row exists for `<F>`
 
 #### Scenario: SessionStart hook with matcher compact re-ensures the row and injects the instruction
 
 - **WHEN** Claude Code resumes a session from auto-compaction and fires `SessionStart` with `source: 'compact'`
-- **THEN** `post-compact.sh` SHALL POST `/api/foo/sessions` with the session id, cwd and agent, so a row abandoned by the stale sweep is re-created silently
+- **THEN** `post-compact.sh` SHALL POST `/api/foo/sessions` with the session id, cwd and agent, and SHALL then POST `/api/foo/sessions/<session_id>/resume`, so a row the stale sweep abandoned mid-conversation is returned to `active`
 - **AND** SHALL emit a multi-line instruction to stdout prefixed with `rembric:` directing the model to call `memory.session_summary` with the compact summary visible in its context
 - **AND** the next model turn SHALL see the instruction in its context and (when cooperating) SHALL call `memory.session_summary({title, summary})` with the model-authored values
 
@@ -553,7 +584,7 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 #### Scenario: SessionEnd hook captures the transcript and POSTs /end with summary
 
 - **GIVEN** a Claude Code session with at least one assistant turn, whose `transcript_path` JSONL is readable
-- **WHEN** Claude Code fires `SessionEnd` with stdin `{"session_id": "...", "transcript_path": "/path/to/transcript.jsonl", "reason": "logout"}`
+- **WHEN** Claude Code fires `SessionEnd` with stdin `{"session_id": "...", "transcript_path": "/path/to/transcript.jsonl", "reason": "logout"}`, the hook having been invoked as `session-end.sh claude-code`
 - **THEN** the script SHALL format the transcript via `_transcript.sh`, derive a title from the first non-empty assistant message
 - **AND** SHALL POST `/api/foo/sessions/<S>/end` with body `{"summary": "<formatted>", "title": "<derived>", "final": false}`
 - **AND** the server SHALL transition the row to `status='ended'`, write the summary and title (subject to `final` precedence), and respond `200 OK`

@@ -7,6 +7,17 @@ description: End-to-end smoke against the local rembric dev stack (`pnpm run dev
 
 Real-stack verification of a change before opening the PR. Read `docker-compose.dev.yml`, `apps/server/Dockerfile`, and `package.json::dev:docker:up` for the source of truth on ports, mounts, and the dev target — this file gives you only the pattern that survives those changing.
 
+## 0. Preflight: free the RAM the build needs
+
+`/tmp` is a tmpfs on this box, so everything under it is RAM. Every vitest run leaves a `rembric-test-*` directory behind and nothing cleans them: 1624 of them once held 8 GB, leaving 2.4 GB free, and `pnpm run dev:docker:up` died with `exit code: 137` (`Killed`) mid-`pnpm install`. That failure reads like a network or lockfile problem and is neither.
+
+```bash
+free -h                                                     # the `shared` column is the tmpfs
+find /tmp -maxdepth 1 -name 'rembric-test-*' -mmin +60 -exec rm -rf {} +
+```
+
+Keep the `-mmin +60`: other sessions may be mid-run, and a bare glob takes their fixtures with it.
+
 ## 1. Bring up from the change's worktree
 
 ```bash
@@ -41,9 +52,59 @@ until docker ps --filter name=rembric-dev --filter health=healthy --format '{{.N
 
 - **HTTP**: `curl … | jq` against `http://localhost:<port>/api/<slug>/…` with `Authorization: Bearer …` and `Content-Type: application/json`. Parse responses with `jq`, not regex.
 - **MCP**: POST JSON-RPC to `/mcp/<slug>` (path-scoped) or `/mcp` (unscoped). Send `Accept: application/json, text/event-stream` — the response is SSE-framed, so strip a leading `data: ` before `JSON.parse`. Handshake first (`initialize` → store the `mcp-session-id` header → `notifications/initialized`), then `tools/call`.
-- **DB**: the container is intentionally minimal (no `sqlite3`, no `ps`). Use host-side `sqlite3 ./data-dev/data.db` against the bind-mounted file.
+- **DB**: the container is intentionally minimal (no `sqlite3`, no `ps`) — and the **host has no `sqlite3` either**. Read the bind-mounted file with node, from the pnpm store, with `cwd` inside `apps/server`:
+
+  ```bash
+  cd <worktree>/apps/server
+  node -e 'const D=require("better-sqlite3");const db=new D("../../data-dev/data.db",{readonly:true});
+    console.log(db.prepare("SELECT id,status,ended_at FROM sessions ORDER BY started_at DESC LIMIT 3").all());'
+  ```
+
+  From an ESM script the workspace root resolves nothing; import the real path,
+  `<worktree>/node_modules/.pnpm/better-sqlite3@<v>/node_modules/better-sqlite3/lib/index.js`.
 
 Cover the boundaries your change introduces (happy path · the new error path · the next-layer-down guard, e.g. wire-DoS zod cap when you tightened a service cap · the lowest-level constraint, e.g. DB CHECK fires on direct SQL when bypassing the service). Report results as a `| Caso | Esperado | Resultado |` table so the user can scan.
+
+**Every arm needs a control that must pass, in the same run.** A smoke arm has two ways to look green: the behaviour works, or the probe never reached it. They are indistinguishable from the outside, and this repo has been fooled by both — an "absent from the purge set" assertion over an empty set, and a `session-end.sh` timing of **2 ms** that turned out to be the script aborting before it did anything. Pair each assertion with the negative that proves the probe bit: the same call before the change lands, the row that IS in the set beforehand, the write that DID happen.
+
+## 5b. Driving the real client CLIs against your worktree
+
+Unit tests exercise the scripts; only this exercises the host. Every recipe below keeps the operator's own installation untouched — never install your worktree into `~/.claude`, `~/.codex` or `~/.pi`.
+
+Common setup for all of them: a scratch working directory containing
+
+```
+PROJECT_SLUG=demo
+```
+
+in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bare slug makes every shell hook `exit 0` in silence with no diagnostic, which is indistinguishable from the hooks never running. That mistake produced a confident, wrong "Codex does not run plugin hooks in `codex exec`" finding that had to be retracted. Plus `REMBRIC_SERVER_URL=http://localhost:<port>`, `REMBRIC_API_TOKEN=<admin>` and `REMBRIC_DEBUG=1` — without the last one a failing hook says nothing at all.
+
+- **Codex** — works headless, hooks included:
+
+  ```bash
+  export CODEX_HOME=<scratch>/codexhome          # isolated; ~/.codex untouched
+  codex plugin marketplace add <worktree>        # local path is a valid marketplace
+  codex plugin add rembric@rembric               # the qualifier is required
+  codex exec --json --skip-git-repo-check --dangerously-bypass-hook-trust "..."
+  codex exec resume <thread_id> --json --skip-git-repo-check --dangerously-bypass-hook-trust "..."
+  ```
+
+  Hooks do not run until the operator trusts each type; `--dangerously-bypass-hook-trust` is the documented automation escape. Confirm the cached copy under `$CODEX_HOME/plugins/cache/…` is _yours_ before trusting the result.
+
+- **Pi** — works headless, extension loaded by path:
+
+  ```bash
+  pi -p -ne -e <worktree>/apps/plugin/.pi-plugin/index.ts "..."
+  pi -p -ne -e <same> --session <session-id> "..."      # cold-start resume
+  ```
+
+  `-ne` disables discovery so the operator's installed extension cannot interfere; `-e` still honours the explicit path.
+
+- **Claude Code** — **does not work headless.** Measured: `claude -p --plugin-dir <worktree>/apps/plugin` loads no plugin — no row, no `REMBRIC_DEBUG` diagnostic, nothing about plugins or hooks under `--debug`. Print mode appears not to run plugin hooks. Its scripts are the same ones the Codex arm exercises (the repo forbids per-client variants), so the residual gap is the `hooks.json` wiring; say so rather than claiming coverage.
+
+- **Running a hook script directly** (to time it, or to drive one event): invoke it with **`bash`, not `sh`**. The scripts read `${BASH_SOURCE[0]}` under `set -u`, so a POSIX shell aborts into their own `trap … ERR` and exits 0 in about 2 ms having done nothing.
+
+**Proving a lifecycle transition landed when no field reports it.** A `/end` against an already-terminal row is a documented no-op, so `ended_at` moving is proof the row was `active` when the end arrived — which is how a resume between two runs is demonstrated without any endpoint exposing "was resumed". Look for that shape: an idempotent verb whose side effect only occurs from the state you are trying to prove.
 
 ## 6. Teardown
 
@@ -60,5 +121,7 @@ Run from the same worktree path you brought up.
 - **Container lacks `sqlite3` / `ps` / `vi`.** Inspect from the host, log via `docker logs`.
 - **MCP responses are SSE-framed** even when you sent `Accept: application/json` too.
 - **`docker compose up` does not warn on mount divergence.** §2 is the only way to catch it.
+- **A container restart WIPES the database.** The dev container runs `seed-dev --reset` on every boot, so `docker restart rembric-dev` returns a freshly seeded corpus: new session ids, your smoke's rows gone, and migrations applied from `0000` in the log. Anything that needs state to survive a restart — "the boot sweep does not re-retire this row", "no migration ran" — is **not measurable in this stack**, and neither is it a defect in the change. Capture fixture ids after the boot you are going to use, never before.
+- **`/tmp` is tmpfs and vitest never cleans up.** See §0; the symptom is `exit code: 137` in a `RUN` layer.
 
 When in doubt, read the compose files first; this skill is the procedure, the files are the contract.
