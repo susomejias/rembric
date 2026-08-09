@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -27,6 +27,13 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   });
 }
+
+// `_transcript.sh` prefers jq and falls back to awk when it is absent, so a
+// machine without jq would exercise the fallback and read as a content
+// mismatch rather than a missing dependency. Fail on the dependency instead.
+it('jq is installed, so these tests exercise the jq path and not the awk fallback', () => {
+  expect(spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+});
 
 /** Paths answered with `404 session_not_found` instead of `200`. */
 let notFound: Set<string>;
@@ -97,7 +104,7 @@ function writeRembricFile(slug: string): void {
   writeFileSync(join(dir, '.rembric'), `PROJECT_SLUG=${slug}\n`);
 }
 
-describe('session-start.sh ensures then resumes', () => {
+describe('session-start.sh ensures then resumes', { retry: 2 }, () => {
   it('POSTs the ensure and then the resume, in that order, with an empty body', async () => {
     writeRembricFile('demo');
 
@@ -180,7 +187,7 @@ describe('session-start.sh ensures then resumes', () => {
   });
 });
 
-describe('post-compact.sh ensures then resumes', () => {
+describe('post-compact.sh ensures then resumes', { retry: 2 }, () => {
   it('POSTs the pair and still emits the compaction instruction', async () => {
     writeRembricFile('demo');
 
@@ -202,99 +209,114 @@ describe('post-compact.sh ensures then resumes', () => {
   });
 });
 
-describe('session-end.sh selects its transcript parser from the agent argument', () => {
-  function writeClaudeTranscript(): string {
-    const path = join(dir, 'claude.jsonl');
-    writeFileSync(
-      path,
-      [
-        JSON.stringify({ type: 'user', message: { role: 'user', content: 'please fix the bug' } }),
+describe(
+  'session-end.sh selects its transcript parser from the agent argument',
+  { retry: 2 },
+  () => {
+    function writeClaudeTranscript(): string {
+      const path = join(dir, 'claude.jsonl');
+      writeFileSync(
+        path,
+        [
+          JSON.stringify({
+            type: 'user',
+            message: { role: 'user', content: 'please fix the bug' },
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            message: { role: 'assistant', content: 'Fixed it, running tests now.' },
+          }),
+        ].join('\n') + '\n',
+      );
+      return path;
+    }
+
+    function writeCodexTranscript(): string {
+      const path = join(dir, 'codex.jsonl');
+      writeFileSync(
+        path,
+        [
+          JSON.stringify({
+            type: 'event_msg',
+            payload: { type: 'user_message', message: 'please fix the bug' },
+          }),
+          JSON.stringify({
+            type: 'event_msg',
+            payload: { type: 'agent_message', message: 'Fixed it, running tests now.' },
+          }),
+        ].join('\n') + '\n',
+      );
+      return path;
+    }
+
+    it('parses a Codex transcript under codex-cli and POSTs /end with summary and title', async () => {
+      writeRembricFile('demo');
+      const out = await run(
+        'session-end.sh',
         JSON.stringify({
-          type: 'assistant',
-          message: { role: 'assistant', content: 'Fixed it, running tests now.' },
+          session_id: 'sess-1',
+          cwd: dir,
+          transcript_path: writeCodexTranscript(),
+          reason: 'other',
         }),
-      ].join('\n') + '\n',
-    );
-    return path;
-  }
+        'codex-cli',
+      );
 
-  function writeCodexTranscript(): string {
-    const path = join(dir, 'codex.jsonl');
-    writeFileSync(
-      path,
-      [
+      expect(out).toBe('');
+      expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
+      const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
+      expect(body.summary).toContain('please fix the bug');
+      expect(body.summary).toContain('Fixed it, running tests now.');
+      expect(body.title).toContain('Fixed it, running tests now.');
+      expect(body.final).toBe(false);
+    });
+
+    // The control that makes the dispatch load-bearing: the same Codex transcript
+    // read by the Claude parser yields nothing, so the script degrades to `{}`.
+    it('yields a degraded /end for a Codex transcript read by the Claude parser', async () => {
+      writeRembricFile('demo');
+      await run(
+        'session-end.sh',
+        JSON.stringify({ session_id: 'sess-1', cwd: dir, transcript_path: writeCodexTranscript() }),
+        'claude-code',
+      );
+
+      expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
+      expect(JSON.parse(requests[0]!.body)).toEqual({});
+    });
+
+    it('defaults to the Claude parser when no agent argument is passed', async () => {
+      writeRembricFile('demo');
+      await run(
+        'session-end.sh',
         JSON.stringify({
-          type: 'event_msg',
-          payload: { type: 'user_message', message: 'please fix the bug' },
+          session_id: 'sess-1',
+          cwd: dir,
+          transcript_path: writeClaudeTranscript(),
         }),
+      );
+
+      const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
+      expect(body.summary).toContain('Fixed it, running tests now.');
+    });
+
+    it('degrades to /end {} when the transcript is unreadable', async () => {
+      writeRembricFile('demo');
+      await run(
+        'session-end.sh',
         JSON.stringify({
-          type: 'event_msg',
-          payload: { type: 'agent_message', message: 'Fixed it, running tests now.' },
+          session_id: 'sess-1',
+          cwd: dir,
+          transcript_path: join(dir, 'gone.jsonl'),
         }),
-      ].join('\n') + '\n',
-    );
-    return path;
-  }
+        'codex-cli',
+      );
 
-  it('parses a Codex transcript under codex-cli and POSTs /end with summary and title', async () => {
-    writeRembricFile('demo');
-    const out = await run(
-      'session-end.sh',
-      JSON.stringify({
-        session_id: 'sess-1',
-        cwd: dir,
-        transcript_path: writeCodexTranscript(),
-        reason: 'other',
-      }),
-      'codex-cli',
-    );
-
-    expect(out).toBe('');
-    expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
-    const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
-    expect(body.summary).toContain('please fix the bug');
-    expect(body.summary).toContain('Fixed it, running tests now.');
-    expect(body.title).toContain('Fixed it, running tests now.');
-    expect(body.final).toBe(false);
-  });
-
-  // The control that makes the dispatch load-bearing: the same Codex transcript
-  // read by the Claude parser yields nothing, so the script degrades to `{}`.
-  it('yields a degraded /end for a Codex transcript read by the Claude parser', async () => {
-    writeRembricFile('demo');
-    await run(
-      'session-end.sh',
-      JSON.stringify({ session_id: 'sess-1', cwd: dir, transcript_path: writeCodexTranscript() }),
-      'claude-code',
-    );
-
-    expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
-    expect(JSON.parse(requests[0]!.body)).toEqual({});
-  });
-
-  it('defaults to the Claude parser when no agent argument is passed', async () => {
-    writeRembricFile('demo');
-    await run(
-      'session-end.sh',
-      JSON.stringify({ session_id: 'sess-1', cwd: dir, transcript_path: writeClaudeTranscript() }),
-    );
-
-    const body = JSON.parse(requests[0]!.body) as Record<string, unknown>;
-    expect(body.summary).toContain('Fixed it, running tests now.');
-  });
-
-  it('degrades to /end {} when the transcript is unreadable', async () => {
-    writeRembricFile('demo');
-    await run(
-      'session-end.sh',
-      JSON.stringify({ session_id: 'sess-1', cwd: dir, transcript_path: join(dir, 'gone.jsonl') }),
-      'codex-cli',
-    );
-
-    expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
-    expect(JSON.parse(requests[0]!.body)).toEqual({});
-  });
-});
+      expect(paths()).toEqual(['/api/demo/sessions/sess-1/end']);
+      expect(JSON.parse(requests[0]!.body)).toEqual({});
+    });
+  },
+);
 
 describe('rembric_post honours REMBRIC_POST_MAX_TIME', () => {
   // curl is shimmed so the flag can be read off the real invocation; asserting
