@@ -27,7 +27,7 @@
     "prompts": [
       "./commands"
     ],
-    "image": "https://raw.githubusercontent.com/susomejias/rembric/main/apps/landing/public/assets/logo-transparent.png"
+    "image": "https://raw.githubusercontent.com/susomejias/rembric/main/apps/landing/public/assets/og.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
