@@ -19,12 +19,12 @@ export default defineConfig({
     exclude: ['**/node_modules/**', 'dist/**'],
     testTimeout: 15_000,
     // Run test files sequentially. The real-server integration tests
-    // (mcp-integration) drive an MCP roots-discovery `listRoots` SSE round
-    // trip on a 1s budget; running ~75 files across parallel workers starves
-    // that server's event loop under CPU pressure, so the round trip loses the
-    // race and discovery falls back to global — a flaky failure unrelated to
-    // product behavior. Serial execution removes the starvation. The server
-    // suite is small, so the wall-clock cost is modest.
+    // (mcp-integration) drive an MCP roots-discovery `listRoots` round trip on
+    // a bounded budget (2500 ms); running ~75 files across parallel workers
+    // starves that server's event loop under CPU pressure, so the round trip
+    // can exceed the budget and discovery falls back to the default project —
+    // a flaky failure unrelated to product behavior. Serial execution removes
+    // the starvation. The server suite is small, so the cost is modest.
     fileParallelism: false,
     coverage: {
       provider: 'v8',

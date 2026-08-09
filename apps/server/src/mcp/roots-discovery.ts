@@ -1,4 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import {
+  ErrorCode,
+  McpError,
+  type ListRootsResult,
+  type RequestId,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import type { SessionRouter } from '../server/session-router.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -6,15 +13,8 @@ import type { ProjectsService } from '../services/projects.js';
 /**
  * Server-driven project auto-detection via the MCP `roots` capability.
  *
- * Triggered lazily from scope-aware tool handlers (`project.current`,
- * `memory.session_start`, `memory.{save,search,get,confirm}`). We tried
- * an eager `server.oninitialized` hook (commit 1379c93) but found that
- * the MCP HTTP streamable client doesn't open its server→client SSE
- * channel until AFTER `notifications/initialized` has been processed,
- * so a `roots/list` issued from `oninitialized` always times out and
- * poisons the discovery slot for the rest of the transport. By the
- * time the agent issues a tool call the channel is up, so `listRoots`
- * succeeds there.
+ * Triggered lazily from the shared scope resolver, so `roots/list` is always
+ * issued from inside a tool call and is correlated with it.
  *
  * Single-flight semantics across concurrent lazy callers come from
  * `SessionRouter.discoveryInFlight`.
@@ -32,19 +32,14 @@ import type { ProjectsService } from '../services/projects.js';
  * either of those happen.
  */
 
-// Budget for the `listRoots` SSE round trip on the first tool call. A
-// compliant client whose channel is open answers in well under this; the
-// budget only bites a client that advertises `roots` but never responds
-// (its first call waits this long before falling back to global). Bumped
-// from 1s: bearer auth now runs async (scrypt on the libuv threadpool) on
-// every message, including the client's `roots/list` RESPONSE, so the round
-// trip carries more latency under load — 1s occasionally lost the race on
-// slow/instrumented runners. 2.5s keeps the worst-case bound reasonable.
+// Binds only a client that advertises `roots` and then declines to answer.
 const ROOTS_LIST_TIMEOUT_MS = 2500;
 
 /**
- * One slot per `(tokenId, mcpSessionId)` records whether discovery has
- * already run, so subsequent tool calls do not re-issue `roots/list`.
+ * One slot per `(tokenId, mcpSessionId)` records whether discovery reached a
+ * DEFINITIVE outcome, so subsequent tool calls do not re-issue `roots/list`.
+ * An attempt that produced no answer leaves it unconsumed — see
+ * `markDiscoveryRun`'s call sites.
  */
 const discoveryRunForTransport = new Set<string>();
 
@@ -76,21 +71,17 @@ export interface RootsDiscoveryContext {
   mcpSessionId: string;
   /** When the URL path already pinned a slug, discovery is a no-op. */
   pathSlug: string | null;
+  /**
+   * JSON-RPC id of the tool call discovery is running under, when one is in
+   * scope. Stamped on `roots/list` so the transport routes it onto that call's
+   * own response stream, which is registered before any handler runs.
+   */
+  toolCallRequestId?: RequestId;
 }
 
 /**
- * Single-flight wrapper around `maybeDiscoverViaRoots`. Use this from
- * any code path that benefits from roots-derived project resolution:
- *
- *   - `server.oninitialized` (eager — fires the moment the handshake
- *     completes, so the router is populated before any tool call)
- *   - scope-aware tool handlers (fallback — clients that never emit
- *     `notifications/initialized`, or tool calls that arrive in the
- *     short window before eager discovery settles)
- *
- * The router stores the in-flight promise so concurrent callers all
- * await the same `listRoots` round trip. Failures are swallowed —
- * discovery must never break a request.
+ * Single-flight wrapper: the router holds the promise only while an attempt is
+ * in flight, so a settled one cannot short-circuit a later call's retry.
  */
 export async function ensureRootsDiscoveryRun(
   deps: RootsDiscoveryDeps,
@@ -105,7 +96,11 @@ export async function ensureRootsDiscoveryRun(
   if (isDiscoveryRun(ctx.tokenId, ctx.mcpSessionId)) return;
   const promise = maybeDiscoverViaRoots(deps, ctx).catch(() => undefined);
   deps.router.setDiscoveryPromise(ctx.tokenId, ctx.mcpSessionId, promise);
-  await promise;
+  try {
+    await promise;
+  } finally {
+    deps.router.clearDiscoveryPromise(ctx.tokenId, ctx.mcpSessionId, promise);
+  }
 }
 
 export async function maybeDiscoverViaRoots(
@@ -114,21 +109,42 @@ export async function maybeDiscoverViaRoots(
 ): Promise<void> {
   if (ctx.pathSlug) return;
   if (isDiscoveryRun(ctx.tokenId, ctx.mcpSessionId)) return;
-  markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
 
   const caps = deps.server.server.getClientCapabilities();
-  if (!caps?.roots) return;
-
-  try {
-    const res = await deps.server.server.listRoots(undefined, { timeout: ROOTS_LIST_TIMEOUT_MS });
-    const firstRoot = res.roots[0];
-    if (!firstRoot) return;
-    const slug = deriveSlugFromUri(firstRoot.uri);
-    if (!slug) return;
-    applyDerivedSlug(deps, ctx, slug);
-  } catch {
-    // Silent on error / timeout — discovery must never break a request.
+  if (!caps?.roots) {
+    markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+    return;
   }
+
+  let res: ListRootsResult;
+  try {
+    res = await deps.server.server.listRoots(undefined, listRootsOptions(ctx));
+  } catch (err) {
+    if (isAnswerFromClient(err)) markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+    // Swallowed: discovery must never break a request.
+    return;
+  }
+  markDiscoveryRun(ctx.tokenId, ctx.mcpSessionId);
+  const firstRoot = res.roots[0];
+  if (!firstRoot) return;
+  const slug = deriveSlugFromUri(firstRoot.uri);
+  if (!slug) return;
+  applyDerivedSlug(deps, ctx, slug);
+}
+
+function listRootsOptions(ctx: RootsDiscoveryContext): RequestOptions {
+  const options: RequestOptions = { timeout: ROOTS_LIST_TIMEOUT_MS };
+  // Unstamped when no tool call is in scope: the pre-existing routing, never a throw.
+  if (ctx.toolCallRequestId !== undefined) options.relatedRequestId = ctx.toolCallRequestId;
+  return options;
+}
+
+/** `McpError.code` is a plain `number`, so the enum members are widened to match it. */
+const NO_ANSWER_CODES: readonly number[] = [ErrorCode.RequestTimeout, ErrorCode.ConnectionClosed];
+
+/** A JSON-RPC error is an answer; a timeout or transport failure is not. */
+function isAnswerFromClient(err: unknown): boolean {
+  return err instanceof McpError && !NO_ANSWER_CODES.includes(err.code);
 }
 
 /**
@@ -145,7 +161,7 @@ export async function refreshRootsAfterChange(
   const caps = deps.server.server.getClientCapabilities();
   if (!caps?.roots) return;
   try {
-    const res = await deps.server.server.listRoots(undefined, { timeout: ROOTS_LIST_TIMEOUT_MS });
+    const res = await deps.server.server.listRoots(undefined, listRootsOptions(ctx));
     const firstRoot = res.roots[0];
     if (!firstRoot) {
       deps.router.setSuggestedSlugs(ctx.tokenId, ctx.mcpSessionId, []);

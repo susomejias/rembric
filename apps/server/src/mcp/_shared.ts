@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext, type RequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
+import { tryGetToolCallId } from '../server/tool-call-context.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService, ProjectView } from '../services/projects.js';
@@ -64,11 +65,10 @@ export function unresolvableSlugError(slug: string, projects: ProjectsService): 
  * There is no fourth source and no scopeless outcome — every authenticated
  * connection resolves to exactly one project.
  *
- * Before consulting source #2 on an unscoped connection, this helper
- * awaits any in-flight roots discovery (or triggers it lazily as a
- * fallback for clients that never emit `notifications/initialized`) so
- * the router is populated by the time we read it. Path-scoped
- * connections short-circuit on `ctx.requestedSlug`.
+ * Before consulting source #2 on an unscoped connection, this helper awaits
+ * any in-flight roots discovery, or triggers it, so the router is populated by
+ * the time we read it. Path-scoped connections short-circuit on
+ * `ctx.requestedSlug`.
  */
 export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
   const ctx = getRequestContext();
@@ -79,7 +79,12 @@ export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<
   if (deps.getServer) {
     await ensureRootsDiscoveryRun(
       { server: deps.getServer(), router: deps.router, projects: deps.projects },
-      { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId, pathSlug: ctx.requestedSlug },
+      {
+        tokenId: ctx.token.id,
+        mcpSessionId: ctx.mcpSessionId,
+        pathSlug: ctx.requestedSlug,
+        toolCallRequestId: tryGetToolCallId(),
+      },
     );
   }
   const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);

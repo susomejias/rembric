@@ -49,9 +49,9 @@ export class SessionRouter {
   private readonly entries = new Map<string, RouterEntry>();
   /**
    * In-flight roots-discovery promise per transport. Used to serialize
-   * concurrent discovery attempts (e.g. `oninitialized` fires eager
-   * discovery and a tool handler arrives before it settles — the handler
-   * awaits the same promise instead of triggering a second listRoots).
+   * concurrent discovery attempts: a tool handler that arrives while one is
+   * running awaits the same promise instead of triggering a second listRoots.
+   * Holds in-flight attempts only; a settled one is removed.
    */
   private readonly discoveryInFlight = new Map<string, Promise<unknown>>();
 
@@ -120,6 +120,15 @@ export class SessionRouter {
   /** Read the in-flight roots-discovery promise for this transport, if any. */
   getDiscoveryPromise(tokenId: string, mcpSessionId: string): Promise<unknown> | undefined {
     return this.discoveryInFlight.get(entryKey(tokenId, mcpSessionId));
+  }
+
+  /**
+   * Drop a settled roots-discovery promise. Identity-checked so a caller whose
+   * attempt has been superseded cannot evict the live one.
+   */
+  clearDiscoveryPromise(tokenId: string, mcpSessionId: string, promise: Promise<unknown>): void {
+    const key = entryKey(tokenId, mcpSessionId);
+    if (this.discoveryInFlight.get(key) === promise) this.discoveryInFlight.delete(key);
   }
 
   /** Test-only helper: drop everything. */

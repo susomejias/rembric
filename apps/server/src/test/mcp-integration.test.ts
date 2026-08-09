@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -2995,78 +2996,62 @@ describe('MCP protocol conformance', () => {
   // roots-discovery-aware resolver, so the FIRST call on a fresh transport
   // sees the same project scope a later call would.
   //
-  // retry: discovery is an async `listRoots()` SSE round trip on a bounded
-  // budget; on a slow, coverage-instrumented CI runner it can occasionally
-  // exceed the budget and fall back to global. Correct behavior on a settled
-  // transport — each retry reconnects (fresh discovery) after startup
-  // contention (e.g. the boot-time embedding drain) has cleared.
-  it(
-    'memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope',
-    { retry: 3 },
-    async () => {
-      // Fixtures created once: `retry` re-runs this body, so a re-`create`
-      // would hit UNIQUE(slug)/PK and mask the real (timing) retry.
-      const repos = createRepositories(server.dbHandle.db);
-      const projectsSvc = new ProjectsService(repos);
-      let project = projectsSvc.findBySlug('integration-roots-ctx-proj');
-      if (!project) {
-        project = projectsSvc.create({ slug: 'integration-roots-ctx-proj' });
-        repos.memory.insert({
-          id: '01TESTROOTSCTXMARKER00000A',
-          scope: 'project',
-          projectId: project.id,
-          type: 'project',
-          title: 'roots-discovered context marker',
-          content: 'roots-discovered context marker',
-          tags: [],
-          status: 'active',
-          replaces: [],
-          createdAt: new Date(),
-          lastSeenAt: new Date(),
-        });
-      }
+  // This is the WARM arm: ~90 prior connections to this server precede it, and
+  // it runs with retries disabled (mcp-api spec — a retried test asserts only
+  // that one attempt of several passed).
+  it('memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope', async () => {
+    const repos = createRepositories(server.dbHandle.db);
+    const projectsSvc = new ProjectsService(repos);
+    const project = projectsSvc.create({ slug: 'integration-roots-ctx-proj' });
+    repos.memory.insert({
+      id: '01TESTROOTSCTXMARKER00000A',
+      scope: 'project',
+      projectId: project.id,
+      type: 'project',
+      title: 'roots-discovered context marker',
+      content: 'roots-discovered context marker',
+      tags: [],
+      status: 'active',
+      replaces: [],
+      createdAt: new Date(),
+      lastSeenAt: new Date(),
+    });
 
-      const client = await connect({ rootUri: `file:///tmp/${project.slug}` });
-      const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
-      expect(ctx.isError).toBeFalsy();
-      const payload = readJson(ctx) as { scope: string; recentMemories: { snippet: string }[] };
-      expect(payload.scope).toBe(`project:${project.id}`);
-      expect(
-        payload.recentMemories.some((m) => m.snippet.includes('roots-discovered context marker')),
-      ).toBe(true);
+    const client = await connect({ rootUri: `file:///tmp/${project.slug}` });
+    const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
+    expect(ctx.isError).toBeFalsy();
+    const payload = readJson(ctx) as { scope: string; recentMemories: { snippet: string }[] };
+    expect(payload.scope).toBe(`project:${project.id}`);
+    expect(
+      payload.recentMemories.some((m) => m.snippet.includes('roots-discovered context marker')),
+    ).toBe(true);
 
-      await client.close();
-    },
-  );
+    await client.close();
+  });
 
-  // retry: same async roots-discovery round-trip dependency as the test above.
   // Premise changed: an unminted roots suggestion no longer blocks the write —
   // the connection has a project (the default one), so the gate that refused a
   // scopeless write has no state left to fire in. `project.current` still
   // surfaces the suggestion, so the agent can move the row with `project.use`.
-  it(
-    'memory.capture_passive writes to the default project when roots surface an unminted slug',
-    { retry: 3 },
-    async () => {
-      const dflt = defaultProject(server.dbHandle);
-      const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
-      const result = (await client.callTool({
-        name: 'memory.capture_passive',
-        arguments: { text: '## Key Learnings:\n- captured against the default project\n' },
-      })) as ToolResult;
-      expect(result.isError).toBeFalsy();
-      const saved = readJson(result) as { saved: number; ids: string[] };
-      expect(saved.saved).toBeGreaterThan(0);
+  it('memory.capture_passive writes to the default project when roots surface an unminted slug', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
+    const result = (await client.callTool({
+      name: 'memory.capture_passive',
+      arguments: { text: '## Key Learnings:\n- captured against the default project\n' },
+    })) as ToolResult;
+    expect(result.isError).toBeFalsy();
+    const saved = readJson(result) as { saved: number; ids: string[] };
+    expect(saved.saved).toBeGreaterThan(0);
 
-      const current = readJson(
-        (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
-      ) as { projectId: string | null; suggestedSlugs: string[] };
-      expect(current.projectId).toBe(dflt.id);
-      expect(current.suggestedSlugs).toEqual(['integration-unminted-slug']);
+    const current = readJson(
+      (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    ) as { projectId: string | null; suggestedSlugs: string[] };
+    expect(current.projectId).toBe(dflt.id);
+    expect(current.suggestedSlugs).toEqual(['integration-unminted-slug']);
 
-      await client.close();
-    },
-  );
+    await client.close();
+  });
 });
 
 // Real-server coverage for the auth-surface hardening (change
@@ -3230,5 +3215,169 @@ describe('the enforced description cap is published in mcp-api', () => {
       published,
       `no mcp-api requirement names DESCRIPTION_MAX_LENGTH with the value ${DESCRIPTION_MAX_LENGTH}`,
     ).toBe(true);
+  });
+});
+
+/**
+ * Routing-level coverage for roots discovery, on its own server so the first
+ * arm below is the first traffic that server has served.
+ *
+ * A test that asserts only the resolved scope passes whenever the underlying
+ * arrival race is won, so it cannot guard the routing. The arms here assert the
+ * routing property itself (mcp-api spec): discovery completes while the
+ * client's optional standalone server→client stream is absent.
+ *
+ * Retries stay disabled here and on the warm arm above, per the same spec: a
+ * retried test asserts only that one attempt of several passed.
+ */
+describe('roots discovery routing (real server)', () => {
+  let server: BootstrappedServer;
+  let baseUrl: string;
+  const ADMIN_TOKEN = 'roots-routing-admin-token-with-enough-entropy';
+  /** Every HTTP request the server received, in arrival order. */
+  const httpLog: string[] = [];
+
+  beforeAll(async () => {
+    const tmp = createTestDb();
+    tmp.cleanup();
+    const port = await findFreePort();
+    server = await createServer(
+      {
+        REMBRIC_HOST: '127.0.0.1',
+        REMBRIC_PORT: String(port),
+        REMBRIC_DATA_DIR: tmp.dataDir,
+        REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
+      },
+      { embedder: new FakeEmbedder() },
+    );
+    server.http.server.on('request', (req) => httpLog.push(`${req.method} ${req.url}`));
+    baseUrl = `http://127.0.0.1:${port}`;
+  }, 30_000);
+
+  afterAll(async () => {
+    await server?.shutdown();
+  });
+
+  function createProject(slug: string): { id: string; slug: string } {
+    return new ProjectsService(createRepositories(server.dbHandle.db)).create({ slug });
+  }
+
+  async function connectRoots(opts: {
+    rootUri: string;
+    advertiseRoots?: boolean;
+    suppressStandaloneStream?: boolean;
+    dropFirstRootsList?: boolean;
+  }): Promise<{ client: Client; clientMethods: string[]; rootsCalls: () => number }> {
+    const clientMethods: string[] = [];
+    const guardedFetch: FetchLike = (url, init) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      clientMethods.push(method);
+      if (opts.suppressStandaloneStream === true && method === 'GET') {
+        // 405 is the SDK's "this server offers no GET stream" path, taken
+        // without raising: the server never sees the GET, so it never registers
+        // the standalone server→client stream.
+        return Promise.resolve(new Response(null, { status: 405 }));
+      }
+      return fetch(url, init);
+    };
+    const advertiseRoots = opts.advertiseRoots !== false;
+    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+      fetch: guardedFetch,
+      requestInit: { headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } },
+    });
+    const client = new Client(
+      { name: 'roots-routing-client', version: '0.0.0' },
+      { capabilities: advertiseRoots ? { roots: {} } : {} },
+    );
+    let calls = 0;
+    if (advertiseRoots) {
+      client.setRequestHandler(ListRootsRequestSchema, async () => {
+        calls += 1;
+        if (opts.dropFirstRootsList === true && calls === 1) {
+          // No answer of ANY kind, so the server's own budget expires. A
+          // rejection would instead be an answer, which legitimately consumes
+          // the once-only discovery slot.
+          await new Promise(() => {});
+        }
+        return { roots: [{ uri: opts.rootUri, name: opts.rootUri }] };
+      });
+    }
+    await client.connect(transport);
+    return { client, clientMethods, rootsCalls: () => calls };
+  }
+
+  async function contextScope(client: Client): Promise<string> {
+    const result = (await client.callTool({
+      name: 'memory.context',
+      arguments: {},
+    })) as ToolResult;
+    expect(result.isError).toBeFalsy();
+    return (readJson(result) as { scope: string }).scope;
+  }
+
+  // Cold arm — the control. Must be the first test in this describe: it is the
+  // first traffic this server has served. It passes on both sides of the
+  // routing fix, so a harness that never reaches the discovery path at all is
+  // distinguishable from a correct one.
+  it('resolves the discovered project on the first connection a server serves', async () => {
+    const project = createProject('routing-cold-arm');
+    const { client } = await connectRoots({ rootUri: `file:///tmp/${project.slug}` });
+    expect(await contextScope(client)).toBe(`project:${project.id}`);
+    await client.close();
+  });
+
+  it('completes discovery while the client never opens the standalone stream', async () => {
+    const project = createProject('routing-no-standalone');
+    const from = httpLog.length;
+    const { client, clientMethods } = await connectRoots({
+      rootUri: `file:///tmp/${project.slug}`,
+      suppressStandaloneStream: true,
+    });
+    const scope = await contextScope(client);
+    const mine = httpLog.slice(from);
+
+    expect(clientMethods, 'the client did attempt the standalone GET').toContain('GET');
+    expect(mine.filter((line) => line.startsWith('GET /mcp'))).toEqual([]);
+    // The instrument is live: this connection's POSTs did reach the server.
+    expect(mine.some((line) => line.startsWith('POST /mcp'))).toBe(true);
+    expect(scope).toBe(`project:${project.id}`);
+
+    await client.close();
+  });
+
+  it('retries discovery on the next tool call when the first roots/list got no answer', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const project = createProject('routing-unanswered-first');
+    const { client, rootsCalls } = await connectRoots({
+      rootUri: `file:///tmp/${project.slug}`,
+      dropFirstRootsList: true,
+    });
+
+    expect(await contextScope(client)).toBe(`project:${dflt.id}`);
+    expect(rootsCalls()).toBe(1);
+
+    expect(await contextScope(client)).toBe(`project:${project.id}`);
+    expect(rootsCalls()).toBe(2);
+
+    const current = readJson(
+      (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    ) as { projectId: string | null };
+    expect(current.projectId).toBe(project.id);
+
+    await client.close();
+  });
+
+  // Control: without it, "the discovered project" above could be the default
+  // project under another name.
+  it('resolves the default project when the client advertises no roots capability', async () => {
+    const dflt = defaultProject(server.dbHandle);
+    const project = createProject('routing-not-discovered');
+    const { client, rootsCalls } = await connectRoots({
+      rootUri: `file:///tmp/${project.slug}`,
+      advertiseRoots: false,
+    });
+    expect(await contextScope(client)).toBe(`project:${dflt.id}`);
+    expect(rootsCalls()).toBe(0);
+    await client.close();
   });
 });

@@ -1,6 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import {
+  ErrorCode,
+  McpError,
+  type ListRootsResult,
+  type RequestId,
+} from '@modelcontextprotocol/sdk/types.js';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { deriveSlugFromUri } from './roots-discovery.js';
+import { SessionRouter } from '../server/session-router.js';
+
+import {
+  deriveSlugFromUri,
+  ensureRootsDiscoveryRun,
+  isDiscoveryRun,
+  maybeDiscoverViaRoots,
+  resetDiscoveryState,
+  type RootsDiscoveryContext,
+  type RootsDiscoveryDeps,
+} from './roots-discovery.js';
 
 describe('deriveSlugFromUri', () => {
   it('extracts the basename from a file:// URI', () => {
@@ -39,5 +56,175 @@ describe('deriveSlugFromUri', () => {
 
   it('strips trailing slashes', () => {
     expect(deriveSlugFromUri('file:///home/me/rembric/')).toBe('rembric');
+  });
+});
+
+/**
+ * Outcome classification and single-flight bookkeeping. The once-only discovery
+ * slot is consumed by an ANSWER, never by an attempt: the projects spec makes
+ * the difference load-bearing, because a consumed slot misscopes the connection
+ * for its whole life and no verb reassigns what it wrote.
+ */
+describe('maybeDiscoverViaRoots outcome classification', () => {
+  const TOKEN = 'tk_roots_unit';
+  let seq = 0;
+
+  interface Harness {
+    deps: RootsDiscoveryDeps;
+    router: SessionRouter;
+    ctx: RootsDiscoveryContext;
+    listRootsCalls: () => number;
+    lastOptions: () => RequestOptions | undefined;
+  }
+
+  function harness(opts: {
+    roots?: boolean;
+    listRoots?: () => Promise<ListRootsResult>;
+    toolCallRequestId?: RequestId;
+  }): Harness {
+    const router = new SessionRouter();
+    let calls = 0;
+    let lastOptions: RequestOptions | undefined;
+    const server = {
+      server: {
+        getClientCapabilities: () => (opts.roots === false ? {} : { roots: {} }),
+        listRoots: (_params: undefined, options?: RequestOptions) => {
+          calls += 1;
+          lastOptions = options;
+          return (opts.listRoots ?? (() => Promise.resolve({ roots: [] })))();
+        },
+      },
+    };
+    const projects = {
+      findBySlug: (slug: string) => (slug === 'known' ? { id: 'p-known', slug } : undefined),
+      getById: (id: string) => (id === 'p-known' ? { id, slug: 'known' } : undefined),
+    };
+    seq += 1;
+    return {
+      // Only the members the discovery path reads: the real McpServer and
+      // ProjectsService drag a transport and a database in behind them.
+      deps: { server, router, projects } as unknown as RootsDiscoveryDeps,
+      router,
+      ctx: {
+        tokenId: TOKEN,
+        mcpSessionId: `sess-${seq}`,
+        pathSlug: null,
+        toolCallRequestId: opts.toolCallRequestId,
+      },
+      listRootsCalls: () => calls,
+      lastOptions: () => lastOptions,
+    };
+  }
+
+  beforeEach(() => {
+    resetDiscoveryState();
+  });
+
+  it('consumes the slot when the client answers with a root naming a project', async () => {
+    const h = harness({
+      listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
+    });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(h.router.get(h.ctx.tokenId, h.ctx.mcpSessionId)?.projectId).toBe('p-known');
+  });
+
+  it('consumes the slot when the client answers with an empty root list', async () => {
+    const h = harness({ listRoots: () => Promise.resolve({ roots: [] }) });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+  });
+
+  it('consumes the slot when the client returns a JSON-RPC error', async () => {
+    const h = harness({
+      listRoots: () => Promise.reject(new McpError(ErrorCode.MethodNotFound, 'no roots here')),
+    });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+  });
+
+  it('consumes the slot when the client advertises no roots capability', async () => {
+    const h = harness({ roots: false });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
+    expect(h.listRootsCalls()).toBe(0);
+  });
+
+  it('leaves the slot unconsumed when the request times out', async () => {
+    const h = harness({
+      listRoots: () =>
+        Promise.reject(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out')),
+    });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
+  });
+
+  it('leaves the slot unconsumed when the transport cannot route the request', async () => {
+    const h = harness({
+      listRoots: () => Promise.reject(new Error('No connection established for request ID: 7')),
+    });
+    await maybeDiscoverViaRoots(h.deps, h.ctx);
+    expect(isDiscoveryRun(h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
+  });
+
+  it('stamps the in-flight tool call id on the request, and omits it when there is none', async () => {
+    const stamped = harness({ toolCallRequestId: 42 });
+    await maybeDiscoverViaRoots(stamped.deps, stamped.ctx);
+    expect(stamped.lastOptions()?.relatedRequestId).toBe(42);
+
+    const unstamped = harness({});
+    await maybeDiscoverViaRoots(unstamped.deps, unstamped.ctx);
+    expect(unstamped.lastOptions()).toBeDefined();
+    expect('relatedRequestId' in (unstamped.lastOptions() ?? {})).toBe(false);
+  });
+
+  it('holds the router promise only while an attempt is in flight', async () => {
+    let release: (result: ListRootsResult) => void = () => undefined;
+    const h = harness({
+      listRoots: () =>
+        new Promise<ListRootsResult>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const run = ensureRootsDiscoveryRun(h.deps, h.ctx);
+    expect(h.router.getDiscoveryPromise(h.ctx.tokenId, h.ctx.mcpSessionId)).toBeDefined();
+    release({ roots: [{ uri: 'file:///x/known' }] });
+    await run;
+    expect(h.router.getDiscoveryPromise(h.ctx.tokenId, h.ctx.mcpSessionId)).toBeUndefined();
+  });
+
+  it('retries on the next call after an attempt that produced no answer', async () => {
+    let attempt = 0;
+    const h = harness({
+      listRoots: () => {
+        attempt += 1;
+        return attempt === 1
+          ? Promise.reject(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out'))
+          : Promise.resolve({ roots: [{ uri: 'file:///x/known' }] });
+      },
+    });
+    await ensureRootsDiscoveryRun(h.deps, h.ctx);
+    expect(h.router.get(h.ctx.tokenId, h.ctx.mcpSessionId)?.projectId).toBeUndefined();
+
+    await ensureRootsDiscoveryRun(h.deps, h.ctx);
+    expect(h.listRootsCalls()).toBe(2);
+    expect(h.router.get(h.ctx.tokenId, h.ctx.mcpSessionId)?.projectId).toBe('p-known');
+  });
+
+  it('collapses two concurrent first callers onto one request', async () => {
+    let release: (result: ListRootsResult) => void = () => undefined;
+    const h = harness({
+      listRoots: () =>
+        new Promise<ListRootsResult>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const both = Promise.all([
+      ensureRootsDiscoveryRun(h.deps, h.ctx),
+      ensureRootsDiscoveryRun(h.deps, h.ctx),
+    ]);
+    release({ roots: [{ uri: 'file:///x/known' }] });
+    await both;
+    expect(h.listRootsCalls()).toBe(1);
   });
 });
