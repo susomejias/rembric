@@ -4,6 +4,15 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.25.2](https://github.com/susomejias/rembric/compare/plugin-v0.25.1...plugin-v0.25.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **dashboard:** name every client on every surface, and pin the one that drifted ([b9b7418](https://github.com/susomejias/rembric/commit/b9b74186e9244a32fe7ab15c43a6ddf14b915447))
+* **docs:** retract the claim that Ctrl-C never closes a Pi session ([408e3d3](https://github.com/susomejias/rembric/commit/408e3d3ea35aa9e711cd576c064744591b36c4ec))
+* **plugin:** end the Pi session on shutdown, so attribution stops silently breaking ([8bf83e4](https://github.com/susomejias/rembric/commit/8bf83e4bad9110c304dc9c8191603eba40e72d3d))
+
 ## [0.25.1](https://github.com/susomejias/rembric/compare/plugin-v0.25.0...plugin-v0.25.1) (2026-08-08)
 
 
