@@ -19,15 +19,16 @@ CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
 SLUG="$(rembric_read_project_slug "$CWD")"
 
-# Re-affirm the session row exists (idempotent ensure). This covers the
-# edge case where the row was abandoned by the stale sweep between the
-# pre-compact moment and the post-compact resume — re-create silently.
+# Idempotent ensure, then resume. The ensure alone returns a terminal row
+# untouched, so the resume is what recovers a row the stale sweep abandoned
+# between the pre-compact moment and here.
 if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   ID_ESC="$(rembric_json_escape "$SESSION_ID")"
   CWD_ESC="$(rembric_json_escape "$CWD")"
   AGENT_ESC="$(rembric_json_escape "${1:-${REMBRIC_AGENT:-claude-code}}")"
   rembric_post "/api/${SLUG}/sessions" \
     "{\"id\":\"${ID_ESC}\",\"cwd\":\"${CWD_ESC}\",\"agent\":\"${AGENT_ESC}\"}"
+  rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
 cat <<'PROTOCOL'

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +36,10 @@ def _captured_post(mock_urlopen, idx: int = 0):
     return request.full_url, body, headers
 
 
+def _posted_urls(mock_urlopen) -> list[str]:
+    return [call.args[0].full_url for call in mock_urlopen.call_args_list]
+
+
 class LifecycleTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -55,11 +60,11 @@ class LifecycleTest(unittest.TestCase):
         return self.mod.RembricMemoryProvider()
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_initialize_posts_session(self, mock_urlopen: MagicMock) -> None:
+    def test_initialize_posts_session_then_resume(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeResponse()
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
-        self.assertEqual(mock_urlopen.call_count, 1)
+        self.assertEqual(mock_urlopen.call_count, 2)
         url, body, headers = _captured_post(mock_urlopen)
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions"
@@ -70,6 +75,14 @@ class LifecycleTest(unittest.TestCase):
         )
         self.assertEqual(headers["Authorization"], "Bearer tok-XXXX")
         self.assertEqual(headers["Content-type"], "application/json")
+        # The resume follows the ensure, never precedes it: on a row purged
+        # while terminal the ensure recreates it and the resume is the no-op.
+        url_resume, body_resume, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertEqual(
+            url_resume,
+            "http://server.example.com:8787/api/myproj/sessions/01XYZ/resume",
+        )
+        self.assertEqual(body_resume, {})
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_pre_compress_posts_transcript(self, mock_urlopen: MagicMock) -> None:
@@ -82,8 +95,8 @@ class LifecycleTest(unittest.TestCase):
                 {"role": "assistant", "content": "ack"},
             ]
         )
-        self.assertEqual(mock_urlopen.call_count, 2)
-        url, body, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertEqual(mock_urlopen.call_count, 3)
+        url, body, _ = _captured_post(mock_urlopen, idx=2)
         self.assertEqual(
             url,
             "http://server.example.com:8787/api/myproj/sessions/01XYZ/summary",
@@ -100,7 +113,7 @@ class LifecycleTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         big = "x" * 30_000
         provider.on_pre_compress([{"role": "user", "content": big}])
-        _, body, _ = _captured_post(mock_urlopen, idx=1)
+        _, body, _ = _captured_post(mock_urlopen, idx=2)
         self.assertEqual(len(body["summary"]), 20_000)
         # Truncation is from the head — the tail of the input survives.
         self.assertTrue(body["summary"].endswith("x" * 20_000))
@@ -113,7 +126,7 @@ class LifecycleTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         provider.on_session_end([])
-        url, body, _ = _captured_post(mock_urlopen, idx=1)
+        url, body, _ = _captured_post(mock_urlopen, idx=2)
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/end"
         )
@@ -134,7 +147,7 @@ class LifecycleTest(unittest.TestCase):
                 {"role": "user", "content": "thx"},
             ]
         )
-        url, body, _ = _captured_post(mock_urlopen, idx=1)
+        url, body, _ = _captured_post(mock_urlopen, idx=2)
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/end"
         )
@@ -153,8 +166,8 @@ class LifecycleTest(unittest.TestCase):
         provider.on_session_switch(
             "01NEW", parent_session_id="01OLD", reset=False
         )
-        # Expect two POSTs: /end old, /sessions new.
-        self.assertEqual(mock_urlopen.call_count, 2)
+        # Expect three POSTs: /end old, /sessions new, resume new.
+        self.assertEqual(mock_urlopen.call_count, 3)
         url_end, body_end, _ = _captured_post(mock_urlopen, idx=0)
         self.assertTrue(url_end.endswith("/sessions/01OLD/end"))
         self.assertEqual(body_end, {})
@@ -162,6 +175,9 @@ class LifecycleTest(unittest.TestCase):
         self.assertTrue(url_new.endswith("/sessions"))
         self.assertEqual(body_new["id"], "01NEW")
         self.assertEqual(body_new["agent"], "hermes")
+        url_resume, body_resume, _ = _captured_post(mock_urlopen, idx=2)
+        self.assertTrue(url_resume.endswith("/sessions/01NEW/resume"))
+        self.assertEqual(body_resume, {})
         self.assertEqual(provider._session_id, "01NEW")
 
     @patch("rembric_hermes_plugin.urlopen")
@@ -172,20 +188,123 @@ class LifecycleTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
         mock_urlopen.reset_mock()
-        # Hermes passes parent_session_id="" on /reset by upstream contract
-        # (clean restart, no continuation lineage). Trust the cached id to
-        # know which session to close — otherwise the old row stays active
-        # forever and never accumulates its summary.
-        provider.on_session_switch("01NEW", reset=True)
-        # Both /end (for the cached id) AND /sessions (for the new id) fire.
-        self.assertEqual(mock_urlopen.call_count, 2)
+        # /reset and /new arrive with a POPULATED parent_session_id (the host
+        # passes `old_session_id or ""`), so it discriminates nothing. The
+        # cached id does: it is what tells us there is an old row to close.
+        provider.on_session_switch("01NEW", parent_session_id="01OLD", reset=True)
+        self.assertEqual(mock_urlopen.call_count, 3)
         url_end, body_end, _ = _captured_post(mock_urlopen, idx=0)
         self.assertTrue(url_end.endswith("/sessions/01OLD/end"))
         self.assertEqual(body_end, {})
         url_new, body_new, _ = _captured_post(mock_urlopen, idx=1)
         self.assertTrue(url_new.endswith("/sessions"))
         self.assertEqual(body_new["id"], "01NEW")
+        url_resume, _, _ = _captured_post(mock_urlopen, idx=2)
+        self.assertTrue(url_resume.endswith("/sessions/01NEW/resume"))
         self.assertEqual(provider._session_id, "01NEW")
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_in_place_switch_keeps_id_and_resumes_only_once(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01SAME", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+        # In-place compression, then /undo and the gateway rewind: all three
+        # hand back the id the provider already holds.
+        provider.on_session_switch(
+            "01SAME", parent_session_id="01SAME", reset=False
+        )
+        provider.on_session_switch(
+            "01SAME", parent_session_id="", reset=False, rewound=True
+        )
+        urls = _posted_urls(mock_urlopen)
+        self.assertEqual([u for u in urls if u.endswith("/end")], [])
+        self.assertEqual([u for u in urls if u.endswith("/resume")], [])
+        self.assertEqual(len(urls), 2)
+        self.assertTrue(all(u.endswith("/sessions") for u in urls))
+        self.assertEqual(provider._session_id, "01SAME")
+        # Control in the same run: a genuinely new id DOES close the old row
+        # and DOES resume, so the assertions above are not vacuous.
+        mock_urlopen.reset_mock()
+        provider.on_session_switch(
+            "01NEW", parent_session_id="01SAME", reset=False
+        )
+        urls = _posted_urls(mock_urlopen)
+        self.assertEqual(len([u for u in urls if u.endswith("/01SAME/end")]), 1)
+        self.assertEqual(len([u for u in urls if u.endswith("/01NEW/resume")]), 1)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_switching_back_to_an_ensured_id_does_not_resume_again(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
+        provider.on_session_switch("01NEW", parent_session_id="01OLD")
+        mock_urlopen.reset_mock()
+        provider.on_session_switch("01OLD", parent_session_id="01NEW")
+        urls = _posted_urls(mock_urlopen)
+        # The ensure repeats (it is idempotent); the resume does not.
+        self.assertEqual(len([u for u in urls if u.endswith("/sessions")]), 1)
+        self.assertEqual([u for u in urls if u.endswith("/resume")], [])
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_reason_and_rewound_do_not_change_behaviour(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        # The host sends these from some call sites and not others; consuming
+        # either would couple us to a keyword that says nothing about the only
+        # case the resume exists for (a cold start, which fires neither).
+        runs = []
+        for extra in ({}, {"reason": "resume"}, {"rewound": True}, {"reason": "branch"}):
+            provider = self._provider()
+            provider.initialize("01OLD", cwd=str(self.tmp / "cwd"))
+            mock_urlopen.reset_mock()
+            provider.on_session_switch("01NEW", parent_session_id="01OLD", **extra)
+            runs.append(_posted_urls(mock_urlopen))
+        self.assertEqual(len(runs[0]), 3)
+        for observed in runs[1:]:
+            self.assertEqual(observed, runs[0])
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_failed_ensure_suppresses_the_resume(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "http://server.example.com:8787/api/myproj/sessions",
+            503,
+            "Service Unavailable",
+            {},  # type: ignore[arg-type]
+            None,
+        )
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        urls = _posted_urls(mock_urlopen)
+        self.assertEqual(len(urls), 1)
+        self.assertTrue(urls[0].endswith("/sessions"))
+        # The id is remembered anyway, so a later ensure retries neither call.
+        mock_urlopen.reset_mock()
+        mock_urlopen.side_effect = None
+        mock_urlopen.return_value = _FakeResponse()
+        provider.on_session_switch("01XYZ", parent_session_id="01XYZ")
+        self.assertEqual(
+            [u for u in _posted_urls(mock_urlopen) if u.endswith("/resume")], []
+        )
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_successful_ensure_does_emit_the_resume(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        # Control for the failure test above: same path, ensure answering 200.
+        mock_urlopen.return_value = _FakeResponse()
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        self.assertEqual(
+            [u for u in _posted_urls(mock_urlopen) if u.endswith("/resume")],
+            ["http://server.example.com:8787/api/myproj/sessions/01XYZ/resume"],
+        )
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_suppressed_context_makes_no_http_calls_from_sync_or_end(
