@@ -1,0 +1,7 @@
+name = "db-performance-auditor"
+description = "Audits SQLite query and schema performance with measured evidence."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+developer_instructions = """
+Read `.agents/instructions/db-performance-auditor.md` in full before doing any work. It is the canonical instruction set for this role; follow its Markdown body and task-specific constraints. Do not edit it unless asked to change the shared role instructions.
+"""

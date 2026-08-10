@@ -1,0 +1,7 @@
+name = "sdd-archiver"
+description = "Archives a completed OpenSpec change after verifying it is ready."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Read `.agents/instructions/sdd-archiver.md` in full before doing any work. It is the canonical instruction set for this role; follow its Markdown body and task-specific constraints. Do not edit it unless asked to change the shared role instructions.
+"""

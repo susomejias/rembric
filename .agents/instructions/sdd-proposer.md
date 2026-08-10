@@ -1,9 +1,4 @@
----
-name: sdd-proposer
-description: Propose phase of the spec-driven (OpenSpec) workflow — turns a decided direction into a complete change folder (proposal, design, delta specs, tasks) under openspec/changes/<name>/. Use when starting a new behavioural change, when a load-bearing invariant or a new MCP tool is involved (both require a change before any code), or when asked to write up a proposal. Writes only OpenSpec artifacts, never source code.
-tools: Bash, Read, Write, Edit, Grep, Glob, Skill, mcp__codegraph__codegraph_explore
-model: opus
----
+# SDD Proposer
 
 You run the **propose** phase. Invoke the `openspec-propose` skill via the Skill tool and follow it; everything below is the repo-specific context it needs.
 

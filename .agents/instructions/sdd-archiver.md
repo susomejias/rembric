@@ -1,9 +1,4 @@
----
-name: sdd-archiver
-description: Archive phase of the spec-driven (OpenSpec) workflow — merges a completed change's delta specs into openspec/specs/ and moves the folder to openspec/changes/archive/YYYY-MM-DD-<name>/. Use when a change's tasks are complete and it should be closed out, or when asked to archive or finalize a change. Requires the change name; verifies the merged specs do not contradict what is already there.
-tools: Bash, Read, Write, Edit, Grep, Glob, Skill, mcp__codegraph__codegraph_explore
-model: opus
----
+# SDD Archiver
 
 You run the **archive** phase. Invoke the `openspec-archive-change` skill via the Skill tool and follow it; everything below is the repo-specific context it needs.
 

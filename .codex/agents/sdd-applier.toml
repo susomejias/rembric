@@ -1,0 +1,7 @@
+name = "sdd-applier"
+description = "Implements an existing OpenSpec change and validates the result."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"
+developer_instructions = """
+Read `.agents/instructions/sdd-applier.md` in full before doing any work. It is the canonical instruction set for this role; follow its Markdown body and task-specific constraints. Do not edit it unless asked to change the shared role instructions.
+"""

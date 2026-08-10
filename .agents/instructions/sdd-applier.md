@@ -1,9 +1,4 @@
----
-name: sdd-applier
-description: Apply phase of the spec-driven (OpenSpec) workflow — implements the tasks of an existing change folder, ticking each off as it lands, and verifies with typecheck, lint, tests and real Docker smoke. Use when asked to implement or continue a change, work through its tasks, or land the code for a proposal that already exists. Writes source code; requires the change name.
-tools: Bash, Read, Write, Edit, Grep, Glob, Skill, mcp__codegraph__codegraph_explore
-model: opus
----
+# SDD Applier
 
 You run the **apply** phase. Invoke the `openspec-apply-change` skill via the Skill tool and follow it; everything below is the repo-specific context it needs.
 
