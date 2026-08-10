@@ -1,8 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiSh = join(here, '..', 'scripts', '_api.sh');
@@ -11,6 +13,26 @@ const apiSh = join(here, '..', 'scripts', '_api.sh');
 function callFn(fn: string, ...args: string[]): string {
   const quoted = args.map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
   return execFileSync('bash', ['-c', `source '${apiSh}'; ${fn} ${quoted}`], { encoding: 'utf8' });
+}
+
+/**
+ * Same, but with an explicit TMPDIR, and returns the function's OWN exit
+ * status as a boolean. `_api.sh` sets `trap 'exit 0' ERR` for every hook
+ * script it's sourced into, so a bare (unconditional) call to a function
+ * that legitimately returns non-zero (rembric_resumed_peek's "not resumed"
+ * case) would trip that trap and force the WHOLE invocation to exit 0,
+ * masking the real result. Wrapping the call in `if …; then …; else …; fi`
+ * is what every real caller does too (prompt-nudge.sh's `if … &&
+ * rembric_resumed_peek …; then`), so this mirrors the actual call shape.
+ */
+function callFnIn(tmp: string, fn: string, ...args: string[]): boolean {
+  const quoted = args.map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+  const script = `source '${apiSh}'; if ${fn} ${quoted}; then echo OK; else echo NO; fi`;
+  const result = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    env: { ...process.env, TMPDIR: tmp },
+  });
+  return result.stdout.trim() === 'OK';
 }
 
 describe('rembric_parse_dotenv (#260)', () => {
@@ -94,5 +116,60 @@ describe('rembric_json_escape (#260)', () => {
     const input = 'line1\nline2\x1b[31mred\x1b[0m\tend';
     const out = escape(input);
     expect(parseAsJsonString(out)).toBe(input);
+  });
+});
+
+describe('rembric_resumed_mark / rembric_resumed_peek (marker-directory mechanics)', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'rembric-resumedmark-'));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it('peek is false before anything is recorded', () => {
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-none')).toBe(false);
+  });
+
+  it('a mark of created=false makes peek succeed', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', 's-a', 'false');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-a')).toBe(true);
+  });
+
+  it('a mark of created=true leaves peek failing', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', 's-b', 'true');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-b')).toBe(false);
+  });
+
+  it('a mark with an empty/unknown created value leaves peek failing (unknown = do-not-advise)', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', 's-c', '');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-c')).toBe(false);
+  });
+
+  it('the FIRST mark wins — a later mark for the same id cannot flip the decision', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', 's-d', 'true');
+    // Control: a later ensure for the same id now sees created:false, which
+    // is what happens once the row exists — the mark must not overwrite.
+    callFnIn(tmp, 'rembric_resumed_mark', 's-d', 'false');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-d')).toBe(false);
+  });
+
+  it('marks for different session ids are independent', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', 's-e1', 'false');
+    callFnIn(tmp, 'rembric_resumed_mark', 's-e2', 'true');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-e1')).toBe(true);
+    expect(callFnIn(tmp, 'rembric_resumed_peek', 's-e2')).toBe(false);
+  });
+
+  it('fails closed (peek false) when the marker directory cannot be created', () => {
+    const notADir = join(tmp, 'this-is-a-file-not-a-dir');
+    writeFileSync(notADir, '');
+    callFnIn(notADir, 'rembric_resumed_mark', 's-f', 'false');
+    expect(callFnIn(notADir, 'rembric_resumed_peek', 's-f')).toBe(false);
+  });
+
+  it('is a no-op for an empty session id', () => {
+    callFnIn(tmp, 'rembric_resumed_mark', '', 'false');
+    expect(callFnIn(tmp, 'rembric_resumed_peek', '')).toBe(false);
   });
 });

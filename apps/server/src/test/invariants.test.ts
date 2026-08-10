@@ -844,6 +844,11 @@ const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: 
     definition: /\bconst\s+SESSION_ID_NUDGE_TEMPLATE\s*=/,
     canonical: REMBRIC_PLUGIN_CORE_MJS,
   },
+  {
+    symbol: 'RESUMED_READ_NUDGE',
+    definition: /\bconst\s+RESUMED_READ_NUDGE\s*=/,
+    canonical: REMBRIC_PLUGIN_CORE_MJS,
+  },
 ];
 
 // Tests are excluded because some legitimately re-declare the nudge constants as

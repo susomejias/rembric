@@ -11,6 +11,7 @@ SAVE_NUDGE_EVERY=5
 SAVE_NUDGE='rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).'
 SUMMARY_NUDGE='rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.'
 SESSION_ID_NUDGE_TEMPLATE='rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.'
+RESUMED_READ_NUDGE='rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh
@@ -43,6 +44,14 @@ if [ -n "$RAW_SESSION_ID" ] && { [ "$SAVE_FIRES" -eq 1 ] || [ "$SUMMARY_FIRES" -
   echo "${SESSION_ID_NUDGE_TEMPLATE//\{\{SESSION_ID\}\}/$RAW_SESSION_ID}"
 fi
 [ "$SAVE_FIRES" -eq 1 ] && echo "$SAVE_NUDGE"
-[ "$SUMMARY_FIRES" -eq 1 ] && echo "$SUMMARY_NUDGE"
+if [ "$SUMMARY_FIRES" -eq 1 ]; then
+  # This hook's summary line fires only on turn 1, so this IS the first
+  # firing of the process — the sibling read line belongs here, never at
+  # stop-nudge.sh's later every-N firing.
+  if [ -n "$RAW_SESSION_ID" ] && rembric_resumed_peek "$RAW_SESSION_ID"; then
+    echo "$RESUMED_READ_NUDGE"
+  fi
+  echo "$SUMMARY_NUDGE"
+fi
 
 exit 0
