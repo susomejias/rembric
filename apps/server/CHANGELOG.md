@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/susomejias/rembric/compare/server-v0.28.0...server-v0.28.1) (2026-08-10)
+
+
+### Features
+
+* **pi:** render tool results collapsed by default ([906b596](https://github.com/susomejias/rembric/commit/906b59609c21c9d92966f6b82a36737f674a1570)), closes [#333](https://github.com/susomejias/rembric/issues/333)
+
 ## [0.28.0](https://github.com/susomejias/rembric/compare/server-v0.27.3...server-v0.28.0) (2026-08-09)
 
 
