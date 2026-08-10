@@ -120,6 +120,12 @@ jobs:
       - name: Check active OpenSpec deltas are not stale
         run: pnpm run check:delta-freshness
 
+      - name: Check active OpenSpec deltas file each requirement under the right section
+        run: pnpm run check:delta-sections
+
+      - name: Check published specs carry no dangling requirement cross-reference
+        run: pnpm run check:spec-crossrefs
+
       # Server suite runs WITH coverage so the vitest thresholds actually gate
       # PRs; the Hermes plugin's Python tests run separately (they have no
       # coverage gate). Together these cover what `pnpm test` runs.
