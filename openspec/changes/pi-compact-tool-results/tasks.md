@@ -99,6 +99,8 @@ The unit harness supplies the render context itself, so it cannot prove the host
 - [x] 7.9 Use `--api-key` with a deliberately invalid key where no real model call is needed, so nothing is billed for arms that only need the extension loaded.
   - **Deviation, recorded.** `--api-key <invalid>` was **not** used. It cannot satisfy 7.3–7.6: an invalid key means the model never runs, so no tool is ever called and no `ToolExecutionComponent` is built — there is nothing to render. Instead a local fake OpenAI-compatible provider (registered through a second `-e` extension, `baseUrl: http://127.0.0.1:<port>/v1`) emits a canned `tool_calls` delta. Strictly stronger on the task's stated intent: no external request was made at all, so nothing could be billed.
 
+- [x] 7.10 Re-run against the reconciled tree. Section 7's arms above ran with the working tree based on `cd58797`, where `apps/plugin/bin/rembric-plugin-core.mjs` — a module the extension imports — differs from `origin/main` by 12 lines. Re-run on `origin/main` + this change: `✓ memory.context · 209 lines · ctrl+o to expand` collapsed, the complete payload on expand and collapsed again on the second toggle, `✗ memory.get · 5 lines · ctrl+o to expand` for a fabricated id, `48;5;52` (`toolErrorBg`) ×12 with zero `48;5;22`, and `"code": "not_found"` present in the expanded diagnostic. The `git HEAD` controls (7.6) were not re-run: they measure change-vs-no-change, which the rebase does not affect.
+
 ## 8. Documentation
 
 - [x] 8.1 `apps/plugin/.pi-plugin/README.md` — a short "Tool output" note: results are collapsed by default, `app.tools.expand` (default `ctrl+o`) toggles them, and the toggle is global to the transcript.
