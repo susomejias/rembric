@@ -26,6 +26,9 @@ __pycache__/
 *.local.*
 docker-compose.override.yml
 
+# Per-user Pi subagent model routing; copy the versioned template to configure it.
+.pi/subagents.json
+
 # Local SQLite (dev / testing)
 *.db
 *.db-journal
