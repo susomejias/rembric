@@ -48,7 +48,10 @@
       "prettier --write",
       "eslint --fix"
     ],
-    "*.{json,md,yml,yaml}": [
+    "*.{json,yml,yaml}": [
+      "prettier --write"
+    ],
+    "!(AGENTS).md": [
       "prettier --write"
     ]
   }
