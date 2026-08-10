@@ -39,8 +39,11 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   ID_ESC="$(rembric_json_escape "$SESSION_ID")"
   CWD_ESC="$(rembric_json_escape "$CWD")"
   AGENT_ESC="$(rembric_json_escape "$AGENT")"
-  rembric_post "/api/${SLUG}/sessions" \
-    "{\"id\":\"${ID_ESC}\",\"cwd\":\"${CWD_ESC}\",\"agent\":\"${AGENT_ESC}\"}"
+  CREATED="$(rembric_session_ensure "/api/${SLUG}/sessions" \
+    "{\"id\":\"${ID_ESC}\",\"cwd\":\"${CWD_ESC}\",\"agent\":\"${AGENT_ESC}\"}")"
+  # Latched on the FIRST ensure for this session id — prompt-nudge.sh (a
+  # different process) reads it back to gate the resumed-process read line.
+  rembric_resumed_mark "$SESSION_ID" "$CREATED"
   # Ensure-then-resume, in that order: a row purgeEmpty removed is recreated by
   # the ensure and the resume then no-ops against it. Never gated on `source` —
   # no host reports a resume on a cold start, which is the case this repairs.

@@ -25,6 +25,8 @@ export const SUMMARY_NUDGE =
   'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.';
 export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
+export const RESUMED_READ_NUDGE =
+  'rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.';
 
 // `memory` and `project` are the server's two tool namespaces; a dotted word
 // outside them is prose or a filename and must be left alone. The Pi client's
@@ -84,12 +86,15 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const sessionMessages = new Map();
   const pendingFlush = new Map();
   const userTurnCounts = new Map();
+  // null = not yet captured; set once, from the FIRST session-ensure of this
+  // protocol's lifetime, and never overwritten by a later session's ensure.
+  let processResumed = null;
+  const resumedReadEmitted = new Set();
 
-  /** Reports delivery so a caller can skip a follow-up; never throws. */
-  async function rembricPost(path, body) {
-    if (disabled) return false;
+  async function doPost(path, body) {
+    if (disabled) return null;
     try {
-      const res = await fetch(`${baseUrl}${path}`, {
+      return await fetch(`${baseUrl}${path}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -98,16 +103,41 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(POST_TIMEOUT_MS),
       });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => '');
-        diag(`POST ${path} ${res.status} body=${detail}`);
-        return false;
-      }
-      return true;
     } catch (err) {
       diag(`POST ${path} ${err?.message ?? 'error'}`);
+      return null;
+    }
+  }
+
+  /**
+   * Reports delivery so a caller can skip a follow-up; never throws. Never
+   * reads the response body — every /summary and /end call goes through
+   * this function, and the contract in plugin-session-protocol forbids
+   * reading a *summary* response to learn summary state.
+   */
+  async function rembricPost(path, body) {
+    const res = await doPost(path, body);
+    if (!res) return false;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      diag(`POST ${path} ${res.status} body=${detail}`);
       return false;
     }
+    return true;
+  }
+
+  /**
+   * The ONE call site that reads a response body: the session-ensure
+   * response, never a summary response. `created` gates the resumed-process
+   * read line (plugin-session-protocol). Kept separate from rembricPost
+   * above so the two can never converge into one function that could later
+   * be pointed at /summary or /end.
+   */
+  async function postSessionEnsure(path, body) {
+    const res = await doPost(path, body);
+    if (!res || !res.ok) return { ok: false, created: null };
+    const json = await res.json().catch(() => null);
+    return { ok: true, created: typeof json?.created === 'boolean' ? json.created : null };
   }
 
   function isSubAgent(sessionId) {
@@ -131,11 +161,17 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     const body = { id: sessionId, agent };
     if (cwd) body.cwd = cwd;
 
-    const ensured = await rembricPost(`/api/${slug}/sessions`, body);
+    const isFirstEnsureOfProcess = processResumed === null;
+    const ensure = await postSessionEnsure(`/api/${slug}/sessions`, body);
+    if (isFirstEnsureOfProcess) {
+      // An unknown outcome (failed ensure, or no `created` field) is
+      // "do not advise", never "advise anyway".
+      processResumed = ensure.ok && ensure.created === false;
+    }
     // Strictly after the ensure, which recreates a row the empty-session purge
     // removed; skipped when it did not land, since that failure is also a
     // resume failure.
-    if (ensured) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
+    if (ensure.ok) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
   }
 
   function nudgesForTurn(sessionId, prompt) {
@@ -152,7 +188,15 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
       lines.push(SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', sessionId));
     }
     if (saveFires) lines.push(SAVE_NUDGE);
-    if (summaryFires) lines.push(SUMMARY_NUDGE);
+    if (summaryFires) {
+      // A sibling of the summary line, never folded into it: its own text
+      // stays independent of session state either way.
+      if (processResumed === true && !resumedReadEmitted.has(sessionId)) {
+        resumedReadEmitted.add(sessionId);
+        lines.push(RESUMED_READ_NUDGE);
+      }
+      lines.push(SUMMARY_NUDGE);
+    }
     return lines;
   }
 

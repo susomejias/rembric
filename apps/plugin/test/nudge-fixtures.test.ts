@@ -37,6 +37,8 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   endOfTurnRubric: string;
   firstPromptRelevanceCore: string;
   firstPromptRelevance: string;
+  resumedReadCore: string;
+  resumedRead: string;
 };
 
 function sessionIdLine(sessionId: string): string {
@@ -98,7 +100,8 @@ function pythonHintConstant(
     | '_SAVE_HINT_URGENT'
     | '_SUMMARY_HINT'
     | '_SESSION_ID_HINT_TEMPLATE'
-    | '_RELEVANCE_HINT',
+    | '_RELEVANCE_HINT'
+    | '_RESUMED_READ_HINT',
 ): string {
   const program = [
     'import importlib.util, sys',
@@ -260,6 +263,30 @@ describe('first-prompt relevance nudge lock-step across bash, TS, and Python', (
   );
 });
 
+describe('resumedRead fixture lock-step across bash, TS, and Python', () => {
+  it('the fixture text is the rembric:-prefixed shared core', () => {
+    expect(fixtures.resumedRead).toBe(`rembric: ${fixtures.resumedReadCore}`);
+  });
+
+  it.runIf(hasPython3)(
+    "Python's _RESUMED_READ_HINT wraps the exact shared core text in <memory-hint> tags",
+    () => {
+      const hint = pythonHintConstant('_RESUMED_READ_HINT');
+      expect(hint).toBe(`<memory-hint>${fixtures.resumedReadCore}</memory-hint>`);
+    },
+  );
+
+  // The single summary-reminder string stays byte-identical whether or not
+  // this line accompanies it — the two are siblings, never one composed
+  // string, so the fixture that gates this requirement (13.8) is checked
+  // here rather than relying on review.
+  it('the summary fixture is unchanged by the existence of resumedRead', () => {
+    expect(fixtures.summary).toBe(
+      "rembric: if recent work produced a decision, fix, discovery, or file change, call memory.session_summary({title, summary}) — title ≤100 (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Merges into the stored summary and keeps what you omit — add what's new. Skip if nothing memorable.",
+    );
+  });
+});
+
 describe('nudge cadence numbers lock-step across bash and TS', () => {
   it('SAVE_NUDGE_EVERY matches', () => {
     expect(SAVE_NUDGE_EVERY).toBe(bashCadence('SAVE_NUDGE_EVERY'));
@@ -392,6 +419,12 @@ describe('per-line byte budgets', () => {
 
   it('summary ≤260 bytes (65 tokens)', () => {
     expect(bytes(fixtures.summary)).toBeLessThanOrEqual(260);
+  });
+
+  // Measured 139 bytes; the cap leaves the same ~15% margin as the other
+  // short lines (`save`, `firstPromptRelevance`) above.
+  it('resumedRead ≤160 bytes (40 tokens)', () => {
+    expect(bytes(fixtures.resumedRead)).toBeLessThanOrEqual(160);
   });
 });
 

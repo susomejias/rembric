@@ -137,6 +137,11 @@ _RELEVANCE_HINT = (
     "<memory-hint>New session — call memory.context with focus set to this "
     "prompt before responding, to surface relevant prior work.</memory-hint>"
 )
+_RESUMED_READ_HINT = (
+    "<memory-hint>this session existed before this process attached to it "
+    "— call memory.session_get before your next memory.session_summary "
+    "write.</memory-hint>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +324,10 @@ class RembricMemoryProvider(MemoryProvider):
         self._turn_number: int = 0
         self._compaction_imminent: bool = False
         self._compaction_warned: bool = False
+        # None = not yet captured; set once, from the FIRST session-ensure of
+        # this provider instance's lifetime, and never overwritten later.
+        self._process_resumed: bool | None = None
+        self._resumed_hint_emitted: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -379,13 +388,24 @@ class RembricMemoryProvider(MemoryProvider):
             return
         first_ensure = session_id not in self._ensured_session_ids
         self._ensured_session_ids.add(session_id)
-        ensured = _api_post(
+        first_ensure_of_process = self._process_resumed is None
+        # The ONE call site that reads a response body: the session-ensure
+        # response, never a summary response. `_api_post` (used by
+        # on_pre_compress/on_session_end below) stays body-free — the
+        # contract in plugin-session-protocol forbids reading a *summary*
+        # response to learn summary state.
+        response = _api_request(
             base,
             slug,
             "/sessions",
             {"id": session_id, "cwd": cwd, "agent": "hermes"},
         )
-        if ensured and first_ensure:
+        if first_ensure_of_process:
+            created = response.get("created") if response is not None else None
+            # An unknown outcome (failed ensure, or no `created` field) is
+            # "do not advise", never "advise anyway".
+            self._process_resumed = created is False
+        if response is not None and first_ensure:
             _api_post(base, slug, f"/sessions/{session_id}/resume", {})
 
     def get_tool_schemas(self) -> list[dict]:
@@ -458,6 +478,12 @@ class RembricMemoryProvider(MemoryProvider):
         if self._turn_number > 0 and (
             self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
         ):
+            # A sibling of the summary hint, never folded into it: its own
+            # text stays independent of session state either way.
+            if self._process_resumed and session_id and session_id not in self._resumed_hint_emitted:
+                self._resumed_hint_emitted.add(session_id)
+                hints.append(_RESUMED_READ_HINT)
+                hint_tags.append("resumed_read")
             hints.append(_SUMMARY_HINT)
             hint_tags.append("summary")
         if hints and session_id:

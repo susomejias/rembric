@@ -10,7 +10,12 @@
 #                                       tightens it for a host-imposed shorter one
 #                                       (Codex's SessionEnd allows 3s for the WHOLE
 #                                       handler, transcript read and diagnostic included).
+#   - rembric_session_ensure <path> <body> → same, but echoes the response's
+#                                       `created` field (`true`/`false`) — the
+#                                       only function here that reads a body.
 #   - rembric_turn_count <name> <id>  → echoes the atomic per-session turn count
+#   - rembric_resumed_mark/_peek <id> → records/reads whether the FIRST ensure
+#                                       for a session id reported created:false
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -92,6 +97,44 @@ rembric_post() {
   return 0
 }
 
+# POSTs the session-ensure body and echoes the response's `created` field
+# verbatim (`true`/`false`), or nothing on failure or an absent field. This
+# is the ONLY function in this file that reads a response body:
+# session-start.sh uses it for the ensure call alone, never for
+# session-end.sh's /summary or /end calls, which stay on rembric_post
+# (body-free) above — the contract in plugin-session-protocol forbids
+# reading a *summary* response to learn summary state, and keeping this a
+# separate function is what keeps the two from ever converging into one.
+rembric_session_ensure() {
+  local path="${1:-}" body="${2:-}"
+  [ -z "$path" ] && return 0
+  if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
+    printf '[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST %s\n' "$path" >&2
+    return 0
+  fi
+  [ -z "$body" ] && body='{}'
+  local url="${REMBRIC_SERVER_URL%/}${path}"
+  local rc=0 response="" status="" detail=""
+  response="$(curl -s -X POST \
+    -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --max-time "${REMBRIC_POST_MAX_TIME:-3}" \
+    -d "$body" \
+    -w '\n%{http_code}' \
+    "$url")" || rc=$?
+  status="${response##*$'\n'}"
+  detail="${response%$'\n'*}"
+  if [ "$rc" -ne 0 ] || [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
+    printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$detail" | jq -r 'if .created == true then "true" elif .created == false then "false" else "" end' 2>/dev/null
+  else
+    printf '%s' "$detail" | sed -n 's/.*"created"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1
+  fi
+}
+
 # Atomic per-session turn counter, shared by prompt-nudge.sh and
 # prompt-search.sh so each keeps its own cadence without duplicating the
 # counting mechanics. `counter_name` picks the counter's directory (each
@@ -136,6 +179,43 @@ rembric_turn_count_peek() {
     '' | *[!0-9]*) return 0 ;;
   esac
   printf '%s' "$count"
+}
+
+# Records whether the FIRST session-ensure for this session id reported
+# `created:false` (a resumed pre-existing session), using the same
+# marker-directory mechanism as rembric_turn_count above. Write-once per
+# session id: a LATER invocation (e.g. a `clear`/`compact` SessionStart,
+# which re-ensures the same id) must not overwrite the first decision,
+# because by then the row already exists and every later ensure reports
+# `created:false` regardless of whether the session was originally fresh.
+# `created` empty/unknown is recorded the same as `true` — "do not advise",
+# never "advise anyway".
+rembric_resumed_mark() {
+  local session_id="${1:-}" created="${2:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/rembric-resumed"
+  mkdir -p "$dir" 2>/dev/null || true
+  local file="${dir}/${safe_id}"
+  [ -e "$file" ] && return 0
+  case "$created" in
+    false) printf '1' >"$file" 2>/dev/null || true ;;
+    *) printf '0' >"$file" 2>/dev/null || true ;;
+  esac
+}
+
+# Peeked by prompt-nudge.sh — a LATER, separate process — to decide whether
+# to emit the resumed-process read line. Fails closed: an absent or
+# unreadable marker is treated as "not resumed", never as "resumed".
+rembric_resumed_peek() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 1
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-resumed/${safe_id}"
+  [ -f "$file" ] || return 1
+  [ "$(cat "$file" 2>/dev/null)" = "1" ]
 }
 
 # Best-effort extraction of a session id from the hook stdin JSON. Prefers
