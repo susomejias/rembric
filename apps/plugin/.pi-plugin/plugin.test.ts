@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Resolves to the stub `apps/server/vitest.config.ts` aliases in, so the hint
+// arm asserts against whatever the harness's own helper returns.
+import { keyHint } from '@earendil-works/pi-coding-agent';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createRepositories } from '../../server/src/db/repositories/index.js';
@@ -25,7 +28,7 @@ import {
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
 
-import rembric from './index.js';
+import rembric, { renderToolResultLines } from './index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -39,17 +42,41 @@ const SERVER_TOOL_COUNT = (
 const ADMIN_TOKEN = 'pi-plugin-admin-token-with-enough-entropy-zz';
 const PROJECT_SLUG = 'pi-plugin-test';
 
+type ToolResult = { content: Array<{ type: string; text?: string }>; details: unknown };
+
+type FakeTheme = { fg: (color: string, text: string) => string; bold: (text: string) => string };
+
+type RenderContext = { isError: boolean; expanded: boolean; isPartial: boolean };
+
+type RenderComponent = { render: (width: number) => string[] };
+
 type RegisteredTool = {
   name: string;
   label: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (
-    toolCallId: string,
-    params: unknown,
-    signal?: AbortSignal,
-  ) => Promise<{ content: Array<{ type: string; text?: string }>; isError?: true }>;
+  execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<ToolResult>;
+  renderCall?: (args: unknown, theme: FakeTheme, context: RenderContext) => RenderComponent;
+  renderResult?: (
+    result: ToolResult,
+    options: { expanded: boolean; isPartial: boolean },
+    theme: FakeTheme,
+    context: RenderContext,
+  ) => RenderComponent;
 };
+
+// Distinguishable and strippable, so an arm can compare the plain text of two
+// renderings without hard-coding either one.
+const THEME: FakeTheme = {
+  fg: (color, text) => `<${color}>${text}</${color}>`,
+  bold: (text) => `«${text}»`,
+};
+
+const HINT = '<expand-hint>';
+
+function plain(line: string): string {
+  return line.replace(/<\/?[a-z]+>/g, '').replace(/[«»]/g, '');
+}
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
@@ -172,15 +199,17 @@ function toolNamed(harness: Harness, canonical: string): RegisteredTool {
   return tool;
 }
 
-/** Rejection and an `isError` result are both refusals; callers assert which. */
+/**
+ * A refusal is a rejection and nothing else: the harness ignores an `isError`
+ * property on a returned result, so the extension throws instead of carrying one.
+ */
 async function callThroughExtension(
   tool: RegisteredTool,
   args: unknown,
 ): Promise<{ refused: boolean; text: string }> {
   try {
     const result = await tool.execute('call-1', args);
-    const text = result.content.map((part) => part.text ?? '').join('\n');
-    return { refused: result.isError === true, text };
+    return { refused: false, text: result.content.map((part) => part.text ?? '').join('\n') };
   } catch (err) {
     return { refused: true, text: err instanceof Error ? err.message : String(err) };
   }
@@ -252,6 +281,104 @@ afterAll(async () => {
   delete process.env.REMBRIC_API_TOKEN;
   rmSync(cwd, { recursive: true, force: true });
   await server.shutdown();
+});
+
+// Driven directly, with nothing stubbed: `renderToolResultLines` imports no
+// harness package, so these arms hold even against a stub that throws on use.
+describe('collapsed and expanded tool-result rendering', () => {
+  const MULTILINE = [
+    '{',
+    '  "ok": true,',
+    '  "memories": [',
+    '    { "id": "mem_alpha", "title": "the first remembered thing" },',
+    '    { "id": "mem_beta", "title": "the second remembered thing" }',
+    '  ]',
+    '}',
+  ].join('\n');
+
+  // Every line long enough that a collapsed rendering containing one could not
+  // be a coincidence; `{` and `}` are excluded for exactly that reason.
+  const substantialLines = MULTILINE.split('\n').filter((line) => line.trim().length >= 4);
+
+  const ERROR_PAYLOAD = JSON.stringify(
+    { ok: false, code: 'not_found', message: 'no memory with that id' },
+    null,
+    2,
+  );
+
+  it('the payload these arms assert over is non-empty and spans several lines', () => {
+    expect(MULTILINE.length).toBeGreaterThan(0);
+    expect(MULTILINE.split('\n').length).toBeGreaterThan(1);
+    expect(substantialLines.length).toBeGreaterThan(1);
+    expect(ERROR_PAYLOAD.split('\n').length).toBeGreaterThan(1);
+  });
+
+  it('collapses a successful multi-line result to one line naming the tool, its size and the key', () => {
+    const out = renderToolResultLines(MULTILINE, false, false, 'memory.context', HINT, THEME);
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('memory.context');
+    expect(out[0]).toContain(String(MULTILINE.split('\n').length));
+    expect(out[0]).toContain(HINT);
+    for (const line of substantialLines) {
+      expect(out[0], `${line.trim()} leaked into the collapsed line`).not.toContain(line.trim());
+    }
+  });
+
+  it('restores the complete original text, byte for byte, when expanded', () => {
+    const out = renderToolResultLines(MULTILINE, true, false, 'memory.context', HINT, THEME);
+
+    expect(out.join('\n')).toBe(MULTILINE);
+  });
+
+  it('marks a failed result differently from a successful one, in the error colour', () => {
+    const ok = renderToolResultLines(MULTILINE, false, false, 'memory.context', HINT, THEME);
+    const failed = renderToolResultLines(MULTILINE, false, true, 'memory.context', HINT, THEME);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).not.toBe(ok[0]);
+    // The outcome marker itself differs, not merely the styling around it.
+    expect(plain(failed[0])[0]).not.toBe(plain(ok[0])[0]);
+    expect(failed[0]).toContain('<error>');
+    expect(ok[0]).not.toContain('<error>');
+  });
+
+  it('expands a failure to its full diagnostic text, error code included', () => {
+    const out = renderToolResultLines(ERROR_PAYLOAD, true, true, 'memory.get', HINT, THEME);
+
+    expect(out.join('\n')).toBe(ERROR_PAYLOAD);
+    expect(out.join('\n')).toContain('"code": "not_found"');
+  });
+
+  it('collapses regardless of size — one line and several hundred alike', () => {
+    const oneLine = 'a single line of result text';
+    const many = Array.from({ length: 400 }, (_, i) => `result line number ${i}`).join('\n');
+
+    for (const [text, count] of [
+      [oneLine, 1],
+      [many, 400],
+    ] as const) {
+      const out = renderToolResultLines(text, false, false, 'memory.search', HINT, THEME);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toContain(String(count));
+      expect(out[0]).not.toContain(text.split('\n')[0]);
+    }
+  });
+
+  it('counts newline-delimited lines, not rendered rows', () => {
+    const out = renderToolResultLines('x'.repeat(500), false, false, 'memory.get', HINT, THEME);
+
+    expect(plain(out[0])).toContain(' 1 line ');
+    expect(out[0]).not.toContain('500');
+  });
+
+  it('renders identically for two different tools apart from the name', () => {
+    const a = renderToolResultLines(MULTILINE, false, false, 'memory.context', HINT, THEME);
+    const b = renderToolResultLines(MULTILINE, false, false, 'project.list', HINT, THEME);
+
+    expect(a[0]).not.toBe(b[0]);
+    expect(a[0].replace('memory.context', '<tool>')).toBe(b[0].replace('project.list', '<tool>'));
+  });
 });
 
 describe('tool discovery over the extension’s own MCP transport', () => {
@@ -329,6 +456,28 @@ describe('tool discovery over the extension’s own MCP transport', () => {
       expect(src, `${tool.name} appears as a literal`).not.toContain(tool.name);
     }
   });
+
+  it('the render path names no tool, reads no response field and hard-codes no key', () => {
+    const src = readFileSync(join(here, 'index.ts'), 'utf8');
+    const from = src.indexOf('export function renderToolResultLines');
+    const to = src.indexOf("pi.on('before_agent_start'");
+    expect(from, 'the pure render function was not found').toBeGreaterThan(-1);
+    expect(to, 'the end of the registration block was not found').toBeGreaterThan(from);
+    const renderPath = src.slice(from, to);
+    // Without these the slice could miss the renderers and assert over nothing.
+    expect(renderPath).toContain('renderCall:');
+    expect(renderPath).toContain('renderResult:');
+
+    for (const tool of discovered) {
+      expect(renderPath, `${tool.name} appears on the render path`).not.toContain(tool.name);
+    }
+    expect(renderPath).not.toContain('JSON.parse');
+    expect(renderPath.toLowerCase()).not.toContain('ctrl+');
+    // `content` is the whole of the result the renderer is allowed to know
+    // about; anything else would be a response-shape dependency.
+    const members = new Set([...renderPath.matchAll(/\bresult\.([A-Za-z_]\w*)/g)].map((m) => m[1]));
+    expect([...members]).toEqual(['content']);
+  });
 });
 
 describe('provider-safe registration names', () => {
@@ -390,6 +539,129 @@ describe('proxied calls reach the database', () => {
       id: 'mem_this_id_was_never_saved',
     });
     expect(get.text).toContain('not_found');
+  });
+});
+
+describe('an MCP error result is signalled by throwing', () => {
+  let harness: Harness;
+  const FABRICATED = 'mem_this_id_was_never_saved';
+
+  beforeAll(async () => {
+    harness = await startedHarness('pi-error-signal');
+  });
+
+  async function wireResult(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ isError: boolean; text: string }> {
+    const message = (await rawRpc('tools/call', { name, arguments: args })) as {
+      result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+    };
+    const text = (message.result?.content ?? [])
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text ?? '')
+      .join('\n');
+    return { isError: message.result?.isError === true, text };
+  }
+
+  it('rejects with the MCP result text verbatim when the result carries isError', async () => {
+    const reference = await wireResult('memory.get', { id: FABRICATED });
+    expect(reference.isError).toBe(true);
+    expect(reference.text).toContain('not_found');
+
+    const thrown = await toolNamed(harness, 'memory.get')
+      .execute('call-error', { id: FABRICATED })
+      .then(
+        () => null,
+        (err: unknown) => err,
+      );
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(reference.text);
+  });
+
+  it('the control — a successful call resolves, with its text unchanged', async () => {
+    const reference = await wireResult('project.current', {});
+    expect(reference.isError).toBe(false);
+    expect(reference.text.length).toBeGreaterThan(0);
+
+    const result = await toolNamed(harness, 'project.current').execute('call-ok', {});
+
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text).toBe(reference.text);
+  });
+});
+
+describe('the registered renderers', () => {
+  let harness: Harness;
+  let discovered: WireTool[];
+  const CONTEXT = { isError: false, expanded: false, isPartial: false };
+  const OPTIONS = { expanded: false, isPartial: false };
+  const RESULT: ToolResult = {
+    content: [{ type: 'text', text: 'line one\nline two\nline three' }],
+    details: undefined,
+  };
+
+  beforeAll(async () => {
+    harness = await startedHarness('pi-renderers');
+    discovered = await rawListTools();
+  });
+
+  it('every discovered tool is registered with both renderers', () => {
+    expect(discovered.length).toBeGreaterThan(0);
+    expect(harness.tools).toHaveLength(discovered.length);
+    for (const tool of harness.tools) {
+      expect(typeof tool.renderCall, `${tool.label} has no renderCall`).toBe('function');
+      expect(typeof tool.renderResult, `${tool.label} has no renderResult`).toBe('function');
+    }
+  });
+
+  it('the call slot renders the canonical dotted name and no argument', () => {
+    for (const tool of harness.tools) {
+      const rendered = tool
+        .renderCall?.({ id: 'ARGUMENT_SENTINEL' }, THEME, CONTEXT)
+        .render(80)
+        .join('\n');
+
+      expect(rendered).toContain(tool.label);
+      expect(rendered).not.toContain('ARGUMENT_SENTINEL');
+    }
+    // Without this the loop above passes on an empty registration.
+    expect(harness.tools.some((t) => t.label.includes('.'))).toBe(true);
+  });
+
+  it('reads the error flag off the render context, where a result-reader would see nothing', () => {
+    const tool = toolNamed(harness, 'memory.get');
+
+    const rendered = tool
+      .renderResult?.(RESULT, OPTIONS, THEME, { ...CONTEXT, isError: true })
+      .render(80);
+
+    expect(rendered).toHaveLength(1);
+    expect(rendered?.[0]).toContain('<error>');
+
+    // The inverse, in the suite rather than only in prose: the result argument
+    // carries no such property, so a renderer consulting it reports success.
+    const offResult = renderToolResultLines(
+      'line one\nline two\nline three',
+      false,
+      (RESULT as { isError?: boolean }).isError ?? false,
+      tool.label,
+      HINT,
+      THEME,
+    );
+    expect(offResult[0]).toContain('<success>');
+    expect(offResult[0]).not.toContain('<error>');
+  });
+
+  it('takes the expand hint from the harness binding rather than a key literal', () => {
+    const rendered = toolNamed(harness, 'memory.context')
+      .renderResult?.(RESULT, OPTIONS, THEME, CONTEXT)
+      .render(80);
+
+    const hint = keyHint('app.tools.expand', 'to expand');
+    expect(hint.length).toBeGreaterThan(0);
+    expect(rendered?.[0]).toContain(hint);
   });
 });
 

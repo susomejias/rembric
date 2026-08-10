@@ -1,3 +1,6 @@
+import { keyHint } from '@earendil-works/pi-coding-agent';
+import { Text } from '@earendil-works/pi-tui';
+
 // These two specifiers are rewritten to `./bin/` at publish time.
 import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
 import type { SessionProtocol } from '../bin/rembric-plugin-core.mjs';
@@ -15,8 +18,15 @@ type ToolContent = { type: string; text?: string };
 type ToolExecuteResult = {
   content: ToolContent[];
   details: unknown;
-  isError?: true;
 };
+
+type ToolRenderResultOptions = { expanded: boolean; isPartial: boolean };
+
+type ToolRenderContext = { isError: boolean; expanded: boolean; isPartial: boolean };
+
+type ThemeLike = { fg: (color: string, text: string) => string; bold: (text: string) => string };
+
+type RenderComponent = { render: (width: number) => string[]; invalidate: () => void };
 
 type ToolDefinition = {
   name: string;
@@ -28,6 +38,13 @@ type ToolDefinition = {
     params: unknown,
     signal?: AbortSignal,
   ) => Promise<ToolExecuteResult>;
+  renderCall?: (args: unknown, theme: ThemeLike, context: ToolRenderContext) => RenderComponent;
+  renderResult?: (
+    result: ToolExecuteResult,
+    options: ToolRenderResultOptions,
+    theme: ThemeLike,
+    context: ToolRenderContext,
+  ) => RenderComponent;
 };
 
 // `ui` is optional because the extension is installed into whatever harness
@@ -245,6 +262,24 @@ function isSelfResume(event: SessionShutdownEvent, ctx: ExtensionContext): boole
   return target === ctx.sessionManager.getSessionFile?.();
 }
 
+export function renderToolResultLines(
+  text: string,
+  expanded: boolean,
+  isError: boolean,
+  canonicalName: string,
+  keyHintText: string,
+  theme: ThemeLike,
+): string[] {
+  if (expanded) return text.split('\n');
+  const count = text.split('\n').length;
+  const outcome = theme.fg(
+    isError ? 'error' : 'success',
+    `${isError ? '✗' : '✓'} ${theme.bold(canonicalName)}`,
+  );
+  const size = theme.fg('muted', ` · ${count} ${count === 1 ? 'line' : 'lines'} · `);
+  return [`${outcome}${size}${keyHintText}`];
+}
+
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
@@ -292,11 +327,26 @@ export default function rembric(pi: ExtensionApi): void {
               (params ?? {}) as Record<string, unknown>,
               signal,
             );
-            return {
-              content: [{ type: 'text', text }],
-              details: undefined,
-              ...(isError ? { isError: true as const } : {}),
-            };
+            if (isError) throw new Error(text);
+            return { content: [{ type: 'text', text }], details: undefined };
+          },
+          renderCall: (_args, theme) =>
+            new Text(theme.fg('toolTitle', theme.bold(tool.name)), 0, 0),
+          renderResult: (result, options, theme, context) => {
+            const text = (result.content ?? [])
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text ?? '')
+              .join('\n');
+            const lines = renderToolResultLines(
+              text,
+              options.expanded,
+              context.isError,
+              tool.name,
+              keyHint('app.tools.expand', 'to expand'),
+              theme,
+            );
+            const body = lines.join('\n');
+            return new Text(options.expanded ? theme.fg('toolOutput', body) : body, 0, 0);
           },
         });
       }

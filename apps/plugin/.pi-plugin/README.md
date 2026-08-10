@@ -76,6 +76,19 @@ For a temporary rollback after a broken release, see the [emergency plugin rollb
 - **Session capture** — the session is registered on your first prompt, the transcript is flushed after each turn, and a final summary is written when the session ends.
 - **`<private>` redaction** — anything between `<private>` and `</private>` is replaced with `[REDACTED]` before a transcript leaves your machine. An unclosed `<private>` redacts to the end of the text.
 
+## Tool output
+
+Every Rembric tool result is collapsed to a single line — outcome, the tool's dotted name, how many lines the result has, and the key that expands it:
+
+```
+✓ memory.context · 170 lines · ctrl+o to expand
+✗ memory.get · 5 lines · ctrl+o to expand
+```
+
+Press that key (`app.tools.expand`, `ctrl+o` by default — the line names whatever you have bound) to see the complete result text, unchanged, and press it again to collapse. A failed call is marked separately and Pi paints its row on the error background; expanding it shows the whole diagnostic, error code included.
+
+The toggle is Pi's own and it is **global**: one press expands every tool row in the transcript, Rembric's and the built-ins' alike. Collapsing applies to every tool regardless of size, so what you see does not depend on a threshold you cannot inspect.
+
 ## Troubleshooting
 
 | Symptom                                                | Cause                                                                                                          | Fix                                                                                                                               |

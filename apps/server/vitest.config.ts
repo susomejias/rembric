@@ -1,6 +1,18 @@
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vitest/config';
 
+const piHostStub = fileURLToPath(new URL('./src/test/pi-host-stub.ts', import.meta.url));
+
 export default defineConfig({
+  // These resolve only inside the Pi harness, so `.pi-plugin/index.ts`'s static
+  // imports would fail its whole test file to load.
+  resolve: {
+    alias: {
+      '@earendil-works/pi-tui': piHostStub,
+      '@earendil-works/pi-coding-agent': piHostStub,
+    },
+  },
   test: {
     // install.test.ts stays here so `vitest run ../../install.test.ts` (the
     // e2e:installer step) can find it — a positional filter can only narrow

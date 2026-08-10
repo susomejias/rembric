@@ -413,6 +413,12 @@ The four shared command files (`apps/plugin/commands/{context,recall,remember,su
 3. Save a test memory, then check `/dashboard/memories` for the row.
 4. `/dashboard/sessions` shows a new row with `agent='pi'`.
 
+#### Tool output is collapsed by default
+
+A Rembric tool result occupies one line — outcome marker, the canonical dotted tool name, the number of lines in the result and the key that expands it (`✓ memory.context · 170 lines · ctrl+o to expand`). A failed call carries a distinct marker and Pi paints its row on the error background. Expanding restores the complete result text unchanged, error diagnostics and their `code` field included.
+
+The key is whatever `app.tools.expand` is bound to (`ctrl+o` by default, and the line names an override from `~/.pi/agent/keybindings.json`). The toggle is Pi's own and is **global**: one press moves every tool row in the transcript, not just Rembric's. Collapsing applies to every tool regardless of result size — there is no threshold.
+
 #### Session close is awaited, and each exit path is named
 
 Pi awaits its session-shutdown handler with no timeout, so the final summary POST completes instead of racing process exit (measured against Pi 0.84.1: a 10 s awaited fetch completes, and so does a full MCP `tools/call` issued from inside the handler). SIGTERM and SIGHUP both reach it; SIGKILL runs nothing.
