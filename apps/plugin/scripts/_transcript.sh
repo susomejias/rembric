@@ -324,14 +324,6 @@ rembric_session_facts_raw() {
   "_rembric_facts_raw_${parser}" "$path"
 }
 
-# True when the session already called the summary tool. The stream carries every
-# tool name, so this costs nothing — and without it the reminder tells a model
-# that DID summarise that it has not, which is the one unfounded claim in a
-# payload whose whole point is being grounded.
-rembric_facts_show_summary_written() {
-  printf '%s\n' "${1:-}" | grep -q $'^T\t.*memory_session_summary'
-}
-
 rembric_session_facts() {
   local parser="${1:-}" path="${2:-}" raw
   raw="$(rembric_session_facts_raw "$parser" "$path")" || return 0
