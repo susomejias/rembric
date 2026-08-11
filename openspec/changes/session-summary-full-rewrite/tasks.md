@@ -92,8 +92,8 @@ Every edit below is text. The HTTP protocol does not change. Measure after each 
 
 ## 7. Dev seed
 
-- [ ] 7.1 `apps/server/src/scripts/seed-dev.ts` — give at least one seeded session two curated summary versions, so the dashboard section and the Docker smoke below have data. Keep the `--reset` gate untouched.
-- [ ] 7.2 Confirm the seed's `DELETE FROM sessions` still works with the new child table (the cascade handles it) and that the invariants allow-list needs no new entry.
+- [x] 7.1 `apps/server/src/scripts/seed-dev.ts` — give at least one seeded session two curated summary versions, so the dashboard section and the Docker smoke below have data. Keep the `--reset` gate untouched. — First entry of `endedSessions` gets a draft `writeSummary(final:true)` before its `end(...)`, so it carries two version rows.
+- [x] 7.2 Confirm the seed's `DELETE FROM sessions` still works with the new child table (the cascade handles it) and that the invariants allow-list needs no new entry. — Added a regression test in `seed-dev.test.ts`: seeds, asserts `max(version) >= 2` and the version table is non-empty, resets, asserts `PRAGMA foreign_key_check` is clean and the table is repopulated by the fresh seed. `wipe()` gained no new `DELETE` statement; `invariants.test.ts` (95/95) confirms no allow-list edit was needed.
 
 ## 8. Verification
 
