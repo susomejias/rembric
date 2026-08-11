@@ -83,12 +83,12 @@ Every edit below is text. The HTTP protocol does not change. Measure after each 
 
 ## 6. Dashboard
 
-- [ ] 6.1 `apps/server/src/dashboard/sessions.ts` — add the `SUMMARY HISTORY` section to the `/:id` detail view, below the existing `Summary` block: entries newest-first, each showing `version`, `formatTs(createdAt)`, the character count, and the full `content` inside a native disclosure element, rendered with the existing `mdBody` helper.
-- [ ] 6.2 Empty state: render the section with an explicit "no summary versions recorded" line (`tblEmpty`-style), never hide it.
-- [ ] 6.3 No new route, no form, no `data-confirm` — there is no mutation to confirm.
-- [ ] 6.4 CSS: reuse existing tokens/classes. If a disclosure needs styling, it goes in `apps/server/src/dashboard/styles/` — never an inline `<style>`.
-- [ ] 6.5 Dashboard test: a session with three versions renders three entries in order `3, 2, 1` with the newest content equal to the `Summary` block; a session with none renders the empty line; no form targets a version row.
-- [ ] 6.6 Verify timestamps go through `formatTs` (no `toISOString`/`toLocaleString` in the new template code).
+- [x] 6.1 `apps/server/src/dashboard/sessions.ts` — add the `SUMMARY HISTORY` section to the `/:id` detail view, below the existing `Summary` block: entries newest-first, each showing `version`, `formatTs(createdAt)`, the character count, and the full `content` inside a native disclosure element, rendered with the existing `mdBody` helper. — Titled "Summary History (N)" rather than the all-caps form, matching this file's existing `<h2>` casing convention (`Description`, `Summary`, `Memories`, `Prompts`).
+- [x] 6.2 Empty state: render the section with an explicit "no summary versions recorded" line (`tblEmpty`-style), never hide it.
+- [x] 6.3 No new route, no form, no `data-confirm` — there is no mutation to confirm.
+- [x] 6.4 CSS: reuse existing tokens/classes. If a disclosure needs styling, it goes in `apps/server/src/dashboard/styles/` — never an inline `<style>`. — `.rbr-summary-history`/`.rbr-summary-version` added to `apps/server/src/dashboard/styles/views/sessions.css`, mirroring `.rbr-prompt-content`'s disclosure styling in `prompts.css`.
+- [x] 6.5 Dashboard test: a session with three versions renders three entries in order `3, 2, 1` with the newest content equal to the `Summary` block; a session with none renders the empty line; no form targets a version row. — New file `apps/server/src/dashboard/session-summary-history.test.ts`, 4 tests (added a 4th covering 6.6 directly).
+- [x] 6.6 Verify timestamps go through `formatTs` (no `toISOString`/`toLocaleString` in the new template code). — Confirmed by inspection (`formatTs(v.createdAt)`) and by the 4th test asserting `data-rembric-ts` is present on the rendered version timestamp.
 
 ## 7. Dev seed
 
