@@ -156,10 +156,10 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
   });
 
   // A curated write is now recorded as a version row before it can displace
-  // anything (session-summary-full-rewrite, D4), so a redundant reminder can no
-  // longer cost stored text — and suppressing it froze whatever the first write
-  // said, because nothing afterwards ever asked the model to improve it. The
-  // hook no longer inspects the transcript for a prior summary call at all.
+  // anything, so a redundant reminder can no longer cost stored text — and
+  // suppressing it froze whatever the first write said, because nothing
+  // afterwards ever asked the model to improve it. The hook no longer
+  // inspects the transcript for a prior summary call at all.
   it('still fires when the session has already called memory.session_summary — never silence', () => {
     advanceToFiringTurn('sum1');
     const withSummary = join(dir, 'summarised.jsonl');
