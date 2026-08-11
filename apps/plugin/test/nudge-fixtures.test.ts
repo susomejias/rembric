@@ -282,7 +282,7 @@ describe('resumedRead fixture lock-step across bash, TS, and Python', () => {
   // here rather than relying on review.
   it('the summary fixture is unchanged by the existence of resumedRead', () => {
     expect(fixtures.summary).toBe(
-      "rembric: if recent work produced a decision, fix, discovery, or file change, call memory.session_summary({title, summary}) — title ≤100 (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Merges into the stored summary and keeps what you omit — add what's new. Skip if nothing memorable.",
+      'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.',
     );
   });
 });

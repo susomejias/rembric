@@ -143,7 +143,9 @@ describe('the resumed-process read line', () => {
     await core.ensureSession('s-unchanged');
 
     const turn1 = core.nudgesForTurn('s-unchanged', 'anything');
-    expect(turn1.filter((l) => l.startsWith('rembric: if recent work'))).toEqual([SUMMARY_NUDGE]);
+    expect(turn1.filter((l) => l.startsWith('rembric: did real work happen'))).toEqual([
+      SUMMARY_NUDGE,
+    ]);
   });
 
   it('is emitted as its own line, alongside the reminder, never interpolated into it', async () => {
