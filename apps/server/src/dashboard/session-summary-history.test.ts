@@ -61,9 +61,9 @@ describe('session detail SUMMARY HISTORY section', () => {
     expect(idx2).toBeGreaterThan(idx3);
     expect(idx1).toBeGreaterThan(idx2);
 
-    expect(html).toContain('>v3 ·');
-    expect(html).toContain('>v2 ·');
-    expect(html).toContain('>v1 ·');
+    expect(html).toMatch(/<summary>\s*v3 ·/);
+    expect(html).toMatch(/<summary>\s*v2 ·/);
+    expect(html).toMatch(/<summary>\s*v1 ·/);
     expect(html).toContain('Summary History (3)');
 
     // The newest version's content equals the Summary block rendered above it.
