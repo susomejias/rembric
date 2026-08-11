@@ -153,6 +153,27 @@ const FORBIDDEN: ForbiddenRule[] = [
     description:
       '`db.update(memoryRelations).set({ sourceId|targetId|judgmentId })` is forbidden — immutable',
   },
+  {
+    pattern: /delete\s*\(\s*sessionSummaryVersions\s*\)/i,
+    description:
+      'Drizzle `db.delete(sessionSummaryVersions)` is forbidden — version rows are append-only, removable only by the `ON DELETE CASCADE` when their session is purged',
+  },
+  {
+    pattern: /DELETE\s+FROM\s+session_summary_versions\b/i,
+    description:
+      'raw `DELETE FROM session_summary_versions` is forbidden — the cascade on `sessions` is the only removal mechanism, and it needs no DELETE statement of its own',
+  },
+  {
+    pattern:
+      /update\([^)]*sessionSummaryVersions[^)]*\)[^.]*\.set\([^)]*(content|version|sessionId)\s*:/i,
+    description:
+      '`db.update(sessionSummaryVersions).set({ content|version|sessionId })` is forbidden — a version row is never edited',
+  },
+  {
+    pattern: /UPDATE\s+session_summary_versions\b[^;]*\bSET\s+(content|version|session_id)\s*=/i,
+    description:
+      'raw `UPDATE session_summary_versions SET (content|version|session_id) = …` is forbidden — a version row is never edited',
+  },
 ];
 
 function listSourceFiles(dir: string): string[] {
