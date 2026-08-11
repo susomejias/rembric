@@ -38,6 +38,13 @@ export default defineConfig({
     // a flaky failure unrelated to product behavior. Serial execution removes
     // the starvation. The server suite is small, so the cost is modest.
     fileParallelism: false,
+    // Every fixture DB is a `mkdtempSync(join(tmpdir(), …))` (`src/test/db.ts`)
+    // holding ~44 MB of migrated SQLite. On a host where `/tmp` is tmpfs that is
+    // RAM, and a killed run never reaches its `cleanup()`: 479 orphaned dirs
+    // measured on 2026-08-11, 2.8 GB of RAM, which OOM-killed the box. Pointing
+    // `TMPDIR` at a disk-backed directory makes an aborted run cost disk instead.
+    // `os.tmpdir()` reads the variable per call, so this covers every fixture.
+    env: { TMPDIR: '/var/tmp/rembric-tests' },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
