@@ -1,0 +1,105 @@
+# Tasks
+
+Execution order matters: phase 0 establishes the branch this change lands on, and every later phase assumes the rescued commits are already in it.
+
+## 0. Dismantle the abandoned line of work, and rescue what is independent of it
+
+- [ ] 0.1 Cut a NEW branch from `origin/main`. Do NOT continue on `feat/merge-curated-session-summaries`, and do not merge or revert it commit-by-commit — it stays as an unmerged, unpushed reference.
+- [ ] 0.2 `git rm -r openspec/changes/merge-curated-session-summaries/` — **deleted, not archived** (design D11). Before deleting, re-run the check that made deletion free and paste the output into the commit body: `grep -rn "MUST merge into the stored summary\|newest-first\|replaceStoredSummary\|canonical layout" openspec/specs/` must return zero matches. If it returns anything, STOP: something was published and the disposal is no longer a deletion.
+- [ ] 0.3 Rescue the spec gates: `git cherry-pick cde976a` (`scripts/check-delta-sections.mjs` + `scripts/check-delta-sections.test.ts` + `scripts/check-spec-crossrefs.mjs` + the two `package.json` scripts + the CI wiring). Verify `pnpm run check:delta-sections` and `pnpm run check:spec-crossrefs` run.
+- [ ] 0.4 Rescue the fixture `TMPDIR` change: `git cherry-pick 7085210` (`apps/server/vitest.config.ts`).
+- [ ] 0.5 Rescue the end-of-turn silence fix: `git cherry-pick 1eab896` (removes `rembric_facts_show_summary_written` from `_transcript.sh` and its call site in `stop-nudge.sh`). Its commit message argues from the merge design — reword it to cite this change's D4/D12 instead.
+- [ ] 0.6 Rescue `resumedRead`: `git cherry-pick aa574ff 39f62cc`. `39f62cc` only touched delta files under the deleted folder, so take its spec content from THIS change's `specs/plugin-session-protocol/spec.md` (already re-homed) and drop the rest of that commit's spec edits.
+- [ ] 0.7 **The rescue trap.** `aa574ff`'s hunks carry context lines describing the merge design. After the cherry-picks, `git diff origin/main -- apps/plugin/test/nudge-fixtures.json` must show ONLY the two `resumedRead` keys added: `summary` and `summaryCore` must be byte-identical to `origin/main` (measured 259 and 250 bytes). Assert it: `node -e 'const a=require("child_process").execSync("git show origin/main:apps/plugin/test/nudge-fixtures.json","utf8"),b=require("fs").readFileSync("apps/plugin/test/nudge-fixtures.json","utf8");const A=JSON.parse(a),B=JSON.parse(b);for(const k of ["summary","summaryCore"])if(A[k]!==B[k])throw new Error(k+" drifted")'`.
+- [ ] 0.8 Confirm no merge-describing clause survives anywhere: `grep -rn "add what.s new\|Merges into the stored summary\|keeps what you omit\|replaceStoredSummary\|summary_at_capacity" apps/ openspec/` must return zero matches after phase 5 rewrites the text. Run it now to see what phase 5 must remove, and again at the end of phase 5 to see it empty.
+- [ ] 0.9 Verify the pinned-surface enumeration BEFORE editing text, so phase 5 works from the real list rather than a remembered one: read `apps/server/src/test/invariants.test.ts::"the session-summary rubric has one source"` and confirm the `surfaces` array is exactly `apps/server/src/mcp/instructions.ts`, `apps/server/src/mcp/server.ts`, `apps/plugin/scripts/prompt-nudge.sh`, `apps/plugin/scripts/stop-nudge.sh`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/.hermes-plugin/__init__.py`. The `it('the enumeration above is complete')` case derives the same set from `git grep`, so a surface missed in phase 5 fails the build rather than shipping.
+
+## 1. Schema and migration
+
+- [ ] 1.1 Add `sessionSummaryVersions` to `apps/server/src/db/schema/agent-sessions.ts`: `id` TEXT PK, `sessionId` TEXT NOT NULL referencing `agentSessions.id` with `onDelete: 'cascade'`, `version` INTEGER NOT NULL, `content` TEXT NOT NULL, `createdAt` timestamp_ms NOT NULL, plus `uniqueIndex('session_summary_versions_session_version_unq').on(table.sessionId, table.version)` — the repo's established pattern (`projects.ts`, `memory-relations.ts`), not a table-level `UNIQUE (…)`. Export `SessionSummaryVersion` / `NewSessionSummaryVersion` from `$inferSelect` / `$inferInsert` — never hand-write the row shape.
+- [ ] 1.2 No index beyond that unique one (design D6). If a later measurement justifies one, it comes with the measurement.
+- [ ] 1.3 Write `apps/server/src/db/migrations/0033_session_summary_versions.sql` — the DDL exactly as in `specs/persistence/spec.md` (`CREATE TABLE` + the named `CREATE UNIQUE INDEX`), no `ALTER TABLE`, no backfill, no `CHECK` on `content` length, no pragma (the runner owns those).
+- [ ] 1.4 Add `'session_summary_versions'` to `SOURCE_TABLES` in `apps/server/src/test/schema-inventory.ts` (one edit serves both `invariants.test.ts`'s source/derived partition and `schema-drift.test.ts`'s table set).
+- [ ] 1.5 Add the index to `EXPECTED_INDEXES` in `apps/server/src/test/schema-drift.test.ts` with its exact `CREATE UNIQUE INDEX …` SQL as SQLite reports it — that list is compared verbatim, so a mismatch between the migration and the drizzle schema surfaces there.
+- [ ] 1.6 Confirm the drizzle barrel picks the table up — it re-exports `./agent-sessions.js`, so no barrel edit should be needed; verify rather than assume.
+
+## 2. Repository (`db/repositories/agent-sessions-repository.ts`)
+
+- [ ] 2.1 `insertSummaryVersion(values: NewSessionSummaryVersion): void` — Drizzle builder, no raw SQL.
+- [ ] 2.2 `latestSummaryVersion(sessionId: string): SessionSummaryVersion | undefined` — `ORDER BY version DESC LIMIT 1`, used for both the next version number and the identical-content comparison, so one read serves both and they cannot disagree.
+- [ ] 2.3 `adminListSummaryVersions(sessionId: string): SessionSummaryVersion[]` — newest first, for the dashboard. The `admin` prefix is required because the read takes no `Scope`; the only call site is `src/dashboard/sessions.ts`, which is inside the confinement gate's default allowance.
+- [ ] 2.4 Do NOT open a transaction in the repository (services own transaction boundaries).
+
+## 3. Service (`services/agent-sessions.ts`)
+
+- [ ] 3.1 Extract the single place that applies precedence and issues the update, shared by all three write paths (`writeSummary`'s active branch, `end`'s active branch, `writeTerminalFields`). Today `precedenceSet` computes the set and each branch issues its own `updateById`; the version append must live with the update, so the update moves into that one place. `resume` keeps composing its own `set` and does NOT route through it.
+- [ ] 3.2 Wrap that place in `this.tx.transaction(...)`. Order inside the transaction: `updateById` first, then — only if it returned a row AND the set carried `summary` AND the incoming `final === true` — read `latestSummaryVersion`, compare `content`, and insert `{ id: ulid(now), sessionId, version: latest ? latest.version + 1 : 1, content, createdAt: now }`.
+- [ ] 3.3 The cap stays exactly where it is: `assertSummaryWithinCap` on the ARGUMENT, once. Do not add a second check on the stored value — under this design they are the same string (design D8).
+- [ ] 3.4 No new `DomainError` code, no new response field. `sessionSummaryOutput` is unchanged.
+- [ ] 3.5 Confirm by reading the resulting code that no path can write `sessions.summary` outside that one place, and that the enumeration in `openspec/specs/sessions/spec.md`'s cap requirement (`writeSummary`, `end`) is still exhaustive.
+
+## 4. Server tests, and mutation verification for every new guard
+
+Each guard below gets a test that NAMES it, and each mutation must redden that test. A mutation that reddens nothing is the finding — the guard is uncovered.
+
+- [ ] 4.1 `apps/server/src/services/agent-sessions.test.ts`: cover every scenario in `specs/sessions/spec.md`'s two ADDED requirements — first curated write appends `version = 1`; second appends `version = 2` and the displaced text is still readable; byte-identical re-write appends nothing; three `final: false` syncs append nothing; a blocked terminal write appends nothing; a first curated write over a raw body versions only the curated text; each rejection path (empty, whitespace, `NUL`, over cap, cross-token, soft-deleted) leaves zero rows.
+- [ ] 4.2 An invariant test asserting the storage invariant directly over the DB: for every session with ≥1 version row, `sessions.summary` equals the highest-`version` `content`. Drive it through a sequence of real service calls (curated, raw, curated, identical, terminal) rather than fixture inserts — the invariant is about the write paths.
+- [ ] 4.3 Atomicity test: force the concurrently-ended path (`updateById` with `requireActive: true` returns undefined) and assert `session_already_ended` is thrown AND zero version rows exist for that session. This is the test that makes the transaction and the write ordering falsifiable.
+- [ ] 4.4 Mutation — the append itself:
+      `node scripts/mutate.mjs --file src/services/agent-sessions.ts --spec src/services/agent-sessions.test.ts --mutation '<the insertSummaryVersion call>' --with ''`
+- [ ] 4.5 Mutation — the `final: true` condition (must redden the `final: false` scenarios):
+      `--mutation '<final-flag condition in the append guard>' --with 'true'`
+- [ ] 4.6 Mutation — the identical-content skip, BOTH directions. Always-append must redden 4.1's identical-re-write case; always-skip must redden the second-write case. Two `--mutation/--with` pairs in one invocation.
+- [ ] 4.7 Mutation — the version numbering: replace `latest ? latest.version + 1 : 1` with `1` and confirm the second-write case goes red (the UNIQUE constraint or the assertion, either is a red).
+- [ ] 4.8 Mutation — the transaction: replace the `this.tx.transaction(...)` wrapper with a direct call and move the insert ahead of the update; 4.3 must go red. If it does not, 4.3 is not exercising the path it names.
+- [ ] 4.9 Mutation — the stored-value/version-row identity: mutate the inserted `content` to a slice of the argument and confirm 4.1's exact-length case goes red (guards against a second, divergent cap sneaking in later).
+- [ ] 4.10 Add the append-only static-grep rules for the new table to `apps/server/src/test/invariants.test.ts` (`db.delete(sessionSummaryVersions)`, raw `DELETE FROM session_summary_versions`, `UPDATE … SET content|version|session_id` on it). Verify each rule with a positive control: paste an offending line into a non-allow-listed source file, confirm the rule flags it naming file and line, then revert. A rule that flags nothing when fed an offender is not a rule.
+- [ ] 4.11 Purge test: a session with version rows is not purge-eligible (its `summary` is non-NULL); and, forcing the state the predicate forbids, `purgeEmpty({ adminBypass: true })` deletes both the session and its versions with no `FOREIGN KEY constraint failed`, with `PRAGMA foreign_key_check` clean afterwards.
+- [ ] 4.12 Mutation — the cascade: drop `onDelete: 'cascade'` from the schema and the `ON DELETE CASCADE` from the migration, and confirm 4.11's purge case goes red.
+- [ ] 4.13 Migration test in the style of `migrations-0031.test.ts`: apply migrations to a populated fixture (sessions with curated summaries, memories, prompts, confirmations), assert the table exists and is EMPTY, assert every pre-existing row is byte-identical, assert `PRAGMA foreign_key_check` is clean.
+
+## 5. Model-facing text — one task per pinned surface
+
+Every edit below is text. The HTTP protocol does not change. Measure after each edit; the numbers in design D13 are the basis.
+
+- [ ] 5.1 `apps/server/src/mcp/server.ts` — the `memory.session_summary` description. Add: the write REPLACES the stored summary; send the session's CURRENT COMPLETE state, concise; put the current state FIRST because `memory.context` shows only the beginning and only `memory.session_get` returns the whole; if you cannot see your earlier work, call `memory.session_get` first. Remove nothing else. Measure from a real `tools/list` response against `DESCRIPTION_MAX_LENGTH = 1900` (basis: 670 before the edit).
+- [ ] 5.2 `apps/server/src/mcp/instructions.ts` — add the clause to the `SUMMARIZE` line. Measure BOTH variants ≤1000 characters (basis: 916 unscoped / 902 path-scoped; a 68-character clause lands at 984). If it does not fit, reclaim prose from the block — do NOT raise the cap.
+- [ ] 5.3 `apps/plugin/.hermes-plugin/__init__.py::system_prompt_block()` — mirror 5.2 byte-for-byte. `apps/plugin/.hermes-plugin/tests/test_system_prompt_block.py` is the pinning test; run it.
+- [ ] 5.4 `apps/plugin/scripts/post-compact.sh` + the `postCompact` fixture in `apps/plugin/test/nudge-fixtures.json` — rewrite to read-then-rewrite: (1) `memory.session_get`, (2) `memory.session_summary` with the CURRENT full state, stating that the write replaces the stored value, (3) `memory.context`/`memory.search` if more is needed. Delete the "with the compact summary shown above" framing. Keep the `10000` substring. Measure ≤600 bytes UTF-8 (draft measured 530; basis before the edit 574).
+- [ ] 5.5 `apps/plugin/scripts/stop-nudge.sh` — the `RUBRIC` heredoc and the `endOfTurnRubric` fixture: state that the write replaces the stored summary and ask for the current complete state, current first. Keep the reasons/evidence and unfinished-work sentences, and keep the extracted-facts framing. This surface has no published per-line cap; record the measured size in the commit body anyway.
+- [ ] 5.6 `apps/plugin/commands/summary.md` — same clause; keep the `10000` mention required by `plugin-session-protocol`.
+- [ ] 5.7 `apps/plugin/scripts/prompt-nudge.sh` and `apps/plugin/bin/rembric-plugin-core.mjs` — **no text change to the `summary`/`saveCore`/`summaryCore` strings** (design D13: 259 bytes against a 260-byte published cap). Both keep the `resumedRead` line rescued in 0.6. Verify with 0.7's byte assertion.
+- [ ] 5.8 Re-run `grep -rn "add what.s new\|Merges into the stored summary\|keeps what you omit" apps/` and confirm zero matches.
+- [ ] 5.9 Run `pnpm vitest run apps/plugin/test/nudge-fixtures.test.ts` and the rubric invariant (`pnpm vitest run apps/server/src/test/invariants.test.ts -t 'session-summary rubric'`) — both the per-surface list and the `git grep`-derived completeness case must be green. Stage the plugin files first: the completeness case reads TRACKED files only, so an unstaged new surface passes locally and fails at pre-push.
+- [ ] 5.10 Run the Hermes Python tests (`apps/plugin/.hermes-plugin/tests/`) and `apps/plugin/test/resumed-read.test.ts`.
+
+## 6. Dashboard
+
+- [ ] 6.1 `apps/server/src/dashboard/sessions.ts` — add the `SUMMARY HISTORY` section to the `/:id` detail view, below the existing `Summary` block: entries newest-first, each showing `version`, `formatTs(createdAt)`, the character count, and the full `content` inside a native disclosure element, rendered with the existing `mdBody` helper.
+- [ ] 6.2 Empty state: render the section with an explicit "no summary versions recorded" line (`tblEmpty`-style), never hide it.
+- [ ] 6.3 No new route, no form, no `data-confirm` — there is no mutation to confirm.
+- [ ] 6.4 CSS: reuse existing tokens/classes. If a disclosure needs styling, it goes in `apps/server/src/dashboard/styles/` — never an inline `<style>`.
+- [ ] 6.5 Dashboard test: a session with three versions renders three entries in order `3, 2, 1` with the newest content equal to the `Summary` block; a session with none renders the empty line; no form targets a version row.
+- [ ] 6.6 Verify timestamps go through `formatTs` (no `toISOString`/`toLocaleString` in the new template code).
+
+## 7. Dev seed
+
+- [ ] 7.1 `apps/server/src/scripts/seed-dev.ts` — give at least one seeded session two curated summary versions, so the dashboard section and the Docker smoke below have data. Keep the `--reset` gate untouched.
+- [ ] 7.2 Confirm the seed's `DELETE FROM sessions` still works with the new child table (the cascade handles it) and that the invariants allow-list needs no new entry.
+
+## 8. Verification
+
+- [ ] 8.1 `pnpm run typecheck` · `pnpm run lint` · `pnpm test`.
+- [ ] 8.2 Spec gates: `openspec validate session-summary-full-rewrite --strict`, `pnpm run check:delta-sections`, `pnpm run check:delta-freshness`, `pnpm run check:spec-crossrefs`. `pnpm run check:spec-provenance` compares `origin/main...HEAD` — expect it to pass because this change edits no published spec.
+- [ ] 8.3 **Docker smoke against pre-existing seeded data** (`pnpm run dev:docker:up`; `chown -R 10001:10001 data-dev` first). Note `dev:docker:up` reseeds on every boot, so capture the pre-upgrade state you care about before restarting. 1. Boot on the PREVIOUS image or a pre-migration DB copy, write a curated summary through `memory.session_summary`, then boot the new image and confirm the migration runs, the table is empty, and the old summary reads back unchanged through `memory.session_get` and the dashboard. 2. Write a second curated summary on that same session; confirm `version = 1` appears with the NEW text (design D17: no backfill infers the old one). 3. Write a third, byte-identical; confirm the version count does not move. 4. POST a raw `final: false` body to `/api/<slug>/sessions/:id/summary` on a fresh session and confirm zero version rows and unchanged HTTP behaviour. 5. Open `/dashboard/sessions/:id` and confirm the history section lists the versions newest-first with full content, and renders its empty state on a session that has none.
+- [ ] 8.4 Measurements to record in the PR body, each with the instrument named: the `memory.session_summary` description length from a real `tools/list` response; both `instructions` variants' lengths; the `postCompact` fixture in UTF-8 bytes; the `summary`/`summaryCore` fixtures in UTF-8 bytes proving they are unchanged at 259/250.
+- [ ] 8.5 Confirm the mutation results from phase 4 are pasted into the PR body — which mutation reddened which named test. A guard without that line is not covered.
+
+## Deliberately not done (recorded so it is not silently lost)
+
+- [ ] N/A — **No read-back proof and no shrink guard.** Both evaluated and rejected; reasons in design D14 and D15.
+- [ ] N/A — **No restore action and no model-facing version read** (design D19). Recovery is the operator copying the text back through the ordinary curated write path.
+- [ ] N/A — **`SUMMARY_MAX_CHARS` and `CONTEXT_SNIPPET_CHARS` are unchanged.** Neither is touched, and neither may be as part of this change.
+- [ ] N/A — **The published `Stop | 0 tokens` figure in `claude-code-plugin` stays uncorrected.** It is already false on `origin/main` (`stop-nudge.sh` emits `additionalContext`); this change does not make a true statement false, and correcting it is its own change (design, open question 4).
+- [ ] N/A — **The `persistence` / `sessions` contradiction about the `summary` length `CHECK` stays uncorrected**, for the same reason (design, open question 3).
+- [ ] N/A — **No per-turn reminder text change**, and no per-line cap raise. If a future change wants the clause there, it raises the cap deliberately and re-measures every published figure containing the string.
