@@ -77,6 +77,39 @@ describe('runSeed', () => {
     expect(result.counts!.pendingJudgments).toBe(1);
   });
 
+  it('seeds at least one session with two summary versions, and --reset cascades them cleanly', () => {
+    runSeed({ handle: db.handle, reset: false, log: () => {} });
+
+    const countVersions = (): number =>
+      (
+        db.handle.raw.prepare('SELECT count(*) AS n FROM session_summary_versions').get() as {
+          n: number;
+        }
+      ).n;
+
+    expect(countVersions()).toBeGreaterThan(0);
+    const maxVersion = (
+      db.handle.raw.prepare('SELECT max(version) AS v FROM session_summary_versions').get() as {
+        v: number;
+      }
+    ).v;
+    expect(maxVersion).toBeGreaterThanOrEqual(2);
+
+    runSeed({
+      handle: db.handle,
+      reset: true,
+      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      log: () => {},
+    });
+
+    // The reset ran `DELETE FROM sessions` with no session_summary_versions
+    // statement of its own — the ON DELETE CASCADE is what must have carried
+    // the old rows away, and the fresh seed's own two-version session is what
+    // repopulates the table.
+    expect(db.handle.raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(countVersions()).toBeGreaterThan(0);
+  });
+
   it('--reset does not violate FK constraints when entity links/scan rows exist (regression: add-entity-index)', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
