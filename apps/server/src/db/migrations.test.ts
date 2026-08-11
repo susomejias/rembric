@@ -629,6 +629,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0030_memory_fts_vocab.sql',
       '0031_default_project.sql',
       '0032_token_projects.sql',
+      '0033_session_summary_versions.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1106,6 +1107,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
       '0030_memory_fts_vocab.sql',
       '0031_default_project.sql',
       '0032_token_projects.sql',
+      '0033_session_summary_versions.sql',
     ]);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);

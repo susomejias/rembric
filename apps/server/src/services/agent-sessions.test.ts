@@ -691,6 +691,44 @@ describe('AgentSessionsService', () => {
       expect(result.deletedIds).not.toContain(s.id);
     });
 
+    it('a session carrying a version row is not purge-eligible', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'with-version-row' });
+      sessions.end(s.id, { tokenId, summary: 'this session did something', final: true });
+      db.handle.raw
+        .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+        .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+      const repos = createRepositories(db.handle.db);
+      expect(repos.agentSessions.adminListSummaryVersions(s.id)).toHaveLength(1);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).not.toContain(s.id);
+      expect(sessions.getById(s.id)).toBeDefined();
+    });
+
+    it('purging a session removes its version rows via the cascade, with no FK violation', () => {
+      const s = sessions.start({ tokenId, projectId, agent: 'purge-with-versions' });
+      sessions.writeSummary(s.id, { tokenId, summary: 'this session did something', final: true });
+      sessions.writeSummary(s.id, { tokenId, summary: 'revised', final: true });
+      sessions.end(s.id, { tokenId });
+      const repos = createRepositories(db.handle.db);
+      expect(repos.agentSessions.adminListSummaryVersions(s.id)).toHaveLength(2);
+
+      // Force the state the purge predicate forbids: contrary to the
+      // invariant (a version row implies a non-NULL summary), null out the
+      // column directly so the row becomes purge-eligible while its version
+      // rows still exist — the scenario the cascade exists for.
+      db.handle.raw
+        .prepare('UPDATE sessions SET summary = NULL, summary_final = 0, ended_at = ? WHERE id = ?')
+        .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
+
+      const result = sessions.purgeEmpty({ adminBypass: true });
+      expect(result.deletedIds).toContain(s.id);
+      expect(sessions.getById(s.id)).toBeUndefined();
+      expect(repos.agentSessions.adminListSummaryVersions(s.id)).toHaveLength(0);
+      expect(db.handle.raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    });
+
     it('does not purge a session with a genuine but uncurated summary (summary_final=0)', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'raw-summary-purge' });
       sessions.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
@@ -1238,6 +1276,170 @@ describe('AgentSessionsService', () => {
       expect(after?.status).toBe('ended');
       expect(after?.endedAt?.getTime()).toBe(before.endedAt?.getTime());
       expect(after?.lastActivityAt?.getTime()).toBe(before.lastActivityAt?.getTime());
+    });
+  });
+
+  describe('session_summary_versions', () => {
+    let repos: ReturnType<typeof createRepositories>;
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      repos = createRepositories(db.handle.db);
+      svc = new AgentSessionsService(repos, db.handle.db);
+    });
+
+    function versions(sessionId: string) {
+      return repos.agentSessions.adminListSummaryVersions(sessionId);
+    }
+
+    it('a first curated write on a session with no stored summary appends version 1', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'A', final: true });
+
+      expect(svc.getById(s.id)?.summary).toBe('A');
+      const rows = versions(s.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ version: 1, content: 'A' });
+    });
+
+    it('a second curated write replaces the column and appends version 2; the displaced text is still readable', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'A', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'B', final: true });
+
+      expect(svc.getById(s.id)?.summary).toBe('B');
+      const rows = versions(s.id);
+      expect(rows.map((r) => ({ version: r.version, content: r.content }))).toEqual([
+        { version: 2, content: 'B' },
+        { version: 1, content: 'A' },
+      ]);
+    });
+
+    it('a byte-identical curated re-write appends no row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'B', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'B', final: true });
+
+      expect(svc.getById(s.id)?.summary).toBe('B');
+      expect(versions(s.id)).toHaveLength(1);
+    });
+
+    it('three final:false raw syncs append no row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'turn 1 raw', final: false });
+      svc.writeSummary(s.id, { tokenId, summary: 'turn 2 raw', final: false });
+      svc.writeSummary(s.id, { tokenId, summary: 'turn 3 raw', final: false });
+
+      expect(svc.getById(s.id)?.summary).toBe('turn 3 raw');
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a blocked terminal write appends no row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.end(s.id, { tokenId, summary: 'curated', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'later', final: true });
+
+      expect(svc.getById(s.id)?.summary).toBe('curated');
+      expect(versions(s.id)).toHaveLength(1);
+    });
+
+    it('the first curated write over a raw body versions only the curated text', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'raw transcript dump', final: false });
+      svc.writeSummary(s.id, { tokenId, summary: 'Goal: …', final: true });
+
+      const rows = versions(s.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ version: 1, content: 'Goal: …' });
+    });
+
+    it('a rejected write (empty summary) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      expect(() => svc.writeSummary(s.id, { tokenId, summary: '   ', final: true })).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a rejected write (whitespace-only summary) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      expect(() => svc.writeSummary(s.id, { tokenId, summary: '\t\n ', final: true })).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a rejected write (NUL byte) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      expect(() =>
+        svc.writeSummary(s.id, { tokenId, summary: 'has a \0 byte', final: true }),
+      ).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a rejected write (over SUMMARY_MAX_CHARS) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      expect(() =>
+        svc.writeSummary(s.id, {
+          tokenId,
+          summary: 'a'.repeat(SUMMARY_MAX_CHARS + 1),
+          final: true,
+        }),
+      ).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a rejected write (cross-token) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      expect(() =>
+        svc.writeSummary(s.id, { tokenId: otherTokenId, summary: 'not mine', final: true }),
+      ).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('a rejected write (soft-deleted session) leaves no version row', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.softDelete(s.id, { adminBypass: true });
+      expect(() => svc.writeSummary(s.id, { tokenId, summary: 'too late', final: true })).toThrow();
+      expect(versions(s.id)).toHaveLength(0);
+    });
+
+    it('the stored value and the version row are the same string, capped once', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      const exact = 'a'.repeat(SUMMARY_MAX_CHARS);
+      svc.writeSummary(s.id, { tokenId, summary: exact, final: true });
+
+      const stored = svc.getById(s.id);
+      const rows = versions(s.id);
+      expect(stored?.summary).toBe(exact);
+      expect(rows[0]?.content).toBe(exact);
+      expect(rows[0]?.content).toBe(stored?.summary);
+      expect(rows[0]?.content?.length).toBe(SUMMARY_MAX_CHARS);
+    });
+
+    it('the storage invariant holds after a realistic sequence of curated, raw, curated, identical and terminal writes', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'raw sync 1', final: false });
+      svc.writeSummary(s.id, { tokenId, summary: 'Goal: first curation', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'raw sync 2', final: false });
+      svc.writeSummary(s.id, { tokenId, summary: 'Goal: second curation', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'Goal: second curation', final: true });
+      svc.end(s.id, { tokenId, summary: 'Goal: final curation', final: true });
+
+      const stored = svc.getById(s.id);
+      const rows = versions(s.id);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]).toMatchObject({ version: rows.length, content: stored?.summary });
+      expect(rows.map((r) => r.version)).toEqual([3, 2, 1]);
+    });
+
+    it('the atomicity guarantee: a concurrently-ended write throws session_already_ended and leaves zero version rows', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      const spy = vi.spyOn(repos.agentSessions, 'updateById').mockReturnValue(undefined);
+      try {
+        expect(() =>
+          svc.writeSummary(s.id, { tokenId, summary: 'raced out', final: true }),
+        ).toThrow(/session_already_ended|concurrently ended/);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(versions(s.id)).toHaveLength(0);
     });
   });
 });
