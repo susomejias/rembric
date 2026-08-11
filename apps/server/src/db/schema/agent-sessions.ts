@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { projects } from './projects.js';
 import { tokens } from './tokens.js';
@@ -106,3 +106,32 @@ export const agentSessions = sqliteTable(
 
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+
+/**
+ * Successive stored values of one session's curated `summary`. Appended
+ * inside the same transaction as the `sessions.summary` UPDATE it records —
+ * see `services/agent-sessions.ts`. Append-only: no row is ever UPDATEd or
+ * DELETEd by application code, except by the cascade when its session is
+ * purged (`sessions`, "Sessions MAY be physically purged when empty").
+ */
+export const sessionSummaryVersions = sqliteTable(
+  'session_summary_versions',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    content: text('content').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({
+    sessionVersionUnq: uniqueIndex('session_summary_versions_session_version_unq').on(
+      table.sessionId,
+      table.version,
+    ),
+  }),
+);
+
+export type SessionSummaryVersion = typeof sessionSummaryVersions.$inferSelect;
+export type NewSessionSummaryVersion = typeof sessionSummaryVersions.$inferInsert;

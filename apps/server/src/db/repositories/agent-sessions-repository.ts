@@ -3,9 +3,12 @@ import { and, count, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-
 import type { Db } from '../client.js';
 import {
   agentSessions,
+  sessionSummaryVersions,
   type AgentSession,
   type AgentSessionStatus,
   type NewAgentSession,
+  type NewSessionSummaryVersion,
+  type SessionSummaryVersion,
 } from '../schema/agent-sessions.js';
 import { projects, type Project } from '../schema/projects.js';
 import { tokens, type Token } from '../schema/tokens.js';
@@ -371,6 +374,30 @@ export class AgentSessionsRepository {
       .leftJoin(projects, eq(projects.id, agentSessions.projectId))
       .where(eq(agentSessions.id, id))
       .get();
+  }
+
+  insertSummaryVersion(values: NewSessionSummaryVersion): void {
+    this.db.insert(sessionSummaryVersions).values(values).run();
+  }
+
+  latestSummaryVersion(sessionId: string): SessionSummaryVersion | undefined {
+    return this.db
+      .select()
+      .from(sessionSummaryVersions)
+      .where(eq(sessionSummaryVersions.sessionId, sessionId))
+      .orderBy(desc(sessionSummaryVersions.version))
+      .limit(1)
+      .get();
+  }
+
+  /** Unscoped whole-history read for the dashboard's `SUMMARY HISTORY` section. */
+  adminListSummaryVersions(sessionId: string): SessionSummaryVersion[] {
+    return this.db
+      .select()
+      .from(sessionSummaryVersions)
+      .where(eq(sessionSummaryVersions.sessionId, sessionId))
+      .orderBy(desc(sessionSummaryVersions.version))
+      .all();
   }
 
   adminRecent(limit: number): AdminRecentSession[] {
