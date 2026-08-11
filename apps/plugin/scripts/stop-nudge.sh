@@ -60,10 +60,6 @@ RAW="$(rembric_session_facts_raw "$PARSER" "$TRANSCRIPT_PATH" 2>/dev/null || tru
 # summarising, so nothing to remind about.
 [ -z "$RAW" ] && _emit_nothing
 
-# Already curated this session — say nothing rather than tell the model something
-# untrue about its own work.
-rembric_facts_show_summary_written "$RAW" && _emit_nothing
-
 FACTS="$(rembric_facts_from_raw "$PARSER" "$TRANSCRIPT_PATH" "$RAW" 2>/dev/null || true)"
 # Redact the WHOLE payload: commands and file paths carry <private> spans as
 # readily as the exchange does, and this path bypasses _rembric_truncate_transcript
@@ -72,7 +68,7 @@ FACTS="$(rembric_redact_private "$FACTS")"
 [ -z "$FACTS" ] && _emit_nothing
 
 read -r -d '' RUBRIC <<'EOF' || true
-rembric: this turn is done and the session has no curated summary. Call memory.session_summary({title≤100, summary}) now, covering: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.
+rembric: this turn is done. Call memory.session_summary({title≤100, summary}) now — the write REPLACES the stored summary, so send the session's CURRENT COMPLETE state, current state first: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.
 Write the reasons and the evidence, not just the outcomes — the code already records what changed, never why it beat the alternative nor what you actually verified. Say what was left unfinished; silence there reads as "everything is done".
 Ground it in these extracted facts rather than recollection:
 EOF

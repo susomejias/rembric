@@ -436,8 +436,9 @@ class RembricMemoryProvider(MemoryProvider):
             "lookup) if you lack prior detail.\n"
             "SUMMARIZE: did real work happen? Before ending, you MUST call "
             "memory.session_summary({title≤100 (the work, not cwd), "
-            "summary≤10000}) — Goal · Accomplished · Decisions+why · "
-            "Verified+how · Unfinished+why · Files.\n"
+            "summary≤10000}) — REPLACES the stored summary; send the whole "
+            "current state, current first: Goal · Accomplished · "
+            "Decisions+why · Verified+how · Unfinished+why · Files.\n"
             "Know your sessionId? Pass it — never guess it.\n"
             "Update Rembric: memory.about."
         )

@@ -29,7 +29,7 @@ const BASE = `Rembric — persistent memory across sessions. Use the tools proac
 
 SAVE: the moment it happens — bug fix · decision · discovery · config · pattern · preference — call memory.save with a title≤100 headline + content (don't batch). Evolving a prior topic? pass topic_key; resolve candidates[] with memory.judge.
 RECALL: starting/resuming work, after /compact, or asked "what did we do"? Call memory.context (memory.search for keyword lookup) if you lack prior detail.
-SUMMARIZE: did real work happen? Before ending, you MUST call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — ${SUMMARY_SECTIONS}.
+SUMMARIZE: did real work happen? Before ending, you MUST call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — REPLACES the stored summary; send the whole current state, current first: ${SUMMARY_SECTIONS}.
 Know your sessionId? Pass it — never guess it.
 Update Rembric: memory.about.`;
 
