@@ -309,6 +309,7 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
     const memories = deps.repos.memory.adminListBySession(id);
     const sessionPrompts = deps.repos.prompts.adminListBySession(id);
+    const summaryVersions = deps.repos.agentSessions.adminListSummaryVersions(id);
 
     const memoriesCount = memories.length;
     const actionForm = row.deletedAt
@@ -393,6 +394,24 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           ? mdBody(row.summary)
           : html`<pre>${row.summary}</pre>`
         : html`<p>—</p>`}
+
+      <h2>Summary History (${summaryVersions.length})</h2>
+      ${summaryVersions.length === 0
+        ? tblEmpty('No summary versions recorded.')
+        : html`
+            <div class="rbr-summary-history">
+              ${summaryVersions.map(
+                (v) => html`
+                  <details class="rbr-summary-version">
+                    <summary>
+                      v${v.version} · ${formatTs(v.createdAt)} · ${v.content.length} chars
+                    </summary>
+                    ${mdBody(v.content)}
+                  </details>
+                `,
+              )}
+            </div>
+          `}
 
       <h2>Memories (${memories.length})</h2>
       ${memories.length === 0
