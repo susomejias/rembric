@@ -273,8 +273,44 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.repos.agentSessions.updateById(existing.id, set, { requireActive: false });
+    const updated = this.updateAndVersion(existing.id, set, { requireActive: false });
     return updated ?? existing;
+  }
+
+  /**
+   * The single site every write path that mutates `sessions.summary` funnels
+   * through: the update and the version append are one atomic act. Appends a
+   * row to `session_summary_versions` only when the update landed, the `set`
+   * carried a new `summary`, and that `summary` is the incoming write's FINAL
+   * value — `set.summaryFinal === true` is exactly that, since
+   * `precedenceSet` only ever puts `summaryFinal` in `set` alongside `summary`,
+   * set to the incoming write's `final` flag (see "Every curated
+   * session-summary write MUST append a version row in the same transaction",
+   * `openspec/specs/sessions/spec.md`). A byte-identical re-write appends
+   * nothing, which is what keeps `idempotentHint: true` honest.
+   */
+  private updateAndVersion(
+    id: string,
+    set: Partial<NewAgentSession>,
+    opts: { requireActive: boolean },
+  ): AgentSession | undefined {
+    return this.tx.transaction((): AgentSession | undefined => {
+      const updated = this.repos.agentSessions.updateById(id, set, opts);
+      if (updated && typeof set.summary === 'string' && set.summaryFinal === true) {
+        const latest = this.repos.agentSessions.latestSummaryVersion(id);
+        if (!latest || latest.content !== set.summary) {
+          const ts = this.now();
+          this.repos.agentSessions.insertSummaryVersion({
+            id: ulid(ts.getTime()),
+            sessionId: id,
+            version: latest ? latest.version + 1 : 1,
+            content: set.summary,
+            createdAt: ts,
+          });
+        }
+      }
+      return updated;
+    });
   }
 
   /**
@@ -325,7 +361,7 @@ export class AgentSessionsService {
       lastActivityAt: this.now(),
       ...precedenceSet(existing, input),
     };
-    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
+    const updated = this.updateAndVersion(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -376,7 +412,7 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input),
     };
-    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
+    const updated = this.updateAndVersion(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
