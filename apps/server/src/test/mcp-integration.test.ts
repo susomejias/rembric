@@ -249,6 +249,19 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
+  it('memory.session_summary description directs verbatim copying of carried-forward facts, not paraphrase', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const sessionSummary = tools.find((t) => t.name === 'memory.session_summary');
+    const desc = sessionSummary?.description ?? '';
+
+    expect(desc).toContain('COPY it');
+    expect(desc).toContain('do not paraphrase');
+    expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+
+    await client.close();
+  });
+
   it('memory.context description advertises the judgment total and the size that lifts the age filter', async () => {
     const client = await connect();
     const { tools } = await client.listTools();

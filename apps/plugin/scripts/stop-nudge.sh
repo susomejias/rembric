@@ -69,7 +69,7 @@ FACTS="$(rembric_redact_private "$FACTS")"
 
 read -r -d '' RUBRIC <<'EOF' || true
 rembric: this turn is done. Call memory.session_summary({title≤100, summary}) now — the write REPLACES the stored summary, so send the session's CURRENT COMPLETE state, current state first: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.
-Write the reasons and the evidence, not just the outcomes — the code already records what changed, never why it beat the alternative nor what you actually verified. Say what was left unfinished; silence there reads as "everything is done".
+Write the reasons and the evidence, not just the outcomes — the code already records what changed, never why it beat the alternative nor what you actually verified. Say what was left unfinished; silence there reads as "everything is done". Copy every file path, line number, measurement and test name across VERBATIM — a paraphrased number is a lost number.
 Ground it in these extracted facts rather than recollection:
 EOF
 

@@ -566,4 +566,9 @@ describe('end-of-turn rubric lock-step', () => {
       expect(fixtures.endOfTurnRubric, `rubric omits '${section}'`).toContain(section);
     }
   });
+
+  it('the rubric directs verbatim copying of concrete facts, not paraphrase', () => {
+    expect(fixtures.endOfTurnRubric).toContain('VERBATIM');
+    expect(fixtures.endOfTurnRubric).toContain('a paraphrased number is a lost number');
+  });
 });
