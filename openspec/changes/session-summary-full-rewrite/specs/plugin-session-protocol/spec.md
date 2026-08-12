@@ -62,7 +62,7 @@ This block is also the compaction re-arm of the read directive specified in "A p
 
 Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state that a curated summary write replaces the stored value"), which carries the replacement and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
 
-The block SHALL keep every obligation it already carries: the `10000` cap substring and the ≤600-byte budget of "Plugin-injected protocol nudges MUST surface the summary length cap", and one copy of the text shared by the clients that use it. A reworded block SHALL be re-measured, and the measurement SHALL be recorded rather than assumed: the rewritten block measures 530 bytes against the published 600.
+The block SHALL keep every obligation it already carries: the `10000` cap substring and the ≤600-byte budget of "Plugin-injected protocol nudges MUST surface the summary length cap", and one copy of the text shared by the clients that use it. A reworded block SHALL be re-measured, and the measurement SHALL be recorded rather than assumed: the rewritten block measures 560 bytes against the published 600.
 
 #### Scenario: The block asks for the current whole state, after a read
 
@@ -107,6 +107,8 @@ Three findings, each with a different consequence for this contract:
 3. **Detail erodes even when the model obeys.** The stronger model lost `50rps` in BOTH arms, by paraphrasing rather than by dropping a section. A rewrite is therefore NOT a durability mechanism for facts: a fact that must survive belongs in `memory.save`, and the summary is a state description that may lose precision on every pass. No requirement SHALL be written that depends on a specific fact surviving an unbounded number of rewrites.
 
 **A stronger tool description is not the remedy, and that is measured too.** `memory.session_summary`'s description already carries the read directive verbatim (`apps/server/src/mcp/server.ts:326`: `Can't see your earlier work? Call memory.session_get first, then write the whole updated state.`), and the weaker model with no injected block ignored it. Strengthening description text against that result would be speculation; what the datum supports is the injected block.
+
+This finding is scoped to the READ directive specifically: it says a stronger nudge toward `memory.session_get` would not have moved the arm that already ignored the one there. It says nothing about a description obligation the tool did not carry at all — copying concrete facts verbatim instead of paraphrasing them, which finding 3 above (the stronger model losing `50rps` to paraphrase, not omission) targets and which `mcp-api`'s `memory.session_summary` requirement adds as its own, separate fact. That addition is not a repeat of the rejected experiment.
 
 **The matrix.** For each client, the compaction event it exposes and the obligation that follows:
 
@@ -183,7 +185,9 @@ The shared text SHALL be phrased as a calibrated imperative:
 - It SHALL condition that action on real, memorable work having happened (a decision, fix, discovery, or files changed), preserving the model's discretion to skip trivial turns with nothing worth persisting — so the imperative does not induce vacuous summaries or noise saves.
 - It SHALL NOT change the firing cadence, which is governed separately (summary on turn 1 and every `SUMMARY_NUDGE_EVERY`; save every `SAVE_NUDGE_EVERY`) and is unchanged by this requirement.
 
-**The summary string SHALL NOT carry the write's replace-and-rewrite semantics, and that exclusion is a measured decision rather than an omission.** The string measures 259 UTF-8 bytes against its own published per-line cap of 260 (`claude-code-plugin`), and the firing-turn ceiling is ≤840 bytes against a measured worst case of 780, so any added clause costs a cap edit plus a re-measurement of three published aggregate figures, paid on turn 1 and every tenth turn in five clients. The semantics are delivered instead where the model is already reading a longer text about this tool and where there is measured headroom: the tool description (670 of 1900 characters) and `initialize.instructions` (916 of 1000), plus the two surfaces that fire exactly when a summary is about to be written — the compaction block and the end-of-turn rubric. A future change MAY move the clause here, and if it does it SHALL raise the per-line cap deliberately and re-measure every published figure that contains this string; it SHALL NOT append the clause and leave the caps as published.
+**The summary string SHALL NOT carry the write's replace-and-rewrite semantics, and that exclusion is a measured decision rather than an omission.** The string measures 259 UTF-8 bytes against its own published per-line cap of 260 (`claude-code-plugin`), and the firing-turn ceiling is ≤840 bytes against a measured worst case of 780, so any added clause costs a cap edit plus a re-measurement of three published aggregate figures, paid on turn 1 and every tenth turn in five clients. The semantics are delivered instead where the model is already reading a longer text about this tool and where there is measured headroom: the tool description (1003 of 1900 characters, after this change's own additions to it) and `initialize.instructions` (990 of 1000, after this change's own clause), plus the two surfaces that fire exactly when a summary is about to be written — the compaction block and the end-of-turn rubric. A future change MAY move the clause here, and if it does it SHALL raise the per-line cap deliberately and re-measure every published figure that contains this string; it SHALL NOT append the clause and leave the caps as published.
+
+**`initialize.instructions`'s remaining headroom is 10 characters, not a number that invites more prose.** 990 of the published 1000-character cap is already spent; a contributor reading "measured headroom" here SHALL NOT read it as an invitation to add further text to this block — there is none to spare. Any future addition to `initialize.instructions` SHALL either reclaim prose from the existing block first (the same rule `mcp-api`'s `instructions` requirement already states) or raise the cap deliberately with its own re-measurement; it SHALL NOT be attempted as a small addition on the assumption that ~84 characters remain.
 
 **The summary string SHALL NOT assert, or deny, that a summary already exists for the session.** One string has to be true in both states, and a claim about state is the one thing a state-blind reminder cannot make.
 
@@ -404,3 +408,39 @@ The bash fallback's transcript formatter (`_rembric_format_transcript_claude_cod
 - **WHEN** the user closes the session and `SessionEnd` fires with that transcript's path
 - **THEN** `sessions.summary` SHALL contain every well-formed line before the torn one (oldest-first, role: content)
 - **AND** `sessions.summary` SHALL NOT be `NULL` or empty — the torn line degrades the summary by at most itself, it does not discard the lines that parsed successfully before it
+
+### Requirement: Plugin-injected protocol nudges MUST surface the summary length cap
+
+The agent-facing protocol nudges injected by the per-client plugins SHALL state the summary length cap inline so the agent budgets for it on the first attempt and does not trip the MCP rejection path. The affected injection sites are:
+
+- `apps/plugin/scripts/post-compact.sh` — the `SessionStart matcher:"compact"` hook stdout, shared by Claude Code and Codex CLI (budget ≤150 tokens; see `claude-code-plugin`'s token-budget requirement for the measurement unit). The protocol block listed for the agent SHALL include the cap on the `summary` field.
+- `apps/plugin/.hermes-plugin/__init__.py` — Hermes provider's system-message injection (around line 313). The session-close protocol sentence SHALL include the cap.
+- `apps/plugin/commands/summary.md` — the slash command description SHALL mention the cap so users invoking `/rembric:summary` see the budget too.
+
+Each plugin SHALL emit the literal substring `10000` (the current cap value) in the injected text so a test can grep for it and a contributor changing the cap is forced to update every site.
+
+The `≤150` budget replaces a previously-published `≤120`, which the shipped block exceeded from the moment it was written (measured 552 bytes = 138.0 tokens under the newline-exclusive per-line convention `claude-code-plugin` pins; 138.3 if the emitting script's trailing newline is counted, which only turn totals do). The cap was raised rather than the text trimmed: this block fires at the moment of highest consequence — the model has just lost its context and this is the only instruction telling it what to persist — so trimming it to recover 16 tokens once per compaction trades instruction-following for nothing. `claude-code-plugin` asserts the same number and the two SHALL be changed together.
+
+**The 552-byte figure above is history, not a claim about the block's current size, and this change is what makes that distinction load-bearing.** "The post-compaction instruction SHALL direct the model to read the stored summary and then rewrite the session's current state in full" rewords this same block's text: 574 bytes on `main` immediately before that rewrite, 560 bytes after it. Neither number is 552, and neither needs to be — the 552 figure describes the block as it stood at a still-earlier point, when the `≤120`→`≤150` budget decision was made, and is retained here as the record of that decision rather than corrected to track every later reword. Both 574 and 560 stay within the ≤600-byte / ≤150-token cap this paragraph sets, so no cap change follows from the reword; a future reader who measures the current block and finds neither 552 nor a cap violation has found exactly what this note says to expect.
+
+#### Scenario: Claude Code post-compact injection mentions the cap
+
+- **WHEN** `apps/plugin/scripts/post-compact.sh` runs and emits its stdout protocol block
+- **THEN** the emitted text SHALL contain the substring `10000`
+- **AND** the text SHALL describe the cap as a limit on the `summary` field passed to `memory.session_summary`
+
+#### Scenario: The post-compact block stays within its raised budget
+
+- **WHEN** the `postCompact` fixture is measured in UTF-8 bytes
+- **THEN** it SHALL be ≤600 bytes (≤150 tokens at the pinned bytes÷4 proxy)
+- **AND** the assertion SHALL fail the build when exceeded
+
+#### Scenario: Hermes provider injection mentions the cap
+
+- **WHEN** Hermes loads the rembric plugin and its system-message injection runs
+- **THEN** the injected protocol text SHALL contain the substring `10000`
+
+#### Scenario: Slash command description mentions the cap
+
+- **WHEN** a user opens the `/rembric:summary` slash command's description text
+- **THEN** the description SHALL contain the substring `10000`
