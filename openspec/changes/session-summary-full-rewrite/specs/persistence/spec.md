@@ -10,11 +10,14 @@ CREATE TABLE session_summary_versions (
   session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   version    INTEGER NOT NULL,
   content    TEXT    NOT NULL,
+  title      TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX session_summary_versions_session_version_unq
   ON session_summary_versions (session_id, version);
 ```
+
+`title` is nullable and carries the `sessions.title` value in effect when the row was written (`sessions`, revising design D6). It is declared in this same migration rather than a follow-up one: nothing on this branch has been pushed, `0033` has never shipped in a release, and a second migration for a column on a table no release ever had would describe history that never happened.
 
 The uniqueness constraint SHALL be a NAMED unique index rather than a table-level `UNIQUE (…)` clause, so it appears in the schema-drift inventory by name like every other index in this schema, instead of as an anonymous auto-index.
 

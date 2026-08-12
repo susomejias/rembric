@@ -51,3 +51,21 @@ The Hermes provider's `system_prompt_block()` is required elsewhere to stay byte
 
 - **WHEN** the Hermes provider's system-prompt block is compared to the server's base instructions text
 - **THEN** the two SHALL be byte-identical, so the clause is present in both
+
+### Requirement: The `memory.session_get` description MUST disambiguate `limit` and mark the read exceptional
+
+`memory.session_get` gains an optional `limit` argument bounding how many stored summary VERSIONS it also returns (see `sessions`). On a tool that returns a single object rather than a list, a bare `limit` invites the reading a caller would use for `memory.search`'s `limit` — narrowing the ONE summary it already returns, or its length. The description SHALL therefore state explicitly what `limit` bounds (the count of past summary versions returned, newest first, nothing else) and SHALL state that supplying it is EXCEPTIONAL: for recovering detail a later rewrite dropped, not a routine substitute for the current summary the tool already returns untruncated.
+
+This obligation SHALL be discharged within `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"), measured from a real `tools/list` response, and SHALL NOT require raising the cap.
+
+#### Scenario: The description disambiguates what `limit` bounds
+
+- **WHEN** the `memory.session_get` description is read from a real `tools/list` response
+- **THEN** it SHALL state that `limit` bounds the number of summary VERSIONS returned
+- **AND** it SHALL NOT read as bounding the summary's length or any other size
+
+#### Scenario: The description marks the versions read as exceptional
+
+- **WHEN** the same description is inspected
+- **THEN** it SHALL state that supplying `limit` is for recovering displaced detail, not routine use
+- **AND** it SHALL satisfy `DESCRIPTION_MAX_LENGTH`
