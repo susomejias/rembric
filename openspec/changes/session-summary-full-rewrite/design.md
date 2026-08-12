@@ -183,6 +183,8 @@ Measured: the reworded `memory.session_get` description is 652 characters agains
 - **Storage grows with curated writes.** Bounded by writes × `SUMMARY_MAX_CHARS`: ≤10 rows for a 100-turn session at the every-tenth cadence, ≤100 KB at the cap, against 659 characters measured on a real four-curation session.
 - **The dashboard page grows with the history.** Resolved by D21: capped at `SUMMARY_HISTORY_MAX` (20), newest first, with a "showing N of TOTAL" note.
 - **A title-only final write can leave `sessions.title` ahead of the newest version's title.** Accepted and documented rather than solved (D22): the only such path is `POST /:slug/sessions/:id/end` with `title` and no `summary`, unreachable through `memory.session_summary` (whose schema requires `summary`). The next content-changing curated write re-pairs both values in a fresh row.
+- **A specific fact can erode out of the summary even when every model obeys the instruction.** Measured (D23): the stronger model lost one of four anchors in both arms, by paraphrasing rather than by dropping a section. Accepted, and it fixes the division of labour — durable facts go to `memory.save`, the summary carries state. The version rows keep every earlier phrasing readable, so erosion costs precision in the CURRENT value, never the record.
+- **On a client with no compaction event (Pi today), a post-compaction rewrite is expected to be thin.** Accepted (D25). The version table is the mitigation, recovery is `memory.session_get({ limit })` or the dashboard history, and the gap closes only if the host ships a compaction event.
 
 ### D21 — The dashboard history section is capped at `SUMMARY_HISTORY_MAX = 20`, newest shown, fixed cap over pagination
 
@@ -204,9 +206,70 @@ D6 rejected versioning `title`: a lost label costs a re-read of the summary, not
 
 **The invariant, extended, and where it stops.** The newest version's `title` SHALL equal `sessions.title` immediately after the write that appended it — both come from the same `updateById` result. This is narrower than the `summary` invariant's wording: unlike `summary`, `title` CAN change through a write that appends no version — a title-only `final: true` write on the active-session branch of `end()` with no `summary` argument. That path exists only through `POST /:slug/sessions/:id/end` (`memory.session_summary`'s schema requires `summary` on every call, so the path does not exist through MCP). Such a write leaves `sessions.title` ahead of the newest version's `title` until the next content-changing curated write. Stated explicitly rather than assumed away, and covered by a regression test that demonstrates the divergence rather than merely asserting the invariant holds (`apps/server/src/services/agent-sessions.test.ts`).
 
+### D23 — The four-arm CLI measurement: what it validates, and what it explicitly does not
+
+Run after phase 9 shipped green, with real CLIs against a local server: four arms, two models × injected-post-compaction-block / no-injected-block. Phase 1 of each arm curated a summary carrying four concrete anchors (`orders-service.ts:142`, `340ms`, `retry-cap.test.ts`, `50rps`); phase 2 was a NEW process with no memory of phase 1 — the post-compaction condition — given new work and required to rewrite.
+
+| arm                               | stored summary, chars | called `memory.session_get`? | phase-1 anchors surviving |
+| --------------------------------- | --------------------- | ---------------------------- | ------------------------- |
+| stronger model, injected block    | 2034 → 3006           | yes (1)                      | 3 of 4                    |
+| stronger model, no injected block | 1794 → 2909           | yes (1)                      | 2 of 4                    |
+| weaker model, injected block      | 1019 → 1762           | yes (1)                      | **4 of 4**                |
+| weaker model, no injected block   | 975 → 1077            | **no (0)**                   | **0 of 4**                |
+
+**What it validates.** The central assumption of D1+D2 — that asking for the current complete state does not cost stored text. The column GREW in all four arms, and no model wrote a delta-shaped summary even in the arm that never read what was there. This is the assumption on which "keep replacing, and ask for the whole state" rests, and it now has evidence rather than an argument. It also validates D2's most consequential instance: the injected block is what makes a weak model read at all, so the injection is normative rather than best-effort.
+
+**What it does NOT validate, and this is the part worth writing down.** The rewrite is not a durability mechanism for facts. The stronger model lost `50rps` in BOTH of its arms — not by dropping a section but by paraphrasing the sentence that contained it. So a fact survives a rewrite only as long as some model keeps judging it worth restating, and no requirement may depend on a specific fact surviving an unbounded number of rewrites. That is what `memory.save` is for; the summary is a state description. It also sharpens D15's rejection of a shrink guard from the other side: the failure mode here is not shrinkage, it is erosion inside a summary that grew.
+
+**What it cannot settle.** Two models and four runs is not a distribution. The direction of every arm agreed, which is what makes the finding usable, but the numbers are not a rate and are not quoted as one anywhere.
+
+**One arm had to be re-run**, and the reason is the finding recorded under "Findings outside this change" below: four parallel arms sharing one token and one project collided on a single session row, because `memory.session_start` adopts the project's active session and discards the `agent` it was given.
+
+### D24 — The opencode compaction block adopts the same semantics, and the guard that missed it is named
+
+`apps/plugin/.opencode-plugin/plugin.ts:244-252` — the `experimental.session.compacting` handler — still pushed the pre-change instruction after phase 5 rewrote every other surface: `'call \`memory.session_summary\` with the content of the compacted summary above. '`plus`'This preserves what was accomplished before compaction. '`. Against a replacing write that is an instruction to store the window, at the one moment the model has nothing else — the D2 failure in its exact original form, and by D23's no-block arm the one that costs every earlier anchor.
+
+**Why phase 5 missed it, and why that is the interesting part.** The surface list phase 5 worked from is `apps/server/src/test/invariants.test.ts::'the session-summary rubric has one source'`, which asserts its own completeness — but from a `git grep` for the canonical section list. This block never carried that list, so it was never in the enumeration, and a test whose completeness case is derived from a marker can only ever be complete with respect to that marker. The lesson is not "check harder": it is that a self-asserting enumeration is only as complete as the property it greps for, and a second class of surface (compaction-time protocol text) needs its own enumeration rather than to be smuggled into this one.
+
+**The fix is to share the text, not to rewrite it in place.** The block's protocol sentences come from the shared fixture through `rembric-plugin-core.mjs`, on the discipline every other nudge already follows, with the slug sentence — the only per-connection part — appended by the client. A second hand-written copy is what allowed a divergence to persist unnoticed for a whole phase, so the disposal removes the copy rather than correcting it. A side effect worth having: the shared text carries the `10000` substring, so this injection now surfaces the cap too.
+
+### D25 — Hermes's compaction gap is CLOSED; Pi's is an ACCEPTED RISK
+
+The two remaining clients are not symmetric, and treating them the same would be wrong in one direction or the other.
+
+**Hermes: closed, because the mechanism already exists.** `on_pre_compress` fires AT the compaction and is already listed in `plugin.yaml`'s hooks, and `prefetch()` is injected every turn, so the first `prefetch()` after a compaction is a post-compaction surface with no new host capability needed. The provider already treats a compaction as a moment deserving a one-shot dedicated hint — `_SAVE_HINT_URGENT` — but that hint is about `memory.save`, and by D23 the summary is the surface where the absence costs everything. Leaving a measured 0-of-4 loss uncovered when the arming event is already wired would be accepting a cost we have a mechanism to avoid.
+
+Two ways to get it wrong, both specified against: arming from `remaining_tokens` (a prediction of a compaction, which is the wrong moment — the directive is only correct after one) and returning the text from `on_pre_compress` (whose documented destination is the compressor prompt — the summariser, not the agent — so it would shape the window instead of the stored summary, reproducing the very confusion this change removes).
+
+**Pi: accepted, because there is nothing to inject into.** `apps/plugin/.pi-plugin/index.ts` registers `session_start`, `before_agent_start`, `message_end`, `agent_settled` and `session_shutdown`. No compaction event exists, and the host ships none by design. So the risk is declared rather than tracked: the thin rewrite is an EXPECTED and accepted outcome there, the version table is the mitigation, and recovery is `memory.session_get({ limit })` or the dashboard history.
+
+**The easy answer was measured and rejected.** The obvious substitute for an injected block is a stronger tool description — and the description already carries the directive verbatim (`apps/server/src/mcp/server.ts:326`: `Can't see your earlier work? Call memory.session_get first, then write the whole updated state.`). The weaker model with no injected block ignored it. Strengthening that text further would be speculation dressed as a fix; the datum says only the injected block moved the behaviour, so where no injection is possible the honest disposal is an accepted risk, not a description edit.
+
 ## Existing installations
 
 One `CREATE TABLE` at first boot; no row read or written; every existing column untouched. Nothing derived needs invalidating — `memory_fts`, `memory_vec` and the three entity tables do not derive from the new table, which is classified as a SOURCE table in the shared schema inventory. Rolling back to a pre-migration image leaves the table present and unread, with `sessions.summary` still authoritative on both sides, so a downgrade loses no summary. The dashboard's new section renders as empty for every session that pre-dates the upgrade, which D17 makes the correct display rather than a defect.
+
+## Findings outside this change
+
+Both were found while validating this change and neither is caused by it. Recorded here so they are not lost, with the evidence that makes them actionable, and deliberately NOT fixed here — this change's diff touches none of the files involved.
+
+### `memory.session_start` adopts the project's active session and silently discards the `agent` it was given
+
+The adoption itself is published and deliberate (`openspec/specs/mcp-api/spec.md:2807`):
+
+> `memory.session_start` SHALL NOT always insert a row. When an `active` session already exists for the caller's `(tokenId, projectId)` on this transport — the ordinary case, because every supported host registers the session over HTTP before the agent runs — the call SHALL adopt that row instead of minting a second one, and SHALL report which of the two happened in a REQUIRED `reused` field
+
+What is NOT published is what happens to the `agent` argument on that branch. `apps/server/src/mcp/session-tools.ts:202` looks the row up by `(tokenId, projectId)` alone; on a hit the branch only touches the activity clock (`:213`) and returns, and `args.agent` is read exclusively in the insert branch (`:219`). `sessions.agent` is then immutable — `apps/server/src/services/agent-sessions.ts:89` states the rule as `Never UPDATE `agent`, `token_id`, `project_id`, `started_at`` — and there is no repair verb, so a row adopted by a different agent stays attributed to the first one permanently.
+
+The cost is measurable, not theoretical: running D23's four arms in parallel under one token and one project, arms 2–4 each adopted arm 1's row, so three agents' summaries landed on a session attributed to a fourth, and one probe had to be re-run to get a clean reading.
+
+Two independent questions to settle in that change, which is why it is not a one-line fix: whether adoption should consider `agent` in the lookup at all, and whether `reused: true` is a sufficient signal for a caller that explicitly asked for a different `agent` than the row carries.
+
+### `REMBRIC_PORT` in `.env` makes the container permanently unreachable and unhealthy
+
+One variable drives two things that must not move together. `docker-compose.yml:22` uses it for the HOST side of the mapping while the container side is fixed — `- '${REMBRIC_PORT:-8787}:8787'` — and `env_file: .env` (`:29`) also hands it to the process, where `apps/server/src/config.ts:51` reads it as the LISTEN port. So `REMBRIC_PORT=8799` makes the server listen on 8799 inside the container while the mapping publishes container port 8787, and the healthcheck probes `http://127.0.0.1:8787/healthz` inside the container (`:39`). Measured: host 8799 → `000`, host 8787 → `000`, container-internal 8799 → `200`. The container never becomes healthy and no host port reaches it.
+
+Found while running the Docker smoke for task 8.3. Its own change, because the fix is a choice between three incompatible options with different upgrade stories for operators who already set the variable: a separate host-port variable, making the container side of the mapping follow the variable, or refusing the variable at boot in a composed deployment.
 
 ## Open questions
 

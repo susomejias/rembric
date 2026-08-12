@@ -1,0 +1,50 @@
+## MODIFIED Requirements
+
+### Requirement: Experimental.session.compacting handler
+
+The `"experimental.session.compacting"` handler SHALL:
+
+1. If `input.sessionID` is present, call `ensureSession(input.sessionID)`.
+2. Push a single string onto `output.context` (the array opencode's compactor consumes) instructing the post-compaction agent to FIRST read the stored summary with `memory.session_get`, and THEN call `memory.session_summary` with the session's CURRENT COMPLETE state — brought up to date with the surviving window, and with the write's replacing semantics stated, so that sending the compacted window alone is understood to store the window alone. The instruction text SHALL be a single multi-line string ending with a sentence stating that without this step everything before compaction is lost from memory. The text SHALL name the project slug when one was resolved. **The text SHALL ALSO include a final sentence directing the post-compact agent to call `memory.context` if it needs detail beyond what it read (file paths, decisions, specific errors not in the compacted block).**
+
+**The instruction SHALL NOT ask the agent to call `memory.session_summary` with the content of the compacted summary**, and SHALL NOT ask for a summary of the surviving window. That was the shipped framing when this requirement was rewritten — `apps/plugin/.opencode-plugin/plugin.ts:244-252` pushed `'call \`memory.session_summary\` with the content of the compacted summary above. '` followed by `'This preserves what was accomplished before compaction. '` — and against a replacing write it produces exactly the loss the instruction exists to prevent: the model obeys, and the stored summary becomes the window.
+
+This handler was the one compaction surface the read-then-rewrite rewrite missed, and the reason is worth recording because it is a property of the guard rather than of the author: the enumeration that pins the model-facing summary surfaces (`apps/server/src/test/invariants.test.ts::'the session-summary rubric has one source'`) asserts its own completeness from a `git grep` for the canonical section list, and this block never carried that list, so it was never in the enumeration and no test could notice it disagreeing.
+
+The obligations of "The post-compaction instruction SHALL direct the model to read the stored summary and then rewrite the session's current state in full" apply to this string in full; this handler is the opencode compaction surface named there.
+
+**The protocol sentences SHALL NOT be hand-written in `plugin.ts`.** They SHALL be sourced from the shared cross-language fixture contract (`apps/plugin/test/nudge-fixtures.json`) through the shared JS/TS core (`apps/plugin/bin/rembric-plugin-core.mjs`) and pinned by `apps/plugin/test/nudge-fixtures.test.ts`, on the same single-implementation discipline every other model-facing nudge string already follows. The bash clients embed the `rembric:`-prefixed fixture value and this client embeds the unprefixed `…Core` variant, matching the existing `save`/`saveCore` and `summary`/`summaryCore` pairs; the unprefixed variant SHALL satisfy the same ≤600-byte budget the prefixed one carries under "Plugin-injected protocol nudges MUST surface the summary length cap".
+
+The project-slug sentence remains this client's own addition and is appended to the shared text rather than forked from it: it is the only part of the string that is per-connection data rather than protocol text, so the published obligation to name the slug is satisfied without a second copy of the protocol. A consequence worth stating, because it makes a published enumeration incidentally truer: the shared text carries the `10000` cap substring, so this injection surfaces the cap even though the injection-site list in "Plugin-injected protocol nudges MUST surface the summary length cap" does not name `plugin.ts`.
+
+The handler SHALL NOT mutate `input.context` or `input.messages` directly. All effects SHALL be expressed as appends to `output.context`.
+
+The handler SHALL NOT GET any `/context` or recall-context endpoint in v1 — no such endpoint exists on the HTTP API today. When the corresponding endpoint ships in a future OpenSpec change, the handler MAY be extended to prepend a server-returned recall block before the reminder; that prepend SHALL fail silently on any error and the reminder string (including the memory.context guidance) SHALL remain the last (always-present) entry.
+
+#### Scenario: Reminder includes memory.session_summary AND memory.context guidance
+
+- **WHEN** `experimental.session.compacting` fires with a valid `input.sessionID`
+- **THEN** `ensureSession` runs (POST `/api/<slug>/sessions` once)
+- **AND** exactly ONE string is pushed to `output.context`
+- **AND** that string contains the substring `memory.session_summary`
+- **AND** that string contains the substring `memory.context` (new requirement — the post-compact recovery path)
+- **AND** that string contains the project slug when one was resolved from `.rembric`
+- **AND** that string contains the substring `memory.session_get`, positioned before the `memory.session_summary` directive it is meant to precede
+
+#### Scenario: Compacting fires without sessionID
+
+- **WHEN** `experimental.session.compacting` fires with no `input.sessionID`
+- **THEN** `ensureSession` SHALL NOT be called and no HTTP request SHALL be made
+- **AND** the instruction string SHALL still be pushed onto `output.context`, unchanged in content — the post-compaction agent needs the directive whether or not this process could identify the session row
+
+#### Scenario: The instruction carries no window-only framing
+
+- **WHEN** the string pushed onto `output.context` is inspected
+- **THEN** it SHALL NOT instruct the agent to pass the compacted summary's content, "the compacted summary above", or a summary of the surviving window to `memory.session_summary`
+- **AND** it SHALL state that the write replaces the stored value
+
+#### Scenario: The protocol text is the shared one, not a per-client copy
+
+- **WHEN** `apps/plugin/.opencode-plugin/plugin.ts` is inspected
+- **THEN** it SHALL NOT declare its own copy of the protocol sentences
+- **AND** the sentences it pushes SHALL be byte-identical to the shared fixture's unprefixed post-compaction value, with the slug sentence as the only per-client addition
