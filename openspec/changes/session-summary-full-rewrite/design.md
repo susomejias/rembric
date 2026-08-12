@@ -50,11 +50,11 @@ No new `MemoryType`, no row in `memory`. Two measured reasons:
 
 Adding a type to fix both means teaching decay, review TTLs, the type filters, the dashboard facets and the retrieval evaluation about a row nobody should retrieve. A dedicated table teaches nothing anything.
 
-### D6 — Minimal columns; `title` is not versioned; no extra index
+### D6 — Minimal columns; no extra index (title-versioning half reversed by D22)
 
-`id`, `session_id`, `version`, `content`, `created_at` and nothing else. `token_id` and `agent` are already on the parent row; a `final` column would be constant-true by construction; a source column (`mcp` vs `http`) would record a distinction the invariant already makes (only curated writes append).
+`id`, `session_id`, `version`, `content`, `created_at`, `title` (added by D22, see below) and nothing else. `token_id` and `agent` are already on the parent row; a `final` column would be constant-true by construction; a source column (`mcp` vs `http`) would record a distinction the invariant already makes (only curated writes append).
 
-`title` is not versioned: it is ≤100 characters, and losing a label costs a re-read of the summary rather than a re-derivation of the session.
+This decision originally also rejected versioning `title`, on the reasoning that it is ≤100 characters and a lost label costs a re-read of the summary, not a re-derivation of the session. **D22 reverses that half**, kept here rather than silently edited: the column list above already reflects the reversal.
 
 One named unique index on `(session_id, version)` is declared and nothing further. It serves both reads the design has (newest row for one session; all rows for one session, ordered), and being named rather than an anonymous table-level `UNIQUE (…)` auto-index is what puts it in the schema-drift inventory alongside every other index here. Adding an index without a measurement is a write cost against an unestablished read benefit — the discipline this repo already applies to query changes.
 
@@ -153,16 +153,56 @@ It also keeps a published claim honest rather than requiring its correction: `op
 
 The comparison is against the newest version's `content` only, not against the whole history: reverting to an older text IS a new event and gets its own row.
 
-### D19 — No restore verb, and no version read for models
+### D19 — No restore verb, and no version read for models (the read half reversed by D20)
 
-Deferred deliberately, not forgotten. Recovery today is an operator reading the version on the dashboard and handing the text back through the ordinary curated write path, which produces a new version row and leaves the history honest. A `restore` action would be a new mutation verb whose result is indistinguishable from that write, and a model-facing history read would put superseded summaries in front of the model that is supposed to be writing the current one.
+Deferred deliberately, not forgotten. Recovery today is an operator reading the version on the dashboard and handing the text back through the ordinary curated write path, which produces a new version row and leaves the history honest. A `restore` action would be a new mutation verb whose result is indistinguishable from that write.
+
+This decision originally also rejected any model-facing history read, reasoning that it "would put superseded summaries in front of the model that is supposed to be writing the current one." **D20 reverses that half** — a BOUNDED, EXCEPTIONAL read, not an unbounded one — for the reason given there. The no-restore-verb half is unchanged: recovery is still an operator or a model handing text back through the ordinary curated write.
+
+### D20 — `memory.session_get({ limit })`: a bounded, scoped model read of the version history
+
+D19's blanket "no version read for models" is reversed for the reason it was written to avoid: an operator-only history serves nobody who can only act through the agent itself. The common recovery case is not "an operator notices and pastes text back" — it is "the model's own context is gone and it needs its own earlier detail to write a correct current-state summary next", and only a model-callable read can serve that case at all.
+
+Reversing it now, before this change publishes, costs nothing a published requirement would: the requirement being changed (`sessions`, "No new read surface") lives only in `openspec/changes/session-summary-full-rewrite/specs/`, not yet in `openspec/specs/`, so this is an edit to this change's own still-unpublished artifact, not a `REMOVED`/`MODIFIED` pair against a shipped contract.
+
+The surface stays narrow, for the reasons D5 and D19 kept the table out of ordinary reach in the first place:
+
+- **No new field on `memory.context`, no HTTP route.** Only one tool gains one optional argument.
+- **`limit`, not `versions`, is the parameter name** — matching this repo's existing size-bounding convention (`z.number().int().min(0).max(X).optional()`, e.g. `contextSchema`'s `sessions`/`prompts`/`memories`, `apps/server/src/mcp/memory-tools.ts:247-249`). The tradeoff of that name: on `memory.search`, `limit` narrows a list the tool already returns; on `memory.session_get`, which returns one object, a bare `limit` invites the same reading — bounding the ONE summary, or its length — rather than the actual meaning, "how many past versions to also attach". The description carries the disambiguation explicitly (see `mcp-api`) rather than relying on the name alone, because the name alone is genuinely ambiguous here. The bounding constant is named for what it bounds regardless of the parameter's name: `SESSION_GET_VERSIONS_MAX = 5`.
+- **Omitted or `0` is byte-identical to before this argument existed** — no `versions` field, not an empty array — so no existing caller pays anything. This is the same "additive, zero-cost-when-unused" shape `SESSION_GET_VERSIONS_MAX` shares with every other context-tool maximum.
+- **A positive `limit` returns full, untruncated `content`.** The use case is recovering text to fold into the next rewrite; a truncated recovery would force a second round-trip, the exact cost `memory.session_get` already exists to avoid for the current summary.
+- **The read is resolved against `Scope` by a dedicated repository method** (`listSummaryVersionsInScope`), not the dashboard's unscoped `admin*` read: it applies the scope condition in the query itself rather than trusting the handler's prior `not_found` check, matching every other scoped repository method in this codebase (`CLAUDE.md`, "Scope enforced at service layer").
+- **The tool description states the read is EXCEPTIONAL.** Routine use would reintroduce exactly the failure mode D2 exists to prevent — a model reading stale sections instead of writing the current state. The description exists to say: use this only when a rewrite dropped detail you need back, never as a matter of course.
+
+Measured: the reworded `memory.session_get` description is 652 characters against the 1900-character `DESCRIPTION_MAX_LENGTH` ceiling (verified again from a live `tools/list` response in `apps/server/src/test/mcp-integration.test.ts`).
 
 ## Risks
 
 - **A model that writes a full state every ten turns spends more tokens per call than one writing a delta.** Accepted: M1 says the delta's savings were never delivered to a reader, and the cap already bounds each call at 10 000 characters.
 - **A weak model may write a thin full-state summary and store it.** The version row makes that recoverable, which is the whole point; the reminder firing again (D12's silence fix) is what gives the next turn a chance to improve it.
 - **Storage grows with curated writes.** Bounded by writes × `SUMMARY_MAX_CHARS`: ≤10 rows for a 100-turn session at the every-tenth cadence, ≤100 KB at the cap, against 659 characters measured on a real four-curation session.
-- **The dashboard page grows with the history.** Same arithmetic; collapsed by default. If a measured page weight ever justifies a bound, the bound is a spec edit with the measurement attached — not a silent `LIMIT`.
+- **The dashboard page grows with the history.** Resolved by D21: capped at `SUMMARY_HISTORY_MAX` (20), newest first, with a "showing N of TOTAL" note.
+- **A title-only final write can leave `sessions.title` ahead of the newest version's title.** Accepted and documented rather than solved (D22): the only such path is `POST /:slug/sessions/:id/end` with `title` and no `summary`, unreachable through `memory.session_summary` (whose schema requires `summary`). The next content-changing curated write re-pairs both values in a fresh row.
+
+### D21 — The dashboard history section is capped at `SUMMARY_HISTORY_MAX = 20`, newest shown, fixed cap over pagination
+
+The risk flagged at proposal time ("If a measured page weight ever justifies a bound, the bound is a spec edit with the measurement attached — not a silent `LIMIT`") is now realized, found while implementing this same change rather than reported separately: at the every-10th-turn cadence a 300-turn session carries ~31 version rows and a 1000-turn session ~101, and at the per-write cap (`SUMMARY_MAX_CHARS = 10000`) that is a page of several hundred KB to ~1 MB, unbounded — the section's collapsed-by-default `<details>` elements bound what is VISIBLE, not the bytes the server sends.
+
+**Fixed cap, not pagination.** The section already exists to serve "recover the newest few versions a recent rewrite dropped"; the versions that matter most for that are the newest ones, which a fixed newest-N window serves directly. Pagination would need a page query parameter and a route the original design (D10) deliberately kept off this page ("no new route, no form"); a fixed cap needs neither, and is therefore the minimal fix.
+
+**The number: 20.** At the 10 000-character cap that bounds the section to ≤200 KB even in the reported worst case — an order of magnitude below the ~1 MB pathological case — while still showing roughly twice the every-10th-turn depth of a 200-turn session. It is the same order of magnitude as this codebase's other "how many of these does one view render" constants (`CONTEXT_SESSIONS_MAX = 25`, `PENDING_JUDGMENTS_MAX = 50`), scaled down because this section's rows are far heavier (full markdown bodies, not list rows).
+
+**The heading keeps the TOTAL count** (`adminCountSummaryVersions`, a cheap `COUNT(*)`, not the length of the rendered page), and when the total exceeds what is rendered, a line states how many are shown and how many exist — the omitted versions are still in the table, never implied lost.
+
+### D22 — `session_summary_versions` also stores `title` — the value in effect, not the write's argument
+
+D6 rejected versioning `title`: a lost label costs a re-read of the summary, not a re-derivation of the session. True for the LABEL alone, but wrong for the PAIR the dashboard actually renders: a version's `content` next to the CURRENT `sessions.title` is misleading whenever the title changed after that version was written — a v1 body would sit under a title minted for v3. Reversed here, in the same still-unpublished change, for the identical reason D20 reverses D19's other half.
+
+**Column:** `title TEXT`, nullable (a session can be curated before it has a title), added to the same still-unreleased migration `0033` rather than a new one — nothing on this branch is pushed, `0033` has never shipped in a release, and a second migration describing a column on a table no release ever had would be pure noise for a future reader.
+
+**Which value is stored:** the title in effect on `sessions.title` immediately AFTER the update that appends the row (`updated.title`, the `updateById` result) — never the write's own argument. `title` is optional on every curated write (`sessionSummarySchema`), so an argument-based store would write `NULL` on every write that only touched `summary`, even when the session already has a title live. Storing the post-update value is what pairs the version with the label that was actually live alongside it, regardless of whether this particular call touched it.
+
+**The invariant, extended, and where it stops.** The newest version's `title` SHALL equal `sessions.title` immediately after the write that appended it — both come from the same `updateById` result. This is narrower than the `summary` invariant's wording: unlike `summary`, `title` CAN change through a write that appends no version — a title-only `final: true` write on the active-session branch of `end()` with no `summary` argument. That path exists only through `POST /:slug/sessions/:id/end` (`memory.session_summary`'s schema requires `summary` on every call, so the path does not exist through MCP). Such a write leaves `sessions.title` ahead of the newest version's `title` until the next content-changing curated write. Stated explicitly rather than assumed away, and covered by a regression test that demonstrates the divergence rather than merely asserting the invariant holds (`apps/server/src/services/agent-sessions.test.ts`).
 
 ## Existing installations
 

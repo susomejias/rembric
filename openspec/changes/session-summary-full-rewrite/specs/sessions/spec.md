@@ -10,11 +10,14 @@ The schema SHALL carry a dedicated table `session_summary_versions` whose rows a
 | `session_id` | TEXT NOT NULL REFERENCES `sessions(id)` ON DELETE CASCADE |
 | `version`    | INTEGER NOT NULL, UNIQUE together with `session_id`       |
 | `content`    | TEXT NOT NULL                                            |
+| `title`      | TEXT, nullable                                            |
 | `created_at` | INTEGER NOT NULL (`timestamp_ms`)                        |
 
-No further column SHALL be added by this requirement. `title` is NOT versioned: it is bounded to ≤100 characters, and losing a label costs a re-read of the summary rather than a re-derivation of the session.
+No further column SHALL be added by this requirement. `title` IS versioned alongside `content` (design D22, revising D6): the dashboard renders a version's `content` next to a title, and rendering the CURRENT `sessions.title` there is misleading whenever the title changed after that version was written — the pairing, not the label alone, is what a reader needs. The stored `title` SHALL be the value in effect on `sessions.title` immediately AFTER the same update that appends the row (the `updateById` result), never the write's own argument, because `title` is optional on every curated write and an argument-based store would write `NULL` on every write that only touched `summary`.
 
-**The invariant.** For every session with at least one row in `session_summary_versions`, `sessions.summary` SHALL equal the `content` of that session's row with the greatest `version`. The column and the version row SHALL be written inside ONE `db.transaction()`, so both land or neither does; a state in which the column advanced and the row did not SHALL NOT be reachable.
+**The invariant.** For every session with at least one row in `session_summary_versions`, `sessions.summary` SHALL equal the `content` of that session's row with the greatest `version`, and that row's `title` SHALL equal `sessions.title` as it stood immediately after the write that appended it — both come from the one `updateById` result the append reads, so they cannot disagree at that instant. The column(s) and the version row SHALL be written inside ONE `db.transaction()`, so both land or neither does; a state in which the column advanced and the row did not SHALL NOT be reachable.
+
+This is narrower than an ongoing equality for `title`: unlike `summary`, `title` MAY change through a write that does not append a version — a title-only `final: true` write reaching the active-session branch of `end()` with no `summary` argument, reachable only via `POST /:slug/sessions/:id/end` (the `memory.session_summary` tool's schema requires `summary` on every call, so this path does not exist through MCP). Such a write leaves `sessions.title` ahead of the newest version's `title` until the next content-changing curated write appends a fresh row pairing both current values. This is documented rather than silently assumed away.
 
 **When a row is appended.** A version row SHALL be appended by exactly those writes that store a summary value carrying `final: true` — that is, the writes that pass the `summary_final` precedence rule with an incoming `final: true`, on `writeSummary` and on `end` alike (the two write paths enumerated in "Session summary writes MUST be capped at `SUMMARY_MAX_CHARS` on every write path that mutates `sessions.summary`"). A write that stores nothing SHALL append nothing: this covers the terminal-row branch where an already-`final` column blocks the incoming value, and the `final: false` branch where precedence discards it.
 
@@ -28,7 +31,7 @@ No further column SHALL be added by this requirement. `title` is NOT versioned: 
 
 **One site.** The append SHALL be emitted from the same single place that folds per-field `final` precedence into an update `set` — see "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`", which requires that place to be shared by all three write paths. A second append site is a defect, because the three paths would then be able to disagree about whether a stored value was recorded.
 
-**No new read surface.** The table SHALL NOT be exposed through any MCP tool, HTTP route, or `memory.context` field. `memory.session_get` continues to return the CURRENT summary in full, which is what a model rewriting it needs; the history is an operator-facing audit surface (see `dashboard`).
+**A bounded, scoped read exists for models, and it is exceptional.** `memory.session_get` MAY return recent version rows via an optional `limit` argument (see `mcp-api`). Omitted or `0` SHALL leave the response byte-identical to a call that carries no `limit` at all — no `versions` field, not an empty array — so no existing caller pays anything for this capability. A `limit` above 0 SHALL return that many of the session's newest version rows, newest first, each `content` in FULL and never truncated. The read SHALL be resolved against the caller's `Scope` by a dedicated repository method, never the dashboard's unscoped `admin*` read. The table SHALL still NOT be exposed through `memory.context` or any HTTP route; only this capped MCP read and the operator-facing dashboard section (see `dashboard`) reach it.
 
 #### Scenario: A first curated write on a session with no stored summary
 
@@ -87,6 +90,40 @@ No further column SHALL be added by this requirement. `title` is NOT versioned: 
 - **THEN** `sessions.summary` and the appended version's `content` SHALL be the SAME string of that length
 - **AND** exactly ONE cap check SHALL have been applied, on the argument, by the existing `SUMMARY_MAX_CHARS` precondition — no second cap SHALL be introduced anywhere on this path
 
+#### Scenario: A version row stores the title in effect, not the write's own argument
+
+- **GIVEN** session `<S>` with `summary = 'A'`, `title = 'Title A'`, one version row (`version = 1`, `content = 'A'`, `title = 'Title A'`)
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'B', final: true })` is called with NO `title` argument
+- **THEN** `sessions.title` SHALL remain `'Title A'`
+- **AND** the newly appended `version = 2` row SHALL have `title = 'Title A'` — the title in effect after the write, not `undefined`/`NULL`
+
+#### Scenario: A title-only write can leave the newest version's title behind the live column
+
+- **GIVEN** session `<S>` with one version row (`version = 1`, `content = 'A'`, `title = 'Title A'`)
+- **WHEN** `POST /:slug/sessions/:id/end` is called with `{ title: 'Title B', final: true }` and no `summary`
+- **THEN** `sessions.title` SHALL become `'Title B'`
+- **AND** no new version row SHALL be appended (no `summary` was stored)
+- **AND** the newest existing version row's `title` SHALL remain `'Title A'` until a later content-changing curated write appends a fresh row
+
+#### Scenario: `memory.session_get` omitted or zero `limit` is byte-identical to before this capability existed
+
+- **GIVEN** a session `<S>` with two version rows
+- **WHEN** `memory.session_get({ sessionId: <S> })` is called, and separately `memory.session_get({ sessionId: <S>, limit: 0 })`
+- **THEN** both responses SHALL be identical to each other and SHALL contain no `versions` field
+
+#### Scenario: `memory.session_get` with a positive `limit` returns recent versions, newest first, untruncated
+
+- **GIVEN** a session `<S>` with three version rows, each with `content` longer than `CONTEXT_SNIPPET_CHARS`
+- **WHEN** `memory.session_get({ sessionId: <S>, limit: 2 })` is called
+- **THEN** the response SHALL carry a `versions` array of exactly 2 entries, ordered newest first
+- **AND** each entry's `content` SHALL be the FULL stored value, not truncated to any snippet bound
+
+#### Scenario: `memory.session_get`'s `limit` is rejected above its maximum, not clamped
+
+- **WHEN** `memory.session_get({ sessionId: <S>, limit: SESSION_GET_VERSIONS_MAX + 1 })` is called
+- **THEN** the call SHALL be rejected by input validation before the handler runs
+- **AND** no partial or clamped result SHALL be returned
+
 ### Requirement: `session_summary_versions` rows MUST be append-only, and removable only with their session
 
 A row in `session_summary_versions` SHALL never be `UPDATE`d and never `DELETE`d by application code. There is no edit verb, no restore verb, and no purge verb for a version row: its whole value is that it is a fact about what was stored at a moment, and a mutable version row records nothing.
@@ -98,11 +135,11 @@ The one licensed physical removal is the session's own: the FK SHALL be declared
 
 The cascade is unreachable under today's predicate, and the reason is worth stating because it is what makes the cascade a safety net rather than a routine path: purge-eligibility requires the complete absence of summary text — "Sessions MAY be physically purged when empty" states clause 3 as _no summary text at all (curated or raw) was ever written_ — and a session with a version row has a non-NULL `summary` by the invariant above. A `NO ACTION` FK would instead abort the whole purge batch with `FOREIGN KEY constraint failed` if that ever ceased to hold, which converts an operator action into an unexplained failure.
 
-The invariants suite SHALL forbid, outside migrations, `db.delete(sessionSummaryVersions)`, raw `DELETE FROM session_summary_versions`, and any `UPDATE` of `content`, `version` or `session_id` on that table — in the same static-grep family that already pins `memory`, `sessions`, `prompts` and `memory_relations`. The table SHALL be classified as a SOURCE table in the shared schema inventory: it is the sole record of something an agent supplied and is reproducible from nothing.
+The invariants suite SHALL forbid, outside migrations, `db.delete(sessionSummaryVersions)`, raw `DELETE FROM session_summary_versions`, and any `UPDATE` of `content`, `title`, `version` or `session_id` on that table — in the same static-grep family that already pins `memory`, `sessions`, `prompts` and `memory_relations`. The table SHALL be classified as a SOURCE table in the shared schema inventory: it is the sole record of something an agent supplied and is reproducible from nothing.
 
 #### Scenario: A version row cannot be edited
 
-- **WHEN** the invariants suite scans non-test source files for an `UPDATE` of `session_summary_versions.content`, `.version` or `.session_id`, or for a `DELETE` against that table
+- **WHEN** the invariants suite scans non-test source files for an `UPDATE` of `session_summary_versions.content`, `.title`, `.version` or `.session_id`, or for a `DELETE` against that table
 - **THEN** the suite SHALL fail naming the offending file and line
 
 #### Scenario: Purging a session removes its version rows
@@ -182,3 +219,51 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 - **WHEN** the `memory.session_summary` tool description and the `initialize.instructions` block are inspected
 - **THEN** each SHALL state that the current state goes first
 - **AND** neither SHALL be over its published length ceiling as a result (`mcp-api`)
+
+### Requirement: `memory.session_get` returns a session's full summary by id
+
+The MCP surface SHALL expose a `memory.session_get` tool that returns a single session, identified by `sessionId`, including its **full, untruncated** `summary` (in contrast to `memory.context`, which returns a bounded snippet). The handler SHALL resolve scope using the documented session-tool scope-resolution precedence (`ctx.project` via path-scoping, then `SessionRouter`, via `resolveEffectiveProject` / `scopeFromContext`) and SHALL treat a session whose `project_id` does not match the resolved scope as `not_found`. A soft-deleted session (`deleted_at IS NOT NULL`) SHALL be returned as `not_found`. The tool SHALL be read-only and SHALL NOT mutate any row.
+
+`memory.context` SHALL continue to return the bounded snippet for `recentSessions[].summary`; `memory.session_get` is the on-demand path for the full text (the multi-agent / cross-client handoff use case).
+
+**The tool SHALL additionally accept an optional `limit` argument**, `z.number().int().min(0).max(SESSION_GET_VERSIONS_MAX)` (`SESSION_GET_VERSIONS_MAX = 5`). Omitted or `0` SHALL leave the response identical to a call carrying no `limit`: no `versions` field is added, so every caller that predates this argument is unaffected. A `limit` from 1 to `SESSION_GET_VERSIONS_MAX` SHALL add a `versions` field: an array of that many of the session's newest `session_summary_versions` rows, ordered newest first, each carrying `version`, `title`, `content` (in FULL, never truncated) and `createdAt`. A `limit` above `SESSION_GET_VERSIONS_MAX` SHALL be rejected by input validation, never clamped.
+
+The `limit` read SHALL be resolved against the connection's `Scope`, by a repository method dedicated to this scoped read (never the dashboard's unscoped `admin*` read that backs the "SUMMARY HISTORY" section — see `dashboard`, `data-access`). A `sessionId` that resolves out of scope or to a soft-deleted row SHALL return `not_found` exactly as it does today, before any version read is attempted.
+
+This surface is EXCEPTIONAL, and the tool's description SHALL say so: it exists to recover detail a later rewrite displaced, not as a routine substitute for the current summary this tool already returns in full. The description SHALL also disambiguate what `limit` bounds — the number of stored summary VERSIONS returned, not the length of any summary — because `limit` alone, on a tool that returns one object rather than a list, invites the opposite reading.
+
+#### Scenario: Returns the full summary for an in-scope session
+
+- **GIVEN** a session `S` in the caller's scope with a stored `summary` longer than the `memory.context` snippet bound
+- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
+- **THEN** the response SHALL include `S`'s full, untruncated `summary`
+
+#### Scenario: A cross-scope session id is not found
+
+- **GIVEN** a session `S` that belongs to a different project than the caller's resolved scope
+- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
+- **THEN** the tool SHALL return a structured `not_found` error and SHALL NOT reveal `S`'s contents
+
+#### Scenario: A soft-deleted session is not found
+
+- **GIVEN** a session `S` in the caller's scope with `deleted_at IS NOT NULL`
+- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
+- **THEN** the tool SHALL return a structured `not_found` error
+
+#### Scenario: `memory.session_get` without `limit` is unaffected
+
+- **WHEN** `memory.session_get({ sessionId: S.id })` is called on a session with version rows
+- **THEN** the response SHALL be exactly as it was before this requirement — no `versions` field present
+
+#### Scenario: `memory.session_get` with `limit` returns recent versions newest-first, untruncated
+
+- **GIVEN** a session with three version rows, each with `content` longer than `CONTEXT_SNIPPET_CHARS`
+- **WHEN** `memory.session_get({ sessionId: S.id, limit: 2 })` is called
+- **THEN** `versions` SHALL contain exactly 2 entries in order `[newest, second-newest]`
+- **AND** each entry's `content` SHALL be full length, not truncated
+
+#### Scenario: `memory.session_get`'s `limit` respects scope
+
+- **GIVEN** a session in project A with version rows
+- **WHEN** a connection scoped to project B calls `memory.session_get({ sessionId: <A's session>, limit: 1 })`
+- **THEN** the call SHALL return `not_found`, exactly as it does today without `limit`
