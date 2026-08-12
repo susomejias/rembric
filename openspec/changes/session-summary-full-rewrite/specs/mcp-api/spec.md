@@ -2,16 +2,17 @@
 
 ### Requirement: The `memory.session_summary` description MUST state that the write replaces the stored summary and ask for the current complete state
 
-The tool's own description is the longest text a model reads about this tool before calling it, and it is the surface every client reaches — including the one that discovers tools with `tools/list` rather than enumerating them. It SHALL therefore carry the write's semantics, not only its arguments. The description SHALL state, in its own words but with all four facts present:
+The tool's own description is the longest text a model reads about this tool before calling it, and it is the surface every client reaches — including the one that discovers tools with `tools/list` rather than enumerating them. It SHALL therefore carry the write's semantics, not only its arguments. The description SHALL state, in its own words but with all five facts present:
 
 1. **That the write REPLACES the stored summary.** A model that believes the server accumulates will send a delta, and the delta is what gets stored.
 2. **That the summary asked for is the session's CURRENT COMPLETE state**, concise rather than exhaustive — the state that holds now for the whole session, not the work of the current context window.
 3. **That the current state goes FIRST.** The reason SHALL be given, because a bare ordering instruction reads as a style rule and is the first thing a model drops under length pressure: `memory.context` shows only the beginning of a stored summary, so the opening lines are the preview a later session sees, and the full text is available only to a model that calls `memory.session_get`.
 4. **That a model which cannot see its earlier work SHALL read the stored summary first** via `memory.session_get`, rather than write only what its window still holds.
+5. **That carried-forward facts SHALL be copied, not paraphrased.** File paths with line numbers, measurements, test names and error strings SHALL be copied verbatim from what the model already knows into the new summary text, rather than restated in its own words — a rephrased number is a lost number, because a later reader (human or model) can `grep` a copied fact but not a paraphrase of it.
 
 The description SHALL NOT instruct the model to "add what's new", to send only what changed, or to summarise the current window — any of which makes the stored summary the delta.
 
-These obligations SHALL be discharged in the top-level description text, not only in a per-argument zod `describe()`, and SHALL be satisfied within `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"). The cap SHALL NOT be raised to accommodate them: the description measured 670 characters against a 1900-character ceiling before this requirement, so the four facts fit with room to spare, and if that ever ceases to be true prose is cut instead.
+These obligations SHALL be discharged in the top-level description text, not only in a per-argument zod `describe()`, and SHALL be satisfied within `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"). The cap SHALL NOT be raised to accommodate them: the description measured 670 characters against a 1900-character ceiling before this requirement, so the four facts fit with room to spare, and if that ever ceases to be true prose is cut instead. Fact 5 above lands after the other four had already brought the description to 1003 characters; carrying all five facts verbatim measures 1175 characters, still comfortably within the 1900-character ceiling.
 
 Two published statements about this tool remain true verbatim and SHALL NOT be weakened by this requirement. The published scenario titled _`memory.session_summary` may be called multiple times; the latest call wins_ continues to describe the column's outcome — the replacement is retained by design and only its destructiveness is removed (`sessions`, "Every curated session-summary write MUST append a version row in the same transaction"). And the tool keeps `idempotentHint: true` under "Every MCP tool MUST advertise behavioral annotations", because a byte-identical repeat appends no version row and therefore still has no additional effect.
 
@@ -32,6 +33,12 @@ Two published statements about this tool remain true verbatim and SHALL NOT be w
 
 - **WHEN** every registered tool description is measured from a real `tools/list` response
 - **THEN** `memory.session_summary`'s SHALL satisfy `DESCRIPTION_MAX_LENGTH`
+
+#### Scenario: The description directs literal-copy of concrete facts, not paraphrase
+
+- **WHEN** the `memory.session_summary` description is read from a real `tools/list` response
+- **THEN** it SHALL instruct the model to copy carried-forward concrete facts (file paths with line numbers, measurements, test names, error strings) verbatim rather than paraphrase them
+- **AND** it SHALL satisfy `DESCRIPTION_MAX_LENGTH`
 
 ### Requirement: The `instructions` block MUST state that a curated summary write replaces the stored value
 
