@@ -165,14 +165,15 @@ const FORBIDDEN: ForbiddenRule[] = [
   },
   {
     pattern:
-      /update\([^)]*sessionSummaryVersions[^)]*\)[^.]*\.set\([^)]*(content|version|sessionId)\s*:/i,
+      /update\([^)]*sessionSummaryVersions[^)]*\)[^.]*\.set\([^)]*(content|title|version|sessionId)\s*:/i,
     description:
-      '`db.update(sessionSummaryVersions).set({ content|version|sessionId })` is forbidden — a version row is never edited',
+      '`db.update(sessionSummaryVersions).set({ content|title|version|sessionId })` is forbidden — a version row is never edited',
   },
   {
-    pattern: /UPDATE\s+session_summary_versions\b[^;]*\bSET\s+(content|version|session_id)\s*=/i,
+    pattern:
+      /UPDATE\s+session_summary_versions\b[^;]*\bSET\s+(content|title|version|session_id)\s*=/i,
     description:
-      'raw `UPDATE session_summary_versions SET (content|version|session_id) = …` is forbidden — a version row is never edited',
+      'raw `UPDATE session_summary_versions SET (content|title|version|session_id) = …` is forbidden — a version row is never edited',
   },
 ];
 

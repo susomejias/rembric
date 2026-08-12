@@ -288,6 +288,12 @@ export class AgentSessionsService {
    * session-summary write MUST append a version row in the same transaction",
    * `openspec/specs/sessions/spec.md`). A byte-identical re-write appends
    * nothing, which is what keeps `idempotentHint: true` honest.
+   *
+   * The appended row's `title` is `updated.title` — the value in effect on
+   * `sessions.title` AFTER this update — not `set.title` or the write's own
+   * argument, which is frequently absent (title is optional on every curated
+   * write). Storing the post-update value is what pairs this version's
+   * content with the label that was actually live alongside it.
    */
   private updateAndVersion(
     id: string,
@@ -305,6 +311,7 @@ export class AgentSessionsService {
             sessionId: id,
             version: latest ? latest.version + 1 : 1,
             content: set.summary,
+            title: updated.title,
             createdAt: ts,
           });
         }
@@ -464,6 +471,15 @@ export class AgentSessionsService {
 
   getById(sessionId: string): AgentSession | undefined {
     return this.repos.agentSessions.getById(sessionId);
+  }
+
+  /**
+   * Scoped read for `memory.session_get({ limit })` — the exceptional path
+   * for recovering a version a later rewrite dropped. Not exposed via
+   * `memory.context` or HTTP (`sessions`, "No new read surface").
+   */
+  listSummaryVersions(sessionId: string, scope: Scope, limit: number) {
+    return this.repos.agentSessions.listSummaryVersionsInScope(sessionId, scope, limit);
   }
 
   /**

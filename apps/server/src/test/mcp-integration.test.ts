@@ -19,6 +19,7 @@ import {
   TIMELINE_WINDOW_MAX,
 } from '../mcp/memory-tools.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
+import { SESSION_GET_VERSIONS_MAX } from '../mcp/session-tools.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
@@ -2305,6 +2306,124 @@ describe('MCP protocol conformance', () => {
 
     await client.callTool({ name: 'memory.session_end', arguments: {} });
     await client.close();
+  });
+
+  it('memory.session_get omitted or zero `limit` is byte-identical to a call with no `limit` at all', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'limit byte-identical' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: first', title: 'T1' },
+    });
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: second', title: 'T2' },
+    });
+
+    const withoutLimit = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId },
+    })) as ToolResult;
+    const withZero = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId, limit: 0 },
+    })) as ToolResult;
+
+    expect(withoutLimit.isError).toBeFalsy();
+    expect(readJson(withoutLimit)).toEqual(readJson(withZero));
+    expect(readJson(withoutLimit)).not.toHaveProperty('versions');
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('memory.session_get with a positive `limit` returns recent versions newest-first, full content and their own title', async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'limit returns versions' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const long = (n: number) => `Goal: ${'z'.repeat(400)} (${n})`;
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: long(1), title: 'T1' },
+    });
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: long(2), title: 'T2' },
+    });
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: long(3), title: 'T3' },
+    });
+
+    const got = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId, limit: 2 },
+    })) as ToolResult;
+    expect(got.isError).toBeFalsy();
+    const payload = readJson(got) as {
+      versions: { version: number; title: string | null; content: string }[];
+    };
+    expect(payload.versions).toHaveLength(2);
+    expect(payload.versions.map((v) => v.version)).toEqual([3, 2]);
+    expect(payload.versions[0]?.title).toBe('T3');
+    expect(payload.versions[0]?.content).toBe(long(3));
+    expect(payload.versions[0]?.content.length).toBeGreaterThan(350);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it("memory.session_get's `limit` is rejected above its maximum, not clamped", async () => {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'limit over max' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+
+    const got = (await client.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId, limit: SESSION_GET_VERSIONS_MAX + 1 },
+    })) as ToolResult;
+    expect(got.isError).toBe(true);
+
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it("memory.session_get's `limit` respects scope: a cross-scope session still returns not_found", async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    projects.create({ slug: 'getsession-limit-proj' });
+
+    const pinned = await connect({ projectSlug: 'getsession-limit-proj' });
+    const started = (await pinned.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'limit scope' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+    await pinned.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary: 'Goal: lives in a project.' },
+    });
+    await pinned.callTool({ name: 'memory.session_end', arguments: {} });
+    await pinned.close();
+
+    const globalClient = await connect();
+    const got = (await globalClient.callTool({
+      name: 'memory.session_get',
+      arguments: { sessionId, limit: 1 },
+    })) as ToolResult;
+    expect(got.isError).toBe(true);
+    expect((readJson(got) as { code?: string }).code).toBe('not_found');
+    await globalClient.close();
   });
 
   it('memory.session_get returns not_found for a cross-scope session', async () => {

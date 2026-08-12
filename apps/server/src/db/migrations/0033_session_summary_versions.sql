@@ -7,9 +7,14 @@
 -- same transaction". Purely additive: one CREATE TABLE, one named unique
 -- index, no rebuild of `sessions`, no backfill.
 --
--- No backfill: a version row asserts that its `content` was the stored
--- summary as of its `created_at`, and for a pre-existing curated summary
--- that timestamp is not recorded anywhere on `sessions`. Pre-existing
+-- `title` carries the title IN EFFECT on `sessions.title` at the moment the
+-- row was written (not this write's own argument, which may be absent) —
+-- without it a reader pairs old content with the CURRENT title. Nullable:
+-- a session can be curated before it ever has a title.
+--
+-- No backfill: a version row asserts that its `content`/`title` were the
+-- stored values as of its `created_at`, and for a pre-existing curated
+-- summary that timestamp is not recorded anywhere on `sessions`. Pre-existing
 -- sessions start with an empty history; their next curated write starts
 -- the history at `version = 1` with the NEW content.
 --
@@ -29,6 +34,7 @@ CREATE TABLE `session_summary_versions` (
   `session_id` TEXT NOT NULL REFERENCES `sessions`(`id`) ON DELETE CASCADE,
   `version` INTEGER NOT NULL,
   `content` TEXT NOT NULL,
+  `title` TEXT,
   `created_at` INTEGER NOT NULL
 );
 --> statement-breakpoint

@@ -91,6 +91,24 @@ describe('migration 0033 — session_summary_versions', () => {
     }
   });
 
+  it('the migrated table declares a nullable `title` column (design D22)', () => {
+    fx.stage();
+    const handle = open();
+    try {
+      const columns = handle.raw
+        .prepare<
+          [],
+          { name: string; notnull: number }
+        >(`PRAGMA table_info(session_summary_versions)`)
+        .all();
+      const title = columns.find((c) => c.name === 'title');
+      expect(title).toBeDefined();
+      expect(title?.notnull).toBe(0);
+    } finally {
+      handle.close();
+    }
+  });
+
   it('a curated summary written before the upgrade keeps reading back unchanged, with no version rows', () => {
     const pre = open();
     const { curatedSessionId } = seeded(pre);
@@ -123,6 +141,7 @@ describe('migration 0033 — session_summary_versions', () => {
       svc.writeSummary(curatedSessionId, {
         tokenId: '01TOKADMIN',
         summary: 'the first post-upgrade curation',
+        title: 'Post-upgrade title',
         final: true,
       });
 
@@ -131,6 +150,7 @@ describe('migration 0033 — session_summary_versions', () => {
       expect(versions[0]).toMatchObject({
         version: 1,
         content: 'the first post-upgrade curation',
+        title: 'Post-upgrade title',
       });
       expect(svc.getById(curatedSessionId)?.summary).toBe('the first post-upgrade curation');
     } finally {

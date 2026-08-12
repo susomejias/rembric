@@ -1416,17 +1416,55 @@ describe('AgentSessionsService', () => {
     it('the storage invariant holds after a realistic sequence of curated, raw, curated, identical and terminal writes', () => {
       const s = svc.start({ tokenId, projectId, agent: 'claude' });
       svc.writeSummary(s.id, { tokenId, summary: 'raw sync 1', final: false });
-      svc.writeSummary(s.id, { tokenId, summary: 'Goal: first curation', final: true });
+      svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'Goal: first curation',
+        title: 'T1',
+        final: true,
+      });
       svc.writeSummary(s.id, { tokenId, summary: 'raw sync 2', final: false });
+      svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'Goal: second curation',
+        title: 'T2',
+        final: true,
+      });
       svc.writeSummary(s.id, { tokenId, summary: 'Goal: second curation', final: true });
-      svc.writeSummary(s.id, { tokenId, summary: 'Goal: second curation', final: true });
-      svc.end(s.id, { tokenId, summary: 'Goal: final curation', final: true });
+      svc.end(s.id, { tokenId, summary: 'Goal: final curation', title: 'T3', final: true });
 
       const stored = svc.getById(s.id);
       const rows = versions(s.id);
       expect(rows.length).toBeGreaterThan(0);
-      expect(rows[0]).toMatchObject({ version: rows.length, content: stored?.summary });
+      expect(rows[0]).toMatchObject({
+        version: rows.length,
+        content: stored?.summary,
+        title: stored?.title,
+      });
       expect(rows.map((r) => r.version)).toEqual([3, 2, 1]);
+      expect(rows.map((r) => r.title)).toEqual(['T3', 'T2', 'T1']);
+    });
+
+    it('each version row stores the title in effect after the write, not merely what that call sent', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'A', title: 'Title A', final: true });
+      svc.writeSummary(s.id, { tokenId, summary: 'B', final: true }); // no title this call
+
+      expect(svc.getById(s.id)?.title).toBe('Title A');
+      const rows = versions(s.id);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.version === 1)?.title).toBe('Title A');
+      expect(rows.find((r) => r.version === 2)?.title).toBe('Title A');
+    });
+
+    it('a title-only end() write can leave the newest version title behind the live column (documented scope of the invariant)', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary: 'A', title: 'Title A', final: true });
+      svc.end(s.id, { tokenId, title: 'Title B', final: true }); // no summary
+
+      expect(svc.getById(s.id)?.title).toBe('Title B');
+      const rows = versions(s.id);
+      expect(rows).toHaveLength(1); // no summary change => no new version appended
+      expect(rows[0]?.title).toBe('Title A'); // stale relative to sessions.title, by design
     });
 
     it('the atomicity guarantee: a concurrently-ended write throws session_already_ended and leaves zero version rows', () => {
