@@ -113,6 +113,12 @@ export type NewAgentSession = typeof agentSessions.$inferInsert;
  * see `services/agent-sessions.ts`. Append-only: no row is ever UPDATEd or
  * DELETEd by application code, except by the cascade when its session is
  * purged (`sessions`, "Sessions MAY be physically purged when empty").
+ *
+ * `title` carries the `sessions.title` value IN EFFECT at the moment this row
+ * was written (the post-update column value, not this write's own argument),
+ * so a version pairs the content with the label that was live alongside it —
+ * without it a reader sees old content next to the CURRENT title. Nullable:
+ * a session can be curated before it ever has a title.
  */
 export const sessionSummaryVersions = sqliteTable(
   'session_summary_versions',
@@ -123,6 +129,7 @@ export const sessionSummaryVersions = sqliteTable(
       .references(() => agentSessions.id, { onDelete: 'cascade' }),
     version: integer('version').notNull(),
     content: text('content').notNull(),
+    title: text('title'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => ({

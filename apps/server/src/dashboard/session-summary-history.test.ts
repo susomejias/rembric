@@ -47,9 +47,24 @@ describe('session detail SUMMARY HISTORY section', () => {
 
   it('a session with three curated writes shows three versions, newest first, matching the Summary block', async () => {
     const s = agentSessionsSvc.start({ tokenId: ownerTokenId, projectId: null, agent: 'claude' });
-    agentSessionsSvc.writeSummary(s.id, { tokenId: ownerTokenId, summary: 'v1 text', final: true });
-    agentSessionsSvc.writeSummary(s.id, { tokenId: ownerTokenId, summary: 'v2 text', final: true });
-    agentSessionsSvc.writeSummary(s.id, { tokenId: ownerTokenId, summary: 'v3 text', final: true });
+    agentSessionsSvc.writeSummary(s.id, {
+      tokenId: ownerTokenId,
+      summary: 'v1 text',
+      title: 'Title One',
+      final: true,
+    });
+    agentSessionsSvc.writeSummary(s.id, {
+      tokenId: ownerTokenId,
+      summary: 'v2 text',
+      title: 'Title Two',
+      final: true,
+    });
+    agentSessionsSvc.writeSummary(s.id, {
+      tokenId: ownerTokenId,
+      summary: 'v3 text',
+      title: 'Title Three',
+      final: true,
+    });
 
     const res = await app.request(`/${s.id}`);
     const html = await res.text();
@@ -66,11 +81,48 @@ describe('session detail SUMMARY HISTORY section', () => {
     expect(html).toMatch(/<summary>\s*v1 ·/);
     expect(html).toContain('Summary History (3)');
 
+    // Each version renders its OWN title, in its own <summary> header
+    // (before its content), grouped with the right entry — not the
+    // session's current title repeated on every row.
+    const titleThreeIdx = html.indexOf('Title Three');
+    const titleTwoIdx = html.indexOf('Title Two');
+    const titleOneIdx = html.indexOf('Title One');
+    expect(titleThreeIdx).toBeGreaterThan(-1);
+    expect(titleThreeIdx).toBeLessThan(idx3);
+    expect(titleTwoIdx).toBeGreaterThan(idx3);
+    expect(titleTwoIdx).toBeLessThan(idx2);
+    expect(titleOneIdx).toBeGreaterThan(idx2);
+    expect(titleOneIdx).toBeLessThan(idx1);
+
     // The newest version's content equals the Summary block rendered above it.
     const summaryBlockIdx = html.indexOf('<h2>Summary<');
     const historyIdx = html.indexOf('Summary History');
     const summaryBlock = html.slice(summaryBlockIdx, historyIdx);
     expect(summaryBlock).toContain('v3 text');
+  });
+
+  it('caps the rendered versions at SUMMARY_HISTORY_MAX, newest first, and states how many are omitted', async () => {
+    const s = agentSessionsSvc.start({ tokenId: ownerTokenId, projectId: null, agent: 'claude' });
+    const total = 25;
+    for (let i = 1; i <= total; i++) {
+      agentSessionsSvc.writeSummary(s.id, {
+        tokenId: ownerTokenId,
+        summary: `summary body #${i}`,
+        final: true,
+      });
+    }
+
+    const res = await app.request(`/${s.id}`);
+    const html = await res.text();
+
+    expect(html).toContain('Summary History (25)');
+    expect(html).toContain(`summary body #${total}`);
+    // Oldest 5 (versions 1-5) are omitted from the rendered page. `\b` after
+    // the digit excludes `#10`-`#19`, which legitimately DO appear.
+    expect(html).not.toMatch(/summary body #1\b/);
+    expect(html).not.toMatch(/summary body #5\b/);
+    expect(html).toMatch(/summary body #6\b/); // the oldest of the 20 SHOWN
+    expect(html).toMatch(/Showing the 20 most recent of 25/);
   });
 
   it('a session with no versions states so, and the section is present unconditionally', async () => {
