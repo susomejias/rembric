@@ -186,6 +186,9 @@ describe('RembricPlugin handlers', () => {
     const text = out.context[0];
     expect(text).toContain('memory.session_get');
     expect(text).toContain('10000');
+    expect(text).toContain(
+      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files',
+    );
     expect(text.indexOf('memory.session_get')).toBeLessThan(text.indexOf('memory.session_summary'));
   });
 

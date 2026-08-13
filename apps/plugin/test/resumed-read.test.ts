@@ -354,7 +354,12 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
     await runSessionStart('s-order');
     const out = await runPromptNudge('s-order');
 
-    const lines = out.split('\n').filter((l) => l.length > 0);
+    const marker = '\u0000SUMMARY_NUDGE\u0000';
+    const lines = out
+      .replace(fixtures.summary, marker)
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((line) => (line === marker ? fixtures.summary : line));
     const resumedIndex = lines.indexOf(fixtures.resumedRead);
     const summaryIndex = lines.indexOf(fixtures.summary);
     expect(resumedIndex).toBeGreaterThanOrEqual(0);

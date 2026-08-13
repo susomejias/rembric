@@ -83,7 +83,7 @@ describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
 
   it('still emits the summary reminder on turn 1, which is protocol', () => {
     const first = runPromptNudge(JSON.stringify({ session_id: 's-one' }));
-    expect(first.split('\n').filter((l) => l.length > 0)).toContain(fixtures.summary);
+    expect(first).toContain(fixtures.summary);
   });
 
   it('persists the counter per session across invocations', () => {

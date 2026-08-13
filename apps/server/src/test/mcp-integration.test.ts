@@ -20,6 +20,7 @@ import {
 } from '../mcp/memory-tools.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { SESSION_GET_VERSIONS_MAX } from '../mcp/session-tools.js';
+import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
@@ -128,6 +129,7 @@ describe('MCP protocol conformance', () => {
     const globalInstructions = globalClient.getInstructions();
     expect(globalInstructions).toMatch(/project\.use/);
     expect(globalInstructions).not.toContain('X-Rembric-Project');
+    expect(globalInstructions).toContain(SUMMARY_SECTIONS);
     expect((globalInstructions ?? '').length).toBeLessThanOrEqual(1000);
     await globalClient.close();
 
@@ -135,8 +137,23 @@ describe('MCP protocol conformance', () => {
     const projClient = await connect({ projectSlug: 'integration-proj' });
     const projInstructions = projClient.getInstructions();
     expect(projInstructions).toContain("'integration-proj'");
+    expect(projInstructions).toContain(SUMMARY_SECTIONS);
     expect((projInstructions ?? '').length).toBeLessThanOrEqual(1000);
     await projClient.close();
+  });
+
+  it('publishes the canonical session-summary directive in tools/list', async () => {
+    const client = await connect();
+    const tools = await client.listTools();
+    await client.close();
+    const summary = tools.tools.find((tool) => tool.name === 'memory.session_summary');
+    expect(summary?.description).toBeDefined();
+    expect(summary!.description).toContain(SUMMARY_SECTIONS);
+    expect(summary!.description).not.toContain(
+      'Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files',
+    );
+    expect(summary!.description!.length).toBeLessThan(DESCRIPTION_MAX_LENGTH);
+    expect(summary!.description).toContain(SUMMARY_SECTIONS.split('\n').slice(0, 2).join('\n'));
   });
 
   it('lists the four memory.* tools', async () => {

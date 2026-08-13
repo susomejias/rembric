@@ -166,6 +166,29 @@ When `cwd` is missing or fails to parse, the placeholder SHALL be `"session · H
 - **WHEN** any non-placeholder write (model `memory.session_summary({title})`, Hermes `on_session_end`, bash SessionEnd) lands
 - **THEN** the title SHALL be replaced with the new value (because both writes are `final:false` and last-write-wins among non-finals)
 
+### Requirement: Every model-facing session-summary surface MUST teach the exact Markdown heading format
+
+The session-summary format SHALL be identical across the eight model-facing files pinned by the server invariant: `apps/server/src/mcp/instructions.ts`, `apps/server/src/mcp/server.ts`, `apps/plugin/scripts/prompt-nudge.sh`, `apps/plugin/scripts/stop-nudge.sh`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, and `apps/plugin/.hermes-plugin/__init__.py`. Each SHALL carry the canonical directive from `sessions`: exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`, in that order, as level-2 Markdown headings that belong on separate lines.
+
+This eight-file set reaches all five bundled clients through the existing sharing boundaries: Claude Code and Codex CLI share the bash hooks, opencode and Pi consume the JS/TS core and server tool metadata, and Hermes carries the fixture-pinned Python text. No client-specific wording SHALL be introduced. A file with several summary instruction paths SHALL use the canonical directive in every one of them; one passing occurrence SHALL NOT license another flat occurrence in the same file.
+
+#### Scenario: All eight surfaces carry the exact heading directive
+
+- **WHEN** the invariant reads the eight tracked model-facing files
+- **THEN** each SHALL carry the six canonical `##` headings in order and the separate-line instruction
+- **AND** none SHALL carry the bare flat fragment `Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files`
+
+#### Scenario: All five clients inherit the same format
+
+- **WHEN** the emitted summary instruction is captured for Claude Code, Codex CLI, Hermes Agent, opencode, and Pi
+- **THEN** every client SHALL direct the model to use the same six level-2 headings on separate lines
+- **AND** any prefixes or host wrappers SHALL be the only permitted differences
+
+#### Scenario: A format mutation fails the lock-step tests
+
+- **WHEN** one heading loses its `##` prefix, moves position, is renamed, or an extra heading is appended in one surface
+- **THEN** the invariant or cross-language fixture suite SHALL fail and name the divergent surface
+
 ### Requirement: The per-turn save/summary nudge text MUST be a calibrated imperative shared byte-identical across every client
 
 The save and session-summary nudge strings emitted per-turn by every client — Claude Code and Codex via `apps/plugin/scripts/prompt-nudge.sh`, opencode and Pi via the shared JS/TS module `apps/plugin/bin/rembric-plugin-core.mjs`, Hermes via `prefetch()` (`apps/plugin/.hermes-plugin/__init__.py`) — SHALL be sourced from the single shared contract `apps/plugin/test/nudge-fixtures.json` (`save`, `saveCore`, `summaryCore`, `summary`) and SHALL be byte-identical across clients. Bash and the shared JS/TS module embed the `rembric:`-prefixed `summary`/`save` verbatim; Hermes wraps `saveCore`/`summaryCore` in `<memory-hint>…</memory-hint>` per its established convention. No individual JS/TS client SHALL carry its own copy of these strings — there is one JS/TS implementation and every JS/TS client imports it, so a newly added client is byte-identical by construction rather than by review.
@@ -176,9 +199,9 @@ The shared text SHALL be phrased as a calibrated imperative:
 - It SHALL condition that action on real, memorable work having happened (a decision, fix, discovery, or files changed), preserving the model's discretion to skip trivial turns with nothing worth persisting — so the imperative does not induce vacuous summaries or noise saves.
 - It SHALL NOT change the firing cadence, which is governed separately (summary on turn 1 and every `SUMMARY_NUDGE_EVERY`; save every `SAVE_NUDGE_EVERY`) and is unchanged by this requirement.
 
-**The summary string SHALL NOT carry the write's replace-and-rewrite semantics, and that exclusion is a measured decision rather than an omission.** The string measures 259 UTF-8 bytes against its own published per-line cap of 260 (`claude-code-plugin`), and the firing-turn ceiling is ≤840 bytes against a measured worst case of 780, so any added clause costs a cap edit plus a re-measurement of three published aggregate figures, paid on turn 1 and every tenth turn in five clients. The semantics are delivered instead where the model is already reading a longer text about this tool and where there is measured headroom: the tool description (1175 of 1900 characters, after this change's own additions to it) and `initialize.instructions` (990 of 1000, after this change's own clause), plus the two surfaces that fire exactly when a summary is about to be written — the compaction block and the end-of-turn rubric. A future change MAY move the clause here, and if it does it SHALL raise the per-line cap deliberately and re-measure every published figure that contains this string; it SHALL NOT append the clause and leave the caps as published.
+**The summary string SHALL carry the canonical Markdown format but SHALL NOT carry the write's replace-and-rewrite semantics.** Formatting is needed at every curation prompt because the old inline `Goal · … · Files` list caused models to store one paragraph; replacement semantics remain on the longer tool, initialize, compaction, and end-of-turn surfaces. With the exact format directive the string measures 382 UTF-8 bytes against a 400-byte per-line cap. The divergent-counter firing turn measures approximately 903 bytes and is capped at 960; the ten-turn amortised cost measures approximately 42.6 tokens/turn and remains within the existing 45-token ceiling. These figures SHALL be re-measured from the final fixture in the same commit as the wording.
 
-**`initialize.instructions`'s remaining headroom is 10 characters, not a number that invites more prose.** 990 of the published 1000-character cap is already spent; a contributor reading "measured headroom" here SHALL NOT read it as an invitation to add further text to this block — there is none to spare. Any future addition to `initialize.instructions` SHALL either reclaim prose from the existing block first (the same rule `mcp-api`'s `instructions` requirement already states) or raise the cap deliberately with its own re-measurement; it SHALL NOT be attempted as a small addition on the assumption that ~84 characters remain.
+**`initialize.instructions` SHALL reclaim prose rather than raise its cap.** Blind substitution produces a binding variant of 1113 characters against 1000. The implementation SHALL preserve the 1000-character ceiling and every protocol obligation while shortening surrounding prose; no claimed headroom from the pre-format wording remains.
 
 **The summary string SHALL NOT assert, or deny, that a summary already exists for the session.** One string has to be true in both states, and a claim about state is the one thing a state-blind reminder cannot make.
 
@@ -206,9 +229,10 @@ The shared text SHALL be phrased as a calibrated imperative:
 
 #### Scenario: The summary string is unchanged by the replace-and-rewrite contract
 
-- **WHEN** the `summary` and `summaryCore` fixtures are compared against their values before this change
-- **THEN** they SHALL be byte-identical, and each SHALL remain within its published per-line cap
-- **AND** no published byte or token figure that contains this string SHALL need re-measuring
+- **WHEN** the `summary` and `summaryCore` fixtures are inspected after the Markdown-format change
+- **THEN** they SHALL still omit replace-and-rewrite semantics while requiring the canonical headings on separate lines
+- **AND** the prefixed `summary` fixture SHALL be at most 400 UTF-8 bytes
+- **AND** every published aggregate figure that contains this string SHALL be re-measured
 
 #### Scenario: The summary string makes no claim about whether a summary exists
 
@@ -759,7 +783,7 @@ This block is also the compaction re-arm of the read directive specified in "A p
 
 Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state that a curated summary write replaces the stored value"), which carries the replacement and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
 
-The block SHALL keep every obligation it already carries: the `10000` cap substring and the ≤600-byte budget of "Plugin-injected protocol nudges MUST surface the summary length cap", and one copy of the text shared by the clients that use it. A reworded block SHALL be re-measured, and the measurement SHALL be recorded rather than assumed: the rewritten block measures 560 bytes against the published 600.
+The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL add the exact canonical Markdown heading directive. A reworded block SHALL be re-measured, and the measurement SHALL be recorded rather than assumed: direct replacement measures 683 bytes, so the published cap becomes 700 UTF-8 bytes.
 
 #### Scenario: The block asks for the current whole state, after a read
 
@@ -777,7 +801,8 @@ The block SHALL keep every obligation it already carries: the `10000` cap substr
 
 - **WHEN** the emitted block is measured and grepped
 - **THEN** it SHALL contain the substring `10000`
-- **AND** it SHALL be ≤600 bytes in UTF-8
+- **AND** it SHALL require the six canonical `##` headings on separate lines
+- **AND** it SHALL be ≤700 bytes in UTF-8
 
 #### Scenario: One copy of the text
 

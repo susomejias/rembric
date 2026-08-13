@@ -9,6 +9,7 @@ import { SUMMARY_SECTIONS } from '../../server/src/mcp/summary-rubric.js';
 import {
   createSessionProtocol,
   FIRST_PROMPT_NUDGE,
+  SUMMARY_NUDGE,
   POST_COMPACT_NUDGE_CORE,
   SAVE_NUDGE_EVERY,
   SESSION_ID_NUDGE_TEMPLATE,
@@ -65,6 +66,7 @@ const stopNudgeShPath = join(here, '..', 'scripts', 'stop-nudge.sh');
 const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const pluginCoreMjs = join(here, '..', 'bin', 'rembric-plugin-core.mjs');
+const summaryCommand = join(here, '..', 'commands', 'summary.md');
 
 function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): string[] {
   let out = '';
@@ -75,7 +77,12 @@ function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): 
       env: { ...process.env, TMPDIR: counterDir },
     });
   }
-  return out.split('\n').filter((l) => l.length > 0);
+  const marker = '\u0000SUMMARY_NUDGE\u0000';
+  return out
+    .replace(fixtures.summary, marker)
+    .split('\n')
+    .filter((l) => l.length > 0)
+    .map((line) => (line === marker ? fixtures.summary : line));
 }
 
 const hasPython3 = (() => {
@@ -140,6 +147,36 @@ function bashCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
 }
 
 describe('nudge text lock-step across bash and TS', () => {
+  const headings = [
+    '## Goal',
+    '## Accomplished',
+    '## Decisions+why',
+    '## Verified+how',
+    '## Unfinished+why',
+    '## Files',
+  ];
+
+  it('every summary-facing fixture requires the exact separate-line heading contract', () => {
+    const directive =
+      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):';
+    for (const [name, text] of [
+      ['summary', fixtures.summary],
+      ['postCompact', fixtures.postCompact],
+      ['endOfTurnRubric', fixtures.endOfTurnRubric],
+    ] as const) {
+      expect(text, name).toContain(`${directive}\n${headings.join('\n')}`);
+      expect(text, name).not.toContain('Goal · Accomplished · Decisions+why');
+    }
+    expect(SUMMARY_NUDGE).toBe(fixtures.summary);
+    const command = readFileSync(summaryCommand, 'utf8');
+    expect(command).toContain(directive);
+    let previous = -1;
+    for (const heading of headings) {
+      const next = command.indexOf(heading);
+      expect(next, `summary command omits ${heading}`).toBeGreaterThan(previous);
+      previous = next;
+    }
+  });
   let counterDir: string;
 
   it('bash prompt-nudge.sh emits the sessionId line + the exact fixture save text on turn 5', () => {
@@ -285,7 +322,7 @@ describe('resumedRead fixture lock-step across bash, TS, and Python', () => {
   // here rather than relying on review.
   it('the summary fixture is unchanged by the existence of resumedRead', () => {
     expect(fixtures.summary).toBe(
-      'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.',
+      'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? Skip.',
     );
   });
 });
@@ -390,8 +427,8 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-d
     expect(fixtures.postCompact).not.toMatch(/[¿¡éíóúñÑ]/);
   });
 
-  it('stays within its byte budget (≤600 bytes / 150 tokens)', () => {
-    expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(600);
+  it('stays within its byte budget (≤700 bytes / 175 tokens)', () => {
+    expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(700);
   });
 });
 
@@ -412,8 +449,8 @@ describe('postCompactCore fixture lock-step across the shared JS/TS core and Pyt
     },
   );
 
-  it('stays within the same 600-byte budget as postCompact, with margin to spare', () => {
-    expect(bytes(fixtures.postCompactCore)).toBeLessThanOrEqual(600);
+  it('stays within the same 700-byte budget as postCompact, with margin to spare', () => {
+    expect(bytes(fixtures.postCompactCore)).toBeLessThanOrEqual(700);
   });
 });
 
@@ -442,8 +479,8 @@ describe('per-line byte budgets', () => {
     expect(bytes(sessionIdLine(UUID_SESSION_ID))).toBeLessThanOrEqual(224);
   });
 
-  it('summary ≤260 bytes (65 tokens)', () => {
-    expect(bytes(fixtures.summary)).toBeLessThanOrEqual(260);
+  it('summary ≤400 bytes (100 tokens)', () => {
+    expect(bytes(fixtures.summary)).toBeLessThanOrEqual(400);
   });
 
   // Measured 139 bytes; the cap leaves the same ~15% margin as the other
@@ -467,11 +504,11 @@ describe('UserPromptSubmit emitted-output budgets', () => {
     return bytes(search) + bytes(nudge);
   }
 
-  it('turn 1 with a recall keyword stays ≤720 bytes (180 tokens)', () => {
+  it('turn 1 with a recall keyword stays ≤800 bytes (200 tokens)', () => {
     const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-turn1-'));
     try {
       // Four lines at once: firstPrompt + recall + save + summary.
-      expect(turnBytes(counterDir, 'what did we do yesterday')).toBeLessThanOrEqual(720);
+      expect(turnBytes(counterDir, 'what did we do yesterday')).toBeLessThanOrEqual(800);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }
@@ -482,7 +519,7 @@ describe('UserPromptSubmit emitted-output budgets', () => {
   // while the other is at turn 10 and all five lines fire together. Reachable
   // for real: Codex records hook trust per handler, so trusting one script
   // before the other lands exactly here. Turn 1 is NOT the worst case.
-  it('a turn where the two counters diverge stays ≤840 bytes (210 tokens)', () => {
+  it('a turn where the two counters diverge stays ≤960 bytes (240 tokens)', () => {
     const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-diverged-'));
     try {
       for (let turn = 1; turn <= 9; turn += 1) turnBytes(counterDir, 'keep going');
@@ -494,7 +531,7 @@ describe('UserPromptSubmit emitted-output budgets', () => {
       // stop-nudge.sh. Asserted as a range rather than relaxed to a ceiling, so
       // moving it back — or adding a fourth line here — fails.
       expect(diverged).toBeGreaterThan(460);
-      expect(diverged).toBeLessThanOrEqual(620);
+      expect(diverged).toBeLessThanOrEqual(960);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }
@@ -569,7 +606,7 @@ describe('every enforced cap is published in the capability that owns it', () =>
     'utf8',
   );
 
-  it.each([100, 140, 132, 224, 260, 600, 840, 210, 180])(
+  it.each([100, 140, 132, 224, 400, 700, 960, 240, 180])(
     'the %s cap is stated in claude-code-plugin/spec.md',
     (cap) => {
       expect(spec).toMatch(new RegExp(`\\b${cap}\\b`));
@@ -587,8 +624,23 @@ describe('end-of-turn rubric lock-step', () => {
   });
 
   it('the rubric names every canonical section', () => {
-    for (const section of SUMMARY_SECTIONS.split(' · ')) {
-      expect(fixtures.endOfTurnRubric, `rubric omits '${section}'`).toContain(section);
+    const headings = [
+      '## Goal',
+      '## Accomplished',
+      '## Decisions+why',
+      '## Verified+how',
+      '## Unfinished+why',
+      '## Files',
+    ];
+    expect(fixtures.endOfTurnRubric).toContain(
+      'each on its own line (never one flat paragraph):\n' + headings.join('\n'),
+    );
+    expect(fixtures.endOfTurnRubric).not.toContain('Goal · Accomplished ·');
+    for (const [index, heading] of headings.entries()) {
+      expect(
+        fixtures.endOfTurnRubric.indexOf(heading),
+        `rubric omits '${heading}'`,
+      ).toBeGreaterThan(index === 0 ? -1 : fixtures.endOfTurnRubric.indexOf(headings[index - 1]!));
     }
   });
 

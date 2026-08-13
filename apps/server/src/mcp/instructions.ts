@@ -25,13 +25,13 @@ export interface InstructionsContext {
   requestedSlug: string | null;
 }
 
-const BASE = `Rembric — persistent memory across sessions. Use the tools proactively.
+const BASE = `Rembric — persistent memory across sessions. Use tools proactively.
 
-SAVE: the moment it happens — bug fix · decision · discovery · config · pattern · preference — call memory.save with a title≤100 headline + content (don't batch). Evolving a prior topic? pass topic_key; resolve candidates[] with memory.judge.
-RECALL: starting/resuming work, after /compact, or asked "what did we do"? Call memory.context (memory.search for keyword lookup) if you lack prior detail.
-SUMMARIZE: did real work happen? Before ending, you MUST call memory.session_summary({title≤100 (the work, not cwd), summary≤${SUMMARY_MAX_CHARS}}) — REPLACES the stored summary; send the whole current state, current first: ${SUMMARY_SECTIONS}.
-Know your sessionId? Pass it — never guess it.
-Update Rembric: memory.about.`;
+SAVE: On each real fix/decision/discovery/config/pattern/preference, call memory.save(title≤100, content); evolving topic: topic_key, candidates[]→memory.judge.
+RECALL: Starting/resuming, after /compact, or asked what did we do: call memory.context (memory.search for keywords) if you lack prior detail.
+SUMMARIZE: Before ending each working turn with real work, MUST call memory.session_summary({title≤100, summary≤${SUMMARY_MAX_CHARS}}) — REPLACES stored summary; send whole current state, current first: ${SUMMARY_SECTIONS}
+Know your sessionId? Pass it; never guess.
+Update: memory.about.`;
 
 const PATH_SCOPED_NOTE = (slug: string) =>
   `\n\nThis connection is bound to project '${slug}': everything you save or recall here belongs to it, and no argument reaches another project.`;

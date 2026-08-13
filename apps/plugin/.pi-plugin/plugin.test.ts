@@ -746,6 +746,9 @@ describe('session registration and nudges', () => {
     expect(result.message.content).toContain(underscoreToolNames(FIRST_PROMPT_NUDGE));
     expect(result.message.content).toContain(underscoreToolNames(SUMMARY_NUDGE));
     expect(result.message.content).toContain(
+      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files',
+    );
+    expect(result.message.content).toContain(
       underscoreToolNames(SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', sessionId)),
     );
     expect(result.message.display).toBe(false);

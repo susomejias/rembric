@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from './instructions.js';
+import { SUMMARY_SECTIONS } from './summary-rubric.js';
 
 describe('MCP initialize instructions', () => {
   it('emits ≤ 1000 characters for the unscoped variant', () => {
@@ -13,6 +14,27 @@ describe('MCP initialize instructions', () => {
   it('emits ≤ 1000 characters for the path-scoped variant', () => {
     const text = buildInstructions({ requestedSlug: 'rembric' });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+  });
+
+  it('carries the exact Markdown summary headings on separate lines in both variants', () => {
+    const headings = [
+      '## Goal',
+      '## Accomplished',
+      '## Decisions+why',
+      '## Verified+how',
+      '## Unfinished+why',
+      '## Files',
+    ];
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      expect(text).toContain(SUMMARY_SECTIONS);
+      expect(text).not.toContain(
+        'Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files',
+      );
+      expect(text).toContain(headings.join('\n'));
+    }
   });
 
   it('mentions memory.save, memory.search, memory.session_summary in both variants', () => {

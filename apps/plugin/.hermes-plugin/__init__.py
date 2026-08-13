@@ -124,8 +124,10 @@ _SAVE_HINT_URGENT = (
 _SUMMARY_HINT = (
     "<memory-hint>did real work happen this turn? You MUST call "
     "memory.session_summary({title, summary}) now — title ≤100 chars (the "
-    "work, not cwd); summary: Goal · Accomplished · Decisions+why · "
-    "Verified+how · Unfinished+why · Files. Nothing memorable? "
+    "work, not cwd); summary: Use exactly these six Markdown level-2 "
+    "headings, in this order, each on its own line (never one flat "
+    "paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n"
+    "## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? "
     "Skip.</memory-hint>"
 )
 _SESSION_ID_HINT_TEMPLATE = (
@@ -154,8 +156,10 @@ _POST_COMPACT_HINT = (
     "value.\n"
     "   - title: ≤100 chars, descriptive of the work (not generic, not "
     "the cwd).\n"
-    "   - summary: ≤10000 chars. Goal · Accomplished · Decisions+why · "
-    "Verified+how · Unfinished+why · Files.\n"
+    "   - summary: ≤10000 chars. Use exactly these six Markdown level-2 "
+    "headings, in this order, each on its own line (never one flat "
+    "paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n"
+    "## Verified+how\n## Unfinished+why\n## Files\n"
     "3. Still missing detail? Call memory.context or memory.search.\n"
     "4. Only then, continue with the user's request.</memory-hint>"
 )
@@ -446,22 +450,23 @@ class RembricMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric — persistent memory across sessions. Use the tools "
+            "Rembric — persistent memory across sessions. Use tools "
             "proactively.\n\n"
-            "SAVE: the moment it happens — bug fix · decision · discovery · "
-            "config · pattern · preference — call memory.save with a title≤100 "
-            "headline + content (don't batch). Evolving a prior topic? pass "
-            "topic_key; resolve candidates[] with memory.judge.\n"
-            "RECALL: starting/resuming work, after /compact, or asked \"what "
-            "did we do\"? Call memory.context (memory.search for keyword "
-            "lookup) if you lack prior detail.\n"
-            "SUMMARIZE: did real work happen? Before ending, you MUST call "
-            "memory.session_summary({title≤100 (the work, not cwd), "
-            "summary≤10000}) — REPLACES the stored summary; send the whole "
-            "current state, current first: Goal · Accomplished · "
-            "Decisions+why · Verified+how · Unfinished+why · Files.\n"
-            "Know your sessionId? Pass it — never guess it.\n"
-            "Update Rembric: memory.about."
+            "SAVE: On each real fix/decision/discovery/config/pattern/preference, "
+            "call memory.save(title≤100, content); evolving topic: topic_key, "
+            "candidates[]→memory.judge.\n"
+            "RECALL: Starting/resuming, after /compact, or asked what did we do: "
+            "call memory.context (memory.search for keywords) if you lack prior "
+            "detail.\n"
+            "SUMMARIZE: Before ending each working turn with real work, MUST call "
+            "memory.session_summary({title≤100, summary≤10000}) — REPLACES "
+            "stored summary; send whole current state, current first: Use "
+            "exactly these six Markdown level-2 headings, in this order, each "
+            "on its own line (never one flat paragraph):\n## Goal\n"
+            "## Accomplished\n## Decisions+why\n## Verified+how\n"
+            "## Unfinished+why\n## Files\n"
+            "Know your sessionId? Pass it; never guess.\n"
+            "Update: memory.about."
         )
 
     def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:

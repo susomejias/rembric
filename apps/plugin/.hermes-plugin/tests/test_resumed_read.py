@@ -132,11 +132,7 @@ class ResumedReadTest(unittest.TestCase):
 
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
-        # Line-level, not substring: a line that merely CONTAINS or ENDS
-        # WITH the summary hint's text would also satisfy a weaker check
-        # even after the two lines were glued into one.
-        lines = out.split("\n")
-        self.assertIn(self.mod._SUMMARY_HINT, lines)
+        self.assertIn(self.mod._SUMMARY_HINT, out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_is_its_own_line_ordered_before_the_summary_hint(self, mock_urlopen: MagicMock) -> None:
@@ -145,11 +141,11 @@ class ResumedReadTest(unittest.TestCase):
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
         provider.on_turn_start(1, None)
-        lines = provider.prefetch("q", session_id="01XYZ").split("\n")
-        self.assertIn(self.mod._RESUMED_READ_HINT, lines)
-        self.assertIn(self.mod._SUMMARY_HINT, lines)
+        out = provider.prefetch("q", session_id="01XYZ")
+        self.assertIn(self.mod._RESUMED_READ_HINT, out)
+        self.assertIn(self.mod._SUMMARY_HINT, out)
         self.assertLess(
-            lines.index(self.mod._RESUMED_READ_HINT), lines.index(self.mod._SUMMARY_HINT)
+            out.index(self.mod._RESUMED_READ_HINT), out.index(self.mod._SUMMARY_HINT)
         )
 
     @patch("rembric_hermes_plugin.urlopen")

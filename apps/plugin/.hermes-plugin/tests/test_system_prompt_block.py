@@ -24,15 +24,21 @@ class SystemPromptBlockTest(unittest.TestCase):
         block = provider.system_prompt_block()
         self.assertIn("memory.session_summary", block)
         self.assertIn("title", block)
-        self.assertIn("Goal", block)
-        self.assertIn("Accomplished", block)
-        self.assertIn("Files", block)
-        # The three enriched sections. Named individually because they are the
-        # part a later reader cannot recover from the code, and dropping any one
-        # of them would leave the block looking complete.
-        self.assertIn("Decisions+why", block)
-        self.assertIn("Verified+how", block)
-        self.assertIn("Unfinished+why", block)
+        headings = [
+            "## Goal",
+            "## Accomplished",
+            "## Decisions+why",
+            "## Verified+how",
+            "## Unfinished+why",
+            "## Files",
+        ]
+        self.assertIn(
+            "Use exactly these six Markdown level-2 headings, in this order, "
+            "each on its own line (never one flat paragraph):\n"
+            + "\n".join(headings),
+            block,
+        )
+        self.assertNotIn("Goal · Accomplished · Decisions+why", block)
 
     def test_includes_memory_context_post_compact_clause(self) -> None:
         provider = self.mod.RembricMemoryProvider()

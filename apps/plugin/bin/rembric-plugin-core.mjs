@@ -22,7 +22,7 @@ export const SAVE_NUDGE =
   'rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).';
 export const SUMMARY_NUDGE_EVERY = 10;
 export const SUMMARY_NUDGE =
-  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files. Nothing memorable? Skip.';
+  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? Skip.';
 export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 export const RESUMED_READ_NUDGE =
@@ -36,7 +36,8 @@ export const POST_COMPACT_NUDGE_CORE =
   '1. Call memory.session_get to read the stored summary.\n' +
   '2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state, brought up to date — this REPLACES the stored value.\n' +
   '   - title: ≤100 chars, descriptive of the work (not generic, not the cwd).\n' +
-  '   - summary: ≤10000 chars. Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.\n' +
+  '   - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n' +
+  '## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\n' +
   '3. Still missing detail? Call memory.context or memory.search.\n' +
   "4. Only then, continue with the user's request.";
 

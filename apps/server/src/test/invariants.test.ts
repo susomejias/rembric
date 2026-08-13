@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
 
 import { createTestDb } from './db.js';
@@ -1343,28 +1342,36 @@ describe('the session-summary rubric has one source', () => {
   ];
 
   it('every surface carries the canonical section list', () => {
+    const headings = [
+      '## Goal',
+      '## Accomplished',
+      '## Decisions+why',
+      '## Verified+how',
+      '## Unfinished+why',
+      '## Files',
+    ];
+    const directive =
+      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):';
+    const flatRubric =
+      'Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files';
     for (const rel of surfaces) {
       const src = readFileSync(join(repoRoot, rel), 'utf8');
-      // Adjacent-string-literal concatenation, so Python's wrapped copy is compared
-      // as the ONE string it becomes rather than as six independent substrings.
-      // The membership form this replaces accepted reverse order, sections
-      // scattered through unrelated prose, EXTRA sections appended, and a wrong
-      // separator — i.e. it accepted the exact drift its own reason for existing
-      // cites, and would not have caught the bug it was written for.
-      const joined = src.replace(/"\s*\n\s*"/g, '').replace(/'\s*\n\s*'/g, '');
-      const interpolated = joined.includes('${SUMMARY_SECTIONS}');
+      const joined = src
+        .replace(/"\s*\n\s*"/g, '')
+        .replace(/'\s*\n\s*'/g, '')
+        .replaceAll('\\n', '\n')
+        .replace(/\n\s*\n/g, '\n');
+      const interpolated = src.includes('${SUMMARY_SECTIONS}');
+      const contract = `${directive}\n${headings.join('\n')}`;
       expect(
-        interpolated || joined.includes(SUMMARY_SECTIONS),
-        `${rel} does not carry the canonical section list VERBATIM`,
+        interpolated || joined.includes(contract),
+        `${rel} omits the canonical directive`,
       ).toBe(true);
-      // A contiguous match alone still accepts APPENDED sections, because the
-      // canonical list survives as a prefix — and "extra sections added" is the
-      // very drift the tool description had. So the list must also END there.
+      expect(src, `${rel} still carries the flat rubric`).not.toContain(flatRubric);
       if (!interpolated) {
-        const after = joined.slice(joined.indexOf(SUMMARY_SECTIONS) + SUMMARY_SECTIONS.length);
-        expect(after.startsWith(' · '), `${rel} appends a section to the canonical list`).toBe(
-          false,
-        );
+        const at = joined.indexOf(contract);
+        const after = joined.slice(at + contract.length);
+        expect(after, `${rel} appends another Markdown heading`).not.toMatch(/^\n## /);
       }
     }
   });
@@ -1383,13 +1390,30 @@ describe('the session-summary rubric has one source', () => {
   // pre-push rather than during development, and it is the correct trade: the
   // alternative walks the working tree and flags scratch files.
   it('the enumeration above is complete', () => {
-    const found = execSync(
-      `git -C ${repoRoot} grep -l -e 'Goal · ' -e 'SUMMARY_SECTIONS' -- apps/ ':!*.test.*' ':!*/tests/*' || true`,
+    const candidates = execSync(
+      `git -C ${repoRoot} ls-files -- apps/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**'`,
       { encoding: 'utf8' },
     )
       .split('\n')
-      .filter(Boolean)
-      .filter((f) => !f.endsWith('summary-rubric.ts'));
+      .filter(Boolean);
+    const found = candidates.filter((rel) => {
+      const src = readFileSync(join(repoRoot, rel), 'utf8');
+      const joined = src
+        .replace(/"\s*\n\s*"/g, '')
+        .replace(/'\s*\n\s*'/g, '')
+        .replaceAll('\\n', '\n');
+      if (
+        rel.endsWith('summary-rubric.ts') ||
+        rel.endsWith('invariants.test.ts') ||
+        rel.includes('/tests/') ||
+        rel.endsWith('.test.ts')
+      )
+        return false;
+      return (
+        joined.includes('Use exactly these six Markdown level-2 headings') ||
+        src.includes('${SUMMARY_SECTIONS}')
+      );
+    });
     expect(found.sort()).toEqual([...surfaces].sort());
   });
 });

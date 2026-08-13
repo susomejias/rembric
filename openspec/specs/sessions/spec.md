@@ -164,11 +164,11 @@ The `memory` table SHALL gain a nullable `session_id` column referencing `sessio
 
 When `memory.session_summary` is called, the submitted `summary` SHALL be persisted in the session row's `summary` column. The server SHALL NOT enforce the layout — agents may submit free-form text — but the canonical structure SHALL be documented, and it SHALL be documented from ONE definition.
 
-The canonical structure SHALL name, at minimum: the goal the session was pursuing; the work actually accomplished; the decisions taken and the reason for each; what was verified and by what means; what was left unfinished or blocked, and why; and the files that matter. A structure that names only outcomes produces a summary a later reader cannot act on: the reason a decision was taken and the evidence a claim rests on are the parts that do not survive in the code.
+The canonical structure SHALL consist of exactly these Markdown level-2 headings, in this order, each on its own line: `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`. The instruction SHALL explicitly say that they are exact level-2 headings on separate lines and SHALL NOT present bare section names as one dot-separated paragraph. The headings carry: the goal the session was pursuing; the work actually accomplished; the decisions taken and the reason for each; what was verified and by what means; what was left unfinished or blocked, and why; and the files that matter. A structure that names only outcomes produces a summary a later reader cannot act on: the reason a decision was taken and the evidence a claim rests on are the parts that do not survive in the code.
 
-The canonical structure SHALL have a single source of truth in the server, exported as a named constant, and every surface that states it to a model SHALL derive its text from that constant rather than restate it. A test SHALL enumerate those surfaces and SHALL fail when one of them carries text the constant does not. This requirement exists because the structure was previously restated in six places and five of them named five sections while the sixth named seven, with nothing detecting the divergence.
+The canonical structure SHALL have a single source of truth in the server, exported as a named constant, and every surface that states it to a model SHALL derive or fixture-pin its text from that definition rather than invent a client-specific list. A test SHALL enumerate those surfaces and SHALL fail when one carries text the constant does not, omits or reorders a heading, appends a heading, or restores the flat dot-separated form. This requirement exists because agreement on section names is insufficient when all agreeing surfaces teach Markdown that renders as one paragraph.
 
-One surface is exempt from carrying the long form and SHALL carry a terse pointer to it instead: the `memory.session_summary` tool description, which is bounded by the host truncation ceiling documented in `mcp-api` and has no room for it. The long form SHALL instead be delivered at the moment the model can still act on it (see `plugin-session-protocol`).
+Every model-facing surface, including the `memory.session_summary` tool description, SHALL carry the exact heading directive. Longer reasons/evidence guidance MAY remain concentrated in the end-of-turn rubric, but the bounded tool description has sufficient room for the six headings and separate-line instruction within the host truncation ceiling documented in `mcp-api`.
 
 **The summary a model is asked for is the session's CURRENT COMPLETE state, not the delta since its last write.** The curated write replaces the stored value — that outcome is unchanged and is stated in this capability's cap and precedence requirements — so a write that carries only recent work makes the stored summary carry only recent work. Every model-facing surface SHALL therefore ask for a summary of the state that currently holds for the whole session, concise rather than exhaustive, and SHALL NOT ask for "what changed since last time", "what this window did", or any other delta framing. A model that cannot see its earlier work SHALL be directed to read the stored summary first (`memory.session_get`) rather than to write what it can see.
 
@@ -217,6 +217,17 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 - **WHEN** the `memory.session_summary` tool description and the `initialize.instructions` block are inspected
 - **THEN** each SHALL state that the current state goes first
 - **AND** neither SHALL be over its published length ceiling as a result (`mcp-api`)
+
+#### Scenario: The documented structure uses exact Markdown headings on separate lines
+
+- **WHEN** any model-facing session-summary structure is inspected
+- **THEN** it SHALL name exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files` in that order
+- **AND** it SHALL direct the model to put each heading on its own line rather than emit `Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files` as one paragraph
+
+#### Scenario: Free-form summary storage remains accepted
+
+- **WHEN** an otherwise-valid `memory.session_summary` call submits non-empty free-form text without the canonical headings
+- **THEN** the server SHALL persist it under the ordinary precedence and cap rules rather than reject it for layout
 
 ### Requirement: `memory.session_start` MAY accept an explicit project slug
 
