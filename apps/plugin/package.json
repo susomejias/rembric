@@ -1,6 +1,6 @@
 {
   "name": "@rembric/plugin",
-  "version": "0.28.0",
+  "version": "0.28.1",
   "description": "Multi-client plugin tree for Rembric (Claude Code, Codex CLI, Hermes Agent, opencode, Pi)",
   "type": "module",
   "license": "MIT",
