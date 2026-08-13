@@ -66,6 +66,8 @@ Two of its lists ask the agent to act, and they are deliberately different shape
 
 When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
 
+A curated summary write REPLACES the stored value, so the text a later rewrite left out is not in the current summary. It is not lost either: every curated write appends a version row, and `memory.session_get({ sessionId, limit })` returns the most recent versions — full content, newest first, at most 5 — each with the title that was in force when it was written. Omitting `limit` (or passing `0`) returns exactly the response above, with no version data at all. **Use it only to recover detail a later rewrite dropped, never routinely**: the current summary is what a rewrite needs, and pulling several versions costs context for text you have already superseded. The operator-facing counterpart is the version history on the session detail page of the dashboard.
+
 ## Validated configs
 
 ### ChatGPT (custom MCP connector over OAuth)
@@ -529,7 +531,7 @@ Earlier releases refused these writes with `project_suggestion_pending`, on the 
 
 Long-running agents compact their context. To survive that, two tools fire at specific moments:
 
-- **Before "done" / before compaction**: `memory.session_summary({title, summary})` closes the session and persists the state. Those two are the whole schema — an unknown property is refused — so the rubric (Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files) goes inside `summary`.
+- **Before "done" / before compaction**: `memory.session_summary({summary, title?, sessionId?})` persists the state. It does **not** close the session — `memory.session_end` is what ends it, and the summary write deliberately leaves the row `active` so a later turn can rewrite it. Those three are the whole schema — an unknown property is refused — so the rubric (Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files) goes inside `summary`. The write REPLACES the stored summary, so send the session's current complete state rather than only what changed this turn.
 - **After compaction / new session**: `memory.context({sessions, prompts, memories})` restores it.
 
 The proactive-save protocol embedded in `initialize.instructions` already tells agents to do this. If your client ignores the field, paste the equivalent into the client's rules file (`AGENTS.md`, `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, `~/.gemini/system.md`, etc.).
