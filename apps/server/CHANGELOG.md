@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.3](https://github.com/susomejias/rembric/compare/server-v0.28.2...server-v0.28.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **sessions:** enforce Markdown summary headings ([c44d389](https://github.com/susomejias/rembric/commit/c44d3894b3fe82c69dd178d9eab4ef89a90641aa))
+
 ## [0.28.2](https://github.com/susomejias/rembric/compare/server-v0.28.1...server-v0.28.2) (2026-08-13)
 
 
