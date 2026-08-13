@@ -4,6 +4,20 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.28.0](https://github.com/susomejias/rembric/compare/plugin-v0.27.0...plugin-v0.28.0) (2026-08-13)
+
+
+### Features
+
+* **plugin:** tell a resumed process to read the stored summary once ([da386cb](https://github.com/susomejias/rembric/commit/da386cb0d91cdc987a4142d455ced626e7bc286a))
+* **sessions:** budget the Stop reminder correctly, direct verbatim copying of facts ([d57b1b8](https://github.com/susomejias/rembric/commit/d57b1b8f6fea20eaff87080a4ed6f597ff6547ed))
+* **sessions:** rewrite model-facing summary text for replace-and-rewrite ([733ddd5](https://github.com/susomejias/rembric/commit/733ddd53a483c9b6acd91aa7cc8dcf0a2ad6f49d))
+
+
+### Bug Fixes
+
+* **sessions:** stop opencode's post-compaction instruction from storing the compacted window ([9da6d33](https://github.com/susomejias/rembric/commit/9da6d3315d19bb0557dc5595b0619390d7dce4c2))
+
 ## [0.27.0](https://github.com/susomejias/rembric/compare/plugin-v0.26.0...plugin-v0.27.0) (2026-08-10)
 
 

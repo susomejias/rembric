@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "rembric",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Memory for Claude Code, backed by your self-hosted Rembric server.",
   "author": {
     "name": "rembric contributors",
