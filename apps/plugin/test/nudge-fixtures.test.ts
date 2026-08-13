@@ -9,6 +9,7 @@ import { SUMMARY_SECTIONS } from '../../server/src/mcp/summary-rubric.js';
 import {
   createSessionProtocol,
   FIRST_PROMPT_NUDGE,
+  POST_COMPACT_NUDGE_CORE,
   SAVE_NUDGE_EVERY,
   SESSION_ID_NUDGE_TEMPLATE,
   SUMMARY_NUDGE_EVERY,
@@ -34,6 +35,7 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   sessionIdCoreTemplate: string;
   sessionIdTemplate: string;
   postCompact: string;
+  postCompactCore: string;
   endOfTurnRubric: string;
   firstPromptRelevanceCore: string;
   firstPromptRelevance: string;
@@ -101,7 +103,8 @@ function pythonHintConstant(
     | '_SUMMARY_HINT'
     | '_SESSION_ID_HINT_TEMPLATE'
     | '_RELEVANCE_HINT'
-    | '_RESUMED_READ_HINT',
+    | '_RESUMED_READ_HINT'
+    | '_POST_COMPACT_HINT',
 ): string {
   const program = [
     'import importlib.util, sys',
@@ -343,11 +346,11 @@ describe('the shared JS/TS core emits the due nudges in the bash order', () => {
  * on Claude Code AND Codex CLI — both run this exact script, so it is
  * byte-identical across the two by construction. It was previously emitted
  * in Spanish (the only non-English agent-facing text in the product); see
- * openspec/changes/fix-audited-defects. opencode has an independently-
- * authored post-compaction message (`experimental.session.compacting` in
- * .opencode-plugin/plugin.ts) that predates this fixture and is not forced
- * into byte-identity here — only Claude Code and Codex CLI actually share
- * this script's output today.
+ * openspec/changes/fix-audited-defects. opencode's compaction handler
+ * (`experimental.session.compacting` in .opencode-plugin/plugin.ts) sources
+ * the same core text via rembric-plugin-core.mjs's POST_COMPACT_NUDGE_CORE
+ * plus its own slug sentence — pinned in plugin.test.ts, not here, since it
+ * runs through the TS handler rather than this bash script.
  */
 describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-defects)', () => {
   function runPostCompact(cwd: string): string {
@@ -389,6 +392,28 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-d
 
   it('stays within its byte budget (≤600 bytes / 150 tokens)', () => {
     expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(600);
+  });
+});
+
+describe('postCompactCore fixture lock-step across the shared JS/TS core and Python (opencode-plugin)', () => {
+  it('the fixture text is the postCompact fixture minus its rembric: prefix', () => {
+    expect(fixtures.postCompactCore).toBe(fixtures.postCompact.replace(/^rembric: /, ''));
+  });
+
+  it('the shared JS/TS core matches the fixture exactly', () => {
+    expect(POST_COMPACT_NUDGE_CORE).toBe(fixtures.postCompactCore);
+  });
+
+  it.runIf(hasPython3)(
+    "Python's _POST_COMPACT_HINT wraps the exact shared core text in <memory-hint> tags",
+    () => {
+      const hint = pythonHintConstant('_POST_COMPACT_HINT');
+      expect(hint).toBe(`<memory-hint>${fixtures.postCompactCore}</memory-hint>`);
+    },
+  );
+
+  it('stays within the same 600-byte budget as postCompact, with margin to spare', () => {
+    expect(bytes(fixtures.postCompactCore)).toBeLessThanOrEqual(600);
   });
 });
 

@@ -27,6 +27,18 @@ export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 export const RESUMED_READ_NUDGE =
   'rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.';
+// Unprefixed (no `rembric: `): opencode pushes this to output.context, not a
+// bash-style inline nudge, so it never carries that prefix. Byte-identical
+// to post-compact.sh's PROTOCOL heredoc minus that prefix — the ONE shared
+// implementation of the compaction-time protocol text (plugin-session-protocol).
+export const POST_COMPACT_NUDGE_CORE =
+  'This session resumes from a compaction. BEFORE continuing:\n' +
+  '1. Call memory.session_get to read the stored summary.\n' +
+  '2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state, brought up to date — this REPLACES the stored value.\n' +
+  '   - title: ≤100 chars, descriptive of the work (not generic, not the cwd).\n' +
+  '   - summary: ≤10000 chars. Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files.\n' +
+  '3. Still missing detail? Call memory.context or memory.search.\n' +
+  "4. Only then, continue with the user's request.";
 
 // `memory` and `project` are the server's two tool namespaces; a dotted word
 // outside them is prose or a filename and must be left alone. The Pi client's

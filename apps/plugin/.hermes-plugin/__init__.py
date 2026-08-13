@@ -142,6 +142,23 @@ _RESUMED_READ_HINT = (
     "— call memory.session_get before your next memory.session_summary "
     "write.</memory-hint>"
 )
+# Byte-identical to rembric-plugin-core.mjs's POST_COMPACT_NUDGE_CORE
+# (plugin-session-protocol) — the ONE shared implementation of the
+# compaction-time protocol text, pinned by nudge-fixtures.test.ts.
+_POST_COMPACT_HINT = (
+    "<memory-hint>This session resumes from a compaction. BEFORE "
+    "continuing:\n"
+    "1. Call memory.session_get to read the stored summary.\n"
+    "2. Call memory.session_summary({title, summary}) with the CURRENT "
+    "COMPLETE state, brought up to date — this REPLACES the stored "
+    "value.\n"
+    "   - title: ≤100 chars, descriptive of the work (not generic, not "
+    "the cwd).\n"
+    "   - summary: ≤10000 chars. Goal · Accomplished · Decisions+why · "
+    "Verified+how · Unfinished+why · Files.\n"
+    "3. Still missing detail? Call memory.context or memory.search.\n"
+    "4. Only then, continue with the user's request.</memory-hint>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +345,10 @@ class RembricMemoryProvider(MemoryProvider):
         # this provider instance's lifetime, and never overwritten later.
         self._process_resumed: bool | None = None
         self._resumed_hint_emitted: set[str] = set()
+        # Armed by on_pre_compress firing (the compaction itself), never by
+        # on_turn_start's remaining_tokens prediction; consumed by the next
+        # prefetch() so the directive is emitted exactly once.
+        self._post_compact_pending: bool = False
 
     @property
     def name(self) -> str:
@@ -476,12 +497,27 @@ class RembricMemoryProvider(MemoryProvider):
         elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
             hints.append(_SAVE_HINT)
             hint_tags.append("save")
+        # Emitted on the first prefetch() after on_pre_compress fires,
+        # independent of the save/summary cadence — it is its own line, not
+        # gated on turn number. It is a strict superset of the resumed-read
+        # line, so it supersedes that line on a shared turn (below) rather
+        # than stacking with it.
+        post_compact_due = self._post_compact_pending
+        if post_compact_due:
+            self._post_compact_pending = False
+            hints.append(_POST_COMPACT_HINT)
+            hint_tags.append("post_compact")
         if self._turn_number > 0 and (
             self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
         ):
             # A sibling of the summary hint, never folded into it: its own
             # text stays independent of session state either way.
-            if self._process_resumed and session_id and session_id not in self._resumed_hint_emitted:
+            if (
+                not post_compact_due
+                and self._process_resumed
+                and session_id
+                and session_id not in self._resumed_hint_emitted
+            ):
                 self._resumed_hint_emitted.add(session_id)
                 hints.append(_RESUMED_READ_HINT)
                 hint_tags.append("resumed_read")
@@ -571,6 +607,11 @@ class RembricMemoryProvider(MemoryProvider):
         # Returning "" is the documented no-contribution signal; the
         # important effect is the side-effect POST below. Hermes feeds the
         # return value into the compressor prompt; we choose not to.
+        #
+        # Armed unconditionally, ahead of the guard below: the compaction
+        # itself is what makes the directive correct, not whether this
+        # instance can also POST the transcript.
+        self._post_compact_pending = True
         if (
             not self._initialized
             or not self._slug
@@ -630,6 +671,7 @@ class RembricMemoryProvider(MemoryProvider):
         self._turn_number = 0
         self._compaction_imminent = False
         self._compaction_warned = False
+        self._post_compact_pending = False
 
     def on_session_switch(
         self,

@@ -14,6 +14,7 @@ export declare const SUMMARY_NUDGE_EVERY: number;
 export declare const SUMMARY_NUDGE: string;
 export declare const SESSION_ID_NUDGE_TEMPLATE: string;
 export declare const RESUMED_READ_NUDGE: string;
+export declare const POST_COMPACT_NUDGE_CORE: string;
 
 export declare function diag(line: string): void;
 export declare function stripPrivateTags(text: string): string;

@@ -1394,6 +1394,38 @@ describe('the session-summary rubric has one source', () => {
   });
 });
 
+// A SECOND, independent enumeration: compaction-time protocol text is a
+// different class of surface from the always-present rubric above, and that
+// guard can only ever see surfaces that carry ITS OWN canonical section
+// list — this block's text never did, which is why .opencode-plugin/plugin.ts
+// shipped a hand-written, diverging copy for a whole phase undetected
+// (design.md D24). Grepped by a marker specific to THIS text so the two
+// enumerations stay independent.
+describe('the post-compaction protocol text has one source', () => {
+  const surfaces = [
+    'apps/plugin/scripts/post-compact.sh',
+    REMBRIC_PLUGIN_CORE_MJS,
+    OPENCODE_PLUGIN_TS,
+    'apps/plugin/.hermes-plugin/__init__.py',
+  ];
+
+  // NOTE: derived from `git grep`, so it only sees TRACKED files — stage the
+  // plugin files before running it, same caveat as the rubric enumeration
+  // above. `plugin.ts` carries no literal copy of the text (it imports
+  // POST_COMPACT_NUDGE_CORE), so the symbol name is grepped alongside the
+  // literal marker — `.d.mts`'s declaration and the JSON fixture also name
+  // that symbol/text and are excluded, as summary-rubric.ts is above.
+  it('the enumeration above is complete', () => {
+    const found = execSync(
+      `git -C ${repoRoot} grep -l -e 'This session resumes from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
+      { encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean);
+    expect(found.sort()).toEqual([...surfaces].sort());
+  });
+});
+
 describe('derived-table reproducibility invariant', () => {
   function ownedTables(raw: DbRaw): string[] {
     const shadows = new Set(SHADOW_TABLE_NAMES);
