@@ -94,16 +94,19 @@ The plugin ships no skills, so there is no skill description and no skill body i
 
 **On-invoke cost**, per hook:
 
-| Surface                                     | Cap             |
-| ------------------------------------------- | --------------- |
-| `SessionStart` (`startup\|resume\|clear`)   | ≤30 tokens      |
-| `SessionStart` (`compact`)                  | ≤150 tokens     |
-| `UserPromptSubmit`, per FIRING turn         | ≤210 tokens     |
-| `UserPromptSubmit`, amortised over 10 turns | ≤45 tokens/turn |
-| `SessionEnd`                                | 0 tokens        |
-| `PreCompact`                                | 0 tokens        |
-| `PostCompact`                               | 0 tokens        |
-| `Stop`                                      | 0 tokens        |
+| Surface                                     | Cap                      |
+| ------------------------------------------- | ------------------------ |
+| `SessionStart` (`startup\|resume\|clear`)   | ≤30 tokens               |
+| `SessionStart` (`compact`)                  | ≤150 tokens              |
+| `UserPromptSubmit`, per FIRING turn         | ≤210 tokens              |
+| `UserPromptSubmit`, amortised over 10 turns | ≤45 tokens/turn          |
+| `SessionEnd`                                | 0 tokens                 |
+| `PreCompact`                                | 0 tokens                 |
+| `PostCompact`                               | 0 tokens                 |
+| `Stop` (`stop-sync.sh` handler)             | 0 tokens                 |
+| `Stop` (`stop-nudge.sh` handler)            | no fixed cap — see below |
+
+`Stop` carries two independent handler entries in `hooks.json` (`plugin-session-protocol`'s "The summary reminder MUST be delivered at the end of the turn, and MUST NEVER interrupt" specifies the second one), and a single `0 tokens` figure for the whole event was true of only one of them. `stop-sync.sh` is the asynchronous raw-transcript sync: a pure side effect, no stdout, `0 tokens`, unchanged. `stop-nudge.sh` is the synchronous end-of-turn summary reminder: it carries the canonical summary structure in full plus the session's own grounded facts, and is deliberately uncapped, unlike every other row in this table — `plugin-session-protocol` states this explicitly ("This is the surface that carries the long form precisely because it has no length budget, unlike a tool description"). Collapsing both handlers under one `0 tokens` row published the opposite of what that requirement already requires of the same handler; the split above is the correction, and it costs nothing else in this table because `stop-nudge.sh` was never actually silent — it already emits `hookSpecificOutput.additionalContext` carrying the rubric and the extracted facts.
 
 `UserPromptSubmit` SHALL be governed by the pair — a per-firing-turn ceiling plus an amortised budget — and not by a flat per-turn figure. A flat figure is structurally impossible under this hook's cadence design: the two matcher-less entries fire on **turn 1**, on `count % 5 == 0` (save), on `count == 1 || count % 10 == 0` (summary), and on any turn whose prompt matches a recall keyword, each on its own counter. Turns matching neither cadence nor the keyword emit **zero** tokens, which is what makes the amortised figure the honest one. The previously-published flat `≤30 tokens` was never satisfiable and therefore never tested; measured firing turns are 142.3 (turn 1), 81.3 (turn 5) and 140.8 (turn 10), and 36.4 tokens/turn amortised across a 10-turn window. Turn 1 with a recall keyword measures 165.0, but it is NOT the worst case: the two scripts keep independent counters (`rembric-relevance-prefetch` and `rembric-turnnudge`) with nothing coupling them, so one may sit at turn 1 while the other is at turn 10 and all five lines fire together — measured **195.0**. That is reachable rather than theoretical, because Codex records hook trust per handler entry, so an operator who trusts one script before the other lands in exactly that state. The ceiling is set against the divergent case, not against turn 1.
 
@@ -118,6 +121,8 @@ The plugin ships no skills, so there is no skill description and no skill body i
 | `sessionIdTemplate` (36-char id) | 224         | 56        |
 | `summary`                        | 260         | 65        |
 | `postCompact`                    | 600         | 150       |
+
+`endOfTurnRubric` (the `stop-nudge.sh` template) deliberately has NO row in this table, for the same reason the table above gives it no fixed cap: it is the one surface `plugin-session-protocol` specifies as carrying the long form precisely because it has no length budget.
 
 The `sessionIdTemplate` line is the largest single per-turn contributor (51.0 tokens) and SHALL NOT be removed to reduce the budget. Removing it does not reach the previously-published cap anyway — measured without it, firing turns fall only to 91.0 / 30.0 / 89.5 — and it is not redundant: of `resolveActiveSessionId`'s three paths, the `SessionRouter` fallback is populated only by `memory.session_start`, which the plugin never calls because the session lifecycle is HTTP, and `findActiveForTransport` refuses by design to guess under concurrent ambiguity within its staleness window. With two host sessions open on one repository the nudge is the only mechanism that attaches a memory to the right session. Removing it is therefore blocked on a server-side fix to implicit session attachment under concurrency, which is out of scope for this capability.
 
@@ -147,8 +152,15 @@ The `sessionIdTemplate` line is the largest single per-turn contributor (51.0 to
 
 #### Scenario: A side-effect hook emits nothing to the model
 
-- **WHEN** `SessionEnd`, `PreCompact`, `PostCompact` or `Stop` fires under Claude Code
+- **WHEN** `SessionEnd`, `PreCompact`, `PostCompact`, or the `stop-sync.sh` handler of `Stop` fires under Claude Code
 - **THEN** the script SHALL write nothing to stdout
+
+#### Scenario: The Stop reminder handler is exempt from the zero-output cap
+
+- **GIVEN** the `stop-nudge.sh` handler, the second `Stop` entry in `hooks.json`
+- **WHEN** it fires under Claude Code at its own cadence
+- **THEN** its emitted `hookSpecificOutput.additionalContext` MAY be non-empty
+- **AND** it SHALL NOT be held to a fixed byte or token cap by this capability — `plugin-session-protocol`'s end-of-turn summary-reminder requirement governs its content, not the per-hook table above
 
 #### Scenario: Raising a cap requires a re-measurement
 
