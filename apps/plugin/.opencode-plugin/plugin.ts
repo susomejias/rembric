@@ -15,7 +15,11 @@
 // plugin module with the plugin ctx, so a helper export crashes on load.
 
 import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
-import { createSessionProtocol, diag } from '../bin/rembric-plugin-core.mjs';
+import {
+  createSessionProtocol,
+  diag,
+  POST_COMPACT_NUDGE_CORE,
+} from '../bin/rembric-plugin-core.mjs';
 
 type EventInput = {
   event: {
@@ -241,15 +245,9 @@ export const RembricPlugin: Plugin = async (ctx) => {
         await core.ensureSession(input.sessionID);
       }
 
-      output.context.push(
-        'CRITICAL INSTRUCTION FOR THE POST-COMPACTION AGENT:\n' +
-          'You have Rembric persistent memory available via MCP tools. As your FIRST action, ' +
-          `call \`memory.session_summary\` with the content of the compacted summary above. ` +
-          (slug ? `Use project: '${slug}'. ` : '') +
-          'This preserves what was accomplished before compaction. ' +
-          'Without this step, everything done before compaction is lost from memory. ' +
-          'If the compacted summary lacks specific detail you need (exact file paths, prior decisions, concrete error messages), call `memory.context` before responding.',
-      );
+      // The slug sentence is per-connection data, appended after the shared
+      // protocol text rather than forked from it (opencode-plugin, D24).
+      output.context.push(POST_COMPACT_NUDGE_CORE + (slug ? `Use project: '${slug}'. ` : ''));
     },
   };
 };
