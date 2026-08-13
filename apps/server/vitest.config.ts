@@ -1,8 +1,17 @@
+import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
 
 const piHostStub = fileURLToPath(new URL('./src/test/pi-host-stub.ts', import.meta.url));
+
+// `mkdtemp` does not create parent directories, so pointing TMPDIR at a path
+// that does not exist yet fails every fixture instead of relocating it. This
+// config is evaluated in the main process before any worker spawns, which is
+// why the directory is created here rather than in a per-suite hook: the
+// backup/restore tests reach `os.tmpdir()` directly, not through `src/test/db.ts`.
+const fixtureTmpDir = '/var/tmp/rembric-tests';
+mkdirSync(fixtureTmpDir, { recursive: true });
 
 export default defineConfig({
   // These resolve only inside the Pi harness, so `.pi-plugin/index.ts`'s static
@@ -44,7 +53,7 @@ export default defineConfig({
     // measured on 2026-08-11, 2.8 GB of RAM, which OOM-killed the box. Pointing
     // `TMPDIR` at a disk-backed directory makes an aborted run cost disk instead.
     // `os.tmpdir()` reads the variable per call, so this covers every fixture.
-    env: { TMPDIR: '/var/tmp/rembric-tests' },
+    env: { TMPDIR: fixtureTmpDir },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
