@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.28.2](https://github.com/susomejias/rembric/compare/server-v0.28.1...server-v0.28.2) (2026-08-13)
+
+
+### Features
+
+* **dashboard:** list session summary version history on the detail page ([48310c8](https://github.com/susomejias/rembric/commit/48310c8e8344c2c9bb99134c6cddcb762142c89d))
+* **dev-seed:** give a seeded session two curated summary versions ([1a64a61](https://github.com/susomejias/rembric/commit/1a64a61ea691068e8bf2662ce0ed16894de201b7))
+* **plugin:** tell a resumed process to read the stored summary once ([da386cb](https://github.com/susomejias/rembric/commit/da386cb0d91cdc987a4142d455ced626e7bc286a))
+* **sessions:** add session_summary_versions table and append-on-write ([c984608](https://github.com/susomejias/rembric/commit/c98460883afc5b5f150cb40f3f4a544ba3493187))
+* **sessions:** budget the Stop reminder correctly, direct verbatim copying of facts ([d57b1b8](https://github.com/susomejias/rembric/commit/d57b1b8f6fea20eaff87080a4ed6f597ff6547ed))
+* **sessions:** rewrite model-facing summary text for replace-and-rewrite ([733ddd5](https://github.com/susomejias/rembric/commit/733ddd53a483c9b6acd91aa7cc8dcf0a2ad6f49d))
+* **sessions:** version titles and expose recent versions via session_get ([0563260](https://github.com/susomejias/rembric/commit/0563260bcded49498aad650abce41e438cd6145d))
+
+
+### Bug Fixes
+
+* **dashboard:** tolerate prettier-wrapped whitespace in summary-history test assertions ([29ce7c1](https://github.com/susomejias/rembric/commit/29ce7c1dc4af3bb90e670b8577fc7f553d42c91c))
+* **server:** create the fixture TMPDIR instead of assuming it exists ([0e3fa76](https://github.com/susomejias/rembric/commit/0e3fa76e4249c6919681c984788ea4eed09ebc25))
+* **sessions:** stop opencode's post-compaction instruction from storing the compacted window ([9da6d33](https://github.com/susomejias/rembric/commit/9da6d3315d19bb0557dc5595b0619390d7dce4c2))
+
 ## [0.28.1](https://github.com/susomejias/rembric/compare/server-v0.28.0...server-v0.28.1) (2026-08-10)
 
 
