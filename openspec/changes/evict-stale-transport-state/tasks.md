@@ -81,8 +81,8 @@
 
 ## 10. Deferred and explicitly rejected — recorded so they are not lost
 
-- [ ] 10.1 A capacity bound / LRU for either registry: rejected (design D3), because it makes eviction depend on load rather than liveness. Not deferred — do not add it later without a change that owns scope resolution.
-- [ ] 10.2 Making the threshold configurable: rejected (D3). If an operator ever needs it, the change is to `TRANSPORT_STALENESS_MS` itself, which moves both clocks together by construction.
-- [ ] 10.3 Counting an open standalone SSE stream as transport activity: deferred (Open Question 3), pending 1.5's measurement.
-- [ ] 10.4 Persisting router state across restarts: out of scope and unchanged — the boot-time `abandonStale` pass already reconciles the DB with a cold router.
-- [ ] 10.5 Any eviction hook on `SessionRouter.discoveryInFlight`: rejected with evidence (1.4). The delta records the correction so the issue's three-registry table does not resurface.
+- [x] 10.1 A capacity bound / LRU for either registry: rejected (design D3), because it makes eviction depend on load rather than liveness. Not deferred — do not add it later without a change that owns scope resolution.
+- [x] 10.2 Making the threshold configurable: rejected (D3). If an operator ever needs it, the change is to `TRANSPORT_STALENESS_MS` itself, which moves both clocks together by construction.
+- [x] 10.3 Counting an open standalone SSE stream as transport activity: deferred (Open Question 3), pending 1.5's measurement.
+- [x] 10.4 Persisting router state across restarts: out of scope and unchanged — the boot-time `abandonStale` pass already reconciles the DB with a cold router.
+- [x] 10.5 Any eviction hook on `SessionRouter.discoveryInFlight`: rejected with evidence (1.4). The delta records the correction so the issue's three-registry table does not resurface.
