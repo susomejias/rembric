@@ -1267,34 +1267,6 @@ describe('roots-discovery state ownership invariant', () => {
   });
 });
 
-describe('transport-state reaper threshold invariant', () => {
-  const reaperSrc = readFileSync(join(srcRoot, 'server/transport-state-reaper.ts'), 'utf8');
-  const transportSrc = readFileSync(join(srcRoot, 'mcp/transport.ts'), 'utf8');
-  const routerSrc = readFileSync(join(srcRoot, 'server/session-router.ts'), 'utf8');
-
-  it('the reaper declares no millisecond literal of its own', () => {
-    const productOfTwoNumbers = /\b\d[\d_]*\s*\*\s*\d[\d_]*\b/;
-    const suspiciouslyLargeNumber = /\b\d{4,}\b/;
-    expect(productOfTwoNumbers.test(reaperSrc)).toBe(false);
-    expect(suspiciouslyLargeNumber.test(reaperSrc)).toBe(false);
-  });
-
-  it('imports TRANSPORT_STALENESS_MS rather than forking it', () => {
-    expect(
-      /import\s*\{[^}]*\bTRANSPORT_STALENESS_MS\b[^}]*\}\s*from\s*['"][^'"]*agent-sessions\.js['"]/.test(
-        reaperSrc,
-      ),
-    ).toBe(true);
-  });
-
-  it('neither registry class declares a staleness rule of its own', () => {
-    for (const src of [transportSrc, routerSrc]) {
-      expect(src).not.toMatch(/TRANSPORT_STALENESS_MS/);
-      expect(src).not.toMatch(/Date\.now\(\)\s*-/);
-    }
-  });
-});
-
 // A summary payload is trimmed twice: once by the client that sends it, once by
 // the server that stores it. Two tail-cuts are idempotent — the result is the
 // last min(bounds) characters — so the bounds are free to disagree. The SIDES

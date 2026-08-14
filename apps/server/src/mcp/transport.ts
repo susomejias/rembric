@@ -18,8 +18,6 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 interface Session {
   server: McpServer;
   transport: StreamableHTTPServerTransport;
-  /** Last time this transport served an MCP request; the eviction pass's activity clock. */
-  lastSeenAt: number;
 }
 
 export interface ServerFactoryContext {
@@ -49,10 +47,7 @@ export class McpTransportManager {
   ): Promise<StreamableHTTPServerTransport> {
     if (sessionId) {
       const existing = this.sessions.get(sessionId);
-      if (existing) {
-        existing.lastSeenAt = Date.now();
-        return existing.transport;
-      }
+      if (existing) return existing.transport;
     }
 
     const server = this.serverFactory(factoryCtx);
@@ -67,7 +62,7 @@ export class McpTransportManager {
       allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
       allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : undefined,
       onsessioninitialized: (id) => {
-        this.sessions.set(id, { server, transport, lastSeenAt: Date.now() });
+        this.sessions.set(id, { server, transport });
       },
     });
 
@@ -79,28 +74,6 @@ export class McpTransportManager {
 
     await server.connect(transport);
     return transport;
-  }
-
-  /** Whether a transport is still held for this id. */
-  has(mcpSessionId: string): boolean {
-    return this.sessions.has(mcpSessionId);
-  }
-
-  /** `(mcpSessionId, lastSeenAt)` for every live transport; read-only, no policy. */
-  *entries(): IterableIterator<{ mcpSessionId: string; lastSeenAt: number }> {
-    for (const [mcpSessionId, session] of this.sessions) {
-      yield { mcpSessionId, lastSeenAt: session.lastSeenAt };
-    }
-  }
-
-  /** Close and remove one transport. Idempotent: a no-op if `onclose` got there first. */
-  evict(mcpSessionId: string): boolean {
-    const session = this.sessions.get(mcpSessionId);
-    if (!session) return false;
-    this.sessions.delete(mcpSessionId);
-    void session.transport.close();
-    void session.server.close();
-    return true;
   }
 
   close(): void {

@@ -57,7 +57,6 @@ import { startHttpServer, type HttpServerHandle } from './http.js';
 import { createOAuthProvider } from './oauth-provider.js';
 import { AuthLockout, RateLimiter } from './rate-limit.js';
 import { SessionRouter } from './session-router.js';
-import { runTransportStateReaperPass } from './transport-state-reaper.js';
 
 /**
  * Wire dependencies, apply migrations, bootstrap the admin token, and
@@ -70,12 +69,6 @@ export interface BootstrappedServer {
   http: HttpServerHandle;
   dbHandle: DbHandle;
   shutdown: () => Promise<void>;
-  /**
-   * The process's two in-process transport registries. Not an operator
-   * surface — exposed only so the transport-state reaper's own tests can
-   * drive a real edge and still inspect what it evicted.
-   */
-  transportState: { router: SessionRouter; mcpTransport: McpTransportManager };
 }
 
 export interface BootstrapOverrides {
@@ -85,8 +78,6 @@ export interface BootstrapOverrides {
   updates?: UpdateCheckService;
   /** Test-only seam: replace the self-update orchestrator. */
   selfUpdate?: SelfUpdateOrchestrator;
-  /** Test-only seam: counts every `McpServer` construction (mcp-api's "refusal constructs nothing"). */
-  onServerConstructed?: () => void;
 }
 
 export async function bootstrap(
@@ -274,6 +265,26 @@ export async function bootstrap(
   const entityBackfillFallbackTimer = setInterval(() => entityBackfillTick(true), 60 * 60_000);
   entityBackfillFallbackTimer.unref?.();
 
+  // Periodic stale-session reaper — the boot-time sweep above only catches
+  // rows leaked by a PRIOR process run; a client killed mid-session (SIGKILL,
+  // OOM, closed terminal) while THIS process keeps running would otherwise
+  // block `findActiveForTransport` for every subsequent session on the same
+  // (token, project) for as long as the server stays up. See
+  // openspec/changes/fix-audited-defects.
+  const sessionReapTimer = setInterval(() => {
+    try {
+      const result = agentSessionsSvc.abandonStale({ olderThanMs: config.sessions.abandonAfterMs });
+      if (result.abandoned > 0) {
+        logger.info(`${result.abandoned} stale session(s) marked abandoned (periodic reap)`);
+      }
+    } catch (err) {
+      logger.error('periodic session reap failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, 30 * 60_000);
+  sessionReapTimer.unref?.();
+
   // Doctor report builder — captures live services for `memory.doctor`.
   const buildDoctorReport = buildDoctorReportFactory({
     diagnostics: dbDiagnostics,
@@ -309,9 +320,8 @@ export async function bootstrap(
   // connected transport). The factory receives the URL path slug so the
   // emitted instructions block matches the connection scope.
   const mcpManager = new McpTransportManager(
-    (factoryCtx) => {
-      overrides.onServerConstructed?.();
-      return createMcpServer({
+    (factoryCtx) =>
+      createMcpServer({
         memory: memorySvc,
         projects,
         agentSessions: agentSessionsSvc,
@@ -328,51 +338,12 @@ export async function bootstrap(
         sweep: sweepOnSessionStart,
         orphanAfterMs: config.judgments.orphanAfterMs,
         requestedSlug: factoryCtx.requestedSlug,
-      });
-    },
+      }),
     {
       allowedHosts: config.mcpTransport.allowedHosts,
       allowedOrigins: config.mcpTransport.allowedOrigins,
     },
   );
-
-  // Periodic stale-session reaper — the boot-time sweep above only catches
-  // rows leaked by a PRIOR process run; a client killed mid-session (SIGKILL,
-  // OOM, closed terminal) while THIS process keeps running would otherwise
-  // block `findActiveForTransport` for every subsequent session on the same
-  // (token, project) for as long as the server stays up. See
-  // openspec/changes/fix-audited-defects. Also runs the transport-state
-  // eviction pass (`sessions` capability) on the same tick — same
-  // TRANSPORT_STALENESS_MS window, no second timer.
-  const sessionReapTimer = setInterval(() => {
-    try {
-      const result = agentSessionsSvc.abandonStale({ olderThanMs: config.sessions.abandonAfterMs });
-      if (result.abandoned > 0) {
-        logger.info(`${result.abandoned} stale session(s) marked abandoned (periodic reap)`);
-      }
-    } catch (err) {
-      logger.error('periodic session reap failed', {
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-    try {
-      const evicted = runTransportStateReaperPass({
-        router: sessionRouter,
-        mcpTransport: mcpManager,
-        agentSessions: agentSessionsSvc,
-      });
-      if (evicted.routerEvicted > 0 || evicted.transportsEvicted > 0) {
-        logger.info(
-          `transport-state reap: ${evicted.routerEvicted} router entr${evicted.routerEvicted === 1 ? 'y' : 'ies'}, ${evicted.transportsEvicted} transport(s) evicted`,
-        );
-      }
-    } catch (err) {
-      logger.error('periodic transport-state reap failed', {
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, 30 * 60_000);
-  sessionReapTimer.unref?.();
 
   const updates =
     overrides.updates ??
@@ -482,7 +453,6 @@ export async function bootstrap(
     config,
     http,
     dbHandle,
-    transportState: { router: sessionRouter, mcpTransport: mcpManager },
     shutdown: async () => {
       clearInterval(markerTimer);
       try {
