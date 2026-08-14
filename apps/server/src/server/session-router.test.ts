@@ -52,35 +52,4 @@ describe('SessionRouter', () => {
     r.resetAll();
     expect(r.size()).toBe(0);
   });
-
-  it('evictTransport removes every entry for that mcp-session-id, across tokens, and leaves others', () => {
-    const r = new SessionRouter();
-    r.setActiveSession('tok-1', 'mcp-A', 'S1');
-    r.setActiveSession('tok-2', 'mcp-A', 'S2');
-    r.setActiveSession('tok-1', 'mcp-B', 'S3');
-
-    expect(r.evictTransport('mcp-A')).toBe(2);
-
-    expect(r.get('tok-1', 'mcp-A')).toBeUndefined();
-    expect(r.get('tok-2', 'mcp-A')).toBeUndefined();
-    expect(r.get('tok-1', 'mcp-B')?.rembricSessionId).toBe('S3');
-  });
-
-  it('evictTransport is a no-op count for an id with no entries', () => {
-    const r = new SessionRouter();
-    r.setActiveSession('tok-1', 'mcp-A', 'S1');
-    expect(r.evictTransport('mcp-unknown')).toBe(0);
-    expect(r.size()).toBe(1);
-  });
-
-  it('entriesForEviction yields the (tokenId, mcpSessionId, projectId, rembricSessionId) tuple', () => {
-    const r = new SessionRouter();
-    r.setActiveSession('tok-1', 'mcp-A', 'S1');
-    r.setActiveProject('tok-1', 'mcp-A', 'P1', 'roots');
-
-    const rows = [...r.entriesForEviction()];
-    expect(rows).toEqual([
-      { tokenId: 'tok-1', mcpSessionId: 'mcp-A', projectId: 'P1', rembricSessionId: 'S1' },
-    ]);
-  });
 });

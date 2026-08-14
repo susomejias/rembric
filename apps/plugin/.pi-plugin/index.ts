@@ -97,17 +97,6 @@ function discoveryDeadline(): AbortSignal {
   );
 }
 
-// Carries the HTTP status so a 404 (session evicted or never issued) can be
-// told apart from any other failure without re-parsing the message text.
-class McpHttpError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
 function createMcpClient(endpoint: string, apiToken: string) {
   let mcpSessionId: string | null = null;
   let negotiatedVersion = PROTOCOL_VERSION;
@@ -153,10 +142,7 @@ function createMcpClient(endpoint: string, apiToken: string) {
     });
     const body = await res.text();
     if (!res.ok) {
-      throw new McpHttpError(
-        res.status,
-        `${method} failed: HTTP ${res.status} ${body.slice(0, 300)}`,
-      );
+      throw new Error(`${method} failed: HTTP ${res.status} ${body.slice(0, 300)}`);
     }
     const sessionHeader = res.headers.get('mcp-session-id');
     if (sessionHeader) mcpSessionId = sessionHeader;
@@ -168,33 +154,29 @@ function createMcpClient(endpoint: string, apiToken: string) {
     return (message?.result as Record<string, unknown>) ?? {};
   }
 
-  async function performInitialize(deadline: AbortSignal): Promise<void> {
-    const result = await send(
-      'initialize',
-      {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: CLIENT_NAME, version: '0' },
-      },
-      deadline,
-    );
-    if (typeof result.protocolVersion === 'string') negotiatedVersion = result.protocolVersion;
-    if (typeof result.instructions === 'string' && result.instructions) {
-      serverInstructions = underscoreToolNames(result.instructions);
-    }
-    // Not awaited: a path-scoped connection is already bound to its project,
-    // so nothing downstream depends on the notification landing.
-    void fetch(endpoint, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-      signal: deadline,
-    }).catch(() => {});
-  }
-
   return {
     async initialize(deadline: AbortSignal): Promise<void> {
-      await performInitialize(deadline);
+      const result = await send(
+        'initialize',
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: { name: CLIENT_NAME, version: '0' },
+        },
+        deadline,
+      );
+      if (typeof result.protocolVersion === 'string') negotiatedVersion = result.protocolVersion;
+      if (typeof result.instructions === 'string' && result.instructions) {
+        serverInstructions = underscoreToolNames(result.instructions);
+      }
+      // Not awaited: a path-scoped connection is already bound to its project,
+      // so nothing downstream depends on the notification landing.
+      void fetch(endpoint, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+        signal: deadline,
+      }).catch(() => {});
     },
 
     instructions(): string | null {
@@ -217,26 +199,7 @@ function createMcpClient(endpoint: string, apiToken: string) {
       args: Record<string, unknown>,
       signal?: AbortSignal,
     ): Promise<{ text: string; isError: boolean }> {
-      const hadSession = mcpSessionId !== null;
-      const run = () => send('tools/call', { name, arguments: args }, signal);
-
-      let result: Record<string, unknown>;
-      try {
-        result = await run();
-      } catch (err) {
-        // The 404 fires at the transport boundary before any tool handler
-        // runs (never a 401/403/429/5xx), so retrying this write cannot
-        // replay a call that was already applied. One retry, no loop: a
-        // second failure of any kind propagates as-is.
-        if (hadSession && err instanceof McpHttpError && err.status === 404) {
-          mcpSessionId = null;
-          await performInitialize(discoveryDeadline());
-          result = await run();
-        } else {
-          throw err;
-        }
-      }
-
+      const result = await send('tools/call', { name, arguments: args }, signal);
       const content = (result.content as ToolContent[] | undefined) ?? [];
       const text = content
         .filter((part) => part.type === 'text')

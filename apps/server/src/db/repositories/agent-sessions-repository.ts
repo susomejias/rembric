@@ -173,30 +173,6 @@ export class AgentSessionsRepository {
     return rows.length === 1 ? rows[0] : undefined;
   }
 
-  /**
-   * Existence-only counterpart to `findActiveForTransport`, for the
-   * transport-state eviction pass: it must not guess a session (that method's
-   * job), only decide whether ANY live one protects the transport — so two
-   * matching rows must read as "protected", not as the refusal-to-choose that
-   * `findActiveForTransport` returns for the same shape of ambiguity.
-   */
-  hasActiveForTransport(tokenId: string, projectId: string | null, activeSinceMs: number): boolean {
-    const conditions = [
-      eq(agentSessions.tokenId, tokenId),
-      eq(agentSessions.status, 'active'),
-      isNull(agentSessions.deletedAt),
-      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
-      sql`${EFFECTIVE_LAST_ACTIVITY} >= ${activeSinceMs}`,
-    ];
-    const row = this.db
-      .select({ id: agentSessions.id })
-      .from(agentSessions)
-      .where(and(...conditions))
-      .limit(1)
-      .get();
-    return row !== undefined;
-  }
-
   /** Bump `last_activity_at` — called by every write that resolves to this session. */
   touchActivity(id: string, at: Date): void {
     this.db.update(agentSessions).set({ lastActivityAt: at }).where(eq(agentSessions.id, id)).run();
