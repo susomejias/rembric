@@ -83,6 +83,7 @@ export const sessionStartOutput = {
   startedAt: z.string(),
   title: z.string().nullable(),
   reused: z.boolean(),
+  agent: z.string(),
 };
 
 export const sessionEndOutput = {
@@ -246,6 +247,7 @@ async function handleSessionStart(
     startedAt: session.startedAt,
     title: session.title,
     reused,
+    agent: session.agent,
   });
 }
 

@@ -743,7 +743,7 @@ describe('MCP protocol conformance', () => {
     it.each([
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 616],
+      ['memory.session_start', 818],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
       ['memory.save', 1549],
@@ -812,6 +812,7 @@ describe('MCP protocol conformance', () => {
       const desc = descriptions.get('memory.session_start') ?? '';
       const required = requiredBySchema.get('memory.session_start') ?? [];
       expect(required.sort()).toEqual([
+        'agent',
         'projectId',
         'reused',
         'scope',
@@ -823,6 +824,7 @@ describe('MCP protocol conformance', () => {
         expect(desc, `${field} unnamed in the description`).toContain(field);
       }
       expect(desc).toMatch(/reused:true.*ADOPTED/i);
+      expect(desc).toMatch(/agent.*MAY differ from the `agent` you passed/i);
     });
 
     it('memory.session_resume names every field its outputSchema requires', () => {
@@ -868,14 +870,16 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const second = (await client.callTool({
       name: 'memory.session_start',
-      arguments: { agent: 'rembric-test' },
+      arguments: { agent: 'rembric-test-other' },
     })) as ToolResult;
-    const a = readJson(first) as { sessionId: string; reused: boolean };
-    const b = readJson(second) as { sessionId: string; reused: boolean };
+    const a = readJson(first) as { sessionId: string; reused: boolean; agent: string };
+    const b = readJson(second) as { sessionId: string; reused: boolean; agent: string };
 
     expect(a.reused).toBe(false);
+    expect(a.agent).toBe('rembric-test');
     expect(b.reused).toBe(true);
     expect(b.sessionId).toBe(a.sessionId);
+    expect(b.agent).toBe('rembric-test');
 
     // The control: adoption, not a coincidence of ids — only one row exists.
     const rows = server.dbHandle.db
