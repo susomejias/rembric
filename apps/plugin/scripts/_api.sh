@@ -257,6 +257,18 @@ rembric_transcript_path_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
+# Extract `stop_hook_active` from a Stop hook stdin JSON blob. Callers MUST
+# treat an empty result the same as `false`.
+rembric_stop_hook_active_from_stdin_json() {
+  local input="${1:-}"
+  [ -z "$input" ] && return 0
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$input" | jq -r 'if .stop_hook_active == true then "true" elif .stop_hook_active == false then "false" else "" end' 2>/dev/null
+  else
+    printf '%s' "$input" | sed -n 's/.*"stop_hook_active"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1
+  fi
+}
+
 # Extract `compaction_summary` from a PostCompact hook stdin JSON blob.
 # Prefers Claude Code's snake_case; falls back to camelCase in case Codex
 # (or a future client) ships the same content under `compactionSummary`.
