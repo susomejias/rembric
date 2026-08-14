@@ -45,6 +45,13 @@ function entryKey(tokenId: string, mcpSessionId: string): string {
   return `${tokenId}::${mcpSessionId}`;
 }
 
+// Safe to split on the first "::": tokenId is a ulid and mcpSessionId a
+// randomUUID, neither of which ever contains "::".
+function parseEntryKey(key: string): { tokenId: string; mcpSessionId: string } {
+  const sep = key.indexOf('::');
+  return { tokenId: key.slice(0, sep), mcpSessionId: key.slice(sep + 2) };
+}
+
 export class SessionRouter {
   private readonly entries = new Map<string, RouterEntry>();
   /**
@@ -106,10 +113,41 @@ export class SessionRouter {
     });
   }
 
-  /** Clear an entire transport entry (used by `memory.session_end`). */
+  /** Null the active Rembric session id for a transport (used by `memory.session_end`); the entry itself is kept. */
   clearSession(tokenId: string, mcpSessionId: string): void {
     const e = this.entries.get(entryKey(tokenId, mcpSessionId));
     if (e) e.rembricSessionId = null;
+  }
+
+  /** Remove every entry for a transport, across every token it carries (D3 of `fix-the-roots-discovery-lifecycle`). */
+  evictTransport(mcpSessionId: string): number {
+    let removed = 0;
+    const suffix = `::${mcpSessionId}`;
+    for (const key of this.entries.keys()) {
+      if (key.endsWith(suffix)) {
+        this.entries.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** Every entry for the eviction pass; not a general-purpose read. */
+  *entriesForEviction(): IterableIterator<{
+    tokenId: string;
+    mcpSessionId: string;
+    projectId: string | null;
+    rembricSessionId: string | null;
+  }> {
+    for (const [key, entry] of this.entries) {
+      const { tokenId, mcpSessionId } = parseEntryKey(key);
+      yield {
+        tokenId,
+        mcpSessionId,
+        projectId: entry.projectId,
+        rembricSessionId: entry.rembricSessionId,
+      };
+    }
   }
 
   /** Track an in-flight roots-discovery promise for this transport. */

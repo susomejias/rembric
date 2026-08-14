@@ -511,6 +511,21 @@ export class AgentSessionsService {
   }
 
   /**
+   * Existence-only check for the transport-state eviction pass (`sessions`
+   * capability): whether a live session row protects `(tokenId, projectId)`
+   * within `TRANSPORT_STALENESS_MS`, the same window `findActiveForTransport`
+   * uses. Applies the constant here so it never leaves this file.
+   */
+  hasLiveSessionForTransport(input: { tokenId: string; projectId: string | null }): boolean {
+    const activeSinceMs = this.now().getTime() - TRANSPORT_STALENESS_MS;
+    return this.repos.agentSessions.hasActiveForTransport(
+      input.tokenId,
+      input.projectId,
+      activeSinceMs,
+    );
+  }
+
+  /**
    * N most recent sessions for the given scope, ordered newest first.
    * Soft-deleted sessions and empty sessions (those failing the shared
    * `sessionHasContent` predicate) are NEVER surfaced via this path —

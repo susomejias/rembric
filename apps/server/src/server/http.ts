@@ -371,15 +371,36 @@ async function handleMcpRequest(
     }
   }
 
-  // 3. Look up or create the transport keyed by mcp-session-id. The
+  // 3. A request naming an mcp-session-id the manager does not hold is
+  // refused before anything is constructed — the id was evicted (this
+  // change's `sessions` eviction pass) or predates a restart. `initialize`
+  // is exempt: it establishes a fresh session regardless of what stale id
+  // it happens to carry. Mirrors the JSON-RPC shape the SDK transport
+  // itself emits for a session id that does not match its own (mcp-api,
+  // "A request naming an unknown MCP session MUST be refused with 404").
+  const sessionId = headerString(req.headers['mcp-session-id']);
+  const isInitializeRequest =
+    typeof body === 'object' &&
+    body !== null &&
+    !Array.isArray(body) &&
+    (body as { method?: unknown }).method === 'initialize';
+  if (sessionId && !isInitializeRequest && !opts.mcp.has(sessionId)) {
+    respondJson(res, 404, {
+      jsonrpc: '2.0',
+      error: { code: -32001, message: 'Session not found' },
+      id: null,
+    });
+    return;
+  }
+
+  // 4. Look up or create the transport keyed by mcp-session-id. The
   // factory receives the URL path slug so the per-session McpServer
   // emits the right instructions variant.
-  const sessionId = headerString(req.headers['mcp-session-id']);
   const transport = await opts.mcp.getOrCreate(sessionId, {
     requestedSlug: slug ?? null,
   });
 
-  // 4. Hand off to the transport inside the per-request context.
+  // 5. Hand off to the transport inside the per-request context.
   await runWithContext({ ...ctx, mcpSessionId: sessionId ?? null }, async () => {
     await transport.handleRequest(req, res, body);
   });
