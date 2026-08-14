@@ -96,6 +96,36 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     expect(out.sessionId).not.toBe(a.id);
     expect(out.sessionId).not.toBe(b.id);
   });
+
+  it('reports the adopted session’s own agent, not the caller’s argument', async () => {
+    const existing = startSession('claude-code');
+
+    const r = await runWithContext(makeContext(), () => handlers.sessionStart({ agent: 'pi' }));
+    const out = parseText<{ sessionId: string; reused: boolean; agent: string }>(r);
+    expect(out.reused).toBe(true);
+    expect(out.agent).toBe('claude-code');
+
+    const rows = db.handle.db
+      .select()
+      .from(agentSessionsTable)
+      .where(
+        and(
+          eq(agentSessionsTable.tokenId, adminToken.id),
+          eq(agentSessionsTable.projectId, defaultProjectId),
+        ),
+      )
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.agent).toBe('claude-code');
+    expect(out.sessionId).toBe(existing.id);
+  });
+
+  it('control: a fresh mint reports the agent it was passed', async () => {
+    const r = await runWithContext(makeContext(), () => handlers.sessionStart({ agent: 'pi' }));
+    const out = parseText<{ reused: boolean; agent: string }>(r);
+    expect(out.reused).toBe(false);
+    expect(out.agent).toBe('pi');
+  });
 });
 
 describe('memory.session_summary on a session the sweep already abandoned', () => {
