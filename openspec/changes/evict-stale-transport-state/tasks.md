@@ -72,12 +72,12 @@
 
 ## 9. Verification
 
-- [ ] 9.1 `pnpm run typecheck`
-- [ ] 9.2 `pnpm run lint`
-- [ ] 9.3 `pnpm test` (server + plugin workspaces). Run test suites in series, not in parallel.
-- [ ] 9.4 `pnpm run check:spec-provenance` on the branch.
-- [ ] 9.5 **Operator step.** Docker smoke against pre-existing seeded data, per `.agents/skills/rembric-smoke-tests/SKILL.md`: `pnpm run dev:docker:up` (note it reseeds from scratch — the corpus under test is the seeded one), then connect, disconnect ungracefully, force a pass, and confirm from the dashboard that no session row changed status and no memory row moved project as a result. Eviction must be invisible in the data.
-- [ ] 9.6 `pnpm run eval` is **not** required: no retrieval path is touched. Stated so the omission is a decision, not an oversight.
+- [x] 9.1 `pnpm run typecheck` — clean, all workspaces.
+- [x] 9.2 `pnpm run lint` (`eslint .`) — clean.
+- [x] 9.3 `pnpm test` — 148 test files / 2818 passed / 10 skipped (`apps/server`, includes every `.pi-plugin` and shared-plugin test via the vitest `include` globs) + 91 passed (Hermes Python `unittest`). Series, not parallel (`fileParallelism: false` already set).
+- [x] 9.4 `pnpm run check:spec-provenance` → `spec-provenance: ok (origin/main...HEAD)`.
+- [x] 9.5 Run against `pnpm run dev:docker:up` (mounts verified against this worktree via `docker inspect rembric-dev`), pre-existing seeded corpus (`memory=35 sessions=5 projects=20`, unchanged by this run — not reseeded, since only the process was restarted for the threshold override below, not the container). `TRANSPORT_STALENESS_MS` and the reaper tick period were temporarily overridden to `5_000` in the bind-mounted source (`tsx watch` respawns on save), reverted (`git checkout`) immediately after measuring, and the process respawned a third time confirming both the revert and a healthy container. Connected over real `/mcp` with the seeded `demo-writer` token, called `project.use({slug:'demo'})` (pins a router entry, `source: tool-explicit`), then went ungracefully silent. `docker logs` showed `transport-state reap: 1 router entry, 1 transport(s) evicted` within one tick; a follow-up `tools/list` on the same `mcp-session-id` got real `404`/`-32001`. A full before/after dump of every `sessions` and `memory` row (id, status, project_id, token_id, ended_at) via a read-only `better-sqlite3` script showed **zero diffs and zero new rows on either table** — eviction was invisible in the data, including against the two PRE-EXISTING seeded `active` sessions that share this token+project (their staleness under the shrunk window is what correctly let this transport evict at all, confirming condition (a) reads real rows, not just the one this test created). Torn down (`docker compose … down --remove-orphans`) and the seeded `demo-writer` token deleted by name from the scratchpad log it landed in.
+- [x] 9.6 `pnpm run eval` is **not** required: no retrieval path is touched. Stated so the omission is a decision, not an oversight.
 
 ## 10. Deferred and explicitly rejected — recorded so they are not lost
 
