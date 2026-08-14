@@ -88,10 +88,11 @@ function toolTranscript(name = 'tx.jsonl'): string {
   return p;
 }
 
-function stdin(sessionId: string, transcriptPath?: string): string {
+function stdin(sessionId: string, transcriptPath?: string, stopHookActive?: boolean): string {
   return JSON.stringify({
     session_id: sessionId,
     ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
+    ...(stopHookActive === undefined ? {} : { stop_hook_active: stopHookActive }),
   });
 }
 
@@ -111,7 +112,8 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
     expect(ctx).toContain('failed commands:');
   });
 
-  // The load-bearing assertion: this must never be able to hold a turn open.
+  // The channel is measurably NOT side-effect-free — it re-enters the turn on
+  // this host — but it must never carry the host's own blocking vocabulary.
   it('never emits an interrupting decision', () => {
     const tx = toolTranscript();
     advanceToFiringTurn('s2');
@@ -119,6 +121,45 @@ describe('stop-nudge.sh — end-of-turn summary reminder', () => {
     expect(out).not.toContain('"decision"');
     expect(out).not.toContain('block');
     expect(out).not.toContain('"continue"');
+  });
+
+  it('yields once the host reports the turn was already continued to satisfy it', () => {
+    const tx = toolTranscript();
+    advanceToFiringTurn('s10');
+    expect(run(stopNudgeSh, stdin('s10', tx, true))).toBe('');
+  });
+
+  it('yields for codex-cli too, emitting the empty object it always requires', () => {
+    const tx = toolTranscript('s11.jsonl');
+    advanceToFiringTurn('s11');
+    expect(run(stopNudgeSh, stdin('s11', tx, true), 'codex-cli')).toBe('{}');
+  });
+
+  it('control: the same firing turn with stop_hook_active false still fires', () => {
+    const tx = toolTranscript();
+    advanceToFiringTurn('s12');
+    expect(run(stopNudgeSh, stdin('s12', tx, false))).not.toBe('');
+  });
+
+  it('control: the same firing turn with the flag absent still fires', () => {
+    const tx = toolTranscript();
+    advanceToFiringTurn('s13');
+    expect(run(stopNudgeSh, stdin('s13', tx))).not.toBe('');
+  });
+
+  it('decides the loop guard before it resolves or parses the transcript', () => {
+    const src = readFileSync(stopNudgeSh, 'utf8');
+    const lines = src.split('\n');
+    const guardLine = lines.findIndex((l) =>
+      l.includes('rembric_stop_hook_active_from_stdin_json'),
+    );
+    const transcriptPathLine = lines.findIndex((l) =>
+      l.includes('rembric_transcript_path_from_stdin_json'),
+    );
+    const factsLine = lines.findIndex((l) => l.includes('rembric_session_facts_raw'));
+    expect(guardLine).toBeGreaterThanOrEqual(0);
+    expect(transcriptPathLine).toBeGreaterThan(guardLine);
+    expect(factsLine).toBeGreaterThan(guardLine);
   });
 
   it('is silent on turns between cadence points, and fires again at 10', () => {

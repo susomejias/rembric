@@ -33,6 +33,10 @@ _emit_nothing() {
   exit 0
 }
 
+# The host delivers this hook's additionalContext by continuing the turn, so
+# firing again on that continuation is the loop.
+[ "$(rembric_stop_hook_active_from_stdin_json "$INPUT")" = "true" ] && _emit_nothing
+
 # Unconfigured means the MCP tools are not reachable either, so a reminder to call
 # one is noise. (prompt-nudge.sh has no such guard — an earlier version of this
 # comment claimed every other hook did.)
@@ -43,8 +47,8 @@ fi
 RAW_SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 COUNT="$(rembric_turn_count_peek rembric-turnnudge "$RAW_SESSION_ID")"
 case "$COUNT" in
-  # Fails CLOSED, matching prompt-nudge.sh: 0 would satisfy the modulo below.
-  '' | *[!0-9]*) _emit_nothing ;;
+# Fails CLOSED, matching prompt-nudge.sh: 0 would satisfy the modulo below.
+'' | *[!0-9]*) _emit_nothing ;;
 esac
 # NOT `COUNT -eq 1`: prompt-nudge.sh already fires on turn 1 as protocol, so
 # including it here reminded twice on the one turn with the least to extract.
