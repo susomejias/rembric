@@ -106,7 +106,7 @@ export class SessionRouter {
     });
   }
 
-  /** Clear an entire transport entry (used by `memory.session_end`). */
+  /** Null the active Rembric session id for a transport (used by `memory.session_end`); the entry itself is kept. */
   clearSession(tokenId: string, mcpSessionId: string): void {
     const e = this.entries.get(entryKey(tokenId, mcpSessionId));
     if (e) e.rembricSessionId = null;

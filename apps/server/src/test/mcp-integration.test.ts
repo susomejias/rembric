@@ -3434,6 +3434,58 @@ describe('HTTP hardening (real server)', () => {
     // No validity oracle: the two responses are byte-identical.
     expect(validNonAdmin.text).toBe(invalid.text);
   });
+
+  it('refuses an unknown mcp-session-id with 404/-32001 before constructing anything', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-session-id': 'no-such-session-id',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error?: { code?: number } };
+    expect(body.error?.code).toBe(-32001);
+  });
+
+  it('control: a live mcp-session-id from a real initialize is unaffected', async () => {
+    const init = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'c', version: '0' },
+        },
+      }),
+    });
+    expect(init.status).toBe(200);
+    const sessionId = init.headers.get('mcp-session-id');
+    expect(sessionId).toBeTruthy();
+
+    const list = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-session-id': sessionId ?? '',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    expect(list.status).toBe(200);
+  });
 });
 
 /**

@@ -76,6 +76,11 @@ export class McpTransportManager {
     return transport;
   }
 
+  /** Whether a session id is a transport this manager already holds. */
+  has(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
   close(): void {
     for (const { transport, server } of this.sessions.values()) {
       void transport.close();
