@@ -191,6 +191,22 @@ for id in $(sqlite3 data-dev/data.db "SELECT id FROM sessions WHERE agent='pi' A
 done
 ```
 
+### Driving a real Claude Code (hook-contract changes)
+
+The install wizard's `${user_config.*}` flow can't be scripted, but the hook CONTRACT (host → script stdin → script stdout → host interpretation) can be exercised without it: register the repo's hook scripts directly in a scratch `settings.json`. Rails, each learned the hard way:
+
+**1. Isolate with `CLAUDE_CONFIG_DIR`, not `HOME`.** A nested `claude` under the operator's real config loads their installed rembric plugin, whose hooks fire against their real server — probe sessions land in production data. A scratch `CLAUDE_CONFIG_DIR` starts with no plugins, no settings, no auth.
+
+**2. Credentials: copy the file, NEVER read it.** The scratch dir needs the operator's OAuth to run at all. Copy `.credentials.json` byte-for-byte (`install -m 600 src dst`) into the scratch config dir — never `cat`/parse it, never extract the token into an env var, an argument, or a log, and never echo the copy's contents to verify it. If a permission layer blocks the copy, ask the operator to run the copy themselves; do not work around it by reading the file. Purge every copy in teardown (`rm` the scratch `.credentials.json` alongside the seeded-token files). Presence checks (`test -f`) are the only inspection allowed.
+
+**3. Generate `settings.json` with single-quoted env values, and validate with `jq -e` before launching.** Hook commands embed `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN` inline (double quotes break the JSON). An invalid `settings.json` is ignored SILENTLY — the session runs, hooks never fire, and nothing tells you why.
+
+**4. Pre-seed the turn counter to reach cadence in one turn.** The counter is one byte per turn at `${TMPDIR:-/tmp}/rembric-turnnudge/<session-id>`; pick the session id yourself with `--session-id $(uuidgen)`, write N-1 bytes, and the first prompt lands on turn N. Saves N-1 model calls per arm.
+
+**5. Bound cost and blast radius.** `--model claude-haiku-4-5-20251001`, `--allowedTools` scoped to the one tool the probe needs (plus `mcp__rembric` if the run must exercise MCP), `--mcp-config <scratch>.json --strict-mcp-config`, and an external `timeout` on every run — a hook-loop bug means the turn may never end on its own (measured: an unguarded Stop reminder re-entered 141 times in 10 minutes; the host cap resets on tool-call responses and never engaged).
+
+**6. Instrument the hook, not the TUI.** Wrap the script under test in a logger that records each invocation's key stdin fields and emitted byte count, then assert on that log plus the DB. Run the control arm from `git HEAD` copies of the scripts (git archive), the treatment arm from the working tree, and demand the control fails in the expected direction.
+
 ### Driving an interactive TUI
 
 Feed timed keystrokes through a pty. Slash commands and quit paths only exist in interactive mode, so print mode cannot reach them:
