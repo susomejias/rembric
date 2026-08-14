@@ -257,16 +257,20 @@ jobs:
           # would be auto-created root-owned and the server couldn't open its DB.
           # Pre-create it world-writable (Docker Desktop sidesteps this locally).
           mkdir -p data && chmod 0777 data
+          # Non-default port deliberately: it's the only way this step would
+          # have caught #338 (REMBRIC_PORT customised in .env left the
+          # container unreachable — docker-compose.yml hard-coded the
+          # container side of the mapping to 8787 regardless).
           REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 REMBRIC_UPDATE_CHECK=off REMBRIC_NO_PULL=1 \
-            sh "$REPO/install.sh" --server --action=install --up --token="$TOK" --port=8787
+            sh "$REPO/install.sh" --server --action=install --up --token="$TOK" --port=8799
           ok=
           for _ in $(seq 1 60); do
-            c=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" http://127.0.0.1:8787/healthz || true)
+            c=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" http://127.0.0.1:8799/healthz || true)
             [ "$c" = 200 ] && { ok=1; break; }
             sleep 3
           done
           if [ -z "$ok" ]; then echo "::error::/healthz never returned 200"; docker compose logs || true; exit 1; fi
-          d=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/dashboard || true)
+          d=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8799/dashboard || true)
           echo "healthz=200 dashboard=$d"
           case "$d" in 200 | 302) ;; *) echo "::error::unexpected /dashboard status $d"; exit 1 ;; esac
           docker compose down

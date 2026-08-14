@@ -165,7 +165,7 @@ If you want to restrict the published port to loopback (stricter posture, same-h
 services:
   rembric:
     ports: !override
-      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:${REMBRIC_PORT:-8787}'
 ```
 
 Compose auto-merges the override on every `up`. Point your agent at `http://127.0.0.1:8787`. See [`docs/docker.md`](./docs/docker.md) for the full topology guide.

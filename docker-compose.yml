@@ -9,6 +9,11 @@ services:
     pids_limit: ${REMBRIC_PIDS_LIMIT:-512}
 
     ports:
+      # Both sides read the same variable: the server listens on
+      # REMBRIC_PORT inside the container too (config.ts), so a mapping
+      # that hard-coded the container side would go unreachable the
+      # moment REMBRIC_PORT is customised (issue #338).
+      #
       # Default: bind on all interfaces — the bearer token is the real
       # security boundary, and the common selfhost case (server on a
       # separate host, plugin reaches it over LAN / Tailscale) needs
@@ -18,8 +23,8 @@ services:
       #   services:
       #     rembric:
       #       ports: !override
-      #         - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
-      - '${REMBRIC_PORT:-8787}:8787'
+      #         - '127.0.0.1:${REMBRIC_PORT:-8787}:${REMBRIC_PORT:-8787}'
+      - '${REMBRIC_PORT:-8787}:${REMBRIC_PORT:-8787}'
 
     volumes:
       - ./data:/data
@@ -33,10 +38,13 @@ services:
       test:
         # Absolute path: the image is distroless (node at /nodejs/bin/node, no
         # bare `node` on PATH) — a bare `node` here marks the container unhealthy.
+        # Port read from the same REMBRIC_PORT the server itself listens on
+        # (env_file passes it through to this CMD too) — a hard-coded 8787
+        # here would report unhealthy on a customised port even once reachable.
         - CMD
         - /nodejs/bin/node
         - -e
-        - "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:'+(process.env.REMBRIC_PORT||8787)+'/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 3s
       retries: 3

@@ -56,7 +56,7 @@ Drop a `docker-compose.override.yml` next to the canonical compose:
 services:
   rembric:
     ports: !override
-      - '127.0.0.1:${REMBRIC_PORT:-8787}:8787'
+      - '127.0.0.1:${REMBRIC_PORT:-8787}:${REMBRIC_PORT:-8787}'
 ```
 
 Compose auto-merges `docker-compose.override.yml` on every `up`. The `!override` tag replaces the ports list rather than appending — without it you'd get two bindings (`0.0.0.0:8787` AND `127.0.0.1:8787`) and the loopback one would be redundant.
