@@ -201,6 +201,33 @@ describe('transport-state reaper pass', () => {
     expect(h.router.get(h.tokenId, sessionId)).toBeDefined();
   });
 
+  it('a transport backed by TWO concurrently live sessions on one identity is not evicted (ambiguity must not read as absence)', async () => {
+    const sessionId = await h.connect();
+    h.router.setActiveProject(h.tokenId, sessionId, h.projectId, 'roots');
+    h.agentSessions.ensure({
+      id: 'concurrent-session-a',
+      tokenId: h.tokenId,
+      projectId: h.projectId,
+      agent: 'a',
+    });
+    h.agentSessions.ensure({
+      id: 'concurrent-session-b',
+      tokenId: h.tokenId,
+      projectId: h.projectId,
+      agent: 'b',
+    });
+
+    const result = runTransportStateReaperPass({
+      router: h.router,
+      mcpTransport: h.mcpTransport,
+      agentSessions: h.agentSessions,
+      now: futureNow(),
+    });
+
+    expect(result.transportsEvicted).toBe(0);
+    expect(h.mcpTransport.has(sessionId)).toBe(true);
+  });
+
   it('does not evict a busy transport with no session row at all', async () => {
     const sessionId = await h.connect();
     await h.bump(sessionId);

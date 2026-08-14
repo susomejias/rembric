@@ -45,13 +45,13 @@
 
 `scripts/mutate.mjs` **skips** a non-unique `--mutation` string and reports the skip as uncovered, which reads exactly like a failure. For each string below, first run `grep -c '<string>' <file>` and confirm it prints `1`; extend with surrounding context until it does.
 
-- [ ] 6.1 Weaken the predicate to condition (b) only (drop the SQL existence check) → 5.2 must go red.
-- [ ] 6.2 Weaken the predicate to condition (a) only (drop the `lastSeenAt` comparison) → 5.3 must go red.
-- [ ] 6.3 Remove the together-or-not-at-all coupling so router entries are evicted alone → 5.5 must go red. If it stays green the anti-misscope arm is decorative and must be rewritten before this lands.
-- [ ] 6.4 Remove the orphan clause → 5.4 must go red.
-- [ ] 6.5 Make the existence read inherit `rows.length === 1` → add or confirm an arm with two live sessions on one identity goes red (a transport with two live sessions must not be evicted).
-- [ ] 6.6 Remove the `404` branch so unknown ids fall through to `getOrCreate` → 5.9 must go red on both the status and the factory-count assertions.
-- [ ] 6.7 Record every mutation that reddens nothing as the finding it is, and fix the test rather than the note. A test green on both sides of the change is the default outcome, not the exception.
+- [x] 6.1 Weaken the predicate to condition (b) only (drop the SQL existence check) → 5.2 must go red.
+- [x] 6.2 Weaken the predicate to condition (a) only (drop the `lastSeenAt` comparison) → 5.3 must go red.
+- [x] 6.3 Remove the together-or-not-at-all coupling so router entries are evicted alone → 5.5 must go red. If it stays green the anti-misscope arm is decorative and must be rewritten before this lands.
+- [x] 6.4 Remove the orphan clause → 5.4 must go red.
+- [x] 6.5 Make the existence read inherit `rows.length === 1` → add or confirm an arm with two live sessions on one identity goes red (a transport with two live sessions must not be evicted).
+- [x] 6.6 Remove the `404` branch so unknown ids fall through to `getOrCreate` → 5.9 must go red on both the status and the factory-count assertions.
+- [x] 6.7 Record every mutation that reddens nothing as the finding it is, and fix the test rather than the note. A test green on both sides of the change is the default outcome, not the exception.
 
 ## 7. Client-side recovery (design D7, D8) — Pi is code, the rest is measurement
 
