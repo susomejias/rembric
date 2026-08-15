@@ -2,16 +2,9 @@
   "mcpServers": {
     "rembric": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@rembric/mcp-bridge@0.29.1"
-      ],
+      "args": ["-y", "@rembric/mcp-bridge@0.29.0"],
       "cwd": ".",
-      "env_vars": [
-        "REMBRIC_SERVER_URL",
-        "REMBRIC_API_TOKEN",
-        "PWD"
-      ]
+      "env_vars": ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN", "PWD"]
     }
   }
 }
