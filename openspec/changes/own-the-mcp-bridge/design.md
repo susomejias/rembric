@@ -11,13 +11,13 @@ Everything asserted here about `mcp-remote` was measured against the pinned **0.
 - **"the bridge"** — `@rembric/mcp-bridge`, the published client-side piece: slug resolution, URL building, diagnostics, the advisory version check, bearer injection, the transport, and the recovery.
 - **`rembric-bridge.mjs`** — after this change, the bridge's deprecated on-disk launcher (~10 lines), kept only for pre-existing opencode configs, which spawns the package (D6).
 
-An earlier draft of this change picked `@rembric/mcp-proxy`, for one reason only: `rembric-bridge.mjs` was still a live, separately-specified component, and two things called "bridge" would have been unreadable. The integration decision (D3) removes that constraint — the file is reduced to a launcher with no contract of its own — so the collision dissolves rather than needing to be worked around.
+An earlier draft of this change picked `@rembric/mcp-bridge`, for one reason only: `rembric-bridge.mjs` was still a live, separately-specified component, and two things called "bridge" would have been unreadable. The integration decision (D3) removes that constraint — the file is reduced to a launcher with no contract of its own — so the collision dissolves rather than needing to be worked around.
 
 "Proxy" is also the weaker word for what this is. A proxy forwards; this package resolves `.rembric`, builds the path-scoped URL, runs the advisory version check **and** transports. That composite entrypoint role is what "bridge" has always meant in this repository.
 
 The decisive argument is vocabulary continuity: the specs already name this role "the bridge" across roughly twenty normative requirements, so putting the package under that name migrates them with their wording intact instead of committing the project to a bridge/proxy glossary forever. It also keeps the `[rembric-bridge]` stderr prefix true, which every troubleshooting doc and the e2e walkthrough already grep for.
 
-**Rejected: `@rembric/mcp`** — too vague; it names the protocol, not the thing. **Rejected: `@rembric/bridge`** — does not say what it bridges. Both stay rejected; the naming is closed.
+**Rejected: `@rembric/mcp-bridge`** — too vague; it names the protocol, not the thing. **Rejected: `@rembric/mcp-bridge`** — does not say what it bridges. Both stay rejected; the naming is closed.
 
 ### The verified inventory of what the third-party delegate imposes
 
@@ -85,7 +85,17 @@ If any arm fails, the proposal is abandoned and nothing further is built. This i
 
 The obvious composition — instantiate the SDK's `Client` against the remote and its `Server` against stdio, and bridge the two — is what `mcp-remote` does, and it is why `clientInfo` gets stamped with the bridge's identity: an SDK `Client` performs its own `initialize` and declares itself. The requirement that the server sees the host's real `clientInfo` therefore selects the architecture: the bridge pipes messages, letting the host's `initialize` through **verbatim**, and owns session state only to the extent the recovery needs (the current `mcp-session-id` and the last `initialize` frame).
 
-This is a hypothesis about the SDK's transport classes until the prototype confirms it, which is why it is a named gate arm rather than an assumption. If verbatim passthrough turns out to be impossible with the SDK's transports as published, that is a D1 STOP condition and not something to work around by patching `clientInfo` after the fact.
+With the SDK this was a hypothesis about its transport classes, and a named STOP arm rather than an assumption. **Superseded by D2b: with no SDK there is no second handshake at all**, so verbatim passthrough is a property of the architecture rather than something to verify. Measured: a manual pipe through `measurements/prototype-zerodep.mjs` delivered `clientInfo=zerodep-probe@7.7` to the server unchanged (`measurements/gate-arms12-zerodep.log`).
+
+### D2b — Zero runtime dependencies, not one exact-pinned SDK
+
+D2 selected a message pipe; this decides what implements it. The SDK was specified first and dropped on measurement: it installs 93 packages / 25 MB against `mcp-remote`'s 80 / 7.0 MB (`npm install --ignore-scripts`, clean directory, 2026-08-15), because `express`, `hono`, `cors`, `jose`, `eventsource` and `express-rate-limit` are `dependencies` rather than peers. A replacement that installs more than the thing it replaces defeats part of its own purpose, and none of that surface is reachable from a stdio proxy.
+
+What must be owned instead is smaller than it first appears — newline-delimited stdio framing, `fetch` with a bearer header, and `data:` line parsing — because this server offers no resumable streams (no `Last-Event-ID`) and the bridge speaks no OAuth. `.pi-plugin/index.ts` already ships that surface with `dependencies: {}`.
+
+**Alternative rejected: bundle the SDK to report zero dependencies.** That is vendoring, and it hides the version from a consumer's advisory tooling — the exact blind spot that made confirming `mcp-remote`'s `404` behaviour a matter of reading `chunk-65X3S4HB.js`. First-party code has no upstream version for tooling to miss, so it does not inherit that objection.
+
+**The risk this decision takes on** is that a future protocol revision must be implemented by hand rather than inherited from an SDK upgrade. Bounded by the same reasoning: the `2026-07-28` revision removes sessions, the GET stream and server-initiated requests, which makes a proxy strictly simpler, not harder.
 
 **Alternative rejected: substitute our own `clientInfo` naming the real host**, derived from an env var the manifest sets. It would work, and it is worse: it is a second place where client identity is authored, it drifts from what the host actually declared, and it re-creates the class of defect the measurement above exposed.
 

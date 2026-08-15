@@ -39,11 +39,18 @@ nothing else required — the conventional shape, matching the generic name. Two
   directory (`CLAUDE_PROJECT_DIR` > `PWD` > `cwd`) with a documented fallback to
   path-less `/mcp`, so it never enters the public config surface.
 
-## 1. The proposal's transport design is superseded
+## 1. Transport design: SDK → zero-dependency (APPLIED to the artifacts)
 
-`proposal.md` / `design.md` specify a package built on `@modelcontextprotocol/sdk`
-transports. **That decision was reversed after the artifacts were written**, for two
-measured reasons:
+The artifacts originally specified a package built on `@modelcontextprotocol/sdk`
+transports. That was reversed, and the reversal **has now been written into the
+artifacts**: `specs/mcp-bridge/spec.md` requires an empty `dependencies` object and adds
+a normative requirement for the server-initiated-request relay, and the package name is
+normalised to `@rembric/mcp-bridge` throughout. The remaining `@rembric/mcp-proxy`
+mentions are deliberate historical record (this file, and the header of the superseded
+SDK prototype).
+
+The two measured reasons, kept here because the spec states the rule and not the whole
+history:
 
 - **Dependency tree grows, it does not shrink.** Measured in a clean directory
   (`npm install --ignore-scripts`): `mcp-remote@0.1.38` → 80 packages / 7.0 MB;
@@ -64,6 +71,23 @@ handling around lines 110-130). Zero-dep wins on both objections: no tree at all
 
 Everything else in the proposal stands: the integrated end-state, the exact-pin policy,
 publishing via the existing trusted-publishing OIDC flow, and the recorded evidence.
+
+## 1b. The spec deltas are STALE and would be refused at archive
+
+`node scripts/check-delta-freshness.mjs --strict-body` reports **16 blocking problems**
+across six capabilities: `claude-code-plugin`, `codex-distribution`, `hermes-agent-plugin`,
+`opencode-plugin`, `open-source-distribution`, `supply-chain-hygiene`.
+
+Verified pre-existing, not introduced by the zero-dep revision: the same 16 appear with
+the revision stashed. They are a defect in how the deltas were constructed — MODIFIED
+headers that match no published requirement (so archive would ADD a duplicate rather than
+replace), published scenarios missing from the delta, and published body lines not
+reproduced verbatim.
+
+The fix is what the tool says: for each flagged requirement, take the **published** text
+from `openspec/specs/<capability>/spec.md` and re-apply only this change's edits on top,
+rather than writing the requirement afresh. Do this before the applier runs — a stale
+delta silently reverts what another change published, and `archive` refuses it anyway.
 
 ## 2. The prototype gate — STOP arm CLEARED, two arms still open
 

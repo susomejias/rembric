@@ -275,25 +275,40 @@ The bridge SHALL impose **no hard version floor**: it SHALL NOT refuse to run, a
 - **THEN** exactly one SHALL target `/healthz`
 - **AND** it SHALL have been issued by the bridge, not by any client or launcher
 
-### Requirement: The bridge declares exactly one runtime dependency, at an exact version
+### Requirement: The bridge declares no runtime dependencies
 
-`@rembric/mcp-bridge` SHALL declare `@modelcontextprotocol/sdk` as its only runtime dependency, at an **exact** version — never a range.
+`@rembric/mcp-bridge` SHALL declare an empty `dependencies` object. It SHALL implement the stdio framing, the HTTP requests, and the SSE response parsing against Node's own built-ins, and SHALL NOT depend on `@modelcontextprotocol/sdk` or on any other package at runtime.
 
-An exact version is required for the same reason the spawn sites pin the bridge itself: a range lets a new upstream release change the bridge's behaviour on a user's machine with no Rembric release, which is the floating-tag hole one level down. The dependency's justification, and its measured cost, are owned by `supply-chain-hygiene`.
+The alternative — one exact-pinned dependency on the SDK's client transports — was specified first and reversed on measurement. In a clean directory (`npm install --ignore-scripts`), `mcp-remote@0.1.38` installs 80 packages / 7.0 MB while `@modelcontextprotocol/sdk@1.29.0` installs 93 packages / 25 MB, because the SDK declares `express`, `hono`, `cors`, `jose`, `eventsource` and `express-rate-limit` in `dependencies` rather than as peers. A replacement whose purpose includes reducing what a user's machine executes cannot ship a larger tree than the thing it replaces, and none of that surface is reachable from a stdio proxy.
 
-The bridge SHALL import only the SDK's client-side transport surface. It SHALL NOT bundle or vendor the SDK: the consumer's dependency tree is what lets their advisory tooling see the version they are running, and a bundled copy makes a CVE in it invisible to them.
+Zero dependencies also discharges the message-pipe requirement above by construction rather than by discipline: with no SDK `Client` there is no second handshake that could substitute the bridge's identity for the host's.
 
-#### Scenario: The manifest declares one exact dependency
+This is not a novel burden for this repository. `apps/plugin/.pi-plugin/index.ts` already ships a Streamable HTTP MCP client with `dependencies: {}`, including SSE frame parsing, and the prototype recorded in `measurements/prototype-zerodep.mjs` demonstrated the one mechanism that had no precedent there — see the roots requirement below.
+
+#### Scenario: The manifest declares no runtime dependencies
 
 - **WHEN** `apps/plugin/mcp-bridge/package.json` is read
-- **THEN** `dependencies` SHALL contain exactly one entry, `@modelcontextprotocol/sdk`
-- **AND** its value SHALL be an exact version string with no range operator (`^`, `~`, `>=`, `*`, or `x`)
+- **THEN** `dependencies` SHALL be absent or an empty object
+- **AND** the published tarball SHALL NOT contain a vendored or bundled copy of any third-party package
 
-#### Scenario: The SDK is a visible dependency, not a bundled copy
+#### Scenario: A consumer's install adds nothing but the bridge
 
-- **WHEN** the published tarball's file list is inspected
-- **THEN** it SHALL NOT contain a vendored or bundled copy of the SDK
-- **AND** a consumer's installed tree SHALL show `@modelcontextprotocol/sdk` at the pinned version
+- **WHEN** `@rembric/mcp-bridge` is installed into an empty directory with lifecycle scripts disabled
+- **THEN** the resulting tree SHALL contain exactly one package
+- **AND** its measured size SHALL be recorded against the 80 packages / 7.0 MB the replaced delegate installs
+
+### Requirement: The bridge relays a server-initiated request to the host and returns its answer
+
+A request the server initiates on a response stream — `roots/list` is the one Rembric sends — SHALL be forwarded to the host unchanged, and the host's response SHALL be posted back to the MCP endpoint. The bridge SHALL NOT answer such a request itself, and SHALL NOT drop it: answering it would make the bridge, rather than the host, the authority on the client's roots, and dropping it strands the server's project resolution until its timeout.
+
+This is stated as a requirement because it is the one mechanism the zero-dependency decision could not inherit from an existing implementation: `.pi-plugin/index.ts` sends `capabilities: {}` and therefore never receives one. It was measured before the design was settled — a real `claude` CLI against a real server on a path-less `/mcp`, through `measurements/prototype-zerodep.mjs`, produced `server-initiated request on stream: roots/list id=0 -> host` followed by `host response id=0 -> server` (`measurements/gate-arm3-roots-relay.log`).
+
+#### Scenario: A server-initiated roots/list reaches the host and its answer reaches the server
+
+- **WHEN** the server initiates a `roots/list` request on the response stream of an in-flight tool call
+- **THEN** the bridge SHALL write that request to the host unchanged
+- **AND** SHALL post the host's response to the MCP endpoint
+- **AND** SHALL NOT synthesise a response of its own
 
 ### Requirement: Every spawn site MUST pin an exact bridge version
 
