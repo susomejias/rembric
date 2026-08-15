@@ -288,14 +288,33 @@ describe('agent routing', () => {
     expect(hermes.out).toContain('hermes gateway restart');
   });
 
-  it('hermes update surfaces the exact bridge-pin migration before restart', () => {
+  it('hermes update explains the automatic legacy migration and exact fallback before restart', () => {
     const { code, out } = run(['--agent=hermes', '--action=update'], { home });
     expect(code).toBe(0);
     expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
-    expect(out).toContain('Required Hermes MCP migration');
-    expect(out).toContain('no separate npm update is needed');
+    expect(out).toContain('migrates the documented legacy mcp-remote block automatically');
+    expect(out).toContain('.rembric-mcp-remote.bak backup');
     expect(out).toContain('hermes gateway restart');
     expect(out).not.toContain('hermes plugins install rembric');
+  });
+
+  it('hermes update migrates only the documented legacy MCP block and preserves a backup', () => {
+    const hermesHome = join(home, '.hermes');
+    mkdirSync(hermesHome, { recursive: true });
+    const config = join(hermesHome, 'config.yaml');
+    const legacy = `mcp_servers:\n  rembric:\n    command: npx\n    args:\n      [\n        '-y',\n        'mcp-remote@latest',\n        '\${REMBRIC_SERVER_URL}/mcp/\${REMBRIC_PROJECT_SLUG}',\n        '--header',\n        'Authorization: Bearer \${REMBRIC_API_TOKEN}',\n        '--allow-http',\n      ]\n  other:\n    command: other-mcp\n`;
+    writeFileSync(config, legacy);
+
+    const { code, out } = run(['--agent=hermes', '--action=update'], { home });
+
+    expect(code).toBe(0);
+    expect(readFileSync(join(hermesHome, 'config.yaml.rembric-mcp-remote.bak'), 'utf8')).toBe(
+      legacy,
+    );
+    expect(out).toContain('migrated mcp_servers.rembric');
+    expect(readFileSync(config, 'utf8')).toBe(
+      `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']\n  other:\n    command: other-mcp\n`,
+    );
   });
 
   it('opencode/claude update notes drop the install-only wiring (just restart)', () => {
@@ -722,7 +741,7 @@ describe('opencode installer verifications', () => {
     expect(first.code).toBe(0);
     const snapshot = files.map((f) => readFileSync(f, 'utf8'));
     expect(existsSync(join(home, '.config', 'opencode', 'opencode.json'))).toBe(false);
-    expect(first.out).toContain(`@rembric/mcp-bridge@${PLUGIN_VERSION.opencode}`);
+    expect(first.out).toContain('adds the MCP entry in memory');
     const second = run(['--agent=opencode', '--action=install'], { home });
     expect(second.code).toBe(0);
     expect(second.out).toContain('left untouched');
@@ -754,7 +773,7 @@ describe('opencode installer verifications', () => {
     expect(result.code).toBe(0);
     expect(readFileSync(configPath, 'utf8')).toBe(oldConfig);
     expect(result.out).toContain('left untouched');
-    expect(result.out).toContain(`@rembric/mcp-bridge@${PLUGIN_VERSION.opencode}`);
+    expect(result.out).toContain('adds the MCP entry in memory');
   });
 
   it('forwards the local bridge source and keeps the public ref source wired', () => {

@@ -55,6 +55,7 @@ Pi has no repo-side install script — its mechanism is its own CLI (`pi install
 ```bash
 export REMBRIC_SERVER_URL=http://127.0.0.1:8788
 export REMBRIC_API_TOKEN=<demo-writer-plaintext-from-step-2>
+export BRIDGE_VERSION="$(node -p 'require("./apps/plugin/package.json").version')"
 ```
 
 For opencode specifically:
@@ -67,7 +68,7 @@ cat > ~/.config/opencode/opencode.json <<JSON
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
+      "command": ["npx", "-y", "@rembric/mcp-bridge@${BRIDGE_VERSION}"],
       "environment": {
         "REMBRIC_SERVER_URL": "http://127.0.0.1:8788",
         "REMBRIC_API_TOKEN": "<demo-writer-plaintext-from-step-2>"
@@ -245,7 +246,7 @@ cat > ~/.config/opencode/opencode.json <<JSON
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
+      "command": ["npx", "-y", "@rembric/mcp-bridge@${BRIDGE_VERSION}"],
       "environment": {
         "REMBRIC_SERVER_URL": "<REMBRIC_SERVER_URL>",
         "REMBRIC_API_TOKEN": "<REMBRIC_API_TOKEN>"

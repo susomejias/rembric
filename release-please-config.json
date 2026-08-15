@@ -43,7 +43,6 @@
         ".codex-plugin/plugin.json",
         ".hermes-plugin/plugin.yaml",
         { "type": "generic", "path": ".opencode-plugin/plugin.ts" },
-        { "type": "generic", "path": ".opencode-plugin/install.sh" },
         ".pi-plugin/package.json",
         "mcp-bridge/package.json",
         {

@@ -3,7 +3,7 @@
 #
 # Download plugin.ts and its shared modules from the rembric main branch and
 # install them to ~/.config/opencode/plugins/ and ~/.config/rembric/bin/.
-# The installer never edits opencode.json; it prints the MCP snippet instead.
+# The installer never edits opencode.json; the plugin config hook owns its MCP entry.
 # Honour PLUGIN_SRC, BIN_SRC and MCP_BRIDGE_SRC for local development.
 #
 # Usage (public repo):
@@ -28,9 +28,6 @@ REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 PLUGIN_DEST="${OPENCODE_PLUGINS_DIR}/rembric.ts"
 DOTENV_LIB='rembric-dotenv.mjs'
 CORE_LIB='rembric-plugin-core.mjs'
-# x-release-please-start-version
-MCP_BRIDGE_VERSION='0.28.2'
-# x-release-please-end
 SHARED_LIBS="$DOTENV_LIB $CORE_LIB"
 
 if ! mkdir -p "$OPENCODE_PLUGINS_DIR" 2>/dev/null; then
@@ -90,25 +87,6 @@ for lib in $SHARED_LIBS; do
 done
 chmod 644 "$PLUGIN_DEST"
 
-mcp_block() {
-  cat <<MCP
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "rembric": {
-      "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@${MCP_BRIDGE_VERSION}"],
-      "environment": {
-        "REMBRIC_SERVER_URL": "{env:REMBRIC_SERVER_URL}",
-        "REMBRIC_API_TOKEN": "{env:REMBRIC_API_TOKEN}"
-      },
-      "enabled": true
-    }
-  }
-}
-MCP
-}
-
 cat <<EOF
 
   ✓ rembric opencode plugin installed.
@@ -123,11 +101,7 @@ done
 cat <<EOF
   Config:     ${OPENCODE_JSON} (left untouched)
 
-  Paste this MCP block into opencode.json. The config hook also upgrades
-  existing mcp.rembric launcher entries in memory, so no config rewrite is needed:
-
-$(mcp_block | sed 's/^/  /')
-
+  The config hook adds the MCP entry in memory and upgrades legacy launchers.
   Export your credentials in your shell rc:
 
     export REMBRIC_SERVER_URL="https://memory.example.com"

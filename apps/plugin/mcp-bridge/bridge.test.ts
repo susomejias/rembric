@@ -625,6 +625,123 @@ describe('stdio to HTTP transport', () => {
     server.close();
   });
 
+  it('exits when stdin closes during a held-open SSE response', async () => {
+    let toolRequestSeen: () => void = () => {};
+    const toolRequest = new Promise<void>((resolve) => {
+      toolRequestSeen = resolve;
+    });
+    const server = createServer(async (request, response) => {
+      if (request.url === '/healthz') {
+        response.end(JSON.stringify({ version: '0.28.2' }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as {
+        id?: number;
+        method?: string;
+      };
+      if (message.method === 'initialize') {
+        response.setHeader('mcp-session-id', 's1');
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+      } else if (message.method === 'notifications/initialized') {
+        response.statusCode = 202;
+        response.end();
+      } else {
+        toolRequestSeen();
+        response.setHeader('content-type', 'text/event-stream');
+      }
+    });
+    const base = await listen(server);
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+    });
+    client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await client.nextLine();
+    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {} });
+    await toolRequest;
+    client.child.stdin.end();
+    const [code] = (await Promise.race([
+      once(client.child, 'exit') as Promise<[number | null, string | null]>,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('bridge did not exit')), 500),
+      ),
+    ])) as [number | null, string | null];
+    expect(code).toBe(0);
+    server.close();
+  });
+
+  it('does not retry a request cancelled while its session recovers', async () => {
+    const requests: { id?: number; method?: string; session?: string }[] = [];
+    let initializeCount = 0;
+    let releaseRecovery: () => void = () => {};
+    const recoveryStarted = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    let recoveryInitializeSeen: () => void = () => {};
+    const recoveryInitialize = new Promise<void>((resolve) => {
+      recoveryInitializeSeen = resolve;
+    });
+    const server = createServer(async (request, response) => {
+      if (request.url === '/healthz') {
+        response.end(JSON.stringify({ version: '0.28.2' }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as {
+        id?: number;
+        method?: string;
+      };
+      requests.push({
+        id: message.id,
+        method: message.method,
+        session: request.headers['mcp-session-id'],
+      });
+      if (message.method === 'initialize') {
+        initializeCount += 1;
+        if (initializeCount === 2) {
+          recoveryInitializeSeen();
+          await recoveryStarted;
+        }
+        response.setHeader('mcp-session-id', `s${initializeCount}`);
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+      } else if (message.method === 'notifications/initialized') {
+        response.statusCode = 202;
+        response.end();
+      } else if (message.id === 2) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: 2, error: { code: -32001 } }));
+      } else {
+        response.end(
+          JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { id: message.id } }),
+        );
+      }
+    });
+    const base = await listen(server);
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+    });
+    client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await client.nextLine();
+    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {} });
+    await recoveryInitialize;
+    client.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } });
+    releaseRecovery();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    client.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {} });
+    expect(await client.nextLine()).toMatchObject({ id: 3, result: { id: 3 } });
+    expect(requests.filter(({ id }) => id === 2)).toHaveLength(1);
+    expect(requests.filter(({ method }) => method === 'notifications/cancelled')).toHaveLength(0);
+    expect(requests).toContainEqual({ id: 3, method: 'tools/call', session: 's2' });
+    client.child.stdin.end();
+    server.close();
+  });
+
   it('does not restore a stale session after concurrent 404 recovery', async () => {
     const requests: { id?: number; method?: string; session?: string }[] = [];
     let initializeCount = 0;
@@ -791,7 +908,8 @@ describe('stdio to HTTP transport', () => {
     client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     client.send({ jsonrpc: '2.0', id: null, method: 'tools/call', params: {} });
     expect(await client.nextLine()).toMatchObject({ id: null, error: { code: -32000 } });
-    client.child.stdin.end();
+    const [code] = (await once(client.child, 'exit')) as [number | null, string | null];
+    expect(code).not.toBe(0);
     server.close();
   });
 

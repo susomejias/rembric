@@ -759,7 +759,8 @@ run_client_script() { # $1 client, $2 install|uninstall
         MCP_BRIDGE_SRC="$REMBRIC_SRC/apps/plugin/mcp-bridge" \
         sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     else
-      PLUGIN_SRC="$REMBRIC_SRC/apps/plugin/$dir" sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
+      PLUGIN_SRC="$REMBRIC_SRC/apps/plugin/$dir" REMBRIC_ACTION="$verb" \
+        sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     fi
   else
     # Remote: fetch the script and point it at the same ref.
@@ -768,7 +769,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
     else
-      PLUGIN_SRC="$base/$dir" sh "$t"
+      PLUGIN_SRC="$base/$dir" REMBRIC_ACTION="$verb" sh "$t"
     fi
     rm -f "$t"
   fi
@@ -828,29 +829,26 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   return 0
 }
 
-# Hermes keeps mcp_servers in a user-owned config file. The installer may not
-# edit that file, so an update must surface the exact pin migration explicitly.
-hermes_bridge_migration() {
+hermes_bridge_config() {
   _bridge_version=$(available_version apps/plugin)
   if [ -z "$_bridge_version" ]; then
     _bridge_manifest="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
     [ -f "$_bridge_manifest" ] && _bridge_version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$_bridge_manifest" | head -1)
   fi
   if [ -z "$_bridge_version" ]; then
-    say "  ${WARN}Required Hermes MCP migration could not determine the exact plugin version.${RESET}"
-    say "  ${DIM}Read the version from ${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml, update mcp_servers.rembric.args, then restart the gateway.${RESET}"
+    say "  ${WARN}Could not determine the Hermes bridge version.${RESET}"
     return 0
   fi
-  say "  ${WARN}Required Hermes MCP migration:${RESET} update mcp_servers.rembric in ${HERMES_HOME:-${HOME}/.hermes}/config.yaml"
-  say "    args: ['-y', '@rembric/mcp-bridge@${_bridge_version}']"
-  say "  ${DIM}This is an exact package pin; no separate npm update is needed.${RESET}"
-  if [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
-    _migrated=$(ask "  Have you applied this config migration? [y/N]")
-    case "$_migrated" in
-      y|Y) say "  ${LIME}Hermes MCP pin migration acknowledged.${RESET}" ;;
-      *) say "  ${WARN}Migration still required before Hermes can use the updated bridge.${RESET}" ;;
-    esac
-  fi
+  say "    mcp_servers:"
+  say "      rembric:"
+  say "        command: npx"
+  say "        args: ['-y', '@rembric/mcp-bridge@${_bridge_version}']"
+}
+
+hermes_bridge_migration_note() {
+  say "  ${DIM}The updater migrates the documented legacy mcp-remote block automatically and writes one .rembric-mcp-remote.bak backup.${RESET}"
+  say "  ${DIM}If it reported no migration, replace your mcp_servers.rembric entry with:${RESET}"
+  hermes_bridge_config
 }
 
 # Required post-install/upgrade steps per agent (the platform bits the installer
@@ -874,19 +872,21 @@ post_install_notes() { # $1 client, $2 action (install|update)
       # On update the plugin is already installed + enabled — only the gateway
       # needs to reload the new files. The full wiring is install-only.
       if [ "$action" = "update" ]; then
-        hermes_bridge_migration
+        hermes_bridge_migration_note
         say "  ${BOLD}Next:${RESET} ${BOLD}hermes gateway restart${RESET}  ${DIM}— reload the gateway so it picks up the updated plugin${RESET}"
       else
         say "  ${BOLD}Next:${RESET}"
-        say "    1) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
-        say "    2) ${BOLD}hermes plugins enable rembric${RESET}"
-        say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
+        say "    1) add this MCP block to ${BOLD}${HERMES_HOME:-${HOME}/.hermes}/config.yaml${RESET}:"
+        hermes_bridge_config
+        say "    2) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
+        say "    3) ${BOLD}hermes plugins enable rembric${RESET}"
+        say "    4) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
       fi ;;
     opencode)
       if [ "$action" = "update" ]; then
         say "  ${BOLD}Next:${RESET} restart opencode so it loads the updated plugin."
       else
-        say "  ${BOLD}Next:${RESET} paste the printed MCP block into ~/.config/opencode/opencode.json, export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
+        say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
       fi ;;
     pi)
       if [ "$action" = "update" ]; then
@@ -905,7 +905,7 @@ do_client() { # $1 client, $2 action
   say "${BOLD}${c} (${action})${RESET}"
   case "$c" in
     opencode|hermes)
-      run_client_script "$c" "$([ "$action" = uninstall ] && echo uninstall || echo install)"
+      run_client_script "$c" "$action"
       if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
     claude|codex|pi) client_cli_cmds "$c" "$action" ;;
     # An unmatched `case` exits 0, so a client with no backend would print its

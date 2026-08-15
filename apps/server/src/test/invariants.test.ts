@@ -1105,11 +1105,6 @@ describe('the bridge version carriers', () => {
     expect(bridgeVersion).toBe(pluginVersion);
     const opencode = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
     expect(opencode).toContain(`const MCP_BRIDGE_VERSION = '${pluginVersion}';`);
-    const installer = readFileSync(
-      join(repoRoot, 'apps/plugin/.opencode-plugin/install.sh'),
-      'utf8',
-    );
-    expect(installer).toContain(`MCP_BRIDGE_VERSION='${pluginVersion}'`);
   });
 });
 

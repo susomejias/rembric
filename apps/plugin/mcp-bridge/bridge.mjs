@@ -121,6 +121,7 @@ export async function runBridge({
   let negotiatedProtocolVersion = DEFAULT_PROTOCOL_VERSION;
   let latestInitialize = null;
   let recoveryPromise = null;
+  const cancelledDuringRecovery = new Set();
   let initializationReady = Promise.resolve();
   const pendingServerRequests = new Map();
   const active = new Set();
@@ -311,14 +312,17 @@ export async function runBridge({
       return;
     }
     if (sessionId !== failedSession) return;
-    if (!recoveryPromise) {
-      sessionId = null;
-      sessionGeneration += 1;
-      recoveryPromise = reinitialize().finally(() => {
-        recoveryPromise = null;
-      });
+    sessionId = null;
+    sessionGeneration += 1;
+    recoveryPromise = reinitialize().finally(() => {
+      recoveryPromise = null;
+    });
+    try {
+      await recoveryPromise;
+    } catch (error) {
+      terminate(`session recovery failed: ${describeFailure(error)}`);
+      throw error;
     }
-    await recoveryPromise;
   }
 
   async function sendHostRequest(raw) {
@@ -328,14 +332,18 @@ export async function runBridge({
     if (isInitialize) latestInitialize = raw;
 
     try {
-      if (!isInitialize && recoveryPromise && message.method !== 'notifications/cancelled') {
-        await recoveryPromise;
+      if (message.method === 'notifications/cancelled' && recoveryPromise) {
+        const requestId = message.params?.requestId;
+        if (requestId !== undefined) cancelledDuringRecovery.add(messageKey(requestId));
+        return;
       }
+      if (!isInitialize && recoveryPromise) await recoveryPromise;
       const posted = await post(raw, !isInitialize);
       if (posted.response.status === 404 && posted.sentSession) {
         await discardBody(posted.response);
         controllers.delete(posted.controller);
         await recover(posted.sentSession);
+        if (hasId(message) && cancelledDuringRecovery.delete(messageKey(message.id))) return;
         const retry = await post(raw);
         await consume(retry.response, {
           expectedId: hasId(message) ? message.id : undefined,
@@ -371,7 +379,8 @@ export async function runBridge({
     stdin.on('end', async () => {
       if (terminated) return;
       if (buffer) await handleLine(buffer);
-      await Promise.all(active);
+      for (const controller of controllers) controller.abort();
+      await Promise.allSettled(active);
       finish?.(0);
     });
 

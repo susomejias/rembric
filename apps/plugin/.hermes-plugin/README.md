@@ -50,13 +50,13 @@ The plugin works in two complementary modes — **wire both** unless you really 
 | **Memory provider** | Auto session create / summary-on-compact / end-on-close      | `memory.provider: rembric` (this plugin)   |
 | **MCP server**      | Full memory tool surface (save/search/get/context/judge/...) | `mcp_servers.rembric` (the bundled bridge) |
 
-Drop this block into `~/.hermes/config.yaml`:
+Drop this block into `~/.hermes/config.yaml`. Replace `<plugin-version>` with the exact version printed by the TUI installer (or in `~/.hermes/plugins/rembric/plugin.yaml`):
 
 ```yaml
 mcp_servers:
   rembric:
     command: npx
-    args: ['-y', '@rembric/mcp-bridge@0.28.2']
+    args: ['-y', '@rembric/mcp-bridge@<plugin-version>']
     env:
       REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
       REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
@@ -133,7 +133,7 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Use the TUI installer (`Plugins → hermes → update`). It refreshes the provider files and prints the exact `mcp_servers.rembric.args` pin migration; apply that migration before restarting Hermes. No separate npm update is needed because the bridge is fetched by its exact npx pin.
+Use the TUI installer (`Plugins → hermes → update`). It refreshes the provider files and automatically migrates the documented legacy `mcp-remote` block, preserving `config.yaml.rembric-mcp-remote.bak`; custom blocks remain untouched and receive the exact fallback entry. No separate npm update is needed because the bridge is fetched by its exact npx pin.
 
 Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
 
@@ -141,7 +141,7 @@ Manual fallback — re-run the installer; the script is idempotent (overwrites t
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
-Then update the `@rembric/mcp-bridge@<exact-version>` value in `~/.hermes/config.yaml` to the version printed by the installer and restart the gateway. `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
+Then restart the gateway. If the installer reported that it could not recognize a custom MCP block, replace that entry with the exact fallback it printed. `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
 
 For a temporary rollback after a broken release, see the [emergency plugin rollback](../../../docs/agents.md#emergency-plugin-rollback) runbook.
 

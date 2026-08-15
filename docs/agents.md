@@ -234,13 +234,13 @@ The script drops three files (`plugin.yaml`, `__init__.py`, `README.md`) into `$
 
 > **Why curl-pipe-sh, not `hermes plugins install`?** Hermes's installer (`hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x) accepts only `owner/repo` shorthand or a full Git URL — it does NOT support monorepo subpaths. Cloning the whole rembric repo into `~/.hermes/plugins/rembric/` to extract three files would mean tens of MB of unrelated TS source. The curl-installer ships the right artifacts and nothing else.
 
-Then drop this block into `~/.hermes/config.yaml`:
+Then drop this block into `~/.hermes/config.yaml`, replacing `<plugin-version>` with the exact version printed by the TUI installer (or in `~/.hermes/plugins/rembric/plugin.yaml`):
 
 ```yaml
 mcp_servers:
   rembric:
     command: npx
-    args: ['-y', '@rembric/mcp-bridge@0.28.2']
+    args: ['-y', '@rembric/mcp-bridge@<plugin-version>']
     env:
       REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
       REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
@@ -294,7 +294,7 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`; inv
 | Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Both resolve `.rembric` first, then `REMBRIC_PROJECT_SLUG`. Check that the working directory and the environment are the same for both processes; a per-directory `.rembric` overrides the default.                                                                                   |
 | You edited `~/.hermes/.env` and Hermes didn't pick up the new value                       | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                 |
 | `hermes plugins update rembric` reports nothing to update                                 | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                                                                                                                              |
-| TUI Hermes update warns about an MCP pin migration                                        | Replace `mcp_servers.rembric.args` with the exact pin printed by the TUI, then restart the gateway. No separate npm update is needed.                                                                                                                                                 |
+| TUI Hermes update reports an MCP migration fallback                                       | The documented legacy block migrates automatically with a `.rembric-mcp-remote.bak` backup. For a custom block, replace it with the exact entry printed by the TUI, then restart the gateway.                                                                                         |
 
 #### Using Hermes alongside Claude Code or Codex on the same machine
 
@@ -304,7 +304,7 @@ Credentials, slug source, and update flow are independent per client. The Rembri
 | ---------------- | -------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **Claude Code**  | Wizard → keychain (`${user_config.*}`)       | `.rembric` file via the bridge                | `/plugin update rembric@rembric`                                                         |
 | **Codex CLI**    | Shell env (`export REMBRIC_*`)               | `.rembric` file via the bridge                | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
-| **Hermes Agent** | Shell env / `${HERMES_HOME:-~/.hermes}/.env` | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update, then apply the printed exact bridge-pin migration                            |
+| **Hermes Agent** | Shell env / `${HERMES_HOME:-~/.hermes}/.env` | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update migrates the documented legacy block; custom blocks get an exact fallback     |
 
 Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. Hermes has no keychain equivalent; its canonical persisted env is `${HERMES_HOME:-~/.hermes}/.env`.
 
@@ -326,23 +326,7 @@ The script fetches `plugin.ts` and the shared modules, then prints an MCP block 
 
 #### Configure
 
-Paste the printed MCP block into `~/.config/opencode/opencode.json` (or per project `./opencode.json`):
-
-```json
-{
-  "mcp": {
-    "rembric": {
-      "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
-      "environment": {
-        "REMBRIC_SERVER_URL": "https://memory.example.com",
-        "REMBRIC_API_TOKEN": "oc-token-XXXXXXXX"
-      },
-      "enabled": true
-    }
-  }
-}
-```
+The plugin adds its MCP entry in memory and leaves `opencode.json` untouched. Export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that starts opencode.
 
 Per-project path-scoping uses `.rembric` in each repo (the same convention as every other client):
 
@@ -362,7 +346,7 @@ The bridge subprocess reads `.rembric` at spawn time from its project directory 
 #### Troubleshooting
 
 - **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
-- **MCP connection error in opencode.** Confirm the in-memory `mcp.rembric.command` is `['npx', '-y', '@rembric/mcp-bridge@0.28.2']` and that the environment values are available. Legacy launcher entries are upgraded by the plugin config hook.
+- **MCP connection error in opencode.** Confirm `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are available in the shell that starts opencode. Legacy launcher entries are upgraded by the plugin config hook.
 - **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in `subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
 - **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. opencode is now the only client in this state — Codex CLI does have `SessionEnd` and reaches `ended` on a normal close.
 

@@ -133,10 +133,18 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
   return {
     config: (config) => {
-      const rembric = config.mcp?.rembric;
-      if (rembric) {
-        rembric.command = ['npx', '-y', `@rembric/mcp-bridge@${MCP_BRIDGE_VERSION}`];
-      }
+      const command = ['npx', '-y', `@rembric/mcp-bridge@${MCP_BRIDGE_VERSION}`];
+      config.mcp ??= {};
+      const rembric = (config.mcp.rembric ??= {
+        type: 'local',
+        command,
+        environment: {
+          REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
+          REMBRIC_API_TOKEN: '{env:REMBRIC_API_TOKEN}',
+        },
+        enabled: true,
+      });
+      rembric.command = command;
     },
     event: async ({ event }) => {
       if (event.type === 'session.created') {

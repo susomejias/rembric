@@ -69,39 +69,22 @@ scenario blocks are non-normative after this notice: every launcher, copied
 by the current contract below. Existing user-owned launcher files are handled
 by the in-memory config hook; this repository neither ships nor maintains one.
 
-New and existing opencode configurations SHALL use the published bridge. When
-`mcp.rembric` exists, the plugin's `config` hook SHALL replace only its
-in-memory `command` with `['npx', '-y', '@rembric/mcp-bridge@<plugin version>']`.
-It SHALL preserve the environment, enabled state, and unrelated entries, and
-SHALL never write `opencode.json`. When the entry is absent, the hook SHALL
-leave the configuration unchanged.
+New and existing opencode configurations SHALL use the published bridge. The
+plugin's `config` hook SHALL ensure an in-memory `mcp.rembric` entry with
+`type: "local"`, `command: ['npx', '-y', '@rembric/mcp-bridge@<plugin version>']`,
+the two environment references `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN`,
+and `enabled: true`. When an entry already exists, it SHALL replace only its
+in-memory command and preserve the environment, enabled state, and unrelated
+entries. The hook SHALL never write `opencode.json`.
 
-The MCP server entry printed for a fresh install SHALL be:
-
-```json
-{
-  "mcp": {
-    "rembric": {
-      "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@<x.y.z>"],
-      "environment": {
-        "REMBRIC_SERVER_URL": "<URL>",
-        "REMBRIC_API_TOKEN": "<TOKEN>"
-      },
-      "enabled": true
-    }
-  }
-}
-```
-
-`<x.y.z>` SHALL be an exact pin equal to `apps/plugin/package.json::version`.
-The command SHALL contain no URL, header, or `--allow-http` argument. The
-installer SHALL print this snippet, SHALL NOT write `opencode.json`, and SHALL
-not copy or remove a legacy launcher. It SHALL fetch the moved dotenv module
-from `apps/plugin/mcp-bridge/` and `rembric-plugin-core.mjs` from
-`apps/plugin/bin/`; local iteration SHALL support `MCP_BRIDGE_SRC` alongside
-`PLUGIN_SRC` and `BIN_SRC`. The plugin SHALL NOT register its own MCP server
-programmatically or use `type: "remote"`.
+`<plugin version>` SHALL be an exact pin equal to
+`apps/plugin/package.json::version`. The command SHALL contain no URL, header,
+or `--allow-http` argument. The installer SHALL explain that the hook owns the
+in-memory entry, SHALL NOT write `opencode.json`, and SHALL not copy or remove
+a legacy launcher. It SHALL fetch the moved dotenv module from
+`apps/plugin/mcp-bridge/` and `rembric-plugin-core.mjs` from `apps/plugin/bin/`;
+local iteration SHALL support `MCP_BRIDGE_SRC` alongside `PLUGIN_SRC` and
+`BIN_SRC`. The plugin SHALL NOT use `type: "remote"`.
 
 #### Scenario: Bridge file is reused without divergence
 

@@ -49,5 +49,65 @@ for f in plugin.yaml __init__.py README.md; do
   fetch_file "${PLUGIN_SRC}/${f}" "${TARGET}/${f}" || exit 1
 done
 
+migrate_legacy_mcp_config() {
+  config="${HERMES_HOME}/config.yaml"
+  version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${TARGET}/plugin.yaml" | head -1)
+  [ -f "$config" ] && [ -n "$version" ] || return 0
+  command -v python3 >/dev/null 2>&1 || {
+    printf '[rembric] warning: Python 3 is unavailable; update mcp_servers.rembric manually\n' >&2
+    return 0
+  }
+  python3 - "$config" "$version" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+path = Path(sys.argv[1])
+version = sys.argv[2]
+lines = path.read_text().splitlines(keepends=True)
+for start, line in enumerate(lines):
+    if line.strip() != "mcp_servers:" or line[: len(line) - len(line.lstrip())]:
+        continue
+    index = start + 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index == len(lines) or lines[index].strip() != "rembric:" or not lines[index].startswith("  "):
+        continue
+    end = index + 1
+    while end < len(lines):
+        candidate = lines[end]
+        if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 2:
+            break
+        end += 1
+    block = "".join(lines[index:end])
+    keys = [
+        entry.strip().split(":", 1)[0]
+        for entry in lines[index + 1:end]
+        if len(entry) - len(entry.lstrip()) == 4 and ":" in entry
+    ]
+    if (
+        "mcp-remote@" not in block
+        or "Authorization: Bearer ${REMBRIC_API_TOKEN}" not in block
+        or any(key not in {"command", "args"} for key in keys)
+    ):
+        continue
+    backup = path.with_name(f"{path.name}.rembric-mcp-remote.bak")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    replacement = [
+        "  rembric:\n",
+        "    command: npx\n",
+        f"    args: ['-y', '@rembric/mcp-bridge@{version}']\n",
+    ]
+    path.write_text("".join(lines[:index] + replacement + lines[end:]))
+    print(f"[rembric] migrated mcp_servers.rembric; backup: {backup}")
+    break
+PY
+}
+
+if [ "${REMBRIC_ACTION:-install}" = "update" ]; then
+  migrate_legacy_mcp_config
+fi
+
 printf '✓ rembric installed at %s\n' "$TARGET"
 printf '  enable: hermes plugins enable rembric\n'

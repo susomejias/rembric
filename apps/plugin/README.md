@@ -23,13 +23,13 @@ It is an orchestrator — it routes to each client's real mechanism (the per-cli
 <details>
 <summary><strong>Manual install</strong> (per-client, fallback — what the TUI runs under the hood)</summary>
 
-| Client           | Manual command                                                                                                                                                                                |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Claude Code**  | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                            |
-| **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin add rembric@rembric`                                                                                  |
-| **Hermes Agent** | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                           |
-| **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh` then paste the printed MCP block into `~/.config/opencode/opencode.json` |
-| **Pi**           | `pi install npm:@rembric/pi` then export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN` in your shell. Never append a version — a pinned spec is skipped by `pi update --extensions` / `--all`    |
+| Client           | Manual command                                                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Claude Code**  | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                         |
+| **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin add rembric@rembric`                                                                               |
+| **Hermes Agent** | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh \| sh && hermes plugins enable rembric`                                        |
+| **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh`, export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN`, then restart      |
+| **Pi**           | `pi install npm:@rembric/pi` then export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN` in your shell. Never append a version — a pinned spec is skipped by `pi update --extensions` / `--all` |
 
 </details>
 
