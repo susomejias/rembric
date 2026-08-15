@@ -49,6 +49,27 @@ export function isPublished(packageName, version, npmCommand = 'npm') {
       `npm view returned ${JSON.stringify(publishedVersion)} for exact query ${packageSpec}`,
     );
   }
+
+  const attestation = spawnSync(npmCommand, ['view', packageSpec, 'dist.attestations', '--json'], {
+    encoding: 'utf8',
+  });
+  if (attestation.error) throw attestation.error;
+  if (attestation.status !== 0) {
+    throw new Error(`could not verify provenance for ${packageSpec}`);
+  }
+  try {
+    const raw = attestation.stdout.trim();
+    if (!raw) throw new Error(`published ${packageSpec} has no npm provenance attestation`);
+    const metadata = JSON.parse(raw);
+    if (typeof metadata?.provenance?.predicateType !== 'string') {
+      throw new Error(`published ${packageSpec} has no npm provenance attestation`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('has no npm provenance')) throw error;
+    throw new Error(`npm view returned invalid attestation metadata for ${packageSpec}`, {
+      cause: error,
+    });
+  }
   return true;
 }
 

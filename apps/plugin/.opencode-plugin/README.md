@@ -44,17 +44,12 @@ MCP_BRIDGE_SRC="$(pwd)/apps/plugin/mcp-bridge" \
   sh apps/plugin/.opencode-plugin/install.sh
 ```
 
-#### 2. Paste the MCP block into `opencode.json`
+#### 2. Export credentials and restart
 
-The install script prints a snippet at the end. Paste it into one of:
+The plugin adds its MCP entry in memory without changing `opencode.json`. Export:
 
-- **Global** (recommended): `~/.config/opencode/opencode.json`
-- **Per project**: `./opencode.json` at the repo root
-
-Then edit the two placeholders:
-
-- `<REMBRIC_SERVER_URL>` — your Rembric base URL, e.g. `http://127.0.0.1:8787` (no trailing `/mcp`).
-- `<REMBRIC_API_TOKEN>` — bearer token issued from `/dashboard/tokens` (plaintext shown exactly once).
+- `REMBRIC_SERVER_URL` — your Rembric base URL, e.g. `http://127.0.0.1:8787` (no trailing `/mcp`).
+- `REMBRIC_API_TOKEN` — bearer token issued from `/dashboard/tokens` (plaintext shown exactly once).
 
 Restart opencode.
 

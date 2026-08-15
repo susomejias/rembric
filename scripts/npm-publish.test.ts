@@ -57,10 +57,25 @@ function packageFixture(): string {
 describe('npm publish retry safety', () => {
   it('skips a package when the exact version already exists', () => {
     const packageDir = packageFixture();
-    const npm = fakeNpm(['OK:"1.2.3"']);
+    const npm = fakeNpm([
+      'OK:"1.2.3"',
+      'OK:{"provenance":{"predicateType":"https://slsa.dev/provenance/v1"}}',
+    ]);
 
     expect(publishPackage(packageDir, npm.command)).toBe(false);
-    expect(readFileSync(npm.calls, 'utf8')).toBe('view @rembric/example@1.2.3 version --json\n');
+    expect(readFileSync(npm.calls, 'utf8')).toBe(
+      'view @rembric/example@1.2.3 version --json\n' +
+        'view @rembric/example@1.2.3 dist.attestations --json\n',
+    );
+  });
+
+  it('fails closed when an existing package has no provenance attestation', () => {
+    const packageDir = packageFixture();
+    const npm = fakeNpm(['OK:"1.2.3"', 'OK:']);
+
+    expect(() => publishPackage(packageDir, npm.command)).toThrow(
+      'published @rembric/example@1.2.3 has no npm provenance attestation',
+    );
   });
 
   it('publishes a missing package after an exact-version 404', () => {

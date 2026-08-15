@@ -194,7 +194,7 @@ describe('RembricPlugin config hook', () => {
     expect(config.theme).toBe('dark');
   });
 
-  it('does not create an MCP entry when the user has not configured one', async () => {
+  it('adds an in-memory MCP entry when the user has not configured one', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     const config = {
       mcp: { other: { command: ['node', 'other-mcp.mjs'], enabled: true } },
@@ -204,7 +204,18 @@ describe('RembricPlugin config hook', () => {
     handlers.config!(config);
 
     expect(config).toEqual({
-      mcp: { other: { command: ['node', 'other-mcp.mjs'], enabled: true } },
+      mcp: {
+        rembric: {
+          type: 'local',
+          command: ['npx', '-y', expectedBridgeSpecifier],
+          environment: {
+            REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
+            REMBRIC_API_TOKEN: '{env:REMBRIC_API_TOKEN}',
+          },
+          enabled: true,
+        },
+        other: { command: ['node', 'other-mcp.mjs'], enabled: true },
+      },
       theme: 'dark',
     });
   });
