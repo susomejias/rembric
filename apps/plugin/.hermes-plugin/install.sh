@@ -59,6 +59,7 @@ migrate_legacy_mcp_config() {
   }
   python3 - "$config" "$version" <<'PY'
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -85,19 +86,32 @@ for start, line in enumerate(lines):
         for entry in lines[index + 1:end]
         if len(entry) - len(entry.lstrip()) == 4 and ":" in entry
     ]
-    if (
-        "mcp-remote@" not in block
-        or "Authorization: Bearer ${REMBRIC_API_TOKEN}" not in block
-        or any(key not in {"command", "args"} for key in keys)
-    ):
+    legacy = (
+        "mcp-remote@" in block
+        and "Authorization: Bearer ${REMBRIC_API_TOKEN}" in block
+        and all(key in {"command", "args"} for key in keys)
+    )
+    incomplete = (
+        keys == ["command", "args"]
+        and re.search(r"^    args: \['-y', '@rembric/mcp-bridge@[0-9]+\.[0-9]+\.[0-9]+'\]\n?$", block, re.MULTILINE)
+        and "env:" not in block
+        and "enabled:" not in block
+    )
+    if not (legacy or incomplete):
         continue
-    backup = path.with_name(f"{path.name}.rembric-mcp-remote.bak")
+    suffix = "rembric-mcp-remote" if legacy else "rembric-mcp-env"
+    backup = path.with_name(f"{path.name}.{suffix}.bak")
     if not backup.exists():
         shutil.copy2(path, backup)
     replacement = [
         "  rembric:\n",
         "    command: npx\n",
         f"    args: ['-y', '@rembric/mcp-bridge@{version}']\n",
+        "    env:\n",
+        "      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}\n",
+        "      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}\n",
+        "      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n",
+        "    enabled: true\n",
     ]
     path.write_text("".join(lines[:index] + replacement + lines[end:]))
     print(f"[rembric] migrated mcp_servers.rembric; backup: {backup}")

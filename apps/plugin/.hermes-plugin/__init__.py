@@ -15,8 +15,8 @@ intentionally exposes no native tools so the surface cannot drift.
 Credentials live in ``${HERMES_HOME:-~/.hermes}/.env``, written by
 Hermes itself via the manifest's ``requires_env`` flow at install time.
 Hermes pre-loads that file into ``os.environ`` before the plugin module
-imports AND into every subprocess it spawns from ``mcp_servers.*`` —
-single source of truth for both the in-process provider and the bridge.
+imports. The bridge receives the same values through its explicit
+``mcp_servers.rembric.env`` mapping.
 
 Project slug cascade (first valid match wins): ``<cwd>/.rembric``
 ``PROJECT_SLUG`` → ``REMBRIC_PROJECT_SLUG`` env → degraded silent skip.

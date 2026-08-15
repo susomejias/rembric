@@ -292,8 +292,10 @@ describe('agent routing', () => {
     const { code, out } = run(['--agent=hermes', '--action=update'], { home });
     expect(code).toBe(0);
     expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
-    expect(out).toContain('migrates the documented legacy mcp-remote block automatically');
-    expect(out).toContain('.rembric-mcp-remote.bak backup');
+    expect(out).toContain('REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}');
+    expect(out).toContain('enabled: true');
+    expect(out).toContain('repairs recognized Rembric MCP blocks');
+    expect(out).toContain('writes a backup before changing config');
     expect(out).toContain('hermes gateway restart');
     expect(out).not.toContain('hermes plugins install rembric');
   });
@@ -313,8 +315,37 @@ describe('agent routing', () => {
     );
     expect(out).toContain('migrated mcp_servers.rembric');
     expect(readFileSync(config, 'utf8')).toBe(
-      `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']\n  other:\n    command: other-mcp\n`,
+      `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']\n    env:\n      REMBRIC_SERVER_URL: \${REMBRIC_SERVER_URL}\n      REMBRIC_API_TOKEN: \${REMBRIC_API_TOKEN}\n      REMBRIC_PROJECT_SLUG: \${REMBRIC_PROJECT_SLUG}\n    enabled: true\n  other:\n    command: other-mcp\n`,
     );
+  });
+
+  it('hermes update repairs only the incomplete bridge block emitted by the prior updater', () => {
+    const hermesHome = join(home, '.hermes');
+    mkdirSync(hermesHome, { recursive: true });
+    const config = join(hermesHome, 'config.yaml');
+    const incomplete = `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@0.29.1']\n`;
+    writeFileSync(config, incomplete);
+
+    run(['--agent=hermes', '--action=update'], { home });
+
+    expect(readFileSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'), 'utf8')).toBe(
+      incomplete,
+    );
+    expect(readFileSync(config, 'utf8')).toContain('REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}');
+    expect(readFileSync(config, 'utf8')).toContain('enabled: true');
+  });
+
+  it('hermes update preserves canonical and custom bridge blocks', () => {
+    const hermesHome = join(home, '.hermes');
+    mkdirSync(hermesHome, { recursive: true });
+    const config = join(hermesHome, 'config.yaml');
+    const custom = `mcp_servers:\n  rembric:\n    command: wrapper\n    args: ['rembric']\n`;
+    writeFileSync(config, custom);
+
+    run(['--agent=hermes', '--action=update'], { home });
+
+    expect(readFileSync(config, 'utf8')).toBe(custom);
+    expect(existsSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'))).toBe(false);
   });
 
   it('opencode/claude update notes drop the install-only wiring (just restart)', () => {

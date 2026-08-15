@@ -245,6 +245,7 @@ mcp_servers:
       REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
       REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
       REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
+    enabled: true
 
 memory:
   provider: rembric
@@ -252,7 +253,7 @@ memory:
 
 #### Credentials — install-time prompt writes `~/.hermes/.env`
 
-The plugin's `plugin.yaml` declares its three runtime env vars via `requires_env:`. Running `hermes plugins install rembric` prompts the user at install time and writes the answers to `${HERMES_HOME:-~/.hermes}/.env` via Hermes's standard `save_env_value`. Hermes loads that file into `os.environ` on every launch AND forwards the same env to the `mcp_servers.*` subprocesses — single source of truth for both the in-process provider and the MCP bridge.
+The plugin's `plugin.yaml` declares its three runtime env vars via `requires_env:`. Running `hermes plugins install rembric` prompts the user at install time and writes the answers to `${HERMES_HOME:-~/.hermes}/.env` via Hermes's standard `save_env_value`. Hermes loads that file into `os.environ` for the provider; the explicit `mcp_servers.rembric.env` map forwards the values to the bridge.
 
 ```bash
 # After the curl-installer drops the plugin files:
@@ -300,13 +301,13 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`; inv
 
 Credentials, slug source, and update flow are independent per client. The Rembric server side is identical — same token, same `/api/<slug>/sessions(*)` endpoints. The clients just configure their adapters differently:
 
-| Client           | Credentials from                             | Slug from                                     | Update                                                                                   |
-| ---------------- | -------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Claude Code**  | Wizard → keychain (`${user_config.*}`)       | `.rembric` file via the bridge                | `/plugin update rembric@rembric`                                                         |
-| **Codex CLI**    | Shell env (`export REMBRIC_*`)               | `.rembric` file via the bridge                | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
-| **Hermes Agent** | Shell env / `${HERMES_HOME:-~/.hermes}/.env` | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update migrates the documented legacy block; custom blocks get an exact fallback     |
+| Client           | Credentials from                                          | Slug from                                     | Update                                                                                   |
+| ---------------- | --------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Claude Code**  | Wizard → keychain (`${user_config.*}`)                    | `.rembric` file via the bridge                | `/plugin update rembric@rembric`                                                         |
+| **Codex CLI**    | Shell env (`export REMBRIC_*`)                            | `.rembric` file via the bridge                | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
+| **Hermes Agent** | `${HERMES_HOME:-~/.hermes}/.env` + explicit MCP `env` map | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update repairs recognized bridge blocks; custom blocks get an exact fallback         |
 
-Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. Hermes has no keychain equivalent; its canonical persisted env is `${HERMES_HOME:-~/.hermes}/.env`.
+Hermes has no keychain equivalent; `${HERMES_HOME:-~/.hermes}/.env` is its canonical persisted env. The provider reads it directly, while the MCP bridge needs the explicit `mcp_servers.rembric.env` map.
 
 ### opencode (bundled plugin)
 

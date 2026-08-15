@@ -61,12 +61,13 @@ mcp_servers:
       REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
       REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
       REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
+    enabled: true
 
 memory:
   provider: rembric
 ```
 
-The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes plugins install rembric`). Hermes loads that file into the process env at startup and forwards it to the `mcp_servers.*` subprocess. The bridge and provider resolve a per-directory `.rembric` file first, then `REMBRIC_PROJECT_SLUG`; if neither is valid, lifecycle POSTs are skipped and the bridge uses path-less `/mcp`.
+The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes plugins install rembric`). Hermes loads that file for the provider; the explicit `env` map forwards the values to the MCP bridge. The bridge and provider resolve a per-directory `.rembric` file first, then `REMBRIC_PROJECT_SLUG`; if neither is valid, lifecycle POSTs are skipped and the bridge uses path-less `/mcp`.
 
 ## Environment variables
 
@@ -83,7 +84,7 @@ All three vars live in **`${HERMES_HOME:-~/.hermes}/.env`** — single source of
 
 1. `hermes plugins install rembric` reads the manifest's `requires_env:` list, prompts the user for each value not already set in the parent shell, and writes the answers via `save_env_value` to `~/.hermes/.env`.
 2. Subsequent Hermes launches read `~/.hermes/.env` into `os.environ` before plugins import. The provider sees the values via `os.environ.get(...)`.
-3. Hermes also forwards the same env to the `mcp_servers.*` subprocesses it spawns — the bundled MCP bridge inherits the env automatically.
+3. The `mcp_servers.rembric.env` map explicitly forwards those values to the bundled MCP bridge.
 
 To change a value after install:
 

@@ -843,10 +843,15 @@ hermes_bridge_config() {
   say "      rembric:"
   say "        command: npx"
   say "        args: ['-y', '@rembric/mcp-bridge@${_bridge_version}']"
+  say "        env:"
+  say "          REMBRIC_SERVER_URL: \${REMBRIC_SERVER_URL}"
+  say "          REMBRIC_API_TOKEN: \${REMBRIC_API_TOKEN}"
+  say "          REMBRIC_PROJECT_SLUG: \${REMBRIC_PROJECT_SLUG}"
+  say "        enabled: true"
 }
 
 hermes_bridge_migration_note() {
-  say "  ${DIM}The updater migrates the documented legacy mcp-remote block automatically and writes one .rembric-mcp-remote.bak backup.${RESET}"
+  say "  ${DIM}The updater repairs recognized Rembric MCP blocks and writes a backup before changing config.${RESET}"
   say "  ${DIM}If it reported no migration, replace your mcp_servers.rembric entry with:${RESET}"
   hermes_bridge_config
 }
