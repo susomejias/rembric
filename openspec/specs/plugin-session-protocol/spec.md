@@ -574,6 +574,13 @@ The resume SHALL be skipped when the ensure that precedes it did not land. Whate
 
 An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
 
+**The scanned set is every JS/TS source file under `apps/plugin/`, which is broader than the set of clients, and the two halves of the invariant apply to different sets.** The repository now ships a JS/TS artifact under `apps/plugin/` that is deliberately not a session client — the transport package `apps/plugin/mcp-bridge/` — and the distinction has to be normative rather than an accident of the pattern the test happens to use:
+
+- **The no-second-definition half applies to every scanned file**, client or not. A non-client file that redefines a core-owned helper is a second implementation whatever its directory is called, and `diag` and `truncate` are the realistic collisions for any program that writes stderr diagnostics.
+- **The must-import half applies to clients only.** A file that participates in no part of the session protocol SHALL NOT be required to import the core, and requiring it would be worse than useless: it would put session-protocol code inside a transport whose contract is to inspect no payload.
+
+The set of clients SHALL be derived from the per-client directory shape (`apps/plugin/.<name>-plugin/`) rather than enumerated, and a non-client artifact under `apps/plugin/` SHALL NOT be placed in a directory matching that shape.
+
 The core SHALL require `agent` as a mandatory parameter of session registration, with no default. `sessions.agent` is written once per session and memory is append-only, so a defaulted value misattributes sessions permanently with no repair verb.
 
 #### Scenario: A second redaction implementation fails the build
@@ -581,6 +588,19 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **GIVEN** a change introduces a local `function stripPrivateTags` in any JS/TS client file
 - **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
 - **THEN** the test SHALL fail with a message naming the offending file and line
+
+#### Scenario: A non-client file under `apps/plugin/` cannot redefine a core-owned helper
+
+- **GIVEN** a change introduces a `function diag` or `function truncate` inside `apps/plugin/mcp-bridge/`
+- **WHEN** the invariant runs
+- **THEN** the test SHALL fail naming that file and line
+- **AND** the message SHALL name `apps/plugin/bin/rembric-plugin-core.mjs` as the one permitted definition site
+
+#### Scenario: A non-client file is not required to import the core
+
+- **WHEN** the invariant enumerates the files that must import `rembric-plugin-core.mjs`
+- **THEN** `apps/plugin/mcp-bridge/`'s sources SHALL NOT be among them
+- **AND** the enumeration SHALL be derived from the `apps/plugin/.<name>-plugin/` directory shape
 
 #### Scenario: The invariant cannot pass vacuously
 

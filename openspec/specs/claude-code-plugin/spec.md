@@ -27,18 +27,6 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 - The bridge SHALL receive `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` via `env`, sourced from `${user_config.server_url}` and `${user_config.api_token}` respectively.
 - The plugin SHALL NOT use a direct `type: "http"` MCP server entry; the bridge mediates traffic so that the URL can be path-scoped with the slug read from `.rembric` at session start.
 
-## MCP bridge contract
-
-- The plugin SHALL ship `apps/plugin/bin/rembric-bridge.mjs`, a Node ≥18 script that acts as a stdio MCP server for Claude Code while forwarding to Rembric over HTTP.
-- The bridge SHALL resolve the project directory from a precedence chain of environment variables, in this order: `CLAUDE_PROJECT_DIR`, then `PWD`, then `process.cwd()`. The chain SHALL skip empty-string values (use `||` not `??` semantics) so that an explicitly-set-to-empty env var falls through cleanly. This makes the bridge reusable from non-Claude-Code clients (notably Codex) that propagate the user's shell working directory via `PWD` rather than Claude's `CLAUDE_PROJECT_DIR` convention.
-- The bridge SHALL look for `${projectDir}/.rembric`. If the file exists, the bridge SHALL parse it as dotenv-style `KEY=VALUE` lines (with `#` line comments and optional matched-quote stripping) and read `PROJECT_SLUG`. If `PROJECT_SLUG` is defined and matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`, the bridge SHALL construct the URL `${REMBRIC_SERVER_URL}/mcp/<slug>` (path-scoped).
-- If `.rembric` is missing, unparseable, lacks `PROJECT_SLUG`, or `PROJECT_SLUG` does not match the slug regex, the bridge SHALL write a one-line stderr diagnostic and fall back to path-less `${REMBRIC_SERVER_URL}/mcp`. The bridge SHALL NOT abort in this case — the session continues against the default project (or whatever the agent later pins with `project.use`).
-- The bridge SHALL delegate the actual stdio↔Streamable-HTTP-MCP transport to `npx -y mcp-remote` at a pinned exact version (see "The bridge MUST pin the `mcp-remote` version" below), injecting `Authorization: Bearer ${REMBRIC_API_TOKEN}` on every request and passing the `--allow-http` flag so that plain-HTTP LAN deployments (e.g. `http://192.168.x.y:8787`) are accepted. For HTTPS deployments the flag is a no-op.
-- The bridge SHALL NOT parse, rewrite, or inspect MCP frames beyond what `mcp-remote` itself does. It is purely a URL-building entrypoint.
-- The bridge SHALL write one diagnostic line to stderr at startup of the form `[rembric-bridge] projectDir=<dir> (from <source>) url=<url>`, where `<source>` is exactly one of `CLAUDE_PROJECT_DIR`, `PWD`, or `process.cwd()` — naming which step of the precedence chain produced the resolved directory. This aids debugging via `claude --debug` and `codex` log inspection.
-- If `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` are missing, the bridge SHALL exit non-zero with a clear stderr message instructing the user to configure the plugin.
-- The bridge SHALL forward the child process's exit code; if the child terminates from a signal, the bridge SHALL re-raise that signal in its own process.
-
 ## Skill catalog
 
 - The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
@@ -260,7 +248,7 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 
 #### Scenario: Plugin hook scripts do not check for or interoperate with other memory systems
 
-- **WHEN** the plugin's hook scripts (`session-start.sh`, `post-compact.sh`, `session-end.sh`, `pre-compact.sh`, `post-compaction.sh`, `prompt-search.sh`, `prompt-nudge.sh`, `stop-sync.sh`) and the bundled MCP bridge (`apps/plugin/bin/rembric-bridge.mjs`) are inspected
+- **WHEN** the plugin's hook scripts (`session-start.sh`, `post-compact.sh`, `session-end.sh`, `pre-compact.sh`, `post-compaction.sh`, `prompt-search.sh`, `prompt-nudge.sh`, `stop-sync.sh`) and the published MCP bridge (`apps/plugin/mcp-bridge/`) are inspected
 - **THEN** none SHALL contain logic that detects, warns about, defers to, or imports state from any agent memory tool other than Rembric
 - **AND** none SHALL name a specific third-party memory tool in their output, comments, or stderr diagnostics
 
@@ -275,44 +263,6 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 - **WHEN** the plugin README is rendered (e.g. on GitHub)
 - **THEN** the operator guidance about parallel-tool drift SHALL state that this plugin is the sole memory layer and SHALL warn against having another memory tool installed
 - **AND** the guidance SHALL NOT name any specific third-party memory tool by name
-
-### Requirement: The bridge MUST pin the `mcp-remote` version
-
-The bridge (`apps/plugin/bin/rembric-bridge.mjs`) SHALL spawn `mcp-remote` at an exact pinned version (`mcp-remote@<x.y.z>`), never a floating tag such as `@latest`. The pinned version SHALL be bumped deliberately as part of plugin releases.
-
-Before spawning `mcp-remote`, the bridge SHALL perform one `GET ${REMBRIC_SERVER_URL}/healthz` request (reusing the same bearer token it holds for the MCP connection) with a short timeout (2 seconds). On success, the bridge SHALL compare the response's `version` field against a `MIN_SERVER_VERSION` constant bumped alongside the plugin's own version. When the server's version is older than `MIN_SERVER_VERSION` (semver comparison), the bridge SHALL print exactly one line to stderr naming both versions and pointing at the dashboard self-update flow / `docs/updates.md`, then proceed to spawn `mcp-remote` unchanged — the check is advisory only and SHALL NOT block or delay the connection. When the `/healthz` request fails for any reason (network error, timeout, non-200, malformed body), the bridge SHALL silently skip the check and proceed exactly as if no check existed — this MUST NOT introduce a new failure mode for environments where `/healthz` is unreachable but `/mcp` is fine (e.g. transient DNS blips, a reverse proxy exposing only `/mcp`).
-
-This bridge is shared unmodified by the Codex CLI plugin (`.codex-plugin/mcp.json` spawns the same `rembric-bridge.mjs`) and by the opencode plugin's stdio-transport reuse (`opencode-plugin/spec.md`'s "MCP transport reuses the existing stdio bridge" requirement); both clients inherit this version-handshake behavior with no client-specific spec text needed, since the check is entirely internal to the shared bridge script.
-
-#### Scenario: Session start does not re-resolve `latest`
-
-- **WHEN** the bridge spawns the transport
-- **THEN** the npx argument SHALL name an exact `mcp-remote@<x.y.z>` version, so a newly published upstream release cannot change behavior without a Rembric plugin release
-
-#### Scenario: Upstream publishes a broken release
-
-- **WHEN** a broken `mcp-remote` version is published to npm
-- **THEN** existing Rembric installations SHALL be unaffected (they keep spawning the pinned version)
-
-#### Scenario: Bridge warns on an outdated server
-
-- **GIVEN** `/healthz` responds successfully with a `version` older than the bridge's `MIN_SERVER_VERSION`
-- **WHEN** the bridge starts
-- **THEN** it SHALL print exactly one stderr line naming both the server's version and the expected minimum, and pointing at the update flow
-- **AND** it SHALL still spawn `mcp-remote` and connect normally
-
-#### Scenario: Bridge is silent when the server meets the minimum version
-
-- **GIVEN** `/healthz` responds successfully with a `version` at or above `MIN_SERVER_VERSION`
-- **WHEN** the bridge starts
-- **THEN** no version-related stderr line SHALL be printed
-
-#### Scenario: A healthz failure does not block or warn
-
-- **GIVEN** the `/healthz` request times out, errors, or returns a non-200 status
-- **WHEN** the bridge starts
-- **THEN** no version-related stderr line SHALL be printed
-- **AND** the bridge SHALL proceed to spawn `mcp-remote` exactly as it would without this requirement
 
 ### Requirement: The plugin SHALL ship a unified `UserPromptSubmit` per-turn nudge hook
 
@@ -648,6 +598,66 @@ The historical reason a `Stop` hook was once removed was a **semantic bug**, not
 - **WHEN** Claude Code consumes the plugin from the marketplace
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
 - **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, SessionEnd, PreCompact, PostCompact, Stop}` carrying exactly nine handler entries, with NO `PostToolUse` entry
+
+### Requirement: MCP server declaration
+
+- `apps/plugin/.claude-plugin/mcp.json` SHALL declare a single MCP server entry named `rembric`.
+- The server entry SHALL use `command: "npx"` with `args: ["-y", "@rembric/mcp-bridge@<x.y.z>"]`, spawning the published bridge as a stdio MCP server. The version SHALL be exact (see "The plugin manifests MUST pin the `@rembric/mcp-bridge` version" below).
+- The bridge SHALL receive `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` via `env`, sourced from `${user_config.server_url}` and `${user_config.api_token}` respectively. No other argument or environment value is required, and the bearer SHALL NOT appear in `args` — a process argument vector is readable by any local process via `ps` and `/proc/<pid>/cmdline`.
+- The plugin SHALL NOT use a direct `type: "http"` MCP server entry. A stdio child is what allows the URL to be path-scoped with the slug read from `.rembric` at session start, per directory, which a static manifest cannot express — and it is what allows a bearer held in the system keychain to be injected without writing it into a config file.
+- Because the manifest ships inside the plugin tree, a plugin update replaces the entry and the pin together, so the version named here and the version published for that release are written by the same release.
+
+#### Scenario: The manifest spawns the pinned bridge with no arguments beyond the specifier
+
+- **WHEN** `apps/plugin/.claude-plugin/mcp.json` is read
+- **THEN** the top-level object SHALL contain exactly one entry `mcpServers.rembric`
+- **AND** the entry SHALL declare `command: "npx"` and `args: ["-y", "@rembric/mcp-bridge@<x.y.z>"]` with an exact version
+- **AND** `args` SHALL contain no URL, no `--header` and no `--allow-http`
+
+#### Scenario: Credentials reach the bridge through `env`, not `args`
+
+- **WHEN** the entry is read
+- **THEN** `env` SHALL map `REMBRIC_SERVER_URL` to `${user_config.server_url}` and `REMBRIC_API_TOKEN` to `${user_config.api_token}`
+- **AND** neither value SHALL appear anywhere in `args`
+
+#### Scenario: No direct HTTP entry
+
+- **WHEN** the manifest is read
+- **THEN** it SHALL NOT declare a `type: "http"` server entry
+- **AND** the reason SHALL remain that per-directory path scoping and keychain-held bearer injection require a stdio child
+
+### Requirement: The plugin manifests MUST pin the `@rembric/mcp-bridge` version
+
+Every place the plugin spawns the bridge SHALL name an exact pinned version (`@rembric/mcp-bridge@<x.y.z>`), never a floating tag such as `@latest`. For this capability that means `apps/plugin/.claude-plugin/mcp.json`; the Codex manifest and the opencode compatibility launcher carry the same obligation in their own capabilities, and the obligation itself is owned by `mcp-bridge`.
+
+`npx` re-resolves a floating tag on every session start, so with `@latest` a compromise of the publishing account would be arbitrary code execution on every user machine at the next session start. Owning the package makes this stricter, not laxer.
+
+The pin SHALL be written by release-please as a version carrier of the unified `plugin` component, never bumped by hand, so a manifest cannot name a version that was never published. Where the file format cannot carry a release-please annotation, the pin SHALL still be asserted equal to `apps/plugin/package.json::version` by an executable check rather than left to review.
+
+The advisory server-version handshake this requirement previously specified — one fire-and-forget `GET /healthz`, warn-never-block — has moved to the bridge and is specified by `mcp-bridge`. It SHALL exist exactly once across the plugin tree, and this capability SHALL NOT restate or duplicate it.
+
+#### Scenario: Session start does not re-resolve `latest`
+
+- **WHEN** the Claude Code plugin manifest is read
+- **THEN** the npx argument SHALL name an exact `@rembric/mcp-bridge@<x.y.z>` version, so a newly published release cannot change behavior without a Rembric plugin release
+
+#### Scenario: A compromised publish does not reach existing installations
+
+- **WHEN** a malicious or broken `@rembric/mcp-bridge` version is published to npm
+- **THEN** existing Rembric installations SHALL be unaffected (they keep spawning the pinned version)
+- **AND** reaching them SHALL require a deliberate plugin release that bumps the pin
+
+#### Scenario: The pin is written by release-please, not by hand
+
+- **WHEN** a plugin release is cut
+- **THEN** the manifest's pinned version and `apps/plugin/mcp-bridge/package.json::version` SHALL both be updated to the new plugin version
+- **AND** they SHALL agree with each other and with the `plugin-vX.Y.Z` tag
+
+#### Scenario: The advisory version check is not duplicated here
+
+- **WHEN** the Claude Code plugin's shipped files are inspected
+- **THEN** none SHALL issue a `GET /healthz` request
+- **AND** the single implementation SHALL be the one inside `@rembric/mcp-bridge`
 
 ## Hook script invariants
 

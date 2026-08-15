@@ -421,12 +421,14 @@ CI SHALL run the server test suite WITH coverage so the thresholds configured in
 #### Scenario: The shipped bridges are linted
 
 - **WHEN** `pnpm run lint` runs
-- **THEN** `apps/plugin/bin/rembric-bridge.mjs` and `apps/plugin/bin/rembric-dotenv.mjs` SHALL be included in the lint set
+- **THEN** `apps/plugin/mcp-bridge/{bridge,cli,slug,rembric-dotenv}.mjs` SHALL be included in the lint set
 
 #### Scenario: The installer suite runs once
 
 - **WHEN** the CI workflow for a PR completes
 - **THEN** `install.test.ts` SHALL have been executed exactly once, and the shell-syntax (`sh -n`) checks SHALL still run
+
+**Amendment for the plugin bridge workspace:** The lint and test coverage paths in this requirement extend to the published bridge package. `apps/plugin/mcp-bridge/` SHALL be explicitly included in the ESLint set, and its `*.test.ts` files SHALL be explicitly included in `apps/server/vitest.config.ts`. The shipped-bridge scenario's historical paths are replaced for this change by `apps/plugin/mcp-bridge/{bridge,cli,slug}.mjs` and `apps/plugin/mcp-bridge/rembric-dotenv.mjs`; the deleted `apps/plugin/bin/rembric-bridge.mjs` is not a live lint requirement. The installer suite SHALL remain single-run, and the existing root commands and coverage obligations remain unchanged.
 
 ### Requirement: CI MUST reject a published-spec edit that arrives without an archive in the same diff
 

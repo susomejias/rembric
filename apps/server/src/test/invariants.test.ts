@@ -1123,7 +1123,6 @@ const LEGACY_INSTALL_URL_SUBSTRINGS = [
 const LEGACY_URL_ALLOW_LIST = new Set([
   'openspec/specs/open-source-distribution/spec.md', // 404-contract documentation
   'openspec/specs/hermes-agent-plugin/spec.md', // 404-contract documentation
-  'openspec/specs/opencode-plugin/spec.md', // 404-contract documentation
   'apps/server/src/test/invariants.test.ts', // self-reference: this test owns the rule
 ]);
 

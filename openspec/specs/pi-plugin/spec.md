@@ -4,7 +4,7 @@
 
 Owns Rembric's Pi client: the extension tree at `apps/plugin/.pi-plugin/`, the npm package `@rembric/pi` that distributes it, and the runtime MCP proxy that gives it a tool surface.
 
-Pi is the odd client out, and most of this capability follows from one fact about the host: it intentionally ships no built-in MCP client, so `apps/plugin/bin/rembric-bridge.mjs` — the stdio↔HTTP proxy every other client's tools arrive through — has no consumer here. The extension therefore **is** the MCP client. It opens Streamable HTTP against `/mcp/<slug>`, calls `tools/list`, and registers whatever it finds. Tools are discovered, never enumerated: the server stays the only place the surface is described, so the plugin and the server cannot desynchronise.
+Pi is the odd client out, and most of this capability follows from one fact about the host: it intentionally ships no built-in MCP client, so `@rembric/mcp-bridge` — the stdio↔HTTP proxy every other client's tools arrive through — has no consumer here. The extension therefore **is** the MCP client. It opens Streamable HTTP against `/mcp/<slug>`, calls `tools/list`, and registers whatever it finds. Tools are discovered, never enumerated: the server stays the only place the surface is described, so the plugin and the server cannot desynchronise.
 
 Three further consequences shape the rest. The harness's package gallery lists by keyword with no admission process, so the npm package is not a convenience but the **only** discovery path — which makes publication part of the client's contract, carried as one more `extra-files` version carrier of the unified `plugin` component and never as a release-please component of its own. A real provider was measured refusing the server's dotted tool names outright, rejecting the whole payload rather than the offending tool, so registration maps `.`→`_` while `tools/call` keeps the canonical name. And the harness awaits its session-shutdown handler, so this client's final flush is a guarantee rather than the best-effort dispose the opencode host forces — with measured exceptions that are narrower than first published: a single interrupt reaches no handler in either mode, and print mode registers no `SIGINT` at all, but two interrupts within 500 ms in the interactive TUI run the same awaited shutdown as Ctrl-D.
 
@@ -31,7 +31,7 @@ The directory SHALL NOT contain a copy of any shared resource — the session-pr
 #### Scenario: No shared resource is duplicated into the extension directory
 
 - **WHEN** the repository is at HEAD
-- **THEN** `apps/plugin/.pi-plugin/` contains no file whose content duplicates `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/bin/rembric-dotenv.mjs`, `apps/plugin/test/nudge-fixtures.json`, or any file under `apps/plugin/commands/`
+- **THEN** `apps/plugin/.pi-plugin/` contains no file whose content duplicates `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/mcp-bridge/rembric-dotenv.mjs`, `apps/plugin/test/nudge-fixtures.json`, or any file under `apps/plugin/commands/`
 - **AND** `git ls-files apps/plugin/` shows exactly one tracked copy of each of those resources
 
 ### Requirement: The extension SHALL import shared session-protocol logic, never reimplement it
@@ -284,7 +284,7 @@ Because the extension connects to `/mcp/<slug>`, the server resolves its project
 
 The extension SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from `process.env`, matching how the Hermes plugin and the in-process side of the opencode plugin already obtain them. The harness does not inject environment variables from its own settings file, so no settings-file credential path SHALL be documented or implemented.
 
-The project slug SHALL be resolved from `.rembric::PROJECT_SLUG` via `readRembricSlug` from `apps/plugin/bin/rembric-dotenv.mjs`. The extension SHALL NOT parse `.rembric` itself and SHALL NOT declare its own slug regex.
+The project slug SHALL be resolved from `.rembric::PROJECT_SLUG` via `readRembricSlug` from `apps/plugin/mcp-bridge/rembric-dotenv.mjs`. The extension SHALL NOT parse `.rembric` itself and SHALL NOT declare its own slug regex.
 
 When either environment variable is absent the extension SHALL disable itself, SHALL emit exactly one one-line stderr diagnostic naming which configuration is missing, and SHALL NOT break the host harness. The diagnostic SHALL NOT include the token.
 
@@ -327,6 +327,8 @@ The reason string SHALL come from `createSessionProtocol`, which already derives
 - **WHEN** `apps/plugin/.pi-plugin/index.ts` is read at HEAD
 - **THEN** it imports `readRembricSlug` from the shared dotenv module
 - **AND** it declares no local `function parseDotenv` and no local `SLUG_RE`
+
+**Amendment for the bridge move:** The canonical shared dotenv module is now `apps/plugin/mcp-bridge/rembric-dotenv.mjs`, because it is shipped in the published zero-dependency bridge package. The extension SHALL import `readRembricSlug` from `../mcp-bridge/rembric-dotenv.mjs`; no `apps/plugin/mcp-bridge/rembric-dotenv.mjs` copy SHALL remain. The rest of this requirement, including the scenarios above, is unchanged.
 
 ### Requirement: Slash commands reuse the shared command markdown
 
