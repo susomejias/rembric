@@ -2,7 +2,10 @@
   "mcpServers": {
     "rembric": {
       "command": "npx",
-      "args": ["-y", "@rembric/mcp-bridge@0.28.2"],
+      "args": [
+        "-y",
+        "@rembric/mcp-bridge@0.29.0"
+      ],
       "env": {
         "REMBRIC_SERVER_URL": "${user_config.server_url}",
         "REMBRIC_API_TOKEN": "${user_config.api_token}"
