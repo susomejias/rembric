@@ -4,6 +4,24 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.29.0](https://github.com/susomejias/rembric/compare/plugin-v0.28.2...plugin-v0.29.0) (2026-08-15)
+
+
+### Features
+
+* **plugin:** own the MCP bridge transport ([64ef334](https://github.com/susomejias/rembric/commit/64ef3344320c021ccc14da7b213c2e796e0fc638))
+
+
+### Bug Fixes
+
+* **plugin:** harden bridge recovery and upgrades ([dd495aa](https://github.com/susomejias/rembric/commit/dd495aa947d8b531b7285e05a9a75132c0a45c4d))
+* **plugin:** recover the Pi extension from a terminated MCP session ([df04b96](https://github.com/susomejias/rembric/commit/df04b96c4f5b005551cb421ec79db685be58ba1d))
+
+
+### Reverts
+
+* drop the evict-stale-transport-state mechanism ([#328](https://github.com/susomejias/rembric/issues/328)) ([88a4468](https://github.com/susomejias/rembric/commit/88a4468e953c667e2a4c6ab573409187c6c5d310))
+
 ## [0.28.2](https://github.com/susomejias/rembric/compare/plugin-v0.28.1...plugin-v0.28.2) (2026-08-14)
 
 
