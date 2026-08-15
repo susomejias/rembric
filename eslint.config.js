@@ -17,11 +17,14 @@ export default tseslint.config(
       '!apps/plugin/bin',
       'apps/plugin/*/**',
       '!apps/plugin/bin/**',
+      '!apps/plugin/mcp-bridge',
+      '!apps/plugin/mcp-bridge/**',
       '!apps/plugin/.*-plugin',
       '!apps/plugin/.*-plugin/*.ts',
       // Client test files stay out, as apps/plugin/test/'s do: nothing there
       // ships, and the projectService cannot resolve their vitest types.
       'apps/plugin/.*-plugin/*.test.ts',
+      'apps/plugin/mcp-bridge/*.test.ts',
       'plugin/**',
       'openspec/**',
       'apps/server/src/dashboard/public/**',
@@ -95,13 +98,19 @@ export default tseslint.config(
   {
     // Shipped runtime bridges. They live outside the TS projectService, so
     // lint them with recommended (non-type-checked) rules only.
-    files: ['apps/plugin/bin/**/*.mjs', 'apps/landing/build.mjs', 'scripts/*.mjs'],
+    files: [
+      'apps/plugin/bin/**/*.mjs',
+      'apps/plugin/mcp-bridge/**/*.mjs',
+      'apps/landing/build.mjs',
+      'scripts/*.mjs',
+    ],
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {
         process: 'readonly',
         fetch: 'readonly',
         AbortSignal: 'readonly',
+        TextDecoder: 'readonly',
         console: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',

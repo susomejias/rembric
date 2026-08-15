@@ -9,9 +9,9 @@ Everything asserted here about `mcp-remote` was measured against the pinned **0.
 ### Glossary, and why the package is named `@rembric/mcp-bridge`
 
 - **"the bridge"** — `@rembric/mcp-bridge`, the published client-side piece: slug resolution, URL building, diagnostics, the advisory version check, bearer injection, the transport, and the recovery.
-- **`rembric-bridge.mjs`** — after this change, the bridge's deprecated on-disk launcher (~10 lines), kept only for pre-existing opencode configs, which spawns the package (D6).
+- **`rembric-bridge.mjs`** — a legacy on-disk launcher that existing opencode configs may still name; the measured opencode `config` hook replaces that entry in memory, so this change does not copy or maintain the file.
 
-An earlier draft of this change picked `@rembric/mcp-bridge`, for one reason only: `rembric-bridge.mjs` was still a live, separately-specified component, and two things called "bridge" would have been unreadable. The integration decision (D3) removes that constraint — the file is reduced to a launcher with no contract of its own — so the collision dissolves rather than needing to be worked around.
+An earlier draft treated `rembric-bridge.mjs` as a live component. The zero-dependency package now owns the transport; the file is only legacy compatibility residue and is not part of the new install path.
 
 "Proxy" is also the weaker word for what this is. A proxy forwards; this package resolves `.rembric`, builds the path-scoped URL, runs the advisory version check **and** transports. That composite entrypoint role is what "bridge" has always meant in this repository.
 
@@ -64,7 +64,7 @@ This change is usually framed as "add a 404 retry". The reason it is worth ownin
 - **Any server change.** The `404` at `http.ts:386-392` is already correct and already shipped.
 - **Server-side use of the improved `clientInfo`.** This change makes it accurate; consuming it (D17) is another change.
 - **Moving `rembric-plugin-core.mjs`.** Only the dotenv module moves, because only slug resolution becomes the bridge's job. Session-protocol logic must stay out of a transport (D8).
-- **Keeping the launcher beyond its purpose.** It is deprecated on arrival, exists only for `opencode.json` files already on disk, and its removal is a future change once those have turned over.
+- **Maintaining a launcher for every opencode install.** The measured config hook handles existing launcher entries in memory, so the installer no longer copies or removes a launcher.
 - **Retiring `mcp-remote` from the ecosystem.** The upstream PR is goodwill and an exit path, not a dependency of this change.
 
 ---
@@ -121,13 +121,11 @@ Both manifests ship inside the plugin tree, so a plugin update replaces them ato
 
 `claude-code-plugin/spec.md:31`'s prohibition on a direct `type: "http"` entry stays true, and its stated reason ("the bridge mediates traffic so that the URL can be path-scoped") is restated in terms of the bridge rather than deleted — path scoping per directory is still why a stdio child exists at all.
 
-### D6 — The launcher exists for `opencode.json`, and for nothing else
+### D6 — opencode upgrades legacy launchers in memory
 
-opencode's configuration is written **once**, by `install.sh`, into `~/.config/opencode/opencode.json`, naming `~/.config/rembric/bin/rembric-bridge.mjs` (`opencode-plugin/spec.md:120,147`). Unlike the marketplace clients, that file is not replaced on update — so removing the bridge outright breaks every existing opencode install with an error the user has no way to interpret.
+The measured opencode plugin API provides a `config` hook. When `mcp.rembric` exists, the hook replaces only its in-memory `command` with `['npx', '-y', '@rembric/mcp-bridge@<plugin version>']` and preserves the environment and unrelated settings. An existing `opencode.json` that names `~/.config/rembric/bin/rembric-bridge.mjs` therefore upgrades without a file rewrite or a copied launcher.
 
-The launcher is therefore ~10 lines: spawn `npx -y @rembric/mcp-bridge@<pin>`, inherit stdio, pass the environment through. It carries a pin like every other spawn site. New installs write the `npx` form directly, so the launcher's population only shrinks.
-
-**Alternative rejected: have `install.sh` rewrite an existing `opencode.json`.** The installer deliberately does not own that file after first write — it prints the block for the user to paste (`e2e-walkthrough.md` step 3 documents exactly that) — and a tool that edits a user's config on upgrade is a much larger promise than this change should make. **Alternative rejected: leave the old bridge in place unchanged**, still spawning `mcp-remote`. That leaves the defect live for exactly the users who already installed.
+Fresh installs still print the pinned npx snippet; the installer never creates or edits `opencode.json`. A legacy launcher file is user-owned compatibility residue, not a release carrier, and is not copied or removed by this change.
 
 ### D7 — Plain HTTP with no flag; no arguments at all
 
@@ -155,13 +153,13 @@ The bridge adopts that same precedence rather than inventing a second one. This 
 
 **Location** is forced: release-please attributes a release to a component by the paths of the commits under that component's `path`, so a package outside `apps/plugin/` would never _cause_ a `plugin` release and its version carrier would move only when something unrelated did — the lock-step guarantee `open-source-distribution/spec.md:273` exists to provide.
 
-**Workspace membership diverges from the `.pi-plugin/` precedent, deliberately.** `pi-plugin/spec.md:23` accepts being outside `pnpm-workspace.yaml::packages` — unlinted, unreached by `pnpm -r` — and the sentence that makes it acceptable is that the extension "SHALL therefore declare **no runtime dependencies**". This package cannot make that trade: it declares no runtime dependencies to resolve and integrity-verified under `--frozen-lockfile`, and its recovery logic needs executable tests with mutation gates. The Docker image is unaffected — both install lines filter with `--filter @rembric/server...` (`apps/server/Dockerfile:26,95`).
+**Workspace membership diverges from the `.pi-plugin/` precedent, deliberately.** `pi-plugin/spec.md:23` accepts being outside `pnpm-workspace.yaml::packages` — unlinted, unreached by `pnpm -r` — and the sentence that makes it acceptable is that the extension "SHALL therefore declare **no runtime dependencies**". This package deliberately keeps zero runtime dependencies, and its recovery logic needs executable tests with mutation gates. The Docker image is unaffected — both install lines filter with `--filter @rembric/server...` (`apps/server/Dockerfile:26,95`).
 
 **The directory name is load-bearing in one non-obvious way.** `invariants.test.ts:901` derives "is this a client" from the pattern `^apps/plugin/\.[\w-]+-plugin/`, and every file matching it must import `rembric-plugin-core.mjs`. The bridge must not — so the directory must **not** be named `.<something>-plugin/`. `mcp-bridge/` satisfies that and reads correctly next to `bin/`, `hooks/`, `scripts/`.
 
 ### D11 — Four pin carriers, one component, and the tag-versus-publish window accepted
 
-The pin now appears in `.claude-plugin/mcp.json`, `.codex-plugin/mcp.json`, `bin/rembric-bridge.mjs` (the launcher) and — as the package's own `version` — `mcp-bridge/package.json`. All four become `extra-files` carriers of the `plugin` component. `.release-please-manifest.json` keeps exactly two entries; the bridge is a carrier, exactly as `@rembric/pi` is, and the `publish-npm` job gains a second publish step under the same gate and OIDC identity.
+The pin appears in `.claude-plugin/mcp.json`, `.codex-plugin/mcp.json`, the opencode hook and printed snippet, and — as the package's own `version` — `mcp-bridge/package.json`. The executable invariant covers the non-JSON hook surface. `.release-please-manifest.json` keeps exactly two entries; the bridge is a carrier, exactly as `@rembric/pi` is, and the `publish-npm` job gains a second publish step under the same gate and OIDC identity.
 
 **Accepted consequence, stated rather than hidden:** merging the release PR pushes the bumped pin to `main` _before_ the `publish-npm` job has published that version, so for one workflow run `main` names a version the registry does not yet have. The exposure is bounded to that window and to users installing from `main` inside it; the failure is loud (`npx` cannot resolve) rather than silent. **Alternative rejected: pin N−1**, always one release behind — it removes the window and permanently guarantees the code we ship is not the code we just released.
 
@@ -193,7 +191,7 @@ Both are verified **before** the manifests are switched, because both fail in wa
 
 ### D15 — The advisory version check moves, unchanged, and stays a single implementation
 
-One fire-and-forget `GET /healthz`, warn-never-block, silent on any failure, floor bumped with plugin releases — the behaviour `rembric-bridge.mjs:85-124` implements today, now living in the bridge because that is where the client side lives. It remains exactly one implementation: nothing else issues it, and the launcher does not.
+One fire-and-forget `GET /healthz`, warn-never-block, silent on any failure, floor bumped with plugin releases — the behaviour `rembric-bridge.mjs:85-124` implements today, now living in the bridge because that is where the client side lives. It remains exactly one implementation: nothing else issues it, and the opencode config hook does not.
 
 The bridge imposes **no hard floor**. Against a server predating `c2affef` — which returned `400` for an unknown session id, the SDK's own response for an uninitialized pair — the recovery path never fires and behaviour degrades to exactly today's, never worse.
 
@@ -211,24 +209,24 @@ Each becomes materially cheaper once the bridge exists, and each is load-bearing
 
 - **Server-side client disambiguation from the now-exact `clientInfo`.** Would revisit `findActiveForTransport`'s deliberate give-up-under-ambiguity rule (`agent-sessions-repository.ts:144-154`) and the misattribution family settled by `archive/2026-07-12-fix-cross-session-misattribution/`, and would make that change's reverted bridge-instance-id mechanism (`ea71092`/`d1ff2c9`) permanently unnecessary. Touches scope and session attachment — both load-bearing.
 - **A bridge-answered `roots/list` for hosts that do not advertise the roots capability.** Would resolve the unknown recorded in #329 for the stdio clients and improve first-run UX, since path-less `/mcp` could resolve correctly without a `.rembric` file. It also means the bridge _answering_ a request rather than forwarding it — a genuine widening of its charter that forfeits part of D15's argument, and must be made on its own terms.
-- **Removing the opencode launcher.** A future change once existing `opencode.json` files have turned over; it needs a way to know they have.
+- **Removing stale opencode launcher files.** Deferred as user cleanup; the config hook means no repository signal is needed to stop using them.
 - **Re-opening #328's transport eviction.** This change fixes the client half of its blocker; the decision to evict again is separate.
 
 ### D18 — Windows is unverified, and says so
 
-There is no Windows CI in this repo. The package leans on the SDK's transports for platform behaviour and adds no platform-specific code of its own, but "should work" is not a measurement. The compatibility matrix records Windows as unverified with that reason, and reports are triaged reactively. Claiming coverage we have not run is the failure mode this repo's evidence rule exists to prevent.
+There is no Windows CI in this repo. The package adds no platform-specific code of its own, but "should work" is not a measurement. The compatibility matrix records Windows as unverified with that reason, and reports are triaged reactively. Claiming coverage we have not run is the failure mode this repo's evidence rule exists to prevent.
 
 ## Risks / Trade-offs
 
-- **[Risk] release-please cannot write the pin inside a JSON `args` array** (D14a) → **Mitigation**: verified before the manifests are switched, with three ordered fallbacks ending in a one-line in-plugin launcher that preserves everything else about the integration. A pin nobody can write automatically is worse than a small wrapper.
-- **[Risk] `npx` does not resolve under Codex's `env_clear()` spawn** (D14b) → **Mitigation**: verified before the switch; fallback is forwarding `PATH` in `env_vars`, then the launcher. The current `command: "node"` working is not evidence for `command: "npx"`.
+- **[Risk] release-please cannot write a pin embedded in a JSON `args` array** (D14a) → **Mitigation**: the manifests use release-please JSON carriers and the executable pin invariant catches drift; the opencode hook carries the same version alongside its package version.
+- **[Risk] `npx` does not resolve under Codex's `env_clear()` spawn** (D14b) → **Mitigation**: verified before the switch; forward `PATH` in `env_vars` if the measured host requires it. There is no launcher fallback in this change.
 - **[Risk] The dotenv move silently breaks the opencode installer** (D8) → **Mitigation**: `install.sh`'s `sed` rewrite and its `grep -qF` guard are updated in the **same commit** as the move, and an install round-trip that actually loads the installed plugin is part of e2e. The known failure mode is exit 0 with an unloadable plugin and a green test suite.
-- **[Risk] An existing opencode install breaks on upgrade** → **Mitigation**: the launcher (D6), plus an e2e arm that upgrades an install created with the _pre-change_ installer and confirms it still connects. Testing only fresh installs would miss precisely the population the launcher exists for.
+- **[Risk] An existing opencode install breaks on upgrade** → **Mitigation**: the measured config hook replaces the legacy command in memory; a regression test exercises an existing launcher config while asserting the file remains byte-identical.
 - **[Risk] The prototype clears its arms but a client not driven at the gate behaves differently.** Codex CLI cannot be safely driven: an authenticated Codex reaches the _real_ production Rembric through an account-level connector regardless of `CODEX_HOME`/env isolation (incident recorded 2026-08-10). → **Mitigation**: Claude Code and opencode are driven for real; Codex is recorded as unverified **with that reason stated**. Note this risk is larger than in the two-piece design: Codex's manifest changes, so it is no longer true that Codex inherits an untouched shared file.
-- **[Risk] Verbatim `initialize` passthrough is not achievable with the SDK's transport classes as published** → **Mitigation**: a D1 gate arm, measured before any package exists. Failing it stops the change rather than triggering a workaround that re-authors `clientInfo`.
+- **[Risk] Verbatim `initialize` passthrough is not achievable by the bridge engine** → **Mitigation**: the D1 gate arm is measured before the package is treated as complete. Failing it stops the change rather than triggering a workaround that re-authors `clientInfo`.
 - **[Trade-off] The wire protocol is owned rather than inherited** (D2b) → **Accepted because** the surface is bounded (stdio framing, `fetch`, `data:` parsing — no resumability, no OAuth, no server half), `.pi-plugin/` already carries it with `dependencies: {}`, and the only mechanism without precedent there was measured working at the gate. The alternatives were a dependency that installs 93 packages / 25 MB against the replaced delegate's 80 / 7.0 MB, or bundling, which destroys the consumer's view of the version. Install weight drops to one package, and four fewer HTTP requests plus one fewer process per session are measured at the gate.
 - **[Trade-off] The repo now publishes and maintains the whole client side.** → **Accepted because** it is already maintaining the _consequences_ of one it does not control: a hang after every restart, four wasted requests and an OAuth callback port per session start, a rewritten `clientInfo`, frozen headers that killed a shipped mechanism, and an upstream issue unanswered for 14 months. The upstream PR keeps the retirement path open.
-- **[Trade-off] A deprecated launcher ships on day one.** → **Accepted because** the alternative is breaking every existing opencode install. It is ~10 lines, carries no logic, and its population only shrinks.
+- **[Trade-off] Existing opencode configs can retain a stale launcher path.** → **Accepted because** the measured config hook upgrades the entry in memory while preserving the user's file and avoiding a config migration.
 - **[Risk] `main` briefly pins a version the registry does not yet have** (D11) → **Mitigation**: one workflow run, loud failure, and the `publish-npm` job is release-blocking. The first release after this change lands is verified end to end by a task.
 - **[Risk] A `project.use` pin is lost across recovery on path-less connections** (D13) → **Mitigation**: specified rather than hidden, and it does not affect the default shape (a resolved slug → `/mcp/<slug>` → scope re-derived from the URL).
 - **[Risk] The bridge's sources fall under the shared-helper invariant scan** (`invariants.test.ts:878-986`, whose git pathspec `apps/plugin/*.mjs` matches across directories) and collide on a name `rembric-plugin-core.mjs` owns → **Mitigation**: `diag` and `truncate` are the realistic collisions for a program that writes stderr diagnostics; the delta puts the bridge in scope by contract, so a collision is a red build rather than a silent second copy.
@@ -239,8 +237,8 @@ There is no Windows CI in this repo. The package leans on the SDK's transports f
 There is no data migration, no schema change, and no derived-data invalidation. The rollout is a plugin release, and it differs by client:
 
 1. **Claude Code / Codex CLI** — the manifest ships with the plugin, so `<client> plugin update` replaces `mcp.json` and the pin together. The next session start spawns `npx -y @rembric/mcp-bridge@<pin>`; `npx` downloads it once and caches it. No configuration change, no re-authentication.
-2. **opencode, existing install** — `opencode.json` still names `~/.config/rembric/bin/rembric-bridge.mjs`; re-running `install.sh` replaces that file with the launcher, which spawns the bridge. Nothing the user has to edit.
-3. **opencode, new install** — `install.sh` emits the `npx` form directly and copies no launcher.
+2. **opencode, existing install** — `opencode.json` may still name `~/.config/rembric/bin/rembric-bridge.mjs`; the plugin's config hook replaces that command in memory with the exact npx package command. The file is untouched.
+3. **opencode, new install** — `install.sh` prints the exact npx form and never creates `opencode.json`; the user pastes it when desired.
 4. **Hermes** — the config block is documented rather than shipped, so a one-line edit to `~/.hermes/config.yaml` is required. The old block keeps working (badly) until they change it; the README's block is what changes in this repo.
 5. **A user on the old plugin** keeps spawning `mcp-remote@0.1.38`. Nothing breaks and nothing improves.
 
@@ -248,8 +246,8 @@ There is no data migration, no schema change, and no derived-data invalidation. 
 
 ## Open Questions
 
-1. **Does the launcher need a deprecation warning on stderr?** Default taken: **no**. A line on every session start is a line the user cannot act on (re-running the installer is the fix, and the installer already prints the new form), and the plugin's stderr discipline is one diagnostic per real condition. Revisit when the launcher's removal is scheduled — a warning is useful in the release that announces the removal, not in the one that introduces the launcher.
+1. **Does the config hook replace every existing `mcp.rembric` command?** Default taken: **yes**. The measured compatibility requirement is keyed by the named server entry, and preserving its environment and other fields avoids making assumptions about how the old launcher was configured.
 2. **Should the bridge send an explicit `DELETE` on shutdown to terminate its session server-side?** The spec permits it and it would let the server reclaim a transport promptly — #328's whole subject. Default taken: **not in this change.** It is a behaviour change on the server's session lifecycle, it interacts with an issue already reverted once, and it would put a second unproven mechanism behind the same gate.
 3. **RESOLVED by D2b: no SDK version is pinned, because there is no SDK dependency.** This question asked which exact `@modelcontextprotocol/sdk` version to pin (the lockfile resolved `1.29.0`, the measurements used `1.30.0`). It is moot: the package declares an empty `dependencies` object. Kept as a numbered entry so the question is visibly answered rather than silently dropped.
 
-4. **When is the launcher removed?** Not decided here, and deliberately so: it needs a signal that existing `opencode.json` files have turned over, which this change does not have. Recorded as a follow-up (D17) rather than given an arbitrary date.
+4. **What happens to legacy launcher files?** They are left untouched as user-owned files. No install or uninstall action depends on them after the config hook is loaded.

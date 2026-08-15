@@ -9,11 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // MCP bridge AND the opencode plugin). The distributed plugin.ts exports
 // ONLY `RembricPlugin`; opencode invokes every named export as a Plugin
 // function, so the helpers MUST stay outside plugin.ts's export surface.
-import { parseDotenv, readRembricSlug } from '../bin/rembric-dotenv.mjs';
+import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import { RembricPlugin } from './plugin.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const pluginVersion = (
+  JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version: string }
+).version;
+const expectedBridgeSpecifier = `@rembric/mcp-bridge@${pluginVersion}`;
 
 const nudgeFixtures = JSON.parse(
   readFileSync(join(here, '..', 'test', 'nudge-fixtures.json'), 'utf8'),
@@ -146,6 +150,63 @@ describe('readRembricSlug byte-for-byte equivalence with bridge parser', () => {
     expect(parsed.OTHER_KEY).toBe('ignored');
     expect(parsed.TRAILING_WHITESPACE).toBe('xyz');
     expect(readRembricSlug(dir)).toBe('my-repo');
+  });
+});
+
+describe('RembricPlugin config hook', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-config-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+  });
+
+  it('replaces a legacy launcher entry in memory and preserves the rest of the config', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config = {
+      mcp: {
+        rembric: {
+          type: 'local',
+          command: ['node', '/home/user/.config/rembric/bin/rembric-bridge.mjs'],
+          environment: { REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}' },
+          enabled: true,
+        },
+        other: { type: 'remote', url: 'https://example.test/mcp' },
+      },
+      theme: 'dark',
+    };
+
+    handlers.config!(config);
+
+    expect(config.mcp.rembric.command).toEqual(['npx', '-y', expectedBridgeSpecifier]);
+    expect(config.mcp.rembric.environment).toEqual({
+      REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
+    });
+    expect(config.mcp.other).toEqual({ type: 'remote', url: 'https://example.test/mcp' });
+    expect(config.theme).toBe('dark');
+  });
+
+  it('does not create an MCP entry when the user has not configured one', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config = {
+      mcp: { other: { command: ['node', 'other-mcp.mjs'], enabled: true } },
+      theme: 'dark',
+    };
+
+    handlers.config!(config);
+
+    expect(config).toEqual({
+      mcp: { other: { command: ['node', 'other-mcp.mjs'], enabled: true } },
+      theme: 'dark',
+    });
   });
 });
 

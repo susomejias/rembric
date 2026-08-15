@@ -756,6 +756,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     # Local: run the script in place, pointing it at the local tree.
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$REMBRIC_SRC/apps/plugin/$dir" BIN_SRC="$REMBRIC_SRC/apps/plugin/bin" \
+        MCP_BRIDGE_SRC="$REMBRIC_SRC/apps/plugin/mcp-bridge" \
         sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     else
       PLUGIN_SRC="$REMBRIC_SRC/apps/plugin/$dir" sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
@@ -765,7 +766,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     t=$(mktemp); fetch "apps/plugin/$dir/$script" "$t" || { rm -f "$t"; return 1; }
     base="$RAW_BASE/$REF/apps/plugin"
     if [ "$c" = "opencode" ]; then
-      PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" sh "$t"
+      PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
     else
       PLUGIN_SRC="$base/$dir" sh "$t"
     fi
@@ -827,6 +828,31 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   return 0
 }
 
+# Hermes keeps mcp_servers in a user-owned config file. The installer may not
+# edit that file, so an update must surface the exact pin migration explicitly.
+hermes_bridge_migration() {
+  _bridge_version=$(available_version apps/plugin)
+  if [ -z "$_bridge_version" ]; then
+    _bridge_manifest="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
+    [ -f "$_bridge_manifest" ] && _bridge_version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$_bridge_manifest" | head -1)
+  fi
+  if [ -z "$_bridge_version" ]; then
+    say "  ${WARN}Required Hermes MCP migration could not determine the exact plugin version.${RESET}"
+    say "  ${DIM}Read the version from ${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml, update mcp_servers.rembric.args, then restart the gateway.${RESET}"
+    return 0
+  fi
+  say "  ${WARN}Required Hermes MCP migration:${RESET} update mcp_servers.rembric in ${HERMES_HOME:-${HOME}/.hermes}/config.yaml"
+  say "    args: ['-y', '@rembric/mcp-bridge@${_bridge_version}']"
+  say "  ${DIM}This is an exact package pin; no separate npm update is needed.${RESET}"
+  if [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
+    _migrated=$(ask "  Have you applied this config migration? [y/N]")
+    case "$_migrated" in
+      y|Y) say "  ${LIME}Hermes MCP pin migration acknowledged.${RESET}" ;;
+      *) say "  ${WARN}Migration still required before Hermes can use the updated bridge.${RESET}" ;;
+    esac
+  fi
+}
+
 # Required post-install/upgrade steps per agent (the platform bits the installer
 # can't do for you). Surfaced after a successful install/update so the user
 # isn't left with a half-wired plugin. Full walkthrough: docs/agents.md.
@@ -848,6 +874,7 @@ post_install_notes() { # $1 client, $2 action (install|update)
       # On update the plugin is already installed + enabled — only the gateway
       # needs to reload the new files. The full wiring is install-only.
       if [ "$action" = "update" ]; then
+        hermes_bridge_migration
         say "  ${BOLD}Next:${RESET} ${BOLD}hermes gateway restart${RESET}  ${DIM}— reload the gateway so it picks up the updated plugin${RESET}"
       else
         say "  ${BOLD}Next:${RESET}"

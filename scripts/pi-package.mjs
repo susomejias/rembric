@@ -4,7 +4,14 @@
 // lifecycle scripts — see openspec/specs/supply-chain-hygiene/spec.md.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,9 +27,9 @@ const COMMANDS = readdirSync(join(pluginRoot, 'commands'))
   .sort();
 
 const RELATIVE_IMPORT = /from\s+'(\.[^']*)'/g;
-// Both `../bin/` (repo) and `./bin/` (packed) match, so assert-pack reads the
-// same module set after materialize rewrote the specifiers.
-const PACKABLE_IMPORT = /^\.{1,2}\/bin\/([\w.-]+\.mjs)$/;
+// Source modules live either under `bin/` or the published bridge package; all
+// become `./bin/` siblings in the Pi tarball after materialisation.
+const PACKABLE_IMPORT = /^(?:\.\.\/(bin|mcp-bridge)|\.\/(bin))\/([\w.-]+\.mjs)$/;
 
 function fail(message) {
   process.stderr.write(`[pi-package] ${message}\n`);
@@ -33,15 +40,32 @@ function fail(message) {
 // ship unresolvable. `import type` and a value import collapse to one entry.
 function sharedModules() {
   const specifiers = [...readFileSync(indexPath, 'utf8').matchAll(RELATIVE_IMPORT)].map(
-    (m) => m[1],
+    (match) => match[1],
   );
-  const stray = specifiers.filter((s) => !PACKABLE_IMPORT.test(s));
+  const parsed = specifiers.map((specifier) => ({
+    specifier,
+    match: PACKABLE_IMPORT.exec(specifier),
+  }));
+  const stray = parsed.filter(({ match }) => match === null).map(({ specifier }) => specifier);
   if (stray.length > 0) {
     fail(
-      `index.ts imports ${stray.join(', ')} — only '../bin/<module>.mjs' specifiers can be materialised, so this one would ship unresolvable`,
+      `index.ts imports ${stray.join(', ')} — only '../bin/' or '../mcp-bridge/' modules can be materialised`,
     );
   }
-  const modules = [...new Set(specifiers.map((s) => PACKABLE_IMPORT.exec(s)[1]))].sort();
+  const modules = [
+    ...new Map(
+      parsed.map(({ specifier, match }) => [
+        match[3],
+        {
+          specifier,
+          sourceDir:
+            match[1] ??
+            (existsSync(join(pluginRoot, match[2], match[3])) ? match[2] : 'mcp-bridge'),
+          name: match[3],
+        },
+      ]),
+    ).values(),
+  ];
   if (modules.length === 0)
     fail('index.ts imports no shared module — the expected list would be empty');
   return modules;
@@ -53,7 +77,7 @@ function materialize() {
   mkdirSync(join(pkgDir, 'commands'), { recursive: true });
 
   for (const mod of shared) {
-    copyFileSync(join(pluginRoot, 'bin', mod), join(pkgDir, 'bin', mod));
+    copyFileSync(join(pluginRoot, mod.sourceDir, mod.name), join(pkgDir, 'bin', mod.name));
   }
 
   // Rewritten in the COPIES only: the tracked originals must stay canonical for
@@ -71,9 +95,9 @@ function materialize() {
   let rewrote = 0;
   let alreadyPacked = 0;
   for (const mod of shared) {
-    const dev = `'../bin/${mod}'`;
-    const packed = `'./bin/${mod}'`;
-    if (after.includes(dev)) {
+    const dev = `'${mod.specifier}'`;
+    const packed = `'./bin/${mod.name}'`;
+    if (mod.specifier.startsWith('../') && after.includes(dev)) {
       after = after.split(dev).join(packed);
       rewrote += 1;
     } else if (after.includes(packed)) {
@@ -82,13 +106,15 @@ function materialize() {
       alreadyPacked += 1;
     } else {
       fail(
-        `${mod} is imported under neither '../bin/' nor './bin/' — index.ts changed underneath this run`,
+        `${mod.specifier} is absent before materialisation — index.ts changed underneath this run`,
       );
     }
   }
   for (const mod of shared) {
-    if (after.includes(`'../bin/${mod}'`)) fail(`'../bin/${mod}' survived the rewrite`);
-    if (!after.includes(`'./bin/${mod}'`)) fail(`'./bin/${mod}' is absent after the rewrite`);
+    if (mod.specifier.startsWith('../') && after.includes(`'${mod.specifier}'`))
+      fail(`'${mod.specifier}' survived the rewrite`);
+    if (!after.includes(`'./bin/${mod.name}'`))
+      fail(`'./bin/${mod.name}' is absent after the rewrite`);
   }
   writeFileSync(indexPath, after);
 
@@ -105,7 +131,7 @@ function expectedFiles() {
     'package.json',
     'README.md',
     'index.ts',
-    ...sharedModules().map((m) => `bin/${m}`),
+    ...sharedModules().map((module) => `bin/${module.name}`),
     ...COMMANDS.map((c) => `commands/${c}`),
   ].sort();
 }
@@ -117,9 +143,14 @@ function assertPack() {
     cwd: pkgDir,
     encoding: 'utf8',
   });
-  const packed = JSON.parse(out)[0]
-    .files.map((f) => f.path)
-    .sort();
+  let packed;
+  try {
+    packed = JSON.parse(out)[0]
+      .files.map((file) => file.path)
+      .sort();
+  } catch {
+    fail('npm pack returned invalid JSON');
+  }
   const expected = expectedFiles();
 
   const problems = [];

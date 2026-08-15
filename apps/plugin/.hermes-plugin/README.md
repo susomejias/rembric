@@ -25,7 +25,7 @@ hermes plugins enable rembric
 
 - **`REMBRIC_SERVER_URL`** — base URL of your deployment, **without** the `/mcp` suffix. The bridge appends `/mcp/<slug>` itself when you wire it.
 - **`REMBRIC_API_TOKEN`** — Bearer token minted from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Marked `secret: true` in the manifest so the prompt hides the input.
-- **`REMBRIC_PROJECT_SLUG`** — default project slug for session-lifecycle POSTs.
+- **`REMBRIC_PROJECT_SLUG`** — default project slug for the provider and bridge.
 
 If the three vars are already exported in the shell that launches `hermes`, the install skips the corresponding prompts.
 
@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin
 Developing against a local rembric clone? Same script, local source:
 
 ```sh
-PLUGIN_SRC="$(pwd)/plugin/.hermes-plugin" sh plugin/.hermes-plugin/install.sh
+PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
 ```
 
 ## Configure
@@ -56,23 +56,17 @@ Drop this block into `~/.hermes/config.yaml`:
 mcp_servers:
   rembric:
     command: npx
-    args:
-      [
-        '-y',
-        'mcp-remote@latest',
-        '${REMBRIC_SERVER_URL}/mcp/${REMBRIC_PROJECT_SLUG}',
-        '--header',
-        'Authorization: Bearer ${REMBRIC_API_TOKEN}',
-        '--allow-http',
-      ]
+    args: ['-y', '@rembric/mcp-bridge@0.28.2']
+    env:
+      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
+      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
+      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
 
 memory:
   provider: rembric
 ```
 
-The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes plugins install rembric`). Hermes loads that file into the process env at startup and forwards it to the `mcp_servers.*` subprocesses, so `mcp-remote` sees the values.
-
-> If you have rembric cloned locally and want to skip `npx`, point `command: node` at `<rembric-clone>/plugin/bin/rembric-bridge.mjs` instead — same bridge, no transient install.
+The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes plugins install rembric`). Hermes loads that file into the process env at startup and forwards it to the `mcp_servers.*` subprocess. The bridge and provider resolve a per-directory `.rembric` file first, then `REMBRIC_PROJECT_SLUG`; if neither is valid, lifecycle POSTs are skipped and the bridge uses path-less `/mcp`.
 
 ## Environment variables
 
@@ -80,7 +74,7 @@ The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `REMBRIC_SERVER_URL`   | ✓        | Base URL of your Rembric deployment, **without** the `/mcp` suffix. Example: `https://memory.example.com`. No trailing slash. |
 | `REMBRIC_API_TOKEN`    | ✓        | Bearer token minted from the Rembric dashboard at `/dashboard/tokens`.                                                        |
-| `REMBRIC_PROJECT_SLUG` | ✓        | Default project slug. Overridden per-cwd if a `.rembric` file is present.                                                     |
+| `REMBRIC_PROJECT_SLUG` | —        | Optional default project slug. Overridden by a valid per-directory `.rembric` file.                                           |
 | `HERMES_HOME`          | —        | Override Hermes's home dir (default `~/.hermes`). Honoured by the installer.                                                  |
 
 ### Where credentials live
@@ -100,14 +94,13 @@ The plugin **does not** read any plugin-private dotenv file (`~/.rembric/.env`, 
 
 ## Project slug resolution
 
-Rembric scopes everything to a project slug. The provider resolves it on each `initialize` via a four-step cascade — the **first** valid match wins:
+Rembric scopes everything to a project slug. The provider and bridge use the same cascade — the **first valid match** wins:
 
-1. `REMBRIC_PROJECT_SLUG` environment variable (populated by Hermes from `~/.hermes/.env`).
-2. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>` (paridad with the Claude/Codex plugins; lets you pin a slug per-repo even when the default in `.env` is different).
-3. The trailing segment of `REMBRIC_SERVER_URL`'s path if it ends in `/mcp/<slug>`.
-4. No slug → all session-related POSTs skip silently (a single stderr diagnostic is printed once).
+1. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>`.
+2. `REMBRIC_PROJECT_SLUG` from the environment (populated by Hermes from `~/.hermes/.env`).
+3. No valid slug → the provider skips lifecycle POSTs with one diagnostic, while the bridge uses path-less `/mcp`.
 
-Every candidate is validated against the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Non-matching values are discarded and the cascade continues.
+Every candidate is validated against the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Non-matching values are discarded and the cascade continues. The server URL remains the bare deployment URL; a `/mcp/<slug>` suffix is not a fallback.
 
 ## Lifecycle (what the plugin actually does)
 
@@ -130,7 +123,7 @@ The remaining `MemoryProvider` methods (`prefetch`, `sync_turn`, `on_memory_writ
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hermes memory status` shows `rembric: Missing` after install                        | Plugin not enabled. Run `hermes plugins enable rembric` and restart Hermes.                                                                                                                                                                                           |
 | `hermes plugins install rembric` didn't prompt for the env vars                      | The three `REMBRIC_*` vars are already set in the parent shell, so Hermes skipped the prompts (this is by design). Verify via `env \| grep REMBRIC_`. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install. |
-| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | None of the four cascade sources produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                                          |
+| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                             |
 | stderr shows `[rembric] POST /sessions failed: HTTPError 403`                        | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                    |
 | stderr shows `[rembric] POST /sessions failed: HTTPError 404`                        | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                |
 | MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded OR the install never wrote credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then `cat ~/.hermes/.env \| grep REMBRIC_` to verify the three vars are present.                                                  |
@@ -140,13 +133,15 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Use the TUI installer (`Plugins → hermes → update`). Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
+Use the TUI installer (`Plugins → hermes → update`). It refreshes the provider files and prints the exact `mcp_servers.rembric.args` pin migration; apply that migration before restarting Hermes. No separate npm update is needed because the bridge is fetched by its exact npx pin.
+
+Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
 ```
 
-`hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
+Then update the `@rembric/mcp-bridge@<exact-version>` value in `~/.hermes/config.yaml` to the version printed by the installer and restart the gateway. `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
 
 For a temporary rollback after a broken release, see the [emergency plugin rollback](../../../docs/agents.md#emergency-plugin-rollback) runbook.
 

@@ -34,7 +34,9 @@ For dev iteration against a local checkout (preferred — exercises the same cod
 PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
 
 # opencode
-PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" BIN_SRC="$(pwd)/apps/plugin/bin" \
+PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" \
+BIN_SRC="$(pwd)/apps/plugin/bin" \
+MCP_BRIDGE_SRC="$(pwd)/apps/plugin/mcp-bridge" \
   sh apps/plugin/.opencode-plugin/install.sh
 ```
 
@@ -58,14 +60,14 @@ export REMBRIC_API_TOKEN=<demo-writer-plaintext-from-step-2>
 For opencode specifically:
 
 ```bash
-# install.sh copies plugin.ts + rembric-bridge.mjs + rembric-dotenv.mjs to their destinations
-# AND prints the MCP block with $HOME expanded. Paste the printed block manually:
+# install.sh copies plugin.ts + shared modules to their destinations and
+# prints the pinned MCP block. Paste it manually only if opencode.json is absent:
 cat > ~/.config/opencode/opencode.json <<JSON
 {
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["node", "$HOME/.config/rembric/bin/rembric-bridge.mjs"],
+      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
       "environment": {
         "REMBRIC_SERVER_URL": "http://127.0.0.1:8788",
         "REMBRIC_API_TOKEN": "<demo-writer-plaintext-from-step-2>"
@@ -146,7 +148,7 @@ The extension holds the MCP client, so "did it connect" and "did it discover" ar
 sqlite3 data-dev/data.db "SELECT id, agent, status, substr(title,1,40) FROM sessions ORDER BY started_at DESC LIMIT 5;"
 ```
 
-For sub-agent filter changes: send a `session.created` with `parentID` set OR `title` ending in ` subagent)`. Verify the resulting query shows ONLY top-level sessions (sub-agent IDs absent).
+For sub-agent filter changes: send a `session.created` with `parentID` set OR `title` ending in `subagent)`. Verify the resulting query shows ONLY top-level sessions (sub-agent IDs absent).
 
 ## 5b. Driving a real CLI safely
 
@@ -235,7 +237,7 @@ bash apps/plugin/.<client>-plugin/uninstall.sh   # opencode + Hermes; Pi has no 
 
 **Restore the user's agent config file** to its prior state. If they didn't have an `opencode.json` before, delete it. If they did, restore from the backup you (should have) made.
 
-For opencode specifically, leave `opencode.json` with `<REMBRIC_SERVER_URL>` and `<REMBRIC_API_TOKEN>` placeholders if you wrote anything there:
+For opencode specifically, restore `opencode.json` to its prior bytes. If it was absent, leave it absent; the installer only prints this snippet:
 
 ```bash
 cat > ~/.config/opencode/opencode.json <<JSON
@@ -243,7 +245,7 @@ cat > ~/.config/opencode/opencode.json <<JSON
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["node", "$HOME/.config/rembric/bin/rembric-bridge.mjs"],
+      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
       "environment": {
         "REMBRIC_SERVER_URL": "<REMBRIC_SERVER_URL>",
         "REMBRIC_API_TOKEN": "<REMBRIC_API_TOKEN>"

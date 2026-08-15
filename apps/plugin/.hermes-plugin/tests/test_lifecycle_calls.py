@@ -114,6 +114,8 @@ class LifecycleTest(unittest.TestCase):
         big = "x" * 30_000
         provider.on_pre_compress([{"role": "user", "content": big}])
         _, body, _ = _captured_post(mock_urlopen, idx=2)
+        self.assertIsNotNone(body)
+        assert body is not None
         self.assertEqual(len(body["summary"]), 20_000)
         # Truncation is from the head — the tail of the input survives.
         self.assertTrue(body["summary"].endswith("x" * 20_000))
@@ -151,6 +153,8 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/end"
         )
+        self.assertIsNotNone(body)
+        assert body is not None
         self.assertEqual(body["title"], "Fixed the bug")
         self.assertIn("Fixed the bug", body["summary"])
         self.assertEqual(body["final"], False)
@@ -173,6 +177,8 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(body_end, {})
         url_new, body_new, _ = _captured_post(mock_urlopen, idx=1)
         self.assertTrue(url_new.endswith("/sessions"))
+        self.assertIsNotNone(body_new)
+        assert body_new is not None
         self.assertEqual(body_new["id"], "01NEW")
         self.assertEqual(body_new["agent"], "hermes")
         url_resume, body_resume, _ = _captured_post(mock_urlopen, idx=2)
@@ -198,6 +204,8 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(body_end, {})
         url_new, body_new, _ = _captured_post(mock_urlopen, idx=1)
         self.assertTrue(url_new.endswith("/sessions"))
+        self.assertIsNotNone(body_new)
+        assert body_new is not None
         self.assertEqual(body_new["id"], "01NEW")
         url_resume, _, _ = _captured_post(mock_urlopen, idx=2)
         self.assertTrue(url_resume.endswith("/sessions/01NEW/resume"))
@@ -346,7 +354,7 @@ class LifecycleTest(unittest.TestCase):
         # cwd without .rembric and no other slug source
         empty_cwd = self.tmp / "empty"
         empty_cwd.mkdir()
-        # Drop the URL parse fallback by overriding the env.
+        # Keep the server URL bare; it is not a slug source.
         import os
 
         os.environ["REMBRIC_SERVER_URL"] = "http://server.example.com:8787"

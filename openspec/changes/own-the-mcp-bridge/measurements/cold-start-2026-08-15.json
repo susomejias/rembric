@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-08-15T12:45:15.976Z",
+  "instrument": "end-to-end process start to first stdout MCP frame",
+  "results": [
+    {
+      "name": "mcp-remote@0.1.38",
+      "firstFrameMs": 1895.9,
+      "exit": {
+        "exitCode": null,
+        "signal": "SIGTERM"
+      },
+      "stdoutFirstLine": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"evict-stub\",\"version\":\"0\"}}}",
+      "stderr": [
+        "[2193127] Using automatically selected callback port: 28689",
+        "[2193127] Discovering OAuth server configuration...",
+        "[2193127] [2193127] Connecting to remote server: http://127.0.0.1:8923/mcp",
+        "[2193127] Using transport strategy: http-first"
+      ]
+    },
+    {
+      "name": "local-bridge-tarball",
+      "firstFrameMs": 586.7,
+      "exit": {
+        "exitCode": null,
+        "signal": "SIGTERM"
+      },
+      "stdoutFirstLine": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"evict-stub\",\"version\":\"0\"}}}",
+      "stderr": [
+        "[rembric-bridge] No .rembric in /tmp/rembric-bridge-measure-1786797795841; using path-less /mcp.",
+        "[rembric-bridge] projectDir=/tmp/rembric-bridge-measure-1786797795841 (from PWD) url=http://127.0.0.1:8923/mcp"
+      ]
+    }
+  ]
+}

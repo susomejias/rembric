@@ -62,9 +62,21 @@ Any tracked file that names the module's path as a literal SHALL be updated in t
 
 ### Requirement: MCP transport spawns the published bridge, with a launcher for existing installs
 
-New opencode installs SHALL reach the server by spawning the published bridge directly. The bridge SHALL NOT be forked, copied with modifications, or replaced by an opencode-specific variant.
+**Normative supersession.** This requirement retains the published launcher and
+path scenarios below so the MODIFIED delta remains traceable. Those historical
+scenario blocks are non-normative after this notice: every launcher, copied
+`apps/plugin/bin/` bridge, and `node <path>` result they contain is superseded
+by the current contract below. Existing user-owned launcher files are handled
+by the in-memory config hook; this repository neither ships nor maintains one.
 
-The MCP server entry in the user's `opencode.json` SHALL be:
+New and existing opencode configurations SHALL use the published bridge. When
+`mcp.rembric` exists, the plugin's `config` hook SHALL replace only its
+in-memory `command` with `['npx', '-y', '@rembric/mcp-bridge@<plugin version>']`.
+It SHALL preserve the environment, enabled state, and unrelated entries, and
+SHALL never write `opencode.json`. When the entry is absent, the hook SHALL
+leave the configuration unchanged.
+
+The MCP server entry printed for a fresh install SHALL be:
 
 ```json
 {
@@ -82,24 +94,19 @@ The MCP server entry in the user's `opencode.json` SHALL be:
 }
 ```
 
-where `<x.y.z>` is an exact pinned version, never a floating tag. The install script SHALL leave `<URL>` and `<TOKEN>` as placeholders (or as `{env:REMBRIC_*}` substitutions per the install.sh auto-config branch) for the user.
-
-The install script SHALL fetch the launcher from `https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/bin/rembric-bridge.mjs` (and `rembric-plugin-core.mjs` from the same `apps/plugin/bin/` prefix, and the companion `rembric-dotenv.mjs` from `apps/plugin/mcp-bridge/`) when running against the public repo. Local-dev iteration via `PLUGIN_SRC` + `BIN_SRC` env vars SHALL continue to work, with the dev paths pointing at `apps/plugin/.opencode-plugin/`, `apps/plugin/bin/` and `apps/plugin/mcp-bridge/` respectively.
-
-The plugin SHALL NOT register its own MCP server programmatically and SHALL NOT use `type: "remote"`.
-
-**`apps/plugin/bin/rembric-bridge.mjs` SHALL survive as a deprecated on-disk launcher, and this capability is its only consumer.** The reason is specific and does not generalise: `~/.config/opencode/opencode.json` is written **once**, by the user, from the snippet the installer prints — the install script SHALL NOT touch that file — so an existing install keeps naming `<HOME>/.config/rembric/bin/rembric-bridge.mjs` indefinitely. Deleting that file would break every existing opencode install with an error the user cannot interpret. Claude Code and Codex need no launcher, because their manifests ship inside the plugin tree and are replaced on update.
-
-The launcher's entire contract:
-
-- It SHALL spawn `npx -y @rembric/mcp-bridge@<x.y.z>` at an exact pinned version, inherit stdio, and pass its environment through unchanged.
-- It SHALL forward the child's exit code, and re-raise a terminating signal in its own process.
-- It SHALL contain **no other logic**: no `.rembric` parsing, no URL building, no `/healthz` check, no diagnostics beyond a spawn failure. Every one of those now belongs to the bridge, and a second implementation in the launcher would be exactly the duplication this tree forbids.
-- Its pinned version SHALL be a release-please carrier, like every other spawn site.
-
-The launcher is deprecated on arrival: its population only shrinks, since new installs never receive it. Its removal is a separate future change, gated on a way to know existing `opencode.json` files have turned over.
+`<x.y.z>` SHALL be an exact pin equal to `apps/plugin/package.json::version`.
+The command SHALL contain no URL, header, or `--allow-http` argument. The
+installer SHALL print this snippet, SHALL NOT write `opencode.json`, and SHALL
+not copy or remove a legacy launcher. It SHALL fetch the moved dotenv module
+from `apps/plugin/mcp-bridge/` and `rembric-plugin-core.mjs` from
+`apps/plugin/bin/`; local iteration SHALL support `MCP_BRIDGE_SRC` alongside
+`PLUGIN_SRC` and `BIN_SRC`. The plugin SHALL NOT register its own MCP server
+programmatically or use `type: "remote"`.
 
 #### Scenario: Bridge file is reused without divergence
+
+The published scenario is retained for MODIFIED-body provenance; its launcher
+path assertions are superseded by the current contract above.
 
 - **WHEN** the repository is at HEAD
 - **THEN** `apps/plugin/.opencode-plugin/` contains no `*.mjs` or `*-bridge.*` file
@@ -107,6 +114,9 @@ The launcher is deprecated on arrival: its population only shrinks, since new in
 - **AND** no opencode-specific variant of the bridge SHALL exist
 
 #### Scenario: MCP snippet uses type: local with the shared bridge path
+
+The published scenario is retained for MODIFIED-body provenance; its launcher
+command and path assertions are superseded by the fresh-install snippet above.
 
 - **WHEN** the install script runs and prints the MCP snippet
 - **THEN** the printed JSON has `mcp.rembric.type = "local"`
@@ -116,6 +126,9 @@ The launcher is deprecated on arrival: its population only shrinks, since new in
 
 #### Scenario: Default install URLs point at apps/plugin
 
+The published scenario is retained for MODIFIED-body provenance. Its bridge
+carrier is superseded; the moved dotenv path remains current.
+
 - **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh`
 - **THEN** the script SHALL fetch `plugin.ts` from `.../apps/plugin/.opencode-plugin/plugin.ts`
 - **AND** the script SHALL fetch `rembric-bridge.mjs` from `.../apps/plugin/bin/rembric-bridge.mjs`
@@ -124,12 +137,18 @@ The launcher is deprecated on arrival: its population only shrinks, since new in
 
 #### Scenario: Legacy install URL returns 404
 
+The published scenario is retained unchanged; it remains current.
+
 - **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.opencode-plugin/install.sh | sh`
 - **THEN** `curl -fsSL` SHALL fail with a 404 from `raw.githubusercontent.com` and exit non-zero — no shim file is kept under `plugin/`
 - **AND** no files SHALL be installed under `~/.config/opencode/` or `~/.config/rembric/bin/`
 - **AND** the corrected install command SHALL be discoverable in `README.md`, `docs/agents.md`, `apps/plugin/.opencode-plugin/README.md`, and the first post-restructure `opencode-plugin-vX.Y.Z` release notes
 
 #### Scenario: An existing install keeps working through the launcher
+
+The published launcher scenario is retained for MODIFIED-body provenance but is
+superseded: the config hook upgrades the command in memory and the repository
+does not maintain the launcher.
 
 - **GIVEN** an `opencode.json` written before this change, naming `<HOME>/.config/rembric/bin/rembric-bridge.mjs`
 - **WHEN** the user re-runs the install script and then starts opencode
@@ -138,42 +157,70 @@ The launcher is deprecated on arrival: its population only shrinks, since new in
 
 #### Scenario: The launcher carries no logic of its own
 
+The published launcher scenario is retained for MODIFIED-body provenance but is
+superseded because the launcher is deleted from the repository.
+
 - **WHEN** `apps/plugin/bin/rembric-bridge.mjs` is read at HEAD
 - **THEN** it SHALL contain no `.rembric` read, no URL construction, no `/healthz` request, and no slug regex
 - **AND** its only outbound behaviour SHALL be spawning the pinned bridge with the inherited environment
 
 #### Scenario: The launcher pins an exact version like every other spawn site
 
+The published launcher scenario is retained for MODIFIED-body provenance but is
+superseded because there is no launcher carrier.
+
 - **WHEN** the launcher is read
 - **THEN** its package specifier SHALL name an exact `@rembric/mcp-bridge@<x.y.z>` version
 - **AND** that version SHALL equal `apps/plugin/package.json::version`
 
+#### Scenario: Existing launcher configuration is upgraded in memory
+
+- **GIVEN** `mcp.rembric.command` names `node` and a legacy `rembric-bridge.mjs` path
+- **WHEN** opencode invokes the plugin's `config` hook
+- **THEN** the in-memory command SHALL be `['npx', '-y', '@rembric/mcp-bridge@<plugin version>']`
+- **AND** the environment and all unrelated config values SHALL be unchanged
+- **AND** `opencode.json` SHALL not be written
+
+#### Scenario: An absent MCP entry is not invented
+
+- **GIVEN** a config with no `mcp.rembric` entry
+- **WHEN** the config hook runs
+- **THEN** the config SHALL remain unchanged
+- **AND** the installer SHALL print the exact pinned snippet for the user to paste
+
+#### Scenario: The hook pin is exact
+
+- **WHEN** the config hook is run at a plugin version
+- **THEN** its command SHALL contain exactly `@rembric/mcp-bridge@<plugin version>`
+- **AND** it SHALL contain no URL, `--header`, or `--allow-http` argument
+
+#### Scenario: The bridge package is used without a sibling implementation
+
+- **WHEN** the repository is at HEAD
+- **THEN** `apps/plugin/.opencode-plugin/` SHALL contain no bridge implementation
+- **AND** the plugin SHALL use the published `@rembric/mcp-bridge` package
+
 ### Requirement: Install script contract
 
-`apps/plugin/.opencode-plugin/install.sh` SHALL:
+The current install contract supersedes the copied-launcher details retained in
+its historical scenarios below. `apps/plugin/.opencode-plugin/install.sh`
+SHALL remain a POSIX `sh` script with `set -eu`; copy the plugin, the moved
+bridge dotenv module, and `rembric-plugin-core.mjs`; verify every rewritten
+shared import; print rather than write the MCP snippet; and never create,
+modify, or delete `opencode.json`.
 
-1. Use `#!/usr/bin/env bash` shebang and `set -euo pipefail`.
-2. Create `${HOME}/.config/opencode/plugins/` if missing.
-3. Create `${HOME}/.config/rembric/bin/` if missing.
-4. Copy (not symlink) `apps/plugin/bin/rembric-bridge.mjs` to `${HOME}/.config/rembric/bin/rembric-bridge.mjs`.
-   That file is now the deprecated launcher, copied so an `opencode.json` written before this change keeps working; new configurations never reference it.
-5. Copy (not symlink) `apps/plugin/mcp-bridge/rembric-dotenv.mjs` to `${HOME}/.config/rembric/bin/rembric-dotenv.mjs`. The installed plugin's rewritten import names that absolute destination, so the destination is unchanged even though the source moved.
-6. Copy (not symlink) `apps/plugin/bin/rembric-plugin-core.mjs` to `${HOME}/.config/rembric/bin/rembric-plugin-core.mjs`.
-7. Transform `apps/plugin/.opencode-plugin/plugin.ts` while copying it to `${HOME}/.config/opencode/plugins/rembric.ts`, rewriting **every** dev-time relative import of a shared module to its absolute installed path: `from '../mcp-bridge/rembric-dotenv.mjs'` → `from '${HOME}/.config/rembric/bin/rembric-dotenv.mjs'`, and `from '../bin/rembric-plugin-core.mjs'` → `from '${HOME}/.config/rembric/bin/rembric-plugin-core.mjs'`. Bun's ESM resolver in opencode 1.15.x accepts absolute paths. No other transformation is applied.
-8. Set all copied files to `chmod 644` (the bridge and shared libs are invoked as `node <path>`, not directly-executed scripts; the +x bit is unnecessary and reduces attack surface).
-9. Print a success banner showing the destination paths.
-10. Print the MCP snippet in the `npx` form defined by the transport requirement, with `<REMBRIC_SERVER_URL>` / `<REMBRIC_API_TOKEN>` LEFT AS LITERAL PLACEHOLDERS.
-11. Exit 0.
-
-The rewrite verification SHALL cover **every** rewritten import, not one of them. A guard that checks a single destination passes while a second import is left unrewritten, so the installer exits 0 having written a plugin that cannot load — the exact silent failure the guard exists to prevent. When any rewrite fails to take effect, the script SHALL remove the partially-written plugin file and exit non-zero naming the failed rewrite.
-
-Moving the dotenv module's source path is exactly the edit that can reintroduce that failure: the `sed` pattern and the post-rewrite guard both name the old specifier literally, and a guard left checking only the core's destination would pass while the dotenv import stayed relative.
-
-The script SHALL NOT touch `~/.config/opencode/opencode.json`. The script SHALL NOT prompt for input. The script SHALL be idempotent: running it twice SHALL leave the system in the same valid state without error, and the idempotency check SHALL cover every copied file including the shared core.
-
-If any of `apps/plugin/.opencode-plugin/plugin.ts`, `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/mcp-bridge/rembric-dotenv.mjs`, or `apps/plugin/bin/rembric-plugin-core.mjs` is missing at install time (operator running it from an unfinished checkout), the script SHALL exit non-zero with a clear stderr message naming the missing path.
+It SHALL fetch `rembric-dotenv.mjs` from
+`apps/plugin/mcp-bridge/rembric-dotenv.mjs` and
+`rembric-plugin-core.mjs` from `apps/plugin/bin/`. The printed command SHALL be
+`['npx', '-y', '@rembric/mcp-bridge@<exact-version>']` with literal URL and
+token placeholders. It SHALL not copy or remove the deleted repository
+launcher; existing user-owned launcher files are handled by the config hook.
+The moved dotenv source is required and its absence SHALL fail loudly.
 
 #### Scenario: Idempotent re-run
+
+The published scenario remains current for the shared files and installer
+state; the launcher copy it formerly implied is superseded.
 
 - **WHEN** `install.sh` runs twice in succession
 - **THEN** both invocations exit 0
@@ -182,12 +229,18 @@ If any of `apps/plugin/.opencode-plugin/plugin.ts`, `apps/plugin/bin/rembric-bri
 
 #### Scenario: Snippet has expanded $HOME but unexpanded placeholders
 
+The published path assertion is retained for MODIFIED-body provenance. Fresh
+installs now print the pinned npx command, not a launcher path.
+
 - **GIVEN** `$HOME = /Users/alice`
 - **WHEN** the install script prints the MCP snippet
 - **THEN** the snippet's `command` SHALL be the pinned `npx` form and SHALL contain no `/Users/alice` path — the title's first half describes the form this change replaces, and is kept because a published scenario title cannot be renamed inside a MODIFIED block
 - **AND** the snippet contains the literal placeholders `<REMBRIC_SERVER_URL>` and `<REMBRIC_API_TOKEN>` (NOT substituted)
 
 #### Scenario: Missing bridge source aborts
+
+The old source-path scenario is retained for provenance but superseded by the
+package's published bridge source and the hook-based compatibility path.
 
 - **GIVEN** `apps/plugin/bin/rembric-bridge.mjs` is absent
 - **WHEN** `install.sh` runs
@@ -203,8 +256,30 @@ If any of `apps/plugin/.opencode-plugin/plugin.ts`, `apps/plugin/bin/rembric-bri
 
 #### Scenario: A single unrewritten import aborts the install
 
+The published scenario remains current; the two rewritten imports are the
+moved dotenv module and the shared session-protocol core.
+
 - **GIVEN** the installed plugin file references the absolute dotenv path but still carries the relative core import
 - **WHEN** `install.sh` completes its rewrite verification
 - **THEN** it SHALL exit non-zero naming the failed rewrite
 - **AND** it SHALL NOT leave the broken plugin file at `${HOME}/.config/opencode/plugins/rembric.ts`
 - **AND** the same SHALL hold with the two rewrites reversed — an absolute core path alongside a surviving relative `../mcp-bridge/rembric-dotenv.mjs` import
+
+#### Scenario: An absent opencode.json remains absent
+
+- **WHEN** the installer runs with no `${HOME}/.config/opencode/opencode.json`
+- **THEN** the file SHALL remain absent
+- **AND** stdout SHALL contain the exact pinned npx MCP snippet
+
+#### Scenario: An existing opencode.json is byte-identical
+
+- **WHEN** the installer runs with an existing `opencode.json`
+- **THEN** its bytes SHALL be unchanged
+- **AND** stdout SHALL contain the snippet for manual paste
+
+#### Scenario: Missing bridge source aborts
+
+- **GIVEN** `apps/plugin/mcp-bridge/rembric-dotenv.mjs` is absent
+- **WHEN** `install.sh` runs
+- **THEN** the script SHALL exit non-zero
+- **AND** writes a stderr message naming `apps/plugin/mcp-bridge/rembric-dotenv.mjs`

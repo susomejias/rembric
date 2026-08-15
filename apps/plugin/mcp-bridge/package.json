@@ -1,0 +1,19 @@
+{
+  "name": "@rembric/mcp-bridge",
+  "version": "0.28.2",
+  "description": "Zero-dependency stdio to Streamable HTTP MCP bridge for Rembric",
+  "type": "module",
+  "license": "MIT",
+  "author": "rembric contributors",
+  "files": [
+    "cli.mjs",
+    "bridge.mjs",
+    "slug.mjs",
+    "rembric-dotenv.mjs",
+    "README.md"
+  ],
+  "bin": {
+    "mcp-bridge": "cli.mjs"
+  },
+  "dependencies": {}
+}

@@ -8,7 +8,6 @@ set -u
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 REMBRIC_DIR="${HOME}/.config/rembric"
 PLUGIN_DEST="${HOME}/.config/opencode/plugins/rembric.ts"
-BRIDGE_DEST="${REMBRIC_BIN_DIR}/rembric-bridge.mjs"
 # Must stay in step with install.sh's list, which is what put these on disk.
 SHARED_LIBS='rembric-dotenv.mjs rembric-plugin-core.mjs'
 
@@ -26,7 +25,6 @@ drop() {
 }
 
 drop "$PLUGIN_DEST"
-drop "$BRIDGE_DEST"
 for lib in $SHARED_LIBS; do
   drop "${REMBRIC_BIN_DIR}/${lib}"
 done
@@ -45,6 +43,7 @@ if [ -n "$absent" ]; then
 fi
 
 printf '  NOT removed (edit manually if you want them gone):\n'
+printf '    - any legacy rembric-bridge.mjs launcher left by an older install\n'
 printf '    - mcp.rembric block in ~/.config/opencode/opencode.json\n'
 printf '    - mcp.rembric block in any per-project ./opencode.json\n'
 printf '    - .rembric files in your project repos\n\n'

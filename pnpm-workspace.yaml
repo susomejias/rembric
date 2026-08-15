@@ -4,6 +4,7 @@
 # Workspace members: server + plugin under apps/, libraries under packages/.
 packages:
   - 'apps/*'
+  - 'apps/plugin/mcp-bridge'
   - 'packages/*'
 
 # Allowlist of dependencies permitted to run lifecycle scripts.

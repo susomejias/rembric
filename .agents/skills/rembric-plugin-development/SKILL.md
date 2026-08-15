@@ -1,6 +1,6 @@
 ---
 name: rembric-plugin-development
-description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode / Pi, on edits to `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs` or `apps/plugin/bin/rembric-plugin-core.mjs`, on per-client manifest changes, or on plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
+description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode / Pi, on edits to `apps/plugin/mcp-bridge/`, `apps/plugin/bin/rembric-plugin-core.mjs`, per-client manifest changes, or plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
 ---
 
 # Rembric plugin development
@@ -19,7 +19,7 @@ Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,herm
 ## The three single-source-of-truth rules
 
 - **`.rembric` is the only per-repo slug source.** Dotenv file with `PROJECT_SLUG=<lowercase-hyphen>`. Regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`.
-- **`apps/plugin/bin/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. Bridge imports it. opencode plugin imports it (via path rewritten by `install.sh`). Pi extension imports it. Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
+- **`apps/plugin/mcp-bridge/rembric-dotenv.mjs` is the only JS/TS implementation** of `parseDotenv` + `readRembricSlug` + `SLUG_RE`. The bridge, opencode plugin, and Pi extension import it (the installer rewrites the opencode import to the installed absolute path). Inlining any of those in another `.mjs`/`.ts` file fails the build (invariant test).
 - **`apps/plugin/bin/rembric-plugin-core.mjs` is the only JS/TS implementation** of the nudge strings, `stripPrivateTags`, `truncate`, `diag`, the session HTTP client, the transcript accumulator and the flush helpers. Both JS/TS clients (opencode, Pi) import it, which is what makes the nudge strings byte-identical and the `<private>` redaction identical **by construction** rather than by review. Its `agent` parameter is required with no default: `sessions.agent` is written once per session into append-only rows with no repair verb, so a default misfiles sessions permanently. `rembric-plugin-core.d.mts` is hand-written (`apps/plugin` has no build step and no typecheck) and is the only thing that makes the omission a compile error.
 
 Bash (`apps/plugin/scripts/_api.sh`) and Python (`apps/plugin/.hermes-plugin/__init__.py`) keep their own implementations — cross-language wrappers cost more than the duplication. They MUST agree on the regex value.
@@ -38,8 +38,8 @@ Each client has 3–5 non-obvious behaviors that bit us. **Before modifying that
 
 Per memory `01KRNZM2VFCME5HNT8N78HZW18`: shared logic lives in shared paths. Divergence is allowed ONLY when the platform forces it.
 
-- **MUST be shared**: `apps/plugin/bin/rembric-bridge.mjs`, `apps/plugin/bin/rembric-dotenv.mjs`, `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/scripts/*.sh` (Claude+Codex hooks), `apps/plugin/commands/*.md` (Pi consumes them verbatim as prompt templates — reference them, never copy).
-- **Legitimately divergent today**: `hooks/hooks.json` vs `hooks/hooks.codex.json` (env-substitution rules differ); `.claude-plugin/mcp.json` vs `.codex-plugin/mcp.json` (`${CLAUDE_PLUGIN_ROOT}` works in one, not the other); Python in-process provider for Hermes; JS/TS in-process for opencode; the MCP transport in `.pi-plugin/index.ts`, because that host has no MCP client for the bridge to plug into.
+- **MUST be shared**: `apps/plugin/mcp-bridge/rembric-dotenv.mjs`, `apps/plugin/bin/rembric-plugin-core.mjs`, `apps/plugin/scripts/*.sh` (Claude+Codex hooks), `apps/plugin/commands/*.md` (Pi consumes them verbatim as prompt templates — reference them, never copy). The published `@rembric/mcp-bridge` package is the shared stdio transport; there is no repository launcher to copy.
+- **Legitimately divergent today**: `hooks/hooks.json` vs `hooks/hooks.codex.json` (env-substitution rules differ); `.claude-plugin/mcp.json` vs `.codex-plugin/mcp.json` (Claude keychain substitution differs from Codex's curated `env_vars`); Python in-process provider for Hermes; JS/TS in-process for opencode; the MCP transport in `.pi-plugin/index.ts`, because that host has no MCP client for the published bridge to plug into.
 
 Sanity check: `git ls-files apps/plugin/` should show ONE copy of each shared resource. Two paths with near-identical content is a sync bug.
 

@@ -70,8 +70,8 @@ jobs:
     if: ${{ needs.release-please.outputs.plugin_release_created == 'true' }}
     runs-on: ubuntu-latest
     # id-token is the OIDC identity for trusted publishing, scoped to this job so
-    # no other job in the run can mint a publish token. No NPM_TOKEN by policy —
-    # openspec/specs/supply-chain-hygiene/spec.md.
+    # no other job in the run can mint a publish token. No long-lived registry
+    # token by policy — openspec/specs/supply-chain-hygiene/spec.md.
     permissions:
       contents: read
       id-token: write
@@ -97,7 +97,15 @@ jobs:
       - name: Assert the tarball contents
         run: node scripts/pi-package.mjs assert-pack
 
-      - name: Publish @rembric/pi
-        working-directory: apps/plugin/.pi-plugin
-        # --access public: a scoped package defaults to restricted on first publish.
-        run: npm publish --provenance --access public
+      # Both package assertions intentionally precede either publish. A failed
+      # bridge assertion must not leave a partial release behind.
+      - name: Assert the bridge tarball contents
+        run: node scripts/mcp-bridge-package.mjs assert-pack
+
+      # The registry check makes a rerun after a partial publish continue with
+      # the missing package instead of failing on an already-existing version.
+      - name: Publish @rembric/pi if the exact version is missing
+        run: node scripts/npm-publish.mjs apps/plugin/.pi-plugin
+
+      - name: Publish @rembric/mcp-bridge if the exact version is missing
+        run: node scripts/npm-publish.mjs apps/plugin/mcp-bridge

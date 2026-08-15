@@ -1,0 +1,24 @@
+{
+  "instrument": "server-side elapsed time and request count from the transport's first HTTP request to the initialize POST",
+  "baseline": {
+    "client": "mcp-remote@0.1.38",
+    "source": "measurements recorded 2026-08-15 against the session-terminating stub",
+    "requestCount": 4,
+    "requests": [
+      "GET /mcp",
+      "GET /.well-known/oauth-protected-resource/mcp",
+      "GET /.well-known/oauth-protected-resource",
+      "GET /.well-known/oauth-authorization-server"
+    ],
+    "elapsedMs": 25
+  },
+  "bridge": {
+    "client": "@rembric/mcp-bridge@0.28.2 local tarball",
+    "source": "session-terminating-stub.mjs, host 2026-08-15",
+    "requestCount": 2,
+    "requests": ["GET /healthz", "POST /mcp initialize"],
+    "elapsedMs": 1.0,
+    "wellKnownRequests": 0,
+    "listeningSocket": false
+  }
+}

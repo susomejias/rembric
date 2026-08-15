@@ -43,7 +43,19 @@
         ".codex-plugin/plugin.json",
         ".hermes-plugin/plugin.yaml",
         { "type": "generic", "path": ".opencode-plugin/plugin.ts" },
-        ".pi-plugin/package.json"
+        { "type": "generic", "path": ".opencode-plugin/install.sh" },
+        ".pi-plugin/package.json",
+        "mcp-bridge/package.json",
+        {
+          "type": "json",
+          "path": ".claude-plugin/mcp.json",
+          "jsonpath": "$.mcpServers.rembric.args[1]"
+        },
+        {
+          "type": "json",
+          "path": ".codex-plugin/mcp.json",
+          "jsonpath": "$.mcpServers.rembric.args[1]"
+        }
       ],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },

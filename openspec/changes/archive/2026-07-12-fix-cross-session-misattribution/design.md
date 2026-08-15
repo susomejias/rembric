@@ -37,6 +37,8 @@ Investigated two comparable memory tools (`Gentleman-Programming/engram`, `rohit
 
 **Alternative considered and rejected**: use the MCP `initialize` handshake's `clientInfo.name` to distinguish callers (a "cheap" idea raised before the reverted mechanism above). Verified by reading `mcp-remote`'s source: it always declares itself as `{name: "mcp-remote", version}` regardless of the actual upstream host, so Claude Code, Codex, and opencode (all fronted by the shared bridge, which shells out to `mcp-remote`) are server-side indistinguishable via this field. Not viable without patching a third-party dependency.
 
+**Correction measured 2026-08-15 against pinned `mcp-remote@0.1.38`:** the current behavior is a rewrite, not a full replacement. A host name reaches the server as `"<host> (via mcp-remote 0.1.37)"`; the host survives as a prefix and the appended transport version is itself wrong. The conclusion above still stands: the value is not the host's exact identity and cannot safely disambiguate callers.
+
 ## Risks / Trade-offs
 
 - **[Trade-off]** During genuine concurrency (two+ active sessions under one token), auto-attachment stops working entirely for that window — saves/summaries land with `session_id = NULL` (or `memory.session_start` mints a new session) instead of attaching to any specific one. **Accepted because**: this is strictly better than the prior behavior (attaching to the wrong one silently), the condition is comparatively rare, and an agent that cares can still pass an explicit `sessionId` — the tool schema already supports it, unchanged by this proposal.

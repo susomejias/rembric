@@ -1,11 +1,10 @@
 """Cascade behavior for ``_resolve_slug``.
 
-Cascade is four steps, .rembric-first:
+Cascade is two candidate sources, .rembric-first:
 
 1. ``<cwd>/.rembric`` ``PROJECT_SLUG``
 2. ``REMBRIC_PROJECT_SLUG`` env
-3. trailing ``/mcp/<slug>`` segment of ``REMBRIC_SERVER_URL``
-4. ``None`` (degraded)
+3. ``None`` (degraded)
 """
 
 from __future__ import annotations
@@ -47,11 +46,11 @@ class SlugCascadeTest(unittest.TestCase):
         )
         self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
 
-    def test_url_parse_is_final_source(self) -> None:
+    def test_url_path_is_not_a_slug_source(self) -> None:
         mod = self._plugin(
             REMBRIC_SERVER_URL="https://memory.example.com/mcp/delta",
         )
-        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "delta")
+        self.assertIsNone(mod._resolve_slug(str(self.tmp_path / "cwd")))
 
     def test_invalid_dotrembric_candidate_falls_through_to_env(self) -> None:
         (self.tmp_path / "cwd" / ".rembric").write_text(
@@ -60,7 +59,7 @@ class SlugCascadeTest(unittest.TestCase):
         mod = self._plugin(REMBRIC_PROJECT_SLUG="gamma")
         self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
 
-    def test_invalid_url_segment_falls_through_to_none(self) -> None:
+    def test_url_path_is_ignored_when_slug_is_invalid(self) -> None:
         mod = self._plugin(
             REMBRIC_SERVER_URL="https://memory.example.com/mcp/Has_Underscores",
         )
@@ -70,15 +69,8 @@ class SlugCascadeTest(unittest.TestCase):
         mod = self._plugin()
         self.assertIsNone(mod._resolve_slug(str(self.tmp_path / "cwd")))
 
-    def test_url_without_mcp_segment_is_skipped(self) -> None:
+    def test_url_without_mcp_segment_is_ignored(self) -> None:
         mod = self._plugin(REMBRIC_SERVER_URL="https://memory.example.com/")
-        self.assertIsNone(mod._resolve_slug(str(self.tmp_path / "cwd")))
-
-    def test_url_with_trailing_segments_after_mcp(self) -> None:
-        mod = self._plugin(
-            REMBRIC_SERVER_URL="https://memory.example.com/mcp/delta/extra",
-        )
-        # 'mcp' must be the second-to-last segment for the parse to succeed.
         self.assertIsNone(mod._resolve_slug(str(self.tmp_path / "cwd")))
 
 
