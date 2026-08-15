@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps/plugin/mcp-bridge');
+const expectedRepository = 'https://github.com/susomejias/rembric';
 const expected = [
   'README.md',
   'bridge.mjs',
@@ -22,6 +24,16 @@ function fail(message) {
 
 if (process.argv[2] !== 'assert-pack') {
   fail(`unknown command ${process.argv[2] ?? '(none)'} — expected assert-pack`);
+}
+
+let packageJson;
+try {
+  packageJson = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+} catch {
+  fail('package.json is invalid JSON');
+}
+if (packageJson.repository?.url !== expectedRepository) {
+  fail(`repository must be ${expectedRepository} for npm provenance`);
 }
 
 const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
