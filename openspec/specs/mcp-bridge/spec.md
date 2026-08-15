@@ -361,6 +361,10 @@ These are recorded as requirements rather than as omissions because the package 
 - **WHEN** the bridge is running a session
 - **THEN** it SHALL hold no listening socket
 
+### Requirement: Bridge compatibility documentation distinguishes support from host verification
+
+The documentation SHALL describe the bridge as a standard stdio MCP transport replacement for hosts that previously used `mcp-remote`. Its compatibility table SHALL retain recorded host-level evidence where it exists and label unmeasured hosts as supported but not host-verified; it SHALL not present an unmeasured host as a recorded run.
+
 ### Requirement: The compatibility matrix names how each client was verified, or states it was not
 
 The package's documentation SHALL carry a compatibility matrix over the clients this repository ships and the platforms it runs on. Each entry SHALL state either how it was verified — the host, the arm exercised, and the date — or that it is unverified together with the reason.

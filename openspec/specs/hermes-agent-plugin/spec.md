@@ -303,7 +303,7 @@ Hermes is the one client whose MCP entry is **documented** rather than shipped a
 
 - It SHALL name `@rembric/mcp-bridge` at an **exact pinned version**, never `mcp-remote` and never a floating tag such as `@latest`. `npx` re-resolves a floating tag on every session start, so a compromised or broken publish reaches the user immediately.
 - Its `args` SHALL be exactly the `-y` flag and the pinned package specifier. There SHALL be **no** URL argument, **no** `--header` argument and **no** `--allow-http` argument: the bridge takes no arguments and reads its whole configuration from the environment.
-- The bearer SHALL reach the process through the environment Hermes already forwards (it loads `${HERMES_HOME:-~/.hermes}/.env` and passes it to `mcp_servers.*` subprocesses), never through `args`. A token in an argument vector is readable by any local process via `ps` and `/proc/<pid>/cmdline`.
+- The bearer SHALL reach the process through explicit `env` mappings for `REMBRIC_SERVER_URL`, `REMBRIC_API_TOKEN`, and `REMBRIC_PROJECT_SLUG`, never through `args`. Hermes MCP subprocesses SHALL NOT be documented as inheriting `${HERMES_HOME:-~/.hermes}/.env` implicitly. A token in an argument vector is readable by any local process via `ps` and `/proc/<pid>/cmdline`.
 - The slug SHALL be expressed as `REMBRIC_PROJECT_SLUG` in the environment, not as a `/mcp/<slug>` URL suffix. With no URL argument the environment variable is the only way to express a default slug — and it is the variable this plugin's own `requires_env` already collects, resolved by the bridge with the same precedence this capability's cascade defines (`.rembric` first, the environment variable second).
 
 Any `node`-instead-of-`npx` variant the README shows SHALL point at a current path; the pre-monorepo `plugin/bin/…` path SHALL NOT appear.
@@ -347,7 +347,7 @@ That section's `mcp_servers.rembric` block SHALL satisfy the same four propertie
 #### Scenario: The documented MCP block keeps the token and the slug in the environment
 
 - **WHEN** the block is read
-- **THEN** the bearer SHALL be supplied through the environment Hermes forwards to the subprocess, not through `args`
+- **THEN** the bearer SHALL be supplied through the explicit `env` mapping to the subprocess, not through `args`
 - **AND** the default project slug SHALL be expressed as `REMBRIC_PROJECT_SLUG`, not as a `/mcp/<slug>` suffix on `REMBRIC_SERVER_URL`
 
 #### Scenario: A per-directory `.rembric` still wins over the documented default
@@ -551,3 +551,21 @@ All HTTP-making steps SHALL silently swallow HTTP errors (single-line stderr dia
 - **WHEN** a new Hermes process initializes against the same session id
 - **THEN** `initialize` SHALL POST the ensure and then the resume, and the row SHALL be `status='active'` with `ended_at IS NULL`
 - **AND** the control SHALL pass in the same run: without the resume the row stays terminal and a subsequent `memory.save` on that transport persists `session_id = NULL`
+
+### Requirement: Hermes MCP bridge configuration
+
+The documented and updater-generated `mcp_servers.rembric` entry SHALL use an exact `@rembric/mcp-bridge` pin, pass no URL or bearer argument, explicitly map `REMBRIC_SERVER_URL`, `REMBRIC_API_TOKEN`, and `REMBRIC_PROJECT_SLUG` into the MCP subprocess, and set `enabled: true`. `${HERMES_HOME:-~/.hermes}/.env` persists provider values, but MCP subprocesses SHALL NOT be documented as inheriting them implicitly.
+
+On update, the installer SHALL back up and replace only its recognized legacy `mcp-remote` block or the exact incomplete npx bridge block it previously emitted. It SHALL leave canonical and custom Rembric blocks byte-for-byte unchanged and print the canonical block when manual configuration is required.
+
+#### Scenario: Incomplete updater bridge entry is repaired
+
+- **GIVEN** an exact-pinned npx bridge entry with no `env` or `enabled` field
+- **WHEN** the Hermes updater runs
+- **THEN** it SHALL preserve a backup and replace the entry with the canonical block
+
+#### Scenario: Custom or canonical bridge entries are preserved
+
+- **GIVEN** a custom or canonical Rembric MCP entry
+- **WHEN** the Hermes updater runs
+- **THEN** a custom entry SHALL remain unchanged and print the manual fallback; a canonical entry SHALL make no config write or backup
