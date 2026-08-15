@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.28.4](https://github.com/susomejias/rembric/compare/server-v0.28.3...server-v0.28.4) (2026-08-15)
+
+
+### Features
+
+* **plugin:** own the MCP bridge transport ([64ef334](https://github.com/susomejias/rembric/commit/64ef3344320c021ccc14da7b213c2e796e0fc638))
+
+
+### Bug Fixes
+
+* **mcp:** evict stale per-transport router and transport state ([ee5de52](https://github.com/susomejias/rembric/commit/ee5de5243b932c35839107a4296bcae7ecdcec10)), closes [#328](https://github.com/susomejias/rembric/issues/328)
+* **mcp:** refuse an unknown mcp-session-id with 404, fix a stale docstring ([faf67fc](https://github.com/susomejias/rembric/commit/faf67fc365e1ae91c3031bb4557c0fa4cf076915))
+* **mcp:** report the resolved agent on memory.session_start ([9f32810](https://github.com/susomejias/rembric/commit/9f328104a4613af61d22a602e7114c97d1cd1535))
+* **plugin:** harden bridge recovery and upgrades ([dd495aa](https://github.com/susomejias/rembric/commit/dd495aa947d8b531b7285e05a9a75132c0a45c4d))
+
+
+### Documentation
+
+* **openspec:** archive own the mcp bridge ([9b5f976](https://github.com/susomejias/rembric/commit/9b5f9760c177f259440684341f56bf2e3af1094c))
+
+
+### Reverts
+
+* drop the evict-stale-transport-state mechanism ([#328](https://github.com/susomejias/rembric/issues/328)) ([88a4468](https://github.com/susomejias/rembric/commit/88a4468e953c667e2a4c6ab573409187c6c5d310))
+
 ## [0.28.3](https://github.com/susomejias/rembric/compare/server-v0.28.2...server-v0.28.3) (2026-08-13)
 
 
