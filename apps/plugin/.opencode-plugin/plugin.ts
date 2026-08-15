@@ -1,5 +1,6 @@
 // x-release-please-start-version
 // @rembric-plugin-version 0.28.2
+const MCP_BRIDGE_VERSION = '0.28.2';
 // x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
@@ -14,12 +15,12 @@
 // ONLY `RembricPlugin` is exported: opencode invokes every named export of a
 // plugin module with the plugin ctx, so a helper export crashes on load.
 
-import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
 import {
   createSessionProtocol,
   diag,
   POST_COMPACT_NUDGE_CORE,
 } from '../bin/rembric-plugin-core.mjs';
+import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 
 type EventInput = {
   event: {
@@ -65,7 +66,18 @@ type CompactingOutput = { context: string[] };
 
 type PluginContext = { directory: string };
 
+type McpServerConfig = {
+  command?: string[];
+  [key: string]: unknown;
+};
+
+type OpenCodeConfig = {
+  mcp?: Record<string, McpServerConfig>;
+  [key: string]: unknown;
+};
+
 type PluginReturn = {
+  config?: (config: OpenCodeConfig) => void;
   event?: (input: EventInput) => Promise<void>;
   'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => Promise<void>;
   'experimental.session.compacting'?: (
@@ -120,6 +132,12 @@ export const RembricPlugin: Plugin = async (ctx) => {
   }
 
   return {
+    config: (config) => {
+      const rembric = config.mcp?.rembric;
+      if (rembric) {
+        rembric.command = ['npx', '-y', `@rembric/mcp-bridge@${MCP_BRIDGE_VERSION}`];
+      }
+    },
     event: async ({ event }) => {
       if (event.type === 'session.created') {
         const info = (event.properties?.info ?? {}) as {

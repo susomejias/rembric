@@ -811,8 +811,8 @@ describe('opencode plugin dispose-spike result is recorded', () => {
 });
 
 const OPENCODE_PLUGIN_TS = 'apps/plugin/.opencode-plugin/plugin.ts';
-const REMBRIC_DOTENV_MJS = 'apps/plugin/bin/rembric-dotenv.mjs';
-const REMBRIC_BRIDGE_MJS = 'apps/plugin/bin/rembric-bridge.mjs';
+const REMBRIC_DOTENV_MJS = 'apps/plugin/mcp-bridge/rembric-dotenv.mjs';
+const MCP_BRIDGE_MJS = 'apps/plugin/mcp-bridge/bridge.mjs';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
 // Every helper the JS/TS clients share, with the ONE file allowed to define it.
@@ -911,7 +911,7 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toBeGreaterThanOrEqual(2);
     // Explicit list: unlike the client set these are closed, so losing one is a
     // regression rather than a rename.
-    for (const known of [REMBRIC_DOTENV_MJS, REMBRIC_BRIDGE_MJS, REMBRIC_PLUGIN_CORE_MJS]) {
+    for (const known of [REMBRIC_DOTENV_MJS, MCP_BRIDGE_MJS, REMBRIC_PLUGIN_CORE_MJS]) {
       expect(scanned, `${known} is no longer scanned`).toContain(known);
     }
     expect(scanned.filter((f) => f.includes('.test.'))).toEqual([]);
@@ -964,8 +964,8 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toEqual([]);
   });
 
-  it('plugin.ts and rembric-bridge.mjs import the slug helpers instead of redefining them', () => {
-    for (const rel of [OPENCODE_PLUGIN_TS, REMBRIC_BRIDGE_MJS]) {
+  it('plugin.ts and the published bridge import the slug helpers instead of redefining them', () => {
+    for (const rel of [OPENCODE_PLUGIN_TS, MCP_BRIDGE_MJS]) {
       expect(
         /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(readFileSync(join(repoRoot, rel), 'utf8')),
         `${rel} must import slug helpers from rembric-dotenv.mjs`,
@@ -985,7 +985,7 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
   });
 });
 
-const PI_PACKAGE_JSON = 'apps/plugin/.pi-plugin/package.json';
+const PI_PACKAGE_DIR = 'apps/plugin/.pi-plugin';
 
 // `prepack`/`prepare`/`prepublishOnly` run at pack time; the install trio runs on
 // a consumer's machine.
@@ -998,44 +998,69 @@ const FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS = [
   'postinstall',
 ];
 
-describe('the published @rembric/pi package', () => {
-  const manifest = JSON.parse(readFileSync(join(repoRoot, PI_PACKAGE_JSON), 'utf8')) as {
-    name?: string;
-    files?: unknown;
-    private?: unknown;
-    scripts?: Record<string, string>;
-  };
+type PublishedManifest = {
+  path: string;
+  name?: string;
+  version?: string;
+  files?: unknown;
+  private?: unknown;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+};
 
-  it('is the manifest these assertions think they are reading', () => {
-    expect(manifest.name, `${PI_PACKAGE_JSON} is not the @rembric/pi manifest`).toBe('@rembric/pi');
+const publishedManifests = execSync(
+  `git -C ${repoRoot} ls-files -- 'apps/plugin/**/package.json' 'apps/plugin/package.json'`,
+  { encoding: 'utf8' },
+)
+  .split('\n')
+  .filter(Boolean)
+  .map((path): PublishedManifest => {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, path), 'utf8')) as Omit<
+      PublishedManifest,
+      'path'
+    >;
+    return { path, ...manifest };
+  })
+  .filter((manifest) => manifest.private !== true || Array.isArray(manifest.files));
+
+describe('the published npm packages', () => {
+  it('derives the published package set from workspace manifests', () => {
+    expect(publishedManifests.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('declares no lifecycle script of its own', () => {
-    const declared = FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS.filter(
-      (key) => manifest.scripts?.[key] !== undefined,
-    );
-    expect(
-      declared,
-      `${PI_PACKAGE_JSON} declares ${declared.join(', ')}; materialise in an explicit CI step instead. Why: scripts/pi-package.mjs and openspec/specs/supply-chain-hygiene/spec.md.`,
-    ).toEqual([]);
+  it('has no lifecycle scripts, private flag, or missing files allowlist', () => {
+    for (const manifest of publishedManifests) {
+      const declared = FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS.filter(
+        (key) => manifest.scripts?.[key] !== undefined,
+      );
+      expect(
+        declared,
+        `${manifest.path} declares ${declared.join(', ')}; materialise in an explicit CI step instead. Why: scripts/pi-package.mjs and openspec/specs/supply-chain-hygiene/spec.md.`,
+      ).toEqual([]);
+      expect(manifest.files, `${manifest.path} must declare a files allowlist`).toEqual(
+        expect.arrayContaining([expect.any(String)]),
+      );
+      expect(manifest.private, `${manifest.path} must not be private`).toBeUndefined();
+    }
   });
 
-  it('bounds its tarball with a non-empty files allowlist and is publishable', () => {
-    expect(
-      manifest.files,
-      `${PI_PACKAGE_JSON} must declare a files allowlist; scripts/pi-package.mjs assert-pack checks it against the expected tarball`,
-    ).toEqual(expect.arrayContaining([expect.any(String)]));
-    expect(manifest.private, `${PI_PACKAGE_JSON} must not be private`).toBeUndefined();
+  it('declares no runtime dependencies', () => {
+    for (const manifest of publishedManifests) {
+      expect(
+        manifest.dependencies ?? {},
+        `${manifest.path} must have no runtime dependencies`,
+      ).toEqual({});
+    }
   });
 
   it('tracks only its four development files, so materialised resources cannot be committed', () => {
-    const tracked = execSync(`git ls-files ${dirname(PI_PACKAGE_JSON)}`, {
+    const tracked = execSync(`git ls-files ${PI_PACKAGE_DIR}`, {
       cwd: repoRoot,
       encoding: 'utf8',
     })
       .split('\n')
       .filter(Boolean)
-      .map((p) => p.slice(dirname(PI_PACKAGE_JSON).length + 1))
+      .map((p) => p.slice(`${PI_PACKAGE_DIR}/`.length))
       .sort();
     expect(tracked).toEqual(['README.md', 'index.ts', 'package.json', 'plugin.test.ts']);
   });
@@ -1046,8 +1071,47 @@ describe('the published @rembric/pi package', () => {
 // so every client carrier (.claude-plugin/{package,plugin}.json,
 // .codex-plugin/{package,plugin}.json, .hermes-plugin/plugin.yaml,
 // .opencode-plugin/plugin.ts) shares a single version. There is no
-// node-workspace cascade and no per-client component. (A future invariant
-// could assert all carriers agree; not enforced today.)
+// node-workspace cascade and no per-client component. Documented spawn sites
+// are checked too because Hermes has no tracked MCP manifest.
+
+describe('the bridge version carriers', () => {
+  const pluginVersion = (
+    JSON.parse(readFileSync(join(repoRoot, 'apps/plugin/package.json'), 'utf8')) as {
+      version: string;
+    }
+  ).version;
+
+  it('keeps every bridge pin equal to the unified plugin version', () => {
+    const pin = /@rembric\/mcp-bridge@(\d+\.\d+\.\d+)/g;
+    const carriers = execSync(
+      `git -C ${repoRoot} grep -l -E '@rembric/mcp-bridge@[0-9]+\\.[0-9]+\\.[0-9]+' -- ':!openspec/**' ':!*.test.*' || true`,
+      { encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean);
+    expect(carriers, 'no operational bridge pin carriers were found').not.toHaveLength(0);
+    for (const carrier of carriers) {
+      const pins = [...readFileSync(join(repoRoot, carrier), 'utf8').matchAll(pin)].map(
+        (match) => match[1],
+      );
+      expect(pins, `${carrier} must carry at least one bridge pin`).not.toHaveLength(0);
+      expect(pins, `${carrier} must use the unified plugin version`).toEqual(
+        pins.map(() => pluginVersion),
+      );
+    }
+    const bridgeVersion = publishedManifests.find(
+      (manifest) => manifest.name === '@rembric/mcp-bridge',
+    )?.version;
+    expect(bridgeVersion).toBe(pluginVersion);
+    const opencode = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
+    expect(opencode).toContain(`const MCP_BRIDGE_VERSION = '${pluginVersion}';`);
+    const installer = readFileSync(
+      join(repoRoot, 'apps/plugin/.opencode-plugin/install.sh'),
+      'utf8',
+    );
+    expect(installer).toContain(`MCP_BRIDGE_VERSION='${pluginVersion}'`);
+  });
+});
 
 // Install URL drift guard. The `restructure-monorepo-apps-layout` change
 // moved the shared plugin tree from `plugin/` to `apps/plugin/` and
@@ -1391,7 +1455,7 @@ describe('the session-summary rubric has one source', () => {
   // alternative walks the working tree and flags scratch files.
   it('the enumeration above is complete', () => {
     const candidates = execSync(
-      `git -C ${repoRoot} ls-files -- apps/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**'`,
+      `git -C ${repoRoot} ls-files -- apps/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**' ':!apps/plugin/bin/rembric-bridge.mjs'`,
       { encoding: 'utf8' },
     )
       .split('\n')

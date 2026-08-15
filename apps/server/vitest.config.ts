@@ -33,6 +33,7 @@ export default defineConfig({
       // One pattern for every per-client package dir, so a client's test file
       // cannot exist without being run.
       '../plugin/.*-plugin/*.test.ts',
+      '../plugin/mcp-bridge/*.test.ts',
       '../plugin/test/*.test.ts',
       '../../install.test.ts',
       '../../scripts/*.test.ts',

@@ -18,11 +18,10 @@ Hermes pre-loads that file into ``os.environ`` before the plugin module
 imports AND into every subprocess it spawns from ``mcp_servers.*`` —
 single source of truth for both the in-process provider and the bridge.
 
-Project slug cascade (first valid match wins): ``REMBRIC_PROJECT_SLUG``
-env → ``<cwd>/.rembric`` ``PROJECT_SLUG`` → trailing path segment of
-``REMBRIC_SERVER_URL`` if it ends in ``/mcp/<slug>`` → degraded silent
-skip. Failures degrade silently (single-line stderr diagnostic) and
-never abort the host session.
+Project slug cascade (first valid match wins): ``<cwd>/.rembric``
+``PROJECT_SLUG`` → ``REMBRIC_PROJECT_SLUG`` env → degraded silent skip.
+Failures degrade silently (single-line stderr diagnostic) and never abort
+the host session.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
@@ -101,7 +99,7 @@ except ImportError:  # pragma: no cover - exercised only outside Hermes
             pass
 
 
-# Mirror of the slug regex enforced by ``plugin/bin/rembric-bridge.mjs`` and
+# Mirror of the slug regex enforced by the published ``@rembric/mcp-bridge`` and
 # Rembric's project-slug validation: lowercase letters/digits/hyphens, 1–64
 # chars, must not start or end with a hyphen.
 _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
@@ -212,31 +210,11 @@ def _slug_from_dotrembric(cwd: str) -> str | None:
     return _valid_slug(pairs.get("PROJECT_SLUG"))
 
 
-def _slug_from_url() -> str | None:
-    url = os.environ.get("REMBRIC_SERVER_URL")
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return None
-    parts = [p for p in parsed.path.split("/") if p]
-    if len(parts) >= 2 and parts[-2] == "mcp":
-        return _valid_slug(parts[-1])
-    return None
-
-
 def _resolve_slug(cwd: str) -> str | None:
-    """Cascade through the four sources, returning the first valid slug.
-
-    .rembric wins over the env var so a per-repo file overrides the global
-    default set once via the install flow, matching plugin.yaml's own
-    "Overridden per-cwd if a .rembric file is present" wording.
-    """
+    """Return the first valid slug from the local marker or environment."""
     for source in (
         lambda: _slug_from_dotrembric(cwd),
         _slug_from_env,
-        _slug_from_url,
     ):
         candidate = source()
         if candidate:
@@ -316,7 +294,7 @@ def _api_post(
 # ---------------------------------------------------------------------------
 
 
-class RembricMemoryProvider(MemoryProvider):
+class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
     """Lifecycle-only memory provider for Rembric.
 
     Sessions: initialize → POST /api/<slug>/sessions; on_pre_compress → POST
@@ -429,7 +407,7 @@ class RembricMemoryProvider(MemoryProvider):
             created = response.get("created") if response is not None else None
             # An unknown outcome (failed ensure, or no `created` field) is
             # "do not advise", never "advise anyway".
-            self._process_resumed = created is False
+            self._process_resumed = isinstance(created, bool) and not created
         if response is not None and first_ensure:
             _api_post(base, slug, f"/sessions/{session_id}/resume", {})
 

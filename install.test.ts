@@ -288,11 +288,13 @@ describe('agent routing', () => {
     expect(hermes.out).toContain('hermes gateway restart');
   });
 
-  it('hermes update only reminds to restart the gateway (already installed/enabled)', () => {
+  it('hermes update surfaces the exact bridge-pin migration before restart', () => {
     const { code, out } = run(['--agent=hermes', '--action=update'], { home });
     expect(code).toBe(0);
+    expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
+    expect(out).toContain('Required Hermes MCP migration');
+    expect(out).toContain('no separate npm update is needed');
     expect(out).toContain('hermes gateway restart');
-    // The install-only wiring step must not be suggested on an update.
     expect(out).not.toContain('hermes plugins install rembric');
   });
 
@@ -507,7 +509,7 @@ describe('the ACTION column recommends only actions --action accepts', () => {
       INSTALLER_SRC,
     );
     expect(block).not.toBeNull();
-    const arms = [...block![1].matchAll(/^ {4}([a-z]+|\*)\)/gm)].map((m) => m[1]);
+    const arms = [...block![1].matchAll(/^[ \t]*([a-z]+|\*)\)/gm)].map((m) => m[1]);
     expect(arms).toContain('*');
     expect(arms.filter((a) => a !== '*').sort()).toEqual([...ACTIONS].sort());
   });
@@ -713,18 +715,61 @@ describe('opencode installer verifications', () => {
   it('is idempotent: a second install produces byte-identical files', () => {
     const files = [
       join(home, '.config', 'opencode', 'plugins', 'rembric.ts'),
-      join(home, '.config', 'opencode', 'opencode.json'),
-      join(home, '.config', 'rembric', 'bin', 'rembric-bridge.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-dotenv.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-plugin-core.mjs'),
     ];
     const first = run(['--agent=opencode', '--action=install'], { home });
     expect(first.code).toBe(0);
     const snapshot = files.map((f) => readFileSync(f, 'utf8'));
+    expect(existsSync(join(home, '.config', 'opencode', 'opencode.json'))).toBe(false);
+    expect(first.out).toContain(`@rembric/mcp-bridge@${PLUGIN_VERSION.opencode}`);
     const second = run(['--agent=opencode', '--action=install'], { home });
     expect(second.code).toBe(0);
-    expect(second.out).toContain('already has mcp.rembric'); // config detected, not re-written
+    expect(second.out).toContain('left untouched');
     expect(files.map((f) => readFileSync(f, 'utf8'))).toEqual(snapshot);
+  });
+
+  it('leaves an existing opencode.json byte-identical', () => {
+    const cfgDir = join(home, '.config', 'opencode');
+    mkdirSync(cfgDir, { recursive: true });
+    const configPath = join(cfgDir, 'opencode.json');
+    const oldConfig = JSON.stringify(
+      {
+        mcp: {
+          rembric: {
+            type: 'local',
+            command: ['node', '/home/user/.config/rembric/bin/rembric-bridge.mjs'],
+            environment: { REMBRIC_SERVER_URL: 'old-url', REMBRIC_API_TOKEN: 'old-token' },
+          },
+        },
+        operatorSetting: 'leave-me-alone',
+      },
+      null,
+      2,
+    );
+    writeFileSync(configPath, oldConfig);
+
+    const result = run(['--agent=opencode', '--action=update'], { home });
+
+    expect(result.code).toBe(0);
+    expect(readFileSync(configPath, 'utf8')).toBe(oldConfig);
+    expect(result.out).toContain('left untouched');
+    expect(result.out).toContain(`@rembric/mcp-bridge@${PLUGIN_VERSION.opencode}`);
+  });
+
+  it('forwards the local bridge source and keeps the public ref source wired', () => {
+    const noNetwork = mkdtempSync(join(tmpdir(), 'rembric-no-network-'));
+    writeFileSync(join(noNetwork, 'curl'), '#!/bin/sh\nexit 91\n');
+    chmodSync(join(noNetwork, 'curl'), 0o755);
+    const result = run(['--agent=opencode', '--action=install'], {
+      home,
+      path: `${noNetwork}:${CORE_PATH}`,
+    });
+    rmSync(noNetwork, { recursive: true, force: true });
+
+    expect(result.code).toBe(0);
+    expect(INSTALLER_SRC).toContain('MCP_BRIDGE_SRC="$REMBRIC_SRC/apps/plugin/mcp-bridge"');
+    expect(INSTALLER_SRC).toContain('MCP_BRIDGE_SRC="$base/mcp-bridge"');
   });
 
   it('an unrelated "rembric" string elsewhere in opencode.json is NOT treated as configured', () => {
@@ -734,7 +779,7 @@ describe('opencode installer verifications', () => {
     writeFileSync(join(cfgDir, 'opencode.json'), cfg);
     const { code, out } = run(['--agent=opencode', '--action=install'], { home });
     expect(code).toBe(0);
-    expect(out).toContain('manual merge required');
+    expect(out).toContain('left untouched');
     expect(readFileSync(join(cfgDir, 'opencode.json'), 'utf8')).toBe(cfg); // untouched
   });
 
@@ -744,7 +789,7 @@ describe('opencode installer verifications', () => {
     const cfg = JSON.stringify({ mcp: { rembric: { type: 'local', enabled: true } } });
     writeFileSync(join(cfgDir, 'opencode.json'), cfg);
     const { out } = run(['--agent=opencode', '--action=install'], { home });
-    expect(out).toContain('already has mcp.rembric');
+    expect(out).toContain('left untouched');
     expect(readFileSync(join(cfgDir, 'opencode.json'), 'utf8')).toBe(cfg);
   });
 
@@ -757,7 +802,11 @@ describe('opencode installer verifications', () => {
     const { code, out } = run([], {
       home,
       script: OPENCODE_INSTALL,
-      env: { PLUGIN_SRC: drift, BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin') },
+      env: {
+        PLUGIN_SRC: drift,
+        BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin'),
+        MCP_BRIDGE_SRC: join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge'),
+      },
     });
     rmSync(drift, { recursive: true, force: true });
     expect(code).toBe(1);
@@ -774,19 +823,26 @@ describe('opencode installer verifications', () => {
       join(drift, 'plugin.ts'),
       [
         '// @rembric-plugin-version 0.0.0',
-        "import { readRembricSlug } from '../bin/rembric-dotenv.mjs';",
+        "import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';",
         "import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';",
         'export const RembricPlugin = () => ({});',
         '',
       ]
         .join('\n')
         // Drift ONE import out of the sed pattern's reach; the other still rewrites.
-        .replace(`../bin/${drifted}`, `./lib/${drifted}`),
+        .replace(
+          `../${drifted === 'rembric-dotenv.mjs' ? 'mcp-bridge' : 'bin'}/${drifted}`,
+          `./lib/${drifted}`,
+        ),
     );
     const { code, out } = run([], {
       home,
       script: OPENCODE_INSTALL,
-      env: { PLUGIN_SRC: drift, BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin') },
+      env: {
+        PLUGIN_SRC: drift,
+        BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin'),
+        MCP_BRIDGE_SRC: join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge'),
+      },
     });
     rmSync(drift, { recursive: true, force: true });
     expect(code).toBe(1);
@@ -821,9 +877,7 @@ describe('opencode installer verifications', () => {
     expect(installedFiles).toContain('.config/rembric/bin/rembric-plugin-core.mjs');
 
     expect(run(['--agent=opencode', '--action=uninstall'], { home }).code).toBe(0);
-    // opencode.json is the documented exception: it may configure other MCP
-    // servers, so the uninstaller prints the block instead of editing it.
-    expect(filesUnder(home)).toEqual(['.config/opencode/opencode.json']);
+    expect(filesUnder(home)).toEqual([]);
   });
 });
 

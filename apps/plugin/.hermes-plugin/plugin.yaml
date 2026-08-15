@@ -21,5 +21,5 @@ requires_env:
     secret: true
   - name: REMBRIC_PROJECT_SLUG
     description: >-
-      Default project slug. Overridden per-cwd if a .rembric file is present, or
-      by the trailing /mcp/<slug> segment of REMBRIC_SERVER_URL.
+      Default project slug for the bridge. A per-directory .rembric file takes
+      precedence when present.

@@ -46,6 +46,8 @@ importers:
 
   apps/plugin: {}
 
+  apps/plugin/mcp-bridge: {}
+
   apps/server:
     dependencies:
       '@hono/node-server':

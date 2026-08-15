@@ -2,7 +2,6 @@ import { keyHint } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 
 // These two specifiers are rewritten to `./bin/` at publish time.
-import { readRembricSlug } from '../bin/rembric-dotenv.mjs';
 import type { SessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import {
   createSessionProtocol,
@@ -10,6 +9,7 @@ import {
   POST_TIMEOUT_MS,
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
+import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 
 type JsonSchema = Record<string, unknown>;
 

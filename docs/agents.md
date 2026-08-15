@@ -133,11 +133,11 @@ codex plugin marketplace add https://github.com/susomejias/rembric.git
 codex plugin add rembric@rembric
 ```
 
-The marketplace `source` is `git-subdir` against `./plugin`, so Codex clones the repo subtree on install. Repo access (SSH key / PAT) gates discovery, exactly like the Claude Code plugin.
+The marketplace `source` is `git-subdir` against `./apps/plugin`, so Codex clones the repo subtree on install. Repo access (SSH key / PAT) gates discovery, exactly like the Claude Code plugin.
 
 What the plugin registers for Codex:
 
-- The `rembric` MCP server (declared by `apps/plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `apps/plugin/.claude-plugin/mcp.json`), invoking the bundled bridge at `plugin_root/bin/rembric-bridge.mjs` (resolved via the manifest's `cwd: "."` + relative args).
+- The `rembric` MCP server (declared by `apps/plugin/.codex-plugin/mcp.json`, the Codex-specific sibling of Claude Code's `apps/plugin/.claude-plugin/mcp.json`), invoking the exact-pinned `@rembric/mcp-bridge` package with `npx`.
 - A five-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `PostCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact (pre + post), and end-on-stop.
 - **No slash commands.** `/rembric:remember`, `/rembric:recall`, `/rembric:context` and `/rembric:summary` are Claude-Code-only: Claude Code auto-discovers them from `apps/plugin/commands/*.md`, and `.codex-plugin/plugin.json` declares only `mcpServers` and `hooks`. Under Codex, ask the agent in plain language instead ("remember that…", "what did we do last time") — it has the same MCP tools, and the protocol guidance arrives server-side via the `initialize.instructions` handshake.
 
@@ -163,7 +163,7 @@ export REMBRIC_API_TOKEN="$(cat ~/.rembric/codex-token)"   # token minted from /
 
 Then restart your terminal (or `source ~/.zshrc`) before launching `codex`. The same two envs feed:
 
-- The **MCP bridge** — `apps/plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The same manifest also uses `cwd: "."` + `args: ["./bin/rembric-bridge.mjs"]` to anchor the bridge path to the plugin root — `${CLAUDE_PLUGIN_ROOT}` substitution does NOT work in MCP args under Codex (only in hook commands), so future contributors should not "simplify" the path back to the Claude Code form.
+- The **MCP bridge** — `apps/plugin/.codex-plugin/mcp.json` declares `env_vars: ["REMBRIC_SERVER_URL", "REMBRIC_API_TOKEN"]`, Codex's native mechanism for reading specific env vars from the parent shell at MCP subprocess spawn time (`create_env_for_mcp_server` in `codex-rs/rmcp-client/src/utils.rs`). Codex does NOT inherit the full parent env automatically — `LocalStdioServerLauncher::launch_server` calls `Command::env_clear()` before applying the curated env, so only the names you list under `env_vars` are forwarded, on top of `DEFAULT_ENV_VARS`. The manifest uses `command: "npx"` with `args: ["-y", "@rembric/mcp-bridge@<exact-version>"]`; `env_vars` forwards the credentials and `PWD`.
 - The **lifecycle hooks** — six event types under Codex (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`) across nine handler entries, since `SessionStart`, `UserPromptSubmit` and `Stop` each declare two — so sessions appear in `/dashboard/sessions`, a normal close reaches `ended` via `SessionEnd`, and PreCompact/PostCompact persist a summary across compaction without depending on the model calling `memory.session_summary` post-compact. Codex records trust per handler, so the `/hooks` panel may list more entries than event types.
 
 Symptoms of missing envs:
@@ -218,10 +218,10 @@ The Codex CLI has no dedicated per-plugin `update` verb, so re-running `codex pl
 
 > **Plugin `0.6.0+` required against Rembric `0.13.0+`.** The provider's `is_available()` now sends `Authorization: Bearer ${REMBRIC_API_TOKEN}` to `/healthz` (the server made the endpoint bearer-gated in `0.13.0`). The env var was already required for every other call; this just tightens an existing requirement. Running plugin `0.5.x` against server `0.13+` will silently disable the memory provider — upgrade in lock-step.
 
-| Piece                          | What it does                                               | Wired via                                                         |
-| ------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------- |
-| **`memory.provider: rembric`** | Auto session create / summary-on-compact / end-on-close    | The Python provider plugin (this section)                         |
-| **`mcp_servers.rembric`**      | Full memory tool surface (save/search/get/context/judge/…) | The shared `bin/rembric-bridge.mjs` invoked as a stdio MCP server |
+| Piece                          | What it does                                               | Wired via                                                                 |
+| ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **`memory.provider: rembric`** | Auto session create / summary-on-compact / end-on-close    | The Python provider plugin (this section)                                 |
+| **`mcp_servers.rembric`**      | Full memory tool surface (save/search/get/context/judge/…) | The published `@rembric/mcp-bridge` package invoked as a stdio MCP server |
 
 Install with one shell command — no `git clone` of rembric required:
 
@@ -240,15 +240,11 @@ Then drop this block into `~/.hermes/config.yaml`:
 mcp_servers:
   rembric:
     command: npx
-    args:
-      [
-        '-y',
-        'mcp-remote@latest',
-        '${REMBRIC_SERVER_URL}/mcp',
-        '--header',
-        'Authorization: Bearer ${REMBRIC_API_TOKEN}',
-        '--allow-http',
-      ]
+    args: ['-y', '@rembric/mcp-bridge@0.28.2']
+    env:
+      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
+      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
+      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
 
 memory:
   provider: rembric
@@ -279,13 +275,11 @@ To change a value later: edit `~/.hermes/.env` directly and restart Hermes, or r
 
 The provider needs a project slug for every session-lifecycle POST. Cascade, first valid match wins:
 
-1. `REMBRIC_PROJECT_SLUG` env var.
-2. `${HERMES_HOME:-$HOME/.hermes}/rembric.json` → `"project_slug"` (written by `hermes plugins config rembric`).
-3. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>` (same dotenv format as the Claude/Codex plugins).
-4. Trailing path segment of `REMBRIC_SERVER_URL` if it ends in `/mcp/<slug>`.
-5. No slug → all session POSTs skip silently (`[rembric] no project slug …` stderr diagnostic once).
+1. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>`.
+2. `REMBRIC_PROJECT_SLUG` from the environment.
+3. No valid slug → the provider skips session POSTs with one `[rembric] no project slug …` diagnostic; the bridge uses path-less `/mcp`.
 
-Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pick whichever source matches your workflow — solo / single-project users go with step 1 or 2, multi-project users with `.rembric` files, path-scoped URL users get step 4 automatically.
+Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`; invalid values fall through. Keep `REMBRIC_SERVER_URL` bare — a `/mcp/<slug>` URL suffix is not a fallback.
 
 #### Symptom → cause table
 
@@ -294,28 +288,29 @@ Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Pic
 | `hermes plugins install rembric` skipped the env prompts                                  | The three `REMBRIC_*` vars are already set in the parent shell. This is by design — Hermes only prompts for vars not in env. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install.                                          |
 | MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`             | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` AND `cat ~/.hermes/.env \| grep REMBRIC_` shows all three vars.                                                                                   |
 | `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission. |
-| stderr shows `[rembric] no project slug for session …; skipping session POST`             | None of the four cascade sources produced a slug. Set `REMBRIC_PROJECT_SLUG` in `~/.hermes/.env` (or re-run `hermes plugins install rembric` to be prompted).                                                                                                                         |
+| stderr shows `[rembric] no project slug for session …; skipping session POST`             | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Set `REMBRIC_PROJECT_SLUG` in `~/.hermes/.env` (or re-run `hermes plugins install rembric` to be prompted).                                                                                                      |
 | stderr shows `[rembric] POST /sessions failed: HTTPError 404`                             | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                                      |
 | MCP tools fail and `hermes memory status` reports `rembric: Missing`                      | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, then `hermes plugins enable rembric`. Restart Hermes.                                                                                                                                |
-| Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Cascade reads from process env / files; the bridge reads from its `args`. Pin `REMBRIC_PROJECT_SLUG` (read by the provider) AND keep the bridge URL aligned, OR set both via env.                                                                                                     |
+| Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Both resolve `.rembric` first, then `REMBRIC_PROJECT_SLUG`. Check that the working directory and the environment are the same for both processes; a per-directory `.rembric` overrides the default.                                                                                   |
 | You edited `~/.hermes/.env` and Hermes didn't pick up the new value                       | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                 |
 | `hermes plugins update rembric` reports nothing to update                                 | The provider was not installed via `hermes plugins install`. Re-run the curl-installer — it's idempotent and overwrites the three files.                                                                                                                                              |
+| TUI Hermes update warns about an MCP pin migration                                        | Replace `mcp_servers.rembric.args` with the exact pin printed by the TUI, then restart the gateway. No separate npm update is needed.                                                                                                                                                 |
 
 #### Using Hermes alongside Claude Code or Codex on the same machine
 
 Credentials, slug source, and update flow are independent per client. The Rembric server side is identical — same token, same `/api/<slug>/sessions(*)` endpoints. The clients just configure their adapters differently:
 
-| Client           | Credentials from                       | Slug from                                               | Update                                                                                   |
-| ---------------- | -------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Claude Code**  | Wizard → keychain (`${user_config.*}`) | `.rembric` file via the bridge                          | `/plugin update rembric@rembric`                                                         |
-| **Codex CLI**    | Shell env (`export REMBRIC_*`)         | `.rembric` file via the bridge                          | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
-| **Hermes Agent** | Shell env OR `~/.rembric/.env` preload | Cascade (env / `rembric.json` / `.rembric` / URL parse) | Re-run the curl-installer                                                                |
+| Client           | Credentials from                             | Slug from                                     | Update                                                                                   |
+| ---------------- | -------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Claude Code**  | Wizard → keychain (`${user_config.*}`)       | `.rembric` file via the bridge                | `/plugin update rembric@rembric`                                                         |
+| **Codex CLI**    | Shell env (`export REMBRIC_*`)               | `.rembric` file via the bridge                | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
+| **Hermes Agent** | Shell env / `${HERMES_HOME:-~/.hermes}/.env` | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update, then apply the printed exact bridge-pin migration                            |
 
-Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. No keychain (Hermes has no `userConfig` equivalent; `get_config_schema()` is provider-managed storage in `~/.hermes/rembric.json`).
+Both the Hermes MCP bridge entry (`mcp_servers.rembric`) and the Hermes provider read the same shell env, so a single shell rc edit covers them. Hermes has no keychain equivalent; its canonical persisted env is `${HERMES_HOME:-~/.hermes}/.env`.
 
 ### opencode (bundled plugin)
 
-**Primary path: the TUI installer** (`sh install.sh` → Plugins → opencode). The `curl | sh` two-step below is the manual fallback. [opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools are served by the same `rembric-bridge.mjs` Claude Code and Codex CLI use — one bridge, four of the five clients (Pi is the exception: it ships no MCP client, so its extension speaks MCP itself).
+**Primary path: the TUI installer** (`sh install.sh` → Plugins → opencode). The `curl | sh` two-step below is the manual fallback. [opencode](https://opencode.ai) plugins are JS/TS modules loaded from `~/.config/opencode/plugins/`. Rembric ships as a single TypeScript file that handles session lifecycle (`session.created` with sub-agent filtering, `session.deleted`) and pushes a post-compact `memory.session_summary` reminder via `experimental.session.compacting`. MCP memory tools use the published zero-dependency `@rembric/mcp-bridge` package; the plugin's measured config hook upgrades legacy launcher entries in memory.
 
 v1 scope explicitly excludes passive prompt capture (`chat.message`) and tool-output capture (`tool.execute.after`); their HTTP endpoints (`/api/<slug>/prompts/passive`, `/api/<slug>/observations/passive`) do not exist on Rembric's API yet and land in a follow-up change.
 
@@ -327,7 +322,7 @@ One-line install — no checkout required:
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh | sh
 ```
 
-The script fetches `plugin.ts`, `rembric-bridge.mjs`, and the shared `rembric-dotenv.mjs` from `main` and drops them at `~/.config/opencode/plugins/rembric.ts` + `~/.config/rembric/bin/rembric-{bridge,dotenv}.mjs` (the bridge + dotenv lib live outside opencode's plugin dir so opencode doesn't try to load them as plugins; the bridge imports the dotenv lib by sibling-relative path at runtime). It prints the MCP block you paste in the next step. Inspect before running with `curl … | less`. Developers iterating locally: `PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" BIN_SRC="$(pwd)/apps/plugin/bin" sh apps/plugin/.opencode-plugin/install.sh`.
+The script fetches `plugin.ts` and the shared modules, then prints an MCP block using the exact pinned bridge package. It never writes `opencode.json`; the plugin config hook upgrades an existing launcher entry in memory. Inspect before running with `curl … | less`. Developers iterating locally: `PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" BIN_SRC="$(pwd)/apps/plugin/bin" MCP_BRIDGE_SRC="$(pwd)/apps/plugin/mcp-bridge" sh apps/plugin/.opencode-plugin/install.sh`.
 
 #### Configure
 
@@ -338,7 +333,7 @@ Paste the printed MCP block into `~/.config/opencode/opencode.json` (or per proj
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["node", "<HOME>/.config/rembric/bin/rembric-bridge.mjs"],
+      "command": ["npx", "-y", "@rembric/mcp-bridge@0.28.2"],
       "environment": {
         "REMBRIC_SERVER_URL": "https://memory.example.com",
         "REMBRIC_API_TOKEN": "oc-token-XXXXXXXX"
@@ -355,7 +350,7 @@ Per-project path-scoping uses `.rembric` in each repo (the same convention as ev
 PROJECT_SLUG=my-app
 ```
 
-The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/<slug>`, and the agent is locked to that project automatically.
+The bridge subprocess reads `.rembric` at spawn time from its project directory and builds `/mcp/<slug>`. Existing configs that still name the old launcher are upgraded in memory by the plugin hook; `opencode.json` remains untouched.
 
 #### Verify
 
@@ -367,7 +362,7 @@ The bridge subprocess reads `.rembric` at spawn time from its cwd, builds `/mcp/
 #### Troubleshooting
 
 - **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
-- **MCP connection error in opencode.** Verify the bridge is reachable: `REMBRIC_SERVER_URL=... REMBRIC_API_TOKEN=... node ~/.config/rembric/bin/rembric-bridge.mjs`. Should print one diagnostic line and connect via `mcp-remote`.
+- **MCP connection error in opencode.** Confirm the in-memory `mcp.rembric.command` is `['npx', '-y', '@rembric/mcp-bridge@0.28.2']` and that the environment values are available. Legacy launcher entries are upgraded by the plugin config hook.
 - **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in `subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
 - **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. opencode is now the only client in this state — Codex CLI does have `SessionEnd` and reaches `ended` on a normal close.
 
@@ -517,7 +512,7 @@ headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 
 Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.
 
-If your client is stdio-only, use `mcp-remote` (the same package the Rembric plugin's bridge wraps) as a stdio↔HTTP shim. See its README for the exact spawn command; the Rembric plugin's `bin/rembric-bridge.mjs` is a working reference.
+If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` as a stdio↔HTTP shim, with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. The package accepts no URL, header, or token arguments.
 
 ## Roots-discovered slugs that name no project
 

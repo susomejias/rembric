@@ -6,7 +6,7 @@ The repository SHALL own the whole client side of the MCP connection in one publ
 
 There SHALL NOT be a second component that resolves the URL and then hands off to this one. The two-piece shape it replaces existed because the transport engine was third-party and could not be told to read a `.rembric` file; with the engine owned, a wrapper whose only job is to compute an argument for it has no independent reason to exist, and it carried real cost — process spawning, a stdio relay, spawn-error handling, exit-code forwarding, terminating-signal re-raising, and one extra process per session.
 
-The directory SHALL sit inside `apps/plugin/` because release-please attributes a release to a component by the paths of the commits under that component's `path`: a package outside it would never itself *cause* a `plugin` release, so its version carrier would be rewritten only when some unrelated change triggered one.
+The directory SHALL sit inside `apps/plugin/` because release-please attributes a release to a component by the paths of the commits under that component's `path`: a package outside it would never itself _cause_ a `plugin` release, so its version carrier would be rewritten only when some unrelated change triggered one.
 
 The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which `apps/server/src/test/invariants.test.ts` derives "is this a JS/TS session client", every member of which must import `apps/plugin/bin/rembric-plugin-core.mjs`. The bridge is a transport and SHALL NOT import the session-protocol core.
 
@@ -362,7 +362,7 @@ The package's documentation SHALL carry a compatibility matrix over the clients 
 Two entries SHALL be present and SHALL NOT be quietly upgraded to a claim:
 
 - **Codex CLI: unverified, with the reason.** An authenticated Codex process reaches the real production Rembric through an account-level connector regardless of `CODEX_HOME` or environment isolation (incident recorded 2026-08-10), so driving a real authenticated Codex against a probe stack is refused. The entry SHALL state what is shared by construction (the same published package, spawned the same way) and what is not: Codex's own manifest changes in this change, so it is **not** true that Codex inherits an untouched shared file.
-- **Windows: unverified, with the reason.** This repository has no Windows CI. The package adds no platform-specific code and leans on the SDK's transports for platform behaviour, but that is an argument, not a measurement; Windows reports are triaged reactively.
+- **Windows: unverified, with the reason.** This repository has no Windows CI. The package adds no platform-specific code, but that is an argument, not a measurement; Windows reports are triaged reactively.
 
 #### Scenario: An unverified entry says so
 

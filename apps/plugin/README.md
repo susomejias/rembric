@@ -40,7 +40,7 @@ The rest of this file is the Claude Code plugin reference. For Codex see [`docs/
 ## What you get
 
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
-- **A tiny stdio bridge** (`bin/rembric-bridge.mjs`, ~80 LOC) that reads `PROJECT_SLUG` from a `.rembric` file at the project root and path-scopes the MCP URL to `/mcp/<slug>` so the Rembric server pins the correct project on connect. No agent-side `project.use` call, no router-fallback codepath.
+- **A zero-dependency stdio bridge** (`mcp-bridge/`) that reads `PROJECT_SLUG` from `.rembric`, path-scopes the MCP URL, and recovers a terminated session without replaying earlier tool calls.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
 - **Eight lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
   - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context.
@@ -182,9 +182,9 @@ The proactive-save protocol travels via the MCP `initialize.instructions` (~500 
 ## Bridge runtime
 
 - **Requires Node 18+** on PATH. Claude Code already needs Node, so this is normally satisfied.
-- The bridge uses `npx -y mcp-remote@<pinned version>` for the actual stdio↔HTTP MCP transport (the exact version is pinned in `rembric-bridge.mjs` and bumped deliberately with plugin releases). First launch downloads `mcp-remote` (~5–15 s, needs network); subsequent launches are instant from the npx cache.
-- One bridge process per MCP session (~30 MB residence). Lives only for the session lifetime.
-- The bridge does NOT parse or modify MCP frames. Bytes flow through `mcp-remote` unchanged.
+- The bridge uses `npx -y @rembric/mcp-bridge@<exact plugin version>` for the stdio↔HTTP MCP transport. The first launch downloads the pinned package; subsequent launches use npx's cache. Measured cold start to the first MCP frame was **586.7 ms** for the bridge versus **1,895.9 ms** for `mcp-remote@0.1.38`.
+- The measured session-start transport instrument was **2 requests** for the bridge (`GET /healthz`, `POST /mcp` initialize; **1 ms** to initialize) versus **4** for `mcp-remote` (`GET /mcp` plus three `.well-known` GETs; **25 ms**); the bridge makes zero `.well-known` requests.
+- One bridge process per MCP session. It forwards host frames verbatim and owns the one-request 404 recovery.
 
 ## Notes
 

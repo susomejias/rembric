@@ -31,11 +31,24 @@ beforeEach(() => {
   mkdirSync(join(root, 'scripts'), { recursive: true });
   mkdirSync(join(root, 'apps', 'plugin'), { recursive: true });
   cpSync(join(REPO_ROOT, 'scripts', 'pi-package.mjs'), join(root, 'scripts', 'pi-package.mjs'));
-  for (const rel of ['apps/plugin/bin', 'apps/plugin/commands', 'apps/plugin/.pi-plugin']) {
+  for (const rel of [
+    'apps/plugin/bin',
+    'apps/plugin/mcp-bridge',
+    'apps/plugin/commands',
+    'apps/plugin/.pi-plugin',
+  ]) {
     cpSync(join(REPO_ROOT, rel), join(root, rel), { recursive: true });
   }
+  writeFileSync(
+    join(root, 'apps', 'plugin', 'mcp-bridge', 'probe.mjs'),
+    'export const probe = true;\n',
+  );
   shared = [
-    ...new Set([...indexText().matchAll(/from\s+'\.\.\/bin\/([\w.-]+\.mjs)'/g)].map((m) => m[1])),
+    ...new Set(
+      [...indexText().matchAll(/from\s+'\.\.\/(?:bin|mcp-bridge)\/([\w.-]+\.mjs)'/g)].map(
+        (m) => m[1],
+      ),
+    ),
   ];
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -69,15 +82,15 @@ describe('materialize', () => {
   });
 
   it('picks up a shared import added without editing the script', () => {
-    // rembric-bridge.mjs is a real module the package does not ship today.
+    // A newly added relative shared import is discovered from the source tree.
     writeFileSync(
       pkg('index.ts'),
-      `import { probe } from '../bin/rembric-bridge.mjs';\n${indexText()}`,
+      `import { probe } from '../mcp-bridge/probe.mjs';\n${indexText()}`,
     );
     const { code, out } = runPiPackage('materialize');
     expect(code).toBe(0);
     expect(out).toContain(`materialised ${shared.length + 1} shared modules`);
-    expect(readFileSync(pkg('bin', 'rembric-bridge.mjs'), 'utf8').length).toBeGreaterThan(0);
+    expect(readFileSync(pkg('bin', 'probe.mjs'), 'utf8').length).toBeGreaterThan(0);
     expect(runPiPackage('assert-pack').code).toBe(0);
   });
 
@@ -134,7 +147,7 @@ describe('materialize', () => {
   });
 
   it('aborts on a specifier it cannot materialise, leaving index.ts alone', () => {
-    const drifted = shared[0];
+    const drifted = 'rembric-plugin-core.mjs';
     writeFileSync(
       pkg('index.ts'),
       indexText().replace(`'../bin/${drifted}'`, `'./lib/${drifted}'`),
