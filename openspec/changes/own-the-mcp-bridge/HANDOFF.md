@@ -65,28 +65,53 @@ handling around lines 110-130). Zero-dep wins on both objections: no tree at all
 Everything else in the proposal stands: the integrated end-state, the exact-pin policy,
 publishing via the existing trusted-publishing OIDC flow, and the recorded evidence.
 
-## 2. The prototype gate has NOT been run to completion
+## 2. The prototype gate — STOP arm CLEARED, two arms still open
 
-The gate is phase 1 of `tasks.md` and carries an explicit STOP. Status:
+The gate is phase 1 of `tasks.md`. Its STOP condition has been discharged: the
+zero-dependency design is viable. Status:
 
-| Arm                                                                  | Status                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------------------------ |
-| 404 → re-init → retry, standalone                                    | PASSED (SDK prototype)                                       |
-| Real Claude Code recovers through the proxy                          | PASSED — `clientInfo=claude-code@2.1.233` reached the server |
-| **roots/list relayed bidirectionally over the tool-call SSE stream** | **NOT RUN — this is the real STOP**                          |
-| Server restart mid-session → recovery                                | NOT RUN                                                      |
-| Session-start latency vs the mcp-remote chain                        | NOT RUN                                                      |
+| Arm                                                                  | Status                                                                 |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **roots/list relayed bidirectionally over the tool-call SSE stream** | **PASSED (zero-dep) — this was the STOP**                              |
+| 404 → re-init → retry                                                | PASSED (zero-dep, and separately with the SDK prototype)               |
+| `clientInfo` passthrough                                             | PASSED (zero-dep) — verbatim, unlike the SDK path where it was a guess |
+| Server restart mid-session → recovery                                | NOT RUN                                                                |
+| Session-start latency vs the mcp-remote chain                        | NOT RUN                                                                |
 
-The two passing arms used the SDK prototype (`measurements/prototype-sdk-based.mjs`),
-so they are **not** evidence for the zero-dep design. Re-run them against a zero-dep
-prototype.
+**The STOP arm, verbatim from `measurements/gate-arm3-roots-relay.log`** — a real
+`claude` CLI driving a real `dev:docker:up` server through
+`measurements/prototype-zerodep.mjs` on a path-less `/mcp`:
 
-The roots arm is the whole risk: Pi's client sends `capabilities: {}` and therefore
-never exercises a server-initiated `roots/list`, so the repo has no precedent for
-relaying it. If that relay cannot be made to work hand-rolled, **stop** — do not
-proceed to implementation.
+```
+[proto0] up. url=http://127.0.0.1:8788/mcp
+[proto0] server-initiated request on stream: roots/list id=0 -> host
+[proto0] host response id=0 -> server
+```
 
-Why the gate comes first, in this repo's own words: `evict-stale-transport-state` was
+The server initiated `roots/list` on a tool call's SSE stream, the proxy handed it to
+the host, the host answered, and the proxy posted that answer back. This was the only
+genuinely unknown mechanism in the design — Pi's client sends `capabilities: {}` and
+never exercises it, so the repo had no precedent. **Hand-rolled relay works.**
+
+Two notes on reading that run, so nobody re-derives them:
+
+- The probe's `project.current` resolved to the **default** project, not to the
+  directory's slug. That is an artifact of the harness, not a relay failure: the
+  `demo-writer` token is pinned to project `demo`, so it could not activate `billing`
+  regardless of what roots reported (an earlier arm surfaced the explicit
+  `forbidden … this token is pinned to project 'demo'` refusal). Use an admin token or a
+  matching project when re-running.
+- The host swallows an MCP server's stderr, so the proxy's own log is invisible if you
+  rely on stderr passthrough. Wrap the command (`sh -c 'exec node proto.mjs 2>>log'`) to
+  capture it — the first attempt at this arm produced no evidence for exactly this
+  reason.
+
+Arms 1-2 were also re-run under zero-dep (`measurements/gate-arms12-zerodep.log`):
+`clientInfo=zerodep-probe@7.7` reached the server verbatim, and a killed session
+recovered `s1 → 404 → s2 → call ok`. The older SDK-prototype results in
+`measurements/gate-arms-run.log` are superseded.
+
+Why the gate came first, in this repo's own words: `evict-stale-transport-state` was
 reverted the day before (`ba555da`) after ~1600 lines were built ahead of its merge
 gate, which then failed.
 
