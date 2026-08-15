@@ -58,7 +58,7 @@ describe('release-please JSONPath pin updates', () => {
         manifests.map(
           (manifest) => JSON.parse(readFileSync(manifest, 'utf8')).mcpServers.rembric.args[1],
         ),
-      ).toEqual(['@rembric/mcp-bridge@0.28.2', '@rembric/mcp-bridge@0.28.2']);
+      ).toEqual(['@rembric/mcp-bridge@0.29.0', '@rembric/mcp-bridge@0.29.0']);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
