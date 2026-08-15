@@ -72,22 +72,63 @@ handling around lines 110-130). Zero-dep wins on both objections: no tree at all
 Everything else in the proposal stands: the integrated end-state, the exact-pin policy,
 publishing via the existing trusted-publishing OIDC flow, and the recorded evidence.
 
-## 1b. The spec deltas are STALE and would be refused at archive
+## 1b. Spec deltas — mostly rebased, and read the count correctly
 
-`node scripts/check-delta-freshness.mjs --strict-body` reports **16 blocking problems**
-across six capabilities: `claude-code-plugin`, `codex-distribution`, `hermes-agent-plugin`,
-`opencode-plugin`, `open-source-distribution`, `supply-chain-hygiene`.
+**Run `node scripts/check-delta-freshness.mjs` WITHOUT `--strict-body` to see what
+actually blocks.** An earlier revision of this file called all 16 `--strict-body` findings
+"blocking"; that conflated two different things, and the script's own header says so:
 
-Verified pre-existing, not introduced by the zero-dep revision: the same 16 appear with
-the revision stashed. They are a defect in how the deltas were constructed — MODIFIED
-headers that match no published requirement (so archive would ADD a duplicate rather than
-replace), published scenarios missing from the delta, and published body lines not
-reproduced verbatim.
+- `FAIL` — a `MODIFIED` header matching no published requirement (archive ADDs a duplicate
+  instead of replacing), or a published `#### Scenario:` absent from the delta (archive
+  refuses). **Neither can be intentional. These block.**
+- `REVIEW` — a published body line not reproduced verbatim. "Advisory by nature: a change
+  may legitimately rewrite a line, which is the whole point of MODIFIED." `--strict-body`
+  escalates these to failures, so a change that deliberately rewrites text can never show
+  zero under that flag. Judge them one by one; do not chase the number to zero.
 
-The fix is what the tool says: for each flagged requirement, take the **published** text
-from `openspec/specs/<capability>/spec.md` and re-apply only this change's edits on top,
-rather than writing the requirement afresh. Do this before the applier runs — a stale
-delta silently reverts what another change published, and `archive` refuses it anyway.
+Rebased so far (`open-source-distribution`, `supply-chain-hygiene`, `opencode-plugin`):
+zero `FAIL` lines remain for those three. The method that worked, and the one to keep
+using: restore the published requirement **byte-identical** and add this change's edits as
+adjacent paragraphs, bullets and scenarios, rather than rewriting published sentences in
+place. That recovered several published scenarios the deltas would otherwise have deleted
+at archive, and reverted two rewordings the change never intended.
+
+Two structural notes worth not re-deriving:
+
+- A published scenario **title** cannot be renamed inside a `MODIFIED` block — archive
+  reads a rename as a drop plus an add. Keep the published title verbatim and say in the
+  body that its wording is now stale. Precedent:
+  `archive/2026-08-04-stop-promising-a-clamp-that-never-happens/design.md:180`.
+- A `RENAMED` requirement always reports one `REVIEW` line that no edit can clear: the
+  gate compares the published header line itself as body text, and the delta's slice
+  necessarily starts at the new header.
+
+Converting a requirement to `REMOVED` + `ADDED` to dodge the gate is not an option — the
+gate does not parse those at all, which loses the protection
+(`archive/2026-08-09-name-every-client-on-every-surface/design.md:61-63`). Where that
+encoding IS honest — a requirement whose premise the change deletes, and which must drop
+published scenarios that a `MODIFIED` would refuse to lose — use a **different title** for
+the `ADDED` replacement: the same title in both `ADDED` and `REMOVED` fails validation
+outright (measured against the real CLI), even though `check-delta-sections.mjs:33-34`
+calls that pairing a documented refactor and only advises on it. The CLI wins.
+
+### The archiver MUST hand-edit two narrative sections
+
+`openspec/specs/claude-code-plugin/spec.md` keeps its manifest and bridge contracts in
+**narrative `##` sections** (`:23-28` "MCP server declaration", `:30` "MCP bridge
+contract"), not in `### Requirement:` blocks. No delta operation can reach them: a
+`REMOVED` block naming one aborts the archive with `not found`, and this change originally
+carried exactly such a block — removed, because it would have no-opped.
+
+So after archiving, those sections will still describe `command: "node"` pointing at
+`${CLAUDE_PLUGIN_ROOT}/bin/rembric-bridge.mjs` and delegation to `mcp-remote`, sitting
+next to the new ADDED requirements that say the opposite. **Edit them by hand as part of
+the archive step.** Precedent: `2026-05-16-fix-codex-mcp-env` filed MODIFIEDs for these
+same sections and someone hand-merged them.
+
+The text the removed block carried — what re-homes into `mcp-bridge` and what does not
+(the child-process behaviours lose their subject once nothing is spawned; the launcher
+survives deprecated for existing opencode installs) — belongs in that hand-edit.
 
 ## 2. The prototype gate — STOP arm CLEARED, two arms still open
 

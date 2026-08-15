@@ -24,7 +24,9 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 - **AND** the cached directory SHALL contain `.codex-plugin/plugin.json`, `.codex-plugin/mcp.json`, `hooks/hooks.codex.json`, and the relevant `scripts/` files
 - **AND** it SHALL NOT be required to contain `bin/rembric-bridge.mjs` or a dotenv module: Codex spawns the published bridge through `npx`, so no repository file is on the MCP path for this client
 
-### Requirement: Codex-specific MCP server configuration
+## ADDED Requirements
+
+### Requirement: Codex-specific MCP server configuration MUST spawn the pinned bridge through `npx`
 
 The Codex plugin SHALL ship its own MCP server configuration file at `apps/plugin/.codex-plugin/mcp.json`, sibling to the Claude Code plugin's `apps/plugin/.claude-plugin/mcp.json`. The two files still diverge, but for one reason rather than two: Codex's `Command::env_clear()` strips parent-env inheritance, so `env_vars` is the only channel by which anything reaches the spawned process (see `codex-rs/rmcp-client/src/utils.rs::create_env_for_mcp_server`). The path-resolution divergence disappears — neither manifest names a repository file any more, because both spawn the published `@rembric/mcp-bridge` through `npx`.
 
@@ -85,3 +87,21 @@ The `env_vars` list SHALL forward the user's shell `PWD` so the bridge can resol
 
 - **WHEN** a contributor merges a commit modifying any file under `apps/plugin/` (a shared asset OR `apps/plugin/.codex-plugin/`)
 - **THEN** release-please SHALL bump the single unified `plugin` component (tag `plugin-vX.Y.Z`), updating `apps/plugin/.codex-plugin/package.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` (via the `plugin` component's `extra-files`) to the same version as every other client
+
+## REMOVED Requirements
+
+### Requirement: Codex-specific MCP server configuration
+
+**Reason**: This requirement's whole contract is a relative script path inside the Codex plugin cache — `command: "node"`, `args: ["./bin/rembric-bridge.mjs"]`, `cwd: "."` — and two of its six scenarios exist only to specify how that path resolves. After this change no repository file is on the MCP path for this client at all: the manifest spawns the published `@rembric/mcp-bridge` through `npx`, so there is nothing to anchor to the plugin root and nothing for `cwd` to resolve. The opening paragraph is falsified in the same move — the two client manifests no longer "diverge in path resolution", because neither names a path; only the env-injection divergence survives, and it survives for a different reason than the one recorded here.
+
+A MODIFIED block cannot express that. `openspec archive` refuses to merge a MODIFIED whose block drops a published scenario, and the two path-resolution scenarios cannot honestly be kept: a scenario titled "Bridge resolves under Codex via plugin-root cwd" whose body denies that any resolution happens is worse published text than an explicit removal. This is the same refactor `2026-05-16-fix-codex-mcp-env` performed on this capability when it removed "Shared MCP server configuration" — its premise, that one file works under both clients, having been empirically falsified — and published a differently-titled replacement.
+
+**Migration**: Everything still true is re-published, in this same delta, under "Codex-specific MCP server configuration MUST spawn the pinned bridge through `npx`" (ADDED):
+
+- the file's location and its sibling relationship to `apps/plugin/.claude-plugin/mcp.json`, unchanged;
+- the surviving half of the divergence — Codex's `Command::env_clear()` makes `env_vars` the only channel by which anything reaches the spawned process — with its `codex-rs` citation retained;
+- the `PWD` forwarding rule and its reason (Codex's spawn semantics put `process.cwd()` at the plugin cache directory, which is not the project), together with the scenario `env_vars forwards PWD so the bridge can resolve the user's project directory` under its published title;
+- `env_vars forwards REMBRIC_* from the launching shell to the bridge` and `Bridge surfaces a useful error when env vars are missing`, retitled but unchanged in substance;
+- `Claude Code MCP config is unaffected`, as `Claude Code MCP config remains a separate file`. Its `${user_config.*}` keychain clause survives verbatim in substance; its `${CLAUDE_PLUGIN_ROOT}` substitution clause does not, because the Claude Code manifest stops using `${CLAUDE_PLUGIN_ROOT}` in this same change and a scenario asserting that substitution "SHALL keep working" would then be false.
+
+Retired with no replacement, deliberately: `Codex MCP config file declares stdio bridge with plugin-root anchoring` (superseded by `Codex MCP config file spawns the pinned bridge`, which specifies the `npx` form and the absence of a bearer in `args`) and `Bridge resolves under Codex via plugin-root cwd` (nothing is resolved relative to the plugin root once `args` names a package specifier rather than a script). What replaces the second is the new scenario `` `npx` resolves under Codex's curated environment ``, which is the resolution question that actually exists under `env_clear()` and which this change requires to be verified against a real Codex rather than inferred.

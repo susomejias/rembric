@@ -46,7 +46,9 @@ This is not vendoring. Bundling a third-party package to report zero dependencie
 
 ### Requirement: Packages this repository publishes MUST carry provenance and be published without a long-lived credential
 
-This capability's existing requirements are inbound: what a third-party package may do to this repo. This requirement is the outbound half, and it exists because the repository publishes packages of its own — `@rembric/pi` (the Pi client extension) and `@rembric/mcp-bridge` (the stdio↔Streamable-HTTP MCP transport the plugin bridge spawns) — and had no policy covering that at all: nothing required provenance, nothing constrained the publish credential, nothing bounded the tarball.
+This capability's existing requirements are inbound: what a third-party package may do to this repo. This requirement is the outbound half, and it exists because the repository now publishes a package of its own (`@rembric/pi`, the Pi client extension) and had no policy covering that at all — nothing required provenance, nothing constrained the publish credential, nothing bounded the tarball.
+
+The estate is now **two** packages, not one: `@rembric/mcp-bridge` — the stdio↔Streamable-HTTP MCP transport every stdio client spawns — is published from this repository under exactly the same rules. Nothing below is relaxed for it, and nothing below is written around a single package: it publishes with provenance, through trusted-publishing OIDC with no long-lived token, with a `files` allowlist asserted against `npm pack --dry-run` before publish, and with no lifecycle scripts of its own.
 
 Every package this repository publishes to a public registry SHALL satisfy all four of the following:
 
@@ -84,13 +86,12 @@ This requirement governs what we publish. It does NOT relax `.npmrc::ignore-scri
 - **GIVEN** an untracked or development-only file is present in the package directory at pack time
 - **WHEN** the asserted `npm pack --dry-run` runs
 - **THEN** the job SHALL fail naming the unexpected path
-- **AND** no publish SHALL occur
 
 #### Scenario: A lifecycle script in a published manifest fails the build
 
 - **GIVEN** a package this repository publishes declares any of `prepack`, `prepare`, `prepublishOnly`, `preinstall`, `install`, or `postinstall`
-- **WHEN** the invariant suite runs
-- **THEN** the build SHALL fail naming the package and the offending key
+- **WHEN** `pnpm test` runs
+- **THEN** an assertion SHALL fail naming the manifest and the offending script key
 - **AND** the failure message SHALL state that materialisation belongs in an explicit CI step because lifecycle-script execution depends on the publish command's working directory
 
 #### Scenario: The assertions cover every published package, not one

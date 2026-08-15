@@ -10,7 +10,7 @@ The directory SHALL sit inside `apps/plugin/` because release-please attributes 
 
 The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which `apps/server/src/test/invariants.test.ts` derives "is this a JS/TS session client", every member of which must import `apps/plugin/bin/rembric-plugin-core.mjs`. The bridge is a transport and SHALL NOT import the session-protocol core.
 
-`apps/plugin/mcp-bridge` SHALL be declared in `pnpm-workspace.yaml::packages`, unlike `.pi-plugin/`. That directory's exclusion from the workspace is accepted only because it declares no runtime dependency; this package declares one, which SHALL be resolved by `pnpm-lock.yaml` and integrity-verified under `--frozen-lockfile`, and its recovery logic SHALL be covered by executable tests.
+`apps/plugin/mcp-bridge` SHALL be declared in `pnpm-workspace.yaml::packages`, unlike `.pi-plugin/`. Both declare no runtime dependencies, so the reason is not lockfile resolution: this package carries the whole client side for every shell client, and its session-recovery and relay logic SHALL be covered by executable tests, which requires it to be a workspace member the test runner reaches.
 
 #### Scenario: The package directory is inside the plugin component and is a workspace member
 
