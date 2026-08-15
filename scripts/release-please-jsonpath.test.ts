@@ -54,11 +54,14 @@ describe('release-please JSONPath pin updates', () => {
         '@rembric/mcp-bridge@0.29.0',
         '@rembric/mcp-bridge@0.29.0',
       ]);
+      const pluginVersion = JSON.parse(
+        readFileSync(join(root, 'apps/plugin/package.json'), 'utf8'),
+      ).version;
       expect(
         manifests.map(
           (manifest) => JSON.parse(readFileSync(manifest, 'utf8')).mcpServers.rembric.args[1],
         ),
-      ).toEqual(['@rembric/mcp-bridge@0.29.1', '@rembric/mcp-bridge@0.29.1']);
+      ).toEqual([`@rembric/mcp-bridge@${pluginVersion}`, `@rembric/mcp-bridge@${pluginVersion}`]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
