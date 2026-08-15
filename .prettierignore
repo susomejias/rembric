@@ -8,7 +8,9 @@ data/
 package-lock.json
 # release-please reserializes these manifests; it owns their JSON layout.
 apps/plugin/.claude-plugin/plugin.json
+apps/plugin/.claude-plugin/mcp.json
 apps/plugin/.codex-plugin/plugin.json
+apps/plugin/.codex-plugin/mcp.json
 .husky/_
 openspec/changes/**/specs/
 
