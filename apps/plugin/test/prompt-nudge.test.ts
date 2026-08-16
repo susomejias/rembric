@@ -1,5 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const here = dirname(fileURLToPath(import.meta.url));
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
-  save: string;
-  summary: string;
+  sessionOpening: string;
+  resumedRead: string;
   sessionIdTemplate: string;
 };
 
@@ -28,106 +28,107 @@ function runPromptNudge(stdin: string): string {
   });
 }
 
-function runPromptNudgeAsync(stdin: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      'bash',
-      [promptNudgeSh],
-      { encoding: 'utf8', env: { ...process.env, TMPDIR: counterDir } },
-      (err, stdout) => (err ? reject(err) : resolve(stdout)),
-    );
-    child.stdin?.end(stdin);
-  });
+function markCreated(sessionId: string, value: '1' | '0'): void {
+  const dir = join(counterDir, 'rembric-created');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, sessionId), value);
 }
 
-describe('prompt-nudge.sh (unified per-turn save + summary nudge)', () => {
+function markResumed(sessionId: string): void {
+  const dir = join(counterDir, 'rembric-resumed');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, sessionId), '1');
+}
+
+function writePending(sessionId: string, text: string): void {
+  const dir = join(counterDir, 'rembric-pending');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, sessionId), text);
+}
+
+describe('prompt-nudge.sh (report-print contract, no cadence)', () => {
   beforeEach(() => {
     counterDir = mkdtempSync(join(tmpdir(), 'rembric-promptnudge-'));
   });
   afterEach(() => rmSync(counterDir, { recursive: true, force: true }));
 
-  it('emits the sessionId line + summary nudge on turn 1 (plain stdout, no JSON wrapper)', () => {
-    const out = runPromptNudge(JSON.stringify({ session_id: 's-turn1' }));
-    expect(out.trim()).toBe(`${sessionIdLine('s-turn1')}\n${fixtures.summary}`);
-    expect(out).not.toContain('hookSpecificOutput');
+  it('counts nothing: no modulo, no cadence constant, no turn-counter call', () => {
+    const src = readFileSync(promptNudgeSh, 'utf8');
+    expect(src).not.toMatch(/%\s*\d/);
+    expect(src).not.toContain('rembric_turn_count');
+    expect(src).not.toMatch(/NUDGE_EVERY/);
   });
 
-  it('stays silent on turns 2-4', () => {
-    runPromptNudge(JSON.stringify({ session_id: 's-mid' })); // turn 1 (summary only)
-    for (let i = 2; i <= 4; i++) {
-      const out = runPromptNudge(JSON.stringify({ session_id: 's-mid' }));
-      expect(out.trim()).toBe('');
-    }
+  it('emits zero bytes on a turn with nothing cached, no opening due, no resume', () => {
+    const out = runPromptNudge(JSON.stringify({ session_id: 's-quiet' }));
+    expect(out).toBe('');
   });
 
-  it('emits the sessionId line + save nudge on turn 5', () => {
-    let last = '';
-    for (let i = 1; i <= 5; i++) {
-      last = runPromptNudge(JSON.stringify({ session_id: 's-five' }));
-    }
-    expect(last.trim()).toBe(`${sessionIdLine('s-five')}\n${fixtures.save}`);
+  it('emits the sessionId line + the session opening once, on a newly created session', () => {
+    markCreated('s-new', '1');
+    const first = runPromptNudge(JSON.stringify({ session_id: 's-new' }));
+    expect(first.trim()).toBe(`${sessionIdLine('s-new')}\n${fixtures.sessionOpening}`);
+
+    const second = runPromptNudge(JSON.stringify({ session_id: 's-new' }));
+    expect(second).toBe('');
   });
 
-  // Turn 10 used to emit BOTH nudges. The summary reminder moved to
-  // stop-nudge.sh, which fires at the END of the turn on this same counter and
-  // cadence — the one moment it can be acted on. Asserted as an exact ordered
-  // list, so moving it back here fails.
-  it('emits the sessionId line + the save nudge ALONE on turn 10', () => {
-    let last = '';
-    for (let i = 1; i <= 10; i++) {
-      last = runPromptNudge(JSON.stringify({ session_id: 's-ten' }));
-    }
-    const lines = last.split('\n').filter((l) => l.length > 0);
-    expect(lines).toEqual([sessionIdLine('s-ten'), fixtures.save]);
+  it('does not emit the opening for a session whose ensure reported created:false', () => {
+    markCreated('s-existing', '0');
+    const out = runPromptNudge(JSON.stringify({ session_id: 's-existing' }));
+    expect(out).not.toContain(fixtures.sessionOpening);
   });
 
-  it('still emits the summary reminder on turn 1, which is protocol', () => {
-    const first = runPromptNudge(JSON.stringify({ session_id: 's-one' }));
-    expect(first).toContain(fixtures.summary);
+  it('emits the resumed-read line once, without the sessionId line, for a resumed session', () => {
+    markResumed('s-resumed');
+    const first = runPromptNudge(JSON.stringify({ session_id: 's-resumed' }));
+    expect(first.trim()).toBe(fixtures.resumedRead);
+
+    const second = runPromptNudge(JSON.stringify({ session_id: 's-resumed' }));
+    expect(second).toBe('');
   });
 
-  it('persists the counter per session across invocations', () => {
-    runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    const out = runPromptNudge(JSON.stringify({ session_id: 's-persist' }));
-    expect(out.trim()).toBe(`${sessionIdLine('s-persist')}\n${fixtures.save}`);
+  it('prints a cached server notice verbatim, preceded by the sessionId line, then clears it', () => {
+    writePending('s-notice', 'rembric: a server-composed notice line');
+    const first = runPromptNudge(JSON.stringify({ session_id: 's-notice' }));
+    expect(first.trim()).toBe(
+      `${sessionIdLine('s-notice')}\nrembric: a server-composed notice line`,
+    );
+
+    const second = runPromptNudge(JSON.stringify({ session_id: 's-notice' }));
+    expect(second).toBe('');
+  });
+
+  it('omits the sessionId line when the session id is unknown', () => {
+    writePending('unused', 'irrelevant');
+    const out = runPromptNudge('{}');
+    expect(out).toBe('');
   });
 
   it('tracks separate sessions independently', () => {
-    for (let i = 1; i <= 5; i++) runPromptNudge(JSON.stringify({ session_id: 's-a' }));
+    markCreated('s-a', '1');
+    runPromptNudge(JSON.stringify({ session_id: 's-a' }));
     const outB = runPromptNudge(JSON.stringify({ session_id: 's-b' }));
-    expect(outB.trim()).toBe(`${sessionIdLine('s-b')}\n${fixtures.summary}`);
+    expect(outB).toBe('');
   });
 
-  it('falls back to a session key and exits 0 on empty/unparseable stdin', () => {
-    expect(runPromptNudge('').trim()).toBe(fixtures.summary);
+  it('records the first user prompt, redacted and capped at 100 chars, for stop-report.sh', () => {
+    const long = `first prompt ${'x'.repeat(200)} <private>secret</private>`;
+    runPromptNudge(JSON.stringify({ session_id: 's-title', prompt: long }));
+    const stored = readFileSync(join(counterDir, 'rembric-first-prompt', 's-title'), 'utf8');
+    expect(stored.length).toBeLessThanOrEqual(100);
+    expect(stored).not.toContain('secret');
+  });
+
+  it('does not overwrite the recorded first prompt on a later turn', () => {
+    runPromptNudge(JSON.stringify({ session_id: 's-first-only', prompt: 'first one' }));
+    runPromptNudge(JSON.stringify({ session_id: 's-first-only', prompt: 'second one' }));
+    const stored = readFileSync(join(counterDir, 'rembric-first-prompt', 's-first-only'), 'utf8');
+    expect(stored).toBe('first one');
+  });
+
+  it('fails safe on unreadable or empty stdin: exits 0 and emits nothing', () => {
+    expect(runPromptNudge('').trim()).toBe('');
     expect(runPromptNudge('not json').trim()).toBe('');
-  });
-
-  it('does not lose increments under concurrent invocations for the same session', async () => {
-    const n = 20;
-    await Promise.all(
-      Array.from({ length: n }, () =>
-        runPromptNudgeAsync(JSON.stringify({ session_id: 's-concurrent' })),
-      ),
-    );
-    const counterFile = join(counterDir, 'rembric-turnnudge', 's-concurrent');
-    expect(readFileSync(counterFile, 'utf8').length).toBe(n);
-  });
-
-  it('fails closed (emits nothing) when the counter file is unreadable, instead of spamming every nudge (#260)', () => {
-    // TMPDIR pointing at a regular file (not a directory) makes
-    // `mkdir -p "$TMPDIR/rembric-turnnudge"` fail, so the counter can never
-    // be written or read — the exact "COUNT unreadable" case.
-    const notADir = join(counterDir, 'this-is-a-file-not-a-dir');
-    writeFileSync(notADir, '');
-    const out = execFileSync('bash', [promptNudgeSh], {
-      input: JSON.stringify({ session_id: 's-broken-counter' }),
-      encoding: 'utf8',
-      env: { ...process.env, TMPDIR: notADir },
-    });
-    expect(out.trim()).toBe('');
   });
 });

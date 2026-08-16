@@ -863,13 +863,8 @@ const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: 
     canonical: REMBRIC_PLUGIN_CORE_MJS,
   },
   {
-    symbol: 'SAVE_NUDGE',
-    definition: /\bconst\s+SAVE_NUDGE\s*=/,
-    canonical: REMBRIC_PLUGIN_CORE_MJS,
-  },
-  {
-    symbol: 'SUMMARY_NUDGE',
-    definition: /\bconst\s+SUMMARY_NUDGE\s*=/,
+    symbol: 'SESSION_OPENING_NUDGE',
+    definition: /\bconst\s+SESSION_OPENING_NUDGE\s*=/,
     canonical: REMBRIC_PLUGIN_CORE_MJS,
   },
   {
@@ -1364,14 +1359,6 @@ describe('summary truncation keeps the same side in every layer', () => {
       tail: /transcript\[-_SUMMARY_MAX_CHARS:\]/,
       head: /transcript\[:_SUMMARY_MAX_CHARS\]/,
     },
-    // Added after this guard shipped with a hole in it: `stop-nudge.sh` bounds the
-    // INJECTED payload and was a fourth trimmer the enumeration did not know
-    // about, so flipping it to a head-cut would have passed CI on day one.
-    {
-      file: 'apps/plugin/scripts/stop-nudge.sh',
-      tail: /\$\{FACTS: -\$RBR_NUDGE_MAX_FACTS_CHARS\}/,
-      head: /\$\{FACTS:0:\$RBR_NUDGE_MAX_FACTS_CHARS\}/,
-    },
   ];
 
   it('the server keeps the tail and marks the front', () => {
@@ -1403,8 +1390,7 @@ describe('the session-summary rubric has one source', () => {
   const surfaces = [
     'apps/server/src/mcp/instructions.ts',
     'apps/server/src/mcp/server.ts',
-    'apps/plugin/scripts/prompt-nudge.sh',
-    'apps/plugin/scripts/stop-nudge.sh',
+    'apps/server/src/services/session-nudge.ts',
     'apps/plugin/scripts/post-compact.sh',
     'apps/plugin/commands/summary.md',
     REMBRIC_PLUGIN_CORE_MJS,
@@ -1511,7 +1497,7 @@ describe('the post-compaction protocol text has one source', () => {
   // that symbol/text and are excluded, as summary-rubric.ts is above.
   it('the enumeration above is complete', () => {
     const found = execSync(
-      `git -C ${repoRoot} grep -l -e 'This session resumes from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
+      `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
       { encoding: 'utf8' },
     )
       .split('\n')

@@ -73,16 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-sync.sh claude-code",
-            "async": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-nudge.sh"
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-report.sh claude-code"
           }
         ]
       }

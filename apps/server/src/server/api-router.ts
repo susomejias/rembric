@@ -81,6 +81,17 @@ const sessionEndSchema = z.object({
 // success, which is the reason this is a route at all.
 const sessionResumeSchema = z.object({}).strict();
 
+// `usedTools` has no default: a defaulted value would make an old or
+// miswired client indistinguishable from one genuinely reporting a
+// conversation-only turn (`session-nudges`). `title`'s bound mirrors
+// `sessionSummarySchema`'s: a generous upper bound here, hard-cut to
+// `TITLE_MAX_LENGTH` in the handler rather than rejected, because a hook
+// script cannot react to a rejection.
+const sessionTurnSchema = z.object({
+  usedTools: z.boolean(),
+  title: z.string().min(1).max(200).optional(),
+});
+
 const RECALL_SNIPPET_CHARS = 240;
 
 const memoryRecallSchema = z.object({
@@ -262,6 +273,39 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         previousEndedAt: before.endedAt?.toISOString() ?? null,
         title: resumed.title,
       });
+    } catch (err) {
+      return domainErr(c, err);
+    }
+  });
+
+  app.post('/:slug/sessions/:id/turn', async (c) => {
+    const ctx = c.get('rembricCtx');
+    if (!ctx.project) {
+      return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
+    }
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
+    const sessionId = c.req.param('id');
+    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, ctx.project.id);
+    if (blocked) {
+      return c.json(blocked.body, blocked.status);
+    }
+    const body = await readJson(c);
+    const parsed = sessionTurnSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
+    }
+    try {
+      const result = deps.agentSessions.reportTurn(sessionId, {
+        tokenId: ctx.token.id,
+        usedTools: parsed.data.usedTools,
+        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
+      });
+      return c.json({ ok: true, sessionId: result.session.id, lines: result.lines });
     } catch (err) {
       return domainErr(c, err);
     }

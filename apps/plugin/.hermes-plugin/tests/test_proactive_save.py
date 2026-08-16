@@ -1,4 +1,8 @@
-"""prefetch save/summary-hint cadence + on_turn_start pre-compaction reminder."""
+"""prefetch's remaining per-turn hints — first-turn relevance, the cached
+server notice (session-nudges), and the pre-compaction urgent reminder.
+The periodic save/summary hint and its cadence are gone: the firing
+decision now belongs to the server.
+"""
 
 from __future__ import annotations
 
@@ -49,33 +53,6 @@ class ProactiveSaveTest(unittest.TestCase):
         return self.mod._SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_prefetch_appends_save_hint_on_cadence_even_with_empty_cache(
-        self, mock_urlopen: MagicMock
-    ) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
-        provider = self._provider()
-        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
-
-        provider.on_turn_start(5, None)
-        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT}"
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
-
-    @patch("rembric_hermes_plugin.urlopen")
-    def test_prefetch_appends_summary_hint_on_turn_1_even_with_empty_cache(
-        self, mock_urlopen: MagicMock
-    ) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
-        provider = self._provider()
-        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
-
-        provider.on_turn_start(1, None)
-        expected = (
-            f"{self._session_id_hint('01XYZ')}\n"
-            f"{self.mod._RELEVANCE_HINT}\n{self.mod._SUMMARY_HINT}"
-        )
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
-
-    @patch("rembric_hermes_plugin.urlopen")
     def test_relevance_hint_fires_only_on_turn_1_not_on_later_turns(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -89,27 +66,20 @@ class ProactiveSaveTest(unittest.TestCase):
         provider.on_turn_start(2, None)
         self.assertNotIn(self.mod._RELEVANCE_HINT, provider.prefetch("q", session_id="01XYZ"))
 
-    @patch("rembric_hermes_plugin.urlopen")
-    def test_prefetch_appends_summary_hint_every_10th_turn(self, mock_urlopen: MagicMock) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
-        provider = self._provider()
-        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
-
-        provider.on_turn_start(10, None)
-        self.assertIn(self.mod._SUMMARY_HINT, provider.prefetch("q", session_id="01XYZ"))
-
     def test_prefetch_omits_session_id_hint_when_session_id_is_unknown(self) -> None:
         # No initialize() call: self._session_id stays None (its __init__
         # default), and no session_id kwarg is passed either.
         provider = self._provider()
         provider.on_turn_start(5, None)
         out = provider.prefetch("q")
-        self.assertEqual(out, self.mod._SAVE_HINT)
+        self.assertEqual(out, "")
         self.assertNotIn("sessionId=", out)
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_prefetch_emits_nothing_off_cadence(self, mock_urlopen: MagicMock) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+    def test_prefetch_emits_nothing_absent_a_cached_notice_or_any_other_hint(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
@@ -117,22 +87,19 @@ class ProactiveSaveTest(unittest.TestCase):
         self.assertEqual(provider.prefetch("q", session_id="01XYZ"), "")
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_prefetch_appends_both_hints_as_separate_lines_on_turn_10(
+    def test_the_cached_server_notice_is_injected_wrapped_and_taken_once(
         self, mock_urlopen: MagicMock
     ) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        provider._pending_lines["01XYZ"] = ["rembric: a server-composed notice"]
 
-        provider.on_turn_start(10, None)
         out = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._SAVE_HINT, out)
-        self.assertIn(self.mod._SUMMARY_HINT, out)
-        # Neither replaces the other — both appear as distinct lines.
-        expected = (
-            f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT}\n{self.mod._SUMMARY_HINT}"
-        )
-        self.assertEqual(out, expected)
+        self.assertIn("<memory-hint>rembric: a server-composed notice</memory-hint>", out)
+
+        second = provider.prefetch("q", session_id="01XYZ")
+        self.assertNotIn("a server-composed notice", second)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_prefetch_appends_hint_after_the_recalled_context(
@@ -144,11 +111,11 @@ class ProactiveSaveTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
         provider.queue_prefetch("warm", session_id="01XYZ")
+        provider._pending_lines["01XYZ"] = ["rembric: a notice"]
 
-        provider.on_turn_start(5, None)
         out = provider.prefetch("q", session_id="01XYZ")
         self.assertIn("<memory-context>", out)
-        self.assertTrue(out.endswith(self.mod._SAVE_HINT))
+        self.assertTrue(out.endswith("</memory-hint>"))
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_on_turn_start_arms_urgent_only_below_the_floor(
@@ -170,28 +137,30 @@ class ProactiveSaveTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
 
+        # The sessionId line no longer accompanies this hint: it now
+        # accompanies only a write-directing line (the server notice or the
+        # session opening), per plugin-session-protocol's restated trigger.
         provider.on_turn_start(2, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
-        expected = f"{self._session_id_hint('01XYZ')}\n{self.mod._SAVE_HINT_URGENT}"
-        self.assertEqual(provider.prefetch("q", session_id="01XYZ"), expected)
+        self.assertEqual(
+            provider.prefetch("q", session_id="01XYZ"), self.mod._SAVE_HINT_URGENT
+        )
 
         provider.on_turn_start(4, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
         self.assertNotIn(self.mod._SAVE_HINT_URGENT, provider.prefetch("q", session_id="01XYZ"))
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_urgent_reminder_does_not_suppress_the_summary_hint(
+    def test_urgent_reminder_does_not_suppress_a_pending_notice(
         self, mock_urlopen: MagicMock
     ) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        provider._pending_lines["01XYZ"] = ["rembric: a server-composed notice"]
 
-        # Turn 10 is a summary-firing turn; force the urgent flag armed too.
-        provider.on_turn_start(10, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
+        provider.on_turn_start(2, None, remaining_tokens=self.mod._COMPACTION_TOKEN_FLOOR - 1)
         out = provider.prefetch("q", session_id="01XYZ")
         self.assertIn(self.mod._SAVE_HINT_URGENT, out)
-        self.assertIn(self.mod._SUMMARY_HINT, out)
-        # The urgent reminder replaces the NORMAL save hint, not the summary one.
-        self.assertNotIn(self.mod._SAVE_HINT, out.replace(self.mod._SAVE_HINT_URGENT, ""))
+        self.assertIn("a server-composed notice", out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_session_switch_resets_turn_state(self, mock_urlopen: MagicMock) -> None:
@@ -204,6 +173,10 @@ class ProactiveSaveTest(unittest.TestCase):
         self.assertEqual(provider._turn_number, 0)
         self.assertFalse(provider._compaction_imminent)
         self.assertFalse(provider._compaction_warned)
+
+    def test_no_save_summary_cadence_constant_or_hint_remains(self) -> None:
+        for name in ("_SAVE_HINT_EVERY", "_SUMMARY_HINT_EVERY", "_SAVE_HINT", "_SUMMARY_HINT"):
+            self.assertFalse(hasattr(self.mod, name), f"{name} should not exist")
 
 
 if __name__ == "__main__":

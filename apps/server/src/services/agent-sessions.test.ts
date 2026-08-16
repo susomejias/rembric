@@ -1708,4 +1708,200 @@ describe('AgentSessionsService', () => {
       expect(versions(s.id)).toHaveLength(0);
     });
   });
+
+  describe('the nudge-gate timestamps', () => {
+    const START = new Date('2026-05-01T00:00:00.000Z');
+    let repos: ReturnType<typeof createRepositories>;
+    let clock: Date;
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      repos = createRepositories(db.handle.db);
+      clock = START;
+      svc = new AgentSessionsService(repos, db.handle.db, () => clock);
+    });
+
+    function minutesAfter(base: Date, minutes: number): Date {
+      return new Date(base.getTime() + minutes * 60_000);
+    }
+
+    describe('last_summary_at — written at the summary precedence site only', () => {
+      it('is stamped on a final:true summary write', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 5);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\nx', final: true });
+        expect(svc.getById(s.id)?.lastSummaryAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('is left untouched by a final:false write', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        svc.writeSummary(s.id, { tokenId, summary: 'raw sync', final: false });
+        expect(svc.getById(s.id)?.lastSummaryAt).toBeNull();
+      });
+
+      it('is left untouched when precedence discards the write (already-final column, incoming final:false)', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\nfirst', final: true });
+        const stampedAt = svc.getById(s.id)?.lastSummaryAt?.getTime();
+        clock = minutesAfter(START, 10);
+        svc.writeSummary(s.id, { tokenId, summary: 'raw sync ignored', final: false });
+        expect(svc.getById(s.id)?.lastSummaryAt?.getTime()).toBe(stampedAt);
+      });
+
+      it('cannot be moved backwards by a stale write', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 30);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\nlater', final: true });
+        const later = svc.getById(s.id)?.lastSummaryAt?.getTime();
+        clock = minutesAfter(START, 10); // an out-of-order clock read
+        svc.end(s.id, { tokenId, summary: '## Goal\nearlier', final: true });
+        // end() on an already-final summary column is a no-op for `summary`
+        // itself (last-final-wins would replace it on an ACTIVE row — this
+        // assertion is about last_summary_at specifically staying forward).
+        expect(svc.getById(s.id)!.lastSummaryAt!.getTime()).toBeGreaterThanOrEqual(later!);
+      });
+    });
+
+    describe('resume leaves all three nudge-gate timestamps alone', () => {
+      it('after a report has stamped last_work_at and a notice has stamped last_nudge_at', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\nx', final: true });
+        clock = minutesAfter(START, 30);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        const before = svc.getById(s.id)!;
+        expect(before.lastWorkAt).not.toBeNull();
+
+        svc.end(s.id, { tokenId });
+        clock = minutesAfter(START, 60);
+        const resumed = svc.resume(s.id, { tokenId });
+
+        expect(resumed.lastWorkAt?.getTime()).toBe(before.lastWorkAt?.getTime());
+        expect(resumed.lastSummaryAt?.getTime()).toBe(before.lastSummaryAt?.getTime());
+        expect(resumed.lastNudgeAt?.getTime()).toBe(before.lastNudgeAt?.getTime());
+      });
+    });
+
+    describe('reportTurn', () => {
+      it('stamps last_activity_at always and last_work_at only when usedTools', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 1);
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+        const afterConvo = svc.getById(s.id)!;
+        expect(afterConvo.lastActivityAt?.getTime()).toBe(clock.getTime());
+        expect(afterConvo.lastWorkAt).toBeNull();
+
+        clock = minutesAfter(START, 2);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        const afterWork = svc.getById(s.id)!;
+        expect(afterWork.lastWorkAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('a conversation-only session over three hours never returns notice lines', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        for (let h = 0; h <= 180; h += 20) {
+          clock = minutesAfter(START, h);
+          const { lines } = svc.reportTurn(s.id, { tokenId, usedTools: false });
+          expect(lines).toEqual([]);
+        }
+        expect(svc.getById(s.id)?.lastWorkAt).toBeNull();
+      });
+
+      it('writes the provisional title under final:false precedence, once', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        svc.reportTurn(s.id, { tokenId, usedTools: false, title: 'first prompt title' });
+        expect(svc.getById(s.id)?.title).toBe('first prompt title');
+        expect(svc.getById(s.id)?.titleFinal).toBe(false);
+
+        // A model-authored final:true title is never displaced by a later report.
+        svc.writeSummary(s.id, { tokenId, title: 'model title', final: true });
+        svc.reportTurn(s.id, { tokenId, usedTools: false, title: 'stale provisional' });
+        expect(svc.getById(s.id)?.title).toBe('model title');
+      });
+
+      it('fires the notice once work follows a null summary, past the floor, and stamps last_nudge_at', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 26);
+        const { lines } = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(lines.length).toBeGreaterThan(0);
+        expect(svc.getById(s.id)?.lastNudgeAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('does not fire before one floor has elapsed since started_at', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 24);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+      });
+
+      it('a summary written after the work suppresses the notice until further work', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 5);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 6);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
+        clock = minutesAfter(START, 40);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
+        clock = minutesAfter(START, 41);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+      });
+
+      it('is not repeated inside the floor once emitted, even with continued work', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 26);
+        const first = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(first.lines.length).toBeGreaterThan(0);
+
+        const nudgedAt = clock;
+        for (const m of [1, 5, 10, 15, 20]) {
+          clock = minutesAfter(nudgedAt, m);
+          const { lines } = svc.reportTurn(s.id, { tokenId, usedTools: true });
+          expect(lines).toEqual([]);
+        }
+      });
+
+      it('a report against a terminal row stamps nothing but last_activity_at and returns no lines', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 26);
+        svc.reportTurn(s.id, { tokenId, usedTools: true }); // arms a notice-eligible state
+        svc.end(s.id, { tokenId });
+        const before = svc.getById(s.id)!;
+
+        clock = minutesAfter(START, 60);
+        const { lines } = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(lines).toEqual([]);
+
+        const after = svc.getById(s.id)!;
+        expect(after.status).toBe('ended');
+        expect(after.endedAt?.getTime()).toBe(before.endedAt?.getTime());
+        expect(after.lastWorkAt?.getTime()).toBe(before.lastWorkAt?.getTime());
+        expect(after.lastNudgeAt?.getTime()).toBe(before.lastNudgeAt?.getTime());
+        expect(after.lastActivityAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('rejects a cross-token report, masked as session_not_found', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        expect(() => svc.reportTurn(s.id, { tokenId: otherTokenId, usedTools: true })).toThrow(
+          /not found/i,
+        );
+      });
+
+      it('rejects a report against a soft-deleted session', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        svc.softDelete(s.id, { adminBypass: true });
+        expect(() => svc.reportTurn(s.id, { tokenId, usedTools: true })).toThrow(/soft-deleted/);
+      });
+    });
+  });
+
+  describe('NUDGE_FLOOR_MS — the one floor constant in the server tree', () => {
+    it('no other `_FLOOR_MS` constant is defined anywhere under apps/server/src', async () => {
+      const { execSync } = await import('node:child_process');
+      const out = execSync(
+        `git grep -n "_FLOOR_MS\\s*=" -- apps/server/src ':(exclude)apps/server/src/**/*.test.ts'`,
+        { cwd: new URL('../../../..', import.meta.url).pathname, encoding: 'utf8' },
+      );
+      const lines = out.split('\n').filter(Boolean);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('services/agent-sessions.ts');
+    });
+  });
 });

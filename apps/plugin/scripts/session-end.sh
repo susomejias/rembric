@@ -53,16 +53,34 @@ if [ -z "$SESSION_ID" ] || [ -z "$SLUG" ]; then
   exit 0
 fi
 
+PARSER="${AGENT//-/_}"
+
 SUMMARY=""
 TITLE=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  # Prefer the deterministic fact extraction over the raw transcript
+  # format — grounded, checkable facts rather than a slice of the
+  # conversation (`sessions`). Falls through to the raw formatter when the
+  # extractor is unavailable for this agent (no `_rembric_facts_raw_codex_cli`
+  # exists yet) or yields nothing.
+  SUMMARY="$(rembric_session_facts "$PARSER" "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  if [ -n "$SUMMARY" ]; then
+    SUMMARY="$(_rembric_truncate_transcript "$SUMMARY")"
+  else
+    case "$AGENT" in
+      codex-cli)
+        SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+        ;;
+      *)
+        SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+        ;;
+    esac
+  fi
   case "$AGENT" in
     codex-cli)
-      SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       ;;
     *)
-      SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       ;;
   esac

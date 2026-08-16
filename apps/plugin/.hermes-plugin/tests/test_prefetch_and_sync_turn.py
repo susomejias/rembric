@@ -139,7 +139,9 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertIsNone(provider.sync_turn("hi", "hello"))
         self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
         provider._sync_lock.release()
-        self.assertEqual(mock_urlopen.call_count, 1)
+        # Two requests per call now: the transcript /summary AND the turn
+        # report (session-nudges), both from the same background thread.
+        self.assertEqual(mock_urlopen.call_count, 2)
         url, body = _captured_post(mock_urlopen)
         self.assertEqual(
             url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/summary"
@@ -148,12 +150,16 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertIn("hi", body["summary"])
         self.assertIn("hello", body["summary"])
         self.assertEqual(body["title"], "hello")
+        turn_url, _ = _captured_post(mock_urlopen, idx=1)
+        self.assertEqual(
+            turn_url, "http://server.example.com:8787/api/myproj/sessions/01XYZ/turn"
+        )
 
         for _ in range(3):
             provider.sync_turn("hi again", "hello again")
             self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
             provider._sync_lock.release()
-        self.assertEqual(mock_urlopen.call_count, 4)
+        self.assertEqual(mock_urlopen.call_count, 8)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_sync_turn_does_not_block_the_calling_thread(self, mock_urlopen: MagicMock) -> None:
@@ -212,7 +218,8 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         self.assertTrue(second_started.wait(timeout=5.0))
         self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
         provider._sync_lock.release()
-        self.assertEqual(mock_urlopen.call_count, 2)
+        # Two requests per sync_turn call now (summary + turn report).
+        self.assertEqual(mock_urlopen.call_count, 4)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_sync_turn_aborts_without_posting_when_lock_acquire_times_out(
@@ -296,6 +303,8 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
                 started.set()
                 release.wait(timeout=5.0)
                 order.append("summary")
+            elif req.full_url.endswith("/turn"):
+                order.append("turn")
             else:
                 order.append("end")
             return _FakeJsonResponse({"ok": True})
@@ -308,7 +317,7 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
 
         provider.on_session_end([{"role": "user", "content": "bye"}])
 
-        self.assertEqual(order, ["summary", "end"])
+        self.assertEqual(order, ["summary", "turn", "end"])
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_initialize_skips_session_creation_for_a_subagent_context(

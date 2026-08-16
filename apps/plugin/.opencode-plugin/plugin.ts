@@ -119,6 +119,14 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
+  // Set in message.part.updated for any non-text part, read and cleared by
+  // the session.idle report (session-nudges). Never read from the
+  // extension's own tool `execute` — that observes only Rembric's tools.
+  const toolUsedFlags = new Map<string, boolean>();
+  // Governs the report by TURN boundary rather than by the flush's
+  // debounce timer: cleared at the next chat.message, so a burst of
+  // session.idle events within one turn reports exactly once.
+  const reportedThisTurn = new Set<string>();
 
   // Both maps are keyed by assistant message id, so they stay bounded only if
   // every way an entry leaves the transcript feeds this: session.deleted
@@ -174,6 +182,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
         const info = (event.properties?.info ?? {}) as { id?: string };
         const sessionId = info.id ?? '';
         if (!sessionId) return;
+        toolUsedFlags.delete(sessionId);
+        reportedThisTurn.delete(sessionId);
         forgetMessageState(core.forgetSession(sessionId));
       }
 
@@ -204,6 +214,11 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       if (event.type === 'message.part.updated') {
         const part = (event.properties as MessagePartUpdatedEventProps | undefined)?.part ?? {};
+        // Recorded BEFORE the non-text early return below, which is
+        // precisely the branch a tool part takes (session-nudges).
+        if (part.type !== undefined && part.type !== 'text' && part.sessionID) {
+          toolUsedFlags.set(part.sessionID, true);
+        }
         if (part.type !== 'text') return;
         const sessionId = part.sessionID ?? '';
         const messageId = part.messageID ?? '';
@@ -231,11 +246,23 @@ export const RembricPlugin: Plugin = async (ctx) => {
         if (core.isSubAgent(sessionId)) return;
         if (!core.isKnown(sessionId)) return;
         core.scheduleIdleFlush(sessionId);
+        // Governed by turn boundaries, not the debounce above: a burst of
+        // idle events within one turn must not report it more than once.
+        if (!reportedThisTurn.has(sessionId)) {
+          reportedThisTurn.add(sessionId);
+          const usedTools = toolUsedFlags.get(sessionId) ?? false;
+          toolUsedFlags.delete(sessionId);
+          void core.reportTurn(sessionId, { usedTools });
+        }
       }
     },
 
     'chat.message': async (input, output) => {
       if (core.isSubAgent(input.sessionID)) return;
+
+      // A new turn starts here — the previous turn's report (if any) is
+      // done, so the next session.idle may report again.
+      reportedThisTurn.delete(input.sessionID);
 
       // Covers a session resumed without a fresh session.created event.
       await core.ensureSession(input.sessionID);

@@ -107,26 +107,11 @@ _SUMMARY_MAX_CHARS = 20_000
 _API_TIMEOUT_SEC = 3
 _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
-_SAVE_HINT_EVERY = 5
-_SUMMARY_HINT_EVERY = 10
 _COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
-_SAVE_HINT = (
-    "<memory-hint>if recent work produced a decision, fix, or discovery, "
-    "you MUST call memory.save now (title ≤100 + content).</memory-hint>"
-)
 _SAVE_HINT_URGENT = (
     "<memory-hint>Context is about to compact — save anything important "
     "with memory.save NOW before it is lost.</memory-hint>"
-)
-_SUMMARY_HINT = (
-    "<memory-hint>did real work happen this turn? You MUST call "
-    "memory.session_summary({title, summary}) now — title ≤100 chars (the "
-    "work, not cwd); summary: Use exactly these six Markdown level-2 "
-    "headings, in this order, each on its own line (never one flat "
-    "paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n"
-    "## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? "
-    "Skip.</memory-hint>"
 )
 _SESSION_ID_HINT_TEMPLATE = (
     '<memory-hint>sessionId="{{SESSION_ID}}" — pass it explicitly to '
@@ -142,24 +127,33 @@ _RESUMED_READ_HINT = (
     "— call memory.session_get before your next memory.session_summary "
     "write.</memory-hint>"
 )
+# Sending ONE section is a legitimate write only because a `##` section a
+# curated write omits keeps its stored text (`sessions`, section-wise
+# merge). Byte-identical (once unwrapped) to rembric-plugin-core.mjs's
+# SESSION_OPENING_NUDGE_CORE, pinned by nudge-fixtures.test.ts.
+_SESSION_OPENING_HINT = (
+    "<memory-hint>New session — before you finish this turn, call "
+    "memory.session_summary with a title and a single `## Goal` section "
+    "describing what this session is for; the other five canonical "
+    "headings are intentionally left out.</memory-hint>"
+)
 # Byte-identical to rembric-plugin-core.mjs's POST_COMPACT_NUDGE_CORE
 # (plugin-session-protocol) — the ONE shared implementation of the
 # compaction-time protocol text, pinned by nudge-fixtures.test.ts.
 _POST_COMPACT_HINT = (
-    "<memory-hint>This session resumes from a compaction. BEFORE "
+    "<memory-hint>Resumed from a compaction. BEFORE "
     "continuing:\n"
     "1. Call memory.session_get to read the stored summary.\n"
     "2. Call memory.session_summary({title, summary}) with the CURRENT "
-    "COMPLETE state, brought up to date — this REPLACES the stored "
-    "value.\n"
-    "   - title: ≤100 chars, descriptive of the work (not generic, not "
-    "the cwd).\n"
+    "COMPLETE state: sent `##` sections REPLACE their stored "
+    "counterpart; omitted ones STAY.\n"
+    "   - title: ≤100 chars, not the cwd.\n"
     "   - summary: ≤10000 chars. Use exactly these six Markdown level-2 "
     "headings, in this order, each on its own line (never one flat "
     "paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n"
     "## Verified+how\n## Unfinished+why\n## Files\n"
-    "3. Still missing detail? Call memory.context or memory.search.\n"
-    "4. Only then, continue with the user's request.</memory-hint>"
+    "3. Missing detail? memory.context or memory.search.\n"
+    "4. Then continue.</memory-hint>"
 )
 
 
@@ -331,6 +325,16 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         # on_turn_start's remaining_tokens prediction; consumed by the next
         # prefetch() so the directive is emitted exactly once.
         self._post_compact_pending: bool = False
+        # Per-session outcome of THIS session's own ensure — independent of
+        # `_process_resumed` above, which only ever captures the process's
+        # FIRST session. Drives the session-opening line (session-nudges).
+        self._session_created: dict[str, bool] = {}
+        self._session_opening_emitted: set[str] = set()
+        # The server's returned notice, cached between `sync_turn`'s report
+        # and the next `prefetch()`. Only ever set with a non-empty list —
+        # a report with no lines must never clear a pending one.
+        self._pending_lines: dict[str, list[str]] = {}
+        self._turn_title_sent: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -403,11 +407,12 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "/sessions",
             {"id": session_id, "cwd": cwd, "agent": "hermes"},
         )
+        created = response.get("created") if response is not None else None
         if first_ensure_of_process:
-            created = response.get("created") if response is not None else None
             # An unknown outcome (failed ensure, or no `created` field) is
             # "do not advise", never "advise anyway".
             self._process_resumed = isinstance(created, bool) and not created
+        self._session_created[session_id] = isinstance(created, bool) and created
         if response is not None and first_ensure:
             _api_post(base, slug, f"/sessions/{session_id}/resume", {})
 
@@ -477,40 +482,48 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._compaction_warned = True
             hints.append(_SAVE_HINT_URGENT)
             hint_tags.append("save_urgent")
-        elif self._turn_number > 0 and self._turn_number % _SAVE_HINT_EVERY == 0:
-            hints.append(_SAVE_HINT)
-            hint_tags.append("save")
         # Emitted on the first prefetch() after on_pre_compress fires,
-        # independent of the save/summary cadence — it is its own line, not
-        # gated on turn number. It is a strict superset of the resumed-read
-        # line, so it supersedes that line on a shared turn (below) rather
-        # than stacking with it.
+        # independent of turn number — it is its own line. It is a strict
+        # superset of the resumed-read line, so it supersedes that line on a
+        # shared turn (below) rather than stacking with it.
         post_compact_due = self._post_compact_pending
         if post_compact_due:
             self._post_compact_pending = False
             hints.append(_POST_COMPACT_HINT)
             hint_tags.append("post_compact")
-        if self._turn_number > 0 and (
-            self._turn_number == 1 or self._turn_number % _SUMMARY_HINT_EVERY == 0
+
+        opening_due = (
+            session_id is not None
+            and self._session_created.get(session_id) is True
+            and session_id not in self._session_opening_emitted
+        )
+        pending_lines = self._pending_lines.pop(session_id, []) if session_id else []
+        write_directing = opening_due or bool(pending_lines)
+
+        if write_directing and session_id:
+            hints.append(_SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id))
+            hint_tags.append("session_id")
+
+        if opening_due and session_id:
+            self._session_opening_emitted.add(session_id)
+            hints.append(_SESSION_OPENING_HINT)
+            hint_tags.append("session_opening")
+        elif (
+            self._turn_number == 1
+            and not post_compact_due
+            and self._process_resumed
+            and session_id
+            and session_id not in self._resumed_hint_emitted
         ):
-            # A sibling of the summary hint, never folded into it: its own
-            # text stays independent of session state either way.
-            if (
-                not post_compact_due
-                and self._process_resumed
-                and session_id
-                and session_id not in self._resumed_hint_emitted
-            ):
-                self._resumed_hint_emitted.add(session_id)
-                hints.append(_RESUMED_READ_HINT)
-                hint_tags.append("resumed_read")
-            hints.append(_SUMMARY_HINT)
-            hint_tags.append("summary")
-        if hints and session_id:
-            hints.insert(
-                0, _SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
-            )
-            hint_tags.insert(0, "session_id")
+            self._resumed_hint_emitted.add(session_id)
+            hints.append(_RESUMED_READ_HINT)
+            hint_tags.append("resumed_read")
+
+        for line in pending_lines:
+            hints.append(f"<memory-hint>{line}</memory-hint>")
+        if pending_lines:
+            hint_tags.append("notice")
+
         # Whether Hermes actually surfaces this return value to the model is
         # otherwise unobservable from the host side; this line is the only way
         # to confirm a hint was even offered.
@@ -549,12 +562,19 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             or self._suppressed
         ):
             return None
-        messages = kwargs.get("messages")
-        if not isinstance(messages, list):
-            messages = [
+        raw_messages = kwargs.get("messages")
+        # Computed against the RAW kwarg, before the two-string fallback below
+        # replaces an absent one with a synthesised list — the absent case is
+        # what licenses the unconditional `True` (session-nudges, D4).
+        used_tools = _messages_used_tools(raw_messages)
+        messages = (
+            raw_messages
+            if isinstance(raw_messages, list)
+            else [
                 {"role": "user", "content": user},
                 {"role": "assistant", "content": assistant},
             ]
+        )
         base, slug, session_id = self._base, self._slug, self._session_id
 
         def _sync() -> None:
@@ -567,24 +587,43 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                 return
             try:
                 transcript = _format_transcript(messages)
-                if not transcript:
-                    return
-                body: dict[str, Any] = {"summary": transcript, "final": False}
-                title = _derive_title_from_messages(messages)
-                if title:
-                    body["title"] = title
-                _api_post(
-                    base,
-                    slug,
-                    f"/sessions/{session_id}/summary",
-                    body,
-                )
+                if transcript:
+                    body: dict[str, Any] = {"summary": transcript, "final": False}
+                    title = _derive_title_from_messages(messages)
+                    if title:
+                        body["title"] = title
+                    _api_post(
+                        base,
+                        slug,
+                        f"/sessions/{session_id}/summary",
+                        body,
+                    )
+                self._post_turn_report(base, slug, session_id, used_tools, messages)
             finally:
                 if acquired:
                     self._sync_lock.release()
 
         threading.Thread(target=_sync, daemon=True).start()
         return None
+
+    def _post_turn_report(
+        self, base: str, slug: str, session_id: str, used_tools: bool, messages: list
+    ) -> None:
+        turn_body: dict[str, Any] = {"usedTools": used_tools}
+        if session_id not in self._turn_title_sent:
+            title = _derive_title_from_first_user_message(messages)
+            if title:
+                turn_body["title"] = title
+                self._turn_title_sent.add(session_id)
+        response = _api_request(base, slug, f"/sessions/{session_id}/turn", turn_body)
+        lines = response.get("lines") if response is not None else None
+        if isinstance(lines, list):
+            text_lines = [line for line in lines if isinstance(line, str)]
+            # Never overwrite a pending, non-empty cache with an empty
+            # result — a second report for the same turn must not swallow a
+            # pending notice.
+            if text_lines:
+                self._pending_lines[session_id] = text_lines
 
     def on_pre_compress(self, messages: list, **kwargs: Any) -> str:
         # Returning "" is the documented no-contribution signal; the
@@ -647,7 +686,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             f"/sessions/{self._session_id}/end",
             body,
         )
-        self._prefetch_cache.pop(self._session_id, None)
+        self._forget_session_state(self._session_id)
         self._reset_turn_state()
 
     def _reset_turn_state(self) -> None:
@@ -655,6 +694,19 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         self._compaction_imminent = False
         self._compaction_warned = False
         self._post_compact_pending = False
+
+    def _forget_session_state(self, session_id: str) -> None:
+        # Deliberately does NOT touch `_ensured_session_ids`: that set
+        # tracks every id ever ensured in this process's lifetime, so that
+        # switching BACK to an id already seen never re-issues the resume —
+        # forgetting it here would undo that guarantee the moment a session
+        # this method has torn down is revisited.
+        self._prefetch_cache.pop(session_id, None)
+        self._session_created.pop(session_id, None)
+        self._session_opening_emitted.discard(session_id)
+        self._pending_lines.pop(session_id, None)
+        self._turn_title_sent.discard(session_id)
+        self._resumed_hint_emitted.discard(session_id)
 
     def on_session_switch(
         self,
@@ -704,7 +756,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                 {},
             )
         if old_id and old_id != new_session_id:
-            self._prefetch_cache.pop(old_id, None)
+            self._forget_session_state(old_id)
             self._reset_turn_state()
         self._session_id = new_session_id
         if new_session_id and not self._suppressed:
@@ -765,17 +817,11 @@ def _format_transcript(messages: list) -> str:
 _TITLE_MAX_CHARS = 100
 
 
-def _derive_title_from_messages(messages: list) -> str:
-    """Return the first non-empty assistant message (≤100 chars) as a title.
-
-    Used by sync_turn (every turn) and on_session_end to seed non-final
-    title writes. Returns empty string when no assistant message is found.
-    """
+def _first_message_text(messages: list, role: str) -> str:
     for msg in messages or []:
         if not isinstance(msg, dict):
             continue
-        role = str(msg.get("role", "")).strip()
-        if role != "assistant":
+        if str(msg.get("role", "")).strip() != role:
             continue
         content = msg.get("content", "")
         if not isinstance(content, str):
@@ -788,10 +834,42 @@ def _derive_title_from_messages(messages: list) -> str:
             continue
         # Collapse newlines / tabs to spaces — titles are single-line.
         text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-        if len(text) > _TITLE_MAX_CHARS:
-            text = text[:_TITLE_MAX_CHARS]
-        return text
+        return text[:_TITLE_MAX_CHARS]
     return ""
+
+
+def _derive_title_from_messages(messages: list) -> str:
+    """First non-empty assistant message (≤100 chars) — sync_turn's / on_session_end's provisional title."""
+    return _first_message_text(messages, "assistant")
+
+
+def _derive_title_from_first_user_message(messages: list) -> str:
+    """First non-empty user message (≤100 chars) — the turn report's provisional title (session-nudges, D12)."""
+    return _first_message_text(messages, "user")
+
+
+def _messages_used_tools(messages: Any) -> bool:
+    """Whether `messages` shows a tool call or result (session-nudges, D4).
+
+    Tests role outside {user, assistant, system} (a tool-result message) OR
+    an assistant message carrying a non-empty `tool_calls` field — a
+    role-only test detects results and misses a call that produced no
+    result message. An absent (non-list) kwarg reports `True`: on Hermes
+    below 2026.5.29 the two-string fallback synthesises a list admitting
+    neither condition BY CONSTRUCTION, so a `False` there would assert "no
+    tool ran" from evidence that could never have shown one.
+    """
+    if not isinstance(messages, list):
+        return True
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role not in ("user", "assistant", "system"):
+            return True
+        if role == "assistant" and msg.get("tool_calls"):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

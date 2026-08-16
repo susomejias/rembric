@@ -347,15 +347,25 @@ describe('RembricPlugin handlers', () => {
     }
   });
 
-  it('chat.message appends the save nudge every 5th user turn, not before', async () => {
+  it('chat.message emits the sessionId line + the session-opening line, once, on a newly created session', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/sessions'))
+        return new Response('{"ok":true,"created":true}', { status: 200 });
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const handlers = await RembricPlugin({ directory: dir } as never);
-    const pushed: number[] = [];
-    for (let turn = 1; turn <= 10; turn++) {
-      const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
-      await handlers['chat.message']!({ sessionID: 's-save' } as never, output as never);
-      if (output.parts.some((p) => p.text?.includes('memory.save now'))) pushed.push(turn);
-    }
-    expect(pushed).toEqual([5, 10]);
+    const first = { parts: [{ type: 'text', text: 'first message' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 's-opening' } as never, first as never);
+    expect(first.parts.some((p) => p.text === nudgeFixtures.sessionOpening)).toBe(true);
+    expect(first.parts.some((p) => p.text?.startsWith('rembric: sessionId="s-opening"'))).toBe(
+      true,
+    );
+
+    const second = { parts: [{ type: 'text', text: 'second message' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 's-opening' } as never, second as never);
+    expect(second.parts.some((p) => p.text === nudgeFixtures.sessionOpening)).toBe(false);
   });
 
   it('chat.message appends the first-prompt relevance nudge on turn 1 only', async () => {
@@ -383,30 +393,121 @@ describe('RembricPlugin handlers', () => {
     expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(false);
   });
 
-  it('chat.message appends the exact fixture summary nudge on turn 1 and every 10th turn, not before', async () => {
+  it('session.idle reports the turn and chat.message prints the cached notice, verbatim, once', async () => {
+    let turnCalls = 0;
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        turnCalls += 1;
+        return new Response(
+          JSON.stringify({ ok: true, sessionId: 's-notice', lines: ['rembric: a server notice'] }),
+          { status: 200 },
+        );
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const handlers = await RembricPlugin({ directory: dir } as never);
-    const pushed: number[] = [];
-    for (let turn = 1; turn <= 11; turn++) {
-      const output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
-      await handlers['chat.message']!({ sessionID: 's-summary' } as never, output as never);
-      const summaryPart = output.parts.find((p) => p.text === nudgeFixtures.summary);
-      if (summaryPart) pushed.push(turn);
-    }
-    expect(pushed).toEqual([1, 10]);
+
+    await handlers['chat.message']!(
+      { sessionID: 's-notice' } as never,
+      { parts: [{ type: 'text', text: 'first turn' }], message: {} } as never,
+    );
+    await handlers.event!({
+      event: { type: 'session.idle', properties: { sessionID: 's-notice' } },
+    } as never);
+    // The report is fire-and-forget from the handler's point of view
+    // (`void core.reportTurn(...)`), so its promise chain (fetch → res.json()
+    // → cache) settles on a later microtask than this `await` observes.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(turnCalls).toBe(1);
+
+    const nextTurn = { parts: [{ type: 'text', text: 'second turn' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 's-notice' } as never, nextTurn as never);
+    expect(nextTurn.parts.some((p) => p.text === 'rembric: a server notice')).toBe(true);
+
+    const thirdTurn = { parts: [{ type: 'text', text: 'third turn' }], message: {} };
+    await handlers['chat.message']!({ sessionID: 's-notice' } as never, thirdTurn as never);
+    expect(thirdTurn.parts.some((p) => p.text === 'rembric: a server notice')).toBe(false);
   });
 
-  it('chat.message pushes BOTH save and summary parts on turn 10, neither replacing the other', async () => {
+  it('a burst of session.idle events within one turn reports exactly once', async () => {
+    let turnCalls = 0;
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        turnCalls += 1;
+        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const handlers = await RembricPlugin({ directory: dir } as never);
-    let output: { parts: Array<{ type: string; text?: string }>; message: object } = {
-      parts: [],
-      message: {},
-    };
-    for (let turn = 1; turn <= 10; turn++) {
-      output = { parts: [{ type: 'text', text: `edit number ${turn}` }], message: {} };
-      await handlers['chat.message']!({ sessionID: 's-coincide' } as never, output as never);
+
+    await handlers['chat.message']!(
+      { sessionID: 's-burst' } as never,
+      { parts: [{ type: 'text', text: 'turn' }], message: {} } as never,
+    );
+    for (let i = 0; i < 3; i += 1) {
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 's-burst' } },
+      } as never);
     }
-    expect(output.parts.some((p) => p.text === nudgeFixtures.save)).toBe(true);
-    expect(output.parts.some((p) => p.text === nudgeFixtures.summary)).toBe(true);
+    expect(turnCalls).toBe(1);
+  });
+
+  it('reports usedTools:true when a non-text part was observed this turn', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 's-tool-flag', parentID: '', title: 'work' } },
+      },
+    } as never);
+    await handlers.event!({
+      event: {
+        type: 'message.part.updated',
+        properties: { part: { type: 'tool', sessionID: 's-tool-flag' } },
+      },
+    } as never);
+    await handlers.event!({
+      event: { type: 'session.idle', properties: { sessionID: 's-tool-flag' } },
+    } as never);
+    expect(capturedBody?.usedTools).toBe(true);
+  });
+
+  it('reports usedTools:false when only text parts were observed this turn', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 's-no-tool', parentID: '', title: 'work' } },
+      },
+    } as never);
+    await handlers.event!({
+      event: { type: 'session.idle', properties: { sessionID: 's-no-tool' } },
+    } as never);
+    expect(capturedBody?.usedTools).toBe(false);
   });
 
   it('chat.message never nudges (save, summary, or recall) a sub-agent session on turn 1', async () => {
@@ -437,7 +538,7 @@ describe('RembricPlugin handlers', () => {
     }
   });
 
-  it('recall and save nudges can both fire on the same turn', async () => {
+  it('the recall line fires on every matching turn, independent of any write-directing line', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     for (let turn = 1; turn <= 5; turn++) {
       const output = {
@@ -445,10 +546,7 @@ describe('RembricPlugin handlers', () => {
         message: {},
       };
       await handlers['chat.message']!({ sessionID: 's-both' } as never, output as never);
-      if (turn === 5) {
-        expect(output.parts.some((p) => p.text?.includes('memory.search'))).toBe(true);
-        expect(output.parts.some((p) => p.text?.includes('memory.save'))).toBe(true);
-      }
+      expect(output.parts.some((p) => p.text?.includes('memory.search'))).toBe(true);
     }
   });
 
@@ -858,6 +956,13 @@ describe('RembricPlugin handlers', () => {
   });
 
   it('every injected nudge part carries a host-valid prt_ id, session id and message id', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/sessions'))
+        return new Response('{"ok":true,"created":true}', { status: 200 });
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const handlers = await RembricPlugin({ directory: dir } as never);
     const output = {
       parts: [{ type: 'text', text: 'recall the auth fix' }],
@@ -873,7 +978,9 @@ describe('RembricPlugin handlers', () => {
       sessionID?: string;
       messageID?: string;
     }>;
-    expect(injected.length).toBeGreaterThanOrEqual(3);
+    // first-prompt + recall + sessionId + session-opening, since the stub
+    // ensure reports created:true.
+    expect(injected.length).toBeGreaterThanOrEqual(4);
     for (const part of injected) {
       expect(part.id).toMatch(/^prt_[0-9a-f]{32}$/);
       expect(part.sessionID).toBe('prt-1');
