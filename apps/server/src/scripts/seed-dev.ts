@@ -301,7 +301,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     },
   ];
 
-  for (const [i, cfg] of endedSessions.entries()) {
+  for (const cfg of endedSessions) {
     const s = sessionsSvc.start({
       tokenId: adminTokenId,
       projectId: proj.id,
@@ -309,17 +309,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
       description: null,
       cwd: cfg.cwd,
     });
-    // The first ended session gets a draft curation before the real one, so
-    // `session_summary_versions` and the dashboard's SUMMARY HISTORY section
-    // have more than one row to show against a real seeded corpus.
-    if (i === 0) {
-      sessionsSvc.writeSummary(s.id, {
-        tokenId: adminTokenId,
-        summary: 'Goal: bootstrap the demo project. (draft — mid-session, not yet the handoff.)',
-        title: cfg.title,
-        final: true,
-      });
-    }
     sessionsSvc.end(s.id, {
       tokenId: adminTokenId,
       summary: cfg.summary,

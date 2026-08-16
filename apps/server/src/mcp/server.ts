@@ -70,7 +70,6 @@ import {
 import { markRefreshPending } from './roots-discovery.js';
 import {
   buildSessionHandlers,
-  SESSION_GET_VERSIONS_MAX,
   sessionEndOutput,
   sessionEndSchema,
   sessionGetOutput,
@@ -357,7 +356,8 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.session_get',
     {
-      description: `Fetch one session by id with its FULL, untruncated summary — memory.context only returns a short snippet. Scope-enforced: a cross-scope or soft-deleted id returns not_found. Use to resume work surfaced in memory.context when the snippet isn't enough (cross-client / multi-agent handoff). Optional \`limit\` (0-${SESSION_GET_VERSIONS_MAX}) ALSO returns that many of the session's past summary VERSIONS, newest first, full content — not the summary's length, and nothing else. This is EXCEPTIONAL: only when a rewrite dropped detail you need back, never routinely; the current summary above is what an ordinary rewrite needs. Omit it (the normal case) and the response is unchanged.`,
+      description:
+        "Fetch one session by id with its FULL, untruncated summary — memory.context only returns a short snippet. Scope-enforced: a cross-scope or soft-deleted id returns not_found. Use to resume work surfaced in memory.context when the snippet isn't enough (cross-client / multi-agent handoff).",
       inputSchema: sessionGetSchema,
       outputSchema: sessionGetOutput,
       annotations: READ_ANNOTATIONS('Get session'),

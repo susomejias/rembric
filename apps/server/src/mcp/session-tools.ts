@@ -50,20 +50,8 @@ export const sessionResumeSchema = {
   sessionId: z.string().min(1),
 };
 
-/** Bound on `sessionGetSchema.limit` — see its `.describe()` for what it bounds. */
-export const SESSION_GET_VERSIONS_MAX = 5;
-
 export const sessionGetSchema = {
   sessionId: z.string().min(1),
-  limit: z
-    .number()
-    .int()
-    .min(0)
-    .max(SESSION_GET_VERSIONS_MAX)
-    .optional()
-    .describe(
-      `How many of this session's stored summary VERSIONS to also return (NOT the summary's length or any other size) — the most recent ${SESSION_GET_VERSIONS_MAX} at most, newest first, each with its full untruncated content. Omit or pass 0 for today's response (no version history): use this only to recover text a later rewrite displaced, not routinely.`,
-    ),
 };
 
 export interface SessionToolDeps {
@@ -120,16 +108,6 @@ export const sessionGetOutput = {
   endedAt: z.string().nullable(),
   title: z.string().nullable(),
   summary: z.string().nullable(),
-  versions: z
-    .array(
-      z.object({
-        version: z.number(),
-        title: z.string().nullable(),
-        content: z.string(),
-        createdAt: z.string(),
-      }),
-    )
-    .optional(),
 };
 
 export function buildSessionHandlers(deps: SessionToolDeps) {
@@ -399,10 +377,7 @@ function rejectIfDeleted(
   return null;
 }
 
-async function handleSessionGet(
-  deps: SessionToolDeps,
-  args: { sessionId: string; limit?: number },
-) {
+async function handleSessionGet(deps: SessionToolDeps, args: { sessionId: string }) {
   let scope: Scope;
   try {
     scope = await requireScope(deps, 'read');
@@ -413,17 +388,6 @@ async function handleSessionGet(
   if (!row || row.deletedAt || row.projectId !== scope.projectId) {
     return mcpError('not_found', `session '${args.sessionId}' not found in this scope`);
   }
-  // Omitted or 0 => the response is byte-identical to before `limit` existed
-  // (`sessions`, "No new read surface"): no `versions` key at all, not an
-  // empty array.
-  const versions = args.limit
-    ? deps.agentSessions.listSummaryVersions(args.sessionId, scope, args.limit).map((v) => ({
-        version: v.version,
-        title: v.title,
-        content: v.content,
-        createdAt: v.createdAt,
-      }))
-    : undefined;
   return ok({
     id: row.id,
     agent: row.agent,
@@ -432,6 +396,5 @@ async function handleSessionGet(
     endedAt: row.endedAt,
     title: row.title,
     summary: row.summary,
-    ...(versions !== undefined && { versions }),
   });
 }

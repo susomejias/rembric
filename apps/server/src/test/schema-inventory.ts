@@ -27,7 +27,6 @@ export const SOURCE_TABLES = [
   'oauth_tokens',
   'projects',
   'prompts',
-  'session_summary_versions',
   'sessions',
   'token_projects',
   'tokens',

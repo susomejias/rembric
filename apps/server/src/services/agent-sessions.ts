@@ -302,61 +302,29 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.updateAndVersion(existing.id, existing, set, { requireActive: false });
+    const updated = this.repos.agentSessions.updateById(
+      existing.id,
+      this.stampLastSummaryAt(existing, set),
+      { requireActive: false },
+    );
     return updated ?? existing;
   }
 
   /**
-   * The single site every write path that mutates `sessions.summary` funnels
-   * through: the update and the version append are one atomic act. Appends a
-   * row to `session_summary_versions` only when the update landed, the `set`
-   * carried a new `summary`, and that `summary` is the incoming write's FINAL
-   * value — `set.summaryFinal === true` is exactly that, since
-   * `precedenceSet` only ever puts `summaryFinal` in `set` alongside `summary`,
-   * set to the incoming write's `final` flag (see "Every curated
-   * session-summary write MUST append a version row in the same transaction",
-   * `openspec/specs/sessions/spec.md`). A byte-identical re-write appends
-   * nothing, which is what keeps `idempotentHint: true` honest.
-   *
-   * The appended row's `title` is `updated.title` — the value in effect on
-   * `sessions.title` AFTER this update — not `set.title` or the write's own
-   * argument, which is frequently absent (title is optional on every curated
-   * write). Storing the post-update value is what pairs this version's
-   * content with the label that was actually live alongside it.
+   * `last_summary_at` is stamped at this one site, shared by every write path
+   * that mutates `sessions.summary`, on exactly the writes that store a
+   * `final:true` summary — never on a `final:false` write, never on a write
+   * `precedenceSet` already discarded (`set.summary` absent in that case) —
+   * see `session-nudges`, "Session rows MUST carry the three nudge-gate
+   * timestamps, and every one of them MUST be monotone".
    */
-  private updateAndVersion(
-    id: string,
+  private stampLastSummaryAt(
     existing: AgentSession,
     set: Partial<NewAgentSession>,
-    opts: { requireActive: boolean },
-  ): AgentSession | undefined {
-    return this.tx.transaction((): AgentSession | undefined => {
-      // `last_summary_at` is written at this SAME site, on exactly the writes
-      // that store a `final:true` summary — never on a `final:false` write,
-      // never on a write `precedenceSet` already discarded (`set.summary`
-      // absent in that case) — see `sessions`, "Session rows MUST carry the
-      // three nudge-gate timestamps...".
-      const finalSet: Partial<NewAgentSession> =
-        typeof set.summary === 'string' && set.summaryFinal === true
-          ? { ...set, lastSummaryAt: laterOf(existing.lastSummaryAt, this.now()) }
-          : set;
-      const updated = this.repos.agentSessions.updateById(id, finalSet, opts);
-      if (updated && typeof set.summary === 'string' && set.summaryFinal === true) {
-        const latest = this.repos.agentSessions.latestSummaryVersion(id);
-        if (!latest || latest.content !== set.summary) {
-          const ts = this.now();
-          this.repos.agentSessions.insertSummaryVersion({
-            id: ulid(ts.getTime()),
-            sessionId: id,
-            version: latest ? latest.version + 1 : 1,
-            content: set.summary,
-            title: updated.title,
-            createdAt: ts,
-          });
-        }
-      }
-      return updated;
-    });
+  ): Partial<NewAgentSession> {
+    return typeof set.summary === 'string' && set.summaryFinal === true
+      ? { ...set, lastSummaryAt: laterOf(existing.lastSummaryAt, this.now()) }
+      : set;
   }
 
   /**
@@ -407,7 +375,11 @@ export class AgentSessionsService {
       lastActivityAt: this.now(),
       ...precedenceSet(existing, input),
     };
-    const updated = this.updateAndVersion(sessionId, existing, set, { requireActive: true });
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      this.stampLastSummaryAt(existing, set),
+      { requireActive: true },
+    );
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -458,7 +430,11 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input),
     };
-    const updated = this.updateAndVersion(sessionId, existing, set, { requireActive: true });
+    const updated = this.repos.agentSessions.updateById(
+      sessionId,
+      this.stampLastSummaryAt(existing, set),
+      { requireActive: true },
+    );
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -576,15 +552,6 @@ export class AgentSessionsService {
 
   getById(sessionId: string): AgentSession | undefined {
     return this.repos.agentSessions.getById(sessionId);
-  }
-
-  /**
-   * Scoped read for `memory.session_get({ limit })` — the exceptional path
-   * for recovering a version a later rewrite dropped. Not exposed via
-   * `memory.context` or HTTP (`sessions`, "No new read surface").
-   */
-  listSummaryVersions(sessionId: string, scope: Scope, limit: number) {
-    return this.repos.agentSessions.listSummaryVersionsInScope(sessionId, scope, limit);
   }
 
   /**

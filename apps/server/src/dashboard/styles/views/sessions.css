@@ -35,30 +35,3 @@
   align-items: center;
 }
 
-.rbr-summary-history {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-
-.rbr-summary-version {
-  border: 1px solid var(--fg-faint);
-  padding: var(--s-2);
-}
-
-.rbr-summary-version summary {
-  cursor: pointer;
-  color: var(--fg-dim);
-  font-family: var(--f-mono);
-  font-size: 0.8rem;
-  user-select: none;
-  list-style: none;
-}
-
-.rbr-summary-version summary::-webkit-details-marker {
-  display: none;
-}
-
-.rbr-summary-version[open] summary {
-  margin-bottom: var(--s-2);
-}

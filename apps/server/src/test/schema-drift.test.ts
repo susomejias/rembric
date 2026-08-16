@@ -161,10 +161,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX prompts_deleted_idx ON prompts (deleted_at) WHERE deleted_at IS NOT NULL',
   },
   {
-    name: 'session_summary_versions_session_version_unq',
-    sql: 'CREATE UNIQUE INDEX session_summary_versions_session_version_unq ON session_summary_versions (session_id, version)',
-  },
-  {
     name: 'sessions_active_transport_idx',
     sql: "CREATE INDEX sessions_active_transport_idx ON sessions (token_id, project_id, COALESCE(last_activity_at, started_at) DESC) WHERE status = 'active' AND deleted_at IS NULL",
   },
@@ -230,7 +226,6 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   { name: 'sqlite_autoindex_oauth_tokens_1', sql: null },
   { name: 'sqlite_autoindex_projects_1', sql: null },
   { name: 'sqlite_autoindex_prompts_1', sql: null },
-  { name: 'sqlite_autoindex_session_summary_versions_1', sql: null },
   { name: 'sqlite_autoindex_sessions_1', sql: null },
   { name: 'sqlite_autoindex_tokens_1', sql: null },
   { name: 'tokens_name_unique', sql: 'CREATE UNIQUE INDEX tokens_name_unique ON tokens (name)' },
