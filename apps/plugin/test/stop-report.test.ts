@@ -122,6 +122,31 @@ describe('stop-report.sh', () => {
     expect(stdout).toBe('{}');
   });
 
+  it.each([
+    ['a body that is not JSON at all', 'not a json body'],
+    ['a 200 body with no `lines` key', '{"ok":true,"sessionId":"s"}'],
+    ['an empty `lines` array the fast path does not match', '{"ok":true,"lines": []}'],
+  ])('still emits {} on Codex for %s', async (_label, body) => {
+    // `rembric_turn_report` returning non-zero trips `_api.sh`'s `trap 'exit 0'
+    // ERR` at this script's `LINES="$(…)"`, so `_emit_nothing` never runs and
+    // the Codex host is handed an empty stdout where it requires `{}`.
+    turnResponse = { status: 200, body };
+    const transcript = writeTranscript('t-rc.jsonl', '{"type":"user"}\n');
+    const { stdout } = await run(
+      'codex-cli',
+      JSON.stringify({
+        session_id: 's-codex-rc',
+        cwd,
+        transcript_path: transcript,
+        stop_hook_active: false,
+      }),
+    );
+    expect(stdout).toBe('{}');
+    // Control: the report really was issued, so the `{}` is not the
+    // early-return path that skips the POST entirely.
+    expect(requests.some((r) => r.path.endsWith('/turn'))).toBe(true);
+  });
+
   it('detects a tool-use turn on Claude Code via "type":"tool_use"', async () => {
     const transcript = writeTranscript(
       't3.jsonl',

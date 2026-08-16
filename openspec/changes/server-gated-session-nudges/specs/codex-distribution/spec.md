@@ -127,6 +127,15 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 - **AND** SHALL emit `'{}'` to stdout and nothing else
 - **AND** SHALL exit zero even on internal error
 
+#### Scenario: A degenerate turn-report response still leaves Codex its `{}`
+
+- **GIVEN** a `/turn` call answered `200` with a body that carries no `lines` key, an empty `lines` array the raw-body fast path does not match, or no JSON at all
+- **WHEN** the `Stop` hook runs under `codex-cli`
+- **THEN** stdout SHALL still be exactly `{}`
+- **AND** the control SHALL pass in the same run: the report SHALL have been POSTed, so the `{}` is not the early return that skips it
+
+This is stated because it was broken: `_api.sh`'s promise that "every function exits 0 on failure … so a plugin-side problem NEVER aborts the host agent" is enforced by the `trap 'exit 0' ERR` at the top of that file, and the trap is NOT inherited by shell functions (there is no `set -E`). A helper that returns non-zero therefore fails at the CALLER's `LINES="$(…)"` assignment, where the trap does apply, and the caller dies before `_emit_nothing`. Both of the report helper's terminating statements SHALL return zero on their own.
+
 #### Scenario: `stop-sync.sh` and `stop-nudge.sh` no longer exist
 
 - **WHEN** the plugin tree is inspected at HEAD

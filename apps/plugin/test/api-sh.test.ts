@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -268,5 +268,177 @@ describe('rembric_turn_report — the notice decodes with and without jq', () =>
   it('control: jq on the same input produces the same bytes', () => {
     expect(spawnSync('bash', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
     expect(report()).toBe(`${NOTICE}\n`);
+  });
+});
+
+describe('rembric_turn_report — a lines-less body must not abort the caller', () => {
+  // `_api.sh` installs `trap 'exit 0' ERR`, so a non-zero return from the
+  // function's LAST statement kills the hook at `LINES="$(rembric_turn_report
+  // …)"` — stop-report.sh then never reaches `_emit_nothing`, and Codex,
+  // which requires a `{}` on stdout, gets nothing.
+  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
+  const AFTER = 'REACHED-NEXT-STATEMENT';
+
+  let bin: string;
+
+  beforeEach(() => {
+    bin = mkdtempSync(join(tmpdir(), 'rbr-turnrc-'));
+  });
+  afterEach(() => rmSync(bin, { recursive: true, force: true }));
+
+  /** Runs the real call-site shape and reports whether the NEXT statement ran. */
+  function reachesNextStatement(responseBody: string, prelude: string): boolean {
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n200' '${responseBody}'\n`, {
+      mode: 0o755,
+    });
+    const script = [
+      `source '${apiSh}'`,
+      prelude,
+      `LINES="$(rembric_turn_report /api/demo/sessions/s/turn '{"usedTools":true}')"`,
+      `printf '%s' "${AFTER}"`,
+    ].join('\n');
+    const out = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+        REMBRIC_API_TOKEN: 'tok',
+      },
+    });
+    return out.stdout.includes(AFTER);
+  }
+
+  it('a 200 body carrying no `lines` key does not abort the caller without jq', () => {
+    expect(reachesNextStatement('{"ok":true,"sessionId":"s"}', HIDE_JQ)).toBe(true);
+  });
+
+  it('a 200 body whose empty `lines` array misses the fast path does not abort it either', () => {
+    // `"lines": []` with a space: the literal `"lines":[]` shortcut above the
+    // decoder does not match it, so the sed fallback runs and yields nothing.
+    expect(reachesNextStatement('{"ok":true,"lines": []}', HIDE_JQ)).toBe(true);
+  });
+
+  it('control: with jq present the same bodies already reached it', () => {
+    expect(spawnSync('bash', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+    expect(reachesNextStatement('{"ok":true,"sessionId":"s"}', '')).toBe(true);
+    expect(reachesNextStatement('{"ok":true,"lines": []}', '')).toBe(true);
+  });
+
+  it('a 200 body that is not JSON at all does not abort the caller WITH jq either', () => {
+    // jq exits 5 on it, and that pipeline is the last statement of its branch.
+    expect(spawnSync('bash', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+    expect(reachesNextStatement('not json at all', '')).toBe(true);
+  });
+
+  it('… and does not abort it without jq', () => {
+    expect(reachesNextStatement('not json at all', HIDE_JQ)).toBe(true);
+  });
+
+  it('control: a body that DOES carry lines still delivers them, jq or not', () => {
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n200' '{"lines":["a notice"]}'\n`, {
+      mode: 0o755,
+    });
+    for (const prelude of [HIDE_JQ, '']) {
+      const out = spawnSync(
+        'bash',
+        [
+          '-c',
+          `source '${apiSh}'\n${prelude}\nLINES="$(rembric_turn_report /api/demo/sessions/s/turn '{}')"\nprintf '%s|%s' "$LINES" "${AFTER}"`,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${bin}:${process.env.PATH ?? ''}`,
+            REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+            REMBRIC_API_TOKEN: 'tok',
+          },
+        },
+      );
+      expect(out.stdout).toBe(`a notice|${AFTER}`);
+    }
+  });
+});
+
+describe('the JSON string decoder is one implementation, and it agrees with jq', () => {
+  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
+
+  function withoutJq(fn: string, input: string): string {
+    return execFileSync(
+      'bash',
+      ['-c', `source '${apiSh}'\n${HIDE_JQ}\n${fn} '${input.replace(/'/g, `'\\''`)}'`],
+      { encoding: 'utf8' },
+    );
+  }
+
+  function viaJq(input: string, filter: string): string {
+    return execFileSync(
+      'bash',
+      ['-c', `printf '%s' '${input.replace(/'/g, `'\\''`)}' | jq -j '${filter}'`],
+      {
+        encoding: 'utf8',
+      },
+    );
+  }
+
+  // Each is a payload the sed-plus-substitution fallbacks got wrong, plus the
+  // ordinary shapes that must not regress.
+  const bodies = [
+    'plain text',
+    'say "hi"\nthen stop',
+    'back\\slash',
+    'a\\nb',
+    'tab\there',
+    '',
+    'multi\nline\nbody',
+    'cr\rlf',
+    'slash / solidus',
+  ];
+
+  for (const body of bodies) {
+    const label = JSON.stringify(body);
+
+    it(`prompt ${label} decodes exactly as jq does`, () => {
+      const input = JSON.stringify({ prompt: body });
+      expect(withoutJq('rembric_prompt_from_stdin_json', input)).toBe(
+        body === '' ? '' : viaJq(input, '.prompt'),
+      );
+    });
+
+    it(`compaction_summary ${label} decodes exactly as jq does`, () => {
+      const input = JSON.stringify({ compaction_summary: body });
+      expect(withoutJq('rembric_compaction_summary_from_stdin_json', input)).toBe(
+        body === '' ? '' : viaJq(input, '.compaction_summary'),
+      );
+    });
+  }
+
+  it('the camelCase spelling still resolves when the snake_case key is absent', () => {
+    const input = JSON.stringify({ compactionSummary: 'from codex' });
+    expect(withoutJq('rembric_compaction_summary_from_stdin_json', input)).toBe('from codex');
+  });
+
+  it('a literal backslash-n survives as two characters, not as a newline', () => {
+    // The ordering defect: `${s//\\n/…}` ran BEFORE `${s//\\\\/…}`, so the
+    // `n` of an escaped backslash was consumed as a newline escape.
+    expect(
+      withoutJq('rembric_compaction_summary_from_stdin_json', '{"compaction_summary":"a\\\\nb"}'),
+    ).toBe('a\\nb');
+  });
+
+  it('`\\uXXXX` is the ONE escape the fallback leaves verbatim, backslash included', () => {
+    // Decoding it needs printf's `\uHHHH`, which is bash 4.2+ and macOS ships
+    // 3.2 — so this is a documented divergence, and the backslash is kept so
+    // the text stays recoverable. jq is the recommended path, and here is
+    // what it would have produced instead.
+    const input = '{"prompt":"caf\\u00e9"}';
+    expect(withoutJq('rembric_prompt_from_stdin_json', input)).toBe('caf\\u00e9');
+    expect(viaJq(input, '.prompt')).toBe('café');
+  });
+
+  it('there is exactly one escape-decoding table in the file', () => {
+    const src = readFileSync(apiSh, 'utf8');
+    expect(src.match(/^\s+n\) out=|^\s+n\) cur=/gm) ?? []).toHaveLength(1);
   });
 });

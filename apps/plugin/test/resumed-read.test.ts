@@ -135,7 +135,8 @@ describe('the resumed-process read line', () => {
       }
       return new Response('', { status: 200 });
     });
-    await core.reportTurn('s-sibling', { usedTools: true });
+    core.markToolUsed('s-sibling');
+    await core.reportTurn('s-sibling');
 
     const turn1 = core.nudgesForTurn('s-sibling', 'anything');
     const resumedIndex = turn1.indexOf(RESUMED_READ_NUDGE);

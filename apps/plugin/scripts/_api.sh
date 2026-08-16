@@ -267,6 +267,97 @@ rembric_cwd_from_stdin_json() {
   printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
 }
 
+# Decode the escape sequences of a JSON string BODY (the text between the
+# quotes), leaving the result in REMBRIC_JSON_DECODED. The ONE escape decoder
+# in this file: the walker below, the prompt extractor and the compaction
+# extractor all route through it.
+#
+# A global rather than stdout because both of the callers that matter cannot
+# afford `$(…)`: command substitution strips a trailing newline the value is
+# entitled to keep, and it forks once per decoded string. A nameref would be
+# tidier but needs bash 4.3, and macOS still ships 3.2.
+#
+# `\uXXXX` is passed through VERBATIM — decoding it needs printf's `\uHHHH`,
+# which is bash 4.2+. jq remains the recommended path.
+rembric_json_decode_string() {
+  local s="${1:-}" out="" head esc
+  while [ -n "$s" ]; do
+    case "$s" in
+      *\\*) ;;
+      *)
+        out="${out}${s}"
+        break
+        ;;
+    esac
+    head="${s%%\\*}"
+    s="${s#*\\}"
+    out="${out}${head}"
+    esc="${s:0:1}"
+    s="${s:1}"
+    case "$esc" in
+      n) out="${out}"$'\n' ;;
+      r) out="${out}"$'\r' ;;
+      t) out="${out}"$'\t' ;;
+      b) out="${out}"$'\b' ;;
+      f) out="${out}"$'\f' ;;
+      u) out="${out}\\u" ;;
+      # A trailing lone backslash is not valid JSON; keep it rather than eat it.
+      '') out="${out}\\" ;;
+      *) out="${out}${esc}" ;;
+    esac
+  done
+  REMBRIC_JSON_DECODED="$out"
+}
+
+# Capture the raw (still-escaped) body of a JSON string value. Unlike the
+# bare `"\([^"]*\)"` the other extractors use, this admits `\"` inside the
+# value — a prompt containing a quoted word was otherwise truncated at it,
+# which is how `say "hi"` reached the server as `say \`.
+#
+# Not sed: the BRE that expresses "quote not preceded by an odd number of
+# backslashes" needs `\|`, which is a GNU extension, and the portable
+# `[^"]*\(\\"[^"]*\)*` form does not backtrack into the escaped quote here
+# (measured: still `say \`). The scan below chunks on `"` with parameter
+# expansion, so it stays C-level rather than per-character.
+rembric_json_raw_string_field() {
+  local input="${1:-}" key="${2:-}"
+  { [ -z "$input" ] || [ -z "$key" ]; } && return 0
+  local rest="$input" body out chunk bs
+  while :; do
+    case "$rest" in
+      *"\"${key}\""*) ;;
+      *) return 0 ;;
+    esac
+    rest="${rest#*\"${key}\"}"
+    # A later occurrence is tried when this one is not a `"key": "…"` pair —
+    # the key's own name can appear inside an earlier string value.
+    body="${rest#"${rest%%[![:space:]]*}"}"
+    case "$body" in :*) ;; *) continue ;; esac
+    body="${body#:}"
+    body="${body#"${body%%[![:space:]]*}"}"
+    case "$body" in \"*) ;; *) continue ;; esac
+    body="${body#\"}"
+    out=""
+    while :; do
+      case "$body" in
+        *\"*) ;;
+        *) return 0 ;; # unterminated string — treat as absent
+      esac
+      chunk="${body%%\"*}"
+      body="${body#*\"}"
+      out="${out}${chunk}"
+      # An ODD run of backslashes before the quote escapes it, so the string
+      # continues; an even run (including none) closes it.
+      bs="${chunk##*[!\\]}"
+      if [ $((${#bs} % 2)) -eq 0 ]; then
+        printf '%s' "$out"
+        return 0
+      fi
+      out="${out}\""
+    done
+  done
+}
+
 # Extract `prompt` from UserPromptSubmit hook stdin JSON (jq, sed fallback).
 rembric_prompt_from_stdin_json() {
   local input="${1:-}"
@@ -274,7 +365,11 @@ rembric_prompt_from_stdin_json() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null
   else
-    printf '%s' "$input" | sed -n 's/.*"prompt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
+    local raw
+    raw="$(rembric_json_raw_string_field "$input" prompt)"
+    [ -z "$raw" ] && return 0
+    rembric_json_decode_string "$raw"
+    printf '%s' "$REMBRIC_JSON_DECODED"
   fi
 }
 
@@ -304,37 +399,25 @@ rembric_stop_hook_active_from_stdin_json() {
 # (or a future client) ships the same content under `compactionSummary`.
 # Returns empty when missing.
 #
-# Prefers `jq` when available (correctly handles escaped quotes and any
-# whitespace in the payload). Falls back to a sed regex that matches the
-# same shape as the other stdin extractors — simple `"[^"]*"` value
-# capture. The fallback cannot recover content past an unescaped quote
-# inside the value, but in practice compaction summaries from Claude
-# Code / Codex are JSON-encoded so embedded quotes appear as `\"` and
-# the regex truncates at the first escape; for v1 this is the same
-# trade-off as the other stdin extractors. jq is the recommended path.
+# Prefers `jq` when available. The fallback goes through the SAME raw-body
+# capture and escape decoder as the prompt extractor: the chain of
+# `${s//…}` substitutions it used before applied `\n` BEFORE `\\`, so a
+# literal backslash followed by `n` (`"a\\nb"` on the wire) decoded to a
+# real newline. jq is still the recommended path — `\uXXXX` is the one
+# escape neither fallback decodes.
 rembric_compaction_summary_from_stdin_json() {
   local input="${1:-}"
   [ -z "$input" ] && return 0
-  local s=""
   if command -v jq >/dev/null 2>&1; then
-    s="$(printf '%s' "$input" | jq -r '.compaction_summary // .compactionSummary // empty' 2>/dev/null)"
-  else
-    s="$(printf '%s' "$input" | sed -n 's/.*"compaction_summary"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-    if [ -z "$s" ]; then
-      s="$(printf '%s' "$input" | sed -n 's/.*"compactionSummary"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-    fi
-    # The sed regex preserved JSON escape sequences (e.g. \n, \") literally.
-    # Convert them back to real characters so callers handling plain text
-    # see a readable summary; rembric_json_escape will re-encode on emit.
-    if [ -n "$s" ]; then
-      s="${s//\\n/$'\n'}"
-      s="${s//\\r/$'\r'}"
-      s="${s//\\t/$'\t'}"
-      s="${s//\\\"/\"}"
-      s="${s//\\\\/\\}"
-    fi
+    printf '%s' "$input" | jq -r '.compaction_summary // .compactionSummary // empty' 2>/dev/null
+    return 0
   fi
-  printf '%s' "$s"
+  local raw
+  raw="$(rembric_json_raw_string_field "$input" compaction_summary)"
+  [ -z "$raw" ] && raw="$(rembric_json_raw_string_field "$input" compactionSummary)"
+  [ -z "$raw" ] && return 0
+  rembric_json_decode_string "$raw"
+  printf '%s' "$REMBRIC_JSON_DECODED"
 }
 
 # Escape a string for embedding in a JSON value: backslashes, double quotes,
@@ -406,19 +489,31 @@ rembric_turn_report() {
   # body costs 0.0044ms against the 1.18ms fork measured for `jq`.
   case "$detail" in *'"lines":[]'*) return 0 ;; esac
   if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$detail" | jq -r '(.lines // [])[]' 2>/dev/null
+    # `|| true`: `jq` exits 5 on a body that is not JSON at all, and this
+    # pipeline is the last statement of the branch — the ERR trap is not
+    # inherited by functions (no `set -E`), so the non-zero surfaces at the
+    # CALLER's `LINES="$(…)"` assignment and kills the hook there.
+    printf '%s' "$detail" | jq -r '(.lines // [])[]' 2>/dev/null || true
   else
     local inner
     inner="$(printf '%s' "$detail" | sed -n 's/.*"lines"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p')"
-    [ -n "$inner" ] && rembric_json_string_array_items "$inner"
+    # `if`, not `[ -n "$inner" ] && …`: the `&&` form is the function's LAST
+    # statement, so an empty `inner` made it return 1, and the `trap 'exit 0'
+    # ERR` at the top of this file then killed the CALLER at its assignment —
+    # stop-report.sh never reached `_emit_nothing` and Codex lost its `{}`.
+    if [ -n "$inner" ]; then
+      rembric_json_string_array_items "$inner"
+    fi
   fi
 }
 
 # Decode the elements of a JSON array of strings, one per output line —
 # what `jq -r '.[]'` prints. Walks the string grammar rather than splitting
 # on `","`: the notice is ONE element carrying embedded `\n` and `\"`, which
-# a split-and-strip fallback emitted with the escapes still literal.
-# `\uXXXX` is not decoded — jq remains the recommended path.
+# a split-and-strip fallback emitted with the escapes still literal. This
+# walk only finds the element BOUNDARIES; the escapes inside one are decoded
+# by `rembric_json_decode_string`, the single decoder shared with the prompt
+# and compaction extractors.
 rembric_json_string_array_items() {
   local inner="${1:-}"
   local n=${#inner} i=0 ch in_str=0 esc=0 cur=""
@@ -434,21 +529,15 @@ rembric_json_string_array_items() {
     fi
     if [ "$esc" -eq 1 ]; then
       esc=0
-      case "$ch" in
-        n) cur="${cur}"$'\n' ;;
-        r) cur="${cur}"$'\r' ;;
-        t) cur="${cur}"$'\t' ;;
-        b) cur="${cur}"$'\b' ;;
-        f) cur="${cur}"$'\f' ;;
-        *) cur="${cur}${ch}" ;;
-      esac
+      cur="${cur}\\${ch}"
       continue
     fi
     case "$ch" in
       '\') esc=1 ;;
       '"')
         in_str=0
-        printf '%s\n' "$cur"
+        rembric_json_decode_string "$cur"
+        printf '%s\n' "$REMBRIC_JSON_DECODED"
         ;;
       *) cur="${cur}${ch}" ;;
     esac

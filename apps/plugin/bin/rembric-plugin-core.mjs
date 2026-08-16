@@ -112,6 +112,14 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   // (`session-nudges`, `plugin-session-protocol`).
   const pendingLines = new Map();
   const turnTitleSent = new Set();
+  // The per-turn tool-observation latch (`session-nudges`, D4a). Armed by the
+  // client's own predicate through `markToolUsed`, disarmed at the turn
+  // boundary by `beginTurn`, read and cleared by `reportTurn`. It lives here
+  // rather than in each client because only the PREDICATE differs between
+  // hosts — the latch's lifecycle is identical, and when each client owned
+  // its own copy they drifted: one reset it at the turn boundary and one did
+  // not, and one had to remember a second `delete` beside `forgetSession`.
+  const toolUsedSessions = new Set();
   // null = not yet captured; set once, from the FIRST session-ensure of this
   // protocol's lifetime, and never overwritten by a later session's ensure.
   let processResumed = null;
@@ -319,18 +327,41 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   }
 
   /**
+   * Arm the tool-observation latch for this session. Called from whatever
+   * event the host uses to signal a tool invocation — the predicate is the
+   * client's (opencode: a `tool` message part; Pi: a `toolResult` message or
+   * a `toolCall` content part), the latch is not.
+   */
+  function markToolUsed(sessionId) {
+    if (!sessionId) return;
+    toolUsedSessions.add(sessionId);
+  }
+
+  /**
+   * Disarm it at the START of a turn, from the host's own start-of-turn
+   * surface. Required rather than redundant with the read-and-clear in
+   * `reportTurn`: an observation arriving after the previous turn's report
+   * would otherwise be attributed to this turn.
+   */
+  function beginTurn(sessionId) {
+    toolUsedSessions.delete(sessionId);
+  }
+
+  /**
    * The per-turn report (`session-nudges`). Issued from each client's own
    * end-of-turn event (opencode: `session.idle`; Pi: `agent_settled`),
    * alongside — never instead of — the existing debounced transcript flush.
-   * `usedTools` is what the CALLER observed; this function makes no
-   * interpretation of it. The title rides along at most once per session,
-   * derived from the transcript accumulator's first recorded user message
-   * (already `<private>`-redacted by `appendUserMessage`).
+   * `usedTools` is read from the latch above and reported without
+   * interpretation; the server owns the interpretation. The title rides
+   * along at most once per session, derived from the transcript
+   * accumulator's first recorded user message (already `<private>`-redacted
+   * by `appendUserMessage`).
    */
-  async function reportTurn(sessionId, { usedTools } = {}) {
+  async function reportTurn(sessionId) {
+    const usedTools = toolUsedSessions.delete(sessionId);
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
-    const body = { usedTools: usedTools === true };
+    const body = { usedTools };
     if (!turnTitleSent.has(sessionId)) {
       const title = deriveTitle(sessionId);
       if (title) {
@@ -404,6 +435,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     sessionOpeningEmitted.delete(sessionId);
     pendingLines.delete(sessionId);
     turnTitleSent.delete(sessionId);
+    toolUsedSessions.delete(sessionId);
     const entries = sessionMessages.get(sessionId) ?? [];
     sessionMessages.delete(sessionId);
     const pending = pendingFlush.get(sessionId);
@@ -423,6 +455,8 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     isKnown,
     ensureSession,
     nudgesForTurn,
+    markToolUsed,
+    beginTurn,
     reportTurn,
     appendUserMessage,
     appendAssistantMessage,

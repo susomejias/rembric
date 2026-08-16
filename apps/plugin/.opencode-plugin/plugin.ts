@@ -119,10 +119,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
-  // Set in message.part.updated for any non-text part, read and cleared by
-  // the session.idle report (session-nudges). Never read from the
-  // extension's own tool `execute` — that observes only Rembric's tools.
-  const toolUsedFlags = new Map<string, boolean>();
   // Governs the report by TURN boundary rather than by the flush's
   // debounce timer: cleared at the next chat.message, so a burst of
   // session.idle events within one turn reports exactly once.
@@ -182,7 +178,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
         const info = (event.properties?.info ?? {}) as { id?: string };
         const sessionId = info.id ?? '';
         if (!sessionId) return;
-        toolUsedFlags.delete(sessionId);
         reportedThisTurn.delete(sessionId);
         forgetMessageState(core.forgetSession(sessionId));
       }
@@ -217,9 +212,10 @@ export const RembricPlugin: Plugin = async (ctx) => {
         // Recorded BEFORE the non-text early return below, which is the
         // branch a tool part takes (session-nudges). Pinned to the SDK's
         // concrete `tool` type: `reasoning`, `file`, `snapshot`, `patch`,
-        // `agent`, `retry` and the step markers are not tool use.
+        // `agent`, `retry` and the step markers are not tool use. The
+        // predicate is this client's; the latch is the core's.
         if (part.type === 'tool' && part.sessionID) {
-          toolUsedFlags.set(part.sessionID, true);
+          core.markToolUsed(part.sessionID);
         }
         if (part.type !== 'text') return;
         const sessionId = part.sessionID ?? '';
@@ -252,9 +248,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
         // idle events within one turn must not report it more than once.
         if (!reportedThisTurn.has(sessionId)) {
           reportedThisTurn.add(sessionId);
-          const usedTools = toolUsedFlags.get(sessionId) ?? false;
-          toolUsedFlags.delete(sessionId);
-          void core.reportTurn(sessionId, { usedTools });
+          void core.reportTurn(sessionId);
         }
       }
     },
@@ -263,8 +257,10 @@ export const RembricPlugin: Plugin = async (ctx) => {
       if (core.isSubAgent(input.sessionID)) return;
 
       // A new turn starts here — the previous turn's report (if any) is
-      // done, so the next session.idle may report again.
+      // done, so the next session.idle may report again, and a tool part
+      // that arrived after it must not count towards this turn.
       reportedThisTurn.delete(input.sessionID);
+      core.beginTurn(input.sessionID);
 
       // Covers a session resumed without a fresh session.created event.
       await core.ensureSession(input.sessionID);

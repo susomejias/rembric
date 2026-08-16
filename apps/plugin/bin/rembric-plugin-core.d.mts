@@ -30,8 +30,6 @@ export type SessionProtocolOptions = {
   cwd?: string;
 };
 
-export type ReportTurnOptions = { usedTools: boolean };
-
 export type SessionProtocol = {
   readonly disabled: boolean;
   readonly disabledReason: string | null;
@@ -41,8 +39,15 @@ export type SessionProtocol = {
   isKnown(sessionId: string): boolean;
   ensureSession(sessionId: string): Promise<void>;
   nudgesForTurn(sessionId: string, prompt: string): string[];
-  /** The per-turn report (`session-nudges`); caches the server's returned lines for the next `nudgesForTurn`. */
-  reportTurn(sessionId: string, opts: ReportTurnOptions): Promise<void>;
+  /** Arm the tool-observation latch — the client supplies only the predicate. */
+  markToolUsed(sessionId: string): void;
+  /** Disarm it at the host's start-of-turn surface. */
+  beginTurn(sessionId: string): void;
+  /**
+   * The per-turn report (`session-nudges`); reads and clears the latch, and
+   * caches the server's returned lines for the next `nudgesForTurn`.
+   */
+  reportTurn(sessionId: string): Promise<void>;
   /** Returns the entries the per-session cap evicted, oldest first. */
   appendUserMessage(sessionId: string, rawText: string): TranscriptEntry[];
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];

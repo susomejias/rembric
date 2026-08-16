@@ -12,15 +12,15 @@
 
 `apps/plugin/.opencode-plugin/plugin.ts` SHALL participate in the report-and-print contract (`session-nudges`) through the two events it already registers, adding no new event registration.
 
-**Reporting, on `session.idle`.** That branch already fires once per agent turn, after the assistant response completes and before the next user prompt, which is exactly the end-of-turn moment the contract names. It SHALL, in addition to the debounced transcript flush it already performs, call the shared core's turn-report helper for the session, passing whether a tool was observed during the turn, and SHALL cache the returned lines. Subagent sessions SHALL NOT be reported.
+**Reporting, on `session.idle`.** That branch already fires once per agent turn, after the assistant response completes and before the next user prompt, which is exactly the end-of-turn moment the contract names. It SHALL, in addition to the debounced transcript flush it already performs, call the shared core's turn-report helper for the session, and the core SHALL read its own tool-observation latch and cache the returned lines. Subagent sessions SHALL NOT be reported.
 
-**Observing tool use.** The `message.part.updated` branch SHALL set a per-session flag when it sees a part whose `type` is exactly `"tool"` — that branch already inspects `part.type` and returns early for everything that is not `text`, so the observation costs one comparison on a path that already runs. The flag SHALL be read and cleared by the report on `session.idle`. **The concrete type is pinned, and it is NOT "anything that is not `text`":** the installed SDK's `Part` union enumerates `text`, `subtask`, `reasoning`, `file`, `tool`, `step-start`, `step-finish`, `snapshot`, `patch`, `agent`, `retry` and `compaction`, so a not-`text` test reports tool use for a turn that only thought out loud or emitted a step marker. If a future host emits no `tool` part for a tool invocation, this client falls under the fail-open rule in `session-nudges` and reports `true`, and this requirement SHALL be amended to say so.
+**Observing tool use.** The `message.part.updated` branch SHALL arm the shared core's tool-observation latch when it sees a part whose `type` is exactly `"tool"` — that branch already inspects `part.type` and returns early for everything that is not `text`, so the observation costs one comparison on a path that already runs. The latch SHALL be disarmed by the core at the turn boundary the `chat.message` handler already marks, and read and cleared by the report on `session.idle`. **This client SHALL hold no per-session flag of its own**: the predicate above is what differs between hosts, and the latch is not. **The concrete type is pinned, and it is NOT "anything that is not `text`":** the installed SDK's `Part` union enumerates `text`, `subtask`, `reasoning`, `file`, `tool`, `step-start`, `step-finish`, `snapshot`, `patch`, `agent`, `retry` and `compaction`, so a not-`text` test reports tool use for a turn that only thought out loud or emitted a step marker. If a future host emits no `tool` part for a tool invocation, this client falls under the fail-open rule in `session-nudges` and reports `true`, and this requirement SHALL be amended to say so.
 
 **Printing, on `chat.message`.** The handler SHALL push the cached lines — the sessionId line first, then the server's lines verbatim — as separate `output.parts` text parts, each through the existing `nudgePart` helper, since opencode validates every pushed part against its real `TextPart` schema and a bare `{ type: 'text', text }` takes down the turn. Reading the cache SHALL clear it. The recall nudge and the session opening are pushed by the same handler from the shared fixtures and are independent of the notice: any combination MAY fire on the same turn and none replaces another.
 
 **The handler SHALL compose no reminder text of its own.** The unprefixed `…Core` fixture variants remain the source for the client-composed lines; the notice arrives already prefixed from the server.
 
-Subagent sessions SHALL neither be reported nor printed to (the handler's existing subagent guard covers both). The per-session cache and tool flag SHALL be evicted in the existing `session.deleted` cleanup, alongside `sessionMessages` and `assistantParts`.
+Subagent sessions SHALL neither be reported nor printed to (the handler's existing subagent guard covers both). The per-session cache and the latch SHALL be evicted by the core's `forgetSession`, which the existing `session.deleted` cleanup already calls — this handler SHALL NOT carry a second eviction beside it.
 
 #### Scenario: One report per turn, from `session.idle`
 
@@ -41,7 +41,14 @@ Subagent sessions SHALL neither be reported nor printed to (the handler's existi
 - **GIVEN** a turn whose part sequence is a tool part followed by several `text` parts of the assistant's closing answer
 - **WHEN** `session.idle` fires
 - **THEN** the report SHALL carry `usedTools: true`
-- **AND** the flag SHALL have been set once and read once, rather than recomputed from the most recent part
+- **AND** the latch SHALL have been armed once and read once, rather than recomputed from the most recent part
+
+#### Scenario: A tool part arriving after the report belongs to the next turn's start, not to it
+
+- **GIVEN** a session whose `session.idle` report for turn one has already been issued
+- **WHEN** a `tool` part arrives before the next `chat.message`, and that turn then ends with no tool of its own
+- **THEN** the second report SHALL carry `usedTools: false`
+- **AND** the control SHALL pass in the same run: turn one's report SHALL have carried `usedTools: true`
 
 #### Scenario: The server's lines are pushed verbatim, as valid parts
 

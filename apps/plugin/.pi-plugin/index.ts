@@ -301,11 +301,6 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
-  // Accumulated across the turn: reset in before_agent_start, set in
-  // message_end, read and cleared in agent_settled (session-nudges D4a).
-  // Never read from the extension's own tool `execute` — that observes
-  // only Rembric's tools, not the model's use of tools generally.
-  let toolUsedThisTurn = false;
 
   pi.on('session_start', async (_event, ctx) => {
     if (core) return;
@@ -386,7 +381,7 @@ export default function rembric(pi: ExtensionApi): void {
     const prompt = event.prompt ?? '';
     // Reset BEFORE this turn's message_end events can set it — a flag set in
     // one turn must never be read in the next (session-nudges D4a).
-    toolUsedThisTurn = false;
+    core.beginTurn(sessionId);
     await core.ensureSession(sessionId);
     core.appendUserMessage(sessionId, prompt);
 
@@ -410,22 +405,22 @@ export default function rembric(pi: ExtensionApi): void {
 
   pi.on('message_end', (event: MessageEndEvent, ctx) => {
     if (!core) return;
+    const sessionId = ctx.sessionManager.getSessionId();
     // Set BEFORE the role filter below, which is precisely the branch a
     // `toolResult` message takes, and before assistantText's own `type ===
-    // 'text'` filter, which drops every `toolCall` part.
-    if (messageIndicatesToolUse(event.message)) toolUsedThisTurn = true;
+    // 'text'` filter, which drops every `toolCall` part. The predicate is
+    // this client's; the latch is the core's.
+    if (messageIndicatesToolUse(event.message)) core.markToolUsed(sessionId);
     if (event.message?.role !== 'assistant') return;
     const text = assistantText(event.message.content);
     if (!text) return;
-    core.appendAssistantMessage(ctx.sessionManager.getSessionId(), text);
+    core.appendAssistantMessage(sessionId, text);
   });
 
   pi.on('agent_settled', (_event, ctx) => {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
-    const usedTools = toolUsedThisTurn;
-    toolUsedThisTurn = false;
-    void core.reportTurn(sessionId, { usedTools });
+    void core.reportTurn(sessionId);
     core.scheduleIdleFlush(sessionId);
   });
 
