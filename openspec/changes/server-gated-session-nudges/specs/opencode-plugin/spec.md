@@ -14,7 +14,7 @@
 
 **Reporting, on `session.idle`.** That branch already fires once per agent turn, after the assistant response completes and before the next user prompt, which is exactly the end-of-turn moment the contract names. It SHALL, in addition to the debounced transcript flush it already performs, call the shared core's turn-report helper for the session, passing whether a tool was observed during the turn, and SHALL cache the returned lines. Subagent sessions SHALL NOT be reported.
 
-**Observing tool use.** The `message.part.updated` branch SHALL set a per-session flag when it sees a part whose `type` is neither `text` nor absent — that branch already inspects `part.type` and returns early for everything that is not `text`, so the observation costs one comparison on a path that already runs. The flag SHALL be read and cleared by the report on `session.idle`. The source is settled: the installed SDK enumerates the message part types and `tool` is among them, while `plugin.ts:207` discards every part that is not `text`. What remains is to pin the CONCRETE `type` string during implementation by logging the distinct values seen on one tool turn; if the host turns out to emit no non-`text` part for a tool invocation, the client SHALL report `true` unconditionally and this requirement SHALL be amended to say so, per the fail-open rule in `session-nudges`.
+**Observing tool use.** The `message.part.updated` branch SHALL set a per-session flag when it sees a part whose `type` is exactly `"tool"` — that branch already inspects `part.type` and returns early for everything that is not `text`, so the observation costs one comparison on a path that already runs. The flag SHALL be read and cleared by the report on `session.idle`. **The concrete type is pinned, and it is NOT "anything that is not `text`":** the installed SDK's `Part` union enumerates `text`, `subtask`, `reasoning`, `file`, `tool`, `step-start`, `step-finish`, `snapshot`, `patch`, `agent`, `retry` and `compaction`, so a not-`text` test reports tool use for a turn that only thought out loud or emitted a step marker. If a future host emits no `tool` part for a tool invocation, this client falls under the fail-open rule in `session-nudges` and reports `true`, and this requirement SHALL be amended to say so.
 
 **Printing, on `chat.message`.** The handler SHALL push the cached lines — the sessionId line first, then the server's lines verbatim — as separate `output.parts` text parts, each through the existing `nudgePart` helper, since opencode validates every pushed part against its real `TextPart` schema and a bare `{ type: 'text', text }` takes down the turn. Reading the cache SHALL clear it. The recall nudge and the session opening are pushed by the same handler from the shared fixtures and are independent of the notice: any combination MAY fire on the same turn and none replaces another.
 
@@ -31,10 +31,10 @@ Subagent sessions SHALL neither be reported nor printed to (the handler's existi
 
 #### Scenario: A tool part is observed and reported
 
-- **GIVEN** a turn during which `message.part.updated` fired with a part whose `type` is not `text`
+- **GIVEN** a turn during which `message.part.updated` fired with a part whose `type` is `"tool"`
 - **WHEN** `session.idle` fires
 - **THEN** the report SHALL carry `usedTools: true`
-- **AND** the control SHALL pass in the same run: a turn with only `text` parts SHALL report `usedTools: false`
+- **AND** the control SHALL pass in the same run: a turn whose only non-`text` parts are `reasoning`, `snapshot` or the step markers SHALL report `usedTools: false`
 
 #### Scenario: The flag survives the whole turn, not just the last part
 
@@ -95,7 +95,7 @@ The debounce SHALL NOT exceed 2 seconds (don't accumulate too much state in-flig
 
 The `event` dispatcher's `"message.part.updated"` branch SHALL:
 
-1. **Record that the turn used a tool when `properties.part.type` is present and is not `"text"`**, setting a per-session boolean the `session.idle` report reads and clears (`session-nudges`). This SHALL happen before the early return in step 2, because that return is precisely the branch a tool part takes.
+1. **Record that the turn used a tool when `properties.part.type` is exactly `"tool"`**, setting a per-session boolean the `session.idle` report reads and clears (`session-nudges`). This SHALL happen before the early return in step 2, because that return is precisely the branch a tool part takes.
 2. Return immediately if `properties.part.type !== "text"`.
 3. Return immediately if `properties.part.sessionID`, `properties.part.messageID`, or `properties.part.id` is empty.
 4. Return immediately if `properties.part.sessionID` is in `subAgentSessions`, or is not in `knownSessions`.
@@ -105,7 +105,7 @@ The `event` dispatcher's `"message.part.updated"` branch SHALL:
 
 The branch MUST be idempotent under streaming updates: opencode fires `message.part.updated` many times per assistant turn (token-by-token, and potentially once per distinct part). The id-keyed replacement in step 7 ensures only one final-state entry per assistant message in the accumulator. The tool flag in step 1 is idempotent by construction — it is set, never counted.
 
-**The concrete part type SHALL be pinned from an observed value, not from the type declaration in `plugin.ts`**, which types `part.type` as an open `string`. The SDK's own enumeration of part types is what establishes that a tool part exists; logging the distinct values on one tool turn is what establishes which string it is. If the host emits no non-`text` part for a tool invocation, this client falls under the fail-open rule in `session-nudges` and reports `true`, and this step SHALL be rewritten to say so rather than left describing a signal that does not arrive.
+**The concrete part type SHALL be pinned to the SDK's `"tool"` literal, not to "not `text`"**, because `plugin.ts` types `part.type` as an open `string` and the union carries ten other members that are not tool use. If the host emits no `tool` part for a tool invocation, this client falls under the fail-open rule in `session-nudges` and reports `true`, and this step SHALL be rewritten to say so rather than left describing a signal that does not arrive.
 
 `messageRoles`, `assistantParts`, the per-session tool flag and the per-session line cache MUST be cleared when that session's `session.deleted` event fires (alongside the existing `sessionMessages`/`pendingFlush` cleanup), to avoid unbounded growth across a long-running opencode server process. The `userTurnCounts` map named in the previous version of this cleanup no longer exists.
 
@@ -119,12 +119,14 @@ The branch MUST be idempotent under streaming updates: opencode fires `message.p
 - **WHEN** the dispatcher receives `message.part.updated` with `part.messageID="m2"`, `part.id="p2"`, text `"Done."` (and `messageRoles.get("m2") === "assistant"`)
 - **THEN** `sessionMessages.get("s1")` is `[{role:'assistant', text:'Hello, working on it.', id:'m1'}, {role:'assistant', text:'Done.', id:'m2'}]`
 
-#### Scenario: A non-text part sets the tool flag and is otherwise ignored
+#### Scenario: A tool part sets the tool flag and is otherwise ignored
 
 - **GIVEN** a session "s1" in `knownSessions`
-- **WHEN** the dispatcher receives `message.part.updated` with `part.sessionID="s1"` and a `part.type` other than `"text"`
+- **WHEN** the dispatcher receives `message.part.updated` with `part.sessionID="s1"` and `part.type="tool"`
 - **THEN** the per-session tool flag for "s1" SHALL be set
 - **AND** `sessionMessages.get("s1")` SHALL be unchanged
+- **WHEN** the dispatcher instead receives a part whose `type` is `"reasoning"`, `"snapshot"` or `"step-start"`
+- **THEN** the flag SHALL NOT be set
 
 #### Scenario: Non-assistant roles and unregistered sessions are ignored
 

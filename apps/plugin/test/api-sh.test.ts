@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -220,5 +220,53 @@ describe('rembric_first_prompt_write / _take (the provisional title travels once
     callIn(tmp, `rembric_first_prompt_write s-b 'prompt b'`);
     expect(callIn(tmp, `rembric_first_prompt_take s-a`)).toBe('prompt a');
     expect(callIn(tmp, `rembric_first_prompt_take s-b`)).toBe('prompt b');
+  });
+});
+
+describe('rembric_turn_report — the notice decodes with and without jq', () => {
+  // One array element carrying the notice's embedded newlines and quotes,
+  // exactly the shape the server composes.
+  const NOTICE =
+    'rembric: refresh it.\nStored for "my session" (sizes, not targets):\n## Goal (9c)';
+  const RESPONSE = JSON.stringify({ ok: true, sessionId: 's', lines: [NOTICE] });
+  // Hides jq from `rembric_turn_report` without touching PATH, which bash
+  // rewrites on this host. Anything else `command` is asked stays real.
+  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
+
+  let bin: string;
+
+  beforeEach(() => {
+    bin = mkdtempSync(join(tmpdir(), 'rbr-nojq-'));
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n200' '${RESPONSE}'\n`, {
+      mode: 0o755,
+    });
+  });
+
+  afterEach(() => rmSync(bin, { recursive: true, force: true }));
+
+  function report(prelude = ''): string {
+    const script = `source '${apiSh}'; ${prelude}\nrembric_turn_report /api/demo/sessions/s/turn '{"usedTools":true}'`;
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+        REMBRIC_API_TOKEN: 'tok',
+      },
+    });
+  }
+
+  it('emits the notice as real lines when jq is absent', () => {
+    // The probe's own control: the override really does hide jq.
+    expect(
+      spawnSync('bash', ['-c', `${HIDE_JQ} command -v jq`], { encoding: 'utf8' }).status,
+    ).not.toBe(0);
+    expect(report(HIDE_JQ)).toBe(`${NOTICE}\n`);
+  });
+
+  it('control: jq on the same input produces the same bytes', () => {
+    expect(spawnSync('bash', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+    expect(report()).toBe(`${NOTICE}\n`);
   });
 });
