@@ -43,15 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-sync.sh codex-cli"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-nudge.sh codex-cli"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-report.sh codex-cli"
           }
         ]
       }

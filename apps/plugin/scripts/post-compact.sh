@@ -32,10 +32,10 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
 fi
 
 cat <<'PROTOCOL'
-rembric: This session resumes from a compaction. BEFORE continuing:
+rembric: Resumed from a compaction. BEFORE continuing:
 1. Call memory.session_get to read the stored summary.
-2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state, brought up to date — this REPLACES the stored value.
-   - title: ≤100 chars, descriptive of the work (not generic, not the cwd).
+2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state: sent `##` sections REPLACE their stored counterpart; omitted ones STAY.
+   - title: ≤100 chars, not the cwd.
    - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):
 ## Goal
 ## Accomplished
@@ -43,8 +43,8 @@ rembric: This session resumes from a compaction. BEFORE continuing:
 ## Verified+how
 ## Unfinished+why
 ## Files
-3. Still missing detail? Call memory.context or memory.search.
-4. Only then, continue with the user's request.
+3. Missing detail? memory.context or memory.search.
+4. Then continue.
 PROTOCOL
 
 exit 0

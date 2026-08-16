@@ -252,6 +252,24 @@ function assistantText(content: unknown): string {
     .trim();
 }
 
+// The settled message (the last `message_end` of a turn) carries no
+// `toolCall` part — the calls were in an EARLIER `message_end` with
+// `stopReason: "toolUse"` — so the tool-observation flag must be
+// ACCUMULATED across the whole turn rather than read from one event
+// (session-nudges D4a). `event.message.role === 'toolResult'` covers the
+// separate result messages; the `toolCall` check covers the calling one.
+function messageIndicatesToolUse(message: MessageEndEvent['message']): boolean {
+  if (!message) return false;
+  if (message.role === 'toolResult') return true;
+  if (message.role !== 'assistant') return false;
+  const content = message.content;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (part) =>
+      typeof part === 'object' && part !== null && (part as ToolContent).type === 'toolCall',
+  );
+}
+
 // Resuming the session already open emits `reason: "resume"` with the same id,
 // so the reason alone cannot tell replacement-by-another from replacement-by-
 // itself. Compared only when the event names a file: on `quit` it is absent, and
@@ -283,6 +301,11 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
+  // Accumulated across the turn: reset in before_agent_start, set in
+  // message_end, read and cleared in agent_settled (session-nudges D4a).
+  // Never read from the extension's own tool `execute` — that observes
+  // only Rembric's tools, not the model's use of tools generally.
+  let toolUsedThisTurn = false;
 
   pi.on('session_start', async (_event, ctx) => {
     if (core) return;
@@ -361,6 +384,9 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const prompt = event.prompt ?? '';
+    // Reset BEFORE this turn's message_end events can set it — a flag set in
+    // one turn must never be read in the next (session-nudges D4a).
+    toolUsedThisTurn = false;
     await core.ensureSession(sessionId);
     core.appendUserMessage(sessionId, prompt);
 
@@ -384,6 +410,10 @@ export default function rembric(pi: ExtensionApi): void {
 
   pi.on('message_end', (event: MessageEndEvent, ctx) => {
     if (!core) return;
+    // Set BEFORE the role filter below, which is precisely the branch a
+    // `toolResult` message takes, and before assistantText's own `type ===
+    // 'text'` filter, which drops every `toolCall` part.
+    if (messageIndicatesToolUse(event.message)) toolUsedThisTurn = true;
     if (event.message?.role !== 'assistant') return;
     const text = assistantText(event.message.content);
     if (!text) return;
@@ -392,7 +422,11 @@ export default function rembric(pi: ExtensionApi): void {
 
   pi.on('agent_settled', (_event, ctx) => {
     if (!core) return;
-    core.scheduleIdleFlush(ctx.sessionManager.getSessionId());
+    const sessionId = ctx.sessionManager.getSessionId();
+    const usedTools = toolUsedThisTurn;
+    toolUsedThisTurn = false;
+    void core.reportTurn(sessionId, { usedTools });
+    core.scheduleIdleFlush(sessionId);
   });
 
   pi.on('session_shutdown', async (event: SessionShutdownEvent, ctx) => {

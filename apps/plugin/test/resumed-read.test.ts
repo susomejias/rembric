@@ -8,12 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  createSessionProtocol,
-  RESUMED_READ_NUDGE,
-  SUMMARY_NUDGE,
-  SUMMARY_NUDGE_EVERY,
-} from '../bin/rembric-plugin-core.mjs';
+import { createSessionProtocol, RESUMED_READ_NUDGE } from '../bin/rembric-plugin-core.mjs';
 
 // The resumed-process read line lives in the shared core (plugin-session-protocol),
 // so this is the only place the rule can be pinned for the in-process JS/TS
@@ -69,25 +64,19 @@ describe('the fixture text is the rembric:-prefixed shared core, and TS matches 
 });
 
 describe('the resumed-process read line', () => {
-  it('is emitted once, on the first summary-reminder firing, when the FIRST ensure reported created:false', async () => {
+  it("is emitted once, on the session's first turn, when the FIRST ensure reported created:false", async () => {
     stubEnsureCreated(false);
     const core = protocol();
     await core.ensureSession('s-resumed');
 
     const turn1 = core.nudgesForTurn('s-resumed', 'anything');
     expect(turn1).toContain(RESUMED_READ_NUDGE);
-    expect(turn1).toContain(SUMMARY_NUDGE);
-
     // Control: it really did fire, so the next assertion is not measured
     // against an empty set.
     expect(turn1.filter((l) => l === RESUMED_READ_NUDGE)).toHaveLength(1);
 
-    let lastTurn: string[] = [];
-    for (let i = 2; i <= SUMMARY_NUDGE_EVERY; i += 1) {
-      lastTurn = core.nudgesForTurn('s-resumed', 'anything');
-    }
-    expect(lastTurn).toContain(SUMMARY_NUDGE);
-    expect(lastTurn).not.toContain(RESUMED_READ_NUDGE);
+    const turn2 = core.nudgesForTurn('s-resumed', 'anything');
+    expect(turn2).not.toContain(RESUMED_READ_NUDGE);
   });
 
   it('is never emitted when the FIRST ensure reported created:true', async () => {
@@ -96,14 +85,7 @@ describe('the resumed-process read line', () => {
     await core.ensureSession('s-fresh');
 
     const turn1 = core.nudgesForTurn('s-fresh', 'anything');
-    expect(turn1).toContain(SUMMARY_NUDGE);
     expect(turn1).not.toContain(RESUMED_READ_NUDGE);
-
-    let lastTurn: string[] = [];
-    for (let i = 2; i <= SUMMARY_NUDGE_EVERY; i += 1) {
-      lastTurn = core.nudgesForTurn('s-fresh', 'anything');
-    }
-    expect(lastTurn).not.toContain(RESUMED_READ_NUDGE);
   });
 
   it('is never emitted when the FIRST ensure failed (unknown is do-not-advise, not advise-anyway)', async () => {
@@ -112,7 +94,6 @@ describe('the resumed-process read line', () => {
     await core.ensureSession('s-ensure-down');
 
     const turn1 = core.nudgesForTurn('s-ensure-down', 'anything');
-    expect(turn1).toContain(SUMMARY_NUDGE);
     expect(turn1).not.toContain(RESUMED_READ_NUDGE);
   });
 
@@ -129,38 +110,38 @@ describe('the resumed-process read line', () => {
     stubEnsureCreated(false);
     const core = protocol();
     await core.ensureSession('s-first');
-    // A LATER ensure in the SAME process reports created:true; the process-wide
-    // latch from the first ensure still governs every session's line.
-    stubEnsureCreated(true);
+    // A LATER ensure in the SAME process reports an unclear outcome (no
+    // `created` field); the process-wide latch from the FIRST ensure still
+    // governs the resumedRead line for every session. (Its own per-session
+    // `created` outcome is `null`, so the OPENING line — which IS tracked
+    // per-session — does not fire and mask this one.)
+    stubEnsureCreated(undefined);
     await core.ensureSession('s-second');
 
     expect(core.nudgesForTurn('s-second', 'anything')).toContain(RESUMED_READ_NUDGE);
   });
 
-  it('is never merged into, and never changes, the summary-reminder string', async () => {
-    stubEnsureCreated(false);
-    const core = protocol();
-    await core.ensureSession('s-unchanged');
-
-    const turn1 = core.nudgesForTurn('s-unchanged', 'anything');
-    expect(turn1.filter((l) => l.startsWith('rembric: did real work happen'))).toEqual([
-      SUMMARY_NUDGE,
-    ]);
-  });
-
-  it('is emitted as its own line, alongside the reminder, never interpolated into it', async () => {
+  it('is emitted as its own line, ahead of a cached server notice, never merged into it', async () => {
     stubEnsureCreated(false);
     const core = protocol();
     await core.ensureSession('s-sibling');
+    // Force a notice into the cache by stubbing reportTurn's response.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        return new Response(JSON.stringify({ ok: true, lines: ['rembric: a server notice'] }), {
+          status: 200,
+        });
+      }
+      return new Response('', { status: 200 });
+    });
+    await core.reportTurn('s-sibling', { usedTools: true });
 
     const turn1 = core.nudgesForTurn('s-sibling', 'anything');
     const resumedIndex = turn1.indexOf(RESUMED_READ_NUDGE);
-    const summaryIndex = turn1.indexOf(SUMMARY_NUDGE);
+    const noticeIndex = turn1.indexOf('rembric: a server notice');
     expect(resumedIndex).toBeGreaterThanOrEqual(0);
-    expect(summaryIndex).toBeGreaterThan(resumedIndex);
-    for (const line of turn1) {
-      expect(line).not.toContain(SUMMARY_NUDGE.slice(0, 20) + RESUMED_READ_NUDGE.slice(0, 10));
-    }
+    expect(noticeIndex).toBeGreaterThan(resumedIndex);
   });
 
   it('never reads the response body of a /summary POST', async () => {
@@ -317,13 +298,11 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
     expect(out).not.toContain(fixtures.resumedRead);
   });
 
-  it('never emits the resumedRead line on the later every-10th cadence firing (stop-nudge.sh owns that turn, not this line)', async () => {
+  it('never repeats the resumedRead line on a later turn', async () => {
     ensureBody = '{"ok":true,"created":false}';
     await runSessionStart('s-once');
-    let out = '';
-    for (let i = 1; i <= SUMMARY_NUDGE_EVERY; i += 1) {
-      out = await runPromptNudge('s-once');
-    }
+    await runPromptNudge('s-once');
+    const out = await runPromptNudge('s-once');
     expect(out).not.toContain(fixtures.resumedRead);
   });
 
@@ -340,29 +319,11 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
     try {
       // A DIFFERENT TMPDIR has no marker at all — indistinguishable from
       // "unreadable" from prompt-nudge.sh's point of view, and it must
-      // still emit the reminder.
+      // still exit cleanly and emit nothing.
       const out = await runPromptNudge('s-broken-marker', { TMPDIR: otherTmp });
       expect(out).not.toContain(fixtures.resumedRead);
-      expect(out).toContain(fixtures.summary);
     } finally {
       rmSync(otherTmp, { recursive: true, force: true });
     }
-  });
-
-  it('emits it as its own line, ordered before the summary reminder, never merged into it', async () => {
-    ensureBody = '{"ok":true,"created":false}';
-    await runSessionStart('s-order');
-    const out = await runPromptNudge('s-order');
-
-    const marker = '\u0000SUMMARY_NUDGE\u0000';
-    const lines = out
-      .replace(fixtures.summary, marker)
-      .split('\n')
-      .filter((l) => l.length > 0)
-      .map((line) => (line === marker ? fixtures.summary : line));
-    const resumedIndex = lines.indexOf(fixtures.resumedRead);
-    const summaryIndex = lines.indexOf(fixtures.summary);
-    expect(resumedIndex).toBeGreaterThanOrEqual(0);
-    expect(summaryIndex).toBeGreaterThan(resumedIndex);
   });
 });

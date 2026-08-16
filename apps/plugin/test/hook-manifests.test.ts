@@ -43,8 +43,8 @@ describe('hooks.json (Claude Code)', () => {
     );
   });
 
-  it('carries exactly nine handler entries', () => {
-    expect(handlerCount(claudeHooks)).toBe(9);
+  it('carries exactly eight handler entries', () => {
+    expect(handlerCount(claudeHooks)).toBe(8);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -71,21 +71,14 @@ describe('hooks.json (Claude Code)', () => {
     }
   });
 
-  // Stop carries TWO entries with opposite obligations, and getting either wrong
-  // silently disables it. The raw sync must stay async so it never delays the
-  // turn; the reminder must NOT be async, because an async hook is fire-and-forget
-  // by the host's contract and cannot contribute feedback to the turn at all.
-  // Asserted as an ordered pair of (script, async), not as a set.
-  it('pairs an async raw sync with a synchronous reminder', () => {
-    expect(
-      claudeHooks.Stop.flatMap((group) => group.hooks).map((h) => [
-        h.command.replace(/^.*scripts\//, 'scripts/').split(' ')[0],
-        h.async ?? false,
-      ]),
-    ).toEqual([
-      ['scripts/stop-sync.sh', true],
-      ['scripts/stop-nudge.sh', false],
-    ]);
+  // Stop carries exactly ONE entry, and it must NOT be async: an async hook
+  // is fire-and-forget by the host's contract and could not deliver a
+  // response the next turn depends on.
+  it('declares exactly one synchronous Stop entry, invoking stop-report.sh', () => {
+    const handlers = claudeHooks.Stop.flatMap((group) => group.hooks);
+    expect(handlers).toHaveLength(1);
+    expect(handlers[0]!.command).toContain('scripts/stop-report.sh');
+    expect(handlers[0]!.async).toBeUndefined();
   });
 });
 
@@ -103,8 +96,8 @@ describe('hooks.codex.json (Codex CLI)', () => {
     );
   });
 
-  it('carries exactly nine handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(9);
+  it('carries exactly eight handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(8);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -221,8 +214,7 @@ describe('every hook invokes the script the spec names', () => {
       'SessionEnd command scripts/session-end.sh claude-code',
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
-      'Stop command scripts/stop-sync.sh claude-code',
-      'Stop command scripts/stop-nudge.sh',
+      'Stop command scripts/stop-report.sh claude-code',
     ]);
   });
 
@@ -232,8 +224,7 @@ describe('every hook invokes the script the spec names', () => {
       'SessionStart command scripts/post-compact.sh codex-cli',
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
-      'Stop command scripts/stop-sync.sh codex-cli',
-      'Stop command scripts/stop-nudge.sh codex-cli',
+      'Stop command scripts/stop-report.sh codex-cli',
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
       'SessionEnd command scripts/session-end.sh codex-cli',
@@ -247,6 +238,12 @@ describe('every hook invokes the script the spec names', () => {
     expect(readdirSync(join(here, '..', 'scripts')).filter((f) => f.endsWith('.codex.sh'))).toEqual(
       [],
     );
+  });
+
+  it('stop-sync.sh and stop-nudge.sh no longer exist', () => {
+    const files = readdirSync(join(here, '..', 'scripts'));
+    expect(files).not.toContain('stop-sync.sh');
+    expect(files).not.toContain('stop-nudge.sh');
   });
 
   // An event declaring an empty `hooks` array satisfied both the event-set and

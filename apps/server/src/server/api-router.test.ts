@@ -695,6 +695,171 @@ describe('createApiRouter', () => {
     });
   });
 
+  describe('POST /:slug/sessions/:id/turn', () => {
+    it('a work-bearing report at a firing moment returns the notice and advances the timestamps', async () => {
+      const clock = { now: new Date('2026-06-01T00:00:00.000Z') };
+      agentSessions = new AgentSessionsService(
+        createRepositories(db.handle.db),
+        db.handle.db,
+        () => clock.now,
+      );
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-fires' },
+      });
+      clock.now = new Date(clock.now.getTime() + 26 * 60_000);
+
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-fires/turn`, {
+        token: adminToken.plaintext,
+        body: { usedTools: true },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(Array.isArray(r.body.lines)).toBe(true);
+      expect((r.body.lines as unknown[]).length).toBeGreaterThan(0);
+
+      const row = agentSessions.getById('sess-turn-fires');
+      expect(row?.lastWorkAt).not.toBeNull();
+      expect(row?.lastActivityAt).not.toBeNull();
+      expect(row?.lastNudgeAt).not.toBeNull();
+    });
+
+    it('a conversation-only report returns lines: [], never null or omitted', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-quiet' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-quiet/turn`, {
+        token: adminToken.plaintext,
+        body: { usedTools: false },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.lines).toEqual([]);
+      const row = agentSessions.getById('sess-turn-quiet');
+      expect(row?.lastWorkAt).toBeNull();
+      expect(row?.lastNudgeAt).toBeNull();
+      expect(row?.lastActivityAt).not.toBeNull();
+    });
+
+    it('400 invalid_input when usedTools is missing, and no timestamp is written', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-missing-field' },
+      });
+      const before = agentSessions.getById('sess-turn-missing-field');
+      for (const body of [{}, { title: 'x' }]) {
+        const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-missing-field/turn`, {
+          token: adminToken.plaintext,
+          body,
+        });
+        expect(r.status).toBe(400);
+        expect(r.body.code).toBe('invalid_input');
+      }
+      const after = agentSessions.getById('sess-turn-missing-field');
+      expect(after?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
+    });
+
+    it('an over-long title is cut to 100 characters rather than rejected', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-long-title' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-long-title/turn`, {
+        token: adminToken.plaintext,
+        body: { usedTools: true, title: 'A'.repeat(150) },
+      });
+      expect(r.status).toBe(200);
+      const row = agentSessions.getById('sess-turn-long-title');
+      expect(row?.title?.length).toBe(100);
+    });
+
+    it('a report against a terminal row succeeds, returns lines: [], and changes neither status nor ended_at', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-terminal' },
+      });
+      await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-terminal/end`, {
+        token: adminToken.plaintext,
+      });
+      const before = agentSessions.getById('sess-turn-terminal');
+
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-terminal/turn`, {
+        token: adminToken.plaintext,
+        body: { usedTools: true },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.lines).toEqual([]);
+      const after = agentSessions.getById('sess-turn-terminal');
+      expect(after?.status).toBe('ended');
+      expect(after?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
+    });
+
+    it('a soft-deleted session gets the same refusal every other session route gives', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-deleted' },
+      });
+      agentSessions.softDelete('sess-turn-deleted', { adminBypass: true });
+
+      const turnResult = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-turn-deleted/turn`,
+        {
+          token: adminToken.plaintext,
+          body: { usedTools: true },
+        },
+      );
+      const summaryResult = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-turn-deleted/summary`,
+        { token: adminToken.plaintext, body: { summary: 'x' } },
+      );
+      expect(turnResult.status).toBe(summaryResult.status);
+      expect(turnResult.body.code).toBe(summaryResult.body.code);
+    });
+
+    it('keeps a live session out of the stale-active sweep, WITH the control of an otherwise-identical session that stops reporting', async () => {
+      const clock = { now: new Date('2026-06-05T00:00:00.000Z') };
+      agentSessions = new AgentSessionsService(
+        createRepositories(db.handle.db),
+        db.handle.db,
+        () => clock.now,
+      );
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-reported' },
+      });
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-turn-silent' },
+      });
+
+      const abandonWindowMs = 24 * 3600 * 1000;
+      for (const hours of [8, 16, 24, 32]) {
+        clock.now = new Date(clock.now.getTime());
+        clock.now = new Date(new Date('2026-06-05T00:00:00.000Z').getTime() + hours * 3600 * 1000);
+        await call(app, 'POST', `/${projectSlug}/sessions/sess-turn-reported/turn`, {
+          token: adminToken.plaintext,
+          body: { usedTools: false },
+        });
+      }
+
+      agentSessions.abandonStale({ olderThanMs: abandonWindowMs });
+
+      expect(agentSessions.getById('sess-turn-reported')?.status).toBe('active');
+      expect(agentSessions.getById('sess-turn-silent')?.status).toBe('abandoned');
+    });
+  });
+
   describe('no session route resumes a terminal row', () => {
     async function terminalSession(id: string, terminal: 'ended' | 'abandoned') {
       const app = makeApp();
@@ -778,6 +943,10 @@ describe('createApiRouter', () => {
       },
       '/:slug/sessions/:id/end': { resumesTerminalRows: false, body: () => ({}) },
       '/:slug/sessions/:id/resume': { resumesTerminalRows: true, body: () => ({}) },
+      '/:slug/sessions/:id/turn': {
+        resumesTerminalRows: false,
+        body: () => ({ usedTools: true }),
+      },
     };
 
     it('the classification covers exactly the POST routes the router registers', () => {

@@ -12,7 +12,7 @@
 #     rembric_extract_first_assistant_claude_code <path>
 #       → echoes the first non-empty assistant message
 #
-#   Codex CLI (stop-sync.sh codex-cli):
+#   Codex CLI (session-end.sh codex-cli):
 #     rembric_format_transcript_codex_cli <path>
 #       → same shape, parses Codex's event_msg envelope instead
 #     rembric_extract_first_assistant_codex_cli <path>

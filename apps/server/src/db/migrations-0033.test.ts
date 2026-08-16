@@ -1,3 +1,7 @@
+import { copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -17,6 +21,13 @@ import type { DbHandle } from './index.js';
  */
 
 const MIGRATION = '0033_session_summary_versions.sql';
+// 0034 adds three nullable `sessions` columns the CURRENT schema.ts (and
+// therefore AgentSessionsService's typed queries) already expects present.
+// It is unrelated to what THIS file tests, but the service-layer
+// assertions below need it staged too, or every `SELECT` naming those
+// columns fails against a DB frozen strictly at 0033.
+const FUTURE_MIGRATION = '0034_session_nudge_gate.sql';
+const MIGRATIONS_SOURCE_DIR = fileURLToPath(new URL('./migrations', import.meta.url));
 
 type Row = Record<string, unknown>;
 
@@ -51,6 +62,10 @@ function tableRows(handle: DbHandle, table: string): Row[] {
 beforeEach(() => {
   fx = createMigrationFixture(MIGRATION);
   fx.stagePrior();
+  copyFileSync(
+    join(MIGRATIONS_SOURCE_DIR, FUTURE_MIGRATION),
+    join(fx.migrationsDir, FUTURE_MIGRATION),
+  );
 });
 
 afterEach(() => fx.cleanup());

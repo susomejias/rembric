@@ -71,7 +71,7 @@ afterEach(async () => {
 
 // Async execFile — NOT execFileSync: the script's curl and this test's HTTP
 // server share one event loop, and a synchronous spawn deadlocks until curl
-// times out (same constraint stop-sync.test.ts documents).
+// times out (same constraint stop-report.test.ts documents).
 async function runFull(
   script: string,
   stdin: string,

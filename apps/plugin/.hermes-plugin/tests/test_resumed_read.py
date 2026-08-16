@@ -49,9 +49,7 @@ class ResumedReadTest(unittest.TestCase):
         return self.mod.RembricMemoryProvider()
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_fires_once_on_the_first_summary_firing_when_created_is_false(
-        self, mock_urlopen: MagicMock
-    ) -> None:
+    def test_fires_once_on_turn_1_when_created_is_false(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
@@ -59,11 +57,9 @@ class ResumedReadTest(unittest.TestCase):
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
         self.assertIn(self.mod._RESUMED_READ_HINT, out)
-        self.assertIn(self.mod._SUMMARY_HINT, out)
 
         provider.on_turn_start(10, None)
         out10 = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._SUMMARY_HINT, out10)
         self.assertNotIn(self.mod._RESUMED_READ_HINT, out10)
 
     @patch("rembric_hermes_plugin.urlopen")
@@ -74,8 +70,10 @@ class ResumedReadTest(unittest.TestCase):
 
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._SUMMARY_HINT, out)
         self.assertNotIn(self.mod._RESUMED_READ_HINT, out)
+        # The session-opening line fires instead, since this session's own
+        # ensure genuinely reported created:true.
+        self.assertIn(self.mod._SESSION_OPENING_HINT, out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_never_fires_when_the_ensure_response_carries_no_created_field(
@@ -115,9 +113,11 @@ class ResumedReadTest(unittest.TestCase):
         provider = self._provider()
         provider.initialize("01FIRST", cwd=str(self.tmp / "cwd"))
 
-        # A LATER ensure in the same provider instance reports created:True;
-        # the latch from the first ensure still governs every session's line.
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": True})
+        # A LATER ensure in the same provider instance reports an UNCLEAR
+        # outcome (no `created` field) — so its own per-session opening
+        # gate stays false and cannot mask the process-wide latch under
+        # test. The latch from the FIRST ensure still governs this line.
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
         provider.on_session_switch("01SECOND", parent_session_id="01FIRST")
 
         provider.on_turn_start(1, None)
@@ -125,17 +125,7 @@ class ResumedReadTest(unittest.TestCase):
         self.assertIn(self.mod._RESUMED_READ_HINT, out)
 
     @patch("rembric_hermes_plugin.urlopen")
-    def test_never_merges_into_or_changes_the_summary_hint(self, mock_urlopen: MagicMock) -> None:
-        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
-        provider = self._provider()
-        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
-
-        provider.on_turn_start(1, None)
-        out = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._SUMMARY_HINT, out)
-
-    @patch("rembric_hermes_plugin.urlopen")
-    def test_is_its_own_line_ordered_before_the_summary_hint(self, mock_urlopen: MagicMock) -> None:
+    def test_is_emitted_as_a_standalone_memory_hint_block(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
         provider = self._provider()
         provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
@@ -143,10 +133,9 @@ class ResumedReadTest(unittest.TestCase):
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
         self.assertIn(self.mod._RESUMED_READ_HINT, out)
-        self.assertIn(self.mod._SUMMARY_HINT, out)
-        self.assertLess(
-            out.index(self.mod._RESUMED_READ_HINT), out.index(self.mod._SUMMARY_HINT)
-        )
+        # Its own closed <memory-hint>...</memory-hint> block, never a
+        # fragment concatenated into a different hint's text.
+        self.assertEqual(out.count(self.mod._RESUMED_READ_HINT), 1)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_a_summary_responses_body_never_influences_the_resumed_state(

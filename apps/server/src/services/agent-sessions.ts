@@ -6,6 +6,7 @@ import { type AgentSession, type NewAgentSession } from '../db/schema/agent-sess
 
 import { DomainError } from './errors.js';
 import type { Scope } from './scope.js';
+import { evaluateSessionNudge, type SessionNudgeRow } from './session-nudge.js';
 import {
   assertNoNul,
   sliceTailWithoutSplittingSurrogatePair,
@@ -15,6 +16,19 @@ import { hasAnyHeading, mergeSummarySections } from './summary-sections.js';
 
 const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
+
+/**
+ * A minimum interval, not a schedule: condition (2) of the gate means
+ * nothing fires without new work, so this bounds the notice from above
+ * while work bounds it from below (`session-nudges`, D2). The one floor
+ * constant in the server tree — asserted by a grep test.
+ */
+export const NUDGE_FLOOR_MS = 25 * 60_000;
+
+/** Never move a monotone timestamp backwards. */
+function laterOf(existing: Date | null, candidate: Date): Date {
+  return existing === null || candidate.getTime() > existing.getTime() ? candidate : existing;
+}
 
 /**
  * How stale `last_activity_at` (falling back to `started_at`) must be
@@ -159,6 +173,20 @@ export interface RecentForContextInput {
   limit?: number;
 }
 
+export interface ReportTurnInput {
+  tokenId: string;
+  /** What the CLIENT observed — whether at least one tool was invoked this turn. */
+  usedTools: boolean;
+  /** Provisional title, sent at most once per session; written under `final:false` precedence. */
+  title?: string;
+}
+
+export interface ReportTurnResult {
+  session: AgentSession;
+  /** Empty when the gate does not fire — never a separate null/undefined state. */
+  lines: string[];
+}
+
 export class AgentSessionsService {
   constructor(
     private readonly repos: Pick<Repositories, 'agentSessions' | 'consolidation'>,
@@ -274,7 +302,7 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.updateAndVersion(existing.id, set, { requireActive: false });
+    const updated = this.updateAndVersion(existing.id, existing, set, { requireActive: false });
     return updated ?? existing;
   }
 
@@ -298,11 +326,21 @@ export class AgentSessionsService {
    */
   private updateAndVersion(
     id: string,
+    existing: AgentSession,
     set: Partial<NewAgentSession>,
     opts: { requireActive: boolean },
   ): AgentSession | undefined {
     return this.tx.transaction((): AgentSession | undefined => {
-      const updated = this.repos.agentSessions.updateById(id, set, opts);
+      // `last_summary_at` is written at this SAME site, on exactly the writes
+      // that store a `final:true` summary — never on a `final:false` write,
+      // never on a write `precedenceSet` already discarded (`set.summary`
+      // absent in that case) — see `sessions`, "Session rows MUST carry the
+      // three nudge-gate timestamps...".
+      const finalSet: Partial<NewAgentSession> =
+        typeof set.summary === 'string' && set.summaryFinal === true
+          ? { ...set, lastSummaryAt: laterOf(existing.lastSummaryAt, this.now()) }
+          : set;
+      const updated = this.repos.agentSessions.updateById(id, finalSet, opts);
       if (updated && typeof set.summary === 'string' && set.summaryFinal === true) {
         const latest = this.repos.agentSessions.latestSummaryVersion(id);
         if (!latest || latest.content !== set.summary) {
@@ -369,7 +407,7 @@ export class AgentSessionsService {
       lastActivityAt: this.now(),
       ...precedenceSet(existing, input),
     };
-    const updated = this.updateAndVersion(sessionId, set, { requireActive: true });
+    const updated = this.updateAndVersion(sessionId, existing, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -420,7 +458,7 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input),
     };
-    const updated = this.updateAndVersion(sessionId, set, { requireActive: true });
+    const updated = this.updateAndVersion(sessionId, existing, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -468,6 +506,72 @@ export class AgentSessionsService {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
     return updated;
+  }
+
+  /**
+   * The per-turn ping (`session-nudges`, `http-api`'s `POST /turn`). One
+   * service call: stamp `last_activity_at` always, `last_work_at` when
+   * `usedTools`, `title` under `final:false` precedence when present, then
+   * evaluate the gate and stamp `last_nudge_at` only when it fires.
+   *
+   * A terminal row (not lifecycle) stamps ONLY `last_activity_at` and
+   * always returns `lines: []` — a report is not a second path back to
+   * `active` and SHALL NOT transition `status` or write `summary`.
+   */
+  reportTurn(sessionId: string, input: ReportTurnInput): ReportTurnResult {
+    const existing = this.getById(sessionId);
+    if (!existing) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.tokenId !== input.tokenId) {
+      throw new DomainError('session_not_found', `session '${sessionId}' not found`);
+    }
+    if (existing.deletedAt) {
+      throw new DomainError(
+        'session_deleted',
+        `sessions.reportTurn: session '${sessionId}' was soft-deleted`,
+      );
+    }
+
+    const ts = this.now();
+
+    if (existing.status !== 'active') {
+      const updated = this.repos.agentSessions.updateById(
+        sessionId,
+        { lastActivityAt: ts },
+        { requireActive: false },
+      );
+      return { session: updated ?? existing, lines: [] };
+    }
+
+    const set: Partial<NewAgentSession> = { lastActivityAt: ts };
+    if (input.usedTools) {
+      set.lastWorkAt = laterOf(existing.lastWorkAt, ts);
+    }
+    if (input.title !== undefined && !existing.titleFinal) {
+      set.title = input.title;
+    }
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
+    const row = updated ?? existing;
+
+    const gateRow: SessionNudgeRow = {
+      startedAt: row.startedAt,
+      lastWorkAt: row.lastWorkAt,
+      lastSummaryAt: row.lastSummaryAt,
+      lastNudgeAt: row.lastNudgeAt,
+      summary: row.summary,
+      title: row.title,
+    };
+    const lines = evaluateSessionNudge(gateRow, ts, NUDGE_FLOOR_MS);
+    if (lines === null) {
+      return { session: row, lines: [] };
+    }
+    const stamped = this.repos.agentSessions.updateById(
+      sessionId,
+      { lastNudgeAt: laterOf(row.lastNudgeAt, ts) },
+      { requireActive: false },
+    );
+    return { session: stamped ?? row, lines };
   }
 
   getById(sessionId: string): AgentSession | undefined {

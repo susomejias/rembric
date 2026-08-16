@@ -44,6 +44,8 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   # Latched on the FIRST ensure for this session id — prompt-nudge.sh (a
   # different process) reads it back to gate the resumed-process read line.
   rembric_resumed_mark "$SESSION_ID" "$CREATED"
+  # The mirror latch: gates the session-opening line (session-nudges).
+  rembric_created_mark "$SESSION_ID" "$CREATED"
   # Ensure-then-resume, in that order: a row purgeEmpty removed is recreated by
   # the ensure and the resume then no-ops against it. Never gated on `source` —
   # no host reports a resume on a cold start, which is the case this repairs.

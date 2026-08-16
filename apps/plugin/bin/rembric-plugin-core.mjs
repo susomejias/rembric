@@ -17,29 +17,30 @@ export const RECALL_NUDGE =
   'rembric: User intent: recall. Call memory.search with the user keywords before responding.';
 export const FIRST_PROMPT_NUDGE =
   'rembric: New session — call memory.context with focus set to this prompt before responding, to surface relevant prior work.';
-export const SAVE_NUDGE_EVERY = 5;
-export const SAVE_NUDGE =
-  'rembric: if recent work produced a decision, fix, or discovery, you MUST call memory.save now (title ≤100 + content).';
-export const SUMMARY_NUDGE_EVERY = 10;
-export const SUMMARY_NUDGE =
-  'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? Skip.';
 export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 export const RESUMED_READ_NUDGE =
   'rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.';
+// Sending ONE section is a legitimate write only because a `##` section a
+// curated write omits keeps its stored text (`sessions`, section-wise merge).
+// "before you finish this turn" is load-bearing, not "now": it defers the
+// write past the user's actual work instead of asking for a summary of a
+// session that has not happened yet (session-nudges, D7).
+export const SESSION_OPENING_NUDGE_CORE =
+  'New session — before you finish this turn, call memory.session_summary with a title and a single `## Goal` section describing what this session is for; the other five canonical headings are intentionally left out.';
+export const SESSION_OPENING_NUDGE = `rembric: ${SESSION_OPENING_NUDGE_CORE}`;
 // Unprefixed (no `rembric: `): opencode pushes this to output.context, not a
 // bash-style inline nudge, so it never carries that prefix. Byte-identical
 // to post-compact.sh's PROTOCOL heredoc minus that prefix — the ONE shared
 // implementation of the compaction-time protocol text (plugin-session-protocol).
 export const POST_COMPACT_NUDGE_CORE =
-  'This session resumes from a compaction. BEFORE continuing:\n' +
+  'Resumed from a compaction. BEFORE continuing:\n' +
   '1. Call memory.session_get to read the stored summary.\n' +
-  '2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state, brought up to date — this REPLACES the stored value.\n' +
-  '   - title: ≤100 chars, descriptive of the work (not generic, not the cwd).\n' +
-  '   - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n' +
-  '## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\n' +
-  '3. Still missing detail? Call memory.context or memory.search.\n' +
-  "4. Only then, continue with the user's request.";
+  '2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state: sent `##` sections REPLACE their stored counterpart; omitted ones STAY.\n' +
+  '   - title: ≤100 chars, not the cwd.\n' +
+  '   - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\n' +
+  '3. Missing detail? memory.context or memory.search.\n' +
+  '4. Then continue.';
 
 // `memory` and `project` are the server's two tool namespaces; a dotted word
 // outside them is prose or a filename and must be left alone. The Pi client's
@@ -98,11 +99,22 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const subAgentSessions = new Set();
   const sessionMessages = new Map();
   const pendingFlush = new Map();
-  const userTurnCounts = new Map();
+  const firstPromptEmitted = new Set();
+  const resumedReadEmitted = new Set();
+  // Per-session outcome of THIS session's own ensure — independent of
+  // `processResumed` below, which only ever captures the process's FIRST
+  // session (see its own comment). Drives the session-opening line.
+  const sessionCreated = new Map();
+  const sessionOpeningEmitted = new Set();
+  // The server's returned notice, cached between the end-of-turn report and
+  // the next start-of-turn print. Only ever SET with a non-empty array — a
+  // report that returns no lines must never clear a pending one
+  // (`session-nudges`, `plugin-session-protocol`).
+  const pendingLines = new Map();
+  const turnTitleSent = new Set();
   // null = not yet captured; set once, from the FIRST session-ensure of this
   // protocol's lifetime, and never overwritten by a later session's ensure.
   let processResumed = null;
-  const resumedReadEmitted = new Set();
 
   async function doPost(path, body) {
     if (disabled) return null;
@@ -140,11 +152,11 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   }
 
   /**
-   * The ONE call site that reads a response body: the session-ensure
-   * response, never a summary response. `created` gates the resumed-process
-   * read line (plugin-session-protocol). Kept separate from rembricPost
-   * above so the two can never converge into one function that could later
-   * be pointed at /summary or /end.
+   * The ONE call site that reads a response body for the session-ensure:
+   * `created` gates the resumed-read line and the session-opening line
+   * (plugin-session-protocol, session-nudges). Kept separate from
+   * rembricPost above so the two can never converge into one function that
+   * could later be pointed at /summary or /end.
    */
   async function postSessionEnsure(path, body) {
     const res = await doPost(path, body);
@@ -181,36 +193,55 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
       // "do not advise", never "advise anyway".
       processResumed = ensure.ok && ensure.created === false;
     }
+    sessionCreated.set(sessionId, ensure.ok === true && ensure.created === true);
     // Strictly after the ensure, which recreates a row the empty-session purge
     // removed; skipped when it did not land, since that failure is also a
     // resume failure.
     if (ensure.ok) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
   }
 
+  /**
+   * The lines to print at the START of a turn: the first-prompt relevance
+   * line (once per session), the recall line (any turn matching the
+   * keywords), the sessionId line (whenever it accompanies either the
+   * session opening or a cached server notice), the session opening OR the
+   * resumed-read line (mutually exclusive, each once per session), and
+   * finally the server-composed notice cached by the last `reportTurn`
+   * (session-nudges, plugin-session-protocol). No cadence, no counter.
+   */
   function nudgesForTurn(sessionId, prompt) {
-    const turn = (userTurnCounts.get(sessionId) ?? 0) + 1;
-    userTurnCounts.set(sessionId, turn);
-
     const lines = [];
-    if (turn === 1) lines.push(FIRST_PROMPT_NUDGE);
+    const isFirstPrompt = !firstPromptEmitted.has(sessionId);
+    if (isFirstPrompt) {
+      firstPromptEmitted.add(sessionId);
+      lines.push(FIRST_PROMPT_NUDGE);
+    }
     if (RECALL_REGEX.test(prompt)) lines.push(RECALL_NUDGE);
 
-    const saveFires = turn % SAVE_NUDGE_EVERY === 0;
-    const summaryFires = turn === 1 || turn % SUMMARY_NUDGE_EVERY === 0;
-    if (saveFires || summaryFires) {
+    const pending = takePendingLines(sessionId);
+    const openingDue =
+      sessionCreated.get(sessionId) === true && !sessionOpeningEmitted.has(sessionId);
+    const writeDirecting = pending.length > 0 || openingDue;
+
+    if (writeDirecting) {
       lines.push(SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', sessionId));
     }
-    if (saveFires) lines.push(SAVE_NUDGE);
-    if (summaryFires) {
-      // A sibling of the summary line, never folded into it: its own text
-      // stays independent of session state either way.
-      if (processResumed === true && !resumedReadEmitted.has(sessionId)) {
-        resumedReadEmitted.add(sessionId);
-        lines.push(RESUMED_READ_NUDGE);
-      }
-      lines.push(SUMMARY_NUDGE);
+    if (openingDue) {
+      sessionOpeningEmitted.add(sessionId);
+      lines.push(SESSION_OPENING_NUDGE);
+    } else if (isFirstPrompt && processResumed === true && !resumedReadEmitted.has(sessionId)) {
+      resumedReadEmitted.add(sessionId);
+      lines.push(RESUMED_READ_NUDGE);
     }
+    for (const line of pending) lines.push(line);
     return lines;
+  }
+
+  /** Read-and-clear: a cached notice is printed exactly once. */
+  function takePendingLines(sessionId) {
+    const lines = pendingLines.get(sessionId);
+    pendingLines.delete(sessionId);
+    return lines ?? [];
   }
 
   function entriesFor(sessionId) {
@@ -287,6 +318,40 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     await rembricPost(`/api/${slug}/sessions/${sessionId}/summary`, body);
   }
 
+  /**
+   * The per-turn report (`session-nudges`). Issued from each client's own
+   * end-of-turn event (opencode: `session.idle`; Pi: `agent_settled`),
+   * alongside — never instead of — the existing debounced transcript flush.
+   * `usedTools` is what the CALLER observed; this function makes no
+   * interpretation of it. The title rides along at most once per session,
+   * derived from the transcript accumulator's first recorded user message
+   * (already `<private>`-redacted by `appendUserMessage`).
+   */
+  async function reportTurn(sessionId, { usedTools } = {}) {
+    if (subAgentSessions.has(sessionId)) return;
+    if (!knownSessions.has(sessionId)) return;
+    const body = { usedTools: usedTools === true };
+    if (!turnTitleSent.has(sessionId)) {
+      const title = deriveTitle(sessionId);
+      if (title) {
+        body.title = title;
+        turnTitleSent.add(sessionId);
+      }
+    }
+    const res = await doPost(`/api/${slug}/sessions/${sessionId}/turn`, body);
+    if (!res) return;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      diag(`POST /api/${slug}/sessions/${sessionId}/turn ${res.status} body=${detail}`);
+      return;
+    }
+    const json = await res.json().catch(() => null);
+    const lines = Array.isArray(json?.lines) ? json.lines.filter((l) => typeof l === 'string') : [];
+    // Never overwrite a pending, non-empty cache with an empty result — a
+    // second report for the same turn must not swallow a pending notice.
+    if (lines.length > 0) pendingLines.set(sessionId, lines);
+  }
+
   // `{}` rather than a skip on an empty accumulator: a session with no turns
   // must still reach `ended`. One request, never `/summary` then `/end` — each
   // is bounded by POST_TIMEOUT_MS, so a pair doubles a quitting user's wait.
@@ -333,7 +398,12 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   function forgetSession(sessionId) {
     knownSessions.delete(sessionId);
     subAgentSessions.delete(sessionId);
-    userTurnCounts.delete(sessionId);
+    firstPromptEmitted.delete(sessionId);
+    resumedReadEmitted.delete(sessionId);
+    sessionCreated.delete(sessionId);
+    sessionOpeningEmitted.delete(sessionId);
+    pendingLines.delete(sessionId);
+    turnTitleSent.delete(sessionId);
     const entries = sessionMessages.get(sessionId) ?? [];
     sessionMessages.delete(sessionId);
     const pending = pendingFlush.get(sessionId);
@@ -353,6 +423,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     isKnown,
     ensureSession,
     nudgesForTurn,
+    reportTurn,
     appendUserMessage,
     appendAssistantMessage,
     upsertAssistantMessage,

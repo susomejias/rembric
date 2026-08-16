@@ -1,47 +1,50 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
-import { SUMMARY_SECTIONS } from '../../server/src/mcp/summary-rubric.js';
 import {
   createSessionProtocol,
   FIRST_PROMPT_NUDGE,
-  SUMMARY_NUDGE,
+  RESUMED_READ_NUDGE,
+  SESSION_OPENING_NUDGE,
+  SESSION_OPENING_NUDGE_CORE,
   POST_COMPACT_NUDGE_CORE,
-  SAVE_NUDGE_EVERY,
   SESSION_ID_NUDGE_TEMPLATE,
-  SUMMARY_NUDGE_EVERY,
 } from '../bin/rembric-plugin-core.mjs';
 
 /**
- * The save/summary nudge texts are the lock-step contract shared with the
- * bash (scripts/prompt-nudge.sh), JS/TS (bin/rembric-plugin-core.mjs, imported
- * by every JS/TS client), and Python (.hermes-plugin/__init__.py)
- * implementations. Bash and the shared JS/TS module embed the SAME
- * `rembric:`-prefixed strings verbatim (asserted directly here); Python
- * wraps both hints in `<memory-hint>...</memory-hint>` tags, so its
- * lock-step check unwraps the tag and compares the shared core text
- * (`saveCore`/`summaryCore`).
+ * The remaining client-composed nudge texts are the lock-step contract shared
+ * with the bash (scripts/prompt-nudge.sh, scripts/prompt-search.sh), JS/TS
+ * (bin/rembric-plugin-core.mjs, imported by every JS/TS client), and Python
+ * (.hermes-plugin/__init__.py) implementations. Bash and the shared JS/TS
+ * module embed the SAME `rembric:`-prefixed strings verbatim (asserted
+ * directly here); Python wraps each hint in `<memory-hint>...</memory-hint>`
+ * tags, so its lock-step check unwraps the tag and compares the shared core
+ * text (the `…Core` fixture keys).
+ *
+ * The stretch-close reminder (`session-nudges`) is server-composed and has
+ * NO fixture: every client prints what the server hands it, and its own
+ * 640-byte bound is asserted against the emitted string on the server
+ * (apps/server/src/services/session-nudge.test.ts).
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
-  saveCore: string;
-  save: string;
-  summaryCore: string;
-  summary: string;
   sessionIdCoreTemplate: string;
   sessionIdTemplate: string;
-  postCompact: string;
-  postCompactCore: string;
-  endOfTurnRubric: string;
   firstPromptRelevanceCore: string;
   firstPromptRelevance: string;
+  postCompact: string;
+  postCompactCore: string;
+  recall: string;
   resumedReadCore: string;
   resumedRead: string;
+  sessionStart: string;
+  sessionOpeningCore: string;
+  sessionOpening: string;
 };
 
 function sessionIdLine(sessionId: string): string {
@@ -53,37 +56,15 @@ function sessionIdLine(sessionId: string): string {
  * UTF-8 bytes ÷ 4. `.length` undercounts because `≤ · —` are multi-byte, which
  * is why the same post-compact block has two published token figures.
  */
-const BYTES_PER_TOKEN = 4;
 const bytes = (s: string): number => Buffer.byteLength(s, 'utf8');
 /** 36 chars: the sessionId line's cap is stated for a rendered UUID. */
 const UUID_SESSION_ID = '0189d5f2-6c3a-7b4e-9f21-8c7d6e5a4b30';
 
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
-const stopNudgeSh = join(here, '..', 'scripts', 'stop-nudge.sh');
 const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
-const stopNudgeShPath = join(here, '..', 'scripts', 'stop-nudge.sh');
-const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const pluginCoreMjs = join(here, '..', 'bin', 'rembric-plugin-core.mjs');
-const summaryCommand = join(here, '..', 'commands', 'summary.md');
-
-function bashNudgesOnTurn(turn: number, sessionId: string, counterDir: string): string[] {
-  let out = '';
-  for (let i = 1; i <= turn; i++) {
-    out = execFileSync('bash', [promptNudgeSh], {
-      input: JSON.stringify({ session_id: sessionId }),
-      encoding: 'utf8',
-      env: { ...process.env, TMPDIR: counterDir },
-    });
-  }
-  const marker = '\u0000SUMMARY_NUDGE\u0000';
-  return out
-    .replace(fixtures.summary, marker)
-    .split('\n')
-    .filter((l) => l.length > 0)
-    .map((line) => (line === marker ? fixtures.summary : line));
-}
 
 const hasPython3 = (() => {
   try {
@@ -105,12 +86,11 @@ function bashFirstPromptNudge(sessionId: string, counterDir: string): string[] {
 
 function pythonHintConstant(
   name:
-    | '_SAVE_HINT'
     | '_SAVE_HINT_URGENT'
-    | '_SUMMARY_HINT'
     | '_SESSION_ID_HINT_TEMPLATE'
     | '_RELEVANCE_HINT'
     | '_RESUMED_READ_HINT'
+    | '_SESSION_OPENING_HINT'
     | '_POST_COMPACT_HINT',
 ): string {
   const program = [
@@ -123,129 +103,19 @@ function pythonHintConstant(
   return execFileSync('python3', ['-c', program, hermesInit, name], { encoding: 'utf8' });
 }
 
-function pythonNumberConstant(name: '_SAVE_HINT_EVERY' | '_SUMMARY_HINT_EVERY'): number {
-  const program = [
-    'import importlib.util, sys',
-    "spec = importlib.util.spec_from_file_location('rembric_hermes_plugin', sys.argv[1])",
-    'mod = importlib.util.module_from_spec(spec)',
-    'spec.loader.exec_module(mod)',
-    'sys.stdout.write(str(getattr(mod, sys.argv[2])))',
-  ].join('\n');
-  return Number(execFileSync('python3', ['-c', program, hermesInit, name], { encoding: 'utf8' }));
+function runPromptNudge(sessionId: string, counterDir: string): string {
+  return execFileSync('bash', [promptNudgeSh], {
+    input: JSON.stringify({ session_id: sessionId }),
+    encoding: 'utf8',
+    env: { ...process.env, TMPDIR: counterDir },
+  });
 }
 
-// SAVE_NUDGE_EVERY lives in prompt-nudge.sh (start of turn); SUMMARY_NUDGE_EVERY
-// moved to stop-nudge.sh (end of turn), where the reminder can actually be acted
-// on. The NUMBER must still match every other client's, because the in-process
-// clients have no end-of-turn event and keep firing it themselves — the cadence
-// is shared even though the firing point is not.
-function bashCadence(name: 'SAVE_NUDGE_EVERY' | 'SUMMARY_NUDGE_EVERY'): number {
-  const file = name === 'SUMMARY_NUDGE_EVERY' ? stopNudgeSh : promptNudgeSh;
-  const match = readFileSync(file, 'utf8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
-  if (!match) throw new Error(`${name} not found in ${file}`);
-  return Number(match[1]);
+function markCreated(counterDir: string, sessionId: string): void {
+  const dir = join(counterDir, 'rembric-created');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, sessionId), '1');
 }
-
-describe('nudge text lock-step across bash and TS', () => {
-  const headings = [
-    '## Goal',
-    '## Accomplished',
-    '## Decisions+why',
-    '## Verified+how',
-    '## Unfinished+why',
-    '## Files',
-  ];
-
-  it('every summary-facing fixture requires the exact separate-line heading contract', () => {
-    const directive =
-      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):';
-    for (const [name, text] of [
-      ['summary', fixtures.summary],
-      ['postCompact', fixtures.postCompact],
-      ['endOfTurnRubric', fixtures.endOfTurnRubric],
-    ] as const) {
-      expect(text, name).toContain(`${directive}\n${headings.join('\n')}`);
-      expect(text, name).not.toContain('Goal · Accomplished · Decisions+why');
-    }
-    expect(SUMMARY_NUDGE).toBe(fixtures.summary);
-    const command = readFileSync(summaryCommand, 'utf8');
-    expect(command).toContain(directive);
-    let previous = -1;
-    for (const heading of headings) {
-      const next = command.indexOf(heading);
-      expect(next, `summary command omits ${heading}`).toBeGreaterThan(previous);
-      previous = next;
-    }
-  });
-  let counterDir: string;
-
-  it('bash prompt-nudge.sh emits the sessionId line + the exact fixture save text on turn 5', () => {
-    counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
-    try {
-      const lines = bashNudgesOnTurn(5, 's-fixture-save', counterDir);
-      expect(lines).toEqual([sessionIdLine('s-fixture-save'), fixtures.save]);
-    } finally {
-      rmSync(counterDir, { recursive: true, force: true });
-    }
-  });
-
-  it('bash prompt-nudge.sh emits the sessionId line + the exact fixture summary text on turn 1', () => {
-    counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
-    try {
-      const lines = bashNudgesOnTurn(1, 's-fixture-summary', counterDir);
-      expect(lines).toEqual([sessionIdLine('s-fixture-summary'), fixtures.summary]);
-    } finally {
-      rmSync(counterDir, { recursive: true, force: true });
-    }
-  });
-
-  it('bash prompt-nudge.sh omits the sessionId line when session_id is unknown', () => {
-    counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
-    try {
-      let out = '';
-      for (let i = 1; i <= 5; i++) {
-        out = execFileSync('bash', [promptNudgeSh], {
-          input: '{}',
-          encoding: 'utf8',
-          env: { ...process.env, TMPDIR: counterDir },
-        });
-      }
-      const lines = out.split('\n').filter((l) => l.length > 0);
-      expect(lines).toEqual([fixtures.save]);
-    } finally {
-      rmSync(counterDir, { recursive: true, force: true });
-    }
-  });
-
-  it('the fixture summary text is the rembric:-prefixed shared core', () => {
-    expect(fixtures.summary).toBe(`rembric: ${fixtures.summaryCore}`);
-  });
-
-  it('the fixture save text is the rembric:-prefixed shared core', () => {
-    expect(fixtures.save).toBe(`rembric: ${fixtures.saveCore}`);
-  });
-
-  it('the fixture sessionId template is the rembric:-prefixed shared core template', () => {
-    expect(fixtures.sessionIdTemplate).toBe(`rembric: ${fixtures.sessionIdCoreTemplate}`);
-  });
-});
-
-describe.runIf(hasPython3)('nudge text lock-step with Python', () => {
-  it("Python's _SUMMARY_HINT wraps the exact shared core text in <memory-hint> tags", () => {
-    const hint = pythonHintConstant('_SUMMARY_HINT');
-    expect(hint).toBe(`<memory-hint>${fixtures.summaryCore}</memory-hint>`);
-  });
-
-  it("Python's _SAVE_HINT wraps the exact shared core text in <memory-hint> tags", () => {
-    const hint = pythonHintConstant('_SAVE_HINT');
-    expect(hint).toBe(`<memory-hint>${fixtures.saveCore}</memory-hint>`);
-  });
-
-  it("Python's _SESSION_ID_HINT_TEMPLATE wraps the exact shared core template in <memory-hint> tags", () => {
-    const hint = pythonHintConstant('_SESSION_ID_HINT_TEMPLATE');
-    expect(hint).toBe(`<memory-hint>${fixtures.sessionIdCoreTemplate}</memory-hint>`);
-  });
-});
 
 describe('sessionId nudge template lock-step across bash, TS, and Python', () => {
   it('bash and TS share the exact rembric:-prefixed sessionId template', () => {
@@ -308,6 +178,10 @@ describe('resumedRead fixture lock-step across bash, TS, and Python', () => {
     expect(fixtures.resumedRead).toBe(`rembric: ${fixtures.resumedReadCore}`);
   });
 
+  it('TS matches the exact fixture text', () => {
+    expect(RESUMED_READ_NUDGE).toBe(fixtures.resumedRead);
+  });
+
   it.runIf(hasPython3)(
     "Python's _RESUMED_READ_HINT wraps the exact shared core text in <memory-hint> tags",
     () => {
@@ -316,31 +190,67 @@ describe('resumedRead fixture lock-step across bash, TS, and Python', () => {
     },
   );
 
-  // The single summary-reminder string stays byte-identical whether or not
-  // this line accompanies it — the two are siblings, never one composed
-  // string, so the fixture that gates this requirement (13.8) is checked
-  // here rather than relying on review.
-  it('the summary fixture is unchanged by the existence of resumedRead', () => {
-    expect(fixtures.summary).toBe(
-      'rembric: did real work happen this turn? You MUST call memory.session_summary({title, summary}) now — title ≤100 chars (the work, not cwd); summary: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nNothing memorable? Skip.',
-    );
+  it('bash prompt-nudge.sh emits the exact fixture text for a resumed session, without the sessionId line', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
+    try {
+      const dir = join(counterDir, 'rembric-resumed');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 's-fixture-resumed'), '1');
+      const out = runPromptNudge('s-fixture-resumed', counterDir);
+      expect(out.trim()).toBe(fixtures.resumedRead);
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
   });
 });
 
-describe('nudge cadence numbers lock-step across bash and TS', () => {
-  it('SAVE_NUDGE_EVERY matches', () => {
-    expect(SAVE_NUDGE_EVERY).toBe(bashCadence('SAVE_NUDGE_EVERY'));
+describe('sessionOpening fixture lock-step across bash, TS, and Python', () => {
+  it('the fixture text is the rembric:-prefixed shared core', () => {
+    expect(fixtures.sessionOpening).toBe(`rembric: ${fixtures.sessionOpeningCore}`);
   });
 
-  it('SUMMARY_NUDGE_EVERY matches', () => {
-    expect(SUMMARY_NUDGE_EVERY).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
+  it('TS matches the exact fixture text', () => {
+    expect(SESSION_OPENING_NUDGE).toBe(fixtures.sessionOpening);
+    expect(SESSION_OPENING_NUDGE_CORE).toBe(fixtures.sessionOpeningCore);
+  });
+
+  it.runIf(hasPython3)(
+    "Python's _SESSION_OPENING_HINT wraps the exact shared core text in <memory-hint> tags",
+    () => {
+      const hint = pythonHintConstant('_SESSION_OPENING_HINT');
+      expect(hint).toBe(`<memory-hint>${fixtures.sessionOpeningCore}</memory-hint>`);
+    },
+  );
+
+  it('bash prompt-nudge.sh emits the sessionId line + the exact fixture opening text, once, on a newly created session', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-nudgefixture-'));
+    try {
+      markCreated(counterDir, 's-fixture-opening');
+      const first = runPromptNudge('s-fixture-opening', counterDir);
+      expect(first.trim()).toBe(
+        `${sessionIdLine('s-fixture-opening')}\n${fixtures.sessionOpening}`,
+      );
+      const second = runPromptNudge('s-fixture-opening', counterDir);
+      expect(second).toBe('');
+    } finally {
+      rmSync(counterDir, { recursive: true, force: true });
+    }
+  });
+
+  it('says "before you finish this turn", never "now"', () => {
+    expect(fixtures.sessionOpeningCore).toContain('before you finish this turn');
+    expect(fixtures.sessionOpeningCore).not.toMatch(/\bnow\b/);
+  });
+
+  it('names ## Goal and states the other five headings are left out', () => {
+    expect(fixtures.sessionOpeningCore).toContain('## Goal');
+    expect(fixtures.sessionOpeningCore).toMatch(/other five canonical headings/);
   });
 });
 
 // The JS/TS clients contribute only a transport, so the core's own emission is
 // the only place the order can be pinned for all of them at once.
-describe('the shared JS/TS core emits the due nudges in the bash order', () => {
-  // Credentials and a slug so construction stays quiet; nudgesForTurn is pure.
+describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', () => {
   const core = () =>
     createSessionProtocol({
       agent: 'nudge-order-fixture',
@@ -349,47 +259,37 @@ describe('the shared JS/TS core emits the due nudges in the bash order', () => {
       slug: 'nudge-order',
     });
 
-  const nudgesOnTurn = (turn: number, sessionId: string): string[] => {
+  it('emits only the first-prompt line on turn 1 of an unregistered session', () => {
     const protocol = core();
-    let lines: string[] = [];
-    for (let i = 1; i <= turn; i += 1) {
-      lines = protocol.nudgesForTurn(sessionId, 'a plain prompt about nothing in particular');
-    }
-    return lines;
-  };
-
-  it('emits the sessionId line + the exact fixture save text on turn 5', () => {
-    expect(nudgesOnTurn(SAVE_NUDGE_EVERY, 's-fixture-save')).toEqual([
-      sessionIdLine('s-fixture-save'),
-      fixtures.save,
+    expect(protocol.nudgesForTurn('s-quiet', 'a plain prompt about nothing')).toEqual([
+      FIRST_PROMPT_NUDGE,
     ]);
   });
 
-  it('emits the relevance line, the sessionId line and the summary text on turn 1, in that order', () => {
-    expect(nudgesOnTurn(1, 's-fixture-summary')).toEqual([
-      fixtures.firstPromptRelevance,
-      sessionIdLine('s-fixture-summary'),
-      fixtures.summary,
-    ]);
+  it('emits nothing on a later turn of the same session', () => {
+    const protocol = core();
+    protocol.nudgesForTurn('s-quiet-2', 'first');
+    expect(protocol.nudgesForTurn('s-quiet-2', 'second')).toEqual([]);
   });
 
-  it('emits nothing on a turn where neither cadence fires', () => {
-    expect(nudgesOnTurn(2, 's-fixture-quiet')).toEqual([]);
+  it('declares no cadence constant, no modulo, no save/summary nudge text', () => {
+    const src = readFileSync(pluginCoreMjs, 'utf8');
+    expect(src).not.toMatch(/SAVE_NUDGE|SUMMARY_NUDGE_EVERY|SAVE_NUDGE_EVERY/);
+    expect(src).not.toContain('userTurnCounts');
   });
 });
 
 /**
  * post-compact.sh's PROTOCOL block fires at SessionStart(matcher:"compact")
  * on Claude Code AND Codex CLI — both run this exact script, so it is
- * byte-identical across the two by construction. It was previously emitted
- * in Spanish (the only non-English agent-facing text in the product); see
- * openspec/changes/fix-audited-defects. opencode's compaction handler
- * (`experimental.session.compacting` in .opencode-plugin/plugin.ts) sources
- * the same core text via rembric-plugin-core.mjs's POST_COMPACT_NUDGE_CORE
- * plus its own slug sentence — pinned in plugin.test.ts, not here, since it
- * runs through the TS handler rather than this bash script.
+ * byte-identical across the two by construction. opencode's compaction
+ * handler (`experimental.session.compacting` in .opencode-plugin/plugin.ts)
+ * sources the same core text via rembric-plugin-core.mjs's
+ * POST_COMPACT_NUDGE_CORE plus its own slug sentence — pinned in
+ * plugin.test.ts, not here, since it runs through the TS handler rather
+ * than this bash script.
  */
-describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-defects)', () => {
+describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
   function runPostCompact(cwd: string): string {
     return execFileSync('bash', [postCompactSh], {
       input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
@@ -397,7 +297,7 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-d
     }).trimEnd();
   }
 
-  it('emits the exact fixture text (English, not the prior Spanish)', () => {
+  it('emits the exact fixture text', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rembric-postcompact-'));
     try {
       expect(runPostCompact(cwd)).toBe(fixtures.postCompact);
@@ -421,6 +321,12 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI, fix-audited-d
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  it('states the merge rule (sent sections REPLACE, omitted ones STAY), not a whole-document replacement', () => {
+    expect(fixtures.postCompact).toMatch(/REPLACE/);
+    expect(fixtures.postCompact).toMatch(/STAY/);
+    expect(fixtures.postCompact).not.toContain('this REPLACES the stored value');
   });
 
   it('contains no non-ASCII Spanish-only characters (¿ ¡ é í ó ú ñ)', () => {
@@ -471,125 +377,108 @@ describe('per-line byte budgets', () => {
     expect(bytes(fixtures.firstPromptRelevance)).toBeLessThanOrEqual(140);
   });
 
-  it('save ≤132 bytes (33 tokens)', () => {
-    expect(bytes(fixtures.save)).toBeLessThanOrEqual(132);
-  });
-
   it('sessionIdTemplate rendered with a 36-char id ≤224 bytes (56 tokens)', () => {
     expect(bytes(sessionIdLine(UUID_SESSION_ID))).toBeLessThanOrEqual(224);
   });
 
-  it('summary ≤400 bytes (100 tokens)', () => {
-    expect(bytes(fixtures.summary)).toBeLessThanOrEqual(400);
+  it('sessionOpening ≤360 bytes (90 tokens)', () => {
+    expect(bytes(fixtures.sessionOpening)).toBeLessThanOrEqual(360);
   });
 
-  // Measured 139 bytes; the cap leaves the same ~15% margin as the other
-  // short lines (`save`, `firstPromptRelevance`) above.
   it('resumedRead ≤160 bytes (40 tokens)', () => {
     expect(bytes(fixtures.resumedRead)).toBeLessThanOrEqual(160);
   });
+
+  it('postCompact ≤700 bytes (175 tokens)', () => {
+    expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(700);
+  });
+
+  it('the fixtures carry no save, saveCore, summary, summaryCore or endOfTurnRubric key', () => {
+    for (const key of ['save', 'saveCore', 'summary', 'summaryCore', 'endOfTurnRubric']) {
+      expect(Object.prototype.hasOwnProperty.call(fixtures, key), key).toBe(false);
+    }
+  });
 });
 
 /**
- * The `UserPromptSubmit` cap is a per-firing-turn ceiling plus an amortised
- * budget, because the two matcher-less entries fire on cadences (turn 1,
- * every 5th, every 10th) — a flat per-turn figure is unsatisfiable by design.
+ * The per-firing-turn ceiling (session-nudges, claude-code-plugin) is derived
+ * from firstPromptRelevance + recall + sessionIdTemplate + the notice's own
+ * 640-byte bound + 4 newlines. The notice itself has no fixture (it is
+ * composed server-side per session), so the worst case is reconstructed here
+ * from a SYNTHETIC 640-byte string standing in for it — the real end-to-end
+ * figure is measured against a live server in the PR description (task 8.3).
  */
 describe('UserPromptSubmit emitted-output budgets', () => {
-  function turnBytes(counterDir: string, prompt: string): number {
-    const env = { ...process.env, TMPDIR: counterDir };
-    const input = JSON.stringify({ session_id: UUID_SESSION_ID, prompt });
-    const search = execFileSync('bash', [promptSearchSh], { input, encoding: 'utf8', env });
-    const nudge = execFileSync('bash', [promptNudgeSh], { input, encoding: 'utf8', env });
-    return bytes(search) + bytes(nudge);
-  }
-
-  it('turn 1 with a recall keyword stays ≤800 bytes (200 tokens)', () => {
+  it('turn 1 with a recall keyword stays ≤800 bytes (200 tokens): this sub-budget does NOT move', () => {
     const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-turn1-'));
     try {
-      // Four lines at once: firstPrompt + recall + save + summary.
-      expect(turnBytes(counterDir, 'what did we do yesterday')).toBeLessThanOrEqual(800);
+      const env = { ...process.env, TMPDIR: counterDir };
+      const input = JSON.stringify({
+        session_id: UUID_SESSION_ID,
+        prompt: 'what did we do yesterday',
+      });
+      const search = execFileSync('bash', [promptSearchSh], { input, encoding: 'utf8', env });
+      const nudge = execFileSync('bash', [promptNudgeSh], { input, encoding: 'utf8', env });
+      expect(bytes(search) + bytes(nudge)).toBeLessThanOrEqual(800);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }
   });
 
-  // The two scripts keep INDEPENDENT counters (`rembric-relevance-prefetch` vs
-  // `rembric-turnnudge`) with nothing coupling them, so one can be at turn 1
-  // while the other is at turn 10 and all five lines fire together. Reachable
-  // for real: Codex records hook trust per handler, so trusting one script
-  // before the other lands exactly here. Turn 1 is NOT the worst case.
-  it('a turn where the two counters diverge stays ≤960 bytes (240 tokens)', () => {
-    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-diverged-'));
+  it('the worst reachable turn (first-prompt + recall + sessionId + a 640-byte notice) stays ≤1088 bytes', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-worst-'));
     try {
-      for (let turn = 1; turn <= 9; turn += 1) turnBytes(counterDir, 'keep going');
-      // Only the first-prompt counter is reset, so turn 10 of the nudge
-      // cadence coincides with turn 1 of the relevance one.
-      rmSync(join(counterDir, 'rembric-relevance-prefetch'), { recursive: true, force: true });
-      const diverged = turnBytes(counterDir, 'what did we do yesterday');
-      // Lower than it used to be (>720) because the summary reminder MOVED to
-      // stop-nudge.sh. Asserted as a range rather than relaxed to a ceiling, so
-      // moving it back — or adding a fourth line here — fails.
-      expect(diverged).toBeGreaterThan(460);
-      expect(diverged).toBeLessThanOrEqual(960);
+      const env = { ...process.env, TMPDIR: counterDir };
+      const input = JSON.stringify({
+        session_id: UUID_SESSION_ID,
+        prompt: 'what did we do yesterday',
+      });
+      const search = execFileSync('bash', [promptSearchSh], { input, encoding: 'utf8', env });
+
+      const syntheticNotice = 'x'.repeat(640);
+      const dir = join(counterDir, 'rembric-pending');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, UUID_SESSION_ID), syntheticNotice);
+      const nudge = execFileSync('bash', [promptNudgeSh], { input, encoding: 'utf8', env });
+
+      expect(bytes(search) + bytes(nudge)).toBeLessThanOrEqual(1088);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }
   });
 
-  it('ten consecutive turns average ≤180 bytes/turn (45 tokens), seven emitting nothing', () => {
-    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-amortised-'));
+  it('a conversation with no work costs only the turn-1 lines, over twenty turns', () => {
+    const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-quiet-'));
     try {
-      const perTurn = Array.from({ length: 10 }, () =>
-        turnBytes(counterDir, 'continue with the refactor'),
-      );
-      const total = perTurn.reduce((sum, n) => sum + n, 0);
-      expect(total / perTurn.length).toBeLessThanOrEqual(180);
-      // The zero turns are what make the mean honest.
-      for (const turn of [2, 3, 4, 6, 7, 8, 9]) {
-        expect(perTurn[turn - 1]).toBe(0);
+      const env = { ...process.env, TMPDIR: counterDir };
+      let total = 0;
+      for (let turn = 1; turn <= 20; turn += 1) {
+        const input = JSON.stringify({ session_id: 's-quiet-20', prompt: 'continue the refactor' });
+        const search = execFileSync('bash', [promptSearchSh], { input, encoding: 'utf8', env });
+        const nudge = execFileSync('bash', [promptNudgeSh], { input, encoding: 'utf8', env });
+        total += bytes(search) + bytes(nudge);
       }
+      // Turn 1 alone: firstPromptRelevance plus its one trailing newline.
+      expect(total).toBe(bytes(fixtures.firstPromptRelevance) + 1);
+      expect(total).toBeLessThan(1880);
     } finally {
       rmSync(counterDir, { recursive: true, force: true });
     }
   });
 });
 
-describe.runIf(hasPython3)('nudge cadence numbers lock-step with Python', () => {
-  it('SAVE_NUDGE_EVERY matches', () => {
-    expect(pythonNumberConstant('_SAVE_HINT_EVERY')).toBe(bashCadence('SAVE_NUDGE_EVERY'));
+describe.runIf(hasPython3)('no cadence constant remains in the Python provider', () => {
+  it('declares no _SAVE_HINT_EVERY, _SUMMARY_HINT_EVERY, _SAVE_HINT, or _SUMMARY_HINT', () => {
+    const src = readFileSync(hermesInit, 'utf8');
+    expect(src).not.toContain('_SAVE_HINT_EVERY');
+    expect(src).not.toContain('_SUMMARY_HINT_EVERY');
+    expect(src).not.toMatch(/_SAVE_HINT\s*=/);
+    expect(src).not.toMatch(/_SUMMARY_HINT\s*=/);
   });
 
-  it('SUMMARY_NUDGE_EVERY matches', () => {
-    expect(pythonNumberConstant('_SUMMARY_HINT_EVERY')).toBe(bashCadence('SUMMARY_NUDGE_EVERY'));
-  });
-});
-
-/**
- * These two were emitted to a model from bash and from the JS/TS clients with
- * no fixture behind them, so nothing asserted the two copies agreed — the
- * drift surface the shared-fixture requirement exists to close.
- */
-describe('the two script-emitted nudges are in lock-step with their clients', () => {
-  const shellLiteral = (file: string, marker: string): string => {
-    const line = readFileSync(join(here, '..', 'scripts', file), 'utf8')
-      .split('\n')
-      .find((l) => l.includes(marker));
-    return line!.slice(line!.indexOf("'") + 1, line!.lastIndexOf("'"));
-  };
-
-  it('session-start.sh emits the sessionStart fixture verbatim', () => {
-    expect(shellLiteral('session-start.sh', 'memory.context before responding')).toBe(
-      fixtures.sessionStart,
-    );
-  });
-
-  it('prompt-search.sh emits the recall fixture verbatim', () => {
-    expect(shellLiteral('prompt-search.sh', 'User intent: recall')).toBe(fixtures.recall);
-  });
-
-  it('the shared JS/TS module emits the same recall line as bash', () => {
-    expect(readFileSync(pluginCoreMjs, 'utf8')).toContain(fixtures.recall);
+  it('_SAVE_HINT_URGENT survives unchanged (unrelated to the periodic reminder)', () => {
+    const hint = pythonHintConstant('_SAVE_HINT_URGENT');
+    expect(hint).toContain('save anything important');
   });
 });
 
@@ -601,51 +490,29 @@ describe('the two script-emitted nudges are in lock-step with their clients', ()
  * together instead of drifting apart.
  */
 describe('every enforced cap is published in the capability that owns it', () => {
+  // Points at the DELTA spec, not the archived one: `server-gated-session-nudges`
+  // is unarchived while this suite runs, so the archived spec.md still carries
+  // the pre-change numbers (960/180) until the archive phase merges this delta.
   const spec = readFileSync(
-    join(here, '..', '..', '..', 'openspec', 'specs', 'claude-code-plugin', 'spec.md'),
+    join(
+      here,
+      '..',
+      '..',
+      '..',
+      'openspec',
+      'changes',
+      'server-gated-session-nudges',
+      'specs',
+      'claude-code-plugin',
+      'spec.md',
+    ),
     'utf8',
   );
 
-  it.each([100, 140, 132, 224, 400, 700, 960, 240, 180])(
+  it.each([100, 140, 224, 360, 700, 1088, 240])(
     'the %s cap is stated in claude-code-plugin/spec.md',
     (cap) => {
       expect(spec).toMatch(new RegExp(`\\b${cap}\\b`));
     },
   );
-});
-
-// The long-form rubric has no TypeScript consumer — the end-of-turn hook is bash
-// — so the fixture is its source, the same way the short nudges work. The first
-// version put it in a TS constant nothing read, while the text that actually
-// shipped was written a second time in the hook with nothing comparing them.
-describe('end-of-turn rubric lock-step', () => {
-  it('stop-nudge.sh carries the exact fixture rubric', () => {
-    expect(readFileSync(stopNudgeShPath, 'utf8')).toContain(fixtures.endOfTurnRubric);
-  });
-
-  it('the rubric names every canonical section', () => {
-    const headings = [
-      '## Goal',
-      '## Accomplished',
-      '## Decisions+why',
-      '## Verified+how',
-      '## Unfinished+why',
-      '## Files',
-    ];
-    expect(fixtures.endOfTurnRubric).toContain(
-      'each on its own line (never one flat paragraph):\n' + headings.join('\n'),
-    );
-    expect(fixtures.endOfTurnRubric).not.toContain('Goal · Accomplished ·');
-    for (const [index, heading] of headings.entries()) {
-      expect(
-        fixtures.endOfTurnRubric.indexOf(heading),
-        `rubric omits '${heading}'`,
-      ).toBeGreaterThan(index === 0 ? -1 : fixtures.endOfTurnRubric.indexOf(headings[index - 1]!));
-    }
-  });
-
-  it('the rubric directs verbatim copying of concrete facts, not paraphrase', () => {
-    expect(fixtures.endOfTurnRubric).toContain('VERBATIM');
-    expect(fixtures.endOfTurnRubric).toContain('a paraphrased number is a lost number');
-  });
 });

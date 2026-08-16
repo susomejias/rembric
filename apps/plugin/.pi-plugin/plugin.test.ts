@@ -24,7 +24,7 @@ import {
   FIRST_PROMPT_NUDGE,
   POST_TIMEOUT_MS,
   SESSION_ID_NUDGE_TEMPLATE,
-  SUMMARY_NUDGE,
+  SESSION_OPENING_NUDGE,
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
 
@@ -736,7 +736,7 @@ describe('session registration and nudges', () => {
     expect(sessions.getById(sessionId)?.agent).toBe('pi');
   });
 
-  it('injects the first-prompt, sessionId and summary nudges on turn 1, under the registered names', async () => {
+  it('injects the first-prompt, sessionId and session-opening nudges on turn 1, under the registered names', async () => {
     const sessionId = 'pi-session-nudges';
     const harness = await startedHarness(sessionId);
     const result = (await harness.fire('before_agent_start', { prompt: 'first turn' })) as {
@@ -744,10 +744,10 @@ describe('session registration and nudges', () => {
     };
 
     expect(result.message.content).toContain(underscoreToolNames(FIRST_PROMPT_NUDGE));
-    expect(result.message.content).toContain(underscoreToolNames(SUMMARY_NUDGE));
-    expect(result.message.content).toContain(
-      'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files',
-    );
+    // A genuinely new session id, ensured for the first time against the
+    // real server above — the opening fires because `created` really is true.
+    expect(result.message.content).toContain(underscoreToolNames(SESSION_OPENING_NUDGE));
+    expect(result.message.content).toContain('## Goal');
     expect(result.message.content).toContain(
       underscoreToolNames(SESSION_ID_NUDGE_TEMPLATE.replace('{{SESSION_ID}}', sessionId)),
     );
@@ -783,6 +783,137 @@ describe('session registration and nudges', () => {
       for (const name of named) {
         expect(registered, `${name} is not a registered tool`).toContain(name);
       }
+    }
+  });
+});
+
+/**
+ * Drives the REAL three-event `message_end` sequence the harness already
+ * processes today, against a real (in-process) Rembric server — the
+ * scenario `session-nudges` D4a requires, with its own control.
+ */
+describe('tool-observation accumulation across a turn (session-nudges D4a)', () => {
+  function spyOnTurnReports(): { calls: Array<{ usedTools: boolean }>; restore: () => void } {
+    const calls: Array<{ usedTools: boolean }> = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.endsWith('/turn') && init?.body) {
+          calls.push(JSON.parse(String(init.body)) as { usedTools: boolean });
+        }
+        return realFetch(input as never, init);
+      });
+    return { calls, restore: () => spy.mockRestore() };
+  }
+
+  const toolCallMessage = {
+    role: 'assistant',
+    content: [{ type: 'toolCall', name: 'ls', id: 't1' }],
+  };
+  const toolResultMessage = { role: 'toolResult', content: [{ type: 'text', text: 'a b c' }] };
+  const settledTextOnlyMessage = {
+    role: 'assistant',
+    content: [{ type: 'text', text: 'Done.' }],
+    stopReason: 'stop',
+  };
+
+  it('reports usedTools:true for a turn that called a tool, from the accumulated flag', async () => {
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-1');
+      await harness.fire('before_agent_start', { prompt: 'list files' });
+      await harness.fire('message_end', { message: toolCallMessage });
+      await harness.fire('message_end', { message: toolResultMessage });
+      await harness.fire('message_end', { message: settledTextOnlyMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.usedTools).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('CONTROL: inspecting only the final (settled) message_end yields false', async () => {
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-control');
+      await harness.fire('before_agent_start', { prompt: 'list files' });
+      // Only the settled message — the one a naive single-event reader would
+      // inspect — is delivered here, deliberately omitting the earlier
+      // toolCall/toolResult events this same turn actually produced.
+      await harness.fire('message_end', { message: settledTextOnlyMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.usedTools).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('resets per turn: a tool turn followed by a chat-only turn reports false on the second', async () => {
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-reset');
+      await harness.fire('before_agent_start', { prompt: 'list files' });
+      await harness.fire('message_end', { message: toolCallMessage });
+      await harness.fire('message_end', { message: toolResultMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      await harness.fire('before_agent_start', { prompt: 'just chatting' });
+      await harness.fire('message_end', { message: settledTextOnlyMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.usedTools).toBe(true);
+      expect(calls[1]!.usedTools).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('before_agent_start resets a flag left dangling by a turn that never reached agent_settled', async () => {
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-interrupted');
+      // Turn 1: a tool call fires, but the turn is interrupted before
+      // agent_settled — the flag is left `true` with no report issued.
+      await harness.fire('before_agent_start', { prompt: 'list files' });
+      await harness.fire('message_end', { message: toolCallMessage });
+
+      // Turn 2: before_agent_start's own reset must clear the dangling flag,
+      // or this chat-only turn would falsely report usedTools:true.
+      await harness.fire('before_agent_start', { prompt: 'just chatting' });
+      await harness.fire('message_end', { message: settledTextOnlyMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.usedTools).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a `toolResult` message alone (no toolCall observed) also sets the flag', async () => {
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-result-only');
+      await harness.fire('before_agent_start', { prompt: 'anything' });
+      await harness.fire('message_end', { message: toolResultMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(calls[0]!.usedTools).toBe(true);
+    } finally {
+      restore();
     }
   });
 });

@@ -8,12 +8,10 @@ export declare const POST_TIMEOUT_MS: number;
 export declare const RECALL_REGEX: RegExp;
 export declare const RECALL_NUDGE: string;
 export declare const FIRST_PROMPT_NUDGE: string;
-export declare const SAVE_NUDGE_EVERY: number;
-export declare const SAVE_NUDGE: string;
-export declare const SUMMARY_NUDGE_EVERY: number;
-export declare const SUMMARY_NUDGE: string;
 export declare const SESSION_ID_NUDGE_TEMPLATE: string;
 export declare const RESUMED_READ_NUDGE: string;
+export declare const SESSION_OPENING_NUDGE_CORE: string;
+export declare const SESSION_OPENING_NUDGE: string;
 export declare const POST_COMPACT_NUDGE_CORE: string;
 
 export declare function diag(line: string): void;
@@ -32,6 +30,8 @@ export type SessionProtocolOptions = {
   cwd?: string;
 };
 
+export type ReportTurnOptions = { usedTools: boolean };
+
 export type SessionProtocol = {
   readonly disabled: boolean;
   readonly disabledReason: string | null;
@@ -41,6 +41,8 @@ export type SessionProtocol = {
   isKnown(sessionId: string): boolean;
   ensureSession(sessionId: string): Promise<void>;
   nudgesForTurn(sessionId: string, prompt: string): string[];
+  /** The per-turn report (`session-nudges`); caches the server's returned lines for the next `nudgesForTurn`. */
+  reportTurn(sessionId: string, opts: ReportTurnOptions): Promise<void>;
   /** Returns the entries the per-session cap evicted, oldest first. */
   appendUserMessage(sessionId: string, rawText: string): TranscriptEntry[];
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];

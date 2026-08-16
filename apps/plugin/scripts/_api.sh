@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helper for the Rembric plugin hook scripts.
 #
-# Sourced by session-start.sh, pre-compact.sh, and stop-sync.sh. Exposes:
+# Sourced by every hook script. Exposes:
 #   - rembric_parse_dotenv <path>     → echoes "KEY=VALUE\n..." pairs
 #   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
@@ -16,6 +16,13 @@
 #   - rembric_turn_count <name> <id>  → echoes the atomic per-session turn count
 #   - rembric_resumed_mark/_peek <id> → records/reads whether the FIRST ensure
 #                                       for a session id reported created:false
+#   - rembric_created_mark/_peek <id> → same, for created:true (session-opening)
+#   - rembric_turn_report <path> <body> → POSTs, echoes the response's `lines`
+#                                       array as one newline-separated block
+#   - rembric_pending_write/_take <id> → the per-session notice cache; `_take`
+#                                       prints and clears in one step
+#   - rembric_scan_offset/_set <id>  → the per-session transcript byte offset
+#                                       stop-report.sh scans forward from
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -135,16 +142,15 @@ rembric_session_ensure() {
   fi
 }
 
-# Atomic per-session turn counter, shared by prompt-nudge.sh and
-# prompt-search.sh so each keeps its own cadence without duplicating the
-# counting mechanics. `counter_name` picks the counter's directory (each
-# caller uses a distinct one so their cadences never double-increment each
-# other). Append-and-count-bytes instead of read-increment-write: a single
-# O_APPEND write is atomic even across concurrent invocations, so turns can
-# never be lost to a race the way a read-modify-write counter could. Echoes
-# the new count, or nothing if the counter is unreadable — callers MUST
-# treat empty as fail-closed (defaulting to 0 would satisfy every modulo/
-# equality check at once, spamming nudges for the rest of the session).
+# Atomic per-session turn counter. `prompt-search.sh` is now its sole
+# caller (the first-prompt relevance detection) — the only turn counter
+# left in the plugin tree (session-nudges). `counter_name` picks the
+# counter's directory. Append-and-count-bytes instead of
+# read-increment-write: a single O_APPEND write is atomic even across
+# concurrent invocations, so turns can never be lost to a race the way a
+# read-modify-write counter could. Echoes the new count, or nothing if the
+# counter is unreadable — callers MUST treat empty as fail-closed
+# (defaulting to 0 would satisfy every equality check at once).
 rembric_turn_count() {
   local counter_name="${1:-}" session_id="${2:-}"
   [ -z "$counter_name" ] && return 0
@@ -162,23 +168,18 @@ rembric_turn_count() {
   printf '%s' "$count"
 }
 
-# Reads the counter WITHOUT advancing it. The end-of-turn hook has to see the
-# same turn number the start-of-turn hook saw, so it must not append: calling
-# `rembric_turn_count` twice per turn would double the count and silently halve
-# every cadence keyed on it.
-rembric_turn_count_peek() {
-  local counter_name="${1:-}" session_id="${2:-}"
-  [ -z "$counter_name" ] && return 0
+# Fires exactly once per (marker-dir, session id) via an atomic `mkdir` —
+# `mkdir` fails when the directory already exists, so this is race-safe
+# without a read-then-write. Used for the session-opening and resumed-read
+# lines, each of which SHALL fire at most once per session.
+rembric_once_claim() {
+  local dir_name="${1:-}" session_id="${2:-}"
+  { [ -z "$dir_name" ] || [ -z "$session_id" ]; } && return 1
   local safe_id
-  safe_id="$(printf '%s' "${session_id:-nosession}" | tr -c 'A-Za-z0-9_.-' '_')"
-  local file="${TMPDIR:-/tmp}/${counter_name}/${safe_id}"
-  [ -f "$file" ] || return 0
-  local count
-  count="$(wc -c <"$file" 2>/dev/null | tr -d '[:space:]')"
-  case "$count" in
-    '' | *[!0-9]*) return 0 ;;
-  esac
-  printf '%s' "$count"
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/${dir_name}"
+  mkdir -p "$dir" 2>/dev/null || true
+  mkdir "${dir}/${safe_id}" 2>/dev/null
 }
 
 # Records whether the FIRST session-ensure for this session id reported
@@ -218,6 +219,35 @@ rembric_resumed_peek() {
   [ "$(cat "$file" 2>/dev/null)" = "1" ]
 }
 
+# The session-opening line's gate (session-nudges): records whether the
+# FIRST ensure for this session id reported `created:true` — a genuinely
+# NEW session. Deliberately the mirror of rembric_resumed_mark rather than
+# its negation: an unclear outcome sets NEITHER file, so neither the
+# opening nor the resumed-read line fires on an ensure whose result is
+# unknown ("do not advise" beats a guess in either direction).
+rembric_created_mark() {
+  local session_id="${1:-}" created="${2:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/rembric-created"
+  mkdir -p "$dir" 2>/dev/null || true
+  local file="${dir}/${safe_id}"
+  [ -e "$file" ] && return 0
+  [ "$created" = "true" ] && { printf '1' >"$file" 2>/dev/null || true; }
+  return 0
+}
+
+rembric_created_peek() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 1
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-created/${safe_id}"
+  [ -f "$file" ] || return 1
+  [ "$(cat "$file" 2>/dev/null)" = "1" ]
+}
+
 # Best-effort extraction of a session id from the hook stdin JSON. Prefers
 # Claude Code's `session_id`; falls back to Codex's `sessionId`.
 rembric_session_id_from_stdin_json() {
@@ -249,7 +279,7 @@ rembric_prompt_from_stdin_json() {
 }
 
 # Extract `transcript_path` from a hook stdin JSON blob. Returns empty
-# when missing or null. Used by session-end.sh, stop-sync.sh, and
+# when missing or null. Used by session-end.sh, stop-report.sh, and
 # pre-compact.sh to find the JSONL conversation log on disk.
 rembric_transcript_path_from_stdin_json() {
   local input="${1:-}"
@@ -321,7 +351,7 @@ rembric_json_escape() {
   # \t. A transcript containing e.g. an ANSI escape (\x1b, from pasted
   # colored terminal output) would otherwise produce an invalid JSON body
   # that the server's JSON.parse rejects outright — silently dropping the
-  # whole POST (session-end fallback summary, stop-sync turn, or
+  # whole POST (session-end fallback summary, stop-report turn, or
   # pre-compact snapshot) for the rest of the session.
   local i hex c
   i=1
@@ -337,4 +367,128 @@ rembric_json_escape() {
     i=$((i + 1))
   done
   printf '%s' "$s"
+}
+
+# Issues the per-turn report (session-nudges) and echoes the response's
+# `lines` array as one newline-separated block — nothing on a non-2xx
+# status, a timeout, or an empty array. Kept separate from `rembric_post`
+# because it is the one place besides `rembric_session_ensure` that reads
+# a response body, and `plugin-session-protocol` forbids ever pointing
+# that capability at a `/summary` response.
+rembric_turn_report() {
+  local path="${1:-}" body="${2:-}"
+  [ -z "$path" ] && return 0
+  if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
+    printf '[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST %s\n' "$path" >&2
+    return 0
+  fi
+  [ -z "$body" ] && body='{}'
+  local url="${REMBRIC_SERVER_URL%/}${path}"
+  local rc=0 response="" status="" detail=""
+  response="$(curl -s -X POST \
+    -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --max-time "${REMBRIC_POST_MAX_TIME:-3}" \
+    -d "$body" \
+    -w '\n%{http_code}' \
+    "$url")" || rc=$?
+  status="${response##*$'\n'}"
+  detail="${response%$'\n'*}"
+  if [ "$rc" -ne 0 ] || [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
+    printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$detail" | jq -r '(.lines // [])[]' 2>/dev/null
+  else
+    # Best-effort fallback: one string per line inside a top-level "lines"
+    # array. Does not handle an embedded escaped quote inside a line —
+    # jq is the recommended path, same trade-off as the other extractors.
+    printf '%s' "$detail" |
+      sed -n 's/.*"lines"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p' |
+      sed 's/","/"\n"/g' |
+      sed -n 's/^"\(.*\)"$/\1/p;s/^"\(.*\)$/\1/p;s/^\(.*\)"$/\1/p'
+  fi
+}
+
+# The per-session notice cache (session-nudges). `_write` SHALL NOT
+# overwrite a non-empty cache with an empty value — a second report within
+# one turn must not swallow a pending notice. `_take` prints and removes
+# the file in one step, so a notice is printed exactly once.
+rembric_pending_write() {
+  local session_id="${1:-}" text="${2:-}"
+  [ -z "$session_id" ] && return 0
+  [ -z "$text" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/rembric-pending"
+  mkdir -p "$dir" 2>/dev/null || true
+  printf '%s' "$text" >"${dir}/${safe_id}" 2>/dev/null || true
+}
+
+rembric_pending_take() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-pending/${safe_id}"
+  [ -f "$file" ] || return 0
+  cat "$file" 2>/dev/null || true
+  rm -f "$file" 2>/dev/null || true
+}
+
+# The provisional title (design D12): prompt-nudge.sh records the session's
+# first user prompt (already redacted, ≤100 chars) here exactly once;
+# stop-report.sh consumes and clears it for its first report. Write-once
+# rather than "never overwrite non-empty with empty" — a SECOND prompt must
+# never replace the FIRST one this records.
+rembric_first_prompt_write() {
+  local session_id="${1:-}" text="${2:-}"
+  { [ -z "$session_id" ] || [ -z "$text" ]; } && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/rembric-first-prompt"
+  mkdir -p "$dir" 2>/dev/null || true
+  local file="${dir}/${safe_id}"
+  [ -e "$file" ] && return 0
+  printf '%s' "$text" >"$file" 2>/dev/null || true
+}
+
+rembric_first_prompt_take() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-first-prompt/${safe_id}"
+  [ -f "$file" ] || return 0
+  cat "$file" 2>/dev/null || true
+  rm -f "$file" 2>/dev/null || true
+}
+
+# The per-session transcript byte offset stop-report.sh's delta scan reads
+# from and advances past each report — the mechanism that keeps the scan
+# off the ~0.5s-per-firing cost curve a full re-parse sits on.
+rembric_scan_offset() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-scan/${safe_id}"
+  [ -f "$file" ] || return 0
+  local n
+  n="$(cat "$file" 2>/dev/null | tr -d '[:space:]')"
+  case "$n" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  printf '%s' "$n"
+}
+
+rembric_scan_offset_set() {
+  local session_id="${1:-}" bytes="${2:-}"
+  [ -z "$session_id" ] && return 0
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local dir="${TMPDIR:-/tmp}/rembric-scan"
+  mkdir -p "$dir" 2>/dev/null || true
+  printf '%s' "$bytes" >"${dir}/${safe_id}" 2>/dev/null || true
 }

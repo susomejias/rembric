@@ -96,6 +96,20 @@ export const agentSessions = sqliteTable(
      * references from `memory` and `confirmations` remain valid.
      */
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+    /**
+     * The three nudge-gate timestamps behind the server-composed
+     * stretch-close reminder (`session-nudges`). All nullable, all
+     * monotone (never move backwards, never cleared by `resume`), all
+     * exempt from the `final`-flag precedence machinery — none is
+     * model-authored, so there is no competing writer to arbitrate.
+     * NULL means "never": every pre-existing row reads NULL on all three
+     * and the gate stays silent until a client's turn report sets one.
+     */
+    lastWorkAt: integer('last_work_at', { mode: 'timestamp_ms' }),
+    /** Set only by the same site that writes a `final:true` summary. */
+    lastSummaryAt: integer('last_summary_at', { mode: 'timestamp_ms' }),
+    /** Set only when a turn report's response carries notice lines. */
+    lastNudgeAt: integer('last_nudge_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     tokenStatusIdx: index('sessions_token_status_idx').on(table.tokenId, table.status),
