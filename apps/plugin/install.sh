@@ -58,31 +58,43 @@ is_action() { # $1 name → 0 when it is one of ACTIONS
 
 for arg in "$@"; do
   case "$arg" in
-    --server) ARG_SERVER=1 ;;
-    --agent=*) ARG_AGENTS="${arg#--agent=}" ;;
-    --action=*)
-      ARG_ACTION="${arg#--action=}"
-      is_action "$ARG_ACTION" || {
-        printf '[rembric] error: invalid --action=%s (expected one of: %s)\n' "$ARG_ACTION" "$ACTIONS" >&2
-        exit 2
-      } ;;
-    --ref=*) REF="${arg#--ref=}" ;;
-    --up) ARG_UP=1 ;;
-    --yes|-y) ARG_YES=1 ;;
-    --status) ARG_STATUS=1 ;;
-    --json) ARG_JSON=1 ;;
-    --token=*) ARG_TOKEN="${arg#--token=}"; ARG_TOKEN_SET=1 ;;
-    --port=*)
-      ARG_PORT="${arg#--port=}"
-      case "$ARG_PORT" in
-        ''|*[!0-9]*) printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2; exit 2 ;;
-      esac
-      if [ "${#ARG_PORT}" -gt 5 ] || [ "$ARG_PORT" -lt 1 ] || [ "$ARG_PORT" -gt 65535 ]; then
-        printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2; exit 2
-      fi ;;
-    --noninteractive) NONINTERACTIVE=1 ;;
-    -h|--help) ARG_HELP=1 ;;
-    *) printf '[rembric] error: unknown argument %s\n' "$arg" >&2; exit 2 ;;
+  --server) ARG_SERVER=1 ;;
+  --agent=*) ARG_AGENTS="${arg#--agent=}" ;;
+  --action=*)
+    ARG_ACTION="${arg#--action=}"
+    is_action "$ARG_ACTION" || {
+      printf '[rembric] error: invalid --action=%s (expected one of: %s)\n' "$ARG_ACTION" "$ACTIONS" >&2
+      exit 2
+    }
+    ;;
+  --ref=*) REF="${arg#--ref=}" ;;
+  --up) ARG_UP=1 ;;
+  --yes | -y) ARG_YES=1 ;;
+  --status) ARG_STATUS=1 ;;
+  --json) ARG_JSON=1 ;;
+  --token=*)
+    ARG_TOKEN="${arg#--token=}"
+    ARG_TOKEN_SET=1
+    ;;
+  --port=*)
+    ARG_PORT="${arg#--port=}"
+    case "$ARG_PORT" in
+    '' | *[!0-9]*)
+      printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2
+      exit 2
+      ;;
+    esac
+    if [ "${#ARG_PORT}" -gt 5 ] || [ "$ARG_PORT" -lt 1 ] || [ "$ARG_PORT" -gt 65535 ]; then
+      printf '[rembric] error: invalid --port=%s (expected a number 1-65535)\n' "$ARG_PORT" >&2
+      exit 2
+    fi
+    ;;
+  --noninteractive) NONINTERACTIVE=1 ;;
+  -h | --help) ARG_HELP=1 ;;
+  *)
+    printf '[rembric] error: unknown argument %s\n' "$arg" >&2
+    exit 2
+    ;;
   esac
 done
 
@@ -91,25 +103,34 @@ LIME='' DIM='' WARN='' DANGER='' BOLD='' RESET=''
 setup_colors() {
   [ -n "${NO_COLOR:-}" ] && return 0
   [ -t 1 ] || return 0
-  RESET=$(printf '\033[0m'); BOLD=$(printf '\033[1m')
+  RESET=$(printf '\033[0m')
+  BOLD=$(printf '\033[1m')
   case "${COLORTERM:-}" in
-    truecolor|24bit)
-      LIME=$(printf '\033[38;2;198;242;78m')
-      DIM=$(printf '\033[38;2;154;154;154m')
-      WARN=$(printf '\033[38;2;255;140;0m')
-      DANGER=$(printf '\033[38;2;255;51;68m') ;;
-    *) case "${TERM:-}" in
-         *256color*)
-           LIME=$(printf '\033[38;5;154m'); DIM=$(printf '\033[38;5;245m')
-           WARN=$(printf '\033[38;5;208m'); DANGER=$(printf '\033[38;5;203m') ;;
-         *) LIME=$BOLD; WARN=$BOLD; DANGER=$BOLD ;;
-       esac ;;
+  truecolor | 24bit)
+    LIME=$(printf '\033[38;2;198;242;78m')
+    DIM=$(printf '\033[38;2;154;154;154m')
+    WARN=$(printf '\033[38;2;255;140;0m')
+    DANGER=$(printf '\033[38;2;255;51;68m')
+    ;;
+  *) case "${TERM:-}" in
+    *256color*)
+      LIME=$(printf '\033[38;5;154m')
+      DIM=$(printf '\033[38;5;245m')
+      WARN=$(printf '\033[38;5;208m')
+      DANGER=$(printf '\033[38;5;203m')
+      ;;
+    *)
+      LIME=$BOLD
+      WARN=$BOLD
+      DANGER=$BOLD
+      ;;
+    esac ;;
   esac
 }
 setup_colors
 
 say() { printf '%s\n' "$*"; }
-hr()  { printf '%s────────────────────────────────────────────────────%s\n' "$DIM" "$RESET"; }
+hr() { printf '%s────────────────────────────────────────────────────%s\n' "$DIM" "$RESET"; }
 
 # Block-letter REMBRIC wordmark rows + display width (hardcoded — the rows are
 # multibyte █, so we can't measure width portably).
@@ -134,17 +155,19 @@ _wm_anim() {
   trap 'printf "\033[?25h"; exit 130' INT TERM
   _w=0
   while :; do
-    printf '%s' "$LIME"; _wm_static; printf '%s' "$RESET"
-    printf '\033[5A'                                   # back up to row 1
+    printf '%s' "$LIME"
+    _wm_static
+    printf '%s' "$RESET"
+    printf '\033[5A' # back up to row 1
     _i=0
     while [ "$_i" -lt 5 ]; do
       [ $((WM_W - _w)) -gt 0 ] && printf '\033[%dG%*s' "$((3 + _w))" "$((WM_W - _w))" ''
-      printf '\033[1E'                                 # next row, column 1
+      printf '\033[1E' # next row, column 1
       _i=$((_i + 1))
     done
     [ "$_w" -ge "$WM_W" ] && break
     sleep 0.03 2>/dev/null || true
-    printf '\033[5A'                                   # back up to redraw next frame
+    printf '\033[5A' # back up to redraw next frame
     _w=$((_w + 6))
   done
   printf '\033[?25h'
@@ -154,12 +177,17 @@ wordmark() {
   # Block-letter REMBRIC + hero tagline in lime when colour is active; plain
   # one-liner otherwise (headless / NO_COLOR / non-tty). Animate the reveal only
   # on the first interactive render; later redraws are instant.
-  if [ -z "$LIME" ]; then printf '\n  rembric installer\n'; return; fi
+  if [ -z "$LIME" ]; then
+    printf '\n  rembric installer\n'
+    return
+  fi
   printf '\n'
   if [ "$BANNER_DONE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
     _wm_anim
   else
-    printf '%s' "$LIME"; _wm_static; printf '%s' "$RESET"
+    printf '%s' "$LIME"
+    _wm_static
+    printf '%s' "$RESET"
   fi
   printf '\n'
   printf '%s  Persistent memory for AI coding agents — self-hosted, MCP-native, append-only.%s\n' "$DIM" "$RESET"
@@ -206,19 +234,23 @@ ask() { # $1 prompt → stdout answer (read from the terminal, not piped stdin)
 # read_key → echoes UP | DOWN | ENTER | QUIT | OTHER (one keypress from the tty,
 # tty already in raw mode). Arrow keys arrive as ESC [ A/B; Enter as CR/LF.
 read_key() {
-  _esc=$(printf '\033'); _cr=$(printf '\r')
+  _esc=$(printf '\033')
+  _cr=$(printf '\r')
   _c1=$(dd bs=1 count=1 2>/dev/null </dev/tty)
-  if [ -z "$_c1" ] || [ "$_c1" = "$_cr" ]; then echo ENTER; return; fi
+  if [ -z "$_c1" ] || [ "$_c1" = "$_cr" ]; then
+    echo ENTER
+    return
+  fi
   if [ "$_c1" = "$_esc" ]; then
-    _c2=$(dd bs=1 count=1 2>/dev/null </dev/tty)   # '['
-    _c3=$(dd bs=1 count=1 2>/dev/null </dev/tty)   # A/B/...
+    _c2=$(dd bs=1 count=1 2>/dev/null </dev/tty) # '['
+    _c3=$(dd bs=1 count=1 2>/dev/null </dev/tty) # A/B/...
     case "$_c2$_c3" in
-      "[A") echo UP ;; "[B") echo DOWN ;; *) echo OTHER ;;
+    "[A") echo UP ;; "[B") echo DOWN ;; *) echo OTHER ;;
     esac
     return
   fi
   case "$_c1" in
-    k|K) echo UP ;; j|J) echo DOWN ;; q|Q) echo QUIT ;; *) echo OTHER ;;
+  k | K) echo UP ;; j | J) echo DOWN ;; q | Q) echo QUIT ;; *) echo OTHER ;;
   esac
 }
 
@@ -227,9 +259,12 @@ read_key() {
 # cannot be entered.
 MENU_INDEX=0
 arrow_menu() {
-  _title="$1"; shift
-  _n=$#; _sel=0
-  _raw=0; _saved=''
+  _title="$1"
+  shift
+  _n=$#
+  _sel=0
+  _raw=0
+  _saved=''
   if [ "$HAVE_TTY" = "1" ] && command -v stty >/dev/null 2>&1; then
     _saved=$(stty -g </dev/tty 2>/dev/null) || _saved=''
     if [ -n "$_saved" ]; then _raw=1; fi
@@ -239,17 +274,20 @@ arrow_menu() {
     # Numbered fallback.
     printf '%s%s%s\n' "$BOLD" "$_title" "$RESET" >/dev/tty
     _i=1
-    for _o in "$@"; do printf '  %s%d%s) %s\n' "$LIME" "$_i" "$RESET" "$_o" >/dev/tty; _i=$((_i+1)); done
+    for _o in "$@"; do
+      printf '  %s%d%s) %s\n' "$LIME" "$_i" "$RESET" "$_o" >/dev/tty
+      _i=$((_i + 1))
+    done
     _ans=$(ask "  Select [1-$_n]:")
     case "$_ans" in
-      ''|*[!0-9]*) MENU_INDEX=-1 ;;
-      *) if [ "$_ans" -ge 1 ] && [ "$_ans" -le "$_n" ]; then MENU_INDEX=$((_ans-1)); else MENU_INDEX=-1; fi ;;
+    '' | *[!0-9]*) MENU_INDEX=-1 ;;
+    *) if [ "$_ans" -ge 1 ] && [ "$_ans" -le "$_n" ]; then MENU_INDEX=$((_ans - 1)); else MENU_INDEX=-1; fi ;;
     esac
     return
   fi
 
   stty -echo -icanon min 1 time 0 </dev/tty 2>/dev/null
-  printf '\033[?25l' >/dev/tty   # hide cursor
+  printf '\033[?25l' >/dev/tty # hide cursor
   # Restore terminal no matter how we leave. A caught INT/TERM does NOT
   # terminate the process by default once a trap is installed for it — an
   # EXIT-only trap here left Ctrl-C restoring cooked mode but the read_key
@@ -270,13 +308,19 @@ arrow_menu() {
       else
         printf '\r\033[K  %s  %s%s\n' "$DIM" "$_o" "$RESET" >/dev/tty
       fi
-      _i=$((_i+1))
+      _i=$((_i + 1))
     done
     case "$(read_key)" in
-      UP)    if [ "$_sel" -gt 0 ]; then _sel=$((_sel-1)); else _sel=$((_n-1)); fi ;;
-      DOWN)  if [ "$_sel" -lt $((_n-1)) ]; then _sel=$((_sel+1)); else _sel=0; fi ;;
-      ENTER) MENU_INDEX=$_sel; break ;;
-      QUIT)  MENU_INDEX=-1; break ;;
+    UP) if [ "$_sel" -gt 0 ]; then _sel=$((_sel - 1)); else _sel=$((_n - 1)); fi ;;
+    DOWN) if [ "$_sel" -lt $((_n - 1)) ]; then _sel=$((_sel + 1)); else _sel=0; fi ;;
+    ENTER)
+      MENU_INDEX=$_sel
+      break
+      ;;
+    QUIT)
+      MENU_INDEX=-1
+      break
+      ;;
     esac
   done
 
@@ -287,18 +331,31 @@ arrow_menu() {
 
 # ── fetch: local cp when REMBRIC_SRC set, else curl from the ref ────────────
 fetch() { # $1 repo-relative path, $2 dest
-  _rel="$1"; _dest="$2"
+  _rel="$1"
+  _dest="$2"
   if [ -n "$REMBRIC_SRC" ]; then
-    if [ -f "$REMBRIC_SRC/$_rel" ]; then cp "$REMBRIC_SRC/$_rel" "$_dest"; return 0; fi
-    printf '[rembric] error: missing local file %s\n' "$REMBRIC_SRC/$_rel" >&2; return 1
+    if [ -f "$REMBRIC_SRC/$_rel" ]; then
+      cp "$REMBRIC_SRC/$_rel" "$_dest"
+      return 0
+    fi
+    printf '[rembric] error: missing local file %s\n' "$REMBRIC_SRC/$_rel" >&2
+    return 1
   fi
   if ! curl -fsSL --max-time 30 --retry 2 --retry-connrefused "$RAW_BASE/$REF/$_rel" -o "$_dest"; then
-    printf '[rembric] error: failed to fetch %s\n' "$RAW_BASE/$REF/$_rel" >&2; return 1
+    printf '[rembric] error: failed to fetch %s\n' "$RAW_BASE/$REF/$_rel" >&2
+    return 1
   fi
 }
 
 read_remote() { # $1 repo-relative path → stdout file contents
-  _t=$(mktemp); if fetch "$1" "$_t"; then cat "$_t"; rm -f "$_t"; else rm -f "$_t"; return 1; fi
+  _t=$(mktemp)
+  if fetch "$1" "$_t"; then
+    cat "$_t"
+    rm -f "$_t"
+  else
+    rm -f "$_t"
+    return 1
+  fi
 }
 
 # ONE definition of the client set: the parser, the per-client loops, the agent
@@ -314,7 +371,10 @@ is_client() { # $1 name → 0 when it is one of CLIENTS
 client_at() { # $1 1-based position in CLIENTS → name (empty when out of range)
   _ci=1
   for _cn in $CLIENTS; do
-    [ "$_ci" = "$1" ] && { printf '%s' "$_cn"; return 0; }
+    [ "$_ci" = "$1" ] && {
+      printf '%s' "$_cn"
+      return 0
+    }
     _ci=$((_ci + 1))
   done
   return 0
@@ -335,7 +395,8 @@ available_version() { # $1 component key (e.g. apps/plugin/.hermes-plugin)
 # rembric version found under <cache-base>/*/*/*/<manifest-subpath>, filtered to
 # the manifest whose "name" is "rembric". Empty if none.
 _rembric_cache_version() {
-  _base="$1"; _sub="$2"
+  _base="$1"
+  _sub="$2"
   for _f in "$_base"/*/*/*/"$_sub"; do
     [ -f "$_f" ] || continue
     grep -q '"name"[[:space:]]*:[[:space:]]*"rembric"' "$_f" 2>/dev/null || continue
@@ -345,41 +406,46 @@ _rembric_cache_version() {
 
 installed_version() { # $1 client → installed semver or empty
   case "$1" in
-    opencode)
-      f="${HOME}/.config/opencode/plugins/rembric.ts"
-      [ -f "$f" ] && sed -n 's/.*@rembric-plugin-version[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$f" | head -1 ;;
-    hermes)
-      f="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
-      [ -f "$f" ] && sed -n 's/^version:[[:space:]]*["'\'']*\([0-9][0-9.]*\).*/\1/p' "$f" | head -1 ;;
-    claude)
-      # Claude caches the installed plugin at
-      # ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/.claude-plugin/plugin.json
-      # (version also in the path). Glob the cache, keep only the rembric
-      # manifest, return the highest version present.
-      _rembric_cache_version "${HOME}/.claude/plugins/cache" ".claude-plugin/plugin.json" ;;
-    codex)
-      _rembric_cache_version "${HOME}/.codex/plugins/cache" ".codex-plugin/plugin.json" ;;
-    pi)
-      # Only a user-scope `pi install npm:` leaves a version here; every other
-      # vector leaves none, hence `unknown` rather than a guess.
-      f="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/npm/node_modules/@rembric/pi/package.json"
-      if [ -f "$f" ]; then
-        # Captures to the closing quote, not a digits-only class, so a prerelease
-        # (1.2.3-rc.1) is read whole.
-        sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
-      elif client_present pi; then
-        echo unknown
-      fi ;;
+  opencode)
+    f="${HOME}/.config/opencode/plugins/rembric.ts"
+    [ -f "$f" ] && sed -n 's/.*@rembric-plugin-version[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$f" | head -1
+    ;;
+  hermes)
+    f="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
+    [ -f "$f" ] && sed -n 's/^version:[[:space:]]*["'\'']*\([0-9][0-9.]*\).*/\1/p' "$f" | head -1
+    ;;
+  claude)
+    # Claude caches the installed plugin at
+    # ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/.claude-plugin/plugin.json
+    # (version also in the path). Glob the cache, keep only the rembric
+    # manifest, return the highest version present.
+    _rembric_cache_version "${HOME}/.claude/plugins/cache" ".claude-plugin/plugin.json"
+    ;;
+  codex)
+    _rembric_cache_version "${HOME}/.codex/plugins/cache" ".codex-plugin/plugin.json"
+    ;;
+  pi)
+    # Only a user-scope `pi install npm:` leaves a version here; every other
+    # vector leaves none, hence `unknown` rather than a guess.
+    f="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/npm/node_modules/@rembric/pi/package.json"
+    if [ -f "$f" ]; then
+      # Captures to the closing quote, not a digits-only class, so a prerelease
+      # (1.2.3-rc.1) is read whole.
+      sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
+    elif client_present pi; then
+      echo unknown
+    fi
+    ;;
   esac
 }
 
 client_present() { # $1 client → 0 present, 1 absent
   case "$1" in
-    claude)   command -v claude   >/dev/null 2>&1 ;;
-    codex)    command -v codex    >/dev/null 2>&1 ;;
-    opencode) command -v opencode >/dev/null 2>&1 ;;
-    pi)       command -v pi       >/dev/null 2>&1 ;;
-    hermes)   [ -d "${HERMES_HOME:-${HOME}/.hermes}" ] ;;
+  claude) command -v claude >/dev/null 2>&1 ;;
+  codex) command -v codex >/dev/null 2>&1 ;;
+  opencode) command -v opencode >/dev/null 2>&1 ;;
+  pi) command -v pi >/dev/null 2>&1 ;;
+  hermes) [ -d "${HERMES_HOME:-${HOME}/.hermes}" ] ;;
   esac
 }
 
@@ -391,9 +457,18 @@ component_key() { # $1 client → manifest component key
 
 # vercmp $1 installed $2 available → echo: install|none|update|ahead|unknown
 vercmp() {
-  [ -z "$2" ] && { echo unknown; return; }
-  [ -z "$1" ] && { echo install; return; }
-  [ "$1" = "$2" ] && { echo none; return; }
+  [ -z "$2" ] && {
+    echo unknown
+    return
+  }
+  [ -z "$1" ] && {
+    echo install
+    return
+  }
+  [ "$1" = "$2" ] && {
+    echo none
+    return
+  }
   hi=$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)
   [ "$hi" = "$2" ] && echo update || echo ahead
 }
@@ -418,8 +493,8 @@ client_state() {
 # comparison was possible.
 state_action() {
   case "$1" in
-    install|unreadable) echo install ;;
-    update)             echo update ;;
+  install | unreadable) echo install ;;
+  update) echo update ;;
   esac
 }
 
@@ -444,9 +519,12 @@ print_table() {
     act=$(state_action "$CS_STATE")
     if [ -n "$act" ]; then
       if [ "$CS_STATE" = update ]; then act="${WARN}${act}${RESET}"; else act="${LIME}${act}${RESET}"; fi
-    elif [ "$CS_STATE" = none ]; then act="${DIM}up to date${RESET}"
-    elif [ "$CS_STATE" = ahead ]; then act="${DIM}ahead${RESET}"
-    else act="${DIM}-${RESET}"
+    elif [ "$CS_STATE" = none ]; then
+      act="${DIM}up to date${RESET}"
+    elif [ "$CS_STATE" = ahead ]; then
+      act="${DIM}ahead${RESET}"
+    else
+      act="${DIM}-${RESET}"
     fi
     printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${CS_AVAILABLE:--}" "$act"
   done
@@ -457,9 +535,18 @@ print_table() {
 # server_state echoes a single token: running | exited | paused | created |
 # dead | absent (no container) | unknown (no docker / daemon unreachable).
 server_state() {
-  command -v docker >/dev/null 2>&1 || { echo unknown; return; }
-  docker ps >/dev/null 2>&1 || { echo unknown; return; }
-  _st=$(docker container inspect rembric --format '{{.State.Status}}' 2>/dev/null) || { echo absent; return; }
+  command -v docker >/dev/null 2>&1 || {
+    echo unknown
+    return
+  }
+  docker ps >/dev/null 2>&1 || {
+    echo unknown
+    return
+  }
+  _st=$(docker container inspect rembric --format '{{.State.Status}}' 2>/dev/null) || {
+    echo absent
+    return
+  }
   echo "${_st:-absent}"
 }
 # Version the running/stopped container was built from = its image tag (e.g.
@@ -476,9 +563,9 @@ server_latest_release() {
   command -v curl >/dev/null 2>&1 || return 0
   _rurl="${REMBRIC_RELEASES_URL:-https://api.github.com/repos/susomejias/rembric/releases}"
   _rbody=$(curl -fsSL --max-time 4 "$_rurl" 2>/dev/null) || return 0
-  printf '%s' "$_rbody" \
-    | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"server-v[0-9]+\.[0-9]+\.[0-9]+"' \
-    | sed -E 's/.*server-v([0-9.]+)".*/\1/' | sort -V | tail -1
+  printf '%s' "$_rbody" |
+    grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"server-v[0-9]+\.[0-9]+\.[0-9]+"' |
+    sed -E 's/.*server-v([0-9.]+)".*/\1/' | sort -V | tail -1
 }
 
 # NOTE: no "available" for the server — the installer pulls the `:latest`
@@ -486,22 +573,37 @@ server_latest_release() {
 # release" check is the dashboard's (GitHub Releases), not the repo manifest.
 # We report only the docker-observable state + the running image tag.
 server_status_print() {
-  _ss=$(server_state); _sv=$(server_image_version); _lr=$(server_latest_release)
+  _ss=$(server_state)
+  _sv=$(server_image_version)
+  _lr=$(server_latest_release)
   case "$_ss" in
-    running) _sc="$LIME"; _msg=running ;;
-    exited|paused|created|dead) _sc="$WARN"; _msg="$_ss" ;;
-    absent) _sc="$DIM"; _msg="not installed" ;;
-    *) _sc="$DIM"; _msg="unknown (docker unavailable)" ;;
+  running)
+    _sc="$LIME"
+    _msg=running
+    ;;
+  exited | paused | created | dead)
+    _sc="$WARN"
+    _msg="$_ss"
+    ;;
+  absent)
+    _sc="$DIM"
+    _msg="not installed"
+    ;;
+  *)
+    _sc="$DIM"
+    _msg="unknown (docker unavailable)"
+    ;;
   esac
   _extra=''
   [ -n "$_sv" ] && _extra=" · version $_sv"
   if [ -n "$_lr" ]; then
     _extra="$_extra · latest release $_lr"
     case "$_sv" in
-      [0-9]*.[0-9]*.[0-9]*)
-        if [ "$_sv" != "$_lr" ] && [ "$(printf '%s\n%s\n' "$_sv" "$_lr" | sort -V | tail -1)" = "$_lr" ]; then
-          _extra="$_extra ${WARN}(update available)${RESET}"
-        fi ;;
+    [0-9]*.[0-9]*.[0-9]*)
+      if [ "$_sv" != "$_lr" ] && [ "$(printf '%s\n%s\n' "$_sv" "$_lr" | sort -V | tail -1)" = "$_lr" ]; then
+        _extra="$_extra ${WARN}(update available)${RESET}"
+      fi
+      ;;
     esac
   fi
   printf '  %sSERVER%s  %s%s%s%s\n' "$BOLD" "$RESET" "$_sc" "$_msg" "$RESET" "$_extra"
@@ -539,16 +641,24 @@ do_status() {
 # (awk -v avoids sed delimiter/regex issues with user-supplied tokens).
 write_token() {
   if grep -q '^REMBRIC_ADMIN_TOKEN=' ./.env; then
-    _tmp=$(mktemp); awk -v v="$1" '/^REMBRIC_ADMIN_TOKEN=/{print "REMBRIC_ADMIN_TOKEN=" v; next} {print}' ./.env > "$_tmp" && mv "$_tmp" ./.env
+    _tmp=$(mktemp)
+    awk -v v="$1" '/^REMBRIC_ADMIN_TOKEN=/{print "REMBRIC_ADMIN_TOKEN=" v; next} {print}' ./.env >"$_tmp" && mv "$_tmp" ./.env
   else
-    printf 'REMBRIC_ADMIN_TOKEN=%s\n' "$1" >> ./.env
+    printf 'REMBRIC_ADMIN_TOKEN=%s\n' "$1" >>./.env
   fi
 }
 
 # gen_token → a 64-char hex admin token (openssl, or /dev/urandom via od).
 gen_token() {
-  if command -v openssl >/dev/null 2>&1; then openssl rand -hex 32; return; fi
-  if [ -r /dev/urandom ]; then od -An -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \n'; echo; return; fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  if [ -r /dev/urandom ]; then
+    od -An -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \n'
+    echo
+    return
+  fi
   printf '[rembric] error: no openssl and no /dev/urandom to generate a token\n' >&2
   return 1
 }
@@ -587,7 +697,7 @@ bring_up() {
   if [ "$ARG_UP" = "1" ]; then
     _run=1
   elif [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ]; then
-    case "$(ask "  Run 'docker compose pull && up -d' now? [y/N]")" in y|Y) _run=1 ;; esac
+    case "$(ask "  Run 'docker compose pull && up -d' now? [y/N]")" in y | Y) _run=1 ;; esac
   fi
   if [ "$_run" != "1" ]; then
     say "  Ready. ${BOLD}Run it:${RESET} docker compose pull && docker compose up -d"
@@ -649,16 +759,16 @@ bring_up() {
     fi
   else
     case "$_up" in
-      *"already in use"*|*Conflict*)
-        say "  ${WARN}A Rembric container named 'rembric' is already running${RESET} — left untouched."
-        say "  ${DIM}Refusing to clobber an existing install.${RESET} You can either:"
-        say "    • keep using it — open its dashboard, or"
-        say "    • replace it: ${BOLD}docker rm -f rembric${RESET}  (or 'docker compose down' in its install dir), then re-run."
-        ;;
-      *)
-        printf '%s\n' "$_up" | tail -4
-        say "  ${DANGER}docker compose up failed${RESET} — files are ready to retry."
-        ;;
+    *"already in use"* | *Conflict*)
+      say "  ${WARN}A Rembric container named 'rembric' is already running${RESET} — left untouched."
+      say "  ${DIM}Refusing to clobber an existing install.${RESET} You can either:"
+      say "    • keep using it — open its dashboard, or"
+      say "    • replace it: ${BOLD}docker rm -f rembric${RESET}  (or 'docker compose down' in its install dir), then re-run."
+      ;;
+    *)
+      printf '%s\n' "$_up" | tail -4
+      say "  ${DANGER}docker compose up failed${RESET} — files are ready to retry."
+      ;;
     esac
   fi
 }
@@ -697,7 +807,8 @@ do_server() {
       say "  ${DANGER}--token too short${RESET} — REMBRIC_ADMIN_TOKEN needs at least 16 characters (the server refuses to boot otherwise)."
       return 1
     fi
-    tok="$ARG_TOKEN"; write_token "$tok"
+    tok="$ARG_TOKEN"
+    write_token "$tok"
     say "  Admin token (provided): ${BOLD}${tok}${RESET}"
   elif [ -n "$tok" ]; then
     say "  ./.env already configured — left untouched."
@@ -722,16 +833,18 @@ do_server() {
       gen=1
     fi
     write_token "$tok"
-    if [ "$gen" = "1" ]; then say "  Generated admin token: ${BOLD}${tok}${RESET}"
+    if [ "$gen" = "1" ]; then
+      say "  Generated admin token: ${BOLD}${tok}${RESET}"
     else say "  Admin token (yours): ${BOLD}${tok}${RESET}"; fi
     say "  ${DIM}(saved in ./.env — needed to log into the dashboard)${RESET}"
   fi
 
   if [ -n "$ARG_PORT" ]; then
     if grep -q '^REMBRIC_PORT=' ./.env; then
-      _tmp=$(mktemp); awk -v v="$ARG_PORT" '/^REMBRIC_PORT=/{print "REMBRIC_PORT=" v; next} {print}' ./.env > "$_tmp" && mv "$_tmp" ./.env
+      _tmp=$(mktemp)
+      awk -v v="$ARG_PORT" '/^REMBRIC_PORT=/{print "REMBRIC_PORT=" v; next} {print}' ./.env >"$_tmp" && mv "$_tmp" ./.env
     else
-      printf 'REMBRIC_PORT=%s\n' "$ARG_PORT" >> ./.env
+      printf 'REMBRIC_PORT=%s\n' "$ARG_PORT" >>./.env
     fi
     say "  Port: ${BOLD}${ARG_PORT}${RESET}  ${DIM}(REMBRIC_PORT in ./.env)${RESET}"
   fi
@@ -743,14 +856,25 @@ do_server() {
 # opencode/Hermes: delegate to the client's own install.sh/uninstall.sh.
 # Claude/Codex: print marketplace CLI commands (run-through gated on binary).
 run_client_script() { # $1 client, $2 install|uninstall
-  c="$1"; verb="$2"
+  c="$1"
+  verb="$2"
   case "$c" in
-    opencode) dir=".opencode-plugin"; has_uninstall=1 ;;
-    hermes)   dir=".hermes-plugin";   has_uninstall=1 ;;
-    *) return 1 ;;
+  opencode)
+    dir=".opencode-plugin"
+    has_uninstall=1
+    ;;
+  hermes)
+    dir=".hermes-plugin"
+    has_uninstall=1
+    ;;
+  *) return 1 ;;
   esac
-  script="install.sh"; [ "$verb" = "uninstall" ] && script="uninstall.sh"
-  [ "$verb" = "uninstall" ] && [ "$has_uninstall" != "1" ] && { say "  no uninstaller for $c"; return 1; }
+  script="install.sh"
+  [ "$verb" = "uninstall" ] && script="uninstall.sh"
+  [ "$verb" = "uninstall" ] && [ "$has_uninstall" != "1" ] && {
+    say "  no uninstaller for $c"
+    return 1
+  }
 
   if [ -n "$REMBRIC_SRC" ]; then
     # Local: run the script in place, pointing it at the local tree.
@@ -764,7 +888,11 @@ run_client_script() { # $1 client, $2 install|uninstall
     fi
   else
     # Remote: fetch the script and point it at the same ref.
-    t=$(mktemp); fetch "apps/plugin/$dir/$script" "$t" || { rm -f "$t"; return 1; }
+    t=$(mktemp)
+    fetch "apps/plugin/$dir/$script" "$t" || {
+      rm -f "$t"
+      return 1
+    }
     base="$RAW_BASE/$REF/apps/plugin"
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
@@ -778,37 +906,62 @@ run_client_script() { # $1 client, $2 install|uninstall
 # Serves both CLI-driven backends — the marketplace clients (Claude, Codex) and
 # the registry-CLI client (Pi) — so only the command table below is per-client.
 client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
-  c="$1"; action="$2"
+  c="$1"
+  action="$2"
   case "$c" in
-    claude)
-      add="claude plugin marketplace add https://github.com/susomejias/rembric.git"
-      ins="claude plugin install rembric@rembric"
-      upd="claude plugin update rembric@rembric"
-      rem="claude plugin uninstall rembric@rembric" ;;
-    codex)
-      add="codex plugin marketplace add https://github.com/susomejias/rembric.git"
-      ins="codex plugin add rembric@rembric"
-      upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
-      rem="codex plugin remove rembric@rembric" ;;
-    pi)
-      # Unpinned in every action, because `pi update --extensions`/`--all` skips a
-      # version-pinned spec and would freeze the operator while reporting success.
-      # --ref names a git ref, not a registry version, so it is not applied here.
-      add=''
-      ins="pi install npm:@rembric/pi"
-      upd="$ins"
-      rem="pi remove npm:@rembric/pi" ;;
-    # An unmatched `case` exits 0, so a client with no table would report success
-    # having run nothing.
-    *) printf '[rembric] error: no CLI command table for %s\n' "$c" >&2; return 1 ;;
+  claude)
+    add="claude plugin marketplace add https://github.com/susomejias/rembric.git"
+    ins="claude plugin install rembric@rembric"
+    upd="claude plugin update rembric@rembric"
+    rem="claude plugin uninstall rembric@rembric"
+    ;;
+  codex)
+    add="codex plugin marketplace add https://github.com/susomejias/rembric.git"
+    ins="codex plugin add rembric@rembric"
+    upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
+    rem="codex plugin remove rembric@rembric"
+    ;;
+  pi)
+    # Unpinned in every action, because `pi update --extensions`/`--all` skips a
+    # version-pinned spec and would freeze the operator while reporting success.
+    # --ref names a git ref, not a registry version, so it is not applied here.
+    add=''
+    ins="pi install npm:@rembric/pi"
+    upd="$ins"
+    rem="pi remove npm:@rembric/pi"
+    ;;
+  # An unmatched `case` exits 0, so a client with no table would report success
+  # having run nothing.
+  *)
+    printf '[rembric] error: no CLI command table for %s\n' "$c" >&2
+    return 1
+    ;;
   esac
   case "$action" in
-    install)   say "  Run:"; [ -n "$add" ] && say "    ${BOLD}$add${RESET}"; say "    ${BOLD}$ins${RESET}"; cmd="$ins" ;;
-    update)    say "  Run:"; say "    ${BOLD}$upd${RESET}"; cmd="$upd"; add='' ;;
-    uninstall) say "  Run:"; say "    ${BOLD}$rem${RESET}"; cmd="$rem"; add='' ;;
-    # A verb with no arm here would leave `cmd` unset and either report success
-    # having printed nothing or die inside the `eval` below.
-    *) printf '[rembric] error: unsupported action %s for %s\n' "$action" "$c" >&2; return 1 ;;
+  install)
+    say "  Run:"
+    [ -n "$add" ] && say "    ${BOLD}$add${RESET}"
+    say "    ${BOLD}$ins${RESET}"
+    cmd="$ins"
+    ;;
+  update)
+    say "  Run:"
+    say "    ${BOLD}$upd${RESET}"
+    cmd="$upd"
+    add=''
+    ;;
+  uninstall)
+    say "  Run:"
+    say "    ${BOLD}$rem${RESET}"
+    cmd="$rem"
+    add=''
+    ;;
+  # A verb with no arm here would leave `cmd` unset and either report success
+  # having printed nothing or die inside the `eval` below.
+  *)
+    printf '[rembric] error: unsupported action %s for %s\n' "$action" "$c" >&2
+    return 1
+    ;;
   esac
   # --yes is the headless opt-in: run the marketplace command(s) without a
   # prompt, but only when the client binary is actually present (nothing to run
@@ -820,9 +973,10 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   elif [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ] && client_present "$c"; then
     yn=$(ask "  Run these now? [y/N]")
     case "$yn" in
-      y|Y)
-        [ -n "${add:-}" ] && eval "$add" || true
-        eval "$cmd" || true ;;
+    y | Y)
+      [ -n "${add:-}" ] && eval "$add" || true
+      eval "$cmd" || true
+      ;;
     esac
   fi
   if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: your stored credentials and any .rembric files.${RESET}"; fi
@@ -862,60 +1016,70 @@ hermes_bridge_migration_note() {
 post_install_notes() { # $1 client, $2 action (install|update)
   action="${2:-install}"
   case "$1" in
-    claude)
-      if [ "$action" = "update" ]; then
-        say "  ${BOLD}Next:${RESET} restart Claude Code so it loads the updated plugin."
-      else
-        say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code."
-      fi ;;
-    codex)
-      say "  ${BOLD}Next${RESET} (one-time — required or hooks won't fire):"
-      say "    1) open ${BOLD}/hooks${RESET} in Codex and trust the 5 rembric hooks"
-      say "    2) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
-      say "    ${DIM}details: docs/agents.md${RESET}" ;;
-    hermes)
-      # On update the plugin is already installed + enabled — only the gateway
-      # needs to reload the new files. The full wiring is install-only.
-      if [ "$action" = "update" ]; then
-        hermes_bridge_migration_note
-        say "  ${BOLD}Next:${RESET} ${BOLD}hermes gateway restart${RESET}  ${DIM}— reload the gateway so it picks up the updated plugin${RESET}"
-      else
-        say "  ${BOLD}Next:${RESET}"
-        say "    1) add this MCP block to ${BOLD}${HERMES_HOME:-${HOME}/.hermes}/config.yaml${RESET}:"
-        hermes_bridge_config
-        say "    2) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
-        say "    3) ${BOLD}hermes plugins enable rembric${RESET}"
-        say "    4) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
-      fi ;;
-    opencode)
-      if [ "$action" = "update" ]; then
-        say "  ${BOLD}Next:${RESET} restart opencode so it loads the updated plugin."
-      else
-        say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
-      fi ;;
-    pi)
-      if [ "$action" = "update" ]; then
-        say "  ${BOLD}Next:${RESET} restart Pi so it loads the updated extension."
-      else
-        say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell, then restart Pi."
-        # Pi reads no environment from its settings file, so there is no
-        # settings-file alternative to offer.
-        say "    ${DIM}the shell environment is the only place Pi reads them from${RESET}"
-      fi ;;
+  claude)
+    if [ "$action" = "update" ]; then
+      say "  ${BOLD}Next:${RESET} restart Claude Code so it loads the updated plugin."
+    else
+      say "  ${BOLD}Next:${RESET} Claude prompts for the server URL + token during install (stored in your keychain). Restart Claude Code."
+    fi
+    ;;
+  codex)
+    say "  ${BOLD}Next${RESET} (one-time — required or hooks won't fire):"
+    say "    1) open ${BOLD}/hooks${RESET} in Codex and trust the 5 rembric hooks"
+    say "    2) export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell (Codex clears MCP env)"
+    say "    ${DIM}details: docs/agents.md${RESET}"
+    ;;
+  hermes)
+    # On update the plugin is already installed + enabled — only the gateway
+    # needs to reload the new files. The full wiring is install-only.
+    if [ "$action" = "update" ]; then
+      hermes_bridge_migration_note
+      say "  ${BOLD}Next:${RESET} ${BOLD}hermes gateway restart${RESET}  ${DIM}— reload the gateway so it picks up the updated plugin${RESET}"
+    else
+      say "  ${BOLD}Next:${RESET}"
+      say "    1) add this MCP block to ${BOLD}${HERMES_HOME:-${HOME}/.hermes}/config.yaml${RESET}:"
+      hermes_bridge_config
+      say "    2) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
+      say "    3) ${BOLD}hermes plugins enable rembric${RESET}"
+      say "    4) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
+    fi
+    ;;
+  opencode)
+    if [ "$action" = "update" ]; then
+      say "  ${BOLD}Next:${RESET} restart opencode so it loads the updated plugin."
+    else
+      say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET}, then restart opencode."
+    fi
+    ;;
+  pi)
+    if [ "$action" = "update" ]; then
+      say "  ${BOLD}Next:${RESET} restart Pi so it loads the updated extension."
+    else
+      say "  ${BOLD}Next:${RESET} export ${BOLD}REMBRIC_SERVER_URL${RESET} + ${BOLD}REMBRIC_API_TOKEN${RESET} in your shell, then restart Pi."
+      # Pi reads no environment from its settings file, so there is no
+      # settings-file alternative to offer.
+      say "    ${DIM}the shell environment is the only place Pi reads them from${RESET}"
+    fi
+    ;;
   esac
 }
 
 do_client() { # $1 client, $2 action
-  c="$1"; action="$2"
+  c="$1"
+  action="$2"
   say "${BOLD}${c} (${action})${RESET}"
   case "$c" in
-    opencode|hermes)
-      run_client_script "$c" "$action"
-      if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi ;;
-    claude|codex|pi) client_cli_cmds "$c" "$action" ;;
-    # An unmatched `case` exits 0, so a client with no backend would print its
-    # "Next" steps having installed nothing.
-    *) printf '[rembric] error: no backend for %s\n' "$c" >&2; return 1 ;;
+  opencode | hermes)
+    run_client_script "$c" "$action"
+    if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi
+    ;;
+  claude | codex | pi) client_cli_cmds "$c" "$action" ;;
+  # An unmatched `case` exits 0, so a client with no backend would print its
+  # "Next" steps having installed nothing.
+  *)
+    printf '[rembric] error: no backend for %s\n' "$c" >&2
+    return 1
+    ;;
   esac
   if [ "$action" != "uninstall" ]; then post_install_notes "$c" "$action"; fi
   return 0
@@ -928,28 +1092,34 @@ do_client() { # $1 client, $2 action
 do_update_all() {
   load_manifest
   say "${BOLD}Updating all plugins with an update available…${RESET}"
-  _updated=0; _skipped=0
+  _updated=0
+  _skipped=0
   for c in $CLIENTS; do
     client_state "$c"
     case "$CS_STATE" in
-      update)
-        do_client "$c" update
-        _updated=$((_updated + 1)) ;;
-      none)
-        say "  ${DIM}${c}: up to date — skipped${RESET}"
-        _skipped=$((_skipped + 1)) ;;
-      install)
-        say "  ${DIM}${c}: not installed — skipped (use --agent=${c} --action=install)${RESET}"
-        _skipped=$((_skipped + 1)) ;;
-      ahead)
-        say "  ${DIM}${c}: ahead of the published version — skipped${RESET}"
-        _skipped=$((_skipped + 1)) ;;
-      # Unattended, so an unconfirmable version is skipped rather than
-      # reinstalled on every run; forcing it stays the explicit path.
-      *)
-        _force=$(state_action "$CS_STATE")
-        say "  ${DIM}${c}: version unknown — skipped${_force:+ (use --agent=${c} --action=${_force} to force)}${RESET}"
-        _skipped=$((_skipped + 1)) ;;
+    update)
+      do_client "$c" update
+      _updated=$((_updated + 1))
+      ;;
+    none)
+      say "  ${DIM}${c}: up to date — skipped${RESET}"
+      _skipped=$((_skipped + 1))
+      ;;
+    install)
+      say "  ${DIM}${c}: not installed — skipped (use --agent=${c} --action=install)${RESET}"
+      _skipped=$((_skipped + 1))
+      ;;
+    ahead)
+      say "  ${DIM}${c}: ahead of the published version — skipped${RESET}"
+      _skipped=$((_skipped + 1))
+      ;;
+    # Unattended, so an unconfirmable version is skipped rather than
+    # reinstalled on every run; forcing it stays the explicit path.
+    *)
+      _force=$(state_action "$CS_STATE")
+      say "  ${DIM}${c}: version unknown — skipped${_force:+ (use --agent=${c} --action=${_force} to force)}${RESET}"
+      _skipped=$((_skipped + 1))
+      ;;
     esac
   done
   say ""
@@ -1021,19 +1191,26 @@ server_deps_report() {
   say "  ${DIM}Dependency check:${RESET}"
   printf '    docker          %s\n' "$(mark has docker)"
   printf '    docker compose  %s %s\n' "$(mark docker_compose_ok)" "${DIM}(only needed to auto-run 'up')${RESET}"
-  if has openssl; then printf '    openssl         %s\n' "$(mark has openssl)";
+  if has openssl; then
+    printf '    openssl         %s\n' "$(mark has openssl)"
   else printf '    openssl         %s %s\n' "$(mark token_capable)" "${DIM}(absent — using /dev/urandom)${RESET}"; fi
 }
 
 # ── dispatch ────────────────────────────────────────────────────────────────
-if [ "$ARG_HELP" = "1" ]; then usage; exit 0; fi
+if [ "$ARG_HELP" = "1" ]; then
+  usage
+  exit 0
+fi
 
 # Verify the universally-required tools up front (curl only in remote mode).
 preflight || exit 1
 
 # --status is a read-only query (CLI / agent use): print and exit, no banner,
 # regardless of TTY. With --json the output is the JSON payload only.
-if [ "$ARG_STATUS" = "1" ]; then do_status; exit 0; fi
+if [ "$ARG_STATUS" = "1" ]; then
+  do_status
+  exit 0
+fi
 
 # Non-interactive / no-TTY → require explicit flags, never guess.
 if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
@@ -1044,32 +1221,49 @@ if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
     # action as install, so accepting `uninstall` here would install under an
     # "uninstall" heading.
     case "${ARG_ACTION:-install}" in
-      install|update) ;;
-      *) printf '[rembric] error: --server accepts --action=install|update, not %s\n' "$ARG_ACTION" >&2; exit 2 ;;
+    install | update) ;;
+    *)
+      printf '[rembric] error: --server accepts --action=install|update, not %s\n' "$ARG_ACTION" >&2
+      exit 2
+      ;;
     esac
-    do_server "${ARG_ACTION:-install}"; did=1
+    do_server "${ARG_ACTION:-install}"
+    did=1
   fi
   # `--action=update` with no --agent (or the explicit --agent=all alias)
   # updates every installed plugin that has an update available, skipping
   # the rest — this is the command memory.about advertises as `update_all`.
   if [ "$ARG_ACTION" = "update" ] && { [ -z "$ARG_AGENTS" ] || [ "$ARG_AGENTS" = "all" ]; }; then
-    do_update_all; did=1
+    do_update_all
+    did=1
   elif [ -n "$ARG_AGENTS" ]; then
-    [ -z "$ARG_ACTION" ] && { printf '[rembric] error: --agent requires --action\n' >&2; usage; exit 2; }
+    [ -z "$ARG_ACTION" ] && {
+      printf '[rembric] error: --agent requires --action\n' >&2
+      usage
+      exit 2
+    }
     load_manifest
     # Split the comma list ONCE and put IFS back before anything else runs:
     # CLIENTS is space-separated, so leaving IFS at ',' for the body makes every
     # downstream split (is_client's, for one) silently see a single word.
-    OLDIFS=$IFS; IFS=','; set -- $ARG_AGENTS; IFS=$OLDIFS
+    OLDIFS=$IFS
+    IFS=','
+    set -- $ARG_AGENTS
+    IFS=$OLDIFS
     for c in "$@"; do
       if is_client "$c"; then
-        do_client "$c" "$ARG_ACTION"; did=1
+        do_client "$c" "$ARG_ACTION"
+        did=1
       else
-        printf '[rembric] error: unknown agent %s\n' "$c" >&2; exit 2
+        printf '[rembric] error: unknown agent %s\n' "$c" >&2
+        exit 2
       fi
     done
   fi
-  [ "$did" = "0" ] && { usage; exit 2; }
+  [ "$did" = "0" ] && {
+    usage
+    exit 2
+  }
   exit 0
 fi
 
@@ -1083,35 +1277,64 @@ while :; do
     "Plugins  — detect, install / update / uninstall" \
     "Quit"
   case "$MENU_INDEX" in
+  0)
+    screen
+    server_status_print
+    say ""
+    arrow_menu "Server action" "install" "update"
+    case "$MENU_INDEX" in
     0)
       screen
-      server_status_print
-      say ""
-      arrow_menu "Server action" "install" "update"
-      case "$MENU_INDEX" in
-        0) screen; do_server install; pause ;;
-        1) screen; do_server update;  pause ;;
-      esac ;;
+      do_server install
+      pause
+      ;;
     1)
       screen
-      print_table
-      # Unquoted on purpose: one menu entry per client, so the entry order and
-      # the index mapping below both come from CLIENTS.
-      arrow_menu "Which agent?" "all — update outdated" $CLIENTS
-      if [ "$MENU_INDEX" = "0" ]; then
-        c=''; screen; do_update_all; pause
-      else
-        c=$(client_at "$MENU_INDEX")   # -1 (quit) is out of range → empty
-      fi
-      if [ -n "$c" ]; then
+      do_server update
+      pause
+      ;;
+    esac
+    ;;
+  1)
+    screen
+    print_table
+    # Unquoted on purpose: one menu entry per client, so the entry order and
+    # the index mapping below both come from CLIENTS.
+    arrow_menu "Which agent?" "all — update outdated" $CLIENTS
+    if [ "$MENU_INDEX" = "0" ]; then
+      c=''
+      screen
+      do_update_all
+      pause
+    else
+      c=$(client_at "$MENU_INDEX") # -1 (quit) is out of range → empty
+    fi
+    if [ -n "$c" ]; then
+      screen
+      arrow_menu "Action for $c" "install" "update" "uninstall"
+      case "$MENU_INDEX" in
+      0)
         screen
-        arrow_menu "Action for $c" "install" "update" "uninstall"
-        case "$MENU_INDEX" in
-          0) screen; do_client "$c" install;   pause ;;
-          1) screen; do_client "$c" update;    pause ;;
-          2) screen; do_client "$c" uninstall; pause ;;
-        esac
-      fi ;;
-    *) screen; say "  bye"; break ;;
+        do_client "$c" install
+        pause
+        ;;
+      1)
+        screen
+        do_client "$c" update
+        pause
+        ;;
+      2)
+        screen
+        do_client "$c" uninstall
+        pause
+        ;;
+      esac
+    fi
+    ;;
+  *)
+    screen
+    say "  bye"
+    break
+    ;;
   esac
 done
