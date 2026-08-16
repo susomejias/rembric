@@ -9,13 +9,13 @@ Authentication, path-slug scope resolution, the soft-delete refusal and the arch
 The handler SHALL, in one service call:
 
 1. Stamp `last_activity_at`. **This is required, not cosmetic.** It replaces the per-turn `POST /summary` that the shell clients performed before this endpoint existed, and `abandonInactiveSince` compares `COALESCE(last_activity_at, started_at)` against its cutoff — without the stamp a live session would be retired by the stale-active sweep mid-conversation.
-2. Stamp `last_work_at` when `usedTools` is `true`, and leave it untouched when it is `false`.
+2. Stamp `last_work_at` when `usedTools` is `true`, with the reported turn's START — the row's `last_activity_at` as read before this request advances it (`session-nudges`) — and leave it untouched when it is `false`.
 3. Write `title` under the existing `final: false` precedence when the body carries one, so a model-authored title is never displaced.
 4. Evaluate the notice gate (`session-nudges`) and, when it fires, stamp `last_nudge_at` and compose the notice.
 
 The response SHALL be `200 OK` with body `{ ok: true, sessionId: string, lines: string[] }`. `lines` SHALL be an empty array when the gate does not fire — never `null` and never an omitted key, so a client can print unconditionally without a presence check. The response SHALL NOT carry the stored summary, the section bodies, or any timestamp: the notice's inventory is the only view of stored state this endpoint exposes, and a client that wants the text has `memory.session_get` over MCP.
 
-The endpoint SHALL NOT transition `status` and SHALL NOT write `summary`. A report against a terminal row SHALL succeed, SHALL stamp nothing but `last_activity_at`, and SHALL return `lines: []` — a report is not a lifecycle event and SHALL NOT be a second path back to `active`.
+The endpoint SHALL NOT transition `status` and SHALL NOT write `summary`. A report against a terminal row SHALL succeed, SHALL stamp nothing but `last_activity_at`, and SHALL return `lines: []` — a report is not a lifecycle event and SHALL NOT be a second path back to `active`. A row that goes terminal BETWEEN the read and the write SHALL be refused with `session_already_ended`, as `writeSummary` and `end` already are: evaluating the gate against the row the read returned would judge stale state and stamp `last_nudge_at` onto a closed session.
 
 The endpoint SHALL be idempotent in effect for a repeated report of the same turn: two reports differ only in that the second re-stamps timestamps, and the second SHALL NOT return a notice, because the first advanced `last_nudge_at`.
 

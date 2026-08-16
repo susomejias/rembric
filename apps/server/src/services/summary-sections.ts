@@ -131,7 +131,10 @@ interface MergeEntry {
  * Merge `incoming` into `stored`, section by section (D4): every key present
  * in `stored`, in stored order, taking `incoming`'s body where `incoming`
  * carries that key; then every key only `incoming` carries, in `incoming`'s
- * own order. Merging a document with itself reproduces it byte-for-byte.
+ * own order. Merging a document with itself reproduces it byte-for-byte
+ * UNLESS it repeats a heading key, which the parse folds into that key's
+ * first occurrence (D5): `## Goal\nA\n## Goal\nB\n` merged with itself is
+ * `## Goal\nA\nB\n`.
  *
  * A section's own trailing line break is reused verbatim ONLY when the
  * thing that follows it in the merged output is the same thing that

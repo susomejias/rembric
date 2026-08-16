@@ -92,11 +92,21 @@ function buildWithStoredSections(
   return [...base, ...kept, closing].join('\n');
 }
 
+/**
+ * The title is the only variable-length input here and nothing upstream
+ * bounds it in BYTES — measured 776 with a 100-code-unit CJK title — so it
+ * is cut to fit. By code unit, since one costs 1..3 bytes.
+ */
 function buildWithNoStoredSections(title: string, summaryMaxChars: number): string {
   const directive = directiveText();
-  const intro = `Nothing is stored yet for "${title}". ${SUMMARY_SECTIONS}`;
   const closing = closingLine(0, summaryMaxChars);
-  return [directive, intro, closing].join('\n');
+  const render = (t: string): string =>
+    [directive, `Nothing is stored yet for "${t}". ${SUMMARY_SECTIONS}`, closing].join('\n');
+  let kept = title;
+  while (kept.length > 0 && Buffer.byteLength(render(kept), 'utf8') > NOTICE_MAX_BYTES) {
+    kept = sliceWithoutSplittingSurrogatePair(kept, kept.length - 1);
+  }
+  return render(kept);
 }
 
 export function composeSessionNotice(row: SessionNudgeRow, summaryMaxChars: number): string {

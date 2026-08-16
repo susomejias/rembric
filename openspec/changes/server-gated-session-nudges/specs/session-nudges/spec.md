@@ -6,7 +6,7 @@ The decision to remind a model to refresh its session summary SHALL be taken by 
 
 `sessions` SHALL carry three nullable timestamps, whose write rules are normative and whose meanings SHALL NOT be conflated with `last_activity_at`:
 
-- **`last_work_at`** — the moment of the most recent turn a client reported as having used a tool. Set only by the turn report ("Every client MUST report each finished turn to the server and print what it is handed back"), and only when that report carries `usedTools: true`.
+- **`last_work_at`** — the START of the most recent turn a client reported as having used a tool, which is the row's own `last_activity_at` as it stood BEFORE that report advanced it (`started_at` where it is NULL). Set only by the turn report ("Every client MUST report each finished turn to the server and print what it is handed back"), and only when that report carries `usedTools: true`. **It SHALL NOT be stamped with the moment the report arrives.** The report is issued at the END of the turn, while a curated `memory.session_summary` written during that turn stamps `last_summary_at` MID-turn — and is itself an MCP call the client observes as tool use — so stamping `now` would make condition (2) below true forever after the first curated write, degrading the gate into a bare `NUDGE_FLOOR_MS` timer that fires on conversation-only turns too. The turn's start needs nothing from the client: the server already holds it.
 - **`last_summary_at`** — the moment the session's curated summary was last STORED. Set by the same single site that folds per-field `final` precedence into an update `set`, on exactly those writes that store a `summary` carrying `final: true` (`sessions`, "Every curated session-summary write MUST append a version row in the same transaction", **One site**). It SHALL NOT be set by a `final: false` write and SHALL NOT be set by a write precedence discards.
 - **`last_nudge_at`** — the moment the notice was last emitted to a client. Set when, and only when, the server returns notice lines in a turn-report response.
 
@@ -15,6 +15,8 @@ The notice SHALL be emitted for a turn report when ALL THREE hold:
 1. `last_work_at IS NOT NULL`,
 2. `last_summary_at IS NULL` OR `last_work_at > last_summary_at`,
 3. `now - COALESCE(last_nudge_at, started_at) >= NUDGE_FLOOR_MS`.
+
+Condition (2)'s comparison is STRICT, and that is load-bearing rather than incidental: the curated write is normally the last activity of the turn that made it, so the state such a turn produces is `last_work_at == last_summary_at`, and a `>=` there would fire on exactly the turn that just complied.
 
 The NULL readings are normative rather than incidental, because they decide the first firing of every session: an absent `last_summary_at` means "never written" and satisfies (2); an absent `last_work_at` means "no work has been reported" and fails (1), so a session that only converses is never reminded; an absent `last_nudge_at` measures the floor from `started_at`, so the earliest a notice can fire is one floor after the session began.
 
@@ -35,6 +37,17 @@ The gate SHALL be a pure function of the row and the current time. It SHALL NOT 
 - **WHEN** a turn report arrives carrying `usedTools: false`
 - **THEN** no notice SHALL be returned, because condition (2) fails
 - **WHEN** a later report carries `usedTools: true` and the floor is still elapsed
+- **THEN** a notice SHALL be returned
+
+#### Scenario: The turn that refreshes the summary does not then remind itself
+
+- **GIVEN** an `active` session past the floor whose current turn called `memory.session_summary`, so `last_summary_at` is that mid-turn moment
+- **WHEN** that turn's report arrives carrying `usedTools: true`, as it must, since the curated call is itself tool use
+- **THEN** `last_work_at` SHALL be the turn's start and therefore no later than `last_summary_at`
+- **AND** no notice SHALL be returned
+- **WHEN** the next turn is conversation only
+- **THEN** no notice SHALL be returned
+- **WHEN** a later turn does work without refreshing the summary and reports it
 - **THEN** a notice SHALL be returned
 
 #### Scenario: A notice the model ignores is not repeated inside the floor
