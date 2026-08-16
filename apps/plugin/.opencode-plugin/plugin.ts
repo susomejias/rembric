@@ -214,9 +214,11 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       if (event.type === 'message.part.updated') {
         const part = (event.properties as MessagePartUpdatedEventProps | undefined)?.part ?? {};
-        // Recorded BEFORE the non-text early return below, which is
-        // precisely the branch a tool part takes (session-nudges).
-        if (part.type !== undefined && part.type !== 'text' && part.sessionID) {
+        // Recorded BEFORE the non-text early return below, which is the
+        // branch a tool part takes (session-nudges). Pinned to the SDK's
+        // concrete `tool` type: `reasoning`, `file`, `snapshot`, `patch`,
+        // `agent`, `retry` and the step markers are not tool use.
+        if (part.type === 'tool' && part.sessionID) {
           toolUsedFlags.set(part.sessionID, true);
         }
         if (part.type !== 'text') return;

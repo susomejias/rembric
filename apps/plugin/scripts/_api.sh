@@ -408,14 +408,51 @@ rembric_turn_report() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$detail" | jq -r '(.lines // [])[]' 2>/dev/null
   else
-    # Best-effort fallback: one string per line inside a top-level "lines"
-    # array. Does not handle an embedded escaped quote inside a line —
-    # jq is the recommended path, same trade-off as the other extractors.
-    printf '%s' "$detail" |
-      sed -n 's/.*"lines"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p' |
-      sed 's/","/"\n"/g' |
-      sed -n 's/^"\(.*\)"$/\1/p;s/^"\(.*\)$/\1/p;s/^\(.*\)"$/\1/p'
+    local inner
+    inner="$(printf '%s' "$detail" | sed -n 's/.*"lines"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p')"
+    [ -n "$inner" ] && rembric_json_string_array_items "$inner"
   fi
+}
+
+# Decode the elements of a JSON array of strings, one per output line —
+# what `jq -r '.[]'` prints. Walks the string grammar rather than splitting
+# on `","`: the notice is ONE element carrying embedded `\n` and `\"`, which
+# a split-and-strip fallback emitted with the escapes still literal.
+# `\uXXXX` is not decoded — jq remains the recommended path.
+rembric_json_string_array_items() {
+  local inner="${1:-}"
+  local n=${#inner} i=0 ch in_str=0 esc=0 cur=""
+  while [ "$i" -lt "$n" ]; do
+    ch="${inner:i:1}"
+    i=$((i + 1))
+    if [ "$in_str" -eq 0 ]; then
+      if [ "$ch" = '"' ]; then
+        in_str=1
+        cur=""
+      fi
+      continue
+    fi
+    if [ "$esc" -eq 1 ]; then
+      esc=0
+      case "$ch" in
+        n) cur="${cur}"$'\n' ;;
+        r) cur="${cur}"$'\r' ;;
+        t) cur="${cur}"$'\t' ;;
+        b) cur="${cur}"$'\b' ;;
+        f) cur="${cur}"$'\f' ;;
+        *) cur="${cur}${ch}" ;;
+      esac
+      continue
+    fi
+    case "$ch" in
+      '\') esc=1 ;;
+      '"')
+        in_str=0
+        printf '%s\n' "$cur"
+        ;;
+      *) cur="${cur}${ch}" ;;
+    esac
+  done
 }
 
 # The per-session notice cache (session-nudges). `_write` SHALL NOT

@@ -456,6 +456,38 @@ describe('RembricPlugin handlers', () => {
     expect(turnCalls).toBe(1);
   });
 
+  it("reports usedTools:false when the turn's only non-text parts were not tool parts", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/turn')) {
+        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 's-reasoning', parentID: '', title: 'think' } },
+      },
+    } as never);
+    for (const type of ['reasoning', 'step-start', 'snapshot', 'step-finish']) {
+      await handlers.event!({
+        event: {
+          type: 'message.part.updated',
+          properties: { part: { type, sessionID: 's-reasoning' } },
+        },
+      } as never);
+    }
+    await handlers.event!({
+      event: { type: 'session.idle', properties: { sessionID: 's-reasoning' } },
+    } as never);
+    expect(capturedBody?.usedTools).toBe(false);
+  });
+
   it('reports usedTools:true when a non-text part was observed this turn', async () => {
     let capturedBody: Record<string, unknown> | undefined;
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

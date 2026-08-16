@@ -848,8 +848,22 @@ def _derive_title_from_first_user_message(messages: list) -> str:
     return _first_message_text(messages, "user")
 
 
+def _last_turn_messages(messages: list) -> list:
+    """The tail of `messages` belonging to the turn that just finished.
+
+    The kwarg is the agent loop's whole working list, so a scan of all of it
+    reports `True` for every turn after the first tool call ever made.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            return messages[i:]
+    return messages
+
+
 def _messages_used_tools(messages: Any) -> bool:
-    """Whether `messages` shows a tool call or result (session-nudges, D4).
+    """Whether the LAST TURN of `messages` shows a tool call or result
+    (session-nudges, D4).
 
     Tests role outside {user, assistant, system} (a tool-result message) OR
     an assistant message carrying a non-empty `tool_calls` field — a
@@ -861,7 +875,7 @@ def _messages_used_tools(messages: Any) -> bool:
     """
     if not isinstance(messages, list):
         return True
-    for msg in messages:
+    for msg in _last_turn_messages(messages):
         if not isinstance(msg, dict):
             continue
         role = msg.get("role")

@@ -187,6 +187,58 @@ class ToolObservationTest(unittest.TestCase):
         self._sync_and_wait(provider, "hi", "hello")
         self.assertTrue(self._turn_body(mock_urlopen)["usedTools"])
 
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_a_tool_in_an_earlier_turn_is_not_reported_for_a_chat_turn(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        # `messages` is the agent loop's whole working list, so turn one's tool
+        # would otherwise mark every later turn as work for the rest of the run.
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+
+        self._sync_and_wait(
+            provider,
+            "thanks",
+            "you're welcome",
+            messages=[
+                {"role": "user", "content": "run the tests"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "run"}}],
+                },
+                {"role": "tool", "content": "1 passed"},
+                {"role": "assistant", "content": "all green"},
+                {"role": "user", "content": "thanks"},
+                {"role": "assistant", "content": "you're welcome"},
+            ],
+        )
+        self.assertFalse(self._turn_body(mock_urlopen)["usedTools"])
+
+    def test_control_the_same_history_with_the_tool_in_the_last_turn_reports_true(self) -> None:
+        history = [
+            {"role": "user", "content": "just chatting"},
+            {"role": "assistant", "content": "sure"},
+        ]
+        current_turn = [
+            {"role": "user", "content": "run the tests"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "run"}}],
+            },
+            {"role": "tool", "content": "1 passed"},
+        ]
+        self.assertTrue(self.mod._messages_used_tools(history + current_turn))
+        # …and with the two halves swapped the tool is history, not this turn.
+        self.assertFalse(
+            self.mod._messages_used_tools(
+                current_turn + [{"role": "user", "content": "thanks"}]
+            )
+        )
+
     def test_messages_used_tools_matches_the_synthesised_fallback_shape(self) -> None:
         synthesised = [
             {"role": "user", "content": "hi"},
