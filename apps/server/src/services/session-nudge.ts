@@ -26,8 +26,28 @@ export const NOTICE_MAX_BYTES = 640;
 
 const HEADING_DISPLAY_MAX_CHARS = 32;
 
-function utf8Bytes(lines: readonly string[]): number {
-  return Buffer.byteLength(lines.join('\n'), 'utf8');
+/** The module's one way of measuring the byte budget — lines join with `\n`. */
+function utf8Bytes(text: string | readonly string[]): number {
+  return Buffer.byteLength(typeof text === 'string' ? text : text.join('\n'), 'utf8');
+}
+
+/**
+ * The longest prefix of `s` that fits `maxBytes` in UTF-8. Iterates by code
+ * POINT, so it can never stop between the two halves of a surrogate pair,
+ * and it visits each one once — a shrink-and-re-render loop re-encodes the
+ * whole notice per unit removed.
+ */
+function sliceToUtf8Bytes(s: string, maxBytes: number): string {
+  if (utf8Bytes(s) <= maxBytes) return s;
+  let bytes = 0;
+  let end = 0;
+  for (const ch of s) {
+    const size = utf8Bytes(ch);
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    end += ch.length;
+  }
+  return s.slice(0, end);
 }
 
 function headingDisplay(section: SummarySection): string {
@@ -39,6 +59,10 @@ function headingDisplay(section: SummarySection): string {
 
 function sectionBodyChars(section: SummarySection): number {
   return section.body.reduce((sum, line) => sum + line.text.length + line.term.length, 0);
+}
+
+function introLine(title: string): string {
+  return `Stored for "${title}" (current sizes, not targets):`;
 }
 
 function directiveText(): string {
@@ -54,6 +78,26 @@ function closingLine(usedChars: number, summaryMaxChars: number): string {
 }
 
 /**
+ * The frame this branch renders around the title when EVERY section has been
+ * elided — the widest fixed part it can produce, since `+N more` peaks at the
+ * full section count. Reserving it is what leaves the elision loop, and the
+ * all-elided return below, within bound by construction.
+ */
+function storedSectionsFrame(
+  title: string,
+  sectionCount: number,
+  usedChars: number,
+  summaryMaxChars: number,
+): string[] {
+  return [
+    directiveText(),
+    introLine(title),
+    `+${sectionCount} more`,
+    closingLine(usedChars, summaryMaxChars),
+  ];
+}
+
+/**
  * Builds the notice, eliding from the TAIL of stored order (never the
  * head) as soon as adding the next section would exceed the bound —
  * `## Goal` and every early section survive elision by construction, and
@@ -66,7 +110,7 @@ function buildWithStoredSections(
   summaryMaxChars: number,
 ): string {
   const directive = directiveText();
-  const intro = `Stored for "${title}" (current sizes, not targets):`;
+  const intro = introLine(title);
   const closing = closingLine(usedChars, summaryMaxChars);
   const base = [directive, intro];
 
@@ -92,32 +136,41 @@ function buildWithStoredSections(
   return [...base, ...kept, closing].join('\n');
 }
 
-/**
- * The title is the only variable-length input here and nothing upstream
- * bounds it in BYTES — measured 776 with a 100-code-unit CJK title — so it
- * is cut to fit. By code unit, since one costs 1..3 bytes.
- */
-function buildWithNoStoredSections(title: string, summaryMaxChars: number): string {
-  const directive = directiveText();
-  const closing = closingLine(0, summaryMaxChars);
-  const render = (t: string): string =>
-    [directive, `Nothing is stored yet for "${t}". ${SUMMARY_SECTIONS}`, closing].join('\n');
-  let kept = title;
-  while (kept.length > 0 && Buffer.byteLength(render(kept), 'utf8') > NOTICE_MAX_BYTES) {
-    kept = sliceWithoutSplittingSurrogatePair(kept, kept.length - 1);
-  }
-  return render(kept);
+function noStoredSectionsFrame(title: string, summaryMaxChars: number): string[] {
+  return [
+    directiveText(),
+    `Nothing is stored yet for "${title}". ${SUMMARY_SECTIONS}`,
+    closingLine(0, summaryMaxChars),
+  ];
 }
 
+/**
+ * The title is the notice's ONE unbounded input — nothing upstream bounds it
+ * in bytes — and both branches interpolate it, so it is cut here, at the
+ * bifurcation, against whichever frame the chosen branch will render. Cutting
+ * it inside one branch left the other reachable at 714 bytes with a
+ * placeholder-length title (measured).
+ */
 export function composeSessionNotice(row: SessionNudgeRow, summaryMaxChars: number): string {
-  const title = row.title ?? 'this session';
+  const rawTitle = row.title ?? 'this session';
   const sections =
     row.summary === null ? [] : parseSummarySections(row.summary).filter((s) => s.key !== '');
+
   if (sections.length === 0) {
-    return buildWithNoStoredSections(title, summaryMaxChars);
+    const budget = NOTICE_MAX_BYTES - utf8Bytes(noStoredSectionsFrame('', summaryMaxChars));
+    return noStoredSectionsFrame(sliceToUtf8Bytes(rawTitle, budget), summaryMaxChars).join('\n');
   }
+
   const usedChars = row.summary?.length ?? 0;
-  return buildWithStoredSections(title, sections, usedChars, summaryMaxChars);
+  const budget =
+    NOTICE_MAX_BYTES -
+    utf8Bytes(storedSectionsFrame('', sections.length, usedChars, summaryMaxChars));
+  return buildWithStoredSections(
+    sliceToUtf8Bytes(rawTitle, budget),
+    sections,
+    usedChars,
+    summaryMaxChars,
+  );
 }
 
 /**

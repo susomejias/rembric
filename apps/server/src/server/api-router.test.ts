@@ -723,6 +723,7 @@ describe('createApiRouter', () => {
       expect(row?.lastWorkAt).not.toBeNull();
       expect(row?.lastActivityAt).not.toBeNull();
       expect(row?.lastNudgeAt).not.toBeNull();
+      expect(row?.lastTurnReportAt).not.toBeNull();
     });
 
     it('a conversation-only report returns lines: [], never null or omitted', async () => {
@@ -741,6 +742,7 @@ describe('createApiRouter', () => {
       expect(row?.lastWorkAt).toBeNull();
       expect(row?.lastNudgeAt).toBeNull();
       expect(row?.lastActivityAt).not.toBeNull();
+      expect(row?.lastTurnReportAt).not.toBeNull();
     });
 
     it('400 invalid_input when usedTools is missing, and no timestamp is written', async () => {

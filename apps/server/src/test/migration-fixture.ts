@@ -32,6 +32,13 @@ export interface MigrationFixture {
   stagePrior: () => void;
   /** The migration under test — verbatim, or a substituted body for fault injection. */
   stage: (body?: string) => void;
+  /**
+   * The migration under test AND every later one. Required by any assertion
+   * that reads a row back through a repository or service: the Drizzle schema
+   * always describes HEAD, so a file frozen at an older migration is missing
+   * columns the ORM's `SELECT *` names.
+   */
+  stageThroughHead: () => void;
   unstage: () => void;
   /** The migration's committed text. */
   source: () => string;
@@ -56,6 +63,12 @@ export function createMigrationFixture(migration: string): MigrationFixture {
     stage: (body?: string) => {
       if (body === undefined) copyFileSync(join(SOURCE_DIR, migration), staged);
       else writeFileSync(staged, body);
+    },
+    stageThroughHead: () => {
+      for (const f of readdirSync(SOURCE_DIR)) {
+        if (f.endsWith('.sql') && f >= migration)
+          copyFileSync(join(SOURCE_DIR, f), join(migrationsDir, f));
+      }
     },
     unstage: () => unlinkSync(staged),
     source: () => readFileSync(join(SOURCE_DIR, migration), 'utf8'),

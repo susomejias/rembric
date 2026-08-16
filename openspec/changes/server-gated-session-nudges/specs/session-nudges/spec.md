@@ -4,9 +4,12 @@
 
 The decision to remind a model to refresh its session summary SHALL be taken by the server, from state on the session row, and SHALL NOT be taken by any client from a turn count. A turn count does not answer the question the reminder exists to ask — whether anything has happened since the summary was last written — and no client can answer it either, because no client knows when the stored summary was last written.
 
-`sessions` SHALL carry three nullable timestamps, whose write rules are normative and whose meanings SHALL NOT be conflated with `last_activity_at`:
+`sessions` SHALL carry four nullable timestamps, whose write rules are normative and whose meanings SHALL NOT be conflated with `last_activity_at`:
 
-- **`last_work_at`** — the START of the most recent turn a client reported as having used a tool, which is the row's own `last_activity_at` as it stood BEFORE that report advanced it (`started_at` where it is NULL). Set only by the turn report ("Every client MUST report each finished turn to the server and print what it is handed back"), and only when that report carries `usedTools: true`. **It SHALL NOT be stamped with the moment the report arrives.** The report is issued at the END of the turn, while a curated `memory.session_summary` written during that turn stamps `last_summary_at` MID-turn — and is itself an MCP call the client observes as tool use — so stamping `now` would make condition (2) below true forever after the first curated write, degrading the gate into a bare `NUDGE_FLOOR_MS` timer that fires on conversation-only turns too. The turn's start needs nothing from the client: the server already holds it.
+- **`last_turn_report_at`** — the moment the most recent turn report arrived. Written by the turn report and by NOTHING else, on every report regardless of `usedTools`. It exists so that `last_work_at` below has an anchor with a single writer; a column many paths write cannot answer "when did this turn begin".
+- **`last_work_at`** — the START of the most recent turn a client reported as having used a tool, which is the row's `last_turn_report_at` as it stood BEFORE that report advanced it (`started_at` where it is NULL, i.e. on the session's first report). Set only by the turn report ("Every client MUST report each finished turn to the server and print what it is handed back"), and only when that report carries `usedTools: true`. **It SHALL NOT be stamped with the moment the report arrives.** The report is issued at the END of the turn, while a curated `memory.session_summary` written during that turn stamps `last_summary_at` MID-turn — and is itself an MCP call the client observes as tool use — so stamping `now` would make condition (2) below true forever after the first curated write, degrading the gate into a bare `NUDGE_FLOOR_MS` timer that fires on conversation-only turns too.
+
+  **`last_activity_at` SHALL NOT be used as that anchor**, notwithstanding that it, too, sits on the row and is nominally "the turn's start". It is advanced by the per-turn transcript sync (which advances it even on a write precedence discards) and by `memory.save`, `memory.confirm`, `memory.save_prompt` and `memory.capture_passive` — so on a client that posts the raw transcript and then the report within one turn, as the Hermes provider does sequentially on every turn, it reads LATER than the mid-turn curated write and the notice fires on exactly the turn that complied. A dedicated column with one writer is immune to that by construction, and its failure mode is the safe direction: a report lost to an interrupted turn leaves the anchor further back, which suppresses more, never less.
 - **`last_summary_at`** — the moment the session's curated summary was last STORED. Set by the same single site that folds per-field `final` precedence into an update `set`, on exactly those writes that store a `summary` carrying `final: true` (`sessions`, "Every curated session-summary write MUST append a version row in the same transaction", **One site**). It SHALL NOT be set by a `final: false` write and SHALL NOT be set by a write precedence discards.
 - **`last_nudge_at`** — the moment the notice was last emitted to a client. Set when, and only when, the server returns notice lines in a turn-report response.
 
@@ -77,6 +80,14 @@ The gate SHALL be a pure function of the row and the current time. It SHALL NOT 
 - **WHEN** a `final: false` transcript write stores a `summary`
 - **THEN** `last_summary_at` SHALL be unchanged
 - **AND** the gate's condition (2) SHALL still hold
+
+#### Scenario: A raw transcript write between the curated one and the report does not re-arm the gate
+
+- **GIVEN** an `active` session past the floor whose current turn called `memory.session_summary`, so `last_summary_at` is that mid-turn moment
+- **WHEN** the client then stores its raw transcript with a `final: false` write, advancing `last_activity_at` past `last_summary_at`
+- **AND** the turn's report arrives carrying `usedTools: true`
+- **THEN** `last_work_at` SHALL be the previous report's arrival, which is before the curated write
+- **AND** no notice SHALL be returned
 
 ### Requirement: Every client MUST report each finished turn to the server and print what it is handed back
 

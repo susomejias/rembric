@@ -97,6 +97,24 @@ function assertSummaryWithinCap(callsite: string, summary: string | undefined): 
 }
 
 /**
+ * The `title` counterpart of `assertSummaryWithinCap`, at the same layer and
+ * with the same `callsite` argument, rather than inside `precedenceSet`: the
+ * one write path that never reaches that site is `reportTurn` against a
+ * terminal row, which today rejects a bad title and would silently accept one
+ * from there.
+ */
+function assertTitleValid(callsite: string, title: string | undefined): void {
+  if (title === undefined) return;
+  if (title.length === 0 || title.length > TITLE_MAX_LENGTH) {
+    throw new DomainError(
+      'invalid_input',
+      `${callsite}: title must be 1..${TITLE_MAX_LENGTH} chars`,
+    );
+  }
+  assertNoNul(callsite, 'title', title);
+}
+
+/**
  * Service for the agent (MCP) session lifecycle.
  *
  * Append-only contract:
@@ -281,6 +299,25 @@ export class AgentSessionsService {
   }
 
   /**
+   * Every write that has already decided the row is `active`. The
+   * `requireActive` filter can still miss — the row may have been ended
+   * between the read and this update — and the miss MUST surface, because
+   * the alternative (`?? existing`) silently reports success for a write
+   * that never landed. Kept in one place so a fourth such path cannot
+   * forget it.
+   */
+  private updateActiveOrThrow(sessionId: string, set: Partial<NewAgentSession>): AgentSession {
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
+    if (!updated) {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' was concurrently ended`,
+      );
+    }
+    return updated;
+  }
+
+  /**
    * The one late-write path for a row that is already `ended` or
    * `abandoned`. */
   private writeTerminalFields(existing: AgentSession, input: PrecedenceInput): AgentSession {
@@ -323,15 +360,7 @@ export class AgentSessionsService {
     }
     if (input.summary !== undefined) assertNoNul('sessions.writeSummary', 'summary', input.summary);
     assertSummaryWithinCap('sessions.writeSummary', input.summary);
-    if (input.title !== undefined) {
-      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
-        throw new DomainError(
-          'invalid_input',
-          `sessions.writeSummary: title must be 1..${TITLE_MAX_LENGTH} chars`,
-        );
-      }
-      assertNoNul('sessions.writeSummary', 'title', input.title);
-    }
+    assertTitleValid('sessions.writeSummary', input.title);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -355,14 +384,7 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input, ts),
     };
-    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
-    if (!updated) {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' was concurrently ended`,
-      );
-    }
-    return updated;
+    return this.updateActiveOrThrow(sessionId, set);
   }
 
   end(sessionId: string, input: EndSessionInput): AgentSession {
@@ -371,15 +393,7 @@ export class AgentSessionsService {
     }
     if (input.summary !== undefined) assertNoNul('sessions.end', 'summary', input.summary);
     assertSummaryWithinCap('sessions.end', input.summary);
-    if (input.title !== undefined) {
-      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
-        throw new DomainError(
-          'invalid_input',
-          `sessions.end: title must be 1..${TITLE_MAX_LENGTH} chars`,
-        );
-      }
-      assertNoNul('sessions.end', 'title', input.title);
-    }
+    assertTitleValid('sessions.end', input.title);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -406,14 +420,7 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input, ts),
     };
-    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
-    if (!updated) {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' was concurrently ended`,
-      );
-    }
-    return updated;
+    return this.updateActiveOrThrow(sessionId, set);
   }
 
   /**
@@ -458,25 +465,17 @@ export class AgentSessionsService {
 
   /**
    * The per-turn ping (`session-nudges`, `http-api`'s `POST /turn`). One
-   * service call: stamp `last_activity_at` always, `last_work_at` with the
-   * reported turn's START when `usedTools`, `title` under `final:false`
-   * precedence when present, then evaluate the gate and stamp
-   * `last_nudge_at` only when it fires.
+   * service call: stamp `last_activity_at` and `last_turn_report_at` always,
+   * `last_work_at` with the reported turn's START when `usedTools`, `title`
+   * under `final:false` precedence when present, then evaluate the gate and
+   * stamp `last_nudge_at` only when it fires.
    *
    * A terminal row (not lifecycle) stamps ONLY `last_activity_at` and
    * always returns `lines: []` — a report is not a second path back to
    * `active` and SHALL NOT transition `status` or write `summary`.
    */
   reportTurn(sessionId: string, input: ReportTurnInput): ReportTurnResult {
-    if (input.title !== undefined) {
-      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
-        throw new DomainError(
-          'invalid_input',
-          `sessions.reportTurn: title must be 1..${TITLE_MAX_LENGTH} chars`,
-        );
-      }
-      assertNoNul('sessions.reportTurn', 'title', input.title);
-    }
+    assertTitleValid('sessions.reportTurn', input.title);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -507,22 +506,27 @@ export class AgentSessionsService {
     // is never displaced) rather than re-deriving the rule here.
     const set: Partial<NewAgentSession> = {
       lastActivityAt: ts,
+      lastTurnReportAt: ts,
       ...precedenceSet(existing, { title: input.title }, ts),
     };
     if (input.usedTools) {
       // The turn's START, not `now`: the report lands after the mid-turn
       // `memory.session_summary`, so `now` would put work strictly after the
       // summary on every summary-writing turn and condition (2) could never
-      // suppress.
-      set.lastWorkAt = laterOf(existing.lastWorkAt, existing.lastActivityAt ?? existing.startedAt);
-    }
-    const row = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
-    if (!row) {
-      throw new DomainError(
-        'session_already_ended',
-        `session '${sessionId}' was concurrently ended`,
+      // suppress. The start is the PREVIOUS report's arrival, read here
+      // before this one overwrites it — `last_activity_at` cannot serve,
+      // because the transcript sync and every attached memory write advance
+      // it mid-turn (`session-nudges`, D1a).
+      //
+      // `laterOf` is the only thing keeping `last_work_at` monotone: the
+      // anchor is a wall-clock reading, so an NTP step backwards between two
+      // reports would otherwise move it back.
+      set.lastWorkAt = laterOf(
+        existing.lastWorkAt,
+        existing.lastTurnReportAt ?? existing.startedAt,
       );
     }
+    const row = this.updateActiveOrThrow(sessionId, set);
 
     const gateRow: SessionNudgeRow = {
       startedAt: row.startedAt,
@@ -933,12 +937,20 @@ function precedenceSet(
  *
  * Format: `${basename(cwd) || 'session'} · HH:MM UTC`.
  * Used by `ensure` (HTTP) and `start` (MCP).
+ *
+ * The insert paths do not run their `title` through `assertTitleValid` — the
+ * value is server-computed, not caller-supplied — so the cap is honoured
+ * here instead. `cwd` reaches this at up to 4096 characters (`api-router`'s
+ * schema) and unbounded over MCP, and the basename is the half that gives
+ * way: the clock suffix is what tells two sessions in one directory apart.
  */
 export function computePlaceholderTitle(cwd: string | null, now: Date): string {
-  const base = cwdBasename(cwd) || 'session';
   const hh = now.getUTCHours().toString().padStart(2, '0');
   const mm = now.getUTCMinutes().toString().padStart(2, '0');
-  return `${base} · ${hh}:${mm} UTC`;
+  const suffix = ` · ${hh}:${mm} UTC`;
+  const room = TITLE_MAX_LENGTH - suffix.length;
+  const base = cwdBasename(cwd) || 'session';
+  return (base.length > room ? sliceWithoutSplittingSurrogatePair(base, room) : base) + suffix;
 }
 
 function cwdBasename(cwd: string | null): string {

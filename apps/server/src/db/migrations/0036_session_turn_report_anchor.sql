@@ -1,0 +1,21 @@
+-- 0036_session_turn_report_anchor.sql
+--
+-- One nullable timestamp recording when the PREVIOUS per-turn report
+-- arrived, which is where the turn being reported now began
+-- (`session-nudges`, D1a). Purely additive: one ALTER TABLE ADD COLUMN,
+-- no rebuild, no CHECK, no NOT NULL, no foreign key.
+--
+-- It replaces `last_activity_at` as the anchor `last_work_at` is stamped
+-- with. `last_activity_at` has many writers — the per-turn transcript sync
+-- (`writeSummary`, which advances it even when precedence blocks the
+-- change) and every `memory.save` / `memory.confirm` / `memory.save_prompt`
+-- / `memory.capture_passive` touch — so on a client that posts the raw
+-- transcript and then the report (Hermes does exactly this, sequentially)
+-- it read AFTER the mid-turn curated summary and the gate fired on the
+-- turn that had just complied.
+--
+-- NULL means "no report yet": the first report of a session anchors on
+-- `started_at` instead. A lost report (interrupted turn) leaves the anchor
+-- further back, which suppresses more rather than less.
+
+ALTER TABLE `sessions` ADD COLUMN `last_turn_report_at` INTEGER;

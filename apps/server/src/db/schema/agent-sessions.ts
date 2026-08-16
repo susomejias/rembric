@@ -110,6 +110,15 @@ export const agentSessions = sqliteTable(
     lastSummaryAt: integer('last_summary_at', { mode: 'timestamp_ms' }),
     /** Set only when a turn report's response carries notice lines. */
     lastNudgeAt: integer('last_nudge_at', { mode: 'timestamp_ms' }),
+    /**
+     * When the previous per-turn report arrived — i.e. where the turn being
+     * reported now began. Written by `reportTurn` and by nothing else, which
+     * is the whole point: `last_activity_at` is advanced by every summary
+     * sync and every attached memory write, so reading THAT as the turn's
+     * start put `last_work_at` after a mid-turn curated summary and made the
+     * gate fire on the very turn that complied (`session-nudges`, D1a).
+     */
+    lastTurnReportAt: integer('last_turn_report_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     tokenStatusIdx: index('sessions_token_status_idx').on(table.tokenId, table.status),
