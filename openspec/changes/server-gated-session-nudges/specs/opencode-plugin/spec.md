@@ -22,12 +22,21 @@
 
 Subagent sessions SHALL neither be reported nor printed to (the handler's existing subagent guard covers both). The per-session cache and the latch SHALL be evicted by the core's `forgetSession`, which the existing `session.deleted` cleanup already calls — this handler SHALL NOT carry a second eviction beside it.
 
+**Exactly ONE per-session container stays local to this handler: the once-per-turn report gate**, which `session-nudges` requires of every client ("Each client's report SHALL be issued at most once per turn") and which only this host needs, because only this host can re-enter its end-of-turn event within one turn. It SHALL NOT be moved into the shared core: the core is shared with Pi, whose `agent_settled` carries no such gate, so a core-held gate would either change Pi's behaviour or become a per-client opt-in — a second mechanism where the point of the core is to have one. Because its eviction beside `core.forgetSession` is the exception this requirement otherwise forbids, that eviction SHALL be covered by a test that fails when it is removed, so it cannot be dropped as dead code by a later reader applying the rule above.
+
 #### Scenario: One report per turn, from `session.idle`
 
 - **GIVEN** a non-subagent opencode session driven through three user prompts and three assistant responses
 - **WHEN** the three `session.idle` events have fired
 - **THEN** exactly three turn reports SHALL have been issued
 - **AND** no report SHALL have been issued from `chat.message`
+
+#### Scenario: The local turn gate is evicted with the session it belongs to
+
+- **GIVEN** an opencode session whose `session.idle` has already reported the current turn
+- **WHEN** `session.deleted` fires and the same id is created again
+- **THEN** the next `session.idle` SHALL issue a report
+- **AND** the control SHALL pass in the same run: the first `session.idle` SHALL have issued one, so the second is measured against a gate that really closed
 
 #### Scenario: A tool part is observed and reported
 

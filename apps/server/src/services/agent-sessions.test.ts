@@ -1706,6 +1706,98 @@ describe('AgentSessionsService', () => {
         expect(new Set(seen).size).toBeGreaterThan(1);
       });
 
+      it('lets last_turn_report_at follow a clock that steps backwards while the other three hold', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 100);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 120);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        const before = svc.getById(s.id)!;
+
+        clock = minutesAfter(START, 30); // an NTP step backwards between two reports
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        const after = svc.getById(s.id)!;
+
+        expect(after.lastTurnReportAt?.getTime()).toBe(clock.getTime());
+        // Control: the anchor moved back from a value that was really ahead of
+        // it, and the three monotone columns did not follow.
+        expect(before.lastTurnReportAt!.getTime()).toBeGreaterThan(clock.getTime());
+        expect(after.lastWorkAt!.getTime()).toBeGreaterThanOrEqual(before.lastWorkAt!.getTime());
+        expect(after.lastNudgeAt!.getTime()).toBe(before.lastNudgeAt!.getTime());
+      });
+
+      it('still suppresses the compliant turn after the clock stepped backwards', () => {
+        // Freezing the anchor at the highest value ever seen would leave it
+        // AHEAD of a curated write made after the step back, so condition (2)
+        // would hold and the notice would fire on the turn that just complied.
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 100);
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+        clock = minutesAfter(START, 30); // the step back
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+
+        clock = minutesAfter(START, 31);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
+        clock = minutesAfter(START, 32);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+      });
+
+      it('control: the same post-step-back timeline without the curated write does fire', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 100);
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+        clock = minutesAfter(START, 30);
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+
+        clock = minutesAfter(START, 32);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+      });
+
+      it('a lost report leaves the anchor further back, so it suppresses more and never less', () => {
+        // The interrupted-turn direction (`session-nudges`: "a report lost to
+        // an interrupted turn leaves the anchor further back, which suppresses
+        // more, never less"). Hermes drops the report outright on an
+        // interrupted turn, so this is a reachable timeline, not a hypothesis.
+        const REPORTS = [10, 20, 30] as const;
+        function run(dropped: number | null): { work: Array<number | null>; lines: number[] } {
+          clock = START; // both runs must share a `started_at`, which anchors turn one
+          const s = svc.start({ tokenId, projectId, agent: 'hermes-agent' });
+          const work: Array<number | null> = [];
+          const lines: number[] = [];
+          for (const minute of REPORTS) {
+            clock = minutesAfter(START, minute);
+            // The turn itself happens either way; on `dropped` only its report
+            // is lost, which is the whole difference between the two runs.
+            lines.push(
+              minute === dropped
+                ? 0
+                : svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length,
+            );
+            work.push(svc.getById(s.id)?.lastWorkAt?.getTime() ?? null);
+            if (minute === REPORTS[0]) {
+              clock = minutesAfter(START, 15);
+              svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
+            }
+          }
+          return { work, lines };
+        }
+
+        const kept = run(null);
+        const lost = run(20);
+
+        // Control: the two timelines really diverge — the kept one fires on the
+        // last turn, so the lost one's silence is a consequence and not the
+        // shape of a run that never fires at all.
+        expect(kept.lines.at(-1)).toBeGreaterThan(0);
+        expect(lost.lines.at(-1)).toBe(0);
+        for (const [i, workAt] of lost.work.entries()) {
+          const keptAt = kept.work[i] ?? null;
+          if (workAt === null || keptAt === null) continue;
+          expect(workAt, `turn ${i}`).toBeLessThanOrEqual(keptAt);
+        }
+        expect(lost.work.at(-1) ?? 0).toBeLessThan(kept.work.at(-1) ?? 0);
+      });
+
       it('rejects an over-long or NUL-bearing title instead of storing it', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         expect(() =>

@@ -117,6 +117,9 @@ export const agentSessions = sqliteTable(
      * sync and every attached memory write, so reading THAT as the turn's
      * start put `last_work_at` after a mid-turn curated summary and made the
      * gate fire on the very turn that complied (`session-nudges`, D1a).
+     * Deliberately NOT monotone, unlike the three above: an anchor clamped
+     * forward reintroduces that same firing after a backwards clock step
+     * (`sessions`, the four-nudge-gate-timestamps requirement).
      */
     lastTurnReportAt: integer('last_turn_report_at', { mode: 'timestamp_ms' }),
   },

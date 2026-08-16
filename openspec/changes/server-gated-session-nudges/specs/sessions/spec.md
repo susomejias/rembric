@@ -1,12 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: Session rows MUST carry the four nudge-gate timestamps, and every one of them MUST be monotone
+### Requirement: Session rows MUST carry the four nudge-gate timestamps, three of them monotone and the turn anchor free to follow the clock
 
-`sessions` SHALL carry `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`, all `timestamp_ms`, all NULLABLE, all defaulting to NULL. `session-nudges` owns which write sets each and what the gate reads from them; this requirement owns their presence, their nullability, their monotonicity and the migrations that add them.
+`sessions` SHALL carry `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`, all `timestamp_ms`, all NULLABLE, all defaulting to NULL. `session-nudges` owns which write sets each and what the gate reads from them; this requirement owns their presence, their nullability, WHICH of them are monotone, and the migrations that add them.
 
 **NULL means "never", and it is a load-bearing value rather than a missing one.** Every row that predates the columns reads NULL on all four, and the gate is specified so that a NULL row behaves as a silent one until a client reports work. A NULL `last_turn_report_at` means "no turn has been reported yet", and the first report of a session therefore anchors on `started_at`. No backfill SHALL be performed. In particular `last_summary_at` SHALL NOT be inferred from `session_summary_versions.created_at`: a byte-identical curated re-write appends no version row (see "Every curated session-summary write MUST append a version row in the same transaction"), so the newest version's timestamp is not the moment the column was last written, and a later change retires that table.
 
-**Each of them SHALL move forward only.** A write SHALL NOT set any of them to a value earlier than the value already stored, and no path SHALL clear one to NULL once it holds a timestamp — including `resume`, which clears `ended_at` and SHALL leave them alone. A session that is resumed keeps the moment its summary was last written, because that is still when it was last written.
+**Three of them SHALL move forward only** — `last_work_at`, `last_summary_at` and `last_nudge_at`. A write SHALL NOT set one of those three to a value earlier than the value already stored. **No path SHALL clear ANY of the four to NULL once it holds a timestamp**, including `resume`, which clears `ended_at` and SHALL leave them alone: a session that is resumed keeps the moment its summary was last written, because that is still when it was last written.
+
+**`last_turn_report_at` SHALL be stamped with the current instant on every report, and SHALL NOT be clamped forward.** It is the one exception and the exception is load-bearing rather than an oversight. The other three are cumulative observations — the latest moment at which work happened, a summary was stored, a notice was sent — and for those "the highest value seen" IS the value. `last_turn_report_at` is not an observation but an ANCHOR: it marks where the turn now being reported began, and the report that reads it is the same report that replaces it. Clamping it forward would leave a host whose clock steps backwards with an anchor AHEAD of a curated summary written after the step, so `last_work_at` would land later than `last_summary_at`, the gate's condition (2) would hold, and the notice would fire on exactly the turn that had just complied — the defect this column was added to remove. Measured on this tree with the clamp in place: the report following a mid-turn `memory.session_summary` returns one notice line where it must return none. Correctness here comes from the column having exactly ONE writer, not from moving forward only. The asymmetry of the two failures is what settles it: a backwards step costs at most one over-suppressed notice, bounded by the floor, while the clamped reading costs a notice fired at a model that did what it was asked.
 
 The migration SHALL be a plain `ALTER TABLE sessions ADD COLUMN` per column. No table rebuild is required — no `CHECK`, no `NOT NULL`, no foreign key is introduced — so the rebuild dance and its `DROP TABLE` foreign-key hazard do not apply, and `PRAGMA foreign_key_check` passes trivially before `COMMIT`.
 
@@ -33,6 +35,27 @@ These columns SHALL be exempt from the summary/title `final` precedence machiner
 - **WHEN** a write attempts to set `last_work_at` to a value earlier than `T`
 - **THEN** the stored value SHALL remain `T`
 
+#### Scenario: The turn anchor follows a clock that steps backwards, and the other three do not
+
+- **GIVEN** session `<S>` whose `last_turn_report_at` is `T`, with `last_work_at` and `last_nudge_at` set
+- **WHEN** a turn report is handled at an instant `E` earlier than `T`, because the host clock stepped backwards between two reports
+- **THEN** `last_turn_report_at` SHALL be `E`
+- **AND** `last_work_at` SHALL NOT have moved backwards and `last_nudge_at` SHALL be unchanged
+
+#### Scenario: A turn that refreshes the summary after a backwards clock step is still not reminded
+
+- **GIVEN** session `<S>` past the floor whose `last_turn_report_at` was stamped after a backwards clock step, so it reads earlier than the highest value the column has ever held
+- **WHEN** the session's next turn writes a curated summary mid-turn and then reports itself with `usedTools: true`
+- **THEN** no notice SHALL be returned, because `last_work_at` anchors on that earlier report and lands before `last_summary_at`
+- **AND** the control SHALL pass in the same run: the identical timeline with the curated write removed SHALL return a notice, so the silence above is suppression and not an unreachable gate
+
+#### Scenario: A report lost to an interrupted turn suppresses more, never less
+
+- **GIVEN** two identical session timelines that differ only in that one report is never issued, as happens on a Hermes turn the user interrupts
+- **WHEN** both are driven through the same turns
+- **THEN** the lost-report timeline's `last_work_at` SHALL never be later than the kept-report timeline's at the same turn
+- **AND** the control SHALL pass in the same run: there SHALL be a turn on which the kept-report timeline returns a notice and the lost-report one returns none
+
 ## MODIFIED Requirements
 
 ### Requirement: Sessions MUST be append-only
@@ -47,7 +70,7 @@ The `id` column is set exactly once at insert time. It MAY originate from a clie
 
 The `summary` and `title` columns are exempt from one-write-per-lifetime immutability: they MAY be written multiple times subject to the `final` precedence rules (a `final:true` write locks against `final:false` writes; non-final writes can overwrite each other). This exemption SHALL apply irrespective of `status`, with one narrowing on terminal rows where an already-`final` column becomes immutable — see "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`".
 
-**A fourth class of column exists and SHALL be named rather than left implicit: the MONOTONE OBSERVATION TIMESTAMPS** — `last_activity_at`, `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`. They record when something was last observed rather than what the session contains, they are written by many paths and locked by none, and they move forward only (see "Session rows MUST carry the four nudge-gate timestamps, and every one of them MUST be monotone"). They are NOT lifecycle state: writing one SHALL NOT transition `status`, SHALL NOT write or clear `ended_at`, and SHALL NOT be treated by any reader as evidence that a lifecycle event occurred. This class was previously unenumerated even though `last_activity_at` already belonged to it, which made an append-only reading of this requirement quietly false; naming the class is what lets the nudge-gate columns join it without weakening anything.
+**A fourth class of column exists and SHALL be named rather than left implicit: the OBSERVATION TIMESTAMPS** — `last_activity_at`, `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`. They record when something was last observed rather than what the session contains, and they are written by many paths and locked by none. **The first four are MONOTONE and move forward only; `last_turn_report_at` is not, and follows the clock**, for the reason its own requirement states (see "Session rows MUST carry the four nudge-gate timestamps, three of them monotone and the turn anchor free to follow the clock") — it is a turn anchor rather than a cumulative observation, and clamping it forward re-arms the gate against the turn that just complied. None of the five is lifecycle state: writing one SHALL NOT transition `status`, SHALL NOT write or clear `ended_at`, and SHALL NOT be treated by any reader as evidence that a lifecycle event occurred. This class was previously unenumerated even though `last_activity_at` already belonged to it, which made an append-only reading of this requirement quietly false; naming the class is what lets the nudge-gate columns join it without weakening anything.
 
 #### Scenario: Code path attempts to physically delete a session
 

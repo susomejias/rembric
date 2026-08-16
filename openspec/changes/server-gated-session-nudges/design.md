@@ -66,6 +66,8 @@ Rejected on cost grounds only, and rejected: "it costs no new field". A fourth n
 
 `laterOf` stays on the `last_work_at` write. With a single-writer anchor it is no longer load-bearing against an out-of-order writer, but the anchor is still a wall-clock reading of a previous request, so an NTP step backwards between two reports would otherwise walk the column back — which the sessions capability forbids ("A stale write cannot move a timestamp backwards").
 
+**`laterOf` does NOT go on the anchor itself, and that asymmetry is deliberate.** `last_turn_report_at` answers "where did this turn begin", not "how far has this session got", so clamping it forward keeps it ahead of a curated summary written after a backwards step and re-arms condition (2) against the turn that complied — measured: with the clamp in place the report following a mid-turn `memory.session_summary` returns one notice line where it must return none. `sessions` exempts it from the monotone class for that reason and pins the exemption with its own scenario.
+
 Rejected: filtering Rembric's own tools out of the client-side observation. It would require every client to know our tool names, and the names DIFFER per client (the MCP prefixing each host applies), which reintroduces exactly the divergent per-client logic this change removes.
 
 ### D2. The floor is 25 minutes, one exported constant, and it is a floor rather than a period
