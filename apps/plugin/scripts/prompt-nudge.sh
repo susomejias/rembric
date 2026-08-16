@@ -29,15 +29,14 @@ PROMPT="$(rembric_prompt_from_stdin_json "$INPUT")"
 
 [ -z "$RAW_SESSION_ID" ] && exit 0
 
-# Record the FIRST user prompt, redacted, for stop-report.sh's first report
-# (design D12). Write-once: rembric_first_prompt_write no-ops on a session
-# that already has one recorded.
-if [ -n "$PROMPT" ]; then
-  # Redact before truncation — cutting first could sever an opening
-  # <private> tag and leak the span content (same ordering as
-  # _rembric_truncate_transcript).
-  REDACTED_PROMPT="$(rembric_redact_private "$PROMPT")"
-  rembric_first_prompt_write "$RAW_SESSION_ID" "${REDACTED_PROMPT:0:100}"
+# Record the FIRST user prompt for stop-report.sh's first report (design
+# D12). `_rembric_finalize_title` is what makes it a title: redact, then cut
+# to RBR_TITLE_MAX_CHARS, then collapse newlines and tabs — without the last
+# step a multi-line prompt reached `sessions.title` with literal breaks in
+# it. The recorded check comes first so a session that already has its title
+# does not pay for the awk and tr forks on every subsequent turn.
+if [ -n "$PROMPT" ] && ! rembric_first_prompt_recorded "$RAW_SESSION_ID"; then
+  rembric_first_prompt_write "$RAW_SESSION_ID" "$(_rembric_finalize_title "$PROMPT")"
 fi
 
 PENDING="$(rembric_pending_take "$RAW_SESSION_ID")"

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +125,33 @@ describe('prompt-nudge.sh (report-print contract, no cadence)', () => {
     runPromptNudge(JSON.stringify({ session_id: 's-first-only', prompt: 'second one' }));
     const stored = readFileSync(join(counterDir, 'rembric-first-prompt', 's-first-only'), 'utf8');
     expect(stored).toBe('first one');
+  });
+
+  it('collapses newlines and tabs — the recorded title is one line', () => {
+    runPromptNudge(
+      JSON.stringify({ session_id: 's-multiline', prompt: 'line one\nline two\ttabbed' }),
+    );
+    const stored = readFileSync(join(counterDir, 'rembric-first-prompt', 's-multiline'), 'utf8');
+    expect(stored).toBe('line one line two tabbed');
+  });
+
+  it('does not re-record a first prompt once stop-report.sh has consumed it', () => {
+    runPromptNudge(JSON.stringify({ session_id: 's-consumed', prompt: 'the real first prompt' }));
+    // Consume it the way stop-report.sh does.
+    const taken = execFileSync(
+      'bash',
+      [
+        '-c',
+        `source '${join(here, '..', 'scripts', '_api.sh')}'; rembric_first_prompt_take $1`,
+        'sh',
+        's-consumed',
+      ],
+      { encoding: 'utf8', env: { ...process.env, TMPDIR: counterDir } },
+    );
+    expect(taken).toBe('the real first prompt');
+
+    runPromptNudge(JSON.stringify({ session_id: 's-consumed', prompt: 'a later prompt' }));
+    expect(existsSync(join(counterDir, 'rembric-first-prompt', 's-consumed'))).toBe(false);
   });
 
   it('fails safe on unreadable or empty stdin: exits 0 and emits nothing', () => {

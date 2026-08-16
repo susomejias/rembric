@@ -173,3 +173,52 @@ describe('rembric_resumed_mark / rembric_resumed_peek (marker-directory mechanic
     expect(callFnIn(tmp, 'rembric_resumed_peek', '')).toBe(false);
   });
 });
+
+describe('rembric_first_prompt_write / _take (the provisional title travels once)', () => {
+  let tmp: string;
+
+  /** Same shape as `callFn`, but with the TMPDIR the marker directory lives under. */
+  function callIn(tmpdir: string, script: string): string {
+    return execFileSync('bash', ['-c', `source '${apiSh}'; ${script}`], {
+      encoding: 'utf8',
+      env: { ...process.env, TMPDIR: tmpdir },
+    });
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'rembric-firstprompt-'));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it('a take is followed by nothing, even when a later prompt tries to record one', () => {
+    expect(callIn(tmp, `rembric_first_prompt_write s-1 'the first prompt'`)).toBe('');
+    // Control: the recorded value IS delivered once, so an empty second take
+    // cannot be an artefact of the write never landing.
+    expect(callIn(tmp, `rembric_first_prompt_take s-1`)).toBe('the first prompt');
+    callIn(tmp, `rembric_first_prompt_write s-1 'a later prompt'`);
+    expect(callIn(tmp, `rembric_first_prompt_take s-1`)).toBe('');
+    callIn(tmp, `rembric_first_prompt_write s-1 'a third prompt'`);
+    expect(callIn(tmp, `rembric_first_prompt_take s-1`)).toBe('');
+  });
+
+  it('the FIRST prompt wins before consumption — a second write does not replace it', () => {
+    callIn(tmp, `rembric_first_prompt_write s-2 'first'`);
+    callIn(tmp, `rembric_first_prompt_write s-2 'second'`);
+    expect(callIn(tmp, `rembric_first_prompt_take s-2`)).toBe('first');
+  });
+
+  it('rembric_first_prompt_recorded is false before, true while pending, true after consumption', () => {
+    expect(callFnIn(tmp, 'rembric_first_prompt_recorded', 's-3')).toBe(false);
+    callIn(tmp, `rembric_first_prompt_write s-3 'p'`);
+    expect(callFnIn(tmp, 'rembric_first_prompt_recorded', 's-3')).toBe(true);
+    callIn(tmp, `rembric_first_prompt_take s-3`);
+    expect(callFnIn(tmp, 'rembric_first_prompt_recorded', 's-3')).toBe(true);
+  });
+
+  it('sessions are independent — consuming one does not silence another', () => {
+    callIn(tmp, `rembric_first_prompt_write s-a 'prompt a'`);
+    callIn(tmp, `rembric_first_prompt_write s-b 'prompt b'`);
+    expect(callIn(tmp, `rembric_first_prompt_take s-a`)).toBe('prompt a');
+    expect(callIn(tmp, `rembric_first_prompt_take s-b`)).toBe('prompt b');
+  });
+});

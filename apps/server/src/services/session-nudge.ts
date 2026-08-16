@@ -1,14 +1,15 @@
 import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 
+import { sliceWithoutSplittingSurrogatePair } from './strings.js';
 import { parseSummarySections, type SummarySection } from './summary-sections.js';
 
 /**
  * The server-side gate and notice composition for the stretch-close
- * reminder (`session-nudges`). Pure: takes a row-shaped input plus `now`
- * and the floor, returns either `null` (gate does not fire) or the
- * composed notice as a one-element array of lines. No SQL, no clock of
- * its own, no repository — `services/agent-sessions.ts` owns persistence
- * and passes in what this module reads.
+ * reminder (`session-nudges`). Pure: takes a row-shaped input plus `now`,
+ * the floor and the summary cap, returns either `null` (gate does not
+ * fire) or the composed notice as a one-element array of lines. No SQL, no
+ * clock of its own, no repository — `services/agent-sessions.ts` owns
+ * persistence and passes in what this module reads.
  */
 
 export interface SessionNudgeRow {
@@ -23,9 +24,6 @@ export interface SessionNudgeRow {
 /** The composed notice's own byte bound — see `claude-code-plugin`'s per-firing-turn ceiling for the derivation. */
 export const NOTICE_MAX_BYTES = 640;
 
-/** "A curated session-summary write MUST be merged section-wise with the stored summary" — the cap this notice's closing line reads against. */
-export const NOTICE_SUMMARY_MAX_CHARS = 10000;
-
 const HEADING_DISPLAY_MAX_CHARS = 32;
 
 function utf8Bytes(lines: readonly string[]): number {
@@ -34,7 +32,9 @@ function utf8Bytes(lines: readonly string[]): number {
 
 function headingDisplay(section: SummarySection): string {
   const raw = (section.headingLine?.text ?? `## ${section.key}`).trim();
-  return raw.length > HEADING_DISPLAY_MAX_CHARS ? raw.slice(0, HEADING_DISPLAY_MAX_CHARS) : raw;
+  return raw.length > HEADING_DISPLAY_MAX_CHARS
+    ? sliceWithoutSplittingSurrogatePair(raw, HEADING_DISPLAY_MAX_CHARS)
+    : raw;
 }
 
 function sectionBodyChars(section: SummarySection): number {
@@ -49,8 +49,8 @@ function directiveText(): string {
   );
 }
 
-function closingLine(usedChars: number): string {
-  return `${usedChars} used of ${NOTICE_SUMMARY_MAX_CHARS} available.`;
+function closingLine(usedChars: number, summaryMaxChars: number): string {
+  return `${usedChars} used of ${summaryMaxChars} available.`;
 }
 
 /**
@@ -63,10 +63,11 @@ function buildWithStoredSections(
   title: string,
   sections: SummarySection[],
   usedChars: number,
+  summaryMaxChars: number,
 ): string {
   const directive = directiveText();
   const intro = `Stored for "${title}" (current sizes, not targets):`;
-  const closing = closingLine(usedChars);
+  const closing = closingLine(usedChars, summaryMaxChars);
   const base = [directive, intro];
 
   const kept: string[] = [];
@@ -91,34 +92,38 @@ function buildWithStoredSections(
   return [...base, ...kept, closing].join('\n');
 }
 
-function buildWithNoStoredSections(title: string): string {
+function buildWithNoStoredSections(title: string, summaryMaxChars: number): string {
   const directive = directiveText();
   const intro = `Nothing is stored yet for "${title}". ${SUMMARY_SECTIONS}`;
-  const closing = closingLine(0);
+  const closing = closingLine(0, summaryMaxChars);
   return [directive, intro, closing].join('\n');
 }
 
-export function composeSessionNotice(row: SessionNudgeRow): string {
+export function composeSessionNotice(row: SessionNudgeRow, summaryMaxChars: number): string {
   const title = row.title ?? 'this session';
   const sections =
     row.summary === null ? [] : parseSummarySections(row.summary).filter((s) => s.key !== '');
   if (sections.length === 0) {
-    return buildWithNoStoredSections(title);
+    return buildWithNoStoredSections(title, summaryMaxChars);
   }
   const usedChars = row.summary?.length ?? 0;
-  return buildWithStoredSections(title, sections, usedChars);
+  return buildWithStoredSections(title, sections, usedChars, summaryMaxChars);
 }
 
 /**
- * The gate — `sessions/spec.md`'s three conditions, in order. `floorMs` is
- * an explicit parameter rather than an imported constant so this module
- * stays a pure function of its arguments and `services/agent-sessions.ts`
- * (the sole owner of `NUDGE_FLOOR_MS`) is never imported here.
+ * The gate — `sessions/spec.md`'s three conditions, in order. `floorMs` and
+ * `summaryMaxChars` are explicit parameters rather than imported constants
+ * so this module stays a pure function of its arguments and
+ * `services/agent-sessions.ts` (the sole owner of both `NUDGE_FLOOR_MS` and
+ * `SUMMARY_MAX_CHARS`) is never imported here. A local copy of the cap would
+ * let the notice's "N used of M available" drift from the value the write
+ * path actually rejects against.
  */
 export function evaluateSessionNudge(
   row: SessionNudgeRow,
   now: Date,
   floorMs: number,
+  summaryMaxChars: number,
 ): string[] | null {
   if (row.lastWorkAt === null) return null;
   const workAfterSummary =
@@ -126,5 +131,5 @@ export function evaluateSessionNudge(
   if (!workAfterSummary) return null;
   const anchor = row.lastNudgeAt ?? row.startedAt;
   if (now.getTime() - anchor.getTime() < floorMs) return null;
-  return [composeSessionNotice(row)];
+  return [composeSessionNotice(row, summaryMaxChars)];
 }

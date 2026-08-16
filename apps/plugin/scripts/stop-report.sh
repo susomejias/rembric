@@ -68,13 +68,19 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   case "$OFFSET" in '' | *[!0-9]*) OFFSET="" ;; esac
   if [ -n "$CURRENT_BYTES" ]; then
     if [ -n "$OFFSET" ] && [ "$OFFSET" -le "$CURRENT_BYTES" ]; then
-      DELTA="$(tail -c "+$((OFFSET + 1))" "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      TAIL_ARG="+$((OFFSET + 1))"
     else
       # Cold offset (new process, or a shrunk/rotated file): scan at most
       # the last COLD_SCAN_MAX_BYTES rather than the whole transcript.
-      DELTA="$(tail -c "$COLD_SCAN_MAX_BYTES" "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+      TAIL_ARG="$COLD_SCAN_MAX_BYTES"
     fi
-    case "$DELTA" in *"$MARKER"*) USED_TOOLS="true" ;; esac
+    # Streamed, not captured: `DELTA="$(tail …)"` materialised the whole delta
+    # in the shell and then scanned it with `case`, which is the one unbounded
+    # path here (COLD_SCAN_MAX_BYTES bounds only the cold branch). Measured on
+    # 8 MB: 111ms → 4.4ms with no match, 134ms → 2.1ms with an early one.
+    if tail -c "$TAIL_ARG" "$TRANSCRIPT_PATH" 2>/dev/null | grep -qF -m1 -- "$MARKER"; then
+      USED_TOOLS="true"
+    fi
     rembric_scan_offset_set "$SESSION_ID" "$CURRENT_BYTES"
   fi
 fi

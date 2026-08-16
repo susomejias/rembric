@@ -353,6 +353,9 @@ rembric_json_escape() {
   # that the server's JSON.parse rejects outright — silently dropping the
   # whole POST (session-end fallback summary, stop-report turn, or
   # pre-compact snapshot) for the rest of the session.
+  # `printf -v` rather than `$(printf …)`: the substitution form forks twice
+  # per iteration (56 forks for 28 constant bytes) and this runs inside the
+  # synchronous Stop hook — measured 9.19ms vs 0.198ms per call.
   local i hex c
   i=1
   while [ "$i" -le 31 ]; do
@@ -361,8 +364,8 @@ rembric_json_escape() {
       continue
       ;;
     esac
-    hex=$(printf '%02x' "$i")
-    c=$(printf "\\x$hex")
+    printf -v hex '%02x' "$i"
+    printf -v c "\\x$hex"
     s="${s//$c/\\u00$hex}"
     i=$((i + 1))
   done
@@ -398,6 +401,10 @@ rembric_turn_report() {
     printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
     return 0
   fi
+  # The gate fires at most once per floor (25 min), so the overwhelming
+  # majority of responses carry an empty array. Answering those from the raw
+  # body costs 0.0044ms against the 1.18ms fork measured for `jq`.
+  case "$detail" in *'"lines":[]'*) return 0 ;; esac
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$detail" | jq -r '(.lines // [])[]' 2>/dev/null
   else
@@ -439,9 +446,23 @@ rembric_pending_take() {
 
 # The provisional title (design D12): prompt-nudge.sh records the session's
 # first user prompt (already redacted, ≤100 chars) here exactly once;
-# stop-report.sh consumes and clears it for its first report. Write-once
-# rather than "never overwrite non-empty with empty" — a SECOND prompt must
-# never replace the FIRST one this records.
+# stop-report.sh consumes it for its first report. Write-once rather than
+# "never overwrite non-empty with empty" — a SECOND prompt must never replace
+# the FIRST one this records.
+#
+# Consumption leaves a `<id>.done` tombstone rather than removing the file,
+# and `_write` treats the tombstone as "already recorded". Deleting the file
+# outright re-armed `_write` on the very next prompt, so the title travelled
+# on EVERY turn instead of "at most once per session" (session-nudges).
+rembric_first_prompt_recorded() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 1
+  local safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  local file="${TMPDIR:-/tmp}/rembric-first-prompt/${safe_id}"
+  [ -e "$file" ] || [ -e "${file}.done" ]
+}
+
 rembric_first_prompt_write() {
   local session_id="${1:-}" text="${2:-}"
   { [ -z "$session_id" ] || [ -z "$text" ]; } && return 0
@@ -450,7 +471,7 @@ rembric_first_prompt_write() {
   local dir="${TMPDIR:-/tmp}/rembric-first-prompt"
   mkdir -p "$dir" 2>/dev/null || true
   local file="${dir}/${safe_id}"
-  [ -e "$file" ] && return 0
+  { [ -e "$file" ] || [ -e "${file}.done" ]; } && return 0
   printf '%s' "$text" >"$file" 2>/dev/null || true
 }
 
@@ -462,7 +483,10 @@ rembric_first_prompt_take() {
   local file="${TMPDIR:-/tmp}/rembric-first-prompt/${safe_id}"
   [ -f "$file" ] || return 0
   cat "$file" 2>/dev/null || true
-  rm -f "$file" 2>/dev/null || true
+  # Tombstone BEFORE removing: if the write fails the file survives and the
+  # worst case is the old behaviour, never a silently re-armed title.
+  : >"${file}.done" 2>/dev/null && rm -f "$file" 2>/dev/null
+  return 0
 }
 
 # The per-session transcript byte offset stop-report.sh's delta scan reads

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -229,6 +229,23 @@ describe('stop-report.sh', () => {
     );
     const cached = readFileSync(join(counterDir, 'rembric-pending', 's-cache'), 'utf8');
     expect(cached).toBe('rembric: a notice');
+  });
+
+  it('caches nothing when the response carries an empty lines array', async () => {
+    // The empty-array fast path in rembric_turn_report skips the `jq` fork;
+    // its output must stay exactly what `jq` produced — nothing.
+    const transcript = writeTranscript('t7b.jsonl', '{"type":"user"}\n');
+    await run(
+      'claude-code',
+      JSON.stringify({
+        session_id: 's-empty-lines',
+        cwd,
+        transcript_path: transcript,
+        stop_hook_active: false,
+      }),
+    );
+    expect(requests.some((r) => r.path.endsWith('/turn'))).toBe(true);
+    expect(existsSync(join(counterDir, 'rembric-pending', 's-empty-lines'))).toBe(false);
   });
 
   it('sends the recorded first prompt as title on the first report only', async () => {
