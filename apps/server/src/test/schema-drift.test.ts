@@ -333,6 +333,7 @@ const EXPECTED_COLUMNS: Record<
     { name: 'last_work_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'last_summary_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'last_nudge_at', type: 'INTEGER', notnull: 0, pk: 0 },
+    { name: 'last_turn_report_at', type: 'INTEGER', notnull: 0, pk: 0 },
   ],
   confirmations: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },

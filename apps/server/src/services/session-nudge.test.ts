@@ -188,6 +188,43 @@ describe('composeSessionNotice', () => {
     expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
+  it('stays within the byte bound with sections stored and a 100-code-unit CJK title', () => {
+    const text = composeSessionNotice(
+      row({ summary: '## Goal\nship it', title: '漢'.repeat(100) }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
+  });
+
+  it('stays within the byte bound with sections stored and an unbounded placeholder title', () => {
+    // The shape `computePlaceholderTitle` produces from a deep cwd: the title
+    // is the variable-length input of BOTH branches, not only the
+    // nothing-stored one.
+    const title = `${'deep-directory-name'.repeat(21)} · 09:41 UTC`;
+    const text = composeSessionNotice(
+      row({ summary: '## Goal\nship it', title }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
+  });
+
+  it('stays within the byte bound when a long title forces the every-section-elided return', () => {
+    // Forty sections plus a title that leaves no room for even one entry, so
+    // the builder takes its `+N more`-only path — the one return that never
+    // re-checked the bound. The title is ASCII and longer than any budget, so
+    // it is cut to fill the budget EXACTLY and the composed notice lands on
+    // 640 on the nose: reserving one byte too few (a `+N more` label costed
+    // at fewer digits than 40 needs) shows up here as 641.
+    const sections: string[] = [];
+    for (let i = 0; i < 40; i++) sections.push(`## Section ${i}`, `body ${i}`);
+    const text = composeSessionNotice(
+      row({ summary: sections.join('\n'), title: 'a'.repeat(1000) }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(text).toMatch(/\+40 more/);
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
+  });
+
   it('a pathological forty-section, 100-char-heading summary stays within the byte bound and keeps ## Goal', () => {
     const sections: string[] = [];
     for (let i = 0; i < 40; i++) {

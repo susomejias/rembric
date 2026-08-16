@@ -30,7 +30,7 @@ Two constraints shape everything below. First, this change lands **on top of** `
 
 ### D1. The gate is three timestamps on the row, not process state
 
-`last_work_at`, `last_summary_at`, `last_nudge_at`, all nullable, all on `sessions`. Firing condition:
+`last_work_at`, `last_summary_at`, `last_nudge_at`, all nullable, all on `sessions` — joined by `last_turn_report_at`, which D1a adds as `last_work_at`'s anchor. Firing condition:
 
 ```
 last_work_at IS NOT NULL
@@ -46,11 +46,25 @@ Rejected: deriving `last_summary_at` from `session_summary_versions.created_at`.
 
 `last_summary_at` is written at the SAME single precedence site that writes `summary`, which `sessions` already requires to be one place ("**One site.** The append SHALL be emitted from the same single place that folds per-field `final` precedence into an update `set`"). A second site is how the column and the summary come to disagree.
 
-### D1a. `last_work_at` is stamped with the turn's START, and that is what makes suppression reachable at all
+### D1a. `last_work_at` is anchored on a dedicated `last_turn_report_at`, which has exactly one writer
 
-Stamping it with `now` — the moment the end-of-turn report lands — makes condition (2) permanently true from the first curated write onward, so the gate degenerates into a bare 25-minute timer that fires on conversation-only turns too. The order is what does it: `memory.session_summary` stamps `last_summary_at` MID-turn, the report arrives after, and that same MCP call is a `"type":"tool_use"` entry in the transcript, so the client correctly reports `usedTools: true` for the very turn that complied.
+Stamping `last_work_at` with `now` — the moment the end-of-turn report lands — makes condition (2) permanently true from the first curated write onward, so the gate degenerates into a bare 25-minute timer that fires on conversation-only turns too. The order is what does it: `memory.session_summary` stamps `last_summary_at` MID-turn, the report arrives after, and that same MCP call is a `"type":"tool_use"` entry in the transcript, so the client correctly reports `usedTools: true` for the very turn that complied. So the stamp must be the turn's START.
 
-The turn's start is already on the row: `last_activity_at` as it stood before this request advanced it (`started_at` when NULL). It costs no new field, no client change and no clock the server does not already own. Because the curated write is normally that turn's last activity, the state a compliant turn produces is `last_work_at == last_summary_at`, which condition (2)'s STRICT `>` suppresses.
+**Rejected: `last_activity_at` as that anchor.** It was the first version of this decision, and it was wrong: `last_activity_at` is not "the turn's start", it is "the last time anything touched the row", and three separate paths touch it mid-turn.
+
+- `writeSummary` advances it unconditionally, by its own comment, _even when precedence blocks the summary change_ — the per-turn transcript sync is `final: false`, so it never moves `last_summary_at`, but it always moves `last_activity_at`.
+- `touchActivity` advances it from `memory.save`, `memory.confirm`, `memory.save_prompt` and `memory.capture_passive`, via `resolveSessionId`.
+- The turn report itself advances it.
+
+That is enough to defeat the suppression on a client that syncs the transcript and then reports, within one turn — which is not a hypothetical: the Hermes provider's `_sync` POSTs the raw transcript to `/summary` and calls `_post_turn_report` on the next line, sequentially, on **every** turn (`apps/plugin/.hermes-plugin/__init__.py`). Measured with a control passing in the same run: `curated summary → writeSummary(final:false) → report(usedTools:true)` returned one notice line where it must return none.
+
+**Taken: a dedicated `last_turn_report_at` column, written by `reportTurn` and by nothing else.** The report reads it BEFORE advancing it, and that prior value is by construction the moment the previous turn ended, i.e. where this one began (`started_at` on a session's first report). Being single-writer is the whole property: no summary sync and no memory write can move it, so no ordering of them can re-arm the gate. Migration `0036` is one additive `ALTER TABLE … ADD COLUMN`, nullable, no rebuild.
+
+The failure direction is the safe one. A report lost to an interrupted turn or a killed client leaves the anchor at an earlier moment, so the next work stamp is EARLIER, which suppresses more rather than less — the opposite of the defect this replaces.
+
+Rejected on cost grounds only, and rejected: "it costs no new field". A fourth nullable column on `sessions` costs one `ADD COLUMN` and eight bytes per row; the field it saved was the difference between the gate working and the gate firing on every Hermes turn.
+
+`laterOf` stays on the `last_work_at` write. With a single-writer anchor it is no longer load-bearing against an out-of-order writer, but the anchor is still a wall-clock reading of a previous request, so an NTP step backwards between two reports would otherwise walk the column back — which the sessions capability forbids ("A stale write cannot move a timestamp backwards").
 
 Rejected: filtering Rembric's own tools out of the client-side observation. It would require every client to know our tool names, and the names DIFFER per client (the MCP prefixing each host applies), which reintroduces exactly the divergent per-client logic this change removes.
 

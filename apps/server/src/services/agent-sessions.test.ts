@@ -206,6 +206,45 @@ describe('AgentSessionsService', () => {
     });
   });
 
+  describe('computePlaceholderTitle — the insert paths do not reach a title validator', () => {
+    const AT = new Date('2026-05-01T09:41:00.000Z');
+
+    it('keeps the clock suffix and cuts the basename when the cwd is deep', async () => {
+      const { computePlaceholderTitle } = await import('./agent-sessions.js');
+      // 4096 is what `api-router`'s cwd schema admits; MCP bounds it at nothing.
+      const out = computePlaceholderTitle(`/home/u/${'d'.repeat(4096)}`, AT);
+      expect(out.length).toBeLessThanOrEqual(100);
+      expect(out.endsWith(' · 09:41 UTC')).toBe(true);
+    });
+
+    it('leaves an ordinary basename alone', async () => {
+      const { computePlaceholderTitle } = await import('./agent-sessions.js');
+      expect(computePlaceholderTitle('/home/u/rembric', AT)).toBe('rembric · 09:41 UTC');
+    });
+
+    it('drops a whole emoji rather than splitting it at the basename cut', async () => {
+      const { computePlaceholderTitle } = await import('./agent-sessions.js');
+      const out = computePlaceholderTitle(`/${'d'.repeat(87)}😀tail`, AT);
+      expect(out).toBe(`${'d'.repeat(87)} · 09:41 UTC`);
+      expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    });
+
+    it('start and ensure store a title within the cap for a deep cwd', () => {
+      const cwd = `/home/u/${'d'.repeat(4096)}`;
+      expect(
+        sessions.start({ tokenId, projectId, agent: 'a', cwd }).title!.length,
+      ).toBeLessThanOrEqual(100);
+      const { session } = sessions.ensure({
+        id: 'deep-cwd-session',
+        tokenId,
+        projectId,
+        agent: 'a',
+        cwd,
+      });
+      expect(session.title!.length).toBeLessThanOrEqual(100);
+    });
+  });
+
   it('findActiveForTransport returns the sole active session for the pair', () => {
     const a = sessions.start({ tokenId, projectId, agent: 'a' });
     const found = sessions.findActiveForTransport({ tokenId, projectId });
@@ -1551,7 +1590,7 @@ describe('AgentSessionsService', () => {
       });
     });
 
-    describe('resume leaves all three nudge-gate timestamps alone', () => {
+    describe('resume leaves every nudge-gate timestamp alone', () => {
       it('after a report has stamped last_work_at and a notice has stamped last_nudge_at', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\nx', final: true });
@@ -1567,6 +1606,7 @@ describe('AgentSessionsService', () => {
         expect(resumed.lastWorkAt?.getTime()).toBe(before.lastWorkAt?.getTime());
         expect(resumed.lastSummaryAt?.getTime()).toBe(before.lastSummaryAt?.getTime());
         expect(resumed.lastNudgeAt?.getTime()).toBe(before.lastNudgeAt?.getTime());
+        expect(resumed.lastTurnReportAt?.getTime()).toBe(before.lastTurnReportAt?.getTime());
       });
     });
 
@@ -1605,6 +1645,65 @@ describe('AgentSessionsService', () => {
         // still fires — the gate is suppressed, not disarmed.
         clock = minutesAfter(START, 70);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+      });
+
+      it('anchors the turn on the previous report, not on whatever last touched the row', () => {
+        // The Hermes shape, and the reason `last_activity_at` cannot be the
+        // anchor: `_sync` POSTs the raw transcript to /summary and then the
+        // report, sequentially, on EVERY turn — so between the curated write
+        // and the report there is a second writer advancing last_activity_at.
+        const s = svc.start({ tokenId, projectId, agent: 'hermes-agent' });
+        clock = minutesAfter(START, 30);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
+        clock = minutesAfter(START, 31);
+        svc.writeSummary(s.id, { tokenId, summary: 'user: …\n\nassistant: …', final: false });
+        clock = minutesAfter(START, 32);
+
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+        // The raw sync did advance last_activity_at past the curated write —
+        // without this the suppression above could be an artefact of the
+        // second write never landing.
+        const after = svc.getById(s.id)!;
+        expect(after.lastActivityAt!.getTime()).toBeGreaterThan(after.lastSummaryAt!.getTime());
+      });
+
+      it('control: a working turn with no summary at all still fires', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'hermes-agent' });
+        clock = minutesAfter(START, 31);
+        svc.writeSummary(s.id, { tokenId, summary: 'user: …\n\nassistant: …', final: false });
+        clock = minutesAfter(START, 32);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+      });
+
+      it('stamps last_turn_report_at on every report, and nothing else writes it', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        expect(svc.getById(s.id)?.lastTurnReportAt).toBeNull();
+
+        clock = minutesAfter(START, 5);
+        svc.writeSummary(s.id, { tokenId, summary: 'raw', final: false });
+        svc.touchActivity(s.id);
+        expect(svc.getById(s.id)?.lastTurnReportAt).toBeNull();
+
+        clock = minutesAfter(START, 6);
+        svc.reportTurn(s.id, { tokenId, usedTools: false });
+        expect(svc.getById(s.id)?.lastTurnReportAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('keeps last_work_at monotone across a clock that steps backwards', () => {
+        // 20 and 25 are BEHIND the 40 already anchored, which is the only
+        // shape that reaches the monotonicity guard: the anchor is a
+        // wall-clock reading of a previous request, so an NTP step back
+        // between two reports hands this one an earlier one.
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        const seen: number[] = [];
+        for (const minute of [30, 40, 20, 25]) {
+          clock = minutesAfter(START, minute);
+          svc.reportTurn(s.id, { tokenId, usedTools: true });
+          seen.push(svc.getById(s.id)!.lastWorkAt!.getTime());
+        }
+        expect(seen).toEqual([...seen].sort((a, b) => a - b));
+        // Control: the series is not flat, so "sorted" is not vacuous.
+        expect(new Set(seen).size).toBeGreaterThan(1);
       });
 
       it('rejects an over-long or NUL-bearing title instead of storing it', () => {
@@ -1709,6 +1808,7 @@ describe('AgentSessionsService', () => {
         expect(after.endedAt?.getTime()).toBe(before.endedAt?.getTime());
         expect(after.lastWorkAt?.getTime()).toBe(before.lastWorkAt?.getTime());
         expect(after.lastNudgeAt?.getTime()).toBe(before.lastNudgeAt?.getTime());
+        expect(after.lastTurnReportAt?.getTime()).toBe(before.lastTurnReportAt?.getTime());
         expect(after.lastActivityAt?.getTime()).toBe(clock.getTime());
       });
 

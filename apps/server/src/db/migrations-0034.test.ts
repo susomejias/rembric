@@ -128,7 +128,9 @@ describe('migration 0034 — session nudge gate columns', () => {
     const { curatedId } = seeded(pre);
     pre.close();
 
-    fx.stage();
+    // Through HEAD, not just through 0034: this reads back through the ORM,
+    // whose schema always describes HEAD.
+    fx.stageThroughHead();
     const handle = open();
     try {
       const repos = createRepositories(handle.db);
@@ -149,7 +151,7 @@ describe('migration 0034 — session nudge gate columns', () => {
     const { terminalId, softDeletedId } = seeded(pre);
     pre.close();
 
-    fx.stage();
+    fx.stageThroughHead();
     const handle = open();
     try {
       const repos = createRepositories(handle.db);
