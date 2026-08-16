@@ -42,13 +42,27 @@ describe('evaluateSessionNudge — the gate', () => {
     ).not.toBeNull();
   });
 
-  it('does not fire when the summary was written after the work', () => {
-    const r = row({
-      lastWorkAt: minutesAfter(STARTED, 30),
-      lastSummaryAt: minutesAfter(STARTED, 35),
-    });
+  it('does not fire when the summary is no older than the work', () => {
+    // `last_work_at` is the reported turn's START, and the summary write is
+    // normally that turn's LAST activity, so EQUALITY is the state a
+    // summary-writing turn actually produces — `work < summary` only shows
+    // up when a later turn wrote one without reporting a tool.
+    const writtenAt = minutesAfter(STARTED, 30);
     expect(
-      evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS, SUMMARY_MAX_CHARS),
+      evaluateSessionNudge(
+        row({ lastWorkAt: writtenAt, lastSummaryAt: writtenAt }),
+        minutesAfter(STARTED, 60),
+        FLOOR_MS,
+        SUMMARY_MAX_CHARS,
+      ),
+    ).toBeNull();
+    expect(
+      evaluateSessionNudge(
+        row({ lastWorkAt: writtenAt, lastSummaryAt: minutesAfter(STARTED, 35) }),
+        minutesAfter(STARTED, 60),
+        FLOOR_MS,
+        SUMMARY_MAX_CHARS,
+      ),
     ).toBeNull();
   });
 
@@ -129,6 +143,28 @@ describe('composeSessionNotice', () => {
     expect(text).toContain('## Unfinished+why');
     expect(text).toContain('## Files');
     expect(text).toContain('0 used of');
+  });
+
+  it('stays within the byte bound with nothing stored and a 100-code-unit CJK title', () => {
+    const text = composeSessionNotice(
+      row({ summary: null, title: '漢'.repeat(100) }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
+    expect(text).toContain('## Goal');
+    expect(text).toContain('0 used of');
+  });
+
+  it('cuts a nothing-stored title without leaving a lone surrogate', () => {
+    // The leading ASCII char is what makes this discriminating: it shifts the
+    // cut onto an odd code-unit boundary, so a naive `slice` stops exactly
+    // between the two units of an emoji.
+    const text = composeSessionNotice(
+      row({ summary: null, title: `x${'😀'.repeat(50)}` }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
   it('a summary with no ## heading is treated as nothing stored', () => {

@@ -458,15 +458,25 @@ export class AgentSessionsService {
 
   /**
    * The per-turn ping (`session-nudges`, `http-api`'s `POST /turn`). One
-   * service call: stamp `last_activity_at` always, `last_work_at` when
-   * `usedTools`, `title` under `final:false` precedence when present, then
-   * evaluate the gate and stamp `last_nudge_at` only when it fires.
+   * service call: stamp `last_activity_at` always, `last_work_at` with the
+   * reported turn's START when `usedTools`, `title` under `final:false`
+   * precedence when present, then evaluate the gate and stamp
+   * `last_nudge_at` only when it fires.
    *
    * A terminal row (not lifecycle) stamps ONLY `last_activity_at` and
    * always returns `lines: []` — a report is not a second path back to
    * `active` and SHALL NOT transition `status` or write `summary`.
    */
   reportTurn(sessionId: string, input: ReportTurnInput): ReportTurnResult {
+    if (input.title !== undefined) {
+      if (input.title.length === 0 || input.title.length > TITLE_MAX_LENGTH) {
+        throw new DomainError(
+          'invalid_input',
+          `sessions.reportTurn: title must be 1..${TITLE_MAX_LENGTH} chars`,
+        );
+      }
+      assertNoNul('sessions.reportTurn', 'title', input.title);
+    }
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -500,10 +510,19 @@ export class AgentSessionsService {
       ...precedenceSet(existing, { title: input.title }, ts),
     };
     if (input.usedTools) {
-      set.lastWorkAt = laterOf(existing.lastWorkAt, ts);
+      // The turn's START, not `now`: the report lands after the mid-turn
+      // `memory.session_summary`, so `now` would put work strictly after the
+      // summary on every summary-writing turn and condition (2) could never
+      // suppress.
+      set.lastWorkAt = laterOf(existing.lastWorkAt, existing.lastActivityAt ?? existing.startedAt);
     }
-    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
-    const row = updated ?? existing;
+    const row = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
+    if (!row) {
+      throw new DomainError(
+        'session_already_ended',
+        `session '${sessionId}' was concurrently ended`,
+      );
+    }
 
     const gateRow: SessionNudgeRow = {
       startedAt: row.startedAt,

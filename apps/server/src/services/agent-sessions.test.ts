@@ -1582,7 +1582,53 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 2);
         svc.reportTurn(s.id, { tokenId, usedTools: true });
         const afterWork = svc.getById(s.id)!;
-        expect(afterWork.lastWorkAt?.getTime()).toBe(clock.getTime());
+        // The reported turn's START — the activity stamp this request found —
+        // not the moment the report arrived.
+        expect(afterWork.lastWorkAt?.getTime()).toBe(minutesAfter(START, 1).getTime());
+        expect(afterWork.lastActivityAt?.getTime()).toBe(clock.getTime());
+      });
+
+      it('a summary written mid-turn suppresses that turn and the chat turn after it', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        // The curated write lands mid-turn, well past the floor…
+        clock = minutesAfter(START, 30);
+        svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
+        // …and the end-of-turn report follows it, carrying the tool_use entry
+        // that the MCP call itself put in the transcript.
+        clock = minutesAfter(START, 31);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+
+        clock = minutesAfter(START, 60);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
+
+        // A later turn that does real work without refreshing the summary
+        // still fires — the gate is suppressed, not disarmed.
+        clock = minutesAfter(START, 70);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+      });
+
+      it('rejects an over-long or NUL-bearing title instead of storing it', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        expect(() =>
+          svc.reportTurn(s.id, { tokenId, usedTools: false, title: 'a'.repeat(101) }),
+        ).toThrow(/1\.\.100/);
+        expect(() => svc.reportTurn(s.id, { tokenId, usedTools: false, title: 'ok\0cut' })).toThrow(
+          /NUL/,
+        );
+        expect(svc.getById(s.id)?.title).not.toContain('\0');
+      });
+
+      it('refuses to evaluate the gate against a row ended concurrently', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 26);
+        // The row is `active` when reportTurn reads it and `ended` by the time
+        // it writes — the window the `requireActive` guard exists for.
+        const spy = vi.spyOn(repos.agentSessions, 'updateById').mockReturnValueOnce(undefined);
+        expect(() => svc.reportTurn(s.id, { tokenId, usedTools: true })).toThrow(
+          /concurrently ended/,
+        );
+        spy.mockRestore();
+        expect(svc.getById(s.id)?.lastNudgeAt).toBeNull();
       });
 
       it('a conversation-only session over three hours never returns notice lines', () => {
