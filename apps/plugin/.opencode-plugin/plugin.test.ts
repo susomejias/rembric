@@ -1292,6 +1292,39 @@ describe('RembricPlugin handlers', () => {
       expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
     });
 
+    // `reportedThisTurn` is this client's own per-session container — the one
+    // piece of turn state the core does not hold, because unifying it would
+    // give Pi a once-per-turn gate it deliberately does not have. It is
+    // therefore the one whose eviction beside `core.forgetSession` nothing
+    // else would notice, so it is pinned here.
+    it('session.deleted re-arms the once-per-turn report gate for a reused id', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      const turnCalls = () =>
+        fetchMock.mock.calls.filter(
+          ([url]) => typeof url === 'string' && url.endsWith('/sessions/del-report/turn'),
+        );
+
+      await handlers.event!(created('del-report') as never);
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-report' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(10);
+      // Control: the first idle did report, so the count below is measured
+      // against a gate that really closed rather than one that never opened.
+      expect(turnCalls()).toHaveLength(1);
+
+      await handlers.event!({
+        event: { type: 'session.deleted', properties: { info: { id: 'del-report' } } },
+      } as never);
+      await handlers.event!(created('del-report') as never);
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: 'del-report' } },
+      } as never);
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(turnCalls()).toHaveLength(2);
+    });
+
     it('session.deleted forgets message roles so a stale assistant id is not trusted after reuse', async () => {
       const handlers = await RembricPlugin({ directory: dir } as never);
       await handlers.event!(created('del-roles') as never);

@@ -253,6 +253,8 @@ This is what makes the identical-redaction-semantics and byte-identical-line req
 
 A JS/TS client SHALL contribute only the PREDICATE its host makes available — which event means "a tool ran" — and SHALL hold no per-turn state of its own for it. The invariant enforcing this SHALL be stated over the concept rather than over a symbol name: the two copies that preceded it were called `toolUsedFlags` and `toolUsedThisTurn`, so a by-name inventory could not see that they were the same mechanism, and the divergence it hid was real — one client disarmed the latch at the turn boundary and the other did not.
 
+**The read-and-clear SHALL sit BELOW the report's own guards, never above them.** A report the core declines to send — a sub-agent session, or one it never registered — SHALL leave the latch armed. Consuming it there discards the observation into a request that was never issued, so the session's next sent report claims `usedTools: false` about a turn that used a tool. Both clients that exist today guard their own call sites, so the ordering is unreachable from either and its cost is entirely borne by the next client to call `reportTurn` without that guard; it is stated here because "unreachable today" is not a property of the core.
+
 A member of that list SHALL live in the core even when exactly one client calls it. The session-end call is the case in point: only Pi invokes it, because opencode's host kills the subprocess before an awaited call can land. Placing it in the client that happens to use it would put a second `fetch` against a `/sessions/…` path in a client file, which is a second implementation of the session HTTP client whatever it is named, and it would leave the next client that needs the verb to write a third.
 
 **The nudge cadence constants SHALL NOT exist in the core, or anywhere else in the plugin tree.** `SAVE_NUDGE_EVERY`, `SUMMARY_NUDGE_EVERY`, the per-session turn-count map and their bash and Python equivalents are removed: the firing decision belongs to the server (`session-nudges`), and a constant that no longer decides anything is a fifth place for a future contributor to change by mistake.
@@ -291,6 +293,13 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **WHEN** `reportTurn(<S>, …)` is called and the server returns an empty `lines` array
 - **THEN** the cached lines SHALL still be present
 - **AND** the next read for `<S>` SHALL return them and SHALL clear the cache
+
+#### Scenario: A dropped report does not consume the tool latch
+
+- **GIVEN** a core whose tool latch is armed for a session it has not registered
+- **WHEN** `reportTurn` is called for that session
+- **THEN** no request SHALL be issued
+- **AND** the latch SHALL still be armed, so that session's first SENT report SHALL carry `usedTools: true`
 
 #### Scenario: A non-client file under `apps/plugin/` cannot redefine a core-owned helper
 

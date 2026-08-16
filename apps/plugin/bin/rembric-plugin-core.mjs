@@ -358,10 +358,12 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
    * by `appendUserMessage`).
    */
   async function reportTurn(sessionId) {
-    const usedTools = toolUsedSessions.delete(sessionId);
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
-    const body = { usedTools };
+    // Read-and-clear below the guards, never above them: a report the guards
+    // drop sends nothing, so consuming the latch there would attribute the
+    // turn's tool use to no report at all and the next one would say `false`.
+    const body = { usedTools: toolUsedSessions.delete(sessionId) };
     if (!turnTitleSent.has(sessionId)) {
       const title = deriveTitle(sessionId);
       if (title) {
