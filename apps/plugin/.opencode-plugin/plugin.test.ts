@@ -456,11 +456,19 @@ describe('RembricPlugin handlers', () => {
     expect(turnCalls).toBe(1);
   });
 
-  it("reports usedTools:false when the turn's only non-text parts were not tool parts", async () => {
+  /**
+   * Drives one whole turn — session.created, the given part types, then
+   * session.idle — and returns the body the `/turn` POST carried. The three
+   * `usedTools` cases differ ONLY in the part types and the expected
+   * boolean, so the scaffold is shared and the cases are data.
+   */
+  async function turnBody(
+    sessionId: string,
+    partTypes: readonly string[],
+  ): Promise<Record<string, unknown> | undefined> {
     let capturedBody: Record<string, unknown> | undefined;
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/turn')) {
+      if (String(input).endsWith('/turn')) {
         capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
       }
@@ -471,75 +479,78 @@ describe('RembricPlugin handlers', () => {
     await handlers.event!({
       event: {
         type: 'session.created',
-        properties: { info: { id: 's-reasoning', parentID: '', title: 'think' } },
+        properties: { info: { id: sessionId, parentID: '', title: 'work' } },
       },
     } as never);
-    for (const type of ['reasoning', 'step-start', 'snapshot', 'step-finish']) {
+    for (const type of partTypes) {
       await handlers.event!({
         event: {
           type: 'message.part.updated',
-          properties: { part: { type, sessionID: 's-reasoning' } },
+          properties: { part: { type, sessionID: sessionId } },
         },
       } as never);
     }
     await handlers.event!({
-      event: { type: 'session.idle', properties: { sessionID: 's-reasoning' } },
+      event: { type: 'session.idle', properties: { sessionID: sessionId } },
     } as never);
-    expect(capturedBody?.usedTools).toBe(false);
+    return capturedBody;
+  }
+
+  it.each([
+    ['s-reasoning', ['reasoning', 'step-start', 'snapshot', 'step-finish'], false],
+    ['s-tool-flag', ['tool'], true],
+    ['s-no-tool', [], false],
+    ['s-text-only', ['text'], false],
+  ] as const)('reports usedTools:%o for parts %o', async (sessionId, partTypes, expected) => {
+    expect((await turnBody(sessionId, partTypes))?.usedTools).toBe(expected);
   });
 
-  it('reports usedTools:true when a non-text part was observed this turn', async () => {
-    let capturedBody: Record<string, unknown> | undefined;
+  it('a tool part is attributed to the turn it arrives in, never to the next one', async () => {
+    const reported: boolean[] = [];
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/turn')) {
-        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
+      if (String(input).endsWith('/turn')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { usedTools?: boolean };
+        reported.push(body.usedTools === true);
       }
-      return new Response('', { status: 200 });
+      return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     const handlers = await RembricPlugin({ directory: dir } as never);
-    await handlers.event!({
-      event: {
-        type: 'session.created',
-        properties: { info: { id: 's-tool-flag', parentID: '', title: 'work' } },
-      },
-    } as never);
-    await handlers.event!({
-      event: {
-        type: 'message.part.updated',
-        properties: { part: { type: 'tool', sessionID: 's-tool-flag' } },
-      },
-    } as never);
-    await handlers.event!({
-      event: { type: 'session.idle', properties: { sessionID: 's-tool-flag' } },
-    } as never);
-    expect(capturedBody?.usedTools).toBe(true);
-  });
+    const id = 's-late-tool';
 
-  it('reports usedTools:false when only text parts were observed this turn', async () => {
-    let capturedBody: Record<string, unknown> | undefined;
-    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/turn')) {
-        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-        return new Response('{"ok":true,"sessionId":"s","lines":[]}', { status: 200 });
-      }
-      return new Response('', { status: 200 });
-    });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    const handlers = await RembricPlugin({ directory: dir } as never);
-    await handlers.event!({
-      event: {
-        type: 'session.created',
-        properties: { info: { id: 's-no-tool', parentID: '', title: 'work' } },
-      },
-    } as never);
-    await handlers.event!({
-      event: { type: 'session.idle', properties: { sessionID: 's-no-tool' } },
-    } as never);
-    expect(capturedBody?.usedTools).toBe(false);
+    const startTurn = async (text: string): Promise<void> => {
+      await handlers['chat.message']!(
+        { sessionID: id } as never,
+        { parts: [{ type: 'text', text }], message: {} } as never,
+      );
+    };
+    const toolPart = async (): Promise<void> => {
+      await handlers.event!({
+        event: {
+          type: 'message.part.updated',
+          properties: { part: { type: 'tool', sessionID: id } },
+        },
+      } as never);
+    };
+    const endTurn = async (): Promise<void> => {
+      await handlers.event!({
+        event: { type: 'session.idle', properties: { sessionID: id } },
+      } as never);
+      // The report is fire-and-forget from the handler's point of view.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    };
+
+    await startTurn('turn one');
+    await toolPart();
+    await endTurn();
+    // The part now arrives LATE — after turn one's report, before turn two.
+    await toolPart();
+    await startTurn('turn two');
+    await endTurn();
+
+    // The first element is the control: an in-turn part really does arm the
+    // latch, so the second being false cannot be a report that never fired.
+    expect(reported).toEqual([true, false]);
   });
 
   it('chat.message never nudges (save, summary, or recall) a sub-agent session on turn 1', async () => {

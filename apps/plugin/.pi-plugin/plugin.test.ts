@@ -902,6 +902,27 @@ describe('tool-observation accumulation across a turn (session-nudges D4a)', () 
     }
   });
 
+  it('a second agent_settled with no turn in between reports false, not the same tool again', async () => {
+    // The report READS AND CLEARS, so the latch cannot outlive the report
+    // that consumed it even where the host settles twice without an
+    // intervening before_agent_start.
+    const { calls, restore } = spyOnTurnReports();
+    try {
+      const harness = await startedHarness('pi-tool-accum-double-settle');
+      await harness.fire('before_agent_start', { prompt: 'list files' });
+      await harness.fire('message_end', { message: toolCallMessage });
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await harness.fire('agent_settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // The first is the control: the latch really was armed.
+      expect(calls.map((c) => c.usedTools)).toEqual([true, false]);
+    } finally {
+      restore();
+    }
+  });
+
   it('a `toolResult` message alone (no toolCall observed) also sets the flag', async () => {
     const { calls, restore } = spyOnTurnReports();
     try {

@@ -975,6 +975,73 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
       ).toBe(true);
     }
   });
+
+  // The inventory above is keyed by symbol NAME, so it is blind to two copies
+  // of one mechanism that happen to be called different things — which is
+  // exactly what the tool-observation latch was: `toolUsedFlags` (a Map, in
+  // opencode) and `toolUsedThisTurn` (a boolean, in Pi), same arm/read-and-
+  // clear/forget lifecycle, one of them also needing its own `delete` beside
+  // `core.forgetSession`. The two assertions below name the CONCEPT instead.
+
+  it('the tool-observation latch is state no client holds, under any name', () => {
+    const offenders: string[] = [];
+    for (const rel of clients) {
+      readFileSync(join(repoRoot, rel), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/\b(?:const|let|var)\s+\w*(?:[Tt]ool\w*[Uu]sed|[Uu]sed\w*[Tt]ool)\w*\b/.test(line)) {
+            offenders.push(`${rel}:${i + 1}`);
+          }
+        });
+    }
+    expect(
+      offenders,
+      `use core.markToolUsed / core.beginTurn instead of a client-side latch: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  // Derived, like the owned-functions check above: an enumerated list covers
+  // whichever containers someone remembered, and the count only grows.
+  it('every per-session container the core declares is cleared by forgetSession', () => {
+    const coreSrc = readFileSync(join(repoRoot, REMBRIC_PLUGIN_CORE_MJS), 'utf8');
+    const containers = [
+      ...coreSrc.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+(?:Map|Set)\(/g),
+    ].map((m) => m[1]!);
+    expect(
+      containers.length,
+      'no per-session containers parsed out of the core, so the assertion below would pass vacuously',
+    ).toBeGreaterThan(5);
+
+    const body = /function forgetSession\(sessionId\) \{([\s\S]*?)\n {2}\}/.exec(coreSrc)?.[1];
+    expect(body, 'forgetSession not found in the core').toBeDefined();
+
+    const leaked = containers.filter((name) => !body!.includes(`${name}.delete(sessionId)`));
+    expect(
+      leaked,
+      `forgetSession must clear every per-session container or the client that calls it leaks: ${leaked.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('reportTurn takes only a session id, so no client can hand it per-turn state', () => {
+    const coreSrc = readFileSync(join(repoRoot, REMBRIC_PLUGIN_CORE_MJS), 'utf8');
+    const signature = /async function reportTurn\(([^)]*)\)/.exec(coreSrc);
+    expect(signature, 'reportTurn not found in the core').not.toBeNull();
+    expect(signature![1]!.split(',').filter((p) => p.trim().length > 0)).toHaveLength(1);
+
+    const offenders: string[] = [];
+    for (const rel of clients) {
+      readFileSync(join(repoRoot, rel), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          const call = /\breportTurn\(([^)]*)\)/.exec(line);
+          if (call && call[1]!.includes(',')) offenders.push(`${rel}:${i + 1}`);
+        });
+    }
+    expect(
+      offenders,
+      `reportTurn reads its own latch; passing it a second argument reintroduces client-held turn state: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
 });
 
 const PI_PACKAGE_DIR = 'apps/plugin/.pi-plugin';

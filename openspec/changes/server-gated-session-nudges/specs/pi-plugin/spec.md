@@ -4,22 +4,22 @@
 
 `apps/plugin/.pi-plugin/index.ts` SHALL participate in the report-and-print contract (`session-nudges`) through the events it already registers, adding no new registration and writing no new HTTP code — the report call lives in the shared core, like every other request this client makes.
 
-**Reporting, on `agent_settled`.** That handler already fires at the end of a turn and already schedules the debounced flush; it SHALL additionally call the core's turn-report helper, passing whether a tool was observed during the turn, and the core SHALL cache the returned lines. The debounced flush is retained: the accumulator holds the only copy of this session's transcript in memory, and both this capability's session-close requirement and `plugin-session-protocol`'s Pi convergence requirement rest on it.
+**Reporting, on `agent_settled`.** That handler already fires at the end of a turn and already schedules the debounced flush; it SHALL additionally call the core's turn-report helper, and the core SHALL read its own tool-observation latch and cache the returned lines. The debounced flush is retained: the accumulator holds the only copy of this session's transcript in memory, and both this capability's session-close requirement and `plugin-session-protocol`'s Pi convergence requirement rest on it.
 
-**Observing tool use — the signal is `message_end`, and it SHALL be ACCUMULATED across the turn rather than read from one event.** The observation is a per-session boolean with three touch points, all on handlers this extension already registers: reset in `before_agent_start`, set in `message_end`, read and cleared in `agent_settled`.
+**Observing tool use — the signal is `message_end`, and it SHALL be ACCUMULATED across the turn rather than read from one event.** The observation is the shared core's per-session latch, with three touch points, all on handlers this extension already registers: disarmed in `before_agent_start`, armed in `message_end`, read and cleared by the report in `agent_settled`. **This extension SHALL hold no flag of its own** — what it contributes is the predicate below, which is the only part that is Pi's.
 
-`message_end` SHALL set the flag when EITHER holds:
+`message_end` SHALL arm the latch when EITHER holds:
 
 - `event.message.role === 'toolResult'`, or
 - `event.message.role === 'assistant'` and any element of `event.message.content` has `type === 'toolCall'`.
 
 **Reading a single event gives the wrong answer every time, and that is the whole reason this rule is normative rather than an implementation note.** The LAST `message_end` of a turn — the one this extension's handler processes today — is the assistant message whose `stopReason` is `"stop"` and whose content is text only, carrying no `toolCall` part; the calls were in an EARLIER `message_end` whose `stopReason` was `"toolUse"`. `turn_end.toolResults` is likewise empty on the final turn. An implementation that inspects the settled message, or the last message, or the turn-end event, reports `usedTools: false` for a turn that ran ten tools.
 
-Two places in the shipped extension discard exactly this information today, and both SHALL be adjusted rather than worked around: the `role !== 'assistant'` early return in the `message_end` handler, which drops every `toolResult` message; and `assistantText`, which filters content to `type === 'text'` and therefore drops every `toolCall` part. `assistantText`'s own contract is unchanged — it feeds the transcript accumulator, which wants text — so the flag SHALL be set BEFORE either filter runs, not by loosening them.
+Two places in the shipped extension discard exactly this information today, and both SHALL be adjusted rather than worked around: the `role !== 'assistant'` early return in the `message_end` handler, which drops every `toolResult` message; and `assistantText`, which filters content to `type === 'text'` and therefore drops every `toolCall` part. `assistantText`'s own contract is unchanged — it feeds the transcript accumulator, which wants text — so the latch SHALL be armed BEFORE either filter runs, not by loosening them.
 
 **The mechanism is verified against the shipped harness (pi-coding-agent 0.84.1) rather than inferred.** `AssistantMessage.content` is typed `(TextContent | ThinkingContent | ToolCall)[]` with `ToolCall.type === "toolCall"`, and `ToolResultMessage.role === "toolResult"` is one of the three members of the `Message` union (`@earendil-works/pi-ai/dist/types.d.ts`); `StopReason` includes both `"toolUse"` and `"stop"`. The harness forwards `message_end` to extensions with the message unfiltered by role, and its own replacement normaliser enumerates `user | assistant | toolResult | custom` (`dist/core/agent-session.js`), so a `toolResult` message does reach an extension handler. That channel is additionally the one this extension already receives in production, which is why it is preferred over the alternative below.
 
-**The five dedicated tool events are available and are NOT used, by decision.** `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `tool_call` and `tool_result` are all declared on the public extension API (`dist/core/extensions/types.d.ts`), `pi.on` stores any key into a handler `Map` without validating it against a whitelist (`dist/core/extensions/loader.js`), and dispatch is a plain `handlers.get(event.type)` lookup (`dist/core/extensions/runner.js`) fed by the same runner that already delivers `message_end`. They would be simpler — a flag set with no content inspection. They are rejected here on evidence quality: delivery of `message_end` to this extension is observed in production, whereas delivery of the five is established by reading that code chain, and one check was not run (no purpose-built extension was loaded with `pi -e` to receive them). A later change MAY switch to `tool_execution_end` once that check exists; the accumulation rule above would be unchanged by the switch.
+**The five dedicated tool events are available and are NOT used, by decision.** `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `tool_call` and `tool_result` are all declared on the public extension API (`dist/core/extensions/types.d.ts`), `pi.on` stores any key into a handler `Map` without validating it against a whitelist (`dist/core/extensions/loader.js`), and dispatch is a plain `handlers.get(event.type)` lookup (`dist/core/extensions/runner.js`) fed by the same runner that already delivers `message_end`. They would be simpler — a latch armed with no content inspection. They are rejected here on evidence quality: delivery of `message_end` to this extension is observed in production, whereas delivery of the five is established by reading that code chain, and one check was not run (no purpose-built extension was loaded with `pi -e` to receive them). A later change MAY switch to `tool_execution_end` once that check exists; the accumulation rule above would be unchanged by the switch.
 
 **A Rembric tool call SHALL NOT be used as the signal.** Pi routes every discovered Rembric tool through the extension's own `execute`, so counting those calls is available and wrong: it observes only this server's tools, so a turn that edited eight files without touching memory reports no work — which is precisely the turn the notice exists for.
 
@@ -61,13 +61,13 @@ Pi has no compaction event, so nothing about this changes the accepted-risk clau
 - **GIVEN** a session whose previous turn used a tool
 - **WHEN** the next turn runs with no tool call and `agent_settled` fires
 - **THEN** the report SHALL carry `usedTools: false`
-- **AND** the reset SHALL have happened in `before_agent_start`, so a flag set in one turn cannot be read in the next
+- **AND** the disarm SHALL have happened in `before_agent_start`, so a latch armed in one turn cannot be read in the next
 
 #### Scenario: Neither existing text filter is loosened to carry the signal
 
 - **WHEN** `apps/plugin/.pi-plugin/index.ts` is read at HEAD
 - **THEN** `assistantText` SHALL still filter content parts to `type === 'text'`
-- **AND** the flag SHALL be set before the `message_end` handler's role filter and before `assistantText` runs, rather than by widening either
+- **AND** the latch SHALL be armed before the `message_end` handler's role filter and before `assistantText` runs, rather than by widening either
 
 ## MODIFIED Requirements
 
