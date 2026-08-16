@@ -336,16 +336,28 @@ describe('session lifecycle-column invariants', () => {
     const start = svc.indexOf('private writeTerminalFields');
     expect(start).toBeGreaterThan(-1);
     const body = svc.slice(start, svc.indexOf('\n  }', start));
-    expect(body).toMatch(/const set = precedenceSet\(existing, input\);/);
+    expect(body).toMatch(/const set = precedenceSet\(existing, input, \{ terminal: true \}\);/);
     expect(body).not.toMatch(/\bset\.\w+\s*=/);
     expect(body).not.toMatch(/\bset\[/);
   });
 
+  // `merged` (the section-wise merge of `existing.summary`/`input.summary`,
+  // both already summary-precedence-approved) is a legitimate second source
+  // for the `summary` key alongside `summary.value` — see
+  // "A curated session-summary write MUST be merged section-wise with the
+  // stored summary". Deduped because the merge branch and the plain-replace
+  // branch both assign `summaryFinal: summary.final`.
   it('precedenceSet can only ever produce summary and title fields', () => {
     const svc = sources[0]!;
     const start = svc.indexOf('function precedenceSet');
-    const body = svc.slice(start, svc.indexOf('\n}', start));
-    const keys = [...body.matchAll(/(\w+):\s*(?:summary|title)\./g)].map((m) => m[1]).sort();
+    const rawBody = svc.slice(start, svc.indexOf('\n}', start));
+    // Strip string/template literals first — the merged-overflow and
+    // heading-less DomainError messages contain "sessions: merged", which
+    // otherwise matches the same shape as a real object-literal key.
+    const body = rawBody.replace(/`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*'/gs, '""');
+    const keys = [
+      ...new Set([...body.matchAll(/(\w+):\s*(?:summary\.|title\.|merged\b)/g)].map((m) => m[1]!)),
+    ].sort();
     expect(keys).toEqual(['summary', 'summaryFinal', 'title', 'titleFinal']);
   });
 });

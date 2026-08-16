@@ -428,7 +428,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric — persistent memory across sessions. Use tools "
+            "Rembric — persistent memory. Use tools "
             "proactively.\n\n"
             "SAVE: On each real fix/decision/discovery/config/pattern/preference, "
             "call memory.save(title≤100, content); evolving topic: topic_key, "
@@ -437,10 +437,10 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "call memory.context (memory.search for keywords) if you lack prior "
             "detail.\n"
             "SUMMARIZE: Before ending each working turn with real work, MUST call "
-            "memory.session_summary({title≤100, summary≤10000}) — REPLACES "
-            "stored summary; send whole current state, current first: Use "
-            "exactly these six Markdown level-2 headings, in this order, each "
-            "on its own line (never one flat paragraph):\n## Goal\n"
+            "memory.session_summary({title≤100, summary≤10000}) — The `##` "
+            "sections you send REPLACE; the ones you omit STAY. Current state "
+            "first: Use exactly these six Markdown level-2 headings, in this "
+            "order, each on its own line (never one flat paragraph):\n## Goal\n"
             "## Accomplished\n## Decisions+why\n## Verified+how\n"
             "## Unfinished+why\n## Files\n"
             "Know your sessionId? Pass it; never guess.\n"

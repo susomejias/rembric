@@ -1279,6 +1279,234 @@ describe('AgentSessionsService', () => {
     });
   });
 
+  describe('curated summary section-wise merge', () => {
+    let svc: AgentSessionsService;
+
+    beforeEach(() => {
+      svc = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
+    });
+
+    function curated(summary: string) {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, { tokenId, summary, final: true });
+      return s;
+    }
+
+    it('a partial write updates one section and preserves the others', () => {
+      const s = curated('## Goal\nShip X\n## Files\nsrc/a.ts');
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Files\nsrc/a.ts, src/b.ts',
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nShip X\n## Files\nsrc/a.ts, src/b.ts');
+    });
+
+    it('a section the write carries is replaced outright, not appended to', () => {
+      const s = curated('## Goal\nShip X');
+      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip Y', final: true });
+      expect(updated.summary).toBe('## Goal\nShip Y');
+      expect(updated.summary).not.toContain('Ship X');
+    });
+
+    it('a heading only the write carries is appended after the stored sections', () => {
+      const s = curated('## Goal\nShip X\n## Files\nsrc/a.ts');
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Risks\nflaky test',
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nShip X\n## Files\nsrc/a.ts\n## Risks\nflaky test');
+    });
+
+    it('shared headings keep the stored order even when the write reorders them', () => {
+      const s = curated('## Goal\nA\n## Files\nB');
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Files\nB2\n## Goal\nA2',
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nA2\n## Files\nB2');
+    });
+
+    it('heading matching ignores case and surrounding whitespace', () => {
+      const s = curated('## Files\nsrc/a.ts');
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '##   files  \nsrc/b.ts',
+        final: true,
+      });
+      expect(updated.summary).toContain('src/b.ts');
+      expect(updated.summary?.match(/^##/gim)).toHaveLength(1);
+    });
+
+    it('a `##` line inside a fenced code block is not a section boundary', () => {
+      const s = curated('## Files\n```\n## Goal\n```\nsrc/a.ts');
+      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip X', final: true });
+      expect(updated.summary).toContain('```\n## Goal\n```');
+      expect(updated.summary).toContain('## Goal\nShip X');
+    });
+
+    it('a section carried with an empty body is stored empty rather than removed', () => {
+      const s = curated('## Goal\nA\n## Unfinished+why\nblocked on Y');
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Unfinished+why\n',
+        final: true,
+      });
+      expect(updated.summary).toContain('## Unfinished+why');
+      expect(updated.summary).toContain('## Goal\nA');
+      expect(updated.summary).not.toContain('blocked on Y');
+    });
+
+    it('a `final: false` per-turn sync never merges', () => {
+      const s = curated(
+        '## Goal\nA\n## Accomplished\nB\n## Decisions+why\nC\n## Verified+how\nD\n## Unfinished+why\nE\n## Files\nF',
+      );
+      const before = svc.getById(s.id)?.summary;
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '<raw transcript>',
+        final: false,
+      });
+      expect(updated.summary).toBe(before);
+    });
+
+    it('the first curated write over a raw body replaces it whole', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'raw transcript containing a ## line',
+        final: false,
+      });
+      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip X', final: true });
+      expect(updated.summary).toBe('## Goal\nShip X');
+      expect(updated.summary).not.toContain('raw transcript');
+    });
+
+    it('a late curated write to a terminal row is still a silent no-op', () => {
+      const s = curated('## Goal\nA\n## Files\nB');
+      svc.end(s.id, { tokenId });
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'a flat paragraph',
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nA\n## Files\nB');
+    });
+
+    it('a late over-cap curated write to a terminal row is still a silent no-op, not invalid_input', () => {
+      const s = curated('## Goal\nA\n## Files\nB');
+      svc.end(s.id, { tokenId });
+      const updated = svc.writeSummary(s.id, {
+        tokenId,
+        summary: 'a'.repeat(SUMMARY_MAX_CHARS),
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nA\n## Files\nB');
+    });
+
+    it('a merge that changes nothing stores the same bytes', () => {
+      const s = curated('## Goal\nA\n## Files\nB');
+      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Files\nB', final: true });
+      expect(updated.summary).toBe('## Goal\nA\n## Files\nB');
+    });
+
+    it('merging a document with itself is the identity', () => {
+      const doc = '## Goal\nA\n\n### Sub-decision\ndetail\n## Files\n```\ncode\n```\nsrc/a.ts';
+      const s = curated(doc);
+      const updated = svc.writeSummary(s.id, { tokenId, summary: doc, final: true });
+      expect(updated.summary).toBe(doc);
+    });
+
+    describe('heading-less write against a sectioned stored summary', () => {
+      it('is rejected, naming the missing ## section, without mutating the row', () => {
+        const s = curated('## Goal\nA\n## Files\nB');
+        expect(() =>
+          svc.writeSummary(s.id, {
+            tokenId,
+            summary: 'Fixed the CI formatting job.',
+            final: true,
+          }),
+        ).toThrow(/##/);
+        const after = svc.getById(s.id);
+        expect(after?.summary).toBe('## Goal\nA\n## Files\nB');
+        expect(after?.summaryFinal).toBe(true);
+      });
+
+      it('is accepted against a stored summary with no headings (the control)', () => {
+        const s = curated('Goal: A. Files: B.');
+        const updated = svc.writeSummary(s.id, {
+          tokenId,
+          summary: 'Fixed the CI formatting job.',
+          final: true,
+        });
+        expect(updated.summary).toBe('Fixed the CI formatting job.');
+      });
+
+      it('a first curated write on an empty session may be free-form', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        const updated = svc.writeSummary(s.id, {
+          tokenId,
+          summary: 'no headings here',
+          final: true,
+        });
+        expect(updated.summary).toBe('no headings here');
+      });
+
+      it('one heading is enough to merge', () => {
+        const s = curated(
+          '## Goal\nA\n## Accomplished\nB\n## Decisions+why\nC\n## Verified+how\nD\n## Unfinished+why\nE\n## Files\nF',
+        );
+        const updated = svc.writeSummary(s.id, {
+          tokenId,
+          summary: '## Accomplished\nDid it',
+          final: true,
+        });
+        expect(updated.summary).toContain('## Accomplished\nDid it');
+        expect(updated.summary).toContain('## Goal\nA');
+      });
+    });
+
+    describe('the merged-document cap', () => {
+      it('a within-cap argument whose merge exceeds the cap is rejected, and nothing is truncated', () => {
+        const stored = `## Goal\n${'a'.repeat(SUMMARY_MAX_CHARS - 120)}`;
+        const s = curated(stored);
+        const newSection = `## Risks\n${'b'.repeat(500)}`;
+        expect(newSection.length).toBeLessThan(SUMMARY_MAX_CHARS);
+        expect(stored.length + newSection.length + 1).toBeGreaterThan(SUMMARY_MAX_CHARS);
+
+        expect(() => svc.writeSummary(s.id, { tokenId, summary: newSection, final: true })).toThrow(
+          String(SUMMARY_MAX_CHARS),
+        );
+        expect(svc.getById(s.id)?.summary).toBe(stored);
+      });
+
+      it('a condensed full rewrite always fits, so the rejection cannot wedge a session', () => {
+        const stored = `## Goal\n${'a'.repeat(SUMMARY_MAX_CHARS - 20)}`;
+        const s = curated(stored);
+        const condensed = '## Goal\ncondensed';
+        const updated = svc.writeSummary(s.id, { tokenId, summary: condensed, final: true });
+        expect(updated.summary).toBe(condensed);
+      });
+    });
+
+    it('end() merges identically to writeSummary() for the same partial write', () => {
+      const s = svc.start({ tokenId, projectId, agent: 'claude' });
+      svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Goal\nShip X\n## Files\nsrc/a.ts',
+        final: true,
+      });
+      const updated = svc.end(s.id, {
+        tokenId,
+        summary: '## Files\nsrc/a.ts, src/b.ts',
+        final: true,
+      });
+      expect(updated.summary).toBe('## Goal\nShip X\n## Files\nsrc/a.ts, src/b.ts');
+    });
+  });
+
   describe('session_summary_versions', () => {
     let repos: ReturnType<typeof createRepositories>;
     let svc: AgentSessionsService;

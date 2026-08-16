@@ -20,7 +20,7 @@ import {
 } from '../mcp/memory-tools.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { SESSION_GET_VERSIONS_MAX } from '../mcp/session-tools.js';
-import { SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
@@ -275,6 +275,56 @@ describe('MCP protocol conformance', () => {
     expect(desc).toContain('COPY it');
     expect(desc).toContain('do not paraphrase');
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+
+    await client.close();
+  });
+
+  it('memory.session_summary description states the section-wise merge clause, from the shared constant', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const sessionSummary = tools.find((t) => t.name === 'memory.session_summary');
+    const desc = sessionSummary?.description ?? '';
+
+    expect(desc).toContain(SUMMARY_MERGE_RULE);
+    expect(desc).toContain('Sending only the sections that changed');
+    expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+
+    await client.close();
+  });
+
+  it('the rendered instructions and the emitted description carry the same merge sentence, from the same constant', async () => {
+    const client = await connect();
+    const instructions = client.getInstructions() ?? '';
+    const { tools } = await client.listTools();
+    const desc = tools.find((t) => t.name === 'memory.session_summary')?.description ?? '';
+
+    expect(instructions).toContain(SUMMARY_MERGE_RULE);
+    expect(desc).toContain(SUMMARY_MERGE_RULE);
+
+    await client.close();
+  });
+
+  it('memory.session_summary description says condense-never-delete, names the `none` escape hatch, and the over-cap-merge rule', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const sessionSummary = tools.find((t) => t.name === 'memory.session_summary');
+    const desc = sessionSummary?.description ?? '';
+
+    expect(desc).toContain('CONDENSE, never delete');
+    expect(desc).toContain('`none`');
+    expect(desc).toContain('over-cap MERGE is refused, not truncated');
+
+    await client.close();
+  });
+
+  it('memory.session_summary description discourages sending title on every write', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const sessionSummary = tools.find((t) => t.name === 'memory.session_summary');
+    const desc = sessionSummary?.description ?? '';
+
+    expect(desc).toContain('send on the FIRST write or a real change of direction');
+    expect(desc).toContain('omit otherwise, it stays and is never locked');
 
     await client.close();
   });
