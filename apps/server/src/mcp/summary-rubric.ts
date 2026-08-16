@@ -21,3 +21,13 @@ export const SUMMARY_SECTIONS = `Use exactly these six Markdown level-2 headings
 ## Verified+how
 ## Unfinished+why
 ## Files`;
+
+/**
+ * The section-wise merge rule, in one sentence: consumed by
+ * `memory.session_summary`'s description and by `instructions.ts::BASE`,
+ * so the two surfaces cannot drift into teaching different rules (see
+ * `mcp-api`, "The `instructions` block MUST state that a curated summary
+ * write replaces the stored value"). `SUMMARY_SECTIONS` above is untouched
+ * by this constant.
+ */
+export const SUMMARY_MERGE_RULE = 'The `##` sections you send REPLACE; the ones you omit STAY.';

@@ -11,6 +11,7 @@ import {
   sliceTailWithoutSplittingSurrogatePair,
   sliceWithoutSplittingSurrogatePair,
 } from './strings.js';
+import { hasAnyHeading, mergeSummarySections } from './summary-sections.js';
 
 const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
@@ -257,15 +258,15 @@ export class AgentSessionsService {
   private writeTerminalFields(existing: AgentSession, input: PrecedenceInput): AgentSession {
     // No lastActivityAt stamp, unlike the active path: it only drives
     // stale-active retirement and transport resolution, both status='active'.
-    const set = precedenceSet(existing, input);
-    // Deviation from the active path's last-final-wins: on a closed row the
-    // owning process is dead, so a second final write is a resumed or zombie
-    // client, and losing a curated handoff is unrecoverable (no `replaces`
-    // chain for sessions). First curated value stands.
-    if (existing.summaryFinal) {
-      delete set.summary;
-      delete set.summaryFinal;
-    }
+    // `{ terminal: true }` is the deviation from the active path's
+    // last-final-wins: on a closed row the owning process is dead, so a
+    // second final write is a resumed or zombie client, and losing a
+    // curated handoff is unrecoverable (no `replaces` chain for sessions).
+    // First curated value stands — `precedenceSet` blocks any further
+    // summary change once `existing.summaryFinal` is already true, which is
+    // also what keeps a late heading-less or over-cap write a silent no-op
+    // here instead of a merge attempt (D2(3)).
+    const set = precedenceSet(existing, input, { terminal: true });
     if (existing.titleFinal) {
       delete set.title;
       delete set.titleFinal;
@@ -788,18 +789,67 @@ function applyPrecedence(
 
 type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'>;
 
-/** The only place per-field `final` precedence is folded into an update `set`. */
-function precedenceSet(existing: AgentSession, input: PrecedenceInput): Partial<NewAgentSession> {
+/**
+ * The only place per-field `final` precedence is folded into an update
+ * `set` — and, since "A curated session-summary write MUST be merged
+ * section-wise with the stored summary", the only place the merge, the
+ * heading-less rejection and the merged-document cap check run.
+ *
+ * `opts.terminal` carries the terminal-row deviation ("first curated value
+ * stands", D2 in this change's design.md): once `existing.summaryFinal` is
+ * already true on a terminal row, NO further write changes `summary` —
+ * unlike the active path, where a `final:true` write always replaces
+ * (last-final-wins) regardless of what was stored. Folding that here,
+ * rather than deleting `summary`/`summaryFinal` from the `set` afterward in
+ * `writeTerminalFields`, is what keeps a late heading-less or over-cap
+ * write on such a row the silent no-op it is today instead of a merge
+ * attempt that throws.
+ */
+function precedenceSet(
+  existing: AgentSession,
+  input: PrecedenceInput,
+  opts: { terminal: boolean } = { terminal: false },
+): Partial<NewAgentSession> {
   const incomingFinal = input.final ?? false;
-  const summary = applyPrecedence(
-    existing.summary,
-    existing.summaryFinal,
-    input.summary,
-    incomingFinal,
-  );
   const title = applyPrecedence(existing.title, existing.titleFinal, input.title, incomingFinal);
+
+  const summaryLocked = opts.terminal && existing.summaryFinal;
+  const summary = summaryLocked
+    ? { changed: false, value: existing.summary, final: existing.summaryFinal }
+    : applyPrecedence(existing.summary, existing.summaryFinal, input.summary, incomingFinal);
+
+  let summarySet: Partial<NewAgentSession> = {};
+  if (summary.changed) {
+    const storedSummary = existing.summary;
+    const incomingSummary = input.summary;
+    // `summary.changed` (the enclosing `if`) already forces `incomingFinal`
+    // true whenever `existing.summaryFinal` is true — `applyPrecedence`
+    // blocks a non-final incoming write against an already-final column —
+    // so D2(1) ("incoming final:true") needs no separate check here.
+    const isCuratedMerge =
+      incomingSummary !== undefined && existing.summaryFinal && storedSummary !== null;
+    if (isCuratedMerge && storedSummary !== null && incomingSummary !== undefined) {
+      if (!hasAnyHeading(incomingSummary) && hasAnyHeading(storedSummary)) {
+        throw new DomainError(
+          'invalid_input',
+          'sessions: summary has no ## section, but the stored summary already uses the canonical ## Markdown structure (## Goal, ## Accomplished, ## Decisions+why, ## Verified+how, ## Unfinished+why, ## Files) — include at least one ## heading to merge, or call memory.session_get to read what is stored',
+        );
+      }
+      const merged = mergeSummarySections(storedSummary, incomingSummary);
+      if (merged.length > SUMMARY_MAX_CHARS) {
+        throw new DomainError(
+          'invalid_input',
+          `sessions: merged summary would be ${merged.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get first`,
+        );
+      }
+      summarySet = { summary: merged, summaryFinal: summary.final };
+    } else {
+      summarySet = { summary: summary.value, summaryFinal: summary.final };
+    }
+  }
+
   return {
-    ...(summary.changed && { summary: summary.value, summaryFinal: summary.final }),
+    ...summarySet,
     ...(title.changed && { title: title.value, titleFinal: title.final }),
   };
 }

@@ -82,7 +82,7 @@ import {
   sessionSummaryOutput,
   sessionSummarySchema,
 } from './session-tools.js';
-import { SUMMARY_SECTIONS } from './summary-rubric.js';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
 
 /**
  * Construct the MCP server and register every tool.
@@ -323,7 +323,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.session_summary',
     {
-      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". This call REPLACES the stored summary: send the session's CURRENT COMPLETE state, concise rather than exhaustive, not only what changed this turn. Put the current state FIRST — memory.context shows only the beginning of the stored summary, and only memory.session_get returns it in full. Can't see your earlier work? Call memory.session_get first, then write the whole updated state. When you carry a fact forward, COPY it — file paths with line numbers, measurements, test names, error strings — do not paraphrase it; a rephrased number is a lost number. Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars, descriptive of work done, NOT the cwd), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Body:
+      description: `Save the end-of-session summary AND a short title. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word "done"/"listo". ${SUMMARY_MERGE_RULE} It REFINES the session's state, not a turn report: send what holds NOW, concise not exhaustive, what's new ADDED to what's there. Sending only the sections that changed is expected; each section sent is still its full current state, never a fragment. CONDENSE, never delete — shrinking a section is fine at the ${SUMMARY_MAX_CHARS}-char cap; making one disappear is not, so write a genuinely empty section as its heading with \`none\` instead of omitting it. An over-cap MERGE is refused, not truncated — condense the sections and resend. Put the current state FIRST — memory.context shows only the beginning of the stored summary, and only memory.session_get returns it in full. Can't see earlier work? Call memory.session_get first — don't write only what your window still holds. When you carry a fact forward, COPY it — file paths with line numbers, measurements, test names, error strings — do not paraphrase it; a rephrased number is a lost number. Args: { summary (<=${SUMMARY_MAX_CHARS} chars, server rejects longer with invalid_input), title? (<=100 chars — send on the FIRST write or a real change of direction; omit otherwise, it stays and is never locked), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Body:
 ${SUMMARY_SECTIONS}
 Does NOT end the session — use memory.session_end for that.`,
       inputSchema: sessionSummarySchema,

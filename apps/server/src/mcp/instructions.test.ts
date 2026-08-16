@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from './instructions.js';
-import { SUMMARY_SECTIONS } from './summary-rubric.js';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
 
 describe('MCP initialize instructions', () => {
   it('emits ≤ 1000 characters for the unscoped variant', () => {
@@ -136,6 +136,27 @@ describe('MCP initialize instructions', () => {
     ];
     for (const text of variants) {
       expect(text).toContain('memory.about');
+    }
+  });
+
+  it('states the section-wise merge clause, from the shared constant, in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain(SUMMARY_MERGE_RULE);
+      expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+    }
+  });
+
+  it('asks for the current state, current first, in both variants', () => {
+    const variants = [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ];
+    for (const text of variants) {
+      expect(text).toContain('Current state first');
     }
   });
 });

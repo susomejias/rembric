@@ -18,18 +18,18 @@
 
 import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 
-import { SUMMARY_SECTIONS } from './summary-rubric.js';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
 
 export interface InstructionsContext {
   /** Project slug requested in the URL path; null for `/mcp` connections. */
   requestedSlug: string | null;
 }
 
-const BASE = `Rembric — persistent memory across sessions. Use tools proactively.
+const BASE = `Rembric — persistent memory. Use tools proactively.
 
 SAVE: On each real fix/decision/discovery/config/pattern/preference, call memory.save(title≤100, content); evolving topic: topic_key, candidates[]→memory.judge.
 RECALL: Starting/resuming, after /compact, or asked what did we do: call memory.context (memory.search for keywords) if you lack prior detail.
-SUMMARIZE: Before ending each working turn with real work, MUST call memory.session_summary({title≤100, summary≤${SUMMARY_MAX_CHARS}}) — REPLACES stored summary; send whole current state, current first: ${SUMMARY_SECTIONS}
+SUMMARIZE: Before ending each working turn with real work, MUST call memory.session_summary({title≤100, summary≤${SUMMARY_MAX_CHARS}}) — ${SUMMARY_MERGE_RULE} Current state first: ${SUMMARY_SECTIONS}
 Know your sessionId? Pass it; never guess.
 Update: memory.about.`;
 
