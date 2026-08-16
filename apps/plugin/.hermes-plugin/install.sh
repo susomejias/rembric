@@ -19,45 +19,45 @@ HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
 TARGET="${HERMES_HOME}/plugins/rembric"
 
 if ! mkdir -p "$TARGET" 2>/dev/null; then
-  printf '[rembric] error: cannot create %s\n' "$TARGET" >&2
-  exit 1
+    printf '[rembric] error: cannot create %s\n' "$TARGET" >&2
+    exit 1
 fi
 
 fetch_file() {
-  src_path="$1"
-  dest_path="$2"
-  case "$PLUGIN_SRC" in
-    http://*|https://*)
-      if ! curl -fsSL "$src_path" -o "$dest_path"; then
-        printf '[rembric] error: failed to fetch %s\n' "$src_path" >&2
-        return 1
-      fi
-      ;;
+    src_path="$1"
+    dest_path="$2"
+    case "$PLUGIN_SRC" in
+    http://* | https://*)
+        if ! curl -fsSL "$src_path" -o "$dest_path"; then
+            printf '[rembric] error: failed to fetch %s\n' "$src_path" >&2
+            return 1
+        fi
+        ;;
     *)
-      if [ -f "$src_path" ]; then
-        cp "$src_path" "$dest_path"
-      else
-        printf '[rembric] error: missing local file %s\n' "$src_path" >&2
-        return 1
-      fi
-      ;;
-  esac
-  return 0
+        if [ -f "$src_path" ]; then
+            cp "$src_path" "$dest_path"
+        else
+            printf '[rembric] error: missing local file %s\n' "$src_path" >&2
+            return 1
+        fi
+        ;;
+    esac
+    return 0
 }
 
 for f in plugin.yaml __init__.py README.md; do
-  fetch_file "${PLUGIN_SRC}/${f}" "${TARGET}/${f}" || exit 1
+    fetch_file "${PLUGIN_SRC}/${f}" "${TARGET}/${f}" || exit 1
 done
 
 migrate_legacy_mcp_config() {
-  config="${HERMES_HOME}/config.yaml"
-  version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${TARGET}/plugin.yaml" | head -1)
-  [ -f "$config" ] && [ -n "$version" ] || return 0
-  command -v python3 >/dev/null 2>&1 || {
-    printf '[rembric] warning: Python 3 is unavailable; update mcp_servers.rembric manually\n' >&2
-    return 0
-  }
-  python3 - "$config" "$version" <<'PY'
+    config="${HERMES_HOME}/config.yaml"
+    version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${TARGET}/plugin.yaml" | head -1)
+    [ -f "$config" ] && [ -n "$version" ] || return 0
+    command -v python3 >/dev/null 2>&1 || {
+        printf '[rembric] warning: Python 3 is unavailable; update mcp_servers.rembric manually\n' >&2
+        return 0
+    }
+    python3 - "$config" "$version" <<'PY'
 from pathlib import Path
 import re
 import shutil
@@ -120,7 +120,7 @@ PY
 }
 
 if [ "${REMBRIC_ACTION:-install}" = "update" ]; then
-  migrate_legacy_mcp_config
+    migrate_legacy_mcp_config
 fi
 
 printf '✓ rembric installed at %s\n' "$TARGET"
