@@ -37,17 +37,6 @@ export interface SessionsDeps {
   agentSessions: AgentSessionsService;
 }
 
-/**
- * Cap on the `SUMMARY HISTORY` section: newest-first, so this is always the
- * MOST RECENT `SUMMARY_HISTORY_MAX` versions. At the per-write cap
- * (`SUMMARY_MAX_CHARS` = 10 000 chars), that bounds the section to at most
- * ~200 KB of markdown even for the every-10th-turn cadence's worst case (a
- * 1000-turn session carries ~101 versions unbounded) — an order of magnitude
- * below the multi-hundred-KB-to-1MB page this bounds. Older versions are
- * still in the table; this caps only what one page load renders.
- */
-const SUMMARY_HISTORY_MAX = 20;
-
 export function createSessionsRouter(deps: SessionsDeps): Hono {
   const app = new Hono();
 
@@ -320,11 +309,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
 
     const memories = deps.repos.memory.adminListBySession(id);
     const sessionPrompts = deps.repos.prompts.adminListBySession(id);
-    const summaryVersions = deps.repos.agentSessions.adminListSummaryVersions(
-      id,
-      SUMMARY_HISTORY_MAX,
-    );
-    const summaryVersionsTotal = deps.repos.agentSessions.adminCountSummaryVersions(id);
 
     const memoriesCount = memories.length;
     const actionForm = row.deletedAt
@@ -409,31 +393,6 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
           ? mdBody(row.summary)
           : html`<pre>${row.summary}</pre>`
         : html`<p>—</p>`}
-
-      <h2>Summary History (${summaryVersionsTotal})</h2>
-      ${summaryVersionsTotal === 0
-        ? tblEmpty('No summary versions recorded.')
-        : html`
-            <div class="rbr-summary-history">
-              ${summaryVersions.map(
-                (v) => html`
-                  <details class="rbr-summary-version">
-                    <summary>
-                      v${v.version} · ${formatTs(v.createdAt)} · ${v.content.length}
-                      chars${v.title ? html` · ${v.title}` : raw('')}
-                    </summary>
-                    ${mdBody(v.content)}
-                  </details>
-                `,
-              )}
-            </div>
-            ${summaryVersionsTotal > summaryVersions.length
-              ? html`<p class="muted small">
-                  Showing the ${summaryVersions.length} most recent of ${summaryVersionsTotal}
-                  versions. Older ones are recorded but not shown here.
-                </p>`
-              : raw('')}
-          `}
 
       <h2>Memories (${memories.length})</h2>
       ${memories.length === 0

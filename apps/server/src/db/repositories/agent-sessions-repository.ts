@@ -1,15 +1,11 @@
 import { and, count, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
-import type { Scope } from '../../services/scope.js';
 import type { Db } from '../client.js';
 import {
   agentSessions,
-  sessionSummaryVersions,
   type AgentSession,
   type AgentSessionStatus,
   type NewAgentSession,
-  type NewSessionSummaryVersion,
-  type SessionSummaryVersion,
 } from '../schema/agent-sessions.js';
 import { projects, type Project } from '../schema/projects.js';
 import { tokens, type Token } from '../schema/tokens.js';
@@ -375,83 +371,6 @@ export class AgentSessionsRepository {
       .leftJoin(projects, eq(projects.id, agentSessions.projectId))
       .where(eq(agentSessions.id, id))
       .get();
-  }
-
-  insertSummaryVersion(values: NewSessionSummaryVersion): void {
-    this.db.insert(sessionSummaryVersions).values(values).run();
-  }
-
-  latestSummaryVersion(sessionId: string): SessionSummaryVersion | undefined {
-    return this.db
-      .select()
-      .from(sessionSummaryVersions)
-      .where(eq(sessionSummaryVersions.sessionId, sessionId))
-      .orderBy(desc(sessionSummaryVersions.version))
-      .limit(1)
-      .get();
-  }
-
-  /**
-   * Unscoped history read for the dashboard's `SUMMARY HISTORY` section,
-   * newest first. `limit` bounds the dashboard's page weight
-   * (`dashboard`, "The session detail view MUST list the summary version
-   * history"); omit it for the full history, used where a test or the
-   * invariant needs every row rather than a page of it.
-   */
-  adminListSummaryVersions(sessionId: string, limit?: number): SessionSummaryVersion[] {
-    const query = this.db
-      .select()
-      .from(sessionSummaryVersions)
-      .where(eq(sessionSummaryVersions.sessionId, sessionId))
-      .orderBy(desc(sessionSummaryVersions.version))
-      .$dynamic();
-    return (limit !== undefined ? query.limit(limit) : query).all();
-  }
-
-  /** Total version-row count for a session, for the dashboard's "N more" note. */
-  adminCountSummaryVersions(sessionId: string): number {
-    const row = this.db
-      .select({ value: count() })
-      .from(sessionSummaryVersions)
-      .where(eq(sessionSummaryVersions.sessionId, sessionId))
-      .get();
-    return row?.value ?? 0;
-  }
-
-  /**
-   * Scoped history read for `memory.session_get({ limit })` — the model-
-   * facing exceptional-use path (`sessions`, "Every curated session-summary
-   * write MUST append a version row in the same transaction"). Joins to
-   * `sessions` to enforce the caller's `Scope` directly in the query rather
-   * than trusting a prior check, matching every other scoped repository
-   * read in this codebase.
-   */
-  listSummaryVersionsInScope(
-    sessionId: string,
-    scope: Scope,
-    limit: number,
-  ): SessionSummaryVersion[] {
-    return this.db
-      .select({
-        id: sessionSummaryVersions.id,
-        sessionId: sessionSummaryVersions.sessionId,
-        version: sessionSummaryVersions.version,
-        content: sessionSummaryVersions.content,
-        title: sessionSummaryVersions.title,
-        createdAt: sessionSummaryVersions.createdAt,
-      })
-      .from(sessionSummaryVersions)
-      .innerJoin(agentSessions, eq(agentSessions.id, sessionSummaryVersions.sessionId))
-      .where(
-        and(
-          eq(sessionSummaryVersions.sessionId, sessionId),
-          eq(agentSessions.projectId, scope.projectId),
-          isNull(agentSessions.deletedAt),
-        ),
-      )
-      .orderBy(desc(sessionSummaryVersions.version))
-      .limit(limit)
-      .all();
   }
 
   adminRecent(limit: number): AdminRecentSession[] {
