@@ -294,7 +294,7 @@ export class AgentSessionsService {
     // summary change once `existing.summaryFinal` is already true, which is
     // also what keeps a late heading-less or over-cap write a silent no-op
     // here instead of a merge attempt (D2(3)).
-    const set = precedenceSet(existing, input, { terminal: true });
+    const set = precedenceSet(existing, input, this.now(), { terminal: true });
     if (existing.titleFinal) {
       delete set.title;
       delete set.titleFinal;
@@ -302,29 +302,8 @@ export class AgentSessionsService {
     if (Object.keys(set).length === 0) {
       return existing;
     }
-    const updated = this.repos.agentSessions.updateById(
-      existing.id,
-      this.stampLastSummaryAt(existing, set),
-      { requireActive: false },
-    );
+    const updated = this.repos.agentSessions.updateById(existing.id, set, { requireActive: false });
     return updated ?? existing;
-  }
-
-  /**
-   * `last_summary_at` is stamped at this one site, shared by every write path
-   * that mutates `sessions.summary`, on exactly the writes that store a
-   * `final:true` summary — never on a `final:false` write, never on a write
-   * `precedenceSet` already discarded (`set.summary` absent in that case) —
-   * see `session-nudges`, "Session rows MUST carry the three nudge-gate
-   * timestamps, and every one of them MUST be monotone".
-   */
-  private stampLastSummaryAt(
-    existing: AgentSession,
-    set: Partial<NewAgentSession>,
-  ): Partial<NewAgentSession> {
-    return typeof set.summary === 'string' && set.summaryFinal === true
-      ? { ...set, lastSummaryAt: laterOf(existing.lastSummaryAt, this.now()) }
-      : set;
   }
 
   /**
@@ -371,15 +350,12 @@ export class AgentSessionsService {
     }
     // This write path IS activity even when precedence blocks the
     // summary/title change — a per-turn sync hit means the session is live.
+    const ts = this.now();
     const set: Partial<NewAgentSession> = {
-      lastActivityAt: this.now(),
-      ...precedenceSet(existing, input),
+      lastActivityAt: ts,
+      ...precedenceSet(existing, input, ts),
     };
-    const updated = this.repos.agentSessions.updateById(
-      sessionId,
-      this.stampLastSummaryAt(existing, set),
-      { requireActive: true },
-    );
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -428,13 +404,9 @@ export class AgentSessionsService {
       status: 'ended',
       endedAt: ts,
       lastActivityAt: ts,
-      ...precedenceSet(existing, input),
+      ...precedenceSet(existing, input, ts),
     };
-    const updated = this.repos.agentSessions.updateById(
-      sessionId,
-      this.stampLastSummaryAt(existing, set),
-      { requireActive: true },
-    );
+    const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     if (!updated) {
       throw new DomainError(
         'session_already_ended',
@@ -520,12 +492,15 @@ export class AgentSessionsService {
       return { session: updated ?? existing, lines: [] };
     }
 
-    const set: Partial<NewAgentSession> = { lastActivityAt: ts };
+    // The provisional title goes through the same single precedence site as
+    // the other three write paths (`final:false`, so a model-authored title
+    // is never displaced) rather than re-deriving the rule here.
+    const set: Partial<NewAgentSession> = {
+      lastActivityAt: ts,
+      ...precedenceSet(existing, { title: input.title }, ts),
+    };
     if (input.usedTools) {
       set.lastWorkAt = laterOf(existing.lastWorkAt, ts);
-    }
-    if (input.title !== undefined && !existing.titleFinal) {
-      set.title = input.title;
     }
     const updated = this.repos.agentSessions.updateById(sessionId, set, { requireActive: true });
     const row = updated ?? existing;
@@ -538,7 +513,7 @@ export class AgentSessionsService {
       summary: row.summary,
       title: row.title,
     };
-    const lines = evaluateSessionNudge(gateRow, ts, NUDGE_FLOOR_MS);
+    const lines = evaluateSessionNudge(gateRow, ts, NUDGE_FLOOR_MS, SUMMARY_MAX_CHARS);
     if (lines === null) {
       return { session: row, lines: [] };
     }
@@ -864,7 +839,11 @@ type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'>;
  * The only place per-field `final` precedence is folded into an update
  * `set` — and, since "A curated session-summary write MUST be merged
  * section-wise with the stored summary", the only place the merge, the
- * heading-less rejection and the merged-document cap check run.
+ * heading-less rejection and the merged-document cap check run. It is also
+ * where `last_summary_at` is stamped, because `session-nudges` puts that
+ * stamp on "the same single site that folds per-field `final` precedence
+ * into an update `set`": it fires on exactly the writes that store a
+ * `final:true` summary, so a write precedence discarded cannot move it.
  *
  * `opts.terminal` carries the terminal-row deviation ("first curated value
  * stands", D2 in this change's design.md): once `existing.summaryFinal` is
@@ -879,6 +858,7 @@ type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'>;
 function precedenceSet(
   existing: AgentSession,
   input: PrecedenceInput,
+  now: Date,
   opts: { terminal: boolean } = { terminal: false },
 ): Partial<NewAgentSession> {
   const incomingFinal = input.final ?? false;
@@ -899,6 +879,10 @@ function precedenceSet(
     // so D2(1) ("incoming final:true") needs no separate check here.
     const isCuratedMerge =
       incomingSummary !== undefined && existing.summaryFinal && storedSummary !== null;
+    // Reaching here means precedence already decided the value WILL be
+    // stored, so the only remaining condition on the stamp is that the write
+    // is the curated one.
+    const stamp = summary.final ? { lastSummaryAt: laterOf(existing.lastSummaryAt, now) } : {};
     if (isCuratedMerge && storedSummary !== null && incomingSummary !== undefined) {
       if (!hasAnyHeading(incomingSummary) && hasAnyHeading(storedSummary)) {
         throw new DomainError(
@@ -913,9 +897,9 @@ function precedenceSet(
           `sessions: merged summary would be ${merged.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get first`,
         );
       }
-      summarySet = { summary: merged, summaryFinal: summary.final };
+      summarySet = { summary: merged, summaryFinal: summary.final, ...stamp };
     } else {
-      summarySet = { summary: summary.value, summaryFinal: summary.final };
+      summarySet = { summary: summary.value, summaryFinal: summary.final, ...stamp };
     }
   }
 

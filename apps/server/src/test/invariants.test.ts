@@ -314,7 +314,9 @@ describe('session lifecycle-column invariants', () => {
     const start = svc.indexOf('private writeTerminalFields');
     expect(start).toBeGreaterThan(-1);
     const body = svc.slice(start, svc.indexOf('\n  }', start));
-    expect(body).toMatch(/const set = precedenceSet\(existing, input, \{ terminal: true \}\);/);
+    expect(body).toMatch(
+      /const set = precedenceSet\(existing, input, this\.now\(\), \{ terminal: true \}\);/,
+    );
     expect(body).not.toMatch(/\bset\.\w+\s*=/);
     expect(body).not.toMatch(/\bset\[/);
   });
@@ -323,9 +325,12 @@ describe('session lifecycle-column invariants', () => {
   // both already summary-precedence-approved) is a legitimate second source
   // for the `summary` key alongside `summary.value` — see
   // "A curated session-summary write MUST be merged section-wise with the
-  // stored summary". Deduped because the merge branch and the plain-replace
-  // branch both assign `summaryFinal: summary.final`.
-  it('precedenceSet can only ever produce summary and title fields', () => {
+  // stored summary". `laterOf` is the third: `last_summary_at` is stamped at
+  // this same single site, per `session-nudges`' "Set by the same single site
+  // that folds per-field `final` precedence into an update `set`". Deduped
+  // because the merge branch and the plain-replace branch both assign
+  // `summaryFinal: summary.final`.
+  it('precedenceSet can only ever produce summary, title and last_summary_at fields', () => {
     const svc = sources[0]!;
     const start = svc.indexOf('function precedenceSet');
     const rawBody = svc.slice(start, svc.indexOf('\n}', start));
@@ -334,9 +339,11 @@ describe('session lifecycle-column invariants', () => {
     // otherwise matches the same shape as a real object-literal key.
     const body = rawBody.replace(/`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*'/gs, '""');
     const keys = [
-      ...new Set([...body.matchAll(/(\w+):\s*(?:summary\.|title\.|merged\b)/g)].map((m) => m[1]!)),
+      ...new Set(
+        [...body.matchAll(/(\w+):\s*(?:summary\.|title\.|merged\b|laterOf\b)/g)].map((m) => m[1]!),
+      ),
     ].sort();
-    expect(keys).toEqual(['summary', 'summaryFinal', 'title', 'titleFinal']);
+    expect(keys).toEqual(['lastSummaryAt', 'summary', 'summaryFinal', 'title', 'titleFinal']);
   });
 });
 

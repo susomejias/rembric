@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import {
   composeSessionNotice,
   evaluateSessionNudge,
   NOTICE_MAX_BYTES,
-  NOTICE_SUMMARY_MAX_CHARS,
   type SessionNudgeRow,
 } from './session-nudge.js';
 
@@ -30,12 +30,16 @@ function minutesAfter(base: Date, minutes: number): Date {
 describe('evaluateSessionNudge — the gate', () => {
   it('never fires with no work reported', () => {
     const r = row({ lastWorkAt: null });
-    expect(evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS)).toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).toBeNull();
   });
 
   it('fires when work followed a null summary, past the floor', () => {
     const r = row({ lastWorkAt: minutesAfter(STARTED, 30) });
-    expect(evaluateSessionNudge(r, minutesAfter(STARTED, 40), FLOOR_MS)).not.toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(STARTED, 40), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).not.toBeNull();
   });
 
   it('does not fire when the summary was written after the work', () => {
@@ -43,7 +47,9 @@ describe('evaluateSessionNudge — the gate', () => {
       lastWorkAt: minutesAfter(STARTED, 30),
       lastSummaryAt: minutesAfter(STARTED, 35),
     });
-    expect(evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS)).toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).toBeNull();
   });
 
   it('fires again once further work follows the summary write', () => {
@@ -51,28 +57,37 @@ describe('evaluateSessionNudge — the gate', () => {
       lastWorkAt: minutesAfter(STARTED, 60),
       lastSummaryAt: minutesAfter(STARTED, 35),
     });
-    expect(evaluateSessionNudge(r, minutesAfter(STARTED, 90), FLOOR_MS)).not.toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(STARTED, 90), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).not.toBeNull();
   });
 
   it('does not fire before one floor has elapsed since started_at, with lastNudgeAt null', () => {
     const r = row({ lastWorkAt: minutesAfter(STARTED, 1) });
     const almostFloor = minutesAfter(STARTED, 24);
-    expect(evaluateSessionNudge(r, almostFloor, FLOOR_MS)).toBeNull();
+    expect(evaluateSessionNudge(r, almostFloor, FLOOR_MS, SUMMARY_MAX_CHARS)).toBeNull();
     const pastFloor = minutesAfter(STARTED, 26);
-    expect(evaluateSessionNudge(r, pastFloor, FLOOR_MS)).not.toBeNull();
+    expect(evaluateSessionNudge(r, pastFloor, FLOOR_MS, SUMMARY_MAX_CHARS)).not.toBeNull();
   });
 
   it('is not repeated inside the floor after a notice was emitted', () => {
     const nudgedAt = minutesAfter(STARTED, 30);
     const r = row({ lastWorkAt: nudgedAt, lastNudgeAt: nudgedAt });
-    expect(evaluateSessionNudge(r, minutesAfter(nudgedAt, 10), FLOOR_MS)).toBeNull();
-    expect(evaluateSessionNudge(r, minutesAfter(nudgedAt, 26), FLOOR_MS)).not.toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(nudgedAt, 10), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).toBeNull();
+    expect(
+      evaluateSessionNudge(r, minutesAfter(nudgedAt, 26), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).not.toBeNull();
   });
 });
 
 describe('composeSessionNotice', () => {
   it('states the merge rule without re-deriving it, and licenses not calling', () => {
-    const text = composeSessionNotice(row({ summary: '## Goal\nship it', title: 'demo' }));
+    const text = composeSessionNotice(
+      row({ summary: '## Goal\nship it', title: 'demo' }),
+      SUMMARY_MAX_CHARS,
+    );
     expect(text).toContain('##');
     expect(text).toMatch(/omit/i);
     expect(text).toMatch(/do not call/i);
@@ -96,19 +111,17 @@ describe('composeSessionNotice', () => {
       '## Files',
       'a.ts, b.ts',
     ].join('\n');
-    const text = composeSessionNotice(row({ summary, title: 'my session' }));
+    const text = composeSessionNotice(row({ summary, title: 'my session' }), SUMMARY_MAX_CHARS);
     expect(text).toContain('my session');
     expect(text).toContain('## Goal');
     expect(text).toContain('## Files');
     expect(text).toMatch(/current sizes, not targets/);
-    expect(text).toMatch(
-      new RegExp(`${summary.length} used of ${NOTICE_SUMMARY_MAX_CHARS} available\\.`),
-    );
+    expect(text).toMatch(new RegExp(`${summary.length} used of ${SUMMARY_MAX_CHARS} available\\.`));
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
   });
 
   it('replaces the inventory with the canonical section list when nothing is stored', () => {
-    const text = composeSessionNotice(row({ summary: null, title: 'fresh' }));
+    const text = composeSessionNotice(row({ summary: null, title: 'fresh' }), SUMMARY_MAX_CHARS);
     expect(text).toContain('## Goal');
     expect(text).toContain('## Accomplished');
     expect(text).toContain('## Decisions+why');
@@ -119,8 +132,24 @@ describe('composeSessionNotice', () => {
   });
 
   it('a summary with no ## heading is treated as nothing stored', () => {
-    const text = composeSessionNotice(row({ summary: 'just some prose, no headings', title: 't' }));
+    const text = composeSessionNotice(
+      row({ summary: 'just some prose, no headings', title: 't' }),
+      SUMMARY_MAX_CHARS,
+    );
     expect(text).toContain('## Goal');
+  });
+
+  it('never leaves a lone surrogate when the heading cut lands inside an emoji', () => {
+    // The 32-code-unit display cut falls exactly between the two code units
+    // of the emoji; a naked slice keeps the high surrogate, which decodes to
+    // U+FFFD wherever the notice is read back.
+    const heading = `## ${'a'.repeat(28)}😀 and more heading text`;
+    const text = composeSessionNotice(
+      row({ summary: `${heading}\nbody`, title: 't' }),
+      SUMMARY_MAX_CHARS,
+    );
+    expect(text).toContain(`## ${'a'.repeat(28)} (`);
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
   it('a pathological forty-section, 100-char-heading summary stays within the byte bound and keeps ## Goal', () => {
@@ -137,7 +166,7 @@ describe('composeSessionNotice', () => {
       sections.push(heading, `body text for section ${i}`);
     }
     const summary = sections.join('\n');
-    const text = composeSessionNotice(row({ summary, title: 'pathological' }));
+    const text = composeSessionNotice(row({ summary, title: 'pathological' }), SUMMARY_MAX_CHARS);
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
     expect(text).toContain('## Goal');
     expect(text).toMatch(/\+\d+ more/);
