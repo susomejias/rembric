@@ -1,3 +1,10 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The `instructions` block MUST state that a curated summary write replaces the stored value`
+- TO: `### Requirement: The `instructions` block MUST state what a curated summary write replaces and what it keeps`
+
+The title is the only thing that moves; not one clause of the body changes. The old title states the half-truth the body itself forbids — _"Both halves of the first clause are required: the replacing half alone is the reading that makes a model retype a document it can no longer see."_ A title that carries only the replacing half is that reading, in the one place a reader who never opens the body will see it. This change is what makes the correction due: after the version rows go, the merge is the whole of what protects a curated write, so a title asserting whole replacement no longer even has a mechanism behind it.
+
 ## REMOVED Requirements
 
 ### Requirement: The `memory.session_get` description MUST disambiguate `limit` and mark the read exceptional

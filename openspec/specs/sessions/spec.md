@@ -68,7 +68,7 @@ The `summary` and `title` columns are exempt from one-write-per-lifetime immutab
 - **GIVEN** an `active` session `<S>`
 - **WHEN** a per-turn report stamps `last_activity_at`, `last_work_at` and `last_nudge_at`
 - **THEN** `status` SHALL still be `'active'` and `ended_at` SHALL still be NULL
-- **AND** no version row SHALL be appended and no `summary` or `title` SHALL be written by that stamping alone
+- **AND** no `summary` or `title` SHALL be written by that stamping alone
 
 ### Requirement: `AgentSessionsService.start()` MUST accept a client-provided id and be idempotent on that id
 
@@ -183,6 +183,8 @@ Every model-facing surface, including the `memory.session_summary` tool descript
 
 **Sending fewer SECTIONS is not delta framing, and the two SHALL NOT be conflated.** A curated write MAY carry only the sections that changed — that is the intended use of the merge — provided each section it carries states that section's full current state. What is prohibited is a section body that is itself a fragment, and a document that reads as a turn report. The surfaces enumerated in `mcp-api` SHALL state both halves: that an omitted `##` section keeps its stored text, and that a section which has genuinely emptied is written with an explicit short value rather than dropped, so a shrinking summary is condensation and never deletion.
 
+**The server retains no copy of text a curated write replaces, and this is a deliberate, accepted consequence.** Preservation is by OMISSION and by omission only: a `##` section the write does not carry survives byte-identically, and a write carrying no `##` heading at all against a sectioned stored summary is refused. What a write DOES carry replaces the matching section outright, and the replaced bytes are gone — there is no version table, no journal payload, no restore verb, and no read that can return them. Condensing a section is legitimate and is what the surfaces above ask for at a 10 000-character cap; substituting a thin line for a dense section is loss, and the server SHALL NOT attempt to distinguish the two, because a correct summary legitimately shrinks and every guard proposed on that basis has been rejected on that ground. The obligation this places on the model-facing surfaces is the "condense, never delete" text they already carry; the obligation it places on this specification is to say plainly that the loss is unrecoverable rather than imply a safety net that does not exist.
+
 **The summary SHALL be ordered current-first, and the ordering is a contract rather than a style preference.** `memory.context` emits a session summary truncated to its FIRST `CONTEXT_SNIPPET_CHARS` characters through a head-keeping helper, while `memory.session_get` returns the value in full and untruncated. The head of the stored summary is therefore the preview on which a later model decides whether to fetch the rest, and what a model writes first IS that preview. Surfaces SHALL state this ordering obligation; the server SHALL NOT enforce it, consistent with the layout being unenforced above.
 
 The `memory.session_summary` tool SHALL NOT transition the session to `ended`. The tool writes `summary` (and optionally `title`) only, marking both as `final:true`. The dedicated `memory.session_end` tool (or `POST /sessions/<id>/end`) is the sole transition.
@@ -215,8 +217,8 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 - **WHEN** the agent calls `memory.session_summary({summary: "B"})` again
 - **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes)
 - **AND** the response SHALL succeed
-- **AND** the displaced "A" SHALL remain readable as a version row (see "Every curated session-summary write MUST append a version row in the same transaction") — the replacement is retained, and only its destructiveness is removed
-- **AND** where "A" and "B" both carry `##` headings the same last-final-wins rule SHALL apply PER SECTION rather than to the document (see "A curated session-summary write MUST be merged section-wise with the stored summary")
+- **AND** the displaced "A" SHALL NOT be readable from any server surface afterwards — no version row, no journal payload, no restore verb; a document with no `##` heading cannot express preservation by omission, so whole replacement is the whole outcome
+- **AND** where "A" and "B" both carry `##` headings the same last-final-wins rule SHALL apply PER SECTION rather than to the document (see "A curated session-summary write MUST be merged section-wise with the stored summary"), so only the sections "B" actually carries lose their previous text
 
 #### Scenario: No model-facing surface asks for a turn report
 
@@ -224,6 +226,12 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 - **THEN** none SHALL instruct the model to send a summary whose content is only what is new, only what changed, or only what the current context window contains
 - **AND** the `memory.session_summary` description and the `initialize.instructions` block SHALL state that a `##` section the write omits keeps its stored text
 - **AND** no surface SHALL be required by this scenario to state the merge rule beyond those two — the surfaces that ask for the session's current complete state remain correct under the merge, because a complete document replaces every section
+
+#### Scenario: No surface promises recovery of replaced text
+
+- **WHEN** every model-facing and operator-facing surface that describes the curated write is inspected — the `memory.session_summary` description, the `memory.session_get` description, the `initialize.instructions` block, and the dashboard session detail view
+- **THEN** none SHALL state or imply that text replaced by a curated write can be read back afterwards
+- **AND** none SHALL name a version, a history, or a restore
 
 #### Scenario: The current-first ordering is stated where the model reads about the tool
 
@@ -780,11 +788,9 @@ The MCP surface SHALL expose a `memory.session_get` tool that returns a single s
 
 `memory.context` SHALL continue to return the bounded snippet for `recentSessions[].summary`; `memory.session_get` is the on-demand path for the full text (the multi-agent / cross-client handoff use case).
 
-**The tool SHALL additionally accept an optional `limit` argument**, `z.number().int().min(0).max(SESSION_GET_VERSIONS_MAX)` (`SESSION_GET_VERSIONS_MAX = 5`). Omitted or `0` SHALL leave the response identical to a call carrying no `limit`: no `versions` field is added, so every caller that predates this argument is unaffected. A `limit` from 1 to `SESSION_GET_VERSIONS_MAX` SHALL add a `versions` field: an array of that many of the session's newest `session_summary_versions` rows, ordered newest first, each carrying `version`, `title`, `content` (in FULL, never truncated) and `createdAt`. A `limit` above `SESSION_GET_VERSIONS_MAX` SHALL be rejected by input validation, never clamped.
+**The tool SHALL declare exactly one input property, `sessionId`.** It SHALL NOT declare a `limit` argument and SHALL NOT return a `versions` field. Both existed only to page the retired `session_summary_versions` table, and there is nothing left for either to bound or carry. Because tool input schemas are strict (`mcp-api`, "Every MCP tool input schema MUST refuse an unknown property rather than ignore it"), a caller that still sends `limit` SHALL be REFUSED with the transport's invalid-parameters error naming the tool and the property, never have it silently dropped. That refusal is the designed behaviour of strictness and SHALL NOT be exempted for this argument: a model carrying a stale description is told that it is stale, which a silent drop cannot do.
 
-The `limit` read SHALL be resolved against the connection's `Scope`, by a repository method dedicated to this scoped read (never the dashboard's unscoped `admin*` read that backs the "SUMMARY HISTORY" section — see `dashboard`, `data-access`). A `sessionId` that resolves out of scope or to a soft-deleted row SHALL return `not_found` exactly as it does today, before any version read is attempted.
-
-This surface is EXCEPTIONAL, and the tool's description SHALL say so: it exists to recover detail a later rewrite displaced, not as a routine substitute for the current summary this tool already returns in full. The description SHALL also disambiguate what `limit` bounds — the number of stored summary VERSIONS returned, not the length of any summary — because `limit` alone, on a tool that returns one object rather than a list, invites the opposite reading.
+The full summary this tool returns is the ONLY session text the server holds, and the tool's description SHALL NOT imply the existence of any other. In particular it SHALL NOT offer, name, or hint at a recovery path for text a previous curated write displaced — after "A curated session-summary write MUST be merged section-wise with the stored summary" a section the write omits is not displaced at all, and a section the write carries is replaced with no copy retained anywhere.
 
 #### Scenario: Returns the full summary for an in-scope session
 
@@ -804,23 +810,24 @@ This surface is EXCEPTIONAL, and the tool's description SHALL say so: it exists 
 - **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
 - **THEN** the tool SHALL return a structured `not_found` error
 
-#### Scenario: `memory.session_get` without `limit` is unaffected
+#### Scenario: The response carries no `versions` field
 
-- **WHEN** `memory.session_get({ sessionId: S.id })` is called on a session with version rows
-- **THEN** the response SHALL be exactly as it was before this requirement — no `versions` field present
+- **GIVEN** any session `S` in the caller's scope, with or without a stored summary
+- **WHEN** `memory.session_get({ sessionId: S.id })` is called
+- **THEN** the response object SHALL NOT contain a `versions` key, in any form, including an empty array
 
-#### Scenario: `memory.session_get` with `limit` returns recent versions newest-first, untruncated
+#### Scenario: A stale caller sending `limit` is refused, not silently accepted
 
-- **GIVEN** a session with three version rows, each with `content` longer than `CONTEXT_SNIPPET_CHARS`
-- **WHEN** `memory.session_get({ sessionId: S.id, limit: 2 })` is called
-- **THEN** `versions` SHALL contain exactly 2 entries in order `[newest, second-newest]`
-- **AND** each entry's `content` SHALL be full length, not truncated
+- **GIVEN** a connection whose model still carries the pre-retirement tool description
+- **WHEN** it calls `memory.session_get({ sessionId: S.id, limit: 2 })`
+- **THEN** the call SHALL be refused by input validation before the handler runs, with a message naming the tool and the property `limit`
+- **AND** no session SHALL be returned and no row SHALL be read
 
-#### Scenario: `memory.session_get`'s `limit` respects scope
+#### Scenario: A call carrying only `sessionId` still succeeds
 
-- **GIVEN** a session in project A with version rows
-- **WHEN** a connection scoped to project B calls `memory.session_get({ sessionId: <A's session>, limit: 1 })`
-- **THEN** the call SHALL return `not_found`, exactly as it does today without `limit`
+- **GIVEN** the same session `S`
+- **WHEN** `memory.session_get({ sessionId: S.id })` is called
+- **THEN** the call SHALL succeed and return `S`'s full summary — the control that makes the refusal above attributable to `limit` alone rather than to a broken tool
 
 ### Requirement: `findActiveForTransport` MUST NOT guess under concurrent ambiguity
 
@@ -1245,186 +1252,9 @@ Search ranking SHALL remain independent of session lifecycle: no memory's rank S
 - **THEN** `<B>` SHALL be ordered ahead of `<A>`, because ordering keys on `started_at`
 - **AND** `<A>`'s `startedAt` SHALL still be `T0`
 
-### Requirement: Every curated session-summary write MUST append a version row in the same transaction
-
-The schema SHALL carry a dedicated table `session_summary_versions` whose rows are the successive stored values of one session's curated summary:
-
-| column       | type                                                      |
-| ------------ | --------------------------------------------------------- |
-| `id`         | TEXT PRIMARY KEY (ULID, minted from the write's `now()`)  |
-| `session_id` | TEXT NOT NULL REFERENCES `sessions(id)` ON DELETE CASCADE |
-| `version`    | INTEGER NOT NULL, UNIQUE together with `session_id`       |
-| `content`    | TEXT NOT NULL                                             |
-| `title`      | TEXT, nullable                                            |
-| `created_at` | INTEGER NOT NULL (`timestamp_ms`)                         |
-
-No further column SHALL be added by this requirement. `title` IS versioned alongside `content` (design D22, revising D6): the dashboard renders a version's `content` next to a title, and rendering the CURRENT `sessions.title` there is misleading whenever the title changed after that version was written — the pairing, not the label alone, is what a reader needs. The stored `title` SHALL be the value in effect on `sessions.title` immediately AFTER the same update that appends the row (the `updateById` result), never the write's own argument, because `title` is optional on every curated write and an argument-based store would write `NULL` on every write that only touched `summary`.
-
-**The invariant.** For every session with at least one row in `session_summary_versions`, `sessions.summary` SHALL equal the `content` of that session's row with the greatest `version`, and that row's `title` SHALL equal `sessions.title` as it stood immediately after the write that appended it — both come from the one `updateById` result the append reads, so they cannot disagree at that instant. The column(s) and the version row SHALL be written inside ONE `db.transaction()`, so both land or neither does; a state in which the column advanced and the row did not SHALL NOT be reachable.
-
-This is narrower than an ongoing equality for `title`: unlike `summary`, `title` MAY change through a write that does not append a version — a title-only `final: true` write reaching the active-session branch of `end()` with no `summary` argument, reachable only via `POST /:slug/sessions/:id/end` (the `memory.session_summary` tool's schema requires `summary` on every call, so this path does not exist through MCP). Such a write leaves `sessions.title` ahead of the newest version's `title` until the next content-changing curated write appends a fresh row pairing both current values. This is documented rather than silently assumed away.
-
-**When a row is appended.** A version row SHALL be appended by exactly those writes that store a summary value carrying `final: true` — that is, the writes that pass the `summary_final` precedence rule with an incoming `final: true`, on `writeSummary` and on `end` alike (the two write paths enumerated in "Session summary writes MUST be capped at `SUMMARY_MAX_CHARS` on every write path that mutates `sessions.summary`"). A write that stores nothing SHALL append nothing: this covers the terminal-row branch where an already-`final` column blocks the incoming value, and the `final: false` branch where precedence discards it.
-
-**A `final: false` write SHALL NEVER append a version row.** The per-turn raw transcript sync every client performs is a `final: false` write, and its body is a transcript rather than a curated handoff. Versioning it would spend the table on material the summary exists to distil, at one row per turn.
-
-**An identical re-write appends nothing.** When the value about to be stored is byte-identical to the `content` of the session's newest existing version row, no version row SHALL be appended. The column write proceeds unchanged (it stores the same bytes), so the invariant above still holds. This is what keeps the tool's published `idempotentHint: true` honest — see `mcp-api`, "Every MCP tool MUST advertise behavioral annotations", which admits a tool whose "repeated invocation is side-effect-free or last-call-wins": a retry of the same body remains exactly that.
-
-**The versioned value is the value STORED, which since "A curated session-summary write MUST be merged section-wise with the stored summary" is the merged document rather than the write's argument.** The invariant above is unaffected — it equates the column with the newest `content`, and both are that same merged string. One consequence follows and is normative: a partial write whose sections reproduce what is already stored changes nothing, so it appends no version row, exactly as a byte-identical full re-write does not.
-
-**The version numbering.** `version` SHALL be one greater than the greatest `version` currently stored for that session, computed inside the same transaction as the insert, and SHALL start at 1 for a session's first curated write — including the case where nothing was stored before. A history whose first entry is the second curated value is unreadable: the version numbers would imply a predecessor no reader can find, and the dashboard would present the origin of the text as missing rather than as absent.
-
-**The guarantee is scoped to curated text, and the scope is normative.** A raw, uncurated `summary` (`summary_final = 0`) that a first curated write replaces SHALL NOT be versioned. It was never a handoff, it is reproducible from the host transcript that produced it, and treating it as a version would put a transcript dump at `version = 1` of every session that ever synced one.
-
-**One site.** The append SHALL be emitted from the same single place that folds per-field `final` precedence into an update `set` — see "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`", which requires that place to be shared by all three write paths. A second append site is a defect, because the three paths would then be able to disagree about whether a stored value was recorded.
-
-**A bounded, scoped read exists for models, and it is exceptional.** `memory.session_get` MAY return recent version rows via an optional `limit` argument (see `mcp-api`). Omitted or `0` SHALL leave the response byte-identical to a call that carries no `limit` at all — no `versions` field, not an empty array — so no existing caller pays anything for this capability. A `limit` above 0 SHALL return that many of the session's newest version rows, newest first, each `content` in FULL and never truncated. The read SHALL be resolved against the caller's `Scope` by a dedicated repository method, never the dashboard's unscoped `admin*` read. The table SHALL still NOT be exposed through `memory.context` or any HTTP route; only this capped MCP read and the operator-facing dashboard section (see `dashboard`) reach it.
-
-#### Scenario: A first curated write on a session with no stored summary
-
-- **GIVEN** an `active` session `<S>` with `summary IS NULL` and `summary_final = 0`
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'A', final: true })` is called
-- **THEN** `sessions.summary` SHALL be `'A'` with `summary_final = 1`
-- **AND** exactly one row SHALL exist in `session_summary_versions` for `<S>`, with `version = 1` and `content = 'A'`
-
-#### Scenario: A second curated write replaces the column and appends the second version
-
-- **GIVEN** session `<S>` with `summary = 'A'`, `summary_final = 1`, and one version row (`version = 1`, `content = 'A'`)
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'B', final: true })` is called
-- **THEN** `sessions.summary` SHALL be `'B'` (the published last-final-wins outcome is unchanged)
-- **AND** `session_summary_versions` for `<S>` SHALL hold two rows, `version = 1` with `content = 'A'` and `version = 2` with `content = 'B'`
-- **AND** the displaced text `'A'` SHALL be readable from the table after the write
-
-#### Scenario: A byte-identical curated re-write appends no row
-
-- **GIVEN** session `<S>` whose newest version row has `content = 'B'` and whose `summary` is `'B'`
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'B', final: true })` is called again
-- **THEN** the call SHALL succeed
-- **AND** the version count for `<S>` SHALL be unchanged
-- **AND** `sessions.summary` SHALL still equal the newest version's `content`
-
-#### Scenario: A raw per-turn sync appends no row
-
-- **GIVEN** an `active` session `<S>` with no curated summary
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: '<raw transcript>', final: false })` is called on three successive turns
-- **THEN** `sessions.summary` SHALL carry the last raw body, exactly as before this requirement
-- **AND** `session_summary_versions` SHALL hold zero rows for `<S>`
-
-#### Scenario: A blocked terminal write appends no row
-
-- **GIVEN** session `<S>` with `status = 'ended'`, `summary = 'curated'`, `summary_final = 1`, and one version row
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'later', final: true })` is called
-- **THEN** the column SHALL remain `'curated'` (the terminal no-replace deviation is unchanged)
-- **AND** the version count SHALL be unchanged — nothing was stored, so nothing is recorded
-
-#### Scenario: The first curated write over a raw body versions only the curated text
-
-- **GIVEN** session `<S>` with `summary = '<raw transcript>'` and `summary_final = 0`
-- **WHEN** a curated write with `final: true` stores `'Goal: …'`
-- **THEN** `session_summary_versions` SHALL hold exactly one row for `<S>`, `version = 1`, `content = 'Goal: …'`
-- **AND** the raw body SHALL NOT appear in the table
-
-#### Scenario: A rejected write leaves no version row
-
-- **GIVEN** an `active` session `<S>` owned by token `T`
-- **WHEN** a write is rejected for any of the reasons that already reject one (empty/whitespace summary, `NUL` byte, over `SUMMARY_MAX_CHARS`, cross-token mask, soft-deleted row)
-- **THEN** neither `sessions.summary` nor `session_summary_versions` SHALL be mutated
-
-#### Scenario: The stored value and the version row are the same string, and both are capped
-
-- **GIVEN** a curated write whose `summary` is exactly `SUMMARY_MAX_CHARS` characters, against a session with no stored curated summary (so no merge occurs)
-- **WHEN** it is applied
-- **THEN** `sessions.summary` and the appended version's `content` SHALL be the SAME string of that length
-- **AND** the cap SHALL have been applied to that string, from the single `SUMMARY_MAX_CHARS` constant
-
-#### Scenario: A merged write versions the merged document, not the argument
-
-- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1` and one version row
-- **WHEN** a curated write carries only `"## Files\nB2"`
-- **THEN** `sessions.summary` SHALL be `"## Goal\nA\n## Files\nB2"`
-- **AND** the appended version's `content` SHALL be that same merged document, never the `"## Files\nB2"` argument
-- **AND** the merged document SHALL have been checked against `SUMMARY_MAX_CHARS` before it was stored (see "Session summary writes MUST be capped at `SUMMARY_MAX_CHARS` on every write path that mutates `sessions.summary`")
-
-#### Scenario: A partial write that changes nothing appends no version row
-
-- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1` and one version row
-- **WHEN** a curated write carries only `"## Files\nB"`
-- **THEN** the merged document SHALL be byte-identical to the stored value
-- **AND** the version count for `<S>` SHALL be unchanged
-
-#### Scenario: A version row stores the title in effect, not the write's own argument
-
-- **GIVEN** session `<S>` with `summary = 'A'`, `title = 'Title A'`, one version row (`version = 1`, `content = 'A'`, `title = 'Title A'`)
-- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'B', final: true })` is called with NO `title` argument
-- **THEN** `sessions.title` SHALL remain `'Title A'`
-- **AND** the newly appended `version = 2` row SHALL have `title = 'Title A'` — the title in effect after the write, not `undefined`/`NULL`
-
-#### Scenario: A title-only write can leave the newest version's title behind the live column
-
-- **GIVEN** session `<S>` with one version row (`version = 1`, `content = 'A'`, `title = 'Title A'`)
-- **WHEN** `POST /:slug/sessions/:id/end` is called with `{ title: 'Title B', final: true }` and no `summary`
-- **THEN** `sessions.title` SHALL become `'Title B'`
-- **AND** no new version row SHALL be appended (no `summary` was stored)
-- **AND** the newest existing version row's `title` SHALL remain `'Title A'` until a later content-changing curated write appends a fresh row
-
-#### Scenario: `memory.session_get` omitted or zero `limit` is byte-identical to before this capability existed
-
-- **GIVEN** a session `<S>` with two version rows
-- **WHEN** `memory.session_get({ sessionId: <S> })` is called, and separately `memory.session_get({ sessionId: <S>, limit: 0 })`
-- **THEN** both responses SHALL be identical to each other and SHALL contain no `versions` field
-
-#### Scenario: `memory.session_get` with a positive `limit` returns recent versions, newest first, untruncated
-
-- **GIVEN** a session `<S>` with three version rows, each with `content` longer than `CONTEXT_SNIPPET_CHARS`
-- **WHEN** `memory.session_get({ sessionId: <S>, limit: 2 })` is called
-- **THEN** the response SHALL carry a `versions` array of exactly 2 entries, ordered newest first
-- **AND** each entry's `content` SHALL be the FULL stored value, not truncated to any snippet bound
-
-#### Scenario: `memory.session_get`'s `limit` is rejected above its maximum, not clamped
-
-- **WHEN** `memory.session_get({ sessionId: <S>, limit: SESSION_GET_VERSIONS_MAX + 1 })` is called
-- **THEN** the call SHALL be rejected by input validation before the handler runs
-- **AND** no partial or clamped result SHALL be returned
-
-### Requirement: `session_summary_versions` rows MUST be append-only, and removable only with their session
-
-A row in `session_summary_versions` SHALL never be `UPDATE`d and never `DELETE`d by application code. There is no edit verb, no restore verb, and no purge verb for a version row: its whole value is that it is a fact about what was stored at a moment, and a mutable version row records nothing.
-
-The one licensed physical removal is the session's own: the FK SHALL be declared `ON DELETE CASCADE`, so the operator-only escape hatch in "Sessions MAY be physically purged when empty" removes a session's version rows with it, in the same transaction and through the same statement. Two consequences are normative:
-
-- The purge path SHALL NOT gain a `DELETE` statement of its own. The cascade is the mechanism; the allow-listed `DELETE FROM sessions` in `db/repositories/agent-sessions-repository.ts` stays the only physical deletion of session-owned data.
-- A purged session's version rows are NOT recoverable from the journal, and this requirement SHALL NOT claim otherwise. `consolidation_ops` records identifiers, not payloads, so the `session_purge` op names the session ids and nothing more.
-
-The cascade is unreachable under today's predicate, and the reason is worth stating because it is what makes the cascade a safety net rather than a routine path: purge-eligibility requires the complete absence of summary text — "Sessions MAY be physically purged when empty" states clause 3 as _no summary text at all (curated or raw) was ever written_ — and a session with a version row has a non-NULL `summary` by the invariant above. A `NO ACTION` FK would instead abort the whole purge batch with `FOREIGN KEY constraint failed` if that ever ceased to hold, which converts an operator action into an unexplained failure.
-
-The invariants suite SHALL forbid, outside migrations, `db.delete(sessionSummaryVersions)`, raw `DELETE FROM session_summary_versions`, and any `UPDATE` of `content`, `title`, `version` or `session_id` on that table — in the same static-grep family that already pins `memory`, `sessions`, `prompts` and `memory_relations`. The table SHALL be classified as a SOURCE table in the shared schema inventory: it is the sole record of something an agent supplied and is reproducible from nothing.
-
-#### Scenario: A version row cannot be edited
-
-- **WHEN** the invariants suite scans non-test source files for an `UPDATE` of `session_summary_versions.content`, `.title`, `.version` or `.session_id`, or for a `DELETE` against that table
-- **THEN** the suite SHALL fail naming the offending file and line
-
-#### Scenario: Purging a session removes its version rows
-
-- **GIVEN** a purge-eligible session (no summary text, no `title_final`, no anchored rows, ended over the grace period ago) that — contrary to the predicate — also has version rows
-- **WHEN** `purgeEmpty({ adminBypass: true })` runs
-- **THEN** the session row SHALL be deleted, its version rows SHALL be deleted with it by the cascade, and the batch SHALL NOT fail
-- **AND** `PRAGMA foreign_key_check` SHALL report no violations afterwards
-
-#### Scenario: A session carrying a version row is not purge-eligible
-
-- **GIVEN** a session with at least one version row
-- **WHEN** the purge predicate is evaluated
-- **THEN** the session SHALL NOT be counted or deleted, because its `summary` is non-NULL
-
-#### Scenario: The table is classified in the schema inventory
-
-- **WHEN** the source/derived partition is asserted over the migrated schema
-- **THEN** `session_summary_versions` SHALL appear in `SOURCE_TABLES` and SHALL NOT appear in `DERIVED_TABLES`
-
 ### Requirement: A curated session-summary write MUST be merged section-wise with the stored summary
 
-A curated write — an incoming `final: true` write carrying a `summary` — against a session whose stored summary is itself curated (`summary IS NOT NULL` AND `summary_final = 1`) SHALL NOT replace the stored value as a whole. The value stored SHALL be the section-wise MERGE of the stored summary and the write. The merge SHALL be computed at the single site that folds per-field `final` precedence into an update `set` (see "Every curated session-summary write MUST append a version row in the same transaction", **One site**), and SHALL be attempted only for a value that precedence says will actually be stored — so a late write to a terminal row whose `summary_final` is already `1` remains the silent no-op it is today, rather than becoming a rejection.
+A curated write — an incoming `final: true` write carrying a `summary` — against a session whose stored summary is itself curated (`summary IS NOT NULL` AND `summary_final = 1`) SHALL NOT replace the stored value as a whole. The value stored SHALL be the section-wise MERGE of the stored summary and the write. The merge SHALL be computed at the single site that folds per-field `final` precedence into an update `set` — see "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`", which requires that place to be shared by all three write paths — and SHALL be attempted only for a value that precedence says will actually be stored, so a late write to a terminal row whose `summary_final` is already `1` remains the silent no-op it is today, rather than becoming a rejection.
 
 **What a section is.** A section SHALL begin at a line that is exactly a level-2 ATX Markdown heading — two `#` characters followed by at least one space or tab and then non-empty text — and SHALL extend to the line before the next such line, or to the end of the document. A heading of level 3 or deeper SHALL be body text of the enclosing section, because `### Sub-decision` under `## Decisions+why` is part of that section and not a peer of it. A line inside a fenced code block (a triple-backtick or `~~~` fence, opened and closed per CommonMark) SHALL NOT be treated as a heading: summaries carry diffs and shell snippets, and a fenced `## ` line read as a heading would split a code block into two independently-mergeable halves. Text preceding the first heading SHALL be a section whose key is empty. Line breaks SHALL be recognised as `\n` or `\r\n`; the merged document SHALL reuse its source lines verbatim, with no reflow and no normalisation of blank lines.
 
@@ -1435,6 +1265,8 @@ A curated write — an incoming `final: true` write carrying a `summary` — aga
 **Round-trip identity pins the join.** A section owns its heading line and every following line up to (not including) the next heading line, trailing blank lines included, and sections are re-joined with the line terminator that separated them in their source. Merging a document with ITSELF SHALL therefore yield that document byte-for-byte. This is the property that keeps a partial write from silently reformatting the sections it did not touch, and it is what makes "a merge that changes nothing stores the same bytes" hold rather than being approximately true.
 
 **A section's body is always its full current state.** What a curated write MAY omit is a SECTION; what it SHALL NOT carry is a partial section. This is the whole distinction between the partial write this requirement licenses and the delta framing prohibited by "A session summary MUST follow the documented structure": a partial write sends fewer sections, never a fragment of one.
+
+**Omission is the ONLY preservation mechanism, and there is no copy behind it.** A section the write carries is replaced outright and its previous bytes are not retained anywhere — see "A session summary MUST follow the documented structure", which states the accepted consequence. This is why the distinction between omitting a section and rewriting it thinly is normative rather than stylistic: the first costs nothing and the second is unrecoverable.
 
 **Empty is not absent.** A section the write carries with an empty body SHALL be stored as that heading with an empty body. No input SHALL remove a heading from the merged document — there is no delete verb, because a delete verb reachable by omission is what this requirement exists to remove.
 
@@ -1452,6 +1284,7 @@ A curated write — an incoming `final: true` write carrying a `summary` — aga
 - **GIVEN** session `<S>` storing `"## Goal\nShip X"` with `summary_final = 1`
 - **WHEN** a curated write carries `"## Goal\nShip Y"`
 - **THEN** the stored `summary` SHALL be `"## Goal\nShip Y"` and SHALL NOT contain `Ship X`
+- **AND** `Ship X` SHALL NOT be readable from any other server surface afterwards
 
 #### Scenario: A heading only the write carries is appended after the stored sections
 
@@ -1557,7 +1390,7 @@ The rule is a MATCHING rule, not a format validator. It never names `Goal`, neve
 
 `sessions` SHALL carry `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`, all `timestamp_ms`, all NULLABLE, all defaulting to NULL. `session-nudges` owns which write sets each and what the gate reads from them; this requirement owns their presence, their nullability, WHICH of them are monotone, and the migrations that add them.
 
-**NULL means "never", and it is a load-bearing value rather than a missing one.** Every row that predates the columns reads NULL on all four, and the gate is specified so that a NULL row behaves as a silent one until a client reports work. A NULL `last_turn_report_at` means "no turn has been reported yet", and the first report of a session therefore anchors on `started_at`. No backfill SHALL be performed. In particular `last_summary_at` SHALL NOT be inferred from `session_summary_versions.created_at`: a byte-identical curated re-write appends no version row (see "Every curated session-summary write MUST append a version row in the same transaction"), so the newest version's timestamp is not the moment the column was last written, and a later change retires that table.
+**NULL means "never", and it is a load-bearing value rather than a missing one.** Every row that predates the columns reads NULL on all four, and the gate is specified so that a NULL row behaves as a silent one until a client reports work. A NULL `last_turn_report_at` means "no turn has been reported yet", and the first report of a session therefore anchors on `started_at`. No backfill SHALL be performed, and the reason is now stronger than the one originally given: there is no column anywhere from which `last_summary_at` could be inferred. The candidate this requirement was written against, `session_summary_versions.created_at`, was already the wrong instant — a byte-identical curated re-write appended no row, so the newest version's timestamp was not the moment the column was last written — and the table itself is retired (`persistence`, "The `session_summary_versions` table MUST be dropped by a dedicated migration, with `0033` retained on disk"). What remains on the row is `started_at`, `ended_at` and `last_activity_at`, none of which is the moment a summary was written. A pre-existing row therefore reads NULL and the gate treats it as silent until a client reports work, exactly as the paragraph above specifies for NULL.
 
 **Three of them SHALL move forward only** — `last_work_at`, `last_summary_at` and `last_nudge_at`. A write SHALL NOT set one of those three to a value earlier than the value already stored. **No path SHALL clear ANY of the four to NULL once it holds a timestamp**, including `resume`, which clears `ended_at` and SHALL leave them alone: a session that is resumed keeps the moment its summary was last written, because that is still when it was last written.
 

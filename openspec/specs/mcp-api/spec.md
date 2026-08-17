@@ -3043,7 +3043,7 @@ One published statement about this tool remains true verbatim and SHALL NOT be w
 - **THEN** it SHALL instruct the model to copy carried-forward concrete facts (file paths with line numbers, measurements, test names, error strings) verbatim rather than paraphrase them
 - **AND** it SHALL satisfy `DESCRIPTION_MAX_LENGTH`
 
-### Requirement: The `instructions` block MUST state that a curated summary write replaces the stored value
+### Requirement: The `instructions` block MUST state what a curated summary write replaces and what it keeps
 
 `InitializeResult.instructions` is the only always-present surface on at least one client, re-injected into the system prompt every turn, so it is where a model that never reads a tool description still learns the protocol. Its `SUMMARIZE` line SHALL state that a curated write replaces the `##` sections it carries and KEEPS the ones it omits, that the summary to send is the current state, current first, and that its body uses exactly the six canonical `##` headings from `sessions`, each on its own line. Both halves of the first clause are required: the replacing half alone is the reading that makes a model retype a document it can no longer see.
 
@@ -3073,21 +3073,3 @@ The Hermes provider's `system_prompt_block()` is required elsewhere to stay byte
 
 - **WHEN** the Hermes provider's system-prompt block is compared to the server's base instructions text
 - **THEN** the two SHALL be byte-identical, so the clause is present in both
-
-### Requirement: The `memory.session_get` description MUST disambiguate `limit` and mark the read exceptional
-
-`memory.session_get` gains an optional `limit` argument bounding how many stored summary VERSIONS it also returns (see `sessions`). On a tool that returns a single object rather than a list, a bare `limit` invites the reading a caller would use for `memory.search`'s `limit` — narrowing the ONE summary it already returns, or its length. The description SHALL therefore state explicitly what `limit` bounds (the count of past summary versions returned, newest first, nothing else) and SHALL state that supplying it is EXCEPTIONAL: for recovering detail a later rewrite dropped, not a routine substitute for the current summary the tool already returns untruncated.
-
-This obligation SHALL be discharged within `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling"), measured from a real `tools/list` response, and SHALL NOT require raising the cap.
-
-#### Scenario: The description disambiguates what `limit` bounds
-
-- **WHEN** the `memory.session_get` description is read from a real `tools/list` response
-- **THEN** it SHALL state that `limit` bounds the number of summary VERSIONS returned
-- **AND** it SHALL NOT read as bounding the summary's length or any other size
-
-#### Scenario: The description marks the versions read as exceptional
-
-- **WHEN** the same description is inspected
-- **THEN** it SHALL state that supplying `limit` is for recovering displaced detail, not routine use
-- **AND** it SHALL satisfy `DESCRIPTION_MAX_LENGTH`
