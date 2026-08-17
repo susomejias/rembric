@@ -168,13 +168,15 @@ When `cwd` is missing or fails to parse, the placeholder SHALL be `"session · H
 
 ### Requirement: Every model-facing session-summary surface MUST teach the exact Markdown heading format
 
-The session-summary format SHALL be identical across the eight model-facing files pinned by the server invariant: `apps/server/src/mcp/instructions.ts`, `apps/server/src/mcp/server.ts`, `apps/plugin/scripts/prompt-nudge.sh`, `apps/plugin/scripts/stop-nudge.sh`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, and `apps/plugin/.hermes-plugin/__init__.py`. Each SHALL carry the canonical directive from `sessions`: exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`, in that order, as level-2 Markdown headings that belong on separate lines.
+The session-summary format SHALL be identical across the seven model-facing files pinned by the server invariant: `apps/server/src/mcp/instructions.ts`, `apps/server/src/mcp/server.ts`, `apps/server/src/services/session-nudge.ts`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, and `apps/plugin/.hermes-plugin/__init__.py`. Each SHALL carry the canonical directive from `sessions`: exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`, in that order, as level-2 Markdown headings that belong on separate lines. A surface that INTERPOLATES the shared `SUMMARY_SECTIONS` constant rather than embedding the literal SHALL satisfy this by that interpolation, which is stronger — the server's notice composer is the one surface that does so (`session-nudges`).
 
-This eight-file set reaches all five bundled clients through the existing sharing boundaries: Claude Code and Codex CLI share the bash hooks, opencode and Pi consume the JS/TS core and server tool metadata, and Hermes carries the fixture-pinned Python text. No client-specific wording SHALL be introduced. A file with several summary instruction paths SHALL use the canonical directive in every one of them; one passing occurrence SHALL NOT license another flat occurrence in the same file.
+**The set changed shape when the nudge gate moved to the server, and the membership rule is what makes that safe rather than the list.** Two bash surfaces left it — `apps/plugin/scripts/prompt-nudge.sh`, which no longer composes a reminder, and `apps/plugin/scripts/stop-nudge.sh`, which no longer exists — and one server surface joined it, `apps/server/src/services/session-nudge.ts`. Membership is "emits model-facing text that asks for a session summary", and the invariant asserts its own completeness from a repository-wide search, so a surface that keeps the directive but leaves the list fails the test rather than escaping it.
 
-#### Scenario: All eight surfaces carry the exact heading directive
+This seven-file set reaches all five bundled clients through the existing sharing boundaries: Claude Code and Codex CLI reach it through the bash hook that survives plus the server-composed notice, opencode and Pi consume the JS/TS core and server tool metadata, and Hermes carries the fixture-pinned Python text. No client-specific wording SHALL be introduced. A file with several summary instruction paths SHALL use the canonical directive in every one of them; one passing occurrence SHALL NOT license another flat occurrence in the same file.
 
-- **WHEN** the invariant reads the eight tracked model-facing files
+#### Scenario: All seven surfaces carry the exact heading directive
+
+- **WHEN** the invariant reads the seven tracked model-facing files
 - **THEN** each SHALL carry the six canonical `##` headings in order and the separate-line instruction
 - **AND** none SHALL carry the bare flat fragment `Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files`
 
@@ -191,79 +193,85 @@ This eight-file set reaches all five bundled clients through the existing sharin
 
 ### Requirement: The per-turn save/summary nudge text MUST be a calibrated imperative shared byte-identical across every client
 
-The save and session-summary nudge strings emitted per-turn by every client — Claude Code and Codex via `apps/plugin/scripts/prompt-nudge.sh`, opencode and Pi via the shared JS/TS module `apps/plugin/bin/rembric-plugin-core.mjs`, Hermes via `prefetch()` (`apps/plugin/.hermes-plugin/__init__.py`) — SHALL be sourced from the single shared contract `apps/plugin/test/nudge-fixtures.json` (`save`, `saveCore`, `summaryCore`, `summary`) and SHALL be byte-identical across clients. Bash and the shared JS/TS module embed the `rembric:`-prefixed `summary`/`save` verbatim; Hermes wraps `saveCore`/`summaryCore` in `<memory-hint>…</memory-hint>` per its established convention. No individual JS/TS client SHALL carry its own copy of these strings — there is one JS/TS implementation and every JS/TS client imports it, so a newly added client is byte-identical by construction rather than by review.
+The reminder that a session owes a curated summary SHALL be composed by the SERVER and printed verbatim by the client (`session-nudges`). No client SHALL declare a reminder string of its own, and no client SHALL hold a cadence constant, a turn counter or a modulo for this purpose. Byte-identity across the five clients is therefore a structural property rather than a fixture assertion: there is one implementation, in one language, and a client added later inherits it by printing what it is handed.
 
-The shared text SHALL be phrased as a calibrated imperative:
+The strings that REMAIN client-composed SHALL continue to be sourced from the single shared contract `apps/plugin/test/nudge-fixtures.json` and SHALL be byte-identical across clients, on the discipline this requirement has always imposed. Those strings are the recall line, the first-prompt relevance line, the session-start line, the resumed-read line, the post-compaction block, the session-id line, and the **session opening** (`session-nudges`, "The session opening MUST ask for a title and `## Goal` before the turn ends, on every client"). Bash and the shared JS/TS module embed the `rembric:`-prefixed value verbatim; Hermes wraps the unprefixed `…Core` variant in `<memory-hint>…</memory-hint>` per its established convention. No individual JS/TS client SHALL carry its own copy — there is one JS/TS implementation and every JS/TS client imports it.
 
-- It SHALL direct the model to curate (`memory.session_summary`) / save (`memory.save`) as a required action when it applies, not a passive suggestion.
-- It SHALL condition that action on real, memorable work having happened (a decision, fix, discovery, or files changed), preserving the model's discretion to skip trivial turns with nothing worth persisting — so the imperative does not induce vacuous summaries or noise saves.
-- It SHALL NOT change the firing cadence, which is governed separately (summary on turn 1 and every `SUMMARY_NUDGE_EVERY`; save every `SAVE_NUDGE_EVERY`) and is unchanged by this requirement.
+**The `save`, `saveCore`, `summary` and `summaryCore` keys SHALL be removed from the fixture contract**, together with `endOfTurnRubric`. They were the cross-language pins for a text that no client composes any more, and a fixture that pins a string nobody emits is a test that cannot fail for the right reason.
 
-**The summary string SHALL carry the canonical Markdown format but SHALL NOT carry the write's replace-and-rewrite semantics.** Formatting is needed at every curation prompt because the old inline `Goal · … · Files` list caused models to store one paragraph; replacement semantics remain on the longer tool, initialize, compaction, and end-of-turn surfaces. With the exact format directive the string measures 382 UTF-8 bytes against a 400-byte per-line cap. The divergent-counter firing turn measures approximately 903 bytes and is capped at 960; the ten-turn amortised cost measures approximately 42.6 tokens/turn and remains within the existing 45-token ceiling. These figures SHALL be re-measured from the final fixture in the same commit as the wording.
+The server-composed text SHALL keep the calibration this requirement established, restated where it now lives:
 
-**`initialize.instructions` SHALL reclaim prose rather than raise its cap.** Blind substitution produces a binding variant of 1113 characters against 1000. The implementation SHALL preserve the 1000-character ceiling and every protocol obligation while shortening surrounding prose; no claimed headroom from the pre-format wording remains.
+- It SHALL direct the model to curate as a required action when it applies, not as a passive suggestion.
+- It SHALL preserve the model's discretion to skip: the notice states explicitly that a model with nothing to add should not call the tool. This is what stops a periodic reminder from manufacturing vacuous writes, and it SHALL NOT be dropped in favour of an unconditional imperative.
+- It SHALL carry the canonical Markdown format only where the model needs it — that is, when nothing is stored. When sections ARE stored, the notice lists them by name, which teaches the same structure from the session's own state and costs fewer bytes.
+- Its firing is governed by `session-nudges` and SHALL NOT be restated here. The former parenthetical — "summary on turn 1 and every `SUMMARY_NUDGE_EVERY`; save every `SAVE_NUDGE_EVERY`" — describes a mechanism that no longer exists.
 
-**The summary string SHALL NOT assert, or deny, that a summary already exists for the session.** One string has to be true in both states, and a claim about state is the one thing a state-blind reminder cannot make.
+**The notice MAY assert what is stored, and that is a change of position rather than an oversight.** This requirement previously forbade any claim about whether a summary exists, on the ground that "one string has to be true in both states, and a claim about state is the one thing a state-blind reminder cannot make". The reminder is no longer state-blind: it is composed by the process that holds the state, per session, at the moment it is emitted. The prohibition applied to a shared static string and SHALL continue to apply to every client-composed line; it SHALL NOT be read as forbidding the server from describing the row it just read.
 
-#### Scenario: Shared nudge text is imperative and work-conditioned
+#### Scenario: No client composes a cadence-driven reminder
 
-- **WHEN** the `nudge-fixtures.json` `summary` and `save` strings are inspected
-- **THEN** each SHALL read as a directive to act (imperative) AND SHALL reference the real-work condition (decision / fix / discovery / files changed), not merely an unconditional "call X now"
+- **WHEN** every client's source is read at HEAD
+- **THEN** none SHALL declare a string directing the model to call `memory.session_summary` on a cadence
+- **AND** none SHALL declare a modulo, counter or interval constant governing such a string
 
-#### Scenario: Nudge text stays byte-identical across clients
+#### Scenario: The remaining fixtures still lock across languages
 
-- **WHEN** `nudge-fixtures.test.ts` compares the bash, shared JS/TS, and Python nudge sources against `nudge-fixtures.json`
-- **THEN** all SHALL match the shared fixture (Python's `_SUMMARY_HINT` SHALL equal `<memory-hint>${summaryCore}</memory-hint>`, `_SAVE_HINT` SHALL equal `<memory-hint>${saveCore}</memory-hint>`; bash turn-1 output SHALL equal `summary`; bash turn-5 output SHALL equal `save`)
+- **WHEN** `nudge-fixtures.test.ts` compares the bash, shared JS/TS and Python sources against `nudge-fixtures.json`
+- **THEN** every remaining agent-facing key SHALL match across the clients that emit it
+- **AND** Python's `…_HINT` values SHALL equal `<memory-hint>${…Core}</memory-hint>`
 - **AND** the JS/TS arm SHALL read the shared module, not any individual client file
 
-#### Scenario: A client carrying its own nudge copy fails the build
+#### Scenario: The retired keys are gone
 
-- **GIVEN** a JS/TS client file declares its own nudge string constant instead of importing it
+- **WHEN** `apps/plugin/test/nudge-fixtures.json` is read at HEAD
+- **THEN** it SHALL NOT contain `save`, `saveCore`, `summary`, `summaryCore` or `endOfTurnRubric`
+
+#### Scenario: The notice preserves the model's discretion to skip
+
+- **WHEN** the server-composed notice is inspected
+- **THEN** it SHALL state that a model with nothing to add should not call the tool
+- **AND** it SHALL NOT read as an unconditional instruction to write on every emission
+
+#### Scenario: A client that carries its own reminder copy fails the build
+
+- **GIVEN** a JS/TS client file declares a local reminder string constant
 - **WHEN** `pnpm test` runs
 - **THEN** the single-implementation invariant SHALL fail, naming the offending file and line
 
-#### Scenario: Cadence constants are unchanged
-
-- **WHEN** the cadence constants are inspected across clients (`SUMMARY_NUDGE_EVERY`, `SAVE_NUDGE_EVERY`, and the `turn === 1` summary trigger)
-- **THEN** they SHALL be unchanged by this requirement — only the sourcing mechanism changes
-
-#### Scenario: The summary string is unchanged by the replace-and-rewrite contract
-
-- **WHEN** the `summary` and `summaryCore` fixtures are inspected after the Markdown-format change
-- **THEN** they SHALL still omit replace-and-rewrite semantics while requiring the canonical headings on separate lines
-- **AND** the prefixed `summary` fixture SHALL be at most 400 UTF-8 bytes
-- **AND** every published aggregate figure that contains this string SHALL be re-measured
-
-#### Scenario: The summary string makes no claim about whether a summary exists
-
-- **WHEN** the string is inspected
-- **THEN** it SHALL neither assert nor deny that the session already carries a curated summary
-
 ### Requirement: Clients that know their own session id MUST surface it per-turn as a standalone nudge
 
-The server cannot resolve which of several concurrently-active sessions an implicit MCP write belongs to (see the `sessions` capability's `findActiveForTransport` never-guess contract). Clients that DO know their own current session id at nudge-emission time — Claude Code/Codex (`session_id` from hook stdin), opencode (`input.sessionID`), Hermes (`session_id` from the `prefetch` kwarg, falling back to `self._session_id`) — SHALL surface it to the model as a separate, standalone nudge line whenever the save or summary nudge fires (same turn, emitted first), so the model can pass it explicitly to the tools named in the `mcp-api` `sessionId` reinforcement requirement.
+The server cannot resolve which of several concurrently-active sessions an implicit MCP write belongs to (see the `sessions` capability's `findActiveForTransport` never-guess contract). Clients that DO know their own current session id at emission time — Claude Code/Codex (`session_id` from hook stdin), opencode (`input.sessionID`), Hermes (`session_id` from the `prefetch` kwarg, falling back to `self._session_id`), Pi (`ctx.sessionManager.getSessionId()`) — SHALL surface it to the model as a separate, standalone line **whenever any line directing a write is emitted on that turn**, emitted first, so the model can pass it explicitly to the tools named in the `mcp-api` `sessionId` reinforcement requirement.
 
-- The line SHALL be sourced from the shared template `apps/plugin/test/nudge-fixtures.json`'s `sessionIdTemplate`/`sessionIdCoreTemplate` (a `{{SESSION_ID}}` placeholder interpolated with the real value), byte-identical across clients modulo that interpolation — the same lock-step discipline as the save/summary nudge text.
-- The line SHALL be OMITTED when no session id is known (e.g. the host provided none) — never emit a placeholder or invented id.
-- The line SHALL NOT change the save/summary nudge cadence or text; it is purely additive.
+"Any line directing a write" covers both the server-composed stretch-close notice (`session-nudges`) and the client-composed session opening. The former trigger — "whenever the save or summary nudge fires" — named two client-composed lines that no longer exist; restating the rule over the surfaces that replaced them is what keeps it enforceable.
 
-#### Scenario: sessionId nudge fires alongside the save nudge
+- The line SHALL be sourced from the shared template `apps/plugin/test/nudge-fixtures.json`'s `sessionIdTemplate`/`sessionIdCoreTemplate` (a `{{SESSION_ID}}` placeholder interpolated with the real value), byte-identical across clients modulo that interpolation.
+- **It SHALL stay client-composed rather than being folded into the server's response**, even though the server has the id — the report carried it. Two reasons: the line must also accompany the client-composed session opening, which the server knows nothing about; and its byte-identity across five clients is an existing, passing assertion with nothing to gain from moving.
+- The line SHALL be OMITTED when no session id is known — never a placeholder, never an invented id.
+- The line SHALL NOT alter the text or the firing of the line it accompanies; it is purely additive.
 
-- **GIVEN** a client that knows its session id
-- **WHEN** the save nudge fires (turn is a multiple of `SAVE_NUDGE_EVERY`)
-- **THEN** the sessionId nudge line SHALL be emitted immediately before the save nudge line, with the real session id interpolated into `sessionIdTemplate`
+#### Scenario: sessionId line accompanies the server-composed notice
 
-#### Scenario: sessionId nudge fires alongside the summary nudge
+- **GIVEN** a client that knows its session id and holds cached notice lines
+- **WHEN** it prints them at the start of the next turn
+- **THEN** the sessionId line SHALL be emitted immediately before them, with the real id interpolated
 
-- **GIVEN** a client that knows its session id
-- **WHEN** the summary nudge fires (turn 1 or a multiple of `SUMMARY_NUDGE_EVERY`)
-- **THEN** the sessionId nudge line SHALL be emitted immediately before the summary nudge line
+#### Scenario: sessionId line accompanies the session opening
 
-#### Scenario: sessionId nudge is omitted when the session id is unknown
+- **GIVEN** a client on the first turn of a newly created session
+- **WHEN** the opening line is emitted
+- **THEN** the sessionId line SHALL be emitted immediately before it
 
-- **GIVEN** a client turn where no session id could be resolved (e.g. Claude Code/Codex with unparseable hook stdin, or Hermes with no `initialize()` call yet)
-- **WHEN** the save or summary nudge fires
-- **THEN** the sessionId nudge line SHALL NOT be emitted — only the save/summary nudge line(s) appear, unchanged from before this requirement
+#### Scenario: sessionId line is omitted when the id is unknown
+
+- **GIVEN** a client turn where no session id could be resolved
+- **WHEN** any write-directing line is emitted
+- **THEN** the sessionId line SHALL NOT be emitted, and the other line(s) SHALL appear unchanged
+
+#### Scenario: The sessionId line is not emitted on a turn with nothing to accompany
+
+- **GIVEN** a client turn on which no notice was cached and no opening applies
+- **WHEN** the turn starts
+- **THEN** the sessionId line SHALL NOT be emitted — it accompanies a write-directing line and is never emitted alone
 
 ### Requirement: Per-client lifecycle mapping MUST be honoured
 
@@ -273,33 +281,34 @@ The cross-client write contract maps lifecycle events to HTTP endpoints as follo
 | ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
 | Claude Code | `SessionStart` (`startup\|resume\|clear\|fork`)                         | `POST /sessions {id, cwd, agent}` (placeholder title) **then `POST /sessions/<id>/resume`**                                                                  | n/a     |
 | Claude Code | `SessionStart` (`compact`)                                              | `POST /sessions {id, cwd, agent}` (idempotent re-ensure) **then `POST /sessions/<id>/resume`** + stdout instruction                                          | n/a     |
-| Claude Code | `UserPromptSubmit`                                                      | none (stdout nudges only)                                                                                                                                    | n/a     |
-| Claude Code | `Stop` (every turn)                                                     | `POST /summary {summary, title}` — `final` OMITTED                                                                                                           | absent  |
+| Claude Code | `UserPromptSubmit`                                                      | none (stdout lines only — local lines plus the cached notice)                                                                                                | n/a     |
+| Claude Code | `Stop` (every turn)                                                     | `POST /sessions/<id>/turn {usedTools, title?}` — the response's `lines` are cached, never printed here                                                       | n/a     |
 | Claude Code | `PreCompact`                                                            | `POST /summary {summary, title, final:false}`, or `{}` when no transcript                                                                                    | false   |
 | Claude Code | `PostCompact`                                                           | `POST /summary {summary, final:false}`, or `{}` when no compaction summary                                                                                   | false   |
 | Claude Code | `SessionEnd`                                                            | `POST /end {summary, title, final:false}`, or `{}` when no transcript                                                                                        | false   |
 | Codex CLI   | `SessionStart` (`startup\|resume\|clear`)                               | `POST /sessions {id, cwd, agent}` **then `POST /sessions/<id>/resume`**                                                                                      | n/a     |
 | Codex CLI   | `SessionStart` (`compact`)                                              | `POST /sessions {id, cwd, agent}` (idempotent re-ensure) **then `POST /sessions/<id>/resume`** + stdout instruction                                          | n/a     |
-| Codex CLI   | `UserPromptSubmit`                                                      | none (stdout nudges only)                                                                                                                                    | n/a     |
-| Codex CLI   | `Stop` (every turn)                                                     | `POST /summary {summary, title, final:false}` + stdout `'{}'`                                                                                                | false   |
+| Codex CLI   | `UserPromptSubmit`                                                      | none (stdout lines only — local lines plus the cached notice)                                                                                                | n/a     |
+| Codex CLI   | `Stop` (every turn)                                                     | `POST /sessions/<id>/turn {usedTools, title?}` + stdout `'{}'` — the response's `lines` are cached, never printed here                                       | n/a     |
 | Codex CLI   | `PreCompact`                                                            | `POST /summary {summary, title, final:false}`, or `{}` when no transcript                                                                                    | false   |
 | Codex CLI   | `PostCompact`                                                           | `POST /summary {summary, final:false}`, or `{}` when no compaction summary                                                                                   | false   |
 | Codex CLI   | `SessionEnd` (main thread only)                                         | `POST /end {summary, title, final:false}`, or `{}` when no transcript                                                                                        | false   |
 | Hermes      | `initialize`                                                            | `POST /sessions {id, cwd, agent}` **then `POST /sessions/<id>/resume`**                                                                                      | n/a     |
 | Hermes      | `on_pre_compress(messages)`                                             | `POST /summary {summary, final:false}`                                                                                                                       | false   |
 | Hermes      | `on_session_switch(new_id, parent_id)`                                  | `POST /end old` (only when the id actually changed) `+ POST /sessions new` **then `POST /sessions/new/resume`** on the first ensure of `new` in this process | n/a     |
+| Hermes      | `sync_turn(user, assistant, **kwargs)`                                  | `POST /sessions/<id>/turn {usedTools, title?}` on a background thread; the response's `lines` are cached for the next `prefetch()`                           | n/a     |
 | Hermes      | `on_session_end(messages)`                                              | `POST /end {summary, title, final:false}`                                                                                                                    | false   |
 | opencode    | `session.created` (not a sub-agent)                                     | `POST /sessions {id, cwd, agent}` **then `POST /sessions/<id>/resume`**                                                                                      | n/a     |
-| opencode    | `chat.message`                                                          | `POST /sessions {id, cwd, agent}` + resume on the first ensure of the id in this process; no-op afterwards; + debounced `/summary`                           | false   |
-| opencode    | `session.idle`                                                          | debounced `POST /summary {summary, title?, final:false}`                                                                                                     | false   |
+| opencode    | `chat.message`                                                          | `POST /sessions {id, cwd, agent}` + resume on the first ensure of the id in this process; no-op afterwards; + cached notice and local lines pushed           | n/a     |
+| opencode    | `session.idle`                                                          | `POST /sessions/<id>/turn {usedTools, title?}`; the response's `lines` are cached for the next `chat.message`                                                | n/a     |
 | opencode    | `session.compacted`                                                     | `POST /summary {summary, title?, final:false}`                                                                                                               | false   |
-| opencode    | `experimental.session.compacting`                                       | `POST /sessions {id, cwd, agent}` + resume on the first ensure of the id in this process; no-op afterwards; + injected context                               | n/a     |
+| opencode    | `experimental.session.compacting`                                       | `POST /sessions {id, cwd, agent}` + resume on the first ensure of the id in this process; + injected context                                                 | n/a     |
 | opencode    | `session.deleted`                                                       | none (drops the in-memory accumulator only)                                                                                                                  | n/a     |
 | opencode    | `server.instance.disposed`                                              | fire-and-forget `POST /summary {summary, title?, final:false}` per known session — never `/end`                                                              | false   |
 | Pi          | `session_start`                                                         | none (creates the protocol client and discovers tools over MCP)                                                                                              | n/a     |
-| Pi          | `before_agent_start`                                                    | `POST /sessions {id, cwd, agent}` **then `POST /sessions/<id>/resume`** on the first ensure of the id in this process; + injected nudges                     | n/a     |
-| Pi          | `message_end`                                                           | none (feeds the in-memory accumulator only)                                                                                                                  | n/a     |
-| Pi          | `agent_settled`                                                         | debounced `POST /summary {summary, title?, final:false}`                                                                                                     | false   |
+| Pi          | `before_agent_start`                                                    | `POST /sessions {id, cwd, agent}` **then `POST /sessions/<id>/resume`** on the first ensure of the id in this process; + cached notice and local lines       | n/a     |
+| Pi          | `message_end`                                                           | none (feeds the in-memory accumulator and the turn's tool observation only)                                                                                  | n/a     |
+| Pi          | `agent_settled`                                                         | `POST /sessions/<id>/turn {usedTools, title?}`; the response's `lines` are cached for the next `before_agent_start`                                          | n/a     |
 | Pi          | `session_shutdown` (`quit\|new\|resume\|fork`, not a self-resume)       | `POST /end {summary, title, final:false}`, or `{}` when the accumulator is empty                                                                             | false   |
 | Pi          | `session_shutdown` (`reload`, a self-resume, or an unrecognised reason) | `POST /summary {summary, title?, final:false}` — never `/end`                                                                                                | false   |
 | Any (model) | `memory.session_summary({summary, title?})` (MCP)                       | internal write (no HTTP) with `final:true`                                                                                                                   | true    |
@@ -314,16 +323,21 @@ Three properties make the unconditional form the correct one rather than a short
 
 The rule replaces a recovery two clients already attempt and provably cannot perform: `post-compact.sh`'s ensure carries the comment "covers the case where the row was abandoned by the stale sweep between the pre-compact moment and the post-compact resume — re-create silently", and the ensure path returns a terminal row untouched (`http-api` capability). Before this rule that comment described behaviour that did not exist.
 
-Six rows are load-bearing and easy to get wrong:
+**Every client SHALL issue exactly one `POST /api/<slug>/sessions/<id>/turn` per finished turn**, on its own end-of-turn event, and SHALL NOT issue it on a start-of-turn event. That is the row that replaces the per-turn `POST /summary` the shell clients previously performed on `Stop`, and it carries the obligations that write used to carry: it is what advances `last_activity_at`, so a live session is not retired by the stale-active sweep, and it is what delivers the provisional title. The clients that also flush a transcript at a MILESTONE — opencode's `session.compacted` and dispose, Pi's shutdown, Hermes's `on_pre_compress` and `on_session_end`, the shell clients' `PreCompact` and `SessionEnd` — keep those rows unchanged; only the PER-TURN raw sync is replaced.
 
-- **Claude Code `Stop` omits `final` entirely** — it is never sent as `true` and never sent as `false`. Codex's `Stop` sends `final:false` explicitly, because Codex's `Stop` is per-turn and the row must stay `active` for the next turn. `apps/plugin/scripts/stop-sync.sh` selects between the two from its agent-name argument.
-- **`SessionStart (compact)` does make HTTP calls on both clients.** `post-compact.sh` re-POSTs `/sessions` and then `/sessions/<id>/resume` before emitting its stdout block. Its stdout block is additionally injected into the resumed model's context.
-- **Claude Code's `SessionStart` matcher group includes `fork`.** A forked session (`--fork-session` with `--resume`/`--continue`, the `/fork` background copy, or `/branch`) reports `source: "fork"` from v2.1.214 onward and carries a NEW session id, so it is a new session that must be registered. A matcher group that omits `fork` registers no row and emits no nudge for the entire forked conversation. Codex's `SessionStart` has no `fork` source — its documented values are `startup`, `resume`, `clear` and `compact` — so its matcher group SHALL NOT declare one, and the asymmetry is the hosts', not ours.
-- **Codex CLI DOES have `SessionEnd`.** It runs for the main thread when an open conversation is archived or deleted, when Codex closes normally, or after 30 minutes idle with no connected client, and it does not run for subagents. It carries a `reason` field whose only current value is `other`. Its time budget is the tightest of any hook on either host: **1 second by default, 3 seconds maximum**, where every other Codex hook defaults to 600. A handler that does not declare `"timeout": 3` is killed after one second, and a POST allowed to consume that whole budget leaves nothing for reading the transcript or emitting the failure diagnostic. The budget is a property of the event, so it is specified here and enforced in `codex-distribution`.
-- **Pi's two `session_shutdown` rows are selected by the event's `reason`, and the split is the whole point.** `reason: "reload"` is the same session continuing; ending there costs `session_id = NULL` on every later write until the next `before_agent_start` ensure-and-resume repairs it, and there is no reason to incur a repairable fault when the correct branch is free. A `resume` that names the session file already open is the same hazard under a different reason. The gate and its self-resume guard are specified in the `pi-plugin` capability; this table records which endpoint each branch reaches. Pi is the only client that chooses its shutdown endpoint at runtime.
+**"Finished" is load-bearing in that sentence, and exactly one client cannot satisfy it on every turn.** Hermes reports from `sync_turn`, which its host does not call at all on an interrupted turn — the memory fan-out returns first. So a Hermes turn the user interrupts yields no report and therefore no `last_activity_at` stamp. That deviation is permitted, is specified with its consequence in `hermes-agent-plugin`, and SHALL NOT be worked around client-side by reporting from a start-of-turn handler or a timer: a report is a statement that a turn finished, and issuing one for a turn that did not would corrupt the only signal this endpoint carries. Any client added later that cannot observe turn completion SHALL be documented the same way rather than made to approximate it.
+
+Seven rows are load-bearing and easy to get wrong:
+
+- **The shell clients no longer POST a transcript on `Stop`.** `apps/plugin/scripts/stop-sync.sh` is deleted. The per-turn body it sent was re-derived from a JSONL file the host already persists and which `pre-compact.sh` and `session-end.sh` re-read anyway; what is lost is the case of a session hard-killed between two terminal events, which now stores nothing in Rembric rather than the previous turn's transcript. That exposure is a SIGKILL, and it is the same class of loss this capability already documents as out of scope for opencode and Pi.
+- **The in-process clients' transcript accumulator and terminal flushes are UNCHANGED.** opencode's dispose flush and Pi's shutdown POST hold the only copy of those sessions' transcripts, and both convergence guarantees in this capability rest on them. The turn report does not replace them and SHALL NOT be read as doing so.
+- **`SessionStart (compact)` does make HTTP calls on both shell clients.** `post-compact.sh` re-POSTs `/sessions` and then `/sessions/<id>/resume` before emitting its stdout block, which is additionally injected into the resumed model's context.
+- **Claude Code's `SessionStart` matcher group includes `fork`.** A forked session reports `source: "fork"` from v2.1.214 onward and carries a NEW session id, so it is a new session that must be registered. Codex's `SessionStart` has no `fork` source — its documented values are `startup`, `resume`, `clear` and `compact` — so its matcher group SHALL NOT declare one, and the asymmetry is the hosts', not ours.
+- **Codex CLI DOES have `SessionEnd`.** It runs for the main thread when an open conversation is archived or deleted, when Codex closes normally, or after 30 minutes idle with no connected client, and it does not run for subagents. Its time budget is the tightest of any hook on either host: **1 second by default, 3 seconds maximum**, where every other Codex hook defaults to 600. A handler that does not declare `"timeout": 3` is killed after one second, and a POST allowed to consume that whole budget leaves nothing for reading the transcript or emitting the failure diagnostic.
+- **Pi's two `session_shutdown` rows are selected by the event's `reason`, and the split is the whole point.** `reason: "reload"` is the same session continuing; ending there costs `session_id = NULL` on every later write until the next `before_agent_start` ensure-and-resume repairs it. A `resume` that names the session file already open is the same hazard under a different reason. Pi is the only client that chooses its shutdown endpoint at runtime.
 - **opencode's dispose row is fire-and-forget and never `/end`, by decision rather than omission.** The host kills the subprocess before async handlers settle, so an awaited call there would frequently not land and no requirement could promise `ended`. An opencode row therefore stays `active` until `abandonStale` flips it.
 
-Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. opencode does not, for the reason above, and its rows reach `abandoned` through the sweep. All five POST the resume.
+Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. opencode does not, for the reason above, and its rows reach `abandoned` through the sweep. All five POST the resume, and all five POST the turn report.
 
 #### Scenario: Every client has a row and no client has an undocumented lifecycle write
 
@@ -331,6 +345,26 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 - **THEN** each of the five clients SHALL have at least one row
 - **AND** every lifecycle handler in each client that issues an HTTP request SHALL correspond to a row naming that endpoint
 - **AND** a handler that issues no request SHALL either be absent from the table or carry `none` in the HTTP-call column
+
+#### Scenario: Every client reports exactly one turn per turn
+
+- **GIVEN** any of the five clients driven through three consecutive turns, all of which the user allows to finish
+- **WHEN** the requests it issues are recorded
+- **THEN** exactly three `POST /api/<slug>/sessions/<id>/turn` requests SHALL have been made
+- **AND** none SHALL have been made from a start-of-turn event
+
+#### Scenario: A turn the host never finishes is not reported, and is not faked
+
+- **GIVEN** a Hermes session in which the middle of three turns is interrupted
+- **WHEN** the requests are recorded
+- **THEN** exactly two reports SHALL have been made
+- **AND** no report SHALL have been synthesised for the interrupted turn from a start-of-turn handler, a timer, or any other substitute
+
+#### Scenario: No shell client POSTs a transcript per turn
+
+- **WHEN** `apps/plugin/scripts/` is read at HEAD
+- **THEN** `stop-sync.sh` SHALL NOT exist
+- **AND** no script wired to the `Stop` event SHALL POST to `/summary`
 
 #### Scenario: Every client resumes exactly once per session id per process
 
@@ -354,15 +388,22 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 - **THEN** the client SHALL emit exactly one stderr diagnostic naming the path and status, per this capability's failed-POST requirement
 - **AND** the host session SHALL continue, and the hook or handler SHALL exit successfully
 
+#### Scenario: A failed turn report degrades to a diagnostic, never to an aborted session
+
+- **GIVEN** a client whose server returns `404` for the turn report (an old server that does not implement the route)
+- **WHEN** the end-of-turn handler runs
+- **THEN** the client SHALL emit exactly one stderr diagnostic naming the path and status, per this capability's failed-POST requirement
+- **AND** it SHALL cache no lines and SHALL NOT clear any pending ones
+- **AND** the host session SHALL continue, and the hook or handler SHALL exit successfully
+
 #### Scenario: Claude Code hooks.json contains the mapped events
 
 - **WHEN** `apps/plugin/hooks/hooks.json` is loaded
 - **THEN** the `hooks` object SHALL contain entries for exactly these six event types and no others: `SessionStart`, `UserPromptSubmit`, `SessionEnd`, `PreCompact`, `PostCompact`, `Stop`
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, `startup|resume|clear|fork` and `compact`
 - **AND** `UserPromptSubmit` SHALL declare exactly two entries, neither carrying a `matcher` key
-- **AND** `Stop` SHALL declare exactly two entries
-- **AND** the six event types SHALL carry nine handler entries in total
-- **AND** the FIRST `Stop` handler (the raw sync) SHALL declare `"async": true` and the SECOND (the end-of-turn reminder) SHALL NOT declare `async` — an asynchronous handler is fire-and-forget by the host's contract and cannot contribute feedback to the turn
+- **AND** `Stop` SHALL declare exactly ONE entry, invoking `stop-report.sh`, and it SHALL NOT declare `async` — an asynchronous handler is fire-and-forget by the host's contract and could not deliver a response the next turn depends on
+- **AND** the six event types SHALL carry eight handler entries in total
 - **AND** the `hooks` object SHALL NOT contain a `PostToolUse` entry
 
 #### Scenario: Codex hooks.codex.json contains the mapped events
@@ -371,8 +412,8 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 - **THEN** the `hooks` object SHALL contain entries for exactly these six event types and no others: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, `startup|resume|clear` and `compact` — Codex has no `fork` source, so unlike Claude Code's manifest this group SHALL NOT declare one
 - **AND** `UserPromptSubmit` SHALL declare exactly two entries, neither carrying a `matcher` key
-- **AND** `Stop` SHALL declare exactly two entries
-- **AND** the six event types SHALL carry nine handler entries in total
+- **AND** `Stop` SHALL declare exactly ONE entry
+- **AND** the six event types SHALL carry eight handler entries in total
 - **AND** the `SessionEnd` entry SHALL declare `"timeout": 3`, the documented maximum for this one event, and SHALL carry no `matcher` key
 - **AND** the `Stop` script SHALL emit `'{}'` to stdout (Codex requires JSON on Stop stdout — plain text is invalid per docs)
 
@@ -383,17 +424,10 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 - **AND** `hooks.json`'s `PreCompact` entry SHALL invoke it with the agent argument `claude-code`
 - **AND** `hooks.codex.json`'s `PreCompact` entry SHALL invoke it with the agent argument `codex-cli`
 
-#### Scenario: Claude Code `Stop` never marks the session curated
-
-- **GIVEN** a Claude Code session whose `summary_final` is `false`
-- **WHEN** the `Stop` hook fires and POSTs `/summary`
-- **THEN** the request body SHALL NOT contain a `final` key
-- **AND** the row's `summary_final` and `title_final` SHALL remain `false`
-
 #### Scenario: Hermes plugin.yaml declares the lifecycle methods
 
 - **WHEN** `apps/plugin/.hermes-plugin/plugin.yaml` is loaded
-- **THEN** the `hooks` array SHALL contain `on_pre_compress`, `on_session_end`, and `on_session_switch`
+- **THEN** the `hooks` array SHALL contain `on_pre_compress`, `on_session_end`, `on_session_switch` and `sync_turn`
 
 ### Requirement: Plugin-injected protocol nudges MUST surface the summary length cap
 
@@ -562,19 +596,27 @@ What remains out of scope for convergence, in exactly the way a hard crash alrea
 
 ### Requirement: The shared client core MUST be the single implementation of the cross-client protocol logic
 
-The nudge constants and texts, the `<private>` redaction helper, the truncation helpers, the stderr diagnostic, the session HTTP client, the transcript accumulator, the summary-body builder, the flush helpers, the session-end call and the session-resume call SHALL exist in exactly one JS/TS implementation, at `apps/plugin/bin/rembric-plugin-core.mjs`. Every JS/TS client SHALL import them from there and SHALL declare no local copy.
+The `<private>` redaction helper, the truncation helpers, the stderr diagnostic, the session HTTP client, the transcript accumulator, the summary-body builder, the flush helpers, the session-end call, the session-resume call, **the turn-report call, the per-session cache of the server's returned lines, and the per-turn tool-observation LATCH** (arm, disarm at the turn boundary, read-and-clear at the report, evict on forget), and the texts of the lines that remain client-composed, SHALL exist in exactly one JS/TS implementation, at `apps/plugin/bin/rembric-plugin-core.mjs`. Every JS/TS client SHALL import them from there and SHALL declare no local copy.
 
-This is what makes the byte-identical-nudge and identical-redaction-semantics requirements structural rather than a matter of discipline: with one implementation there is no second copy to keep in step, and a client added later inherits both contracts by construction.
+This is what makes the identical-redaction-semantics and byte-identical-line requirements structural rather than a matter of discipline: with one implementation there is no second copy to keep in step, and a client added later inherits both contracts by construction.
+
+A JS/TS client SHALL contribute only the PREDICATE its host makes available — which event means "a tool ran" — and SHALL hold no per-turn state of its own for it. The invariant enforcing this SHALL be stated over the concept rather than over a symbol name: the two copies that preceded it were called `toolUsedFlags` and `toolUsedThisTurn`, so a by-name inventory could not see that they were the same mechanism, and the divergence it hid was real — one client disarmed the latch at the turn boundary and the other did not.
+
+**The read-and-clear SHALL sit BELOW the report's own guards, never above them.** A report the core declines to send — a sub-agent session, or one it never registered — SHALL leave the latch armed. Consuming it there discards the observation into a request that was never issued, so the session's next sent report claims `usedTools: false` about a turn that used a tool. Both clients that exist today guard their own call sites, so the ordering is unreachable from either and its cost is entirely borne by the next client to call `reportTurn` without that guard; it is stated here because "unreachable today" is not a property of the core.
 
 A member of that list SHALL live in the core even when exactly one client calls it. The session-end call is the case in point: only Pi invokes it, because opencode's host kills the subprocess before an awaited call can land. Placing it in the client that happens to use it would put a second `fetch` against a `/sessions/…` path in a client file, which is a second implementation of the session HTTP client whatever it is named, and it would leave the next client that needs the verb to write a third.
 
+**The nudge cadence constants SHALL NOT exist in the core, or anywhere else in the plugin tree.** `SAVE_NUDGE_EVERY`, `SUMMARY_NUDGE_EVERY`, the per-session turn-count map and their bash and Python equivalents are removed: the firing decision belongs to the server (`session-nudges`), and a constant that no longer decides anything is a fifth place for a future contributor to change by mistake.
+
+**The turn-report call and its line cache SHALL be one core-owned pair.** The cache SHALL be keyed per session, SHALL be cleared when the session is forgotten, and SHALL NOT be overwritten with an empty result — a report that returns no lines leaves any pending lines intact, so a second end-of-turn event within one turn cannot swallow a notice. Reading the cache SHALL clear it, so a notice is printed exactly once.
+
 The resume SHALL be issued by the core's session-registration entry point itself, on the branch that has just added the id to its known-session set, rather than by each client after calling it. That set is already the once-per-id gate for the ensure, so making the resume ride on the same branch makes "exactly one resume per id per process" structural instead of a rule two clients each have to remember. No JS/TS client SHALL call the resume path directly, and no JS/TS client SHALL keep its own known-session set for this purpose.
 
-The resume SHALL be skipped when the ensure that precedes it did not land. Whatever prevented the ensure — an unreachable server, a revoked token, an unresolvable slug — prevents the resume too, so issuing it anyway buys nothing and doubles the wait a quitting or starting user absorbs, each POST being separately bounded by the client's timeout. The id SHALL nevertheless remain in the known-session set, so the pair is not retried on the next call: a retry loop keyed on transport failure is a different mechanism with different failure modes, and this capability's failed-POST requirement already specifies the one diagnostic that reports it.
+The resume SHALL be skipped when the ensure that precedes it did not land. Whatever prevented the ensure — an unreachable server, a revoked token, an unresolvable slug — prevents the resume too, so issuing it anyway buys nothing and doubles the wait a quitting or starting user absorbs, each POST being separately bounded by the client's timeout. The id SHALL nevertheless remain in the known-session set, so the pair is not retried on the next call.
 
 An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
 
-**The scanned set is every JS/TS source file under `apps/plugin/`, which is broader than the set of clients, and the two halves of the invariant apply to different sets.** The repository now ships a JS/TS artifact under `apps/plugin/` that is deliberately not a session client — the transport package `apps/plugin/mcp-bridge/` — and the distinction has to be normative rather than an accident of the pattern the test happens to use:
+**The scanned set is every JS/TS source file under `apps/plugin/`, which is broader than the set of clients, and the two halves of the invariant apply to different sets.** The repository ships a JS/TS artifact under `apps/plugin/` that is deliberately not a session client — the transport package `apps/plugin/mcp-bridge/` — and the distinction has to be normative rather than an accident of the pattern the test happens to use:
 
 - **The no-second-definition half applies to every scanned file**, client or not. A non-client file that redefines a core-owned helper is a second implementation whatever its directory is called, and `diag` and `truncate` are the realistic collisions for any program that writes stderr diagnostics.
 - **The must-import half applies to clients only.** A file that participates in no part of the session protocol SHALL NOT be required to import the core, and requiring it would be worse than useless: it would put session-protocol code inside a transport whose contract is to inspect no payload.
@@ -588,6 +630,25 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **GIVEN** a change introduces a local `function stripPrivateTags` in any JS/TS client file
 - **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
 - **THEN** the test SHALL fail with a message naming the offending file and line
+
+#### Scenario: No cadence constant survives anywhere in the plugin tree
+
+- **WHEN** `git grep -n 'NUDGE_EVERY\|_HINT_EVERY\|rembric-turnnudge'` runs over `apps/plugin/` at HEAD
+- **THEN** it SHALL produce no match
+
+#### Scenario: A report returning no lines does not swallow a pending notice
+
+- **GIVEN** a core holding cached lines for session `<S>`
+- **WHEN** `reportTurn(<S>, …)` is called and the server returns an empty `lines` array
+- **THEN** the cached lines SHALL still be present
+- **AND** the next read for `<S>` SHALL return them and SHALL clear the cache
+
+#### Scenario: A dropped report does not consume the tool latch
+
+- **GIVEN** a core whose tool latch is armed for a session it has not registered
+- **WHEN** `reportTurn` is called for that session
+- **THEN** no request SHALL be issued
+- **AND** the latch SHALL still be armed, so that session's first SENT report SHALL carry `usedTools: true`
 
 #### Scenario: A non-client file under `apps/plugin/` cannot redefine a core-owned helper
 
@@ -717,35 +778,43 @@ The verdict marker SHALL remain write-once per session id. The write-once proper
 A compaction is the moment at which the stored summary matters most and is least visible: the model that continues has lost the turns it would summarise, and this injection is the only instruction it receives before it acts. The block SHALL therefore be ordered read-then-write:
 
 1. Read the stored summary (`memory.session_get`).
-2. Write the session's CURRENT COMPLETE state with `memory.session_summary` — what was just read, brought up to date with the surviving window — and SHALL be told that the write replaces the stored value, so sending the window alone stores the window alone.
+2. Write the session's CURRENT COMPLETE state with `memory.session_summary` — what was just read, brought up to date with the surviving window — **and SHALL be told what the write does to the stored value, in terms that are true under the section-wise merge: each `##` section the write carries replaces its stored counterpart, and a section the write omits keeps its stored text. Sending a summary of the window alone therefore replaces every section the window happens to mention and silently leaves the rest stale.**
 3. Recall further prior context (`memory.context` / `memory.search`) when what was read is not enough.
 
-The block SHALL NOT ask for a summary of the compacted window, and SHALL NOT ask for "the compact summary shown above". Either framing, combined with a replacing write, is exactly the loss this contract exists to prevent: the model does as it is told and the stored summary becomes the window.
+The rationale in clause 2 is a correction, not a reword, and the correction is recorded because the previous form is quoted elsewhere. This requirement previously argued "so sending the window alone stores the window alone", which was exactly true of a whole-document replacement and is true after `refine-session-summary-writes` only of a window carrying no `##` heading, or one carrying every stored heading. The obligation is unchanged — the block must state what the write does — and the danger it points at is unchanged in kind but different in shape: the loss is now silent staleness in the sections the window did not mention, rather than wholesale replacement.
+
+The block SHALL NOT ask for a summary of the compacted window, and SHALL NOT ask for "the compact summary shown above". Either framing, combined with a merging write, still produces the loss this contract exists to prevent: the model does as it is told, the sections the window covers become the window, and the sections it does not cover go quietly out of date with nothing marking them.
 
 This block is also the compaction re-arm of the read directive specified in "A process that resumes a pre-existing session SHALL be told ONCE that a stored summary may exist". A compacted context is, for that purpose, a fresh attachment to a pre-existing session, and the injection at the compaction boundary is the earliest point at which the model can act on it — so it carries the directive itself rather than depending on a later reminder firing or on a relaxed first-ensure marker.
 
-Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state that a curated summary write replaces the stored value"), which carries the replacement and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
+Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state that a curated summary write replaces the stored value"), which carries the merge and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
 
-The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL add the exact canonical Markdown heading directive. A reworded block SHALL be re-measured, and the measurement SHALL be recorded rather than assumed: direct replacement measures 683 bytes, so the published cap becomes 700 UTF-8 bytes.
+The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL carry the exact canonical Markdown heading directive. **A reworded block SHALL be re-measured against the published ≤700-byte cap in the same commit as the wording**, and the measured value recorded. Measured on the shipped fixture after the merge correction: the `rembric:`-prefixed `postCompact` is **599 bytes** and the unprefixed `postCompactCore` is **590**, against the 683 bytes the direct-replacement wording measured and the 675 the pre-correction fixture measured.
 
 #### Scenario: The block asks for the current whole state, after a read
 
 - **WHEN** the post-compaction injection is emitted
 - **THEN** it SHALL direct the model to call `memory.session_get` before writing
 - **AND** it SHALL ask for the session's current complete state
-- **AND** it SHALL state that the write replaces the stored value
+- **AND** it SHALL state that the `##` sections the write carries replace their stored counterparts and that omitted sections keep their stored text
+
+#### Scenario: The block no longer claims a whole-document replacement
+
+- **WHEN** the emitted block is inspected
+- **THEN** it SHALL NOT state that the write REPLACES the stored value without qualification
+- **AND** it SHALL NOT imply that a thin rewrite overwrites everything stored
 
 #### Scenario: The block carries no window-only framing
 
 - **WHEN** the same text is inspected
 - **THEN** it SHALL NOT ask for a summary of the compacted window, of "what THIS window did", or of the host's own compact summary
 
-#### Scenario: The block keeps its published obligations
+#### Scenario: The block keeps its published obligations and its cap
 
 - **WHEN** the emitted block is measured and grepped
 - **THEN** it SHALL contain the substring `10000`
 - **AND** it SHALL require the six canonical `##` headings on separate lines
-- **AND** it SHALL be ≤700 bytes in UTF-8
+- **AND** it SHALL be ≤700 bytes in UTF-8, with the measured value recorded alongside the wording
 
 #### Scenario: One copy of the text
 
@@ -838,105 +907,51 @@ This finding is scoped to the READ directive specifically: it says a stronger nu
 - **AND** the displaced text SHALL be readable in full by `memory.session_get` with a positive `limit`, and in the session detail view's version history
 - **AND** no additional client-side or server-side mechanism SHALL be required for that recovery
 
-### Requirement: The summary reminder MUST be delivered at the end of the turn, and MUST NOT re-enter once the host has continued the turn to satisfy it
+### Requirement: Every client's end-of-turn handler MUST report the turn exactly once and MUST NOT emit on the host's end-of-turn channel
 
-A reminder that a session owes a summary SHALL be delivered at the END of a turn as well as at its start. A reminder attached only to the start of a turn always arrives while there is more work to do, so it is advice about future behaviour; the end of the turn is the point at which the work of that turn is finished and the model can still act on it.
+The end-of-turn handler's only output SHALL be the HTTP turn report and, where the host requires one, an empty JSON object. It SHALL write nothing a host could treat as feedback on the turn.
 
-The reminder SHALL be delivered on the host's end-of-turn feedback channel (`hookSpecificOutput.additionalContext` on the shell clients) and SHALL NOT use the host's blocking decision: no `decision` key and no stop reason.
+**That is what retires the re-entry hazard at its root.** On Claude Code 2.1.232 the `Stop` runner appends a hook's `additionalContext` to the very array it returns as `blockingErrors`, and the query loop treats a non-empty array as a block: it appends those messages, sets the stop event's loop-guard flag, increments its consecutive-block counter and re-invokes the model. The host's own cap on that counter is not a bound — it counts CONSECUTIVE blocks and a continuation the model answers with a tool call resets it — and an unguarded reminder was measured re-firing on 141 consecutive continuations over 10 minutes. A handler that emits nothing on that channel cannot start the loop, so the reminder is delivered on the NEXT turn's start-of-turn channel instead, where the host has no such behaviour.
 
-That channel is NOT, however, a channel that leaves the turn alone, and the previously-published claim that it "cannot hold a turn open" was never measured. Measured against the shipped Claude Code host (2.1.232): the `Stop` runner appends this hook's `additionalContext` to the very array it returns as `blockingErrors`, and the query loop treats a non-empty array as a block — it appends those messages, sets the stop event's loop-guard flag, increments its consecutive-block counter and re-invokes the model. The host's own cap on that counter SHALL NOT be relied on as a bound: it counts CONSECUTIVE blocks only and a continuation the model answers with a tool call resets it, so a model that obeys this very reminder (which asks for a tool call) loops without limit — measured end-to-end on that host, an unguarded reminder re-fired on 141 consecutive continuations over 10 minutes and the cap never engaged. Whether an earlier host delivered this channel without continuing the turn is undetermined and SHALL NOT be asserted.
+**The `stop_hook_active` check nevertheless survives, for a smaller and different reason: report idempotence.** Where the host reports that the end-of-turn event is already being continued — the boolean both shell hosts send under that name — the handler SHALL exit having issued no report. A continuation is not a new turn, and a second report for one turn would re-scan the same transcript delta and, worse, could overwrite a pending notice with an empty result. An absent, `null` or unreadable flag SHALL be treated as `false`, so the report still fires on a host that does not send it.
 
-**The reminder SHALL therefore cost at most ONE host continuation per cadence point.** Whenever the host reports that the stop event is already being continued in order to satisfy this hook — the `stop_hook_active` boolean carried in the stop event's own input, which both shell hosts send under that same name (measured on Claude Code 2.1.232; documented for Codex as "Whether this turn was already continued by `Stop`") — the hook SHALL emit nothing at all: no reminder, no facts, no diagnostic, and an empty JSON object only where the host requires one. That silence SHALL NOT depend on the cadence, on the transcript, or on configuration, all of which are unchanged by a continuation and therefore cannot bound the loop themselves: the turn counter advances only on a user prompt, and a continuation submits none. A memory server is an optional accessory to its host and MUST NOT be able to hold an agent's turn open; honouring the host's own loop guard is what makes that true, and on this channel it is the only thing that does.
+The check SHALL be decided BEFORE the transcript is located or read, so a continuation costs process start and nothing else.
 
-The flag SHALL be read from the stop event's input alone, and SHALL be decided BEFORE the transcript is located or parsed, so that a continuation costs process start and nothing else — measured as hook wall-clock per invocation on an 8.36 MB transcript: 790 ms of synchronous parsing without the guard versus 5 ms with it, on a path the host waits for. An absent, `null` or unreadable flag SHALL be treated as `false` — this one fail-open points toward FIRING, unlike every other fail-open in this requirement, because treating an unknown flag as `true` would silence the reminder permanently on any host that does not send it. The flag SHALL NOT be inferred from any other source, and in particular SHALL NOT be reconstructed from the transcript.
+**Fail-open is absolute.** On unparseable input, a missing or unreadable transcript, an unreachable server, a non-2xx response, or any unexpected error, the handler SHALL exit successfully and produce no output beyond the host-required empty object and the one stderr diagnostic this capability's failed-POST requirement specifies. The failure mode of a missed report is a later notice; there SHALL be no failure mode in which the host is degraded.
 
-The host's end-of-turn event SHALL therefore carry TWO independent entries with different obligations:
+The handler SHALL NOT be given a byte or token budget for model-facing output, because it emits none. The budget that applies to the notice is the server's 640-byte bound on the composed string (`session-nudges`), paid on the next turn's start-of-turn channel.
 
-- The existing raw-sync entry SHALL remain asynchronous. It is a pure side effect and SHALL NOT delay the turn.
-- A second entry SHALL be synchronous, because an asynchronous handler is fire-and-forget by the host's contract and cannot contribute feedback to the turn at all. Wiring the reminder asynchronously forfeits it entirely.
+#### Scenario: The end-of-turn handler writes nothing to the model
 
-**The reminder SHALL be rate-limited by the same per-session turn counter the start-of-turn nudge already uses, at the same cadence.** It SHALL NOT fire on every turn. The end-of-turn event fires once per turn, not once per session, so an unthrottled reminder would inject its payload into every turn of a long session — and the repository already owns exactly one mechanism for "remind every N turns". A second, independently-tuned cadence would be a second thing to keep in step with the first.
+- **GIVEN** a turn at which the gate fires and the server returns notice lines
+- **WHEN** the end-of-turn handler runs
+- **THEN** its stdout SHALL be empty, or exactly `{}` on the host that requires a JSON object
+- **AND** it SHALL NOT emit `hookSpecificOutput`, `additionalContext`, a `decision` key or a stop reason
+- **AND** the returned lines SHALL be cached, not printed
 
-When the reminder fires, its payload SHALL carry the canonical summary structure in full (see `sessions`) AND the grounded facts extracted from the session, so the model summarises against evidence rather than recollection. This is the surface that carries the long form precisely because it has no length budget, unlike a tool description.
+#### Scenario: A continuation issues no second report
 
-Because it is also the surface a model reads immediately before writing, the payload SHALL state that the write replaces the stored summary and SHALL ask for the session's current complete state, current first.
+- **GIVEN** a turn already reported, whose host then continues the turn for an unrelated reason
+- **WHEN** the end-of-turn event fires with `stop_hook_active: true`
+- **THEN** no report SHALL be issued and no transcript SHALL be read
+- **AND** the control SHALL pass in the same run: the identical input with the flag `false` SHALL issue exactly one report
 
-The entry SHALL NOT fire when the session has produced nothing worth summarising — a turn that only read or only talked. "Produced nothing" SHALL be decided from the session's own transcript, not from the server: no files written or edited and no commands run.
+#### Scenario: An absent loop-guard flag still reports
 
-**Apart from the loop guard above, that is the ONLY licensed silence, alongside the fail-open cases below.** The reminder SHALL NOT be suppressed because the session already carries a curated summary, and SHALL NOT derive that state from anywhere — not from the server, and not by scanning the transcript for a completed summary tool call. Suppressing it freezes whatever the first write said, because nothing afterwards ever asks the model to improve it, and it is exactly what makes a premature first summary permanent. The reason the suppression was defensible has also gone: a later curated write is recorded as a version row before it can displace anything (`sessions`, "Every curated session-summary write MUST append a version row in the same transaction"), so a redundant reminder can no longer cost stored text.
+- **GIVEN** an end-of-turn event carrying no `stop_hook_active` key, or that key set to `null`
+- **WHEN** the handler runs
+- **THEN** the report SHALL be issued exactly as it is when the flag is `false`
 
-It SHALL NOT be required to know whether a curated summary already exists, and SHALL NOT make a request to find out. No read endpoint for a session exists — the HTTP surface offers only `POST .../summary` and `POST .../end` — so the reminder is cadence-gated and may fire on a session that has already been summarised. That is deliberate under-precision: the cost is one redundant reminder every N turns, and the alternative is new HTTP surface. A follow-up MAY add a read endpoint and narrow this; until it does, no requirement here SHALL assert the reminder consults server state.
-
-That sentence is about the CLIENT. A model directed to read the stored summary before rewriting it (see "A process that resumes a pre-existing session SHALL be told ONCE that a stored summary may exist") calls the `memory.session_get` MCP tool itself; the client still asks the server nothing beyond the session-ensure it already makes.
-
-**Fail-open is absolute.** On unparseable input, an unreadable or absent turn counter, a missing or unreadable transcript, an unavailable parser, or any unexpected error, the entry SHALL exit successfully and produce no output. Where a host requires a JSON object on every invocation, it SHALL emit an empty one rather than nothing. The failure mode of a missed reminder is a thinner summary; there SHALL be no failure mode in which the host is degraded.
-
-#### Scenario: The reminder fires at the counter's cadence when a summary is owed
-
-- **GIVEN** a session that has written or edited a file, or run a command, on a turn at which the shared counter's cadence fires
-- **WHEN** the end-of-turn event fires
-- **THEN** the hook SHALL emit the host's end-of-turn feedback channel carrying the canonical structure and the extracted facts
-- **AND** it SHALL NOT emit an interrupting decision — no `decision` key and no stop reason
-
-#### Scenario: The reminder is silent on turns between cadence points
-
-- **GIVEN** the same session on a turn at which the shared counter's cadence does not fire
-- **WHEN** the end-of-turn event fires
-- **THEN** the hook SHALL produce no output
-
-#### Scenario: The reminder does not consult the server
-
-- **GIVEN** any session state, including one that already carries a curated summary
-- **WHEN** the end-of-turn event fires at a cadence point
-- **THEN** the hook SHALL decide from the transcript, the counter and the stop event's own input alone, and SHALL make no request
-
-#### Scenario: An already-curated session still gets the reminder, never silence
-
-- **GIVEN** a session whose transcript shows a completed `memory.session_summary` call, on a turn at which the cadence fires and files were written
-- **WHEN** the end-of-turn event fires
-- **THEN** the reminder SHALL be emitted
-- **AND** no code path SHALL inspect the transcript for a prior summary call in order to suppress it
-
-#### Scenario: The rubric asks for the current whole state
-
-- **WHEN** the emitted rubric text is inspected
-- **THEN** it SHALL state that the write replaces the stored summary
-- **AND** it SHALL ask for the session's current complete state, current first, rather than for what is new since the last write
-
-#### Scenario: The transcript is missing or unreadable
-
-- **GIVEN** an end-of-turn event whose payload names no transcript, or one that cannot be parsed
-- **WHEN** the hook runs
-- **THEN** it SHALL exit successfully with no output, and the turn SHALL complete normally
-
-#### Scenario: The turn counter is unreadable
-
-- **GIVEN** an environment in which the shared turn counter cannot be read or written
-- **WHEN** the end-of-turn event fires
-- **THEN** the hook SHALL produce no output rather than fall back to reminding on every turn
-
-#### Scenario: A session with nothing worth summarising
-
-- **GIVEN** a session that wrote or edited no file and ran no command
-- **WHEN** the end-of-turn event fires at a cadence point
-- **THEN** the hook SHALL produce no output
-
-#### Scenario: The reminder yields once the host has continued the turn to satisfy it
-
-- **GIVEN** a session at a cadence point whose transcript would otherwise yield extracted facts, and a configured server
-- **WHEN** the end-of-turn event fires with `stop_hook_active: true` in its input
-- **THEN** the hook SHALL exit successfully having emitted nothing at all, or exactly `{}` on the client whose host requires a JSON object
-- **AND** it SHALL do the same on every further continuation of the same turn, so the host's consecutive-block cap is never reached and no override warning is shown to the user
-
-#### Scenario: An absent or null loop-guard flag still fires the reminder
-
-- **GIVEN** the same session and cadence point
-- **WHEN** the end-of-turn event fires with no `stop_hook_active` key in its input, or with that key set to `null`
-- **THEN** the reminder SHALL be emitted exactly as it is when the flag is `false`
-- **AND** the control SHALL pass in the same run: the identical input with `stop_hook_active: true` SHALL emit nothing, so a passing guard test cannot be a broken probe
-
-#### Scenario: The loop guard is decided before the transcript is touched
+#### Scenario: The guard is decided before the transcript is touched
 
 - **WHEN** the end-of-turn script is inspected
-- **THEN** the loop-guard check SHALL appear before the transcript path is resolved and before any transcript-parsing call
-- **AND** a test SHALL assert that order, so a later edit cannot move the guard behind the parse the host waits on
+- **THEN** the loop-guard check SHALL appear before the transcript path is resolved and before any read of it
+- **AND** a test SHALL assert that order, so a later edit cannot move the guard behind work the host waits on
+
+#### Scenario: An unreachable server costs one diagnostic and nothing else
+
+- **GIVEN** a configured server that does not respond
+- **WHEN** the end-of-turn handler runs
+- **THEN** it SHALL print one `[rembric] POST <path> failed …` line to stderr
+- **AND** it SHALL exit successfully within the client's POST timeout
+- **AND** the next turn SHALL emit only the client-composed lines

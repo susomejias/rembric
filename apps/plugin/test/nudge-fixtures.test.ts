@@ -490,22 +490,12 @@ describe.runIf(hasPython3)('no cadence constant remains in the Python provider',
  * together instead of drifting apart.
  */
 describe('every enforced cap is published in the capability that owns it', () => {
-  // Points at the DELTA spec, not the archived one: `server-gated-session-nudges`
-  // is unarchived while this suite runs, so the archived spec.md still carries
-  // the pre-change numbers (960/180) until the archive phase merges this delta.
+  // The PUBLISHED spec: `server-gated-session-nudges` is archived, so the
+  // capability file now carries these numbers. It pointed at that change's
+  // delta while it was unarchived, because the published file still held the
+  // pre-change 960/180 until the archive phase merged it.
   const spec = readFileSync(
-    join(
-      here,
-      '..',
-      '..',
-      '..',
-      'openspec',
-      'changes',
-      'server-gated-session-nudges',
-      'specs',
-      'claude-code-plugin',
-      'spec.md',
-    ),
+    join(here, '..', '..', '..', 'openspec', 'specs', 'claude-code-plugin', 'spec.md'),
     'utf8',
   );
 

@@ -114,6 +114,89 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **THEN** `apps/plugin/scripts/stop-sync.sh` SHALL NOT exist
 - **AND** no manifest entry SHALL reference it
 
+#### Scenario: SessionStart hook creates a session and writes the placeholder title
+
+- **GIVEN** the plugin is installed, `${cwd}/.rembric` contains `PROJECT_SLUG=foo`, project `foo` exists, and `REMBRIC_SERVER_URL` is reachable
+- **WHEN** Claude Code fires the `SessionStart` hook (`source: startup`) with stdin `{"session_id": "claude-sess-abc12345", "cwd": "/home/u/foo"}` at 22:14 UTC
+- **THEN** the script SHALL POST to `${REMBRIC_SERVER_URL}/api/foo/sessions` with body `{"id": "claude-sess-abc12345", "cwd": "/home/u/foo", "agent": "claude-code"}`
+- **AND** SHALL then POST `${REMBRIC_SERVER_URL}/api/foo/sessions/claude-sess-abc12345/resume` with body `{}`, which succeeds as a no-op reporting `previousStatus: 'active'`
+- **AND** the server SHALL insert a row with `title = 'foo · 22:14 UTC'`, `title_final = false`
+- **AND** the script SHALL still emit the `rembric: If this is a continuation...` nudge on stdout
+
+#### Scenario: A resumed Claude Code session returns its row to active
+
+- **GIVEN** session `<S>` was registered in a previous run and its row is now `ended` (its `SessionEnd` hook fired) or `abandoned` (the stale sweep flipped it)
+- **WHEN** the operator runs `claude --resume <S>` and `SessionStart` fires with `source: "resume"` and the SAME `session_id`
+- **THEN** `session-start.sh` SHALL POST the ensure and then the resume
+- **AND** the row SHALL be `status='active'` with `ended_at IS NULL`
+- **AND** the control SHALL pass in the same run: without the resume POST the row stays terminal and a subsequent `memory.save` on that transport persists `session_id = NULL`
+
+#### Scenario: A forked session is registered as a new session
+
+- **GIVEN** the operator runs `claude --resume <S> --fork-session`, which the host documents as creating a new session id
+- **WHEN** `SessionStart` fires with `source: "fork"` and a session id `<F>` different from `<S>`
+- **THEN** the `startup|resume|clear|fork` matcher group SHALL match, and `session-start.sh` SHALL register `<F>` as a new row
+- **AND** the resume that follows SHALL succeed as a no-op against `<F>`
+- **AND** `<S>` SHALL be left in whatever state it was already in — a fork SHALL NOT revive the session it was forked from
+- **AND** the control SHALL pass in the same run: with `fork` absent from every matcher, no hook fires and no row exists for `<F>`
+
+#### Scenario: SessionStart hook with matcher compact re-ensures the row and injects the instruction
+
+- **WHEN** Claude Code resumes a session from auto-compaction and fires `SessionStart` with `source: 'compact'`
+- **THEN** `post-compact.sh` SHALL POST `/api/foo/sessions` with the session id, cwd and agent, and SHALL then POST `/api/foo/sessions/<session_id>/resume`, so a row the stale sweep abandoned mid-conversation is returned to `active`
+- **AND** SHALL emit a multi-line instruction to stdout prefixed with `rembric:` directing the model to read the stored summary with `memory.session_get` and then call `memory.session_summary` with the session's CURRENT COMPLETE state — never with the compacted window, which `plugin-session-protocol`'s post-compaction requirement forbids
+- **AND** the next model turn SHALL see the instruction in its context and (when cooperating) SHALL call `memory.session_summary({title, summary})` with the model-authored values
+
+#### Scenario: Neither UserPromptSubmit entry declares a matcher
+
+- **WHEN** `apps/plugin/hooks/hooks.json` is loaded
+- **THEN** both `UserPromptSubmit` entries SHALL be objects with a `hooks` array and NO `matcher` key
+- **AND** the assertion SHALL fail the build if a `matcher` is added to either
+
+#### Scenario: prompt-search.sh emits the recall line on a keyword at any turn
+
+- **GIVEN** a session already past its first prompt
+- **WHEN** `UserPromptSubmit` fires with stdin whose `prompt` field contains `what did we do`
+- **THEN** `prompt-search.sh` SHALL emit exactly the recall line and SHALL NOT emit the first-prompt line
+
+#### Scenario: prompt-search.sh emits the first-prompt line once per session
+
+- **WHEN** `UserPromptSubmit` fires for the first time in a session with a prompt containing no recall keyword
+- **THEN** `prompt-search.sh` SHALL emit exactly the first-prompt line
+- **AND** on the second and subsequent prompts of the same session it SHALL NOT emit that line again
+
+#### Scenario: Both prompt-search.sh lines can coincide on turn 1
+
+- **WHEN** the first prompt of a session also contains a recall keyword
+- **THEN** `prompt-search.sh` SHALL emit both lines, first-prompt line first
+- **AND** this is the worst case `prompt-search.sh` alone can reach; it is NOT the worst-case `UserPromptSubmit` turn, which is the pending-notice case the token-budget requirement's per-firing-turn ceiling is set against
+
+#### Scenario: SessionEnd hook captures the transcript and POSTs /end with summary
+
+- **GIVEN** a Claude Code session with at least one assistant turn, whose `transcript_path` JSONL is readable
+- **WHEN** Claude Code fires `SessionEnd` with stdin `{"session_id": "...", "transcript_path": "/path/to/transcript.jsonl", "reason": "logout"}`, the hook having been invoked as `session-end.sh claude-code`
+- **THEN** the script SHALL build the fallback body from `_transcript.sh`, PREFERRING the deterministic fact extraction and falling through to the transcript formatter when the extractor is unavailable or yields nothing, and derive a title from the first non-empty assistant message
+- **AND** SHALL POST `/api/foo/sessions/<S>/end` with body `{"summary": "<body>", "title": "<derived>", "final": false}`
+- **AND** the server SHALL transition the row to `status='ended'`, write the summary and title (subject to `final` precedence), and respond `200 OK`
+
+#### Scenario: SessionEnd with missing transcript_path
+
+- **WHEN** SessionEnd fires and `transcript_path` is missing/unreadable
+- **THEN** the script SHALL POST `/end {}` and the row SHALL transition to `ended` with whatever summary/title were already in place
+
+#### Scenario: SessionEnd when model already wrote a final summary
+
+- **GIVEN** a session whose `summary_final = true` because the model called `memory.session_summary` mid-session
+- **WHEN** SessionEnd fires and posts `/end {summary: "raw transcript", title: "...", final: false}`
+- **THEN** the row SHALL transition to `ended`
+- **AND** `summary` and `title` SHALL remain the model-authored values (the `final:false` writes are silently skipped due to precedence)
+
+#### Scenario: Hook catalog lives at the new path
+
+- **WHEN** Claude Code consumes the plugin from the marketplace
+- **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
+- **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, SessionEnd, PreCompact, PostCompact, Stop}` carrying exactly eight handler entries, with NO `PostToolUse` entry
+
 ## MODIFIED Requirements
 
 ### Requirement: The token budget MUST be stated per firing turn and amortised over the cadence window, in a pinned unit, and asserted in the shared fixtures
@@ -147,7 +230,7 @@ The plugin ships no skills, so there is no skill description and no skill body i
 **Two caps on this table MOVE, and the movement is the direct consequence of relocating the reminder from an uncapped channel onto a capped one.** Both new values are derived rather than chosen:
 
 - **Per FIRING turn: 960 → 1088 bytes (240 → 272 tokens).** The worst reachable turn is the counter-divergence case this ceiling has always been set against, now with the notice in place of the retired `save`+`summary` pair: `firstPromptRelevance` (125) + recall (90) + `sessionIdTemplate` rendered (204) + the server-composed notice at its own 640-byte bound + 4 newlines = **1063 bytes**. The ceiling is 1088 for margin. For comparison, the same divergence case measures 917 bytes today.
-- **Amortised over 10 turns: 180 → 240 bytes/turn (45 → 60 tokens/turn).** This cap governed `UserPromptSubmit` alone while the periodic reminder lived on the uncapped `Stop` channel, so it never counted the reminder at all. Measured today across ten turns of a working session, driving the real scripts: `UserPromptSubmit` emits 1230 bytes (123/turn) and `Stop` emits a further 1044, for **227 bytes/turn across both channels**. Under this change the same ten turns emit 668 bytes (turn-1 opening) plus 846 per elapsed floor: **151 bytes/turn** at one floor and **236 bytes/turn** at two, both now entirely on this one channel. The cap rises to 240 to admit the two-floor case honestly rather than to hide it on a second channel.
+- **Amortised over 10 turns: 180 → 240 bytes/turn (45 → 60 tokens/turn).** This cap governed `UserPromptSubmit` alone while the periodic reminder lived on the uncapped `Stop` channel, so it never counted the reminder at all. Measured before this change across ten turns of a working session, driving the real scripts: `UserPromptSubmit` emitted 1230 bytes (123/turn) and `Stop` a further 1044, for **227 bytes/turn across both channels**. Under this change, measured on the shipped fixtures by driving `prompt-search.sh` and `prompt-nudge.sh`, the same ten turns emit **556 bytes** of turn-1 lines (`firstPromptRelevance` 125 + `sessionIdTemplate` rendered 204 + `sessionOpening` 224 + 3 newlines) plus **846 per elapsed floor** (204 + the notice at its 640-byte bound + 2 newlines): **140 bytes/turn** at one floor and **225 bytes/turn** at two, both now entirely on this one channel. The cap rises to 240 to admit the two-floor case honestly rather than to hide it on a second channel.
 
 **On a conversation where no work happens the cost falls rather than rises, and that is the change's point.** Measured today, twenty turns with no tool use at all still emit 1880 bytes across five firing turns, because `prompt-nudge.sh` never opens the transcript. Under this change the same twenty turns emit the turn-1 opening and nothing else — the notice's gate never fires without work (`session-nudges`).
 
@@ -180,7 +263,7 @@ The `sessionIdTemplate` line remains the largest single per-turn client-composed
 
 - **GIVEN** a session driven through the real per-session counter file
 - **WHEN** turn 1 fires with a recall keyword in the prompt (first-prompt line, recall line, sessionId line, session opening)
-- **THEN** the total emitted output SHALL be ≤800 bytes (≤200 tokens) — this sub-budget does NOT move; measured 759 bytes against 797 before this change
+- **THEN** the total emitted output SHALL be ≤800 bytes (≤200 tokens) — this sub-budget does NOT move; measured 647 bytes on the shipped fixtures, against 797 before this change
 
 #### Scenario: The counter diverges, a notice is pending, and every line fires at once
 
