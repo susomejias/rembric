@@ -22,6 +22,11 @@ Hard-won knowledge for each shipped client. Read the relevant section before mod
 - Credentials live in `${HERMES_HOME:-~/.hermes}/.env` populated by `requires_env: [...]` at install time. Don't preload any plugin-specific dotenv.
 - The provider class MUST guard `from agent.memory_provider import MemoryProvider` with a `try/except ImportError` fallback ABC so the file is importable in tests without Hermes installed.
 - `is_available` MUST send `Authorization: Bearer ${REMBRIC_API_TOKEN}` (Rembric `/healthz` requires auth since `0.13.0`). 401 → degrades to `is_available() = False`, silently disabling the provider.
+- **Installing and enabling is NOT activating.** `hermes plugins enable rembric` registers it with the GENERIC plugin system, which explicitly excludes memory providers; the provider only runs after `hermes memory setup rembric`. Until then `hermes memory status` says `Provider: (none — built-in only)` and no hook fires — with no error to tell you why.
+- **Never insert a line at the top of `__init__.py`.** It carries `from __future__` at line 28, so anything before it is a `SyntaxError` that the loader swallows at debug level; the only symptom is `no provider instance found`, which reads like a registration bug. Instrument below the future import and `ast.parse` after every edit.
+- Discovery is a text scan of the **first 8192 bytes** of `__init__.py` for `MemoryProvider` / `register_memory_provider` (`_is_memory_provider_dir`). Ours sits near byte 1700 — a refactor pushing the ABC import past 8 KB makes the plugin invisible silently.
+
+Driving the real CLI (isolation with `HERMES_HOME`, surfacing swallowed load errors, and why `hermes -z` may not exercise the provider at all) is in [e2e-walkthrough.md § Driving a real Hermes](./e2e-walkthrough.md).
 
 ## opencode
 

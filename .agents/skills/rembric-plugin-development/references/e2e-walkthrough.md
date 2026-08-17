@@ -210,6 +210,43 @@ The install wizard's `${user_config.*}` flow can't be scripted, but the hook CON
 
 **6. Instrument the hook, not the TUI.** Wrap the script under test in a logger that records each invocation's key stdin fields and emitted byte count, then assert on that log plus the DB. Run the control arm from `git HEAD` copies of the scripts (git archive), the treatment arm from the working tree, and demand the control fails in the expected direction.
 
+### Driving a real Hermes (memory-provider changes)
+
+Hermes is the one client whose plugin is a **memory provider**, and that puts it on a discovery path with its own rules. Every rail below cost a wrong turn on 2026-08-16 against Hermes v0.20.2.
+
+**1. Isolate with `HERMES_HOME`.** The installer reads `HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"`, so a scratch install is one variable — use it. Installing into the operator's real home is worse than it looks: `hermes plugins enable` rewrites `config.yaml` with Hermes's **entire commented template**, so the diff is dozens of lines, not the one key you added. Back it up first if you skip this rail anyway.
+
+**2. Enabling is not activating — there are two plugin systems.** The generic system (`hermes plugins …`, `~/.hermes/plugins/<name>/`) **excludes** memory providers; its module docstring says so. Memory providers are found by `plugins/memory/__init__.py::_iter_provider_dirs`, which scans bundled + `$HERMES_HOME/plugins/<name>/` + project-local. So it is two steps, and the first one alone looks like success:
+
+```bash
+PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
+hermes plugins enable rembric      # generic system — necessary, NOT sufficient
+hermes memory setup rembric        # THIS is what makes it the active provider
+hermes memory status               # must print "Provider: rembric" and "← active"
+```
+
+Without the second, `hermes memory status` reports `Provider: (none — built-in only)` and no hook ever fires.
+
+**3. Discovery is an 8192-byte text scan.** `_is_memory_provider_dir` reads the first 8 KB of `__init__.py` and looks for the literal `MemoryProvider` or `register_memory_provider`. Ours sits near byte 1700. A refactor that pushes the ABC import below 8 KB makes the plugin invisible, with no error anywhere.
+
+**4. Load failures are swallowed at DEBUG.** `load_memory_provider` logs the real exception at debug and `_get_available_providers` discards it with a bare `continue`; the only visible symptom is `no provider instance found`. Drive the loader directly to see it — and use Hermes's own interpreter, because the launcher unsets `PYTHONPATH`/`PYTHONHOME` and the system python lacks `yaml`, which yields a misleading `ModuleNotFoundError`:
+
+```bash
+cd /usr/local/lib/hermes-agent && env -u PYTHONPATH -u PYTHONHOME ./venv/bin/python -c "
+import sys, logging; sys.path.insert(0, '.')
+logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+from plugins.memory import load_memory_provider
+print(load_memory_provider('rembric'))"
+```
+
+**5. NEVER prepend a line to `__init__.py`.** It carries `from __future__` at line 28, so any statement before it is a `SyntaxError` — swallowed at debug, surfacing only as `no provider instance found`. Instrument _after_ the future import, and run `python3 -c "import ast,pathlib; ast.parse(pathlib.Path('…').read_text())"` after every edit. Several steps were spent diagnosing a plugin that was only broken by its own probe.
+
+**6. Never run `hermes plugins doctor` from the repo root.** It treats the cwd as a plugin and copies it — `node_modules` and model caches included — into `/tmp`. On a 6 GB tmpfs that dies with `No space left on device`. Run it from a plugin directory or not at all.
+
+**7. The load contract, so you know what to satisfy.** `register(ctx)` is tried first, called with a collector that captures `register_memory_provider`; if it registers nothing, the loader falls back to scanning module attributes for a subclass of the REAL `agent.memory_provider.MemoryProvider`. Our plugin imports that class with a local ABC stub as fallback — if the real import ever fails, the class stops being a recognised subclass and the fallback silently finds nothing.
+
+**8. One-shot mode may not exercise the provider — unresolved.** `hermes -z PROMPT -t file --yolo` runs a turn, but with rembric active a full tool-using run produced **zero** memory-provider activity in `~/.hermes/logs/agent.log` (177 lines, no mention of the provider or of rembric). Not proven either way — `hermes chat` needs a TTY and was not attempted. Until someone shows otherwise, assume `-z` is not a valid harness for lifecycle hooks, and check `~/.hermes/logs/agent.log` before concluding your plugin is at fault.
+
 ### Driving an interactive TUI
 
 Feed timed keystrokes through a pty. Slash commands and quit paths only exist in interactive mode, so print mode cannot reach them:
