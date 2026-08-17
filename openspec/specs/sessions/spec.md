@@ -162,7 +162,7 @@ The `memory` table SHALL gain a nullable `session_id` column referencing `sessio
 
 ### Requirement: A session summary MUST follow the documented structure
 
-When `memory.session_summary` is called, the submitted `summary` SHALL be persisted in the session row's `summary` column. The server SHALL NOT enforce the layout — agents may submit free-form text — but the canonical structure SHALL be documented, and it SHALL be documented from ONE definition.
+When `memory.session_summary` is called, the submitted `summary` SHALL be persisted in the session row's `summary` column, composed with what is already stored as "A curated session-summary write MUST be merged section-wise with the stored summary" requires. The server SHALL NOT enforce the layout — agents may submit free-form text — but the canonical structure SHALL be documented, and it SHALL be documented from ONE definition. The single exception to unenforced layout is the matching rule in "A curated session-summary write carrying no `##` heading MUST be refused against a sectioned stored summary", which never names a canonical heading and never fires on a session whose stored summary carries none.
 
 The canonical structure SHALL consist of exactly these Markdown level-2 headings, in this order, each on its own line: `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`. The instruction SHALL explicitly say that they are exact level-2 headings on separate lines and SHALL NOT present bare section names as one dot-separated paragraph. The headings carry: the goal the session was pursuing; the work actually accomplished; the decisions taken and the reason for each; what was verified and by what means; what was left unfinished or blocked, and why; and the files that matter. A structure that names only outcomes produces a summary a later reader cannot act on: the reason a decision was taken and the evidence a claim rests on are the parts that do not survive in the code.
 
@@ -170,7 +170,9 @@ The canonical structure SHALL have a single source of truth in the server, expor
 
 Every model-facing surface, including the `memory.session_summary` tool description, SHALL carry the exact heading directive. Longer reasons/evidence guidance MAY remain concentrated in the end-of-turn rubric, but the bounded tool description has sufficient room for the six headings and separate-line instruction within the host truncation ceiling documented in `mcp-api`.
 
-**The summary a model is asked for is the session's CURRENT COMPLETE state, not the delta since its last write.** The curated write replaces the stored value — that outcome is unchanged and is stated in this capability's cap and precedence requirements — so a write that carries only recent work makes the stored summary carry only recent work. Every model-facing surface SHALL therefore ask for a summary of the state that currently holds for the whole session, concise rather than exhaustive, and SHALL NOT ask for "what changed since last time", "what this window did", or any other delta framing. A model that cannot see its earlier work SHALL be directed to read the stored summary first (`memory.session_get`) rather than to write what it can see.
+**The summary a model is asked for is the session's CURRENT COMPLETE state, not the delta since its last write, and the write REFINES that state rather than substituting for it.** A curated write composes with what is stored, section by section, so the stored summary is the accumulated state and each write brings part of it up to date. Every model-facing surface SHALL ask for the state that currently holds for the whole session, concise rather than exhaustive, and SHALL NOT ask for a summary whose CONTENT is "what changed since last time", "what this window did", or anything else shaped as a report of the latest turn. A model that cannot see its earlier work SHALL be directed to read the stored summary first (`memory.session_get`) rather than to write what it can see.
+
+**Sending fewer SECTIONS is not delta framing, and the two SHALL NOT be conflated.** A curated write MAY carry only the sections that changed — that is the intended use of the merge — provided each section it carries states that section's full current state. What is prohibited is a section body that is itself a fragment, and a document that reads as a turn report. The surfaces enumerated in `mcp-api` SHALL state both halves: that an omitted `##` section keeps its stored text, and that a section which has genuinely emptied is written with an explicit short value rather than dropped, so a shrinking summary is condensation and never deletion.
 
 **The summary SHALL be ordered current-first, and the ordering is a contract rather than a style preference.** `memory.context` emits a session summary truncated to its FIRST `CONTEXT_SNIPPET_CHARS` characters through a head-keeping helper, while `memory.session_get` returns the value in full and untruncated. The head of the stored summary is therefore the preview on which a later model decides whether to fetch the rest, and what a model writes first IS that preview. Surfaces SHALL state this ordering obligation; the server SHALL NOT enforce it, consistent with the layout being unenforced above.
 
@@ -200,17 +202,19 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 
 #### Scenario: `memory.session_summary` is called twice; the second call wins because both are final
 
-- **GIVEN** session `<S>` is `active` with summary "A" written via a prior `memory.session_summary` (final:true)
+- **GIVEN** session `<S>` is `active` with summary "A" written via a prior `memory.session_summary` (final:true), where "A" carries no `##` heading
 - **WHEN** the agent calls `memory.session_summary({summary: "B"})` again
 - **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes)
 - **AND** the response SHALL succeed
 - **AND** the displaced "A" SHALL remain readable as a version row (see "Every curated session-summary write MUST append a version row in the same transaction") — the replacement is retained, and only its destructiveness is removed
+- **AND** where "A" and "B" both carry `##` headings the same last-final-wins rule SHALL apply PER SECTION rather than to the document (see "A curated session-summary write MUST be merged section-wise with the stored summary")
 
-#### Scenario: No model-facing surface asks for a delta
+#### Scenario: No model-facing surface asks for a turn report
 
 - **WHEN** every surface enumerated by the canonical-structure test is inspected
-- **THEN** none SHALL instruct the model to send only what is new, only what changed, or only what the current context window contains
-- **AND** each SHALL state that the write replaces the stored summary
+- **THEN** none SHALL instruct the model to send a summary whose content is only what is new, only what changed, or only what the current context window contains
+- **AND** the `memory.session_summary` description and the `initialize.instructions` block SHALL state that a `##` section the write omits keeps its stored text
+- **AND** no surface SHALL be required by this scenario to state the merge rule beyond those two — the surfaces that ask for the session's current complete state remain correct under the merge, because a complete document replaces every section
 
 #### Scenario: The current-first ordering is stated where the model reads about the tool
 
@@ -226,8 +230,10 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 
 #### Scenario: Free-form summary storage remains accepted
 
+- **GIVEN** the session's stored summary is absent, uncurated, or itself free of `##` headings
 - **WHEN** an otherwise-valid `memory.session_summary` call submits non-empty free-form text without the canonical headings
-- **THEN** the server SHALL persist it under the ordinary precedence and cap rules rather than reject it for layout
+- **THEN** the server SHALL persist it under the ordinary precedence, merge and cap rules rather than reject it for layout
+- **AND** the rejection in "A curated session-summary write carrying no `##` heading MUST be refused against a sectioned stored summary" SHALL NOT fire, because it is conditioned on the STORED value carrying a heading rather than on the write's layout
 
 ### Requirement: `memory.session_start` MAY accept an explicit project slug
 
@@ -449,7 +455,7 @@ The `sessions` table SHALL gain a nullable `title TEXT` column and two boolean p
 
 `AgentSessionsService.ensure(...)` (the HTTP-path constructor) SHALL compute and write the placeholder title atomically with the row insert. `AgentSessionsService.start(...)` (the MCP-path constructor) SHALL do the same.
 
-Writes that update `summary` or `title` carrying `final:true` SHALL flip the corresponding `_final` column to `true`. A subsequent write carrying `final:false` SHALL be a no-op for the corresponding field. A subsequent write carrying `final:true` SHALL replace the value (last-final-wins for admin/manual edits in future scope).
+Writes that update `summary` or `title` carrying `final:true` SHALL flip the corresponding `_final` column to `true`. A subsequent write carrying `final:false` SHALL be a no-op for the corresponding field. A subsequent write carrying `final:true` SHALL WIN the precedence contest for that field (last-final-wins for admin/manual edits in future scope). Winning precedence is not the same as replacing the column: for `title` the winning value is stored outright, while for `summary` the value stored is the section-wise merge of the stored summary and the write, so a `final:true` write that wins precedence does NOT necessarily replace the whole column — see "A curated session-summary write MUST be merged section-wise with the stored summary".
 
 #### Scenario: Row insert writes placeholder title
 
@@ -938,6 +944,16 @@ The enumeration is exhaustive and normative: `writeSummary` and `end` SHALL be t
 
 When `summary.length > SUMMARY_MAX_CHARS`, the service SHALL throw `DomainError('invalid_input', message)` where `message` SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so callers (including the MCP tool envelope and HTTP handler) can surface the cap to the client without re-encoding it. The row SHALL NOT be mutated and `summary_final` SHALL NOT be lifted by a rejected call. This SHALL hold identically for `active` and terminal rows.
 
+**A SECOND cap check SHALL be applied to the merged document, because the stored value is no longer the argument.** Since "A curated session-summary write MUST be merged section-wise with the stored summary", the value written to the column is a function of two inputs, and a check on the argument alone no longer bounds what is stored — the failure mode was measured before this rule existed: a composing write stored 10 350 characters against a 10 000-character cap and returned `ok: true`. The service SHALL therefore evaluate `SUMMARY_MAX_CHARS` a second time, against the merged value, immediately before that value enters the update `set` and inside the same single precedence site where the merge is computed. Both checks SHALL read the SAME constant; `SUMMARY_MAX_CHARS` remains the single source of truth and no second bound SHALL be introduced.
+
+The argument check SHALL keep its published position — before the `summary_final` precedence rule and before `status` is consulted — so a pathological argument is still rejected before the row is read, and so a write whose value precedence discards never pays for a merge.
+
+**An over-cap merge SHALL be REFUSED, never truncated.** The service SHALL throw `DomainError('invalid_input', message)` whose `message` states the merged length, contains the decimal string of `SUMMARY_MAX_CHARS`, and directs the caller to condense the summary and resend — naming `memory.session_get` as the way to read what is stored. The row SHALL NOT be mutated. Truncation SHALL NOT be applied to a merged document under any circumstance: the server's truncation helper keeps the TAIL and prefixes a marker, which on a sectioned summary discards `## Goal` first, and silent loss is the failure this rule set exists to remove.
+
+The rejection SHALL NOT be able to wedge a session. A curated write that carries every heading present in the stored summary replaces the whole document, so a condensed full rewrite is always accepted regardless of how large the stored value was.
+
+The HTTP layer's truncate-instead-of-reject behaviour is unchanged and applies to the incoming body only, before the service is called. A merged-overflow rejection reaches an HTTP caller as an error rather than a truncation; this is reachable only by a `final: true` HTTP write, which no shipped client performs.
+
 #### Scenario: `writeSummary` rejects a summary of `SUMMARY_MAX_CHARS + 1`
 
 - **GIVEN** an active session row owned by token `T`
@@ -964,6 +980,20 @@ When `summary.length > SUMMARY_MAX_CHARS`, the service SHALL throw `DomainError(
 - **GIVEN** an active session row owned by token `T`, `summary_final = false`
 - **WHEN** `agentSessions.writeSummary(sessionId, { tokenId: 'T', summary: 'a'.repeat(SUMMARY_MAX_CHARS), final: true })` is called
 - **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` and `summary_final = true`
+
+#### Scenario: A within-cap argument whose MERGE exceeds the cap is rejected
+
+- **GIVEN** an `active` session row owned by token `T` with `summary_final = 1` and a stored sectioned summary of `SUMMARY_MAX_CHARS - 100` characters
+- **WHEN** a curated write carries a NEW `##` section of 500 characters, so the argument is well within the cap but the merged document is `SUMMARY_MAX_CHARS + 400`
+- **THEN** the call SHALL throw `DomainError('invalid_input', <message>)` containing the decimal string of `SUMMARY_MAX_CHARS`, the merged length, and a direction to condense and resend
+- **AND** the stored `summary` SHALL be byte-identical to what it was before the call
+- **AND** nothing SHALL be truncated, on either the column or any other surface
+
+#### Scenario: A condensed full rewrite always fits, so the rejection cannot wedge a session
+
+- **GIVEN** a session whose stored curated summary is exactly `SUMMARY_MAX_CHARS` characters
+- **WHEN** a curated write carries every heading present in the stored summary, with condensed bodies totalling well under the cap
+- **THEN** the call SHALL succeed and the stored `summary` SHALL be exactly the condensed document
 
 #### Scenario: A previously-stored 2000-char summary survives the CHECK-drop migration
 
@@ -1020,7 +1050,7 @@ A session row whose `status` is `ended` or `abandoned` SHALL accept `summary` an
 
 Late writes SHALL be subject to the existing `summary_final` / `title_final` precedence rules with ONE deviation: on a terminal row an already-`final` column SHALL NOT be replaced, not even by a `final:true` write. On an `active` row last-final-wins is unchanged. The deviation exists because unbounded lateness makes the alternative lossy in a way sessions cannot recover from: a resumed host session reuses its id, its agent's obligatory `memory.session_summary` sends `final:true`, and sessions have no `replaces` chain or `consolidation_ops` journal, so the displaced handoff is gone with no audit trail. Before late writes were permitted the same call was rejected and the text survived; the first curated value therefore stands. A `final:false` write against an already-`final` column remains a silent no-op and is NOT an error.
 
-The asymmetry is deliberate and interacts with `resume`: a row returned to `active` is governed by last-final-wins again, so the resumed conversation's curated handoff replaces the previous one. That is the intended outcome and requires no separate rule — it follows from the row no longer being terminal.
+The asymmetry is deliberate and interacts with `resume`: a row returned to `active` is governed by last-final-wins again, so the resumed conversation's curated handoff is no longer BLOCKED by the previous one. It does not replace it either. `resume` writes only `status`, `ended_at` and `last_activity_at`, so `summary_final` survives the revival and the resumed handoff meets an already-curated stored value — which makes it a curated-against-curated write, MERGED section-wise rather than substituted. Measured: a resumed row storing `## Goal\nShip X\n## Files\nsrc/a.ts`, written with `## Goal\nShip Y`, stores `## Goal\nShip Y\n## Files\nsrc/a.ts`. Both halves follow from rules stated elsewhere and need no separate rule here — the unblocking from the row no longer being terminal, the merge from "A curated session-summary write MUST be merged section-wise with the stored summary".
 
 The cap precondition (`SUMMARY_MAX_CHARS`), the `NUL`-byte rejection, the `title` length bound and the cross-token mask (`session_not_found`) SHALL be evaluated in the service exactly as on an `active` row and BEFORE any column is written. The project-mismatch mask (`session_not_found`) SHALL be evaluated at the HTTP-handler and MCP-tool boundary. The soft-delete rejection (`session_deleted`) SHALL be evaluated at that boundary AND in the service, and the service's evaluation SHALL be the binding one: the boundary check runs before the request body is awaited and can therefore be stale by the time the write happens, so the service re-reads and decides. That service check is NOT specific to terminal rows — it sits ahead of the `status` branch and covers the `active` path identically; the full rule is stated once, under "Sessions MAY be soft-deleted while preserving the audit trail" in this capability. It exists because removing the `status !== 'active'` rejection also removed the backstop that incidentally protected a soft-deleted terminal row from a caller that forgot the gate, and because the gate a caller does remember is not fresh.
 
@@ -1222,6 +1252,8 @@ This is narrower than an ongoing equality for `title`: unlike `summary`, `title`
 
 **An identical re-write appends nothing.** When the value about to be stored is byte-identical to the `content` of the session's newest existing version row, no version row SHALL be appended. The column write proceeds unchanged (it stores the same bytes), so the invariant above still holds. This is what keeps the tool's published `idempotentHint: true` honest — see `mcp-api`, "Every MCP tool MUST advertise behavioral annotations", which admits a tool whose "repeated invocation is side-effect-free or last-call-wins": a retry of the same body remains exactly that.
 
+**The versioned value is the value STORED, which since "A curated session-summary write MUST be merged section-wise with the stored summary" is the merged document rather than the write's argument.** The invariant above is unaffected — it equates the column with the newest `content`, and both are that same merged string. One consequence follows and is normative: a partial write whose sections reproduce what is already stored changes nothing, so it appends no version row, exactly as a byte-identical full re-write does not.
+
 **The version numbering.** `version` SHALL be one greater than the greatest `version` currently stored for that session, computed inside the same transaction as the insert, and SHALL start at 1 for a session's first curated write — including the case where nothing was stored before. A history whose first entry is the second curated value is unreadable: the version numbers would imply a predecessor no reader can find, and the dashboard would present the origin of the text as missing rather than as absent.
 
 **The guarantee is scoped to curated text, and the scope is normative.** A raw, uncurated `summary` (`summary_final = 0`) that a first curated write replaces SHALL NOT be versioned. It was never a handoff, it is reproducible from the host transcript that produced it, and treating it as a version would put a transcript dump at `version = 1` of every session that ever synced one.
@@ -1280,12 +1312,27 @@ This is narrower than an ongoing equality for `title`: unlike `summary`, `title`
 - **WHEN** a write is rejected for any of the reasons that already reject one (empty/whitespace summary, `NUL` byte, over `SUMMARY_MAX_CHARS`, cross-token mask, soft-deleted row)
 - **THEN** neither `sessions.summary` nor `session_summary_versions` SHALL be mutated
 
-#### Scenario: The stored value and the version row are the same string, capped once
+#### Scenario: The stored value and the version row are the same string, and both are capped
 
-- **GIVEN** a curated write whose `summary` is exactly `SUMMARY_MAX_CHARS` characters
+- **GIVEN** a curated write whose `summary` is exactly `SUMMARY_MAX_CHARS` characters, against a session with no stored curated summary (so no merge occurs)
 - **WHEN** it is applied
 - **THEN** `sessions.summary` and the appended version's `content` SHALL be the SAME string of that length
-- **AND** exactly ONE cap check SHALL have been applied, on the argument, by the existing `SUMMARY_MAX_CHARS` precondition — no second cap SHALL be introduced anywhere on this path
+- **AND** the cap SHALL have been applied to that string, from the single `SUMMARY_MAX_CHARS` constant
+
+#### Scenario: A merged write versions the merged document, not the argument
+
+- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1` and one version row
+- **WHEN** a curated write carries only `"## Files\nB2"`
+- **THEN** `sessions.summary` SHALL be `"## Goal\nA\n## Files\nB2"`
+- **AND** the appended version's `content` SHALL be that same merged document, never the `"## Files\nB2"` argument
+- **AND** the merged document SHALL have been checked against `SUMMARY_MAX_CHARS` before it was stored (see "Session summary writes MUST be capped at `SUMMARY_MAX_CHARS` on every write path that mutates `sessions.summary`")
+
+#### Scenario: A partial write that changes nothing appends no version row
+
+- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1` and one version row
+- **WHEN** a curated write carries only `"## Files\nB"`
+- **THEN** the merged document SHALL be byte-identical to the stored value
+- **AND** the version count for `<S>` SHALL be unchanged
 
 #### Scenario: A version row stores the title in effect, not the write's own argument
 
@@ -1356,3 +1403,134 @@ The invariants suite SHALL forbid, outside migrations, `db.delete(sessionSummary
 
 - **WHEN** the source/derived partition is asserted over the migrated schema
 - **THEN** `session_summary_versions` SHALL appear in `SOURCE_TABLES` and SHALL NOT appear in `DERIVED_TABLES`
+
+### Requirement: A curated session-summary write MUST be merged section-wise with the stored summary
+
+A curated write — an incoming `final: true` write carrying a `summary` — against a session whose stored summary is itself curated (`summary IS NOT NULL` AND `summary_final = 1`) SHALL NOT replace the stored value as a whole. The value stored SHALL be the section-wise MERGE of the stored summary and the write. The merge SHALL be computed at the single site that folds per-field `final` precedence into an update `set` (see "Every curated session-summary write MUST append a version row in the same transaction", **One site**), and SHALL be attempted only for a value that precedence says will actually be stored — so a late write to a terminal row whose `summary_final` is already `1` remains the silent no-op it is today, rather than becoming a rejection.
+
+**What a section is.** A section SHALL begin at a line that is exactly a level-2 ATX Markdown heading — two `#` characters followed by at least one space or tab and then non-empty text — and SHALL extend to the line before the next such line, or to the end of the document. A heading of level 3 or deeper SHALL be body text of the enclosing section, because `### Sub-decision` under `## Decisions+why` is part of that section and not a peer of it. A line inside a fenced code block (a triple-backtick or `~~~` fence, opened and closed per CommonMark) SHALL NOT be treated as a heading: summaries carry diffs and shell snippets, and a fenced `## ` line read as a heading would split a code block into two independently-mergeable halves. Text preceding the first heading SHALL be a section whose key is empty. Line breaks SHALL be recognised as `\n` or `\r\n`; the merged document SHALL reuse its source lines verbatim, with no reflow and no normalisation of blank lines.
+
+**How sections match.** Two sections match when their heading text, trimmed and lower-cased, is equal — so `## files` updates the stored `## Files` instead of appending a near-duplicate the model would then have to maintain twice. The heading LINE written into the merged document SHALL be the one supplied by whichever side provided that section's body. Where one document carries the same key more than once, its occurrences SHALL be concatenated in document order at the position of the first; this never discards text, and it is observable only on a document that already departs from the canonical structure.
+
+**The merge.** The merged document SHALL be, in order: every section key present in the stored summary, in STORED order, taking the write's body where the write carries that key and the stored body otherwise; followed by every section key the write carries and the stored summary does not, in the write's own order. The stored order is normative rather than a formatting preference: `memory.context` shows only the head of a stored summary, so ordering by the write would let a two-section partial update hoist those two sections above `## Goal` and change the preview a later session reads.
+
+**Round-trip identity pins the join.** A section owns its heading line and every following line up to (not including) the next heading line, trailing blank lines included, and sections are re-joined with the line terminator that separated them in their source. Merging a document with ITSELF SHALL therefore yield that document byte-for-byte. This is the property that keeps a partial write from silently reformatting the sections it did not touch, and it is what makes "a merge that changes nothing stores the same bytes" hold rather than being approximately true.
+
+**A section's body is always its full current state.** What a curated write MAY omit is a SECTION; what it SHALL NOT carry is a partial section. This is the whole distinction between the partial write this requirement licenses and the delta framing prohibited by "A session summary MUST follow the documented structure": a partial write sends fewer sections, never a fragment of one.
+
+**Empty is not absent.** A section the write carries with an empty body SHALL be stored as that heading with an empty body. No input SHALL remove a heading from the merged document — there is no delete verb, because a delete verb reachable by omission is what this requirement exists to remove.
+
+**Which writes do NOT merge.** A `final: false` write SHALL replace exactly as before this requirement: the per-turn raw transcript sync every client performs is not a curated handoff and SHALL NOT be composed with one. A curated write against a stored summary that is absent or not curated (`summary_final = 0`) SHALL likewise replace it whole: a raw transcript that happens to contain a `## ` line SHALL NOT become a section that later curated writes must maintain.
+
+#### Scenario: A partial curated write updates one section and preserves the others
+
+- **GIVEN** an `active` session `<S>` with `summary_final = 1` and `summary` equal to `"## Goal\nShip X\n## Files\nsrc/a.ts"`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: '## Files\nsrc/a.ts, src/b.ts', final: true })` is called
+- **THEN** the stored `summary` SHALL be `"## Goal\nShip X\n## Files\nsrc/a.ts, src/b.ts"`
+- **AND** the `## Goal` section SHALL be byte-identical to what was stored before the write
+
+#### Scenario: A section the write carries is replaced outright, not appended to
+
+- **GIVEN** session `<S>` storing `"## Goal\nShip X"` with `summary_final = 1`
+- **WHEN** a curated write carries `"## Goal\nShip Y"`
+- **THEN** the stored `summary` SHALL be `"## Goal\nShip Y"` and SHALL NOT contain `Ship X`
+
+#### Scenario: A heading only the write carries is appended after the stored sections
+
+- **GIVEN** session `<S>` storing `"## Goal\nShip X\n## Files\nsrc/a.ts"` with `summary_final = 1`
+- **WHEN** a curated write carries `"## Risks\nflaky test"`
+- **THEN** the stored `summary` SHALL be `"## Goal\nShip X\n## Files\nsrc/a.ts\n## Risks\nflaky test"`
+
+#### Scenario: Shared headings keep the stored order even when the write reorders them
+
+- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1`
+- **WHEN** a curated write carries `"## Files\nB2\n## Goal\nA2"`
+- **THEN** the stored `summary` SHALL be `"## Goal\nA2\n## Files\nB2"` — both bodies updated, the stored order kept
+
+#### Scenario: Heading matching ignores case and surrounding whitespace
+
+- **GIVEN** session `<S>` storing `"## Files\nsrc/a.ts"` with `summary_final = 1`
+- **WHEN** a curated write carries `"##   files  \nsrc/b.ts"`
+- **THEN** the merged document SHALL contain exactly ONE files section, whose body is `src/b.ts`
+- **AND** the document SHALL NOT contain two headings differing only in case or spacing
+
+#### Scenario: A `##` line inside a fenced code block is not a section boundary
+
+- **GIVEN** session `<S>` storing a curated summary whose `## Files` section contains a fenced code block containing the line `## Goal`
+- **WHEN** a curated write carries a new `## Goal` section
+- **THEN** the fenced line SHALL remain body text of the `## Files` section, unchanged
+- **AND** the document SHALL carry exactly one `## Goal` section, outside any fence
+
+#### Scenario: A section carried with an empty body is stored empty rather than removed
+
+- **GIVEN** session `<S>` storing `"## Goal\nA\n## Unfinished+why\nblocked on Y"` with `summary_final = 1`
+- **WHEN** a curated write carries `"## Unfinished+why\n"`
+- **THEN** the stored `summary` SHALL still contain the `## Unfinished+why` heading
+- **AND** its body SHALL be empty
+- **AND** the `## Goal` section SHALL be unchanged
+
+#### Scenario: A `final: false` per-turn sync never merges
+
+- **GIVEN** session `<S>` storing a curated six-section summary with `summary_final = 1`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: '<raw transcript>', final: false })` is called
+- **THEN** the stored `summary` SHALL be unchanged (blocked by the existing `summary_final` precedence rule)
+- **AND** no merge SHALL have been computed
+
+#### Scenario: The first curated write over a raw body replaces it whole
+
+- **GIVEN** session `<S>` with `summary = '<raw transcript containing a ## line>'` and `summary_final = 0`
+- **WHEN** a curated write carries `"## Goal\nShip X"`
+- **THEN** the stored `summary` SHALL be exactly `"## Goal\nShip X"`
+- **AND** no part of the raw transcript SHALL survive in the stored value
+
+#### Scenario: A late curated write to a terminal row is still a silent no-op
+
+- **GIVEN** session `<S>` with `status = 'ended'`, `summary_final = 1` and a stored sectioned summary
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'a flat paragraph', final: true })` is called
+- **THEN** the call SHALL succeed and the row SHALL be returned unchanged, exactly as before this requirement
+- **AND** it SHALL NOT be rejected with `invalid_input`, because precedence discards the incoming value before any merge is attempted
+
+#### Scenario: A merge that changes nothing stores the same bytes
+
+- **GIVEN** session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1`
+- **WHEN** a curated write carries `"## Files\nB"`
+- **THEN** the stored `summary` SHALL be byte-identical to what it was before the write
+
+#### Scenario: Merging a document with itself is the identity
+
+- **GIVEN** any stored curated summary, including one with blank lines between sections, a preamble, `###` subheadings and a fenced code block
+- **WHEN** a curated write carries that exact same document
+- **THEN** the stored value SHALL be byte-identical to the input — no reflow, no blank line added or removed, no heading re-cased
+
+### Requirement: A curated session-summary write carrying no `##` heading MUST be refused against a sectioned stored summary
+
+When a curated write would merge under "A curated session-summary write MUST be merged section-wise with the stored summary", and the write's own body contains ZERO level-2 headings while the stored summary contains at least one, the call SHALL be rejected with `DomainError('invalid_input', message)`. The row SHALL NOT be mutated, `summary_final` SHALL NOT be lifted, and the `message` SHALL say that the write carries no `##` section and name the canonical structure the stored summary already uses.
+
+This is the one input the matching rule cannot interpret: there is no key on which to compose, and storing the write would delete every stored section at once — the failure this whole requirement set exists to remove. Treating the body as a preamble-only merge is worse than rejecting it, because it would leave a fresh paragraph above sections the model no longer believes exist and nothing would ever say so.
+
+The rule is a MATCHING rule, not a format validator. It never names `Goal`, never counts headings, and never fires on a session whose stored summary carries no heading — so "Free-form summary storage remains accepted" continues to hold for every first curated write. That it also closes the path by which a sectioned summary degrades back to one flat paragraph is a consequence, not the justification.
+
+#### Scenario: A flat-paragraph curated write against a sectioned summary is rejected
+
+- **GIVEN** an `active` session `<S>` storing `"## Goal\nA\n## Files\nB"` with `summary_final = 1`
+- **WHEN** `agentSessions.writeSummary(<S>, { tokenId: 'T', summary: 'Fixed the CI formatting job.', final: true })` is called
+- **THEN** the call SHALL throw `DomainError('invalid_input', <message>)` naming the missing `##` section
+- **AND** `summary`, `summary_final`, `title` and `last_activity_at` SHALL be unchanged
+
+#### Scenario: A flat-paragraph curated write against an unsectioned summary is accepted
+
+- **GIVEN** an `active` session `<S>` storing `"Goal: A. Files: B."` with `summary_final = 1` (a free-form curated summary with no headings)
+- **WHEN** a curated write carries `'Fixed the CI formatting job.'`
+- **THEN** the call SHALL succeed and the stored `summary` SHALL be `'Fixed the CI formatting job.'`
+
+#### Scenario: A first curated write on an empty session may be free-form
+
+- **GIVEN** an `active` session `<S>` with `summary IS NULL`
+- **WHEN** a curated write carries a non-empty body with no `##` heading
+- **THEN** the call SHALL succeed and the body SHALL be stored verbatim
+
+#### Scenario: One heading is enough
+
+- **GIVEN** an `active` session `<S>` storing a curated six-section summary
+- **WHEN** a curated write carries a single `## Accomplished` section and nothing else
+- **THEN** the call SHALL succeed and merge, because the write carries at least one heading
