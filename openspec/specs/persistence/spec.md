@@ -1387,63 +1387,69 @@ A later change adding a per-project access verb SHALL be able to do so additivel
 - **WHEN** the schema-drift test compares the live table set against the pinned inventory
 - **THEN** `token_projects` SHALL be present in both, and the comparison SHALL fail if the table is missing from either
 
-### Requirement: Migration `0033_session_summary_versions.sql` MUST create the summary-version table additively, with no backfill
+### Requirement: The `session_summary_versions` table MUST be dropped by a dedicated migration, with `0033` retained on disk
 
-The migration SHALL be purely additive: one `CREATE TABLE`, one named unique index, no table rebuild, no `ALTER TABLE` on `sessions`, and no row written to any existing table. It SHALL declare:
+A migration SHALL drop `session_summary_versions`. Its body SHALL be exactly one statement:
 
 ```sql
-CREATE TABLE session_summary_versions (
-  id         TEXT    PRIMARY KEY NOT NULL,
-  session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  version    INTEGER NOT NULL,
-  content    TEXT    NOT NULL,
-  title      TEXT,
-  created_at INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX session_summary_versions_session_version_unq
-  ON session_summary_versions (session_id, version);
+DROP TABLE session_summary_versions;
 ```
 
-`title` is nullable and carries the `sessions.title` value in effect when the row was written (`sessions`, revising design D6). It is declared in this same migration rather than a follow-up one: nothing on this branch has been pushed, `0033` has never shipped in a release, and a second migration for a column on a table no release ever had would describe history that never happened.
+**No table rebuild, and the reason is structural rather than economical.** `session_summary_versions` references `sessions(id)` and nothing references `session_summary_versions`; it is a child, never a parent. The `FOREIGN KEY constraint failed`-on-`DROP TABLE` hazard that forces the `CREATE … / INSERT … SELECT / DROP / RENAME` dance applies to dropping a PARENT of a populated child, which this is not. The named unique index and the primary-key autoindex are dropped by SQLite with the table and SHALL NOT be dropped by statements of their own.
 
-The uniqueness constraint SHALL be a NAMED unique index rather than a table-level `UNIQUE (…)` clause, so it appears in the schema-drift inventory by name like every other index in this schema, instead of as an anonymous auto-index.
+**No pragma of any kind SHALL appear in the migration.** The runner already wraps every migration in `PRAGMA foreign_keys = OFF` → `BEGIN IMMEDIATE` → body → `PRAGMA foreign_key_check` → `COMMIT` → `PRAGMA foreign_keys = ON` (see "The migration runner MUST disable `foreign_keys` around each migration transaction"), and an author-supplied pragma is forbidden by the invariant that pins that behaviour.
 
-**No index beyond that one SHALL be created.** Both reads the design has — the newest row for one session (`ORDER BY version DESC LIMIT 1`) and every row for one session, ordered — are served by it, since SQLite can scan an index in either direction. A further index SHALL NOT be added without a measurement showing this one insufficient: an unmeasured index is a write cost against an unestablished read benefit.
+**`0033_session_summary_versions.sql` SHALL remain on disk, unmodified.** The runner reads the migration directory and skips filenames already recorded in `_migrations`, so deleting an applied migration errors nowhere — it silently does nothing on an upgraded install and silently changes the outcome on a fresh one, leaving two databases at the same schema version with different applied histories. Retaining the creating migration and adding a dropping one is the pattern this schema already uses for `0011_summary_length_check.sql` / `0012_drop_summary_length_check.sql`. A fresh install therefore creates the table and immediately drops it, ending in exactly the state an upgraded install reaches. The migration filename list pinned by the migration tests SHALL gain the new entry and SHALL NOT lose `0033`.
 
-**No `CHECK` on `content` length SHALL be declared.** The cap is `SUMMARY_MAX_CHARS`, enforced solely in the server, and a value-pinning `CHECK` would make the cap require a migration — which the `sessions` capability forbids for exactly this column's value ("Session summary writes MUST be capped at `SUMMARY_MAX_CHARS` on every write path that mutates `sessions.summary`").
+**The row loss is total and irreversible, and this requirement SHALL say so rather than imply otherwise.** Every stored version row is destroyed. No mechanism in this system can return them: `consolidation_ops` records identifiers, never payloads, and there is no export step, no archival table and no journal of summary text. The only copy an operator can have is a file-level backup taken before the upgrade, per the documented backup procedure. `sessions.summary` is NOT touched by the migration, so no session's current summary is affected in any way.
 
-**No backfill SHALL be performed**, and the reason is normative rather than economic. A version row asserts that its `content` was the stored summary as of its `created_at`, and for a pre-existing curated summary that timestamp is not recorded anywhere: `sessions` carries `started_at`, `ended_at` and `last_activity_at`, none of which is the moment a summary was written. A backfill would therefore have to invent the one field the row exists to carry. Pre-existing sessions consequently start with an empty history and keep their `summary` column verbatim; the version invariant is scoped to sessions that HAVE at least one version row, precisely so that it holds on a populated file from the first boot.
+**No backfill, no data movement, no write to any other table.** The migration reads nothing and writes nothing outside the `DROP`.
 
-**Foreign-key safety.** The table is a new CHILD of `sessions`, so any future migration that rebuilds `sessions` will `DROP TABLE` a parent with a populated child. The runner's existing pragma sequence (`PRAGMA foreign_keys = OFF` → `BEGIN IMMEDIATE` → body → `PRAGMA foreign_key_check` → `COMMIT`) is what makes that safe, and migration authors SHALL NOT add pragmas of their own. This requirement records the raised cost so a later rebuild of `sessions` recreates this FK rather than dropping it silently.
+**Rolling back to a pre-drop image BREAKS the curated write path, and this is the first migration in this schema for which that is true.** A pre-drop image inserts into a table that no longer exists, so the whole curated-write transaction fails and `memory.session_summary` stops working; the dashboard session detail page fails on its history read. `_migrations` still records the drop, so simply restarting the older image does not restore the table. The documented recoveries are to roll forward, or to recreate the empty table by hand from the `0033` DDL still present in the tree. This requirement SHALL NOT be read as making the drop reversible.
 
-#### Scenario: The migration runs against a populated data file
+#### Scenario: The migration runs against a populated data file carrying version rows
 
-- **GIVEN** an existing database with sessions, memories, prompts and confirmations, including sessions carrying curated summaries
-- **WHEN** the server boots on the new image and the migration runner applies `0033`
-- **THEN** the `session_summary_versions` table SHALL exist and SHALL be empty
-- **AND** every pre-existing row in every table SHALL be byte-identical to before the migration
+- **GIVEN** an existing database with sessions, memories, prompts and confirmations, including sessions whose `session_summary_versions` rows are non-empty
+- **WHEN** the server boots on the new image and the migration runner applies the drop
+- **THEN** `session_summary_versions` SHALL NOT exist afterwards
+- **AND** every row of `sessions`, `memory`, `prompts` and `confirmations` SHALL be byte-identical to before the migration, including every `sessions.summary` value
 - **AND** `PRAGMA foreign_key_check` SHALL report no violations before `COMMIT`
 
-#### Scenario: A curated summary written before the upgrade keeps working afterwards
+#### Scenario: The drop needs no table rebuild
 
-- **GIVEN** a session whose `summary` was written before the migration, with `summary_final = 1` and no version rows
-- **WHEN** it is read through `memory.session_get`, `memory.context` and the dashboard after the upgrade
-- **THEN** each SHALL return exactly what it returned before, and no read SHALL fail for the absence of version rows
+- **WHEN** the migration file is inspected
+- **THEN** it SHALL contain exactly one `DROP TABLE` statement and no `CREATE TABLE`, no `INSERT … SELECT`, no `ALTER TABLE … RENAME`, and no `PRAGMA`
+- **AND** it SHALL NOT drop the table's index by name — the index goes with the table
 
-#### Scenario: The next curated write on a pre-existing session starts the history at 1
+#### Scenario: A fresh install ends in the same state as an upgraded one
 
-- **GIVEN** the same pre-migration session, with a stored curated summary and zero version rows
-- **WHEN** a new curated write lands
-- **THEN** one version row SHALL be appended with `version = 1` and the NEW content
-- **AND** the pre-migration text SHALL NOT be inferred into the table
+- **GIVEN** an empty data file
+- **WHEN** the full migration chain is applied from `0001`
+- **THEN** `_migrations` SHALL record both `0033_session_summary_versions.sql` and the dropping migration, in that order
+- **AND** `session_summary_versions` SHALL NOT exist in the resulting schema
+- **AND** the resulting table set SHALL equal the table set of a database upgraded from a pre-`0033` file
 
-#### Scenario: Rolling back to a pre-migration image loses no summary
+#### Scenario: Re-running the migration chain is a no-op
 
-- **GIVEN** a database on which `0033` has run and version rows exist
-- **WHEN** the operator runs a previous image that knows nothing about the table
-- **THEN** the table SHALL be left in place and unread, `sessions.summary` SHALL remain the authoritative current value, and no session summary SHALL be lost by the downgrade
+- **GIVEN** a database on which the drop has already been applied
+- **WHEN** the server boots again
+- **THEN** the runner SHALL apply nothing, and SHALL NOT fail attempting to drop a table that is already gone
 
 #### Scenario: Derived tables need no invalidation
 
 - **WHEN** the migration completes
-- **THEN** `memory_fts`, `memory_vec` and the entity tables SHALL be untouched and SHALL require no rebuild, because the new table is a source table that no derived table derives from
+- **THEN** `memory_fts`, `memory_fts_vocab`, `prompts_fts`, `memory_replaces`, `memory_vec` and the three entity tables SHALL be untouched and SHALL require no rebuild, because the dropped table was a source table that no derived table derived from
+
+#### Scenario: The startup shrink guard is not tripped by the drop
+
+- **GIVEN** a database whose `session_summary_versions` held many rows before the upgrade
+- **WHEN** the server boots on the new image
+- **THEN** the operator-visible-table shrink guard SHALL NOT refuse startup, because the dropped table is not one of the tables it counts
+
+#### Scenario: Downgrading to a pre-drop image breaks the curated write path
+
+- **GIVEN** a database on which the drop has been applied
+- **WHEN** the operator runs a pre-drop image against it
+- **THEN** a curated `memory.session_summary` write SHALL fail, because the older code inserts into a table that no longer exists
+- **AND** `_migrations` SHALL still record the drop, so restarting the older image SHALL NOT restore the table
+- **AND** the documented recovery SHALL be to roll forward, or to recreate the empty table from the retained `0033` DDL
