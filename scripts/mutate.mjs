@@ -106,7 +106,14 @@ for (const { find, replace } of args.mutations) {
     uncovered += 1;
     continue;
   }
-  writeFileSync(target, pristine.replace(find, replace));
+  // A replacer FUNCTION, because a replacement STRING is scanned for `$'`,
+  // `` $` ``, `$&` and `$n`. A shell snippet carrying `$'\x01'` therefore
+  // spliced the rest of the file in, and the mutation "caught by 46 tests" was
+  // really a syntax error.
+  writeFileSync(
+    target,
+    pristine.replace(find, () => replace),
+  );
   const { red, out } = runSpec(args.spec, args.filter);
   const names = failedTestNames(out);
   console.log(`mutation: ${find.slice(0, 70)}${find.length > 70 ? '…' : ''}`);
