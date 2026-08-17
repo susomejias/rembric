@@ -1,6 +1,13 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The Hermes provider SHALL emit unified per-turn save and summary reminders, plus a pre-compaction save reminder`
+- TO: `### Requirement: The Hermes provider SHALL report each turn from `sync_turn` and print the server's notice from `prefetch`, plus a pre-compaction save reminder`
+
+The old title asserted the exact behaviour the body below removes — the provider composes no per-turn save reminder and no per-turn summary reminder any more. This change already applies the rule elsewhere ("the title is the requirement's identity", `claude-code-plugin`'s nine-to-eight handler removal); the rename applies it here rather than publishing a requirement whose title contradicts its own first paragraph. Nothing cites the old title.
+
 ## MODIFIED Requirements
 
-### Requirement: The Hermes provider SHALL emit unified per-turn save and summary reminders, plus a pre-compaction save reminder
+### Requirement: The Hermes provider SHALL report each turn from `sync_turn` and print the server's notice from `prefetch`, plus a pre-compaction save reminder
 
 The Hermes `MemoryProvider` (`apps/plugin/.hermes-plugin/__init__.py`) SHALL reinforce curation through `prefetch()` (whose return is injected as `<memory-context>` every turn), report each finished turn through `sync_turn()`, and keep observing `remaining_tokens` in `on_turn_start()`. This is the only per-turn reinforcement Hermes has, since it does not consume the server's `initialize.instructions`.
 

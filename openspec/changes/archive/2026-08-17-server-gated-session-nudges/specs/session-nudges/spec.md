@@ -200,7 +200,7 @@ There SHALL be ONE periodic reminder, not a save reminder and a summary reminder
 
 Prompt saving SHALL remain the obligation of the always-present protocol block (`mcp-api`, the `initialize.instructions` requirement), which already directs the model to save as soon as there is a fix, decision or discovery and which costs nothing per turn because it is already in the prompt.
 
-Where the notice addresses saving at all it SHALL do so in terms the server can defend — the time elapsed since the session last wrote a memory — and SHALL NOT assert that something memorable happened. That clause SHALL sit inside the notice's 640-byte bound and SHALL be the first thing the elision rule drops.
+**As shipped the notice carries no save clause at all, and that is recorded rather than left to be inferred from its absence.** The design took the default of naming the time elapsed since the session last wrote a memory; the composed notice is the directive, the inventory and the closing line and nothing else. The omission is not a byte-budget consequence — measured, a six-section notice is 448 bytes against the 640-byte bound, and the row shape the composer receives carries no last-memory-write timestamp to name. Where the notice addresses saving at all it SHALL do so in terms the server can defend — the time elapsed since the session last wrote a memory — and SHALL NOT assert that something memorable happened; that clause SHALL sit inside the notice's 640-byte bound and SHALL be the first thing the elision rule drops. Adding it is a change of its own, not a licence this requirement already grants.
 
 #### Scenario: One reminder, one floor
 
@@ -208,12 +208,12 @@ Where the notice addresses saving at all it SHALL do so in terms the server can 
 - **THEN** it SHALL expose exactly one floor constant
 - **AND** no code path SHALL emit a save-only reminder on a cadence of its own
 
-#### Scenario: The save clause is time-stated, never memorability-stated
+#### Scenario: The notice claims nothing about what was worth saving
 
 - **GIVEN** a session that has attached no memory for longer than the floor
 - **WHEN** the notice is composed
-- **THEN** any save clause it carries SHALL name the elapsed time
-- **AND** it SHALL NOT assert that the session produced something worth saving
+- **THEN** it SHALL NOT assert that the session produced something worth saving
+- **AND** any save clause it carries SHALL name the elapsed time rather than a judgement about content
 
 ### Requirement: Recall, the session opening and the resumed-read line MUST stay client-composed, and the split MUST be stated
 

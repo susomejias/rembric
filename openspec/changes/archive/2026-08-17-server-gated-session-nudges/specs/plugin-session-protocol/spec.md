@@ -8,7 +8,7 @@ Its cadence clause bound the reminder to "the same per-session turn counter the 
 
 Its loop-guard clause is retired at the root rather than relaxed. The hazard it measured — this hook's `additionalContext` appended to the array the Claude Code `Stop` runner returns as `blockingErrors`, re-firing on 141 consecutive continuations over 10 minutes — exists only because the hook emits text on that channel. The replacement hook emits nothing there, so the host cannot be made to continue the turn by it. The `stop_hook_active` check survives in the replacement for a different and smaller reason, stated in "Every client's end-of-turn handler MUST report the turn exactly once and MUST NOT emit on the host's end-of-turn channel".
 
-Also retired with it: its measured claim that the reminder is "deliberately uncapped … the surface that carries the long form precisely because it has no length budget". The stretch-close notice is composed on the server and bounded at 700 UTF-8 bytes (`session-nudges`), so no model-facing surface in this system is unbounded any more.
+Also retired with it: its measured claim that the reminder is "deliberately uncapped … the surface that carries the long form precisely because it has no length budget". The stretch-close notice is composed on the server and bounded at 640 UTF-8 bytes (`session-nudges`), so no model-facing surface in this system is unbounded any more.
 
 **Migration**: `apps/plugin/scripts/stop-nudge.sh` is deleted and replaced by `apps/plugin/scripts/stop-report.sh`, which POSTs the turn report and writes nothing to stdout beyond the `{}` Codex requires. The `endOfTurnRubric` fixture is removed. No stored data is affected: the requirement governed injected context only.
 
@@ -204,6 +204,13 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 - **THEN** no client SHALL branch its resume call on `source`, `reason`, `reset`, `rewound`, or any other host-supplied indication of whether the conversation is new
 - **AND** removing every such field from the host payload SHALL leave the resume behaviour unchanged
 
+#### Scenario: A failed resume degrades to a diagnostic, never to an aborted session
+
+- **GIVEN** a client whose server returns `404 session_not_found` for the resume (an id the server has never seen under this token)
+- **WHEN** the ensure-then-resume pair runs
+- **THEN** the client SHALL emit exactly one stderr diagnostic naming the path and status, per this capability's failed-POST requirement
+- **AND** the host session SHALL continue, and the hook or handler SHALL exit successfully
+
 #### Scenario: A failed turn report degrades to a diagnostic, never to an aborted session
 
 - **GIVEN** a client whose server returns `404` for the turn report (an old server that does not implement the route)
@@ -357,7 +364,7 @@ This block is also the compaction re-arm of the read directive specified in "A p
 
 Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state that a curated summary write replaces the stored value"), which carries the merge and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
 
-The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL carry the exact canonical Markdown heading directive. **The reworded block SHALL be re-measured against the published ≤700-byte cap in the same commit as the wording**, and the measured value recorded — the last published measurements for this block are 683 bytes at direct replacement and 675 bytes for the shipped `postCompact` fixture, neither of which describes the corrected text.
+The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL carry the exact canonical Markdown heading directive. **A reworded block SHALL be re-measured against the published ≤700-byte cap in the same commit as the wording**, and the measured value recorded. Measured on the shipped fixture after the merge correction: the `rembric:`-prefixed `postCompact` is **599 bytes** and the unprefixed `postCompactCore` is **590**, against the 683 bytes the direct-replacement wording measured and the 675 the pre-correction fixture measured.
 
 #### Scenario: The block asks for the current whole state, after a read
 
@@ -401,7 +408,7 @@ The check SHALL be decided BEFORE the transcript is located or read, so a contin
 
 **Fail-open is absolute.** On unparseable input, a missing or unreadable transcript, an unreachable server, a non-2xx response, or any unexpected error, the handler SHALL exit successfully and produce no output beyond the host-required empty object and the one stderr diagnostic this capability's failed-POST requirement specifies. The failure mode of a missed report is a later notice; there SHALL be no failure mode in which the host is degraded.
 
-The handler SHALL NOT be given a byte or token budget for model-facing output, because it emits none. The budget that applies to the notice is the server's 700-byte bound on the composed string (`session-nudges`), paid on the next turn's start-of-turn channel.
+The handler SHALL NOT be given a byte or token budget for model-facing output, because it emits none. The budget that applies to the notice is the server's 640-byte bound on the composed string (`session-nudges`), paid on the next turn's start-of-turn channel.
 
 #### Scenario: The end-of-turn handler writes nothing to the model
 
