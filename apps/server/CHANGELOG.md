@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.28.5](https://github.com/susomejias/rembric/compare/server-v0.28.4...server-v0.28.5) (2026-08-17)
+
+
+### Features
+
+* **sessions:** gate session nudges on the server ([6be7568](https://github.com/susomejias/rembric/commit/6be7568be5e9c6e079ef11de227a452d4c93ae28))
+* **sessions:** merge curated session-summary writes section-wise ([1e843e1](https://github.com/susomejias/rembric/commit/1e843e110dd289653402ad683485e36b16bbbc61))
+* **sessions:** retire session_summary_versions ([d62b7b3](https://github.com/susomejias/rembric/commit/d62b7b3c0f42483916e41bcba5313942543b13cf))
+
+
+### Bug Fixes
+
+* **dashboard:** format sessions.css and cover CSS in lint-staged ([9b4b2eb](https://github.com/susomejias/rembric/commit/9b4b2ebbbc19d26b6045f8b072f74a3b5886895a))
+* **plugin:** harden the no-jq hook JSON parsers ([e1f0d60](https://github.com/susomejias/rembric/commit/e1f0d60b69ca7617f3e52e983c18364fe023b180))
+* **plugin:** stop the turn report from killing its caller, and share the tool latch ([c370621](https://github.com/susomejias/rembric/commit/c370621bff3729c85e76dc5f2f6769cc74ac1b76))
+* **sessions:** anchor last_work_at on a dedicated turn-report column ([2f05769](https://github.com/susomejias/rembric/commit/2f0576952d737ea7f4b8153e878d7f7b45a5a69c))
+* **sessions:** close audited defects on the session-summary nudge path ([4f3399d](https://github.com/susomejias/rembric/commit/4f3399d3836f1c42a78d80e21ad5a30d6b5a3c13))
+* **sessions:** except the turn anchor from the monotonicity clause ([9f73d97](https://github.com/susomejias/rembric/commit/9f73d979ec0dc4c8423b9c036975858e214a5034))
+* **sessions:** stamp last_work_at with the turn's start, not the report ([6a00b3a](https://github.com/susomejias/rembric/commit/6a00b3afba71136f6758d1baa59f3cd423819ed8))
+
+
+### Documentation
+
+* **openspec:** archive retire-summary-versions ([7847705](https://github.com/susomejias/rembric/commit/784770516ce5aa643294228848a19f6990e3556a))
+
 ## [0.28.4](https://github.com/susomejias/rembric/compare/server-v0.28.3...server-v0.28.4) (2026-08-15)
 
 
