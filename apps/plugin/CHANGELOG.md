@@ -4,6 +4,28 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.30.0](https://github.com/susomejias/rembric/compare/plugin-v0.29.2...plugin-v0.30.0) (2026-08-17)
+
+
+### Features
+
+* **sessions:** gate session nudges on the server ([6be7568](https://github.com/susomejias/rembric/commit/6be7568be5e9c6e079ef11de227a452d4c93ae28))
+* **sessions:** merge curated session-summary writes section-wise ([1e843e1](https://github.com/susomejias/rembric/commit/1e843e110dd289653402ad683485e36b16bbbc61))
+
+
+### Bug Fixes
+
+* **plugin:** harden the no-jq hook JSON parsers ([e1f0d60](https://github.com/susomejias/rembric/commit/e1f0d60b69ca7617f3e52e983c18364fe023b180))
+* **plugin:** report tool use for the finished turn only ([7882bb7](https://github.com/susomejias/rembric/commit/7882bb743491181d9c85bc43bc6bfc0273c75819))
+* **plugin:** stop the turn report from killing its caller, and share the tool latch ([c370621](https://github.com/susomejias/rembric/commit/c370621bff3729c85e76dc5f2f6769cc74ac1b76))
+* **sessions:** close audited defects on the session-summary nudge path ([4f3399d](https://github.com/susomejias/rembric/commit/4f3399d3836f1c42a78d80e21ad5a30d6b5a3c13))
+* **sessions:** except the turn anchor from the monotonicity clause ([9f73d97](https://github.com/susomejias/rembric/commit/9f73d979ec0dc4c8423b9c036975858e214a5034))
+
+
+### Documentation
+
+* **openspec:** archive server-gated-session-nudges ([a45fb52](https://github.com/susomejias/rembric/commit/a45fb5214ae562bd55c9067d7500ecc44971e543))
+
 ## [0.29.2](https://github.com/susomejias/rembric/compare/plugin-v0.29.1...plugin-v0.29.2) (2026-08-15)
 
 
