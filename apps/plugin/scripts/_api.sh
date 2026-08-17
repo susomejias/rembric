@@ -138,7 +138,14 @@ rembric_session_ensure() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$detail" | jq -r 'if .created == true then "true" elif .created == false then "false" else "" end' 2>/dev/null
   else
-    printf '%s' "$detail" | sed -n 's/.*"created"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1
+    # Two expressions, not `\(true\|false\)`: BRE alternation is a GNU
+    # extension, and a POSIX sed matches a LITERAL `|` there (measured with
+    # `sed --posix`), so `created` came back empty and the session-opening
+    # nudge never fired.
+    printf '%s' "$detail" |
+      sed -n -e 's/.*"created"[[:space:]]*:[[:space:]]*true.*/true/p' \
+        -e 's/.*"created"[[:space:]]*:[[:space:]]*false.*/false/p' |
+      head -n1
   fi
 }
 
@@ -269,7 +276,7 @@ rembric_cwd_from_stdin_json() {
 
 # Decode the escape sequences of a JSON string BODY (the text between the
 # quotes), leaving the result in REMBRIC_JSON_DECODED. The ONE escape decoder
-# in this file: the walker below, the prompt extractor and the compaction
+# in this file: the array walker below, the prompt extractor and the compaction
 # extractor all route through it.
 #
 # A global rather than stdout because both of the callers that matter cannot
@@ -279,34 +286,44 @@ rembric_cwd_from_stdin_json() {
 #
 # `\uXXXX` is passed through VERBATIM — decoding it needs printf's `\uHHHH`,
 # which is bash 4.2+. jq remains the recommended path.
+#
+# Global substitutions rather than a scan: `${s//…}` is one C-level pass, while
+# chunking the string escape-by-escape is O(n·k) and made this hook's
+# UserPromptSubmit cost seconds on a long pasted prompt (measured 3.09s to
+# decode 50 KB, 11.6s for 100 KB, against a 60s hook budget shared with
+# prompt-search.sh, which parses the same prompt again).
 rembric_json_decode_string() {
-  local s="${1:-}" out="" head esc
-  while [ -n "$s" ]; do
-    case "$s" in
-      *\\*) ;;
-      *)
-        out="${out}${s}"
-        break
-        ;;
-    esac
-    head="${s%%\\*}"
-    s="${s#*\\}"
-    out="${out}${head}"
-    esc="${s:0:1}"
-    s="${s:1}"
-    case "$esc" in
-      n) out="${out}"$'\n' ;;
-      r) out="${out}"$'\r' ;;
-      t) out="${out}"$'\t' ;;
-      b) out="${out}"$'\b' ;;
-      f) out="${out}"$'\f' ;;
-      u) out="${out}\\u" ;;
-      # A trailing lone backslash is not valid JSON; keep it rather than eat it.
-      '') out="${out}\\" ;;
-      *) out="${out}${esc}" ;;
-    esac
-  done
-  REMBRIC_JSON_DECODED="$out"
+  local s="${1:-}"
+  # Prose carries no escape at all, and then there is nothing to do.
+  case "$s" in
+    *\\*) ;;
+    *)
+      REMBRIC_JSON_DECODED="$s"
+      return 0
+      ;;
+  esac
+  # `\\` and `\u` are hidden behind U+0001/U+0002 first, so no later pattern
+  # can claim the backslash they own — without that, `\\n` on the wire decodes
+  # to a newline, and the bare-backslash sweep below would eat `\uXXXX`'s.
+  # PRECONDITION: the body carries no raw U+0001/U+0002, or the restore below
+  # mistakes it for a stand-in. JSON requires every C0 byte escaped, and both
+  # jq and `JSON.parse` reject a body that breaks that, so the input this
+  # loses is input the jq path already refuses outright.
+  s="${s//\\\\/$'\x01'}"
+  s="${s//\\u/$'\x02'}"
+  s="${s//\\\"/\"}"
+  s="${s//\\\//\/}"
+  s="${s//\\n/$'\n'}"
+  s="${s//\\r/$'\r'}"
+  s="${s//\\t/$'\t'}"
+  s="${s//\\b/$'\b'}"
+  s="${s//\\f/$'\f'}"
+  # Every escape the grammar defines is now consumed or hidden, so a surviving
+  # backslash introduces one JSON does not define. Dropping it keeps the
+  # character it swallowed, which is what the escape-by-escape scan did.
+  s="${s//\\/}"
+  s="${s//$'\x02'/\\u}"
+  REMBRIC_JSON_DECODED="${s//$'\x01'/\\}"
 }
 
 # Capture the raw (still-escaped) body of a JSON string value. Unlike the
@@ -317,12 +334,11 @@ rembric_json_decode_string() {
 # Not sed: the BRE that expresses "quote not preceded by an odd number of
 # backslashes" needs `\|`, which is a GNU extension, and the portable
 # `[^"]*\(\\"[^"]*\)*` form does not backtrack into the escaped quote here
-# (measured: still `say \`). The scan below chunks on `"` with parameter
-# expansion, so it stays C-level rather than per-character.
+# (measured: still `say \`).
 rembric_json_raw_string_field() {
   local input="${1:-}" key="${2:-}"
   { [ -z "$input" ] || [ -z "$key" ]; } && return 0
-  local rest="$input" body out chunk bs
+  local rest="$input" body probe
   while :; do
     case "$rest" in
       *"\"${key}\""*) ;;
@@ -331,30 +347,32 @@ rembric_json_raw_string_field() {
     rest="${rest#*\"${key}\"}"
     # A later occurrence is tried when this one is not a `"key": "…"` pair —
     # the key's own name can appear inside an earlier string value.
-    body="${rest#"${rest%%[![:space:]]*}"}"
+    body="$rest"
+    # Guarded because the trim itself is the expensive part: it re-scans the
+    # whole remaining document, and JSON here almost never pads the colon.
+    case "$body" in [[:space:]]*) body="${body#"${body%%[![:space:]]*}"}" ;; esac
     case "$body" in :*) ;; *) continue ;; esac
     body="${body#:}"
-    body="${body#"${body%%[![:space:]]*}"}"
+    case "$body" in [[:space:]]*) body="${body#"${body%%[![:space:]]*}"}" ;; esac
     case "$body" in \"*) ;; *) continue ;; esac
     body="${body#\"}"
-    out=""
-    while :; do
-      case "$body" in
-        *\"*) ;;
-        *) return 0 ;; # unterminated string — treat as absent
-      esac
-      chunk="${body%%\"*}"
-      body="${body#*\"}"
-      out="${out}${chunk}"
-      # An ODD run of backslashes before the quote escapes it, so the string
-      # continues; an even run (including none) closes it.
-      bs="${chunk##*[!\\]}"
-      if [ $((${#bs} % 2)) -eq 0 ]; then
-        printf '%s' "$out"
-        return 0
-      fi
-      out="${out}\""
-    done
+    # Hiding every escaped backslash and quote behind a TWO-character stand-in
+    # leaves the first surviving `"` at the same offset the value's closing
+    # quote occupies in `body`, so one slice recovers the raw body. Walking the
+    # quotes instead re-copied the tail once per escaped quote — O(n·k), and
+    # 1.2s of a 50 KB prompt.
+    probe="${body//\\\\/$'\x01\x01'}"
+    probe="${probe//\\\"/$'\x02\x02'}"
+    case "$probe" in
+      *\"*) ;;
+      *) return 0 ;; # unterminated string — treat as absent
+    esac
+    # `${x/"*/}` and not `${x%%"*}`: the suffix form retries the match at every
+    # split point, which is quadratic in the value's length (measured 97.9ms
+    # against 1.0ms on a 100 KB prompt).
+    probe="${probe/\"*/}"
+    printf '%s' "${body:0:${#probe}}"
+    return 0
   done
 }
 
@@ -363,7 +381,11 @@ rembric_prompt_from_stdin_json() {
   local input="${1:-}"
   [ -z "$input" ] && return 0
   if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null
+    # `|| true` for the same reason as rembric_turn_report's: `jq` exits 5 on a
+    # body that is not a JSON object, this pipeline is the branch's LAST
+    # statement, and the `trap 'exit 0' ERR` above then kills the CALLER at its
+    # `PROMPT="$(…)"` assignment.
+    printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null || true
   else
     local raw
     raw="$(rembric_json_raw_string_field "$input" prompt)"
@@ -390,7 +412,13 @@ rembric_stop_hook_active_from_stdin_json() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$input" | jq -r 'if .stop_hook_active == true then "true" elif .stop_hook_active == false then "false" else "" end' 2>/dev/null
   else
-    printf '%s' "$input" | sed -n 's/.*"stop_hook_active"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1
+    # Same GNU-only `\|` as in rembric_session_ensure: under a POSIX sed the
+    # result was empty, which stop-report.sh reads as "not a continuation" —
+    # the recursion guard never cut and the hook went on to the report.
+    printf '%s' "$input" |
+      sed -n -e 's/.*"stop_hook_active"[[:space:]]*:[[:space:]]*true.*/true/p' \
+        -e 's/.*"stop_hook_active"[[:space:]]*:[[:space:]]*false.*/false/p' |
+      head -n1
   fi
 }
 

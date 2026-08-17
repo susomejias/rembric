@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiSh = join(here, '..', 'scripts', '_api.sh');
+const scripts = join(here, '..', 'scripts');
+
+/** Hides jq from a sourced function without touching PATH, which bash rewrites. */
+const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
+
+const realSed = spawnSync('sh', ['-c', 'command -v sed'], { encoding: 'utf8' }).stdout.trim();
+/** GNU sed only; where it is missing the POSIX-BRE arm cannot be exercised here. */
+const posixSedAvailable =
+  spawnSync(realSed, ['--posix', '-n', 's/a/b/p'], { input: 'a', encoding: 'utf8' }).status === 0;
+
+/** Drops a `sed` on PATH that forces POSIX BREs, the way a BSD sed behaves. */
+function writePosixSedShim(bin: string): void {
+  writeFileSync(join(bin, 'sed'), `#!/bin/sh\nexec ${realSed} --posix "$@"\n`, { mode: 0o755 });
+}
 
 /** Source _api.sh, call one function with args, print its stdout. */
 function callFn(fn: string, ...args: string[]): string {
@@ -231,7 +245,6 @@ describe('rembric_turn_report — the notice decodes with and without jq', () =>
   const RESPONSE = JSON.stringify({ ok: true, sessionId: 's', lines: [NOTICE] });
   // Hides jq from `rembric_turn_report` without touching PATH, which bash
   // rewrites on this host. Anything else `command` is asked stays real.
-  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
 
   let bin: string;
 
@@ -276,7 +289,6 @@ describe('rembric_turn_report — a lines-less body must not abort the caller', 
   // function's LAST statement kills the hook at `LINES="$(rembric_turn_report
   // …)"` — stop-report.sh then never reaches `_emit_nothing`, and Codex,
   // which requires a `{}` on stdout, gets nothing.
-  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
   const AFTER = 'REACHED-NEXT-STATEMENT';
 
   let bin: string;
@@ -362,8 +374,6 @@ describe('rembric_turn_report — a lines-less body must not abort the caller', 
 });
 
 describe('the JSON string decoder is one implementation, and it agrees with jq', () => {
-  const HIDE_JQ = `command() { [ "$2" = jq ] && return 1; builtin command "$@"; }`;
-
   function withoutJq(fn: string, input: string): string {
     return execFileSync(
       'bash',
@@ -439,6 +449,229 @@ describe('the JSON string decoder is one implementation, and it agrees with jq',
 
   it('there is exactly one escape-decoding table in the file', () => {
     const src = readFileSync(apiSh, 'utf8');
-    expect(src.match(/^\s+n\) out=|^\s+n\) cur=/gm) ?? []).toHaveLength(1);
+    // One mapping of the JSON `\n` escape to a real newline — the marker of the
+    // single table every extractor routes through.
+    expect(src.split('${s//\\\\n/').length - 1).toBe(1);
+  });
+
+  it('an invalid escape still loses its backslash, the way the scan did', () => {
+    // Unreachable from a real host — jq refuses the payload outright and every
+    // client serialises with a real JSON encoder — but it is the one shape
+    // where the substitution chain could have silently changed the answer.
+    expect(withoutJq('rembric_prompt_from_stdin_json', '{"prompt":"a\\qb"}')).toBe('aqb');
+  });
+});
+
+describe('the no-jq prompt path stays off the quadratic curve', () => {
+  // Both bounds are deliberately loose: they are complexity guards, not latency
+  // SLAs. `UserPromptSubmit` is synchronous, its 60s budget is shared by
+  // prompt-search.sh and prompt-nudge.sh (which parse the same prompt twice),
+  // and the prompt itself is unbounded user input.
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'rbr-perf-'));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /**
+   * Reads the payload from a FILE: Linux caps a single exec argument at 128 KB,
+   * so embedding a megabyte of prompt in the `bash -c` script would E2BIG.
+   */
+  function decodeWithoutJq(payload: string): { out: string; ms: number } {
+    const file = join(tmp, 'payload.json');
+    writeFileSync(file, payload);
+    const script = [
+      `source '${apiSh}'`,
+      HIDE_JQ,
+      `INPUT="$(cat '${file}')"`,
+      `rembric_prompt_from_stdin_json "$INPUT"`,
+    ].join('\n');
+    const started = Date.now();
+    const out = execFileSync('bash', ['-c', script], { encoding: 'utf8', maxBuffer: 1 << 26 });
+    return { out, ms: Date.now() - started };
+  }
+
+  it('decodes a 100 KB escape-heavy prompt without rescanning per escape', () => {
+    // The escape-by-escape scan this replaced was O(n·k): 37ms at 5 KB, 491ms at
+    // 20 KB, 3.1s at 50 KB and 11.6s at 100 KB on the reference host (0.3s after).
+    const body = 'Refactor the "session router" and C:\\Users\\dev\\repo.\n'.repeat(2000);
+    const payload = JSON.stringify({ session_id: 's', prompt: body });
+    expect(payload.length).toBeGreaterThan(100_000);
+    const { out, ms } = decodeWithoutJq(payload);
+    // Control: it really decoded the whole prompt, so a fast run cannot be a run
+    // that did nothing.
+    expect(out).toBe(body);
+    expect(ms).toBeLessThan(5_000);
+  });
+
+  it('finds the closing quote of a 1 MB prompt without retrying every split point', () => {
+    // Escape-free on purpose: the decoder returns immediately, so what is left
+    // is the search for the value's end. `${x%%"*}` measured 17.8s here against
+    // 0.2s for `${x/"*/}`.
+    const body = 'the quick brown fox jumps over the lazy dog and keeps going '.repeat(16_667);
+    expect(body).not.toMatch(/["\\\n\r\t]/);
+    const { out, ms } = decodeWithoutJq(JSON.stringify({ session_id: 's', prompt: body }));
+    expect(out).toBe(body);
+    expect(ms).toBeLessThan(5_000);
+  });
+});
+
+describe('the no-jq boolean fallbacks do not depend on GNU sed', () => {
+  // `\(true\|false\)` is a GNU extension: under a POSIX sed the alternation
+  // matches a LITERAL `|`, so both fields came back EMPTY — the session-opening
+  // nudge never fired, and stop-report.sh's recursion guard never cut.
+  let bin: string;
+
+  beforeEach(() => {
+    bin = mkdtempSync(join(tmpdir(), 'rbr-posixsed-'));
+    writePosixSedShim(bin);
+  });
+  afterEach(() => rmSync(bin, { recursive: true, force: true }));
+
+  /** Runs one _api.sh function with the POSIX sed shim first on PATH. */
+  function underPosixSed(script: string, extraEnv: Record<string, string> = {}): string {
+    return spawnSync('bash', ['-c', `source '${apiSh}'\n${HIDE_JQ}\n${script}`], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, ...extraEnv },
+    }).stdout;
+  }
+
+  function ensureUnderPosixSed(responseBody: string): string {
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n200' '${responseBody}'\n`, {
+      mode: 0o755,
+    });
+    return underPosixSed(`rembric_session_ensure /api/demo/sessions '{}'`, {
+      REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+      REMBRIC_API_TOKEN: 'tok',
+    });
+  }
+
+  it.skipIf(!posixSedAvailable)(
+    'control: the shim really forces POSIX BREs, and still substitutes',
+    () => {
+      const posix = (expr: string) =>
+        spawnSync(join(bin, 'sed'), ['-n', expr], {
+          input: '{"created":true}',
+          encoding: 'utf8',
+        }).stdout;
+      // The expression this change removed: no capture, because `\|` is literal.
+      expect(posix('s/.*"created"[[:space:]]*:[[:space:]]*\\(true\\|false\\).*/\\1/p')).toBe('');
+      // …while an alternation-free BRE substitutes normally, so the empty result
+      // above is the extension, not a broken shim.
+      expect(posix('s/.*"created"[[:space:]]*:[[:space:]]*\\(true\\).*/\\1/p')).toBe('true');
+    },
+  );
+
+  it.skipIf(!posixSedAvailable)('rembric_session_ensure reads `created` under a POSIX sed', () => {
+    expect(ensureUnderPosixSed('{"ok":true,"created":true}')).toBe('true');
+    expect(ensureUnderPosixSed('{"ok":true,"created":false}')).toBe('false');
+  });
+
+  it.skipIf(!posixSedAvailable)('… and still reports nothing when the field is absent', () => {
+    expect(ensureUnderPosixSed('{"ok":true}')).toBe('');
+  });
+
+  it.skipIf(!posixSedAvailable)('stop_hook_active reads true/false under a POSIX sed', () => {
+    const read = (input: string) =>
+      underPosixSed(`rembric_stop_hook_active_from_stdin_json '${input}'`);
+    expect(read('{"stop_hook_active":true}')).toBe('true');
+    expect(read('{"stop_hook_active":false}')).toBe('false');
+    expect(read('{"session_id":"s"}')).toBe('');
+  });
+
+  it.skipIf(!posixSedAvailable)(
+    "stop-report.sh's recursion guard still cuts under a POSIX sed",
+    () => {
+      // The boundary that matters: an empty `stop_hook_active` reads as "not a
+      // continuation", so the hook walked on to the turn report on every one of
+      // Claude Code's continuations.
+      const work = mkdtempSync(join(tmpdir(), 'rbr-stopguard-'));
+      try {
+        writeFileSync(join(work, '.rembric'), 'PROJECT_SLUG=demo\n');
+        writeFileSync(
+          join(bin, 'curl'),
+          `#!/bin/sh\n: >'${join(work, 'posted')}'\nprintf '{"ok":true,"lines":[]}\\n200'\n`,
+          { mode: 0o755 },
+        );
+        const run = (stopHookActive: boolean) => {
+          rmSync(join(work, 'posted'), { force: true });
+          spawnSync(
+            'bash',
+            ['-c', `${HIDE_JQ}\nexec '${join(scripts, 'stop-report.sh')}' codex-cli`],
+            {
+              input: JSON.stringify({
+                session_id: 's1',
+                cwd: work,
+                stop_hook_active: stopHookActive,
+              }),
+              encoding: 'utf8',
+              env: {
+                ...process.env,
+                PATH: `${bin}:${process.env.PATH ?? ''}`,
+                REMBRIC_SERVER_URL: 'http://127.0.0.1:1',
+                REMBRIC_API_TOKEN: 'tok',
+              },
+            },
+          );
+          return existsSync(join(work, 'posted'));
+        };
+        expect(run(true)).toBe(false);
+        // Control: the same wiring DOES post when the turn is not a continuation,
+        // so the `false` above cannot be a hook that never ran.
+        expect(run(false)).toBe(true);
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('rembric_prompt_from_stdin_json — a non-object body must not abort the caller', () => {
+  // `jq` exits 5 on any body that is not a JSON object, and this pipeline is the
+  // LAST statement of its branch, so the `trap 'exit 0' ERR` at the top of
+  // _api.sh kills the CALLER at its `PROMPT="$(…)"` assignment.
+  const AFTER = 'REACHED-NEXT-STATEMENT';
+
+  function reachesNextStatement(input: string, prelude: string): boolean {
+    const script = [
+      `source '${apiSh}'`,
+      prelude,
+      `PROMPT="$(rembric_prompt_from_stdin_json '${input.replace(/'/g, `'\\''`)}')"`,
+      `printf '%s' "${AFTER}"`,
+    ].join('\n');
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8' }).stdout.includes(AFTER);
+  }
+
+  it('a JSON array body does not abort the caller with jq present', () => {
+    expect(spawnSync('bash', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+    expect(reachesNextStatement('["x",{"session_id":"s"}]', '')).toBe(true);
+  });
+
+  it('neither does a body that is not JSON at all', () => {
+    expect(reachesNextStatement('not json at all', '')).toBe(true);
+  });
+
+  it('control: an ordinary object body already reached it, jq or not', () => {
+    for (const prelude of ['', HIDE_JQ]) {
+      expect(reachesNextStatement('{"prompt":"hello"}', prelude)).toBe(true);
+    }
+  });
+
+  it('prompt-search.sh still emits its fail-open nudge on an unparseable body', () => {
+    // The real boundary: the hook dies at its `PROMPT=` assignment, so the
+    // keyword nudge its `else` branch owes an unparseable stdin never prints.
+    const run = (input: string) =>
+      spawnSync(join(scripts, 'prompt-search.sh'), [], { input, encoding: 'utf8' })
+        .stdout.split('\n')
+        .filter(Boolean);
+    const lines = run(`["x",{"session_id":"pf-${process.pid}-a"}]`);
+    expect(lines.some((l) => l.includes('memory.search'))).toBe(true);
+    // Control: a well-formed body carrying no keyword stays quiet, so the line
+    // above is the fail-open branch and not something this hook always prints.
+    const quiet = run(
+      JSON.stringify({ session_id: `pf-${process.pid}-b`, prompt: 'just do the thing' }),
+    );
+    expect(quiet.some((l) => l.includes('memory.search'))).toBe(false);
   });
 });

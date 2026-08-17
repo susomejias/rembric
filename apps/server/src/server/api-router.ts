@@ -305,6 +305,10 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
         usedTools: parsed.data.usedTools,
         title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
       });
+      // `lines` MUST stay the last key: the hooks' no-jq fallback
+      // (`apps/plugin/scripts/_api.sh::rembric_turn_report`) reads it with a
+      // greedy `sed` that runs to the LAST `]` in the body, so any key added
+      // after it would be emitted to the agent as extra nudge lines.
       return c.json({ ok: true, sessionId: result.session.id, lines: result.lines });
     } catch (err) {
       return domainErr(c, err);
