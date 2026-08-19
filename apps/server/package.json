@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude '../../install.test.ts' --exclude '../../scripts/*.history.test.ts'",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage --exclude '../../install.test.ts' --exclude '../../scripts/*.history.test.ts'",
+    "test:coverage": "vitest run --coverage --reporter=json --outputFile=test-results.json --exclude '../../install.test.ts' --exclude '../../scripts/*.history.test.ts'",
     "eval": "tsx src/test/retrieval/run-eval.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check"

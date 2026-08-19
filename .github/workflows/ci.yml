@@ -134,6 +134,12 @@ jobs:
           pnpm --filter @rembric/server run test:coverage
           pnpm run test:hermes-plugin
 
+      # A rescued test passes after retry but carries stale failureMessages.
+      # Vitest reports it green; this gate fails the run instead.
+      - name: Check for rescued tests
+        working-directory: apps/server
+        run: node ../../scripts/check-rescued-tests.mjs test-results.json
+
       - name: Installer e2e (headless)
         run: pnpm run e2e:installer
 
