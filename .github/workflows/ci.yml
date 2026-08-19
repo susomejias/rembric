@@ -43,7 +43,7 @@ jobs:
       # at depth 1: this measurement is the gate's central evidence and it cannot
       # run without history. Excluded from the default vitest include so it fails
       # loudly here instead of silently skipping there.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
