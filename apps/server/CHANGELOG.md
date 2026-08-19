@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.6](https://github.com/susomejias/rembric/compare/server-v0.28.5...server-v0.28.6) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** fail the run when a rescued test carries stale failureMessages ([32cc12e](https://github.com/susomejias/rembric/commit/32cc12ee737decadb895643dda006f7d42ac3f02))
+
 ## [0.28.5](https://github.com/susomejias/rembric/compare/server-v0.28.4...server-v0.28.5) (2026-08-17)
 
 
