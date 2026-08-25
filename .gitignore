@@ -65,3 +65,5 @@ data-dev.backup-*/
 
 # Operator's own LAN compose override, not part of the shipped stack.
 docker-compose.lan.yml
+# Local Pi runtime state
+.atl/
