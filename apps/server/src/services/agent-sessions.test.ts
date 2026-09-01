@@ -59,7 +59,7 @@ describe('AgentSessionsService', () => {
 
   it('end transitions to ended without writing summary', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    const ended = sessions.end(s.id, { tokenId });
+    const { row: ended } = sessions.end(s.id, { tokenId });
     expect(ended.status).toBe('ended');
     expect(ended.endedAt).not.toBeNull();
     expect(ended.summary).toBeNull();
@@ -67,7 +67,7 @@ describe('AgentSessionsService', () => {
 
   it('end with a summary transitions and persists it', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    const updated = sessions.end(s.id, {
+    const { row: updated } = sessions.end(s.id, {
       tokenId,
       summary: '## Goal\nwrap it up',
       final: true,
@@ -84,12 +84,12 @@ describe('AgentSessionsService', () => {
 
   it('double-end is idempotent on already-ended sessions', () => {
     const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-    const first = sessions.end(s.id, { tokenId });
+    const { row: first } = sessions.end(s.id, { tokenId });
     expect(first.status).toBe('ended');
     const firstEndedAt = first.endedAt?.getTime();
     // Second end returns the existing row unchanged — no throw, no
     // re-write of ended_at.
-    const second = sessions.end(s.id, { tokenId });
+    const { row: second } = sessions.end(s.id, { tokenId });
     expect(second.status).toBe('ended');
     expect(second.endedAt?.getTime()).toBe(firstEndedAt);
   });
@@ -121,7 +121,7 @@ describe('AgentSessionsService', () => {
 
     it('writeSummary accepts a summary of exactly the cap', () => {
       const s = sessions.start({ tokenId, projectId, agent: 'claude' });
-      const updated = sessions.writeSummary(s.id, {
+      const { row: updated } = sessions.writeSummary(s.id, {
         tokenId,
         summary: 'a'.repeat(SUMMARY_MAX_CHARS),
         final: true,
@@ -490,7 +490,10 @@ describe('AgentSessionsService', () => {
       }
       const row =
         status === 'ended'
-          ? svc.end(s.id, { tokenId })
+          ? (() => {
+              const { row: r } = svc.end(s.id, { tokenId });
+              return r;
+            })()
           : svc.markAbandoned(s.id, { tokenId, adminBypass: true });
       clock = LATE;
       return row;
@@ -499,7 +502,7 @@ describe('AgentSessionsService', () => {
     for (const status of ['abandoned', 'ended'] as const) {
       it(`writeSummary on a ${status} row writes summary and title, leaving lifecycle columns untouched`, () => {
         const before = terminalSession(status);
-        const updated = svc.writeSummary(before.id, {
+        const { row: updated } = svc.writeSummary(before.id, {
           tokenId,
           summary: 'late but curated',
           title: 'Fix the reaper',
@@ -522,7 +525,7 @@ describe('AgentSessionsService', () => {
 
       it(`writeSummary on a ${status} row applies per-field precedence: the curated summary survives a final:false sync, the title still lands`, () => {
         const before = terminalSession(status, { curatedSummary: true });
-        const updated = svc.writeSummary(before.id, {
+        const { row: updated } = svc.writeSummary(before.id, {
           tokenId,
           summary: 'raw transcript dump',
           title: 'hook fallback title',
@@ -540,7 +543,7 @@ describe('AgentSessionsService', () => {
       it(`writeSummary on a ${status} row emits no UPDATE when precedence blocks every field`, () => {
         const before = terminalSession(status, { curatedSummary: true });
         const spy = vi.spyOn(repos.agentSessions, 'updateById');
-        const updated = svc.writeSummary(before.id, {
+        const { row: updated } = svc.writeSummary(before.id, {
           tokenId,
           summary: 'raw transcript dump',
           final: false,
@@ -553,7 +556,11 @@ describe('AgentSessionsService', () => {
 
     it('end on an abandoned row writes the summary without promoting the status', () => {
       const before = terminalSession('abandoned');
-      const updated = svc.end(before.id, { tokenId, summary: 'closing notes', final: true });
+      const { row: updated } = svc.end(before.id, {
+        tokenId,
+        summary: 'closing notes',
+        final: true,
+      });
       expect(updated.summary).toBe('closing notes');
       expect(updated.summaryFinal).toBe(true);
       expect(updated.status).toBe('abandoned');
@@ -995,7 +1002,10 @@ describe('AgentSessionsService', () => {
         final: true,
       });
       return status === 'ended'
-        ? svc.end(s.id, { tokenId })
+        ? (() => {
+            const { row: r } = svc.end(s.id, { tokenId });
+            return r;
+          })()
         : svc.markAbandoned(s.id, { adminBypass: true });
     }
 
@@ -1134,7 +1144,10 @@ describe('AgentSessionsService', () => {
           final: true,
         });
         return status === 'ended'
-          ? svc.end(s.id, { tokenId })
+          ? (() => {
+              const { row: r } = svc.end(s.id, { tokenId });
+              return r;
+            })()
           : svc.markAbandoned(s.id, { adminBypass: true });
       }
 
@@ -1276,7 +1289,7 @@ describe('AgentSessionsService', () => {
 
     it('markAbandoned still refuses an ended row that was never resumed', () => {
       const s = svc.start({ tokenId, projectId, agent: 'ended-not-resumed' });
-      const before = svc.end(s.id, { tokenId });
+      const { row: before } = svc.end(s.id, { tokenId });
       clock = LATER;
 
       let code = 'no-throw';
@@ -1309,7 +1322,7 @@ describe('AgentSessionsService', () => {
 
     it('a partial write updates one section and preserves the others', () => {
       const s = curated('## Goal\nShip X\n## Files\nsrc/a.ts');
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '## Files\nsrc/a.ts, src/b.ts',
         final: true,
@@ -1319,14 +1332,18 @@ describe('AgentSessionsService', () => {
 
     it('a section the write carries is replaced outright, not appended to', () => {
       const s = curated('## Goal\nShip X');
-      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip Y', final: true });
+      const { row: updated } = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Goal\nShip Y',
+        final: true,
+      });
       expect(updated.summary).toBe('## Goal\nShip Y');
       expect(updated.summary).not.toContain('Ship X');
     });
 
     it('a heading only the write carries is appended after the stored sections', () => {
       const s = curated('## Goal\nShip X\n## Files\nsrc/a.ts');
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '## Risks\nflaky test',
         final: true,
@@ -1336,7 +1353,7 @@ describe('AgentSessionsService', () => {
 
     it('shared headings keep the stored order even when the write reorders them', () => {
       const s = curated('## Goal\nA\n## Files\nB');
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '## Files\nB2\n## Goal\nA2',
         final: true,
@@ -1346,7 +1363,7 @@ describe('AgentSessionsService', () => {
 
     it('heading matching ignores case and surrounding whitespace', () => {
       const s = curated('## Files\nsrc/a.ts');
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '##   files  \nsrc/b.ts',
         final: true,
@@ -1357,14 +1374,18 @@ describe('AgentSessionsService', () => {
 
     it('a `##` line inside a fenced code block is not a section boundary', () => {
       const s = curated('## Files\n```\n## Goal\n```\nsrc/a.ts');
-      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip X', final: true });
+      const { row: updated } = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Goal\nShip X',
+        final: true,
+      });
       expect(updated.summary).toContain('```\n## Goal\n```');
       expect(updated.summary).toContain('## Goal\nShip X');
     });
 
     it('a section carried with an empty body is stored empty rather than removed', () => {
       const s = curated('## Goal\nA\n## Unfinished+why\nblocked on Y');
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '## Unfinished+why\n',
         final: true,
@@ -1379,7 +1400,7 @@ describe('AgentSessionsService', () => {
         '## Goal\nA\n## Accomplished\nB\n## Decisions+why\nC\n## Verified+how\nD\n## Unfinished+why\nE\n## Files\nF',
       );
       const before = svc.getById(s.id)?.summary;
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: '<raw transcript>',
         final: false,
@@ -1394,7 +1415,11 @@ describe('AgentSessionsService', () => {
         summary: 'raw transcript containing a ## line',
         final: false,
       });
-      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Goal\nShip X', final: true });
+      const { row: updated } = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Goal\nShip X',
+        final: true,
+      });
       expect(updated.summary).toBe('## Goal\nShip X');
       expect(updated.summary).not.toContain('raw transcript');
     });
@@ -1402,7 +1427,7 @@ describe('AgentSessionsService', () => {
     it('a late curated write to a terminal row is still a silent no-op', () => {
       const s = curated('## Goal\nA\n## Files\nB');
       svc.end(s.id, { tokenId });
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: 'a flat paragraph',
         final: true,
@@ -1413,7 +1438,7 @@ describe('AgentSessionsService', () => {
     it('a late over-cap curated write to a terminal row is still a silent no-op, not invalid_input', () => {
       const s = curated('## Goal\nA\n## Files\nB');
       svc.end(s.id, { tokenId });
-      const updated = svc.writeSummary(s.id, {
+      const { row: updated } = svc.writeSummary(s.id, {
         tokenId,
         summary: 'a'.repeat(SUMMARY_MAX_CHARS),
         final: true,
@@ -1423,14 +1448,18 @@ describe('AgentSessionsService', () => {
 
     it('a merge that changes nothing stores the same bytes', () => {
       const s = curated('## Goal\nA\n## Files\nB');
-      const updated = svc.writeSummary(s.id, { tokenId, summary: '## Files\nB', final: true });
+      const { row: updated } = svc.writeSummary(s.id, {
+        tokenId,
+        summary: '## Files\nB',
+        final: true,
+      });
       expect(updated.summary).toBe('## Goal\nA\n## Files\nB');
     });
 
     it('merging a document with itself is the identity', () => {
       const doc = '## Goal\nA\n\n### Sub-decision\ndetail\n## Files\n```\ncode\n```\nsrc/a.ts';
       const s = curated(doc);
-      const updated = svc.writeSummary(s.id, { tokenId, summary: doc, final: true });
+      const { row: updated } = svc.writeSummary(s.id, { tokenId, summary: doc, final: true });
       expect(updated.summary).toBe(doc);
     });
 
@@ -1451,7 +1480,7 @@ describe('AgentSessionsService', () => {
 
       it('is accepted against a stored summary with no headings (the control)', () => {
         const s = curated('Goal: A. Files: B.');
-        const updated = svc.writeSummary(s.id, {
+        const { row: updated } = svc.writeSummary(s.id, {
           tokenId,
           summary: 'Fixed the CI formatting job.',
           final: true,
@@ -1461,7 +1490,7 @@ describe('AgentSessionsService', () => {
 
       it('a first curated write on an empty session may be free-form', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
-        const updated = svc.writeSummary(s.id, {
+        const { row: updated } = svc.writeSummary(s.id, {
           tokenId,
           summary: 'no headings here',
           final: true,
@@ -1473,7 +1502,7 @@ describe('AgentSessionsService', () => {
         const s = curated(
           '## Goal\nA\n## Accomplished\nB\n## Decisions+why\nC\n## Verified+how\nD\n## Unfinished+why\nE\n## Files\nF',
         );
-        const updated = svc.writeSummary(s.id, {
+        const { row: updated } = svc.writeSummary(s.id, {
           tokenId,
           summary: '## Accomplished\nDid it',
           final: true,
@@ -1501,7 +1530,11 @@ describe('AgentSessionsService', () => {
         const stored = `## Goal\n${'a'.repeat(SUMMARY_MAX_CHARS - 20)}`;
         const s = curated(stored);
         const condensed = '## Goal\ncondensed';
-        const updated = svc.writeSummary(s.id, { tokenId, summary: condensed, final: true });
+        const { row: updated } = svc.writeSummary(s.id, {
+          tokenId,
+          summary: condensed,
+          final: true,
+        });
         expect(updated.summary).toBe(condensed);
       });
     });
@@ -1513,7 +1546,7 @@ describe('AgentSessionsService', () => {
         summary: '## Goal\nShip X\n## Files\nsrc/a.ts',
         final: true,
       });
-      const updated = svc.end(s.id, {
+      const { row: updated } = svc.end(s.id, {
         tokenId,
         summary: '## Files\nsrc/a.ts, src/b.ts',
         final: true,

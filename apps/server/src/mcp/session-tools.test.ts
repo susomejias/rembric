@@ -219,6 +219,85 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
     expect(out.code).toBe('session_not_found');
     expect(agentSessions.getById(s.id)?.summary).toBeNull();
   });
+
+  it('applied is false and discardReason is terminal_final on a terminal row with a prior curated summary', async () => {
+    const s = startSession();
+    // Write the first curated summary
+    await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({
+        sessionId: s.id,
+        summary: '## Goal\nfirst curated',
+      }),
+    );
+    // Mark as abandoned (terminal)
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+
+    // Second write on terminal row with summaryFinal=true should be discarded
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({
+        sessionId: s.id,
+        summary: '## Goal\nsecond curated',
+      }),
+    );
+    const out = parseText<{
+      ok: boolean;
+      summary: string;
+      applied: boolean;
+      discardReason?: string;
+    }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.summary).toBe('## Goal\nfirst curated');
+    expect(out.applied).toBe(false);
+    expect(out.discardReason).toBe('terminal_final');
+  });
+
+  it('applied is true on a terminal row without a prior curated summary', async () => {
+    const s = startSession();
+    agentSessions.markAbandoned(s.id, { adminBypass: true });
+    // No prior summary write — summaryFinal is false, write should land
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({
+        sessionId: s.id,
+        summary: '## Goal\nlate handoff',
+      }),
+    );
+    const out = parseText<{ ok: boolean; summary: string; applied: boolean }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.summary).toBe('## Goal\nlate handoff');
+    expect(out.applied).toBe(true);
+  });
+
+  it('applied is true and discardReason is absent on an active row', async () => {
+    const s = startSession();
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({
+        sessionId: s.id,
+        summary: '## Goal\nactive write',
+      }),
+    );
+    const out = parseText<{ ok: boolean; applied: boolean; discardReason?: string }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.applied).toBe(true);
+    expect(out.discardReason).toBeUndefined();
+  });
+
+  it('session_end applied is true on an active row', async () => {
+    const s = startSession();
+    const r = await runWithContext(makeContext(), () => handlers.sessionEnd({ sessionId: s.id }));
+    const out = parseText<{ ok: boolean; applied: boolean }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.applied).toBe(true);
+  });
+
+  it('session_end applied is false on an already-terminal row', async () => {
+    const s = startSession();
+    agentSessions.end(s.id, { tokenId: adminToken.id });
+    // Already terminal — should be no-op
+    const r = await runWithContext(makeContext(), () => handlers.sessionEnd({ sessionId: s.id }));
+    const out = parseText<{ ok: boolean; applied: boolean }>(r);
+    expect(out.ok).toBe(true);
+    expect(out.applied).toBe(false);
+  });
 });
 
 describe('memory.session_resume', () => {
@@ -236,7 +315,7 @@ describe('memory.session_resume', () => {
 
   it('returns an ended session to active and reports what it discarded', async () => {
     const s = startSession();
-    const ended = agentSessions.end(s.id, { tokenId: adminToken.id });
+    const { row: ended } = agentSessions.end(s.id, { tokenId: adminToken.id });
 
     const r = await runWithContext(makeContext(), () =>
       handlers.sessionResume({ sessionId: s.id }),
@@ -422,7 +501,7 @@ describe('session tools acting on a resumed session', () => {
 
     const s = sessions.start({ tokenId: adminToken.id, projectId: defaultProjectId, agent: 'a' });
     tick = 1;
-    const firstEnd = sessions.end(s.id, { tokenId: adminToken.id });
+    const { row: firstEnd } = sessions.end(s.id, { tokenId: adminToken.id });
     expect(firstEnd.endedAt?.getTime()).toBe(ticks[1]!.getTime());
     tick = 2;
     await runWithContext(ctx, () => clocked.sessionResume({ sessionId: s.id }));

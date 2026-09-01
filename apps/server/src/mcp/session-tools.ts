@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { getRequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
-import { type ProjectsService } from '../services/projects.js';
+import type { ProjectsService } from '../services/projects.js';
 import { projectScope, type Scope } from '../services/scope.js';
 
 import {
@@ -78,6 +78,7 @@ export const sessionEndOutput = {
   ok: z.literal(true),
   sessionId: z.string(),
   endedAt: z.string().nullable(),
+  applied: z.boolean(),
 };
 
 export const sessionSummaryOutput = {
@@ -87,6 +88,8 @@ export const sessionSummaryOutput = {
   title: z.string().nullable(),
   summaryFinal: z.boolean(),
   titleFinal: z.boolean(),
+  applied: z.boolean(),
+  discardReason: z.string().optional(),
 };
 
 export const sessionResumeOutput = {
@@ -139,7 +142,13 @@ async function handleSessionStart(
   // project), awaiting roots discovery on a path-less connection.
   let scope: Scope;
   let source: ProjectResolutionSource;
-  if (args.project !== undefined) {
+  if (args.project === undefined) {
+    try {
+      ({ scope, source } = await resolveEffectiveScope(deps));
+    } catch (err) {
+      return errToMcp(err);
+    }
+  } else {
     if (ctx.requestedSlug && ctx.requestedSlug !== args.project) {
       return mcpError(
         'scope_locked',
@@ -157,12 +166,6 @@ async function handleSessionStart(
     }
     scope = projectScope(found.id);
     source = 'tool-explicit';
-  } else {
-    try {
-      ({ scope, source } = await resolveEffectiveScope(deps));
-    } catch (err) {
-      return errToMcp(err);
-    }
   }
   const projectId = scope.projectId;
 
@@ -197,7 +200,7 @@ async function handleSessionStart(
         projectId,
         agent: args.agent ?? 'unknown',
         description: args.description ?? null,
-        cwd: typeof process !== 'undefined' ? process.cwd() : null,
+        cwd: typeof process === 'undefined' ? null : process.cwd(),
       });
     } catch (err) {
       return errToMcp(err);
@@ -250,14 +253,16 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
-    const ended = deps.agentSessions.end(sessionId, { tokenId: ctx.token.id });
+    const { row: ended, applied } = deps.agentSessions.end(sessionId, {
+      tokenId: ctx.token.id,
+    });
     const key = routerKey();
     // Not on an abandoned row: `end()` used to throw there, so the binding
     // survived. Clearing it now would drop auto-attach to `session_id = NULL`.
     if (key && ended.status !== 'abandoned') {
       deps.router.clearSession(key.tokenId, key.mcpSessionId);
     }
-    return ok({ ok: true, sessionId: ended.id, endedAt: ended.endedAt });
+    return ok({ ok: true, sessionId: ended.id, endedAt: ended.endedAt, applied });
   } catch (err) {
     return errToMcp(err);
   }
@@ -286,7 +291,7 @@ async function handleSessionSummary(
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
-    const updated = deps.agentSessions.writeSummary(sessionId, {
+    const { row: updated, applied } = deps.agentSessions.writeSummary(sessionId, {
       tokenId: ctx.token.id,
       summary: args.summary,
       title: args.title,
@@ -299,6 +304,8 @@ async function handleSessionSummary(
       title: updated.title,
       summaryFinal: updated.summaryFinal,
       titleFinal: updated.titleFinal,
+      applied,
+      ...(applied === false && { discardReason: 'terminal_final' }),
     });
   } catch (err) {
     return errToMcp(err);

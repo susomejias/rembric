@@ -172,10 +172,10 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       // HTTP path truncates server-side: bash / Python / opencode writers
       // cannot react to invalid_input. The MCP path rejects (agent retries).
       // See apps/server/src/services/agent-sessions.ts:SUMMARY_MAX_CHARS.
-      const updated = deps.agentSessions.writeSummary(sessionId, {
+      const { row: updated } = deps.agentSessions.writeSummary(sessionId, {
         tokenId: ctx.token.id,
         summary: truncateSummary(parsed.data.summary),
-        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
+        title: parsed.data.title === undefined ? undefined : truncateTitle(parsed.data.title),
         final: parsed.data.final,
       });
       return c.json({
@@ -214,11 +214,11 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     }
     try {
       // HTTP path truncates server-side (see /summary handler above).
-      const updated = deps.agentSessions.end(sessionId, {
+      const { row: updated } = deps.agentSessions.end(sessionId, {
         tokenId: ctx.token.id,
         summary:
-          parsed.data.summary !== undefined ? truncateSummary(parsed.data.summary) : undefined,
-        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
+          parsed.data.summary === undefined ? undefined : truncateSummary(parsed.data.summary),
+        title: parsed.data.title === undefined ? undefined : truncateTitle(parsed.data.title),
         final: parsed.data.final,
       });
       return c.json({
@@ -303,7 +303,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
       const result = deps.agentSessions.reportTurn(sessionId, {
         tokenId: ctx.token.id,
         usedTools: parsed.data.usedTools,
-        title: parsed.data.title !== undefined ? truncateTitle(parsed.data.title) : undefined,
+        title: parsed.data.title === undefined ? undefined : truncateTitle(parsed.data.title),
       });
       // `lines` MUST stay the last key: the hooks' no-jq fallback
       // (`apps/plugin/scripts/_api.sh::rembric_turn_report`) reads it with a

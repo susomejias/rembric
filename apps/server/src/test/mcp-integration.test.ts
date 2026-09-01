@@ -21,7 +21,7 @@ import {
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
 import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
-import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
@@ -939,6 +939,77 @@ describe('MCP protocol conformance', () => {
     expect(rows.map((r) => r.id)).toEqual([a.sessionId]);
 
     await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+  });
+
+  it('session_summary on an abandoned terminal row returns applied:false and discardReason', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-verdict-terminal') ??
+      projects.create({ slug: 'integration-verdict-terminal' });
+    const client = await connect({ projectSlug: project.slug });
+    const agentSessions = new AgentSessionsService(
+      createRepositories(server.dbHandle.db),
+      server.dbHandle.db,
+    );
+
+    // Start and write a summary to create a terminal row with summaryFinal:true
+    const start = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test' },
+    })) as ToolResult;
+    const sessionId = (readJson(start) as { sessionId: string }).sessionId;
+
+    await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { sessionId, summary: '## Goal\nfirst curated summary' },
+    });
+    // Mark as abandoned (terminal) — bypass token check since integration test
+    // uses a single token
+    agentSessions.markAbandoned(sessionId, { adminBypass: true });
+
+    // Second summary on terminal row with summaryFinal=true should be discarded
+    const second = (await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { sessionId, summary: '## Goal\nsecond curated' },
+    })) as ToolResult;
+    const body = readJson(second) as { applied: boolean; discardReason?: string };
+    expect(body.applied).toBe(false);
+    expect(body.discardReason).toBe('terminal_final');
+
+    await client.close();
+  });
+
+  it('session_end on an already-terminal row returns applied:false', async () => {
+    const projects = new ProjectsService(createRepositories(server.dbHandle.db));
+    const project =
+      projects.findBySlug('integration-verdict-end') ??
+      projects.create({ slug: 'integration-verdict-end' });
+    const client = await connect({ projectSlug: project.slug });
+
+    // Start the session and capture the session ID
+    const start = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test' },
+    })) as ToolResult;
+    const sessionId = (readJson(start) as { sessionId: string }).sessionId;
+
+    // End the session to make it terminal
+    const firstEnd = (await client.callTool({
+      name: 'memory.session_end',
+      arguments: { sessionId },
+    })) as ToolResult;
+    const body1 = readJson(firstEnd) as { applied: boolean };
+    expect(body1.applied).toBe(true);
+
+    // Second end on already-terminal row should return applied:false
+    const secondEnd = (await client.callTool({
+      name: 'memory.session_end',
+      arguments: { sessionId },
+    })) as ToolResult;
+    const body2 = readJson(secondEnd) as { applied: boolean };
+    expect(body2.applied).toBe(false);
+
     await client.close();
   });
 
