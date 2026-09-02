@@ -64,8 +64,6 @@ The migration runner (`apps/server/src/db/migrate.ts`) therefore wraps every mig
 
 Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active proposals in `openspec/changes/<name>/`; archived in `openspec/changes/archive/`. **Before changing a load-bearing invariant or adding a new MCP tool, open an OpenSpec change first.**
 
-Each phase has a dedicated subagent, so a phase can be delegated whole — see [Agents](#agents).
-
 ## Dashboard conventions
 
 - **Timestamps go through `formatTs`** (`apps/server/src/dashboard/templates.ts`). Emits `<time data-rembric-ts>…</time>`; layout shell upgrades to viewer's TZ. Never hand-write `toISOString` / `toLocaleString` in templates.
@@ -93,19 +91,6 @@ Two skills are mandatory consulting points:
 - **`.agents/skills/rembric-tui-installer-e2e/`** — the runnable e2e validation playbook for the installer. Run before merging/deploying any install/distribution change.
 
 ## Agents
-
-**Agent source lives at `.agents/agents/<name>.md`.** Unlike skills (one symlink per skill), the whole directory is symlinked once — `.claude/agents -> ../.agents/agents` — so adding an agent needs no symlink step, just a new file. Per-file symlinks would also break `lint-staged`, which passes staged paths to `prettier` explicitly and prettier refuses an explicitly-named symlink.
-
-One agent per OpenSpec phase, so a phase can be delegated whole. Each invokes its phase's skill and carries this repo's invariants, so the delegating session doesn't have to re-explain them. They run non-interactively and therefore **must be given the change name** — they will stop rather than guess.
-
-| Agent          | Phase   | Skill it invokes          | Writes                                   |
-| -------------- | ------- | ------------------------- | ---------------------------------------- |
-| `sdd-explorer` | explore | `openspec-explore`        | nothing — findings + open questions only |
-| `sdd-proposer` | propose | `openspec-propose`        | `openspec/changes/<name>/**` only        |
-| `sdd-applier`  | apply   | `openspec-apply-change`   | source, ticking `tasks.md` as it lands   |
-| `sdd-archiver` | archive | `openspec-archive-change` | merges delta specs, moves to `archive/`  |
-
-Plus one specialist:
 
 - **`db-performance-auditor`** — SQLite query and schema performance. Proves every finding with `EXPLAIN QUERY PLAN` plus wall-clock at 1k/20k/50k rows, ranks by `call frequency × measured cost`, and **measures the proposed alternative** rather than assuming it (a `LEFT JOIN` rewrite assumed to be the obvious fix here turned out to be a pessimisation at 50k). Read-only: it never modifies a tracked file. Use it before adding an index or rewriting a query, not just when something is already slow.
 

@@ -1,10 +1,6 @@
 {
   "session_resources": "lean",
   "model_profiles": {
-    "db-performance-auditor": { "model": "openai-codex/gpt-5.6-terra", "effort": "high" },
-    "sdd-applier": { "model": "openai-codex/gpt-5.6-luna", "effort": "high" },
-    "sdd-archiver": { "model": "openai-codex/gpt-5.6-terra", "effort": "medium" },
-    "sdd-explorer": { "model": "openai-codex/gpt-5.6-sol", "effort": "high" },
-    "sdd-proposer": { "model": "openai-codex/gpt-5.6-sol", "effort": "high" }
+    "db-performance-auditor": { "model": "openai-codex/gpt-5.6-terra", "effort": "high" }
   }
 }
