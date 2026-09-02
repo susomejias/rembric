@@ -317,10 +317,10 @@ export class AgentSessionsService {
     return updated;
   }
 
-  /**
-   * The one late-write path for a row that is already `ended` or
-   * `abandoned`. */
-  private writeTerminalFields(existing: AgentSession, input: PrecedenceInput): AgentSession {
+  private writeTerminalFields(
+    existing: AgentSession,
+    input: PrecedenceInput,
+  ): { row: AgentSession; applied: boolean } {
     // No lastActivityAt stamp, unlike the active path: it only drives
     // stale-active retirement and transport resolution, both status='active'.
     // `{ terminal: true }` is the deviation from the active path's
@@ -337,10 +337,13 @@ export class AgentSessionsService {
       delete set.titleFinal;
     }
     if (Object.keys(set).length === 0) {
-      return existing;
+      return { row: existing, applied: false };
     }
     const updated = this.repos.agentSessions.updateById(existing.id, set, { requireActive: false });
-    return updated ?? existing;
+    if (!updated) {
+      return { row: existing, applied: false };
+    }
+    return { row: updated, applied: true };
   }
 
   /**
@@ -354,7 +357,10 @@ export class AgentSessionsService {
    * `_final` flag is already true ignores incoming `final:false` writes
    * and is replaced by incoming `final:true` writes (last-final-wins).
    */
-  writeSummary(sessionId: string, input: WriteSummaryInput): AgentSession {
+  writeSummary(
+    sessionId: string,
+    input: WriteSummaryInput,
+  ): { row: AgentSession; applied: boolean } {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.writeSummary: summary must be non-empty');
     }
@@ -384,10 +390,10 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input, ts),
     };
-    return this.updateActiveOrThrow(sessionId, set);
+    return { row: this.updateActiveOrThrow(sessionId, set), applied: true };
   }
 
-  end(sessionId: string, input: EndSessionInput): AgentSession {
+  end(sessionId: string, input: EndSessionInput): { row: AgentSession; applied: boolean } {
     if (input.summary !== undefined && input.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.end: summary must be non-empty');
     }
@@ -420,7 +426,7 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input, ts),
     };
-    return this.updateActiveOrThrow(sessionId, set);
+    return { row: this.updateActiveOrThrow(sessionId, set), applied: true };
   }
 
   /**
