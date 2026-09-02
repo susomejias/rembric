@@ -287,6 +287,15 @@ export const RembricPlugin: Plugin = async (ctx) => {
         output.parts.push(nudgePart(input.sessionID, messageId, text));
       }
 
+      // Proactive entity recall (`proactive-recall`, D1′): awaited at turn
+      // START with the same bounded, best-effort core call the Pi client
+      // makes; `content` is non-empty past the guard above, so the missing-
+      // prompt skip rule is satisfied by construction. Parts are pushed like
+      // the nudge parts above — same wrapper, same turn, no one-turn lag.
+      for (const hint of await core.recallHints(input.sessionID, content)) {
+        output.parts.push(nudgePart(input.sessionID, messageId, hint));
+      }
+
       // Same debounce as session.idle — avoids a second uncoordinated POST.
       core.scheduleIdleFlush(input.sessionID);
     },

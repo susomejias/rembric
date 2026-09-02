@@ -677,7 +677,20 @@ describe('RembricPlugin handlers', () => {
       const hang = new Promise<Response>((resolve) => {
         released = () => resolve(new Response('', { status: 200 }));
       });
-      fetchMock.mockImplementation(() => hang);
+      // URL-aware: the flush/turn POSTs hang to prove fire-and-forget; the
+      // turn-START recall-hints call is DESIGNED to be awaited
+      // (proactive-recall D1′), so it must resolve — a hang there would
+      // block the handler on something the test never meant to impose.
+      fetchMock.mockImplementation((url: unknown) =>
+        String(url).includes('/recall-hints')
+          ? Promise.resolve(
+              new Response(JSON.stringify({ ok: true, lines: [] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          : hang,
+      );
 
       await handlers['chat.message']!(
         { sessionID: 'flush-slow' } as never,

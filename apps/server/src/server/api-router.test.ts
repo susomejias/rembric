@@ -5,10 +5,12 @@ import { createRepositories } from '../db/repositories/index.js';
 import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { buildSessionHandlers } from '../mcp/session-tools.js';
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
+import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
+import { UsageCounters } from '../services/usage-counters.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { createApiRouter } from './api-router.js';
@@ -949,6 +951,12 @@ describe('createApiRouter', () => {
         resumesTerminalRows: false,
         body: () => ({ usedTools: true }),
       },
+      // Read-only w.r.t. persistence (proactive-recall): the hints route
+      // touches no session state, so a terminal row stays terminal.
+      '/:slug/sessions/:id/recall-hints': {
+        resumesTerminalRows: false,
+        body: () => ({ prompt: 'probe src/x.ts' }),
+      },
     };
 
     it('the classification covers exactly the POST routes the router registers', () => {
@@ -1238,6 +1246,281 @@ describe('createApiRouter', () => {
     });
   });
 
+  // recall-hints lives in the session auth group so it shares the same middleware.
+  describe('POST /:slug/sessions/:id/recall-hints', () => {
+    /**
+     * Seed a memory into the entity index the way the production MCP save
+     * path does (`memory-tools.ts` linkMemory call): service save plus the
+     * extractor's own output linked to the row. `memory.save` alone does
+     * not touch the index, so a prompt-path lookup against such a row can
+     * only ever come back empty.
+     */
+    function seedEntityMemory(input: {
+      type: 'project' | 'feedback' | 'procedural' | 'reference' | 'user';
+      title: string;
+      content: string;
+    }): void {
+      const m = memory.save(input, projectScope(projectId));
+      createRepositories(db.handle.db).entities.linkMemory(
+        m.id,
+        projectId,
+        extractEntities(m.title, m.content),
+        m.createdAt,
+      );
+    }
+
+    it('returns empty lines for an empty prompt', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-empty' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-recall-empty/recall-hints`, {
+        token: adminToken.plaintext,
+        body: { prompt: '' },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.lines).toEqual([]);
+    });
+
+    it('returns empty lines when prompt has no extractable entities', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-no-entities' },
+      });
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-no-entities/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: 'Do it' },
+        },
+      );
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.lines).toEqual([]);
+    });
+
+    it('returns recall lines when prompt mentions an entity with matching memories', async () => {
+      // The content carries the path so extraction links the row to it.
+      seedEntityMemory({
+        type: 'project',
+        title: 'auth handler module',
+        content: 'Auth handler implementation details for src/auth/handler.ts',
+      });
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-has-entity' },
+      });
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-has-entity/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: 'Fix the login flow in src/auth/handler.ts' },
+        },
+      );
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(Array.isArray(r.body.lines)).toBe(true);
+      // Should contain a line with the entity value and the memory title
+      const line = (r.body.lines as string[]).find((l) => l.includes('src/auth/handler.ts'));
+      expect(line).toBeDefined();
+      expect(line).toContain('auth handler module');
+    });
+
+    it('dedupes: same entity in two calls returns lines only on first call', async () => {
+      seedEntityMemory({
+        type: 'project',
+        title: 'cache module',
+        content: 'Caching implementation in src/cache/manager.ts',
+      });
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-dedup' },
+      });
+      const first = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-dedup/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: 'src/cache/manager.ts needs updating' },
+        },
+      );
+      expect(first.status).toBe(200);
+      expect((first.body.lines as string[]).length).toBeGreaterThan(0);
+
+      // Second call with the same entity
+      const second = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-dedup/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: 'src/cache/manager.ts needs updating again' },
+        },
+      );
+      expect(second.status).toBe(200);
+      const secondLines = second.body.lines as string[];
+      const cacheLine = secondLines.find((l) => l.includes('src/cache/manager.ts'));
+      expect(cacheLine).toBeUndefined();
+    });
+
+    it('caps at 3 lines when prompt mentions many entities', async () => {
+      // Six memories, each linked to a distinct file-path entity.
+      for (let i = 1; i <= 6; i++) {
+        seedEntityMemory({
+          type: 'project',
+          title: `entity ${i} memory`,
+          content: `content for entity ${i} in src/e${i}/mod.ts`,
+        });
+      }
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-many' },
+      });
+      // A prompt mentioning the six indexed paths.
+      const prompt =
+        'Fix src/e1/mod.ts, src/e2/mod.ts, src/e3/mod.ts, src/e4/mod.ts, src/e5/mod.ts, src/e6/mod.ts';
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-recall-many/recall-hints`, {
+        token: adminToken.plaintext,
+        body: { prompt },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      const lines = r.body.lines as string[];
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length).toBeLessThanOrEqual(3);
+    });
+
+    it('filters: reference-type memories are not surfaced', async () => {
+      // One entity, two memories: reference must drop out of the line,
+      // project must survive — the filter is only observable when a
+      // matched entity carries both types.
+      seedEntityMemory({
+        type: 'reference',
+        title: 'API reference',
+        content: 'Reference documentation for config/deploy.yaml',
+      });
+      seedEntityMemory({
+        type: 'project',
+        title: 'deploy pipeline note',
+        content: 'Project note about config/deploy.yaml',
+      });
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-ref' },
+      });
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/sess-recall-ref/recall-hints`, {
+        token: adminToken.plaintext,
+        body: { prompt: 'Update config/deploy.yaml' },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      const lines = r.body.lines as string[];
+      expect(lines.some((l) => l.includes('deploy pipeline note'))).toBe(true);
+      for (const line of lines) {
+        expect(line).not.toContain('API reference');
+      }
+    });
+
+    it('does not persist the prompt to any table', async () => {
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-no-persist' },
+      });
+      const secretPrompt = 'This is a SECRET prompt that should NOT be persisted';
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-no-persist/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: secretPrompt },
+        },
+      );
+      expect(r.status).toBe(200);
+
+      // Task 2.4 / proactive-recall spec: the prompt must not land in
+      // ANY table. Scan every real (non-virtual) table's every text
+      // column — memory, prompts, agent_sessions, consolidation_ops and
+      // anything a future migration adds. FTS/vec tables are derived
+      // indexes over the real tables, skipped as VIRTUAL, and nothing
+      // wrote to them anyway.
+      const tables = db.handle.raw
+        .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table'")
+        .all() as { name: string; sql: string | null }[];
+      let scanned = 0;
+      for (const t of tables) {
+        if (/VIRTUAL/i.test(t.sql ?? '')) continue;
+        scanned++;
+        const rows = db.handle.raw.prepare(`SELECT * FROM "${t.name}"`).all() as Record<
+          string,
+          unknown
+        >[];
+        for (const row of rows) {
+          for (const value of Object.values(row)) {
+            if (typeof value !== 'string') continue;
+            expect(value, `prompt text leaked into table '${t.name}'`).not.toContain(secretPrompt);
+          }
+        }
+      }
+      // Non-vacuity: the scan really looked at rows.
+      expect(scanned).toBeGreaterThan(3);
+    });
+
+    it('is token-bound like every other session route: own session 200, foreign session 404', async () => {
+      const app = makeApp();
+      // The project-scoped write token registers and uses its OWN session.
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: projectScopedToken.plaintext,
+        body: { id: 'sess-recall-auth' },
+      });
+      const own = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-auth/recall-hints`,
+        {
+          token: projectScopedToken.plaintext,
+          body: { prompt: 'test' },
+        },
+      );
+      expect(own.status).toBe(200);
+      expect(own.body.ok).toBe(true);
+
+      // `rejectIfDeleted` treats another token's session as not-found (the
+      // same invariant as /turn): the URL :slug never overrides token binding.
+      const foreign = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-auth/recall-hints`,
+        { token: adminToken.plaintext, body: { prompt: 'test' } },
+      );
+      expect(foreign.status).toBe(404);
+      expect(foreign.body.code).toBe('session_not_found');
+    });
+
+    it('404 when session does not exist', async () => {
+      const app = makeApp();
+      const r = await call(app, 'POST', `/${projectSlug}/sessions/never-existed/recall-hints`, {
+        token: adminToken.plaintext,
+        body: { prompt: 'test' },
+      });
+      expect(r.status).toBe(404);
+      expect(r.body.code).toBe('session_not_found');
+    });
+  });
+
   describe('POST /:slug/memory/recall', () => {
     it('returns ranked memories and a formatted <memory-context> block', async () => {
       memory.save(
@@ -1485,4 +1768,69 @@ describe('a soft-delete landing between the boundary check and the write', () =>
       expect(r.body.code).toBe('session_deleted');
     });
   }
+});
+
+describe('GET /:slug/debug/counters (usage counters, D6)', () => {
+  it('returns the counter map to an admin token, in the documented shape', async () => {
+    const counters = new UsageCounters();
+    counters.record(adminToken.id, 'memory.search');
+    counters.record(adminToken.id, 'memory.search');
+    counters.record(adminToken.id, 'memory.save');
+    const app = createApiRouter({
+      agentSessions,
+      memory,
+      tokens,
+      projects,
+      usageCounters: counters,
+    });
+
+    const r = await call(app, 'GET', `/${projectSlug}/debug/counters`, {
+      token: adminToken.plaintext,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.counters).toEqual({
+      [adminToken.id]: { 'memory.search': 2, 'memory.save': 1 },
+    });
+  });
+
+  it('refuses a non-admin token with 403 — the map names tokens by id', async () => {
+    const counters = new UsageCounters();
+    counters.record('someone-else', 'memory.search');
+    const app = createApiRouter({
+      agentSessions,
+      memory,
+      tokens,
+      projects,
+      usageCounters: counters,
+    });
+
+    const r = await call(app, 'GET', `/${projectSlug}/debug/counters`, {
+      token: projectScopedToken.plaintext,
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('forbidden');
+    expect(r.body.counters).toBeUndefined();
+  });
+
+  it('refuses an unauthenticated caller with 401', async () => {
+    const app = createApiRouter({
+      agentSessions,
+      memory,
+      tokens,
+      projects,
+      usageCounters: new UsageCounters(),
+    });
+    const r = await call(app, 'GET', `/${projectSlug}/debug/counters`);
+    expect(r.status).toBe(401);
+  });
+
+  it('answers `{}` when no counter instance is wired (restart-equivalent)', async () => {
+    const app = createApiRouter({ agentSessions, memory, tokens, projects });
+    const r = await call(app, 'GET', `/${projectSlug}/debug/counters`, {
+      token: adminToken.plaintext,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.counters).toEqual({});
+  });
 });

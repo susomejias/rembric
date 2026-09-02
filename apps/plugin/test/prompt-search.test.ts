@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -119,5 +120,116 @@ describe('prompt-search.sh (self-filtering, independent of the hook matcher)', (
       env: { ...process.env, TMPDIR: notADir },
     });
     expect(out.trim()).toBe('');
+  });
+});
+
+describe('server-side entity hints (proactive-entity-recall)', () => {
+  let hintServer: Server;
+  let capturedBody: string;
+  let respondWith: () => { status: number; body: string };
+  let baseUrl: string;
+  let projectDir: string;
+
+  beforeEach(async () => {
+    capturedBody = '';
+    respondWith = () => ({
+      status: 200,
+      body: JSON.stringify({ ok: true, lines: ['rembric: entity hint line'] }),
+    });
+    hintServer = createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk: Buffer) => (body += chunk));
+      req.on('end', () => {
+        capturedBody = body;
+        const { status, body: responseBody } = respondWith();
+        res.statusCode = status;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(responseBody);
+      });
+    });
+    await new Promise<void>((resolve) => hintServer.listen(0, '127.0.0.1', resolve));
+    const addr = hintServer.address();
+    baseUrl = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    projectDir = mkdtempSync(join(tmpdir(), 'rembric-promptsearch-proj-'));
+    writeFileSync(join(projectDir, '.rembric'), 'PROJECT_SLUG=hint-test-proj\n');
+  });
+
+  afterEach(() => {
+    hintServer.close();
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // spawn, not execFileSync: the in-process stub server answers from THIS
+  // worker's event loop, which a synchronous spawn would block — curl would
+  // time out against a server that never gets to run.
+  function runHookAsync(
+    stdin: string,
+    envOverrides: Record<string, string | undefined>,
+  ): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('bash', [promptSearchSh], {
+        cwd: projectDir,
+        env: { ...process.env, TMPDIR: counterDir, ...envOverrides },
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d: Buffer) => (stdout += d));
+      child.stderr.on('data', (d: Buffer) => (stderr += d));
+      child.on('error', reject);
+      child.on('close', () => resolve({ stdout, stderr }));
+      child.stdin.write(stdin);
+      child.stdin.end();
+    });
+  }
+
+  it('echoes hint lines after the local nudges, redacting <private> spans', async () => {
+    const { stdout } = await runHookAsync(
+      JSON.stringify({
+        session_id: 's-hints',
+        prompt: 'look at <private>secret stuff</private> then fix src/auth/handler.ts',
+      }),
+      { REMBRIC_SERVER_URL: baseUrl, REMBRIC_API_TOKEN: 'test-token' },
+    );
+    expect(capturedBody).toBe(
+      JSON.stringify({ prompt: 'look at [REDACTED] then fix src/auth/handler.ts' }),
+    );
+    expect(stdout).toContain(FIRST_PROMPT_NUDGE);
+    expect(stdout).toContain('rembric: entity hint line');
+  });
+
+  it('redacts an unclosed <private> span and caps the prompt at 500 chars', async () => {
+    const long = 'x'.repeat(600);
+    await runHookAsync(
+      JSON.stringify({
+        session_id: 's-hints',
+        prompt: `private <private>tail keeps flowing ${long}`,
+      }),
+      { REMBRIC_SERVER_URL: baseUrl, REMBRIC_API_TOKEN: 'test-token' },
+    );
+    const parsed = JSON.parse(capturedBody) as { prompt: string };
+    // The core keeps the text BEFORE the unclosed span (replace from the tag
+    // to end) — only the flowing tail is redacted.
+    expect(parsed.prompt).toBe('private [REDACTED]');
+    expect(parsed.prompt.length).toBeLessThanOrEqual(500);
+  });
+
+  it('stays silent on hints when the hook carries no server credentials', async () => {
+    const { stdout } = await runHookAsync(
+      JSON.stringify({ session_id: 's-hints', prompt: 'fix src/auth/handler.ts' }),
+      { REMBRIC_SERVER_URL: undefined, REMBRIC_API_TOKEN: undefined },
+    );
+    expect(capturedBody).toBe('');
+    expect(stdout).toContain(FIRST_PROMPT_NUDGE);
+    expect(stdout).not.toContain('entity hint');
+  });
+
+  it('a failing hints endpoint still emits the local nudges', async () => {
+    respondWith = () => ({ status: 500, body: 'boom' });
+    const { stdout } = await runHookAsync(
+      JSON.stringify({ session_id: 's-hints', prompt: 'fix src/auth/handler.ts' }),
+      { REMBRIC_SERVER_URL: baseUrl, REMBRIC_API_TOKEN: 'test-token' },
+    );
+    expect(stdout).toContain(FIRST_PROMPT_NUDGE);
+    expect(stdout).not.toContain('entity hint');
   });
 });

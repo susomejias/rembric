@@ -20,3 +20,6 @@ export type { EmbeddingWorkerOptions } from './embedding-worker.js';
 
 export { DomainError } from './errors.js';
 export type { DomainErrorCode } from './errors.js';
+
+export { UsageCounters, COUNTED_TOOLS } from './usage-counters.js';
+export type { CountedTool, CounterSnapshot } from './usage-counters.js';

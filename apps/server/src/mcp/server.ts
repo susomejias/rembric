@@ -14,6 +14,7 @@ import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
 import type { CandidateOptions } from '../services/save-time-candidates.js';
+import type { UsageCounters } from '../services/usage-counters.js';
 
 import { aboutOutput, handleAbout } from './about-tool.js';
 import { buildInstructions } from './instructions.js';
@@ -116,6 +117,11 @@ export interface CreateMcpServerOptions {
   orphanAfterMs?: number;
   /** URL path slug for this connection, used to scope `instructions`. */
   requestedSlug?: string | null;
+  /**
+   * Optional — in-memory tool-call counters shared with the HTTP debug
+   * surface (proactive-entity-recall, D6). Wired once by the bootstrapper.
+   */
+  usageCounters?: UsageCounters;
   name?: string;
   version?: string;
 }
@@ -130,7 +136,9 @@ const SAVE_DESCRIPTION =
   'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content. Optional: tags[], topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge while the context is fresh. `candidatesDetected` counts the matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5) trimmed the list: a lower bound on how many memories resemble this one, not a scope total, and no request argument raises it. Only `candidates[]` entries carry `judgmentId`s, so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key) instead of judging many pairs. The remainder stays reachable via memory.search and recordable per pair with memory.compare.';
 
 const SEARCH_DESCRIPTION =
-  'Search memories. Call this whenever the user references past work or asks "remember", "recall", "what did we do", "recuerda". Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded — so you can check whether a topic already converged before saving with a new key. Got a literal identifier? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. Answers "what do I know about this file/error/host"; with `query` it narrows rather than fuses. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. `across_projects:true` also reads the other projects this token may reach. Never a default: only on an explicit ask, or when the answer is not expected in this project. It dilutes the page with foreign memories. `searchedProjects[]` names what was read. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
+  'Search memories. Call this before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — or whenever the user references past work or asks to recall. Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded, so you can check whether a topic already converged. Got a literal identifier? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. With `query` it narrows rather than fuses. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. `across_projects:true` also reads the other projects this token may reach. Never a default: only on an explicit ask; it dilutes the page with foreign memories. `searchedProjects[]` names what was read. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
+// Length 1816 / 1900 — 84 chars headroom. Swapped reactive-only trigger wording
+// for proactive-moment triggers (proactive-recall), kept reactive triggers.
 
 const GET_DESCRIPTION =
   'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. `predecessors[]` is bounded (id/title/status/createdAt only, no content) — `truncated:true` means more predecessor history exists than was returned; `headTruncated:true` means the supersedes-chain head could not be fully resolved. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
@@ -212,6 +220,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     agentSessions: opts.agentSessions,
     prompts: opts.prompts,
     orphanAfterMs: opts.orphanAfterMs,
+    usageCounters: opts.usageCounters,
     getServer: () => server,
   });
   registerTool(

@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import type { Repositories } from '../db/repositories/index.js';
 import { MEMORY_STATUSES, MEMORY_TYPES, type Memory } from '../db/schema/memory.js';
-import { getRequestContext } from '../server/request-context.js';
+import { getRequestContext, tryGetRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
@@ -27,6 +27,7 @@ import {
 } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
 import type { Scope, SearchScope } from '../services/scope.js';
+import type { CountedTool, UsageCounters } from '../services/usage-counters.js';
 
 import {
   assertAuthorized,
@@ -593,17 +594,55 @@ export interface MemoryToolDeps {
    * Set by `createMcpServer` after construction.
    */
   getServer?: () => McpServer;
+  /**
+   * Optional — in-memory tool-call counters (proactive-entity-recall, D6).
+   * When present, `memory.save`/`memory.search`/`memory.context` record one
+   * successful-call increment per token. Absent → no counting, zero cost.
+   */
+  usageCounters?: UsageCounters;
 }
 
 export function buildMemoryHandlers(deps: MemoryToolDeps) {
   return {
-    save: handleSave.bind(null, deps),
-    search: handleSearch.bind(null, deps),
+    save: counted(deps, 'memory.save', handleSave.bind(null, deps)),
+    search: counted(deps, 'memory.search', handleSearch.bind(null, deps)),
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
     archive: handleArchive.bind(null, deps),
-    context: handleContext.bind(null, deps),
+    context: counted(deps, 'memory.context', handleContext.bind(null, deps)),
     timeline: handleTimeline.bind(null, deps),
+  };
+}
+
+/**
+ * Wrap a memory tool handler so a SUCCESSFUL call increments the usage
+ * counter for the calling token. Failure arrives two ways at this layer:
+ * a throw (propagates before any increment) and `errToMcp`'s
+ * `{isError: true}` result (checked below) — those are the only two, which
+ * is why the wrapper can live at the composition seam instead of inside
+ * every handler's return ladder. Counting itself never fails a call: the
+ * record sits in a try/catch and the context lookup is best-effort.
+ */
+function counted<Args extends unknown[], Res>(
+  deps: MemoryToolDeps,
+  tool: CountedTool,
+  fn: (...args: Args) => Promise<Res>,
+): (...args: Args) => Promise<Res> {
+  const counters = deps.usageCounters;
+  if (!counters) return fn;
+  return async (...args: Args) => {
+    const result = await fn(...args);
+    try {
+      const ctx = tryGetRequestContext();
+      const failed =
+        typeof result === 'object' &&
+        result !== null &&
+        (result as { isError?: boolean }).isError === true;
+      if (ctx && !failed) counters.record(ctx.token.id, tool);
+    } catch {
+      // Observability only — a broken counter must never fail a tool call.
+    }
+    return result;
   };
 }
 
@@ -914,7 +953,7 @@ async function handleSearch(
   // specified as complete within scope — budgeting against the declared value let
   // `{ entity, relations_limit: 50 }` through and serve 20 000 annotations.
   const effectiveRows =
-    args.limit ?? (args.entity !== undefined ? RANK_WINDOW_CEILING : DEFAULT_SEARCH_LIMIT);
+    args.limit ?? (args.entity === undefined ? DEFAULT_SEARCH_LIMIT : RANK_WINDOW_CEILING);
   const searchBudget = annotationBudgetError(
     'limit',
     effectiveRows,
@@ -1139,13 +1178,13 @@ async function handleGet(
       relations: annotations?.views ?? [],
       relationsTotal: annotations?.total ?? 0,
       ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
-      ...(result.reviewState !== null
-        ? {
+      ...(result.reviewState === null
+        ? {}
+        : {
             reviewState: result.reviewState,
             reviewAfter: result.reviewAfter ?? null,
             reviewEscalated: result.reviewEscalated,
-          }
-        : {}),
+          }),
     });
   } catch (err) {
     return errToMcp(err);
