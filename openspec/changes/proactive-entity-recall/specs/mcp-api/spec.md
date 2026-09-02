@@ -15,6 +15,11 @@ Every content obligation in this requirement SHALL be satisfied within `DESCRIPT
 - **WHEN** an MCP client retrieves the tool description for `memory.save` via `tools/list`
 - **THEN** the description SHALL contain the substring `Call this IMMEDIATELY after` followed by a list including at least: bug fix, decision, discovery, configuration change, pattern, user preference
 
+#### Scenario: `memory.search` description teaches when to call
+
+- **WHEN** an MCP client retrieves the tool description for `memory.search`
+- **THEN** the description SHALL contain wording instructing the agent to call it whenever the user references past work or asks to recall ("remember", "recall", "what did we do")
+
 #### Scenario: `memory.search` description teaches proactive recall moments
 
 - **WHEN** an MCP client retrieves the tool description for `memory.search`

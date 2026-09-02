@@ -9,6 +9,7 @@ import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { projectScope } from '../services/scope.js';
+import { NOTICE_MAX_BYTES } from '../services/session-nudge.js';
 import { TokensService } from '../services/tokens.js';
 import { UsageCounters } from '../services/usage-counters.js';
 import { createTestDb, type TestDb } from '../test/index.js';
@@ -1332,6 +1333,44 @@ describe('createApiRouter', () => {
       const line = (r.body.lines as string[]).find((l) => l.includes('src/auth/handler.ts'));
       expect(line).toBeDefined();
       expect(line).toContain('auth handler module');
+    });
+
+    it('trims the emitted lines to the shared notice ceiling instead of emitting an unbounded payload', async () => {
+      // Three entities, each carrying two 100-char titles: untrimmed that is well
+      // past 640 bytes on a channel whose per-turn budget is a published cap in
+      // `claude-code-plugin`. Whole lines drop; a title never truncates mid-word.
+      const long = 'x'.repeat(100);
+      const paths = ['src/alpha/one.ts', 'src/beta/two.ts', 'src/gamma/three.ts'];
+      for (const path of paths) {
+        seedEntityMemory({
+          type: 'project',
+          title: `a-${path.slice(4, 7)} ${long}`.slice(0, 100),
+          content: `notes about ${path}`,
+        });
+        seedEntityMemory({
+          type: 'project',
+          title: `b-${path.slice(4, 7)} ${long}`.slice(0, 100),
+          content: `more notes about ${path}`,
+        });
+      }
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-bounded' },
+      });
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-bounded/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: `refactor ${paths.join(' and ')}` },
+        },
+      );
+      expect(r.status).toBe(200);
+      const emitted = r.body.lines as string[];
+      expect(emitted.length).toBeGreaterThan(0);
+      expect(Buffer.byteLength(emitted.join('\n'), 'utf8')).toBeLessThanOrEqual(NOTICE_MAX_BYTES);
     });
 
     it('dedupes: same entity in two calls returns lines only on first call', async () => {

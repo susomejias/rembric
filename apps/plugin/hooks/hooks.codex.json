@@ -36,6 +36,14 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/prompt-nudge.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/prompt-hints.sh"
+          }
+        ]
       }
     ],
     "Stop": [
