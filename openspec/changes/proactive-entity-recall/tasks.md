@@ -1,6 +1,6 @@
 ## 1. Description wording swaps (A)
 
-- [x] 1.1 Rewrite `SEARCH_DESCRIPTION` in `apps/server/src/mcp/server.ts`: swap reactive-only trigger wording with proactive moments and keep reactive triggers. Measured 1816 / 1900 (84 headroom).
+- [x] 1.1 Rewrite `SEARCH_DESCRIPTION` in `apps/server/src/mcp/server.ts`: add proactive-moment triggers alongside the reactive ones (the reactive trigger stays, per the published `memory.search` scenario). Measured 1873 / 1900 (27 headroom).
 - [x] 1.2 Rewrite the `RECALL` line in `apps/server/src/mcp/instructions.ts` BASE: added proactive moments alongside existing reactive triggers. Measured ~773 / 1000.
 - [x] 1.3 Update `apps/plugin/test/nudge-fixtures.json`: the `recall` fixture is already consistent with `prompt-search.sh` conventions (client-composed keyword-recall nudge unchanged); verified.
 - [x] 1.4 Run `pnpm run typecheck` — passes.
@@ -25,7 +25,7 @@
 - [x] 3.2 In `apps/plugin/.pi-plugin/index.ts` (`before_agent_start` handler): after computing nudges, call `recallHints()` with the event prompt. Merge returned lines into `result.message` alongside existing nudgesForTurn output. Await the hints call (already in an async context). No change to the turn-report body.
 - [x] 3.3 In `apps/plugin/.opencode-plugin/plugin.ts` (`chat.message` handler): call `recallHints()` with the prompt content. Push returned lines as nudge parts alongside existing nudgesForTurn output. Await the hints call. No change to the turn-report body.
 - [x] 3.4 In `apps/plugin/scripts/_api.sh`: add `rembric_recall_hints` function with bounded timeout. Pattern: POST to recall-hints endpoint, echo returned lines.
-- [x] 3.5 In `apps/plugin/scripts/prompt-search.sh`: call `rembric_recall_hints` synchronously with the prompt from stdin. Echo returned lines. No change to stop-report.sh or the turn body.
+- [x] 3.5 In `apps/plugin/scripts/prompt-hints.sh` (NEW dedicated matcher-less `UserPromptSubmit` entry, registered in both hook manifests): call `rembric_recall_hints` synchronously with the prompt from stdin. Echo returned lines. `prompt-search.sh` stays request-free; no change to stop-report.sh or the turn body.
 - [x] 3.6 Verify the turn body in `rembric-plugin-core.mjs` `reportTurn()` does NOT include a `prompt` field — body stays `{usedTools}` (+`title` once).
 - [x] 3.7 Run `pnpm test` — must pass (includes hook-manifest tests).
 

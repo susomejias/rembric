@@ -43,8 +43,8 @@ describe('hooks.json (Claude Code)', () => {
     );
   });
 
-  it('carries exactly eight handler entries', () => {
-    expect(handlerCount(claudeHooks)).toBe(8);
+  it('carries exactly nine handler entries', () => {
+    expect(handlerCount(claudeHooks)).toBe(9);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -64,11 +64,16 @@ describe('hooks.json (Claude Code)', () => {
     ]);
   });
 
-  it('registers both UserPromptSubmit entries without a matcher key', () => {
-    expect(claudeHooks.UserPromptSubmit).toHaveLength(2);
+  it('registers the three UserPromptSubmit entries without a matcher key', () => {
+    expect(claudeHooks.UserPromptSubmit).toHaveLength(3);
     for (const group of claudeHooks.UserPromptSubmit) {
       expect(Object.keys(group)).toEqual(['hooks']);
     }
+    // Pinned by name, not only by count: the fixed-line hook must stay separate
+    // from the one that queries the server (proactive-entity-recall D1′).
+    expect(
+      claudeHooks.UserPromptSubmit.map((group) => group.hooks[0].command.split('/').pop()),
+    ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
   });
 
   // Stop carries exactly ONE entry, and it must NOT be async: an async hook
@@ -96,8 +101,8 @@ describe('hooks.codex.json (Codex CLI)', () => {
     );
   });
 
-  it('carries exactly eight handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(8);
+  it('carries exactly nine handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(9);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -132,11 +137,16 @@ describe('hooks.codex.json (Codex CLI)', () => {
     ]);
   });
 
-  it('registers both UserPromptSubmit entries without a matcher key', () => {
-    expect(codexHooks.UserPromptSubmit).toHaveLength(2);
+  it('registers the three UserPromptSubmit entries without a matcher key', () => {
+    expect(codexHooks.UserPromptSubmit).toHaveLength(3);
     for (const group of codexHooks.UserPromptSubmit) {
       expect(Object.keys(group)).toEqual(['hooks']);
     }
+    // Pinned by name, not only by count: the fixed-line hook must stay separate
+    // from the one that queries the server (proactive-entity-recall D1′).
+    expect(
+      codexHooks.UserPromptSubmit.map((group) => group.hooks[0].command.split('/').pop()),
+    ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
   });
 });
 
@@ -211,6 +221,7 @@ describe('every hook invokes the script the spec names', () => {
       'SessionStart command scripts/post-compact.sh claude-code',
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
+      'UserPromptSubmit command scripts/prompt-hints.sh',
       'SessionEnd command scripts/session-end.sh claude-code',
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
@@ -224,6 +235,7 @@ describe('every hook invokes the script the spec names', () => {
       'SessionStart command scripts/post-compact.sh codex-cli',
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
+      'UserPromptSubmit command scripts/prompt-hints.sh',
       'Stop command scripts/stop-report.sh codex-cli',
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
