@@ -118,8 +118,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
     try {
       return JSON.parse(raw) as Record<string, unknown>;
     } catch (err) {
-      // A malformed MCP body is a protocol fault, not a silent-empty case:
-      // name the failure so the caller's error path reports the real cause.
       throw new Error(`malformed MCP response body: ${(err as Error).message}`, { cause: err });
     }
   }
@@ -407,11 +405,6 @@ export default function rembric(pi: ExtensionApi): void {
     }
 
     const lines = core.nudgesForTurn(sessionId, prompt).map(underscoreToolNames);
-    // Proactive entity recall (`proactive-recall`, D1′): fetched at turn
-    // START so the model sees the hints from its first token on the topic.
-    // Awaited on purpose — the core bounds it (200 ms default) and resolves
-    // `[]` on every failure, so this cannot stall the response. A missing
-    // prompt skips the call entirely (plugin-session-protocol scenario).
     if (prompt) {
       for (const hint of await core.recallHints(sessionId, prompt)) {
         lines.push(underscoreToolNames(hint));

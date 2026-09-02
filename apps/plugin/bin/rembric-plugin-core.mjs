@@ -6,13 +6,9 @@
 // to its installed path under ~/.config/rembric/bin/ while copying.
 
 export const POST_TIMEOUT_MS = 3000;
-// The recall-hints call sits on the synchronous turn-START path: it must
-// return before the model's first token, so its budget is a fraction of the
-// background POST timeout. Best-effort: on expiry the client proceeds with
-// no hints (`proactive-recall`, resilience requirement).
+// Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
 const RECALL_HINTS_TIMEOUT_MS = 200;
-// Server-side extraction is also windowed, but the client cuts first: what
-// never leaves the process cannot leak (`plugin-session-protocol`, D8).
+// The client cuts first: what never leaves the process cannot leak.
 const RECALL_PROMPT_MAX_CHARS = 500;
 const IDLE_DEBOUNCE_MS = 500;
 export const MAX_TRANSCRIPT_CHARS = 19_500;
@@ -93,9 +89,9 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const disabledReason =
     !serverUrl || !apiToken
       ? 'REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing'
-      : !slug
-        ? `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`
-        : null;
+      : slug
+        ? null
+        : `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`;
   const disabled = disabledReason !== null;
   if (disabledReason) {
     diag(`${disabledReason}; plugin disabled`);

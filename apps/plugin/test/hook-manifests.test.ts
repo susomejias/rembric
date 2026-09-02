@@ -69,8 +69,6 @@ describe('hooks.json (Claude Code)', () => {
     for (const group of claudeHooks.UserPromptSubmit) {
       expect(Object.keys(group)).toEqual(['hooks']);
     }
-    // Pinned by name, not only by count: the fixed-line hook must stay separate
-    // from the one that queries the server (proactive-entity-recall D1′).
     expect(
       claudeHooks.UserPromptSubmit.map((group) => group.hooks[0].command.split('/').pop()),
     ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
@@ -142,8 +140,6 @@ describe('hooks.codex.json (Codex CLI)', () => {
     for (const group of codexHooks.UserPromptSubmit) {
       expect(Object.keys(group)).toEqual(['hooks']);
     }
-    // Pinned by name, not only by count: the fixed-line hook must stay separate
-    // from the one that queries the server (proactive-entity-recall D1′).
     expect(
       codexHooks.UserPromptSubmit.map((group) => group.hooks[0].command.split('/').pop()),
     ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
