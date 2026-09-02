@@ -492,13 +492,7 @@ rembric_json_escape() {
   printf '%s' "$s"
 }
 
-# POSTs the body and echoes the response's `lines` array as one
-# newline-separated block — nothing on a non-2xx status, a timeout, or an
-# empty array. Shared by the two body-reading callers: the per-turn report
-# (session-nudges) and the turn-START recall-hints call
-# (proactive-entity-recall). Still separate from `rembric_post`, and
-# `plugin-session-protocol` forbids ever pointing this reader at a
-# `/summary` response.
+# POSTs and echoes the response `lines` as one block; silent on non-2xx, timeout or empty array.
 rembric_post_lines() {
   local path="${1:-}" body="${2:-}"
   [ -z "$path" ] && return 0
@@ -549,8 +543,7 @@ rembric_turn_report() {
   rembric_post_lines "${1:-}" "${2:-}"
 }
 
-# Echoes the recall-hints endpoint's `lines` for the turn-START push
-# (proactive-entity-recall). Same reader contract as the turn report.
+# Recall-hints reader: same contract as the turn report.
 rembric_recall_hints() {
   rembric_post_lines "${1:-}" "${2:-}"
 }

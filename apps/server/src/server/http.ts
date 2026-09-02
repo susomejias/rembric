@@ -16,7 +16,7 @@ import express from 'express';
 import { Hono, type Context } from 'hono';
 
 import type { DbDiagnostics } from '../db/diagnostics.js';
-import { type McpTransportManager } from '../mcp/index.js';
+import type { McpTransportManager } from '../mcp/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
@@ -193,8 +193,6 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
             }),
           );
         } catch (err) {
-          // Boot-time fail-fast with the cause named: a malformed issuer URL
-          // or provider shape stops startup, but with a diagnosable message.
           throw new Error(`invalid OAuth configuration: ${(err as Error).message}`, {
             cause: err,
           });

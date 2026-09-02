@@ -50,9 +50,6 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  // spawn, not execFileSync: the stub answers from THIS worker's event loop,
-  // which a synchronous spawn would block — curl would time out against a
-  // server that never gets to run.
   function run(
     stdin: string,
     overrides: Record<string, string | undefined>,
@@ -73,8 +70,6 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     });
   }
 
-  // A function, not a const: baseUrl is assigned in beforeEach, and a const here
-  // would capture it at collection time, when it is still ''.
   const withServer = () => ({ REMBRIC_SERVER_URL: baseUrl, REMBRIC_API_TOKEN: 'test-token' });
 
   it('posts the redacted prompt to the session-scoped hints path and echoes the lines', async () => {

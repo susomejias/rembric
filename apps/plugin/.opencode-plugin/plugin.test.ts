@@ -677,10 +677,6 @@ describe('RembricPlugin handlers', () => {
       const hang = new Promise<Response>((resolve) => {
         released = () => resolve(new Response('', { status: 200 }));
       });
-      // URL-aware: the flush/turn POSTs hang to prove fire-and-forget; the
-      // turn-START recall-hints call is DESIGNED to be awaited
-      // (proactive-recall D1′), so it must resolve — a hang there would
-      // block the handler on something the test never meant to impose.
       fetchMock.mockImplementation((url: unknown) =>
         String(url).includes('/recall-hints')
           ? Promise.resolve(

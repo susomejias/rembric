@@ -823,10 +823,6 @@ export class AgentSessionsService {
       lines.push(`${e.value}: ${titles}`);
     }
 
-    // The same published ceiling the stretch-close notice obeys: this channel's per-turn
-    // budget is a requirement in `claude-code-plugin`, so an unbounded hint payload would
-    // silently break another capability's cap. Whole lines drop from the end rather than
-    // truncating a title mid-word.
     while (lines.length > 0 && Buffer.byteLength(lines.join('\n'), 'utf8') > NOTICE_MAX_BYTES) {
       lines.pop();
     }
