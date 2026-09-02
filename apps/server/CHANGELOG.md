@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.7](https://github.com/susomejias/rembric/compare/server-v0.28.6...server-v0.28.7) (2026-09-02)
+
+
+### Bug Fixes
+
+* **mcp:** surface write verdict on session_summary/session_end ([8819cac](https://github.com/susomejias/rembric/commit/8819caca6ebb1e333a1323bd18d166f7074d747b))
+
 ## [0.28.6](https://github.com/susomejias/rembric/compare/server-v0.28.5...server-v0.28.6) (2026-08-19)
 
 
