@@ -114,16 +114,26 @@ function createMcpClient(endpoint: string, apiToken: string) {
     return out;
   }
 
+  function parseMcpJson(raw: string): Record<string, unknown> {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      // A malformed MCP body is a protocol fault, not a silent-empty case:
+      // name the failure so the caller's error path reports the real cause.
+      throw new Error(`malformed MCP response body: ${(err as Error).message}`, { cause: err });
+    }
+  }
+
   function decode(body: string): Record<string, unknown> | null {
     const trimmed = body.trim();
     if (!trimmed) return null;
     if (!trimmed.startsWith('event:') && !trimmed.startsWith('data:')) {
-      return JSON.parse(trimmed) as Record<string, unknown>;
+      return parseMcpJson(trimmed);
     }
     for (const line of trimmed.split('\n')) {
       if (!line.startsWith('data:')) continue;
       const payload = line.slice('data:'.length).trim();
-      if (payload) return JSON.parse(payload) as Record<string, unknown>;
+      if (payload) return parseMcpJson(payload);
     }
     return null;
   }
@@ -228,8 +238,8 @@ type McpClient = ReturnType<typeof createMcpClient>;
 
 // `description` strings only: enum members, patterns and property names are
 // argument values a rename would corrupt.
-function renameToolsInDescriptions(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(renameToolsInDescriptions);
+function renameToolsInDescriptions<T>(node: T): T {
+  if (Array.isArray(node)) return node.map((item) => renameToolsInDescriptions(item)) as T;
   if (typeof node !== 'object' || node === null) return node;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
@@ -238,7 +248,7 @@ function renameToolsInDescriptions(node: unknown): unknown {
         ? underscoreToolNames(value)
         : renameToolsInDescriptions(value);
   }
-  return out;
+  return out as T;
 }
 
 function assistantText(content: unknown): string {
@@ -397,6 +407,16 @@ export default function rembric(pi: ExtensionApi): void {
     }
 
     const lines = core.nudgesForTurn(sessionId, prompt).map(underscoreToolNames);
+    // Proactive entity recall (`proactive-recall`, D1′): fetched at turn
+    // START so the model sees the hints from its first token on the topic.
+    // Awaited on purpose — the core bounds it (200 ms default) and resolves
+    // `[]` on every failure, so this cannot stall the response. A missing
+    // prompt skips the call entirely (plugin-session-protocol scenario).
+    if (prompt) {
+      for (const hint of await core.recallHints(sessionId, prompt)) {
+        lines.push(underscoreToolNames(hint));
+      }
+    }
     if (lines.length > 0) {
       result.message = { customType: 'rembric', content: lines.join('\n'), display: false };
     }

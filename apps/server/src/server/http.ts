@@ -21,6 +21,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { TokensService } from '../services/tokens.js';
+import type { UsageCounters } from '../services/usage-counters.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createApiRouter } from './api-router.js';
@@ -70,6 +71,12 @@ export interface CreateHttpServerOptions {
   triggerConsolidation?: () => Promise<unknown>;
   /** Fire-and-forget lazy sweep, invoked after a session is created. */
   sweep?: (projectId: string | null) => void;
+  /**
+   * In-memory tool-call counters (proactive-entity-recall, D6). The SAME
+   * instance the MCP layer records into; surfaced on
+   * `GET /api/:slug/debug/counters` behind admin auth.
+   */
+  usageCounters?: UsageCounters | null;
   /**
    * OAuth 2.1 authorization server. When present, the SDK `mcpAuthRouter`
    * (a vetted Express router) is mounted for the OAuth endpoints and the
@@ -123,6 +130,7 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
       tokens: opts.tokens,
       projects: opts.projects,
       sweep: opts.sweep,
+      usageCounters: opts.usageCounters,
       oauth: opts.oauth?.service ?? null,
       authLockout: opts.authLockout ?? null,
     }),
@@ -175,14 +183,22 @@ export async function startHttpServer(opts: CreateHttpServerOptions): Promise<Ht
   const oauthListener = opts.oauth
     ? (() => {
         const app = express();
-        app.use(
-          mcpAuthRouter({
-            provider: opts.oauth.provider,
-            issuerUrl: new URL(opts.oauth.issuer),
-            scopesSupported: opts.oauth.scopesSupported,
-            resourceName: 'Rembric',
-          }),
-        );
+        try {
+          app.use(
+            mcpAuthRouter({
+              provider: opts.oauth.provider,
+              issuerUrl: new URL(opts.oauth.issuer),
+              scopesSupported: opts.oauth.scopesSupported,
+              resourceName: 'Rembric',
+            }),
+          );
+        } catch (err) {
+          // Boot-time fail-fast with the cause named: a malformed issuer URL
+          // or provider shape stops startup, but with a diagnosable message.
+          throw new Error(`invalid OAuth configuration: ${(err as Error).message}`, {
+            cause: err,
+          });
+        }
         return app;
       })()
     : null;

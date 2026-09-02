@@ -37,11 +37,14 @@ rembric_parse_dotenv() {
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line#"${line%%[![:space:]]*}"}"
     case "$line" in
-      ''|\#*) continue ;;
+    '' | \#*) continue ;;
     esac
     case "$line" in
-      *=*) key="${line%%=*}"; val="${line#*=}" ;;
-      *) continue ;;
+    *=*)
+      key="${line%%=*}"
+      val="${line#*=}"
+      ;;
+    *) continue ;;
     esac
     key="${key%"${key##*[![:space:]]}"}"
     val="${val#"${val%%[![:space:]]*}"}"
@@ -51,11 +54,17 @@ rembric_parse_dotenv() {
     # no-ops while the JS bridge (which trims both sides) reads it fine.
     val="${val%"${val##*[![:space:]]}"}"
     case "$val" in
-      \"*\") val="${val#\"}"; val="${val%\"}" ;;
-      \'*\') val="${val#\'}"; val="${val%\'}" ;;
+    \"*\")
+      val="${val#\"}"
+      val="${val%\"}"
+      ;;
+    \'*\')
+      val="${val#\'}"
+      val="${val%\'}"
+      ;;
     esac
     printf '%s=%s\n' "$key" "$val"
-  done < "$file"
+  done <"$file"
 }
 
 rembric_read_project_slug() {
@@ -68,9 +77,9 @@ rembric_read_project_slug() {
   # Mirror the bridge's slug regex: lowercase letters/digits/hyphens, 1–64 chars,
   # cannot begin or end with a hyphen.
   case "$slug" in
-    '') return 0 ;;
-    *[!a-z0-9-]*) return 0 ;;
-    -*|*-) return 0 ;;
+  '') return 0 ;;
+  *[!a-z0-9-]*) return 0 ;;
+  -* | *-) return 0 ;;
   esac
   [ "${#slug}" -gt 64 ] && return 0
   printf '%s' "$slug"
@@ -170,7 +179,7 @@ rembric_turn_count() {
   local count
   count="$(wc -c <"$file" 2>/dev/null | tr -d '[:space:]')"
   case "$count" in
-    '' | *[!0-9]*) return 0 ;;
+  '' | *[!0-9]*) return 0 ;;
   esac
   printf '%s' "$count"
 }
@@ -208,8 +217,8 @@ rembric_resumed_mark() {
   local file="${dir}/${safe_id}"
   [ -e "$file" ] && return 0
   case "$created" in
-    false) printf '1' >"$file" 2>/dev/null || true ;;
-    *) printf '0' >"$file" 2>/dev/null || true ;;
+  false) printf '1' >"$file" 2>/dev/null || true ;;
+  *) printf '0' >"$file" 2>/dev/null || true ;;
   esac
 }
 
@@ -296,11 +305,11 @@ rembric_json_decode_string() {
   local s="${1:-}"
   # Prose carries no escape at all, and then there is nothing to do.
   case "$s" in
-    *\\*) ;;
-    *)
-      REMBRIC_JSON_DECODED="$s"
-      return 0
-      ;;
+  *\\*) ;;
+  *)
+    REMBRIC_JSON_DECODED="$s"
+    return 0
+    ;;
   esac
   # `\\` and `\u` are hidden behind U+0001/U+0002 first, so no later pattern
   # can claim the backslash they own — without that, `\\n` on the wire decodes
@@ -341,8 +350,8 @@ rembric_json_raw_string_field() {
   local rest="$input" body probe
   while :; do
     case "$rest" in
-      *"\"${key}\""*) ;;
-      *) return 0 ;;
+    *"\"${key}\""*) ;;
+    *) return 0 ;;
     esac
     rest="${rest#*\"${key}\"}"
     # A later occurrence is tried when this one is not a `"key": "…"` pair —
@@ -364,8 +373,8 @@ rembric_json_raw_string_field() {
     probe="${body//\\\\/$'\x01\x01'}"
     probe="${probe//\\\"/$'\x02\x02'}"
     case "$probe" in
-      *\"*) ;;
-      *) return 0 ;; # unterminated string — treat as absent
+    *\"*) ;;
+    *) return 0 ;; # unterminated string — treat as absent
     esac
     # `${x/"*/}` and not `${x%%"*}`: the suffix form retries the match at every
     # split point, which is quadratic in the value's length (measured 97.9ms
@@ -483,13 +492,14 @@ rembric_json_escape() {
   printf '%s' "$s"
 }
 
-# Issues the per-turn report (session-nudges) and echoes the response's
-# `lines` array as one newline-separated block — nothing on a non-2xx
-# status, a timeout, or an empty array. Kept separate from `rembric_post`
-# because it is the one place besides `rembric_session_ensure` that reads
-# a response body, and `plugin-session-protocol` forbids ever pointing
-# that capability at a `/summary` response.
-rembric_turn_report() {
+# POSTs the body and echoes the response's `lines` array as one
+# newline-separated block — nothing on a non-2xx status, a timeout, or an
+# empty array. Shared by the two body-reading callers: the per-turn report
+# (session-nudges) and the turn-START recall-hints call
+# (proactive-entity-recall). Still separate from `rembric_post`, and
+# `plugin-session-protocol` forbids ever pointing this reader at a
+# `/summary` response.
+rembric_post_lines() {
   local path="${1:-}" body="${2:-}"
   [ -z "$path" ] && return 0
   if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
@@ -535,6 +545,16 @@ rembric_turn_report() {
   fi
 }
 
+rembric_turn_report() {
+  rembric_post_lines "${1:-}" "${2:-}"
+}
+
+# Echoes the recall-hints endpoint's `lines` for the turn-START push
+# (proactive-entity-recall). Same reader contract as the turn report.
+rembric_recall_hints() {
+  rembric_post_lines "${1:-}" "${2:-}"
+}
+
 # Decode the elements of a JSON array of strings, one per output line —
 # what `jq -r '.[]'` prints. Walks the string grammar rather than splitting
 # on `","`: the notice is ONE element carrying embedded `\n` and `\"`, which
@@ -561,13 +581,13 @@ rembric_json_string_array_items() {
       continue
     fi
     case "$ch" in
-      '\') esc=1 ;;
-      '"')
-        in_str=0
-        rembric_json_decode_string "$cur"
-        printf '%s\n' "$REMBRIC_JSON_DECODED"
-        ;;
-      *) cur="${cur}${ch}" ;;
+    '\') esc=1 ;;
+    '"')
+      in_str=0
+      rembric_json_decode_string "$cur"
+      printf '%s\n' "$REMBRIC_JSON_DECODED"
+      ;;
+    *) cur="${cur}${ch}" ;;
     esac
   done
 }
@@ -656,7 +676,7 @@ rembric_scan_offset() {
   local n
   n="$(cat "$file" 2>/dev/null | tr -d '[:space:]')"
   case "$n" in
-    '' | *[!0-9]*) return 0 ;;
+  '' | *[!0-9]*) return 0 ;;
   esac
   printf '%s' "$n"
 }

@@ -15,6 +15,7 @@ import type { ProjectsService } from '../services/projects.js';
 import { projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
+import type { UsageCounters } from '../services/usage-counters.js';
 
 import { AuthError, authenticate } from './auth.js';
 import { httpInternalError } from './error-response.js';
@@ -52,6 +53,12 @@ export interface ApiRouterDeps {
    * the bootstrapper — never affects the session response.
    */
   sweep?: (projectId: string | null) => void;
+  /**
+   * In-memory tool-call counters (proactive-entity-recall, D6). The same
+   * instance the MCP layer records into; surfaced read-only on the admin
+   * debug route. Absent → the route answers with an empty counter map.
+   */
+  usageCounters?: UsageCounters | null;
 }
 
 const ID_RE_SOURCE = '^[A-Za-z0-9_-]{8,128}$';
@@ -92,6 +99,10 @@ const sessionTurnSchema = z.object({
   title: z.string().min(1).max(200).optional(),
 });
 
+const recallHintsSchema = z.object({
+  prompt: z.string(),
+});
+
 const RECALL_SNIPPET_CHARS = 240;
 
 const memoryRecallSchema = z.object({
@@ -106,6 +117,7 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
   app.use('/:slug/sessions/*', authMiddleware(deps));
   app.use('/:slug/sessions', authMiddleware(deps));
   app.use('/:slug/memory/*', authMiddleware(deps));
+  app.use('/:slug/debug/*', authMiddleware(deps));
 
   app.post('/:slug/sessions', async (c) => {
     const ctx = c.get('rembricCtx');
@@ -313,6 +325,54 @@ export function createApiRouter(deps: ApiRouterDeps): Hono<ApiEnv> {
     } catch (err) {
       return domainErr(c, err);
     }
+  });
+
+  app.post('/:slug/sessions/:id/recall-hints', async (c) => {
+    const ctx = c.get('rembricCtx');
+    if (!ctx.project) {
+      return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
+    }
+    if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: ctx.project.id })) {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'token scope does not cover this project' },
+        403,
+      );
+    }
+    const sessionId = c.req.param('id');
+    const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, ctx.project.id);
+    if (blocked) {
+      return c.json(blocked.body, blocked.status);
+    }
+    const body = await readJson(c);
+    const parsed = recallHintsSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ ok: false, code: 'invalid_input', message: zodMessage(parsed.error) }, 400);
+    }
+    try {
+      const result = deps.agentSessions.recallHints(sessionId, parsed.data.prompt);
+      return c.json({ ok: true, lines: result.lines });
+    } catch (err) {
+      return domainErr(c, err);
+    }
+  });
+
+  // Usage counters (proactive-entity-recall, D6): admin-only debug surface.
+  // The map is process-wide per token, so the body is NOT :slug-scoped —
+  // but the slug must still resolve, so a typo behaves like everywhere else
+  // in this router. A non-admin token is refused before anything is read:
+  // the counter map names tokens by id, which is itself privileged.
+  app.get('/:slug/debug/counters', (c) => {
+    const ctx = c.get('rembricCtx');
+    if (!ctx.project) {
+      return c.json({ ok: false, code: 'project_not_found', slug: c.req.param('slug') }, 404);
+    }
+    if (ctx.scope !== '*') {
+      return c.json(
+        { ok: false, code: 'forbidden', message: 'admin token required for debug surfaces' },
+        403,
+      );
+    }
+    return c.json({ ok: true, counters: deps.usageCounters?.snapshot() ?? {} });
   });
 
   app.post('/:slug/memory/recall', async (c) => {
