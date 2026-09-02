@@ -43,6 +43,7 @@ import {
 import { SessionsService } from '../services/sessions.js';
 import { deriveOAuthAreqKey, deriveSessionKey, TokensService } from '../services/tokens.js';
 import { UpdateCheckService } from '../services/update-check.js';
+import { UsageCounters } from '../services/usage-counters.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import type { DashboardStats } from './dashboard-router.js';
@@ -107,6 +108,9 @@ export async function bootstrap(
   const tokens = new TokensService(repos, dbHandle.db);
   const projects = new ProjectsService(repos);
   const agentSessionsSvc = new AgentSessionsService(repos, dbHandle.db);
+  // One per-process instance; the MCP layer records into it, the HTTP admin
+  // debug surface reads it (proactive-entity-recall, D6).
+  const usageCounters = new UsageCounters();
   const promptsSvc = new PromptsService(repos, dbHandle.db);
   const relationsSvc = new RelationsService(repos, dbHandle.db);
   const sessionRouter = new SessionRouter();
@@ -336,6 +340,7 @@ export async function bootstrap(
         repos,
         doctor: buildDoctorReport,
         sweep: sweepOnSessionStart,
+        usageCounters,
         orphanAfterMs: config.judgments.orphanAfterMs,
         requestedSlug: factoryCtx.requestedSlug,
       }),
@@ -411,6 +416,7 @@ export async function bootstrap(
     maxBodyBytes: config.maxBodyBytes,
     triggerConsolidation: () => Promise.resolve(runner.runAll({ force: true })),
     sweep: sweepOnSessionStart,
+    usageCounters,
     oauth:
       oauthService && oauthProvider && oauthIssuer
         ? {

@@ -6,6 +6,10 @@
 // to its installed path under ~/.config/rembric/bin/ while copying.
 
 export const POST_TIMEOUT_MS = 3000;
+// Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
+const RECALL_HINTS_TIMEOUT_MS = 200;
+// The client cuts first: what never leaves the process cannot leak.
+const RECALL_PROMPT_MAX_CHARS = 500;
 const IDLE_DEBOUNCE_MS = 500;
 export const MAX_TRANSCRIPT_CHARS = 19_500;
 const MAX_ENTRY_CHARS = 2000;
@@ -85,9 +89,9 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const disabledReason =
     !serverUrl || !apiToken
       ? 'REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing'
-      : !slug
-        ? `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`
-        : null;
+      : slug
+        ? null
+        : `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`;
   const disabled = disabledReason !== null;
   if (disabledReason) {
     diag(`${disabledReason}; plugin disabled`);
@@ -124,7 +128,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   // protocol's lifetime, and never overwritten by a later session's ensure.
   let processResumed = null;
 
-  async function doPost(path, body) {
+  async function doPost(path, body, timeoutMs = POST_TIMEOUT_MS) {
     if (disabled) return null;
     try {
       return await fetch(`${baseUrl}${path}`, {
@@ -134,7 +138,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       diag(`POST ${path} ${err?.message ?? 'error'}`);
@@ -385,6 +389,41 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     if (lines.length > 0) pendingLines.set(sessionId, lines);
   }
 
+  /**
+   * Proactive entity recall (`proactive-recall`, D1′): POST the current
+   * turn's prompt to the recall-hints endpoint at turn START and return
+   * the server-composed lines. Process-and-discard on the server side;
+   * here the prompt is `<private>`-redacted and cut to the 500-char
+   * window BEFORE it leaves the process, mirroring the title path.
+   *
+   * Best-effort by contract: every failure mode — disabled protocol,
+   * sub-agent/unknown session, non-2xx, timeout, malformed body —
+   * yields `[]` so the model's response is never blocked by recall.
+   * An absent prompt skips the request outright (the spec's
+   * "missing prompt omits the recall-hints call" scenario).
+   */
+  async function recallHints(sessionId, prompt, timeoutMs = RECALL_HINTS_TIMEOUT_MS) {
+    if (disabled) return [];
+    if (!sessionId || !prompt) return [];
+    if (subAgentSessions.has(sessionId)) return [];
+    if (!knownSessions.has(sessionId)) return [];
+    const redacted = stripPrivateTags(String(prompt)).slice(0, RECALL_PROMPT_MAX_CHARS);
+    if (!redacted) return [];
+    const res = await doPost(
+      `/api/${slug}/sessions/${sessionId}/recall-hints`,
+      { prompt: redacted },
+      timeoutMs,
+    );
+    if (!res) return [];
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      diag(`POST /api/${slug}/sessions/${sessionId}/recall-hints ${res.status} body=${detail}`);
+      return [];
+    }
+    const json = await res.json().catch(() => null);
+    return Array.isArray(json?.lines) ? json.lines.filter((l) => typeof l === 'string') : [];
+  }
+
   // `{}` rather than a skip on an empty accumulator: a session with no turns
   // must still reach `ended`. One request, never `/summary` then `/end` — each
   // is bounded by POST_TIMEOUT_MS, so a pair doubles a quitting user's wait.
@@ -460,6 +499,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     markToolUsed,
     beginTurn,
     reportTurn,
+    recallHints,
     appendUserMessage,
     appendAssistantMessage,
     upsertAssistantMessage,

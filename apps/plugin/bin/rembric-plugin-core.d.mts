@@ -48,6 +48,13 @@ export type SessionProtocol = {
    * caches the server's returned lines for the next `nudgesForTurn`.
    */
   reportTurn(sessionId: string): Promise<void>;
+  /**
+   * Proactive entity recall (`proactive-recall`, D1′): POST the turn prompt
+   * (redacted, ≤500 chars) to the recall-hints endpoint at turn START.
+   * Best-effort — returns `[]` on timeout, error, missing prompt, or an
+   * unregistered/sub-agent session (no request issued in the last two cases).
+   */
+  recallHints(sessionId: string, prompt: string, timeoutMs?: number): Promise<string[]>;
   /** Returns the entries the per-session cap evicted, oldest first. */
   appendUserMessage(sessionId: string, rawText: string): TranscriptEntry[];
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];

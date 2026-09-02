@@ -30,8 +30,8 @@ SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 COUNT="$(rembric_turn_count rembric-relevance-prefetch "$SESSION_ID")"
 FIRST_TURN=0
 case "$COUNT" in
-  '' | *[!0-9]*) : ;; # unreadable counter — fail closed on first-turn detection only
-  *) [ "$COUNT" -eq 1 ] && FIRST_TURN=1 ;;
+'' | *[!0-9]*) : ;; # unreadable counter — fail closed on first-turn detection only
+*) [ "$COUNT" -eq 1 ] && FIRST_TURN=1 ;;
 esac
 
 KEYWORD_MATCH=0

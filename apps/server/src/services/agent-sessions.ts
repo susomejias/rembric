@@ -2,11 +2,12 @@ import { ulid } from 'ulid';
 
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
-import { type AgentSession, type NewAgentSession } from '../db/schema/agent-sessions.js';
+import type { AgentSession, NewAgentSession } from '../db/schema/agent-sessions.js';
 
+import { extractEntities } from './entities.js';
 import { DomainError } from './errors.js';
-import type { Scope } from './scope.js';
-import { evaluateSessionNudge, type SessionNudgeRow } from './session-nudge.js';
+import { projectScope, type Scope } from './scope.js';
+import { evaluateSessionNudge, NOTICE_MAX_BYTES, type SessionNudgeRow } from './session-nudge.js';
 import {
   assertNoNul,
   sliceTailWithoutSplittingSurrogatePair,
@@ -207,7 +208,7 @@ export interface ReportTurnResult {
 
 export class AgentSessionsService {
   constructor(
-    private readonly repos: Pick<Repositories, 'agentSessions' | 'consolidation'>,
+    private readonly repos: Pick<Repositories, 'agentSessions' | 'consolidation' | 'entities'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -756,6 +757,81 @@ export class AgentSessionsService {
   adminCountByStatus(): Record<'active' | 'ended' | 'abandoned', number> {
     return toStatusRecord(this.repos.agentSessions.adminCountByStatus());
   }
+
+  /**
+   * Proactive entity recall: extract entities from the first 500 chars of the
+   * prompt, match against the entity index, and return up to 3 recall lines
+   * (each carrying inline titles of the top-2 matched memories). The prompt
+   * is process-and-discard — never written to any table, index, or log at
+   * info level.
+   *
+   * Per-session dedupe: each entity is surfaced at most once per session.
+   * State is transient (in-memory) — a server restart clears it.
+   */
+  recallHints(sessionId: string, prompt: string): { lines: string[] } {
+    // Slice BEFORE any regex runs — bounds ReDoS exposure.
+    const snippet = prompt.slice(0, 500);
+    if (snippet.length === 0) return { lines: [] };
+
+    const entities = extractEntities('', snippet);
+    if (entities.length === 0) return { lines: [] };
+
+    const session = this.getById(sessionId);
+    if (!session) return { lines: [] };
+    if (!session.projectId) return { lines: [] };
+
+    // Transient per-session dedupe: keyed by sessionId, lives only in memory.
+    const dedupeKey = `recall:${sessionId}`;
+    let existing = this._dedupeState.get(dedupeKey);
+    if (!existing) {
+      existing = new Set();
+      this._dedupeState.set(dedupeKey, existing);
+    }
+
+    const seenInThisTurn = new Set<string>();
+    const lines: string[] = [];
+
+    for (const e of entities) {
+      if (lines.length >= 3) break;
+      // Skip entities already recalled in this session.
+      if (existing.has(e.value)) continue;
+      // Skip entities we've already seen in this turn (first appearance only).
+      if (seenInThisTurn.has(e.value)) continue;
+      seenInThisTurn.add(e.value);
+
+      // Entity lookup is project-scoped.
+      const matched = this.repos.entities.findMemoriesByEntity({
+        scope: projectScope(session.projectId),
+        kind: e.kind,
+        value: e.value,
+        limit: 2,
+      });
+
+      // Filter to active-learning types only.
+      const filtered = matched.filter(
+        (m) => m.type === 'project' || m.type === 'feedback' || m.type === 'procedural',
+      );
+      if (filtered.length === 0) continue;
+
+      // Mark this entity as recalled.
+      existing.add(e.value);
+      // Build the line: "Entity value: title1, title2".
+      const titles = filtered
+        .slice(0, 2)
+        .map((m) => m.title)
+        .join(', ');
+      lines.push(`${e.value}: ${titles}`);
+    }
+
+    while (lines.length > 0 && Buffer.byteLength(lines.join('\n'), 'utf8') > NOTICE_MAX_BYTES) {
+      lines.pop();
+    }
+
+    return { lines };
+  }
+
+  /** Transient dedupe state: sessionId → Set of entity values already recalled. */
+  private _dedupeState = new Map<string, Set<string>>();
 
   memoryCount(sessionId: string): number {
     return this.repos.agentSessions.memoryCount(sessionId);

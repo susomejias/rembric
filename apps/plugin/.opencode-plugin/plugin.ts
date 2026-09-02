@@ -287,6 +287,10 @@ export const RembricPlugin: Plugin = async (ctx) => {
         output.parts.push(nudgePart(input.sessionID, messageId, text));
       }
 
+      for (const hint of await core.recallHints(input.sessionID, content)) {
+        output.parts.push(nudgePart(input.sessionID, messageId, hint));
+      }
+
       // Same debounce as session.idle — avoids a second uncoordinated POST.
       core.scheduleIdleFlush(input.sessionID);
     },

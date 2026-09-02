@@ -677,7 +677,16 @@ describe('RembricPlugin handlers', () => {
       const hang = new Promise<Response>((resolve) => {
         released = () => resolve(new Response('', { status: 200 }));
       });
-      fetchMock.mockImplementation(() => hang);
+      fetchMock.mockImplementation((url: unknown) =>
+        String(url).includes('/recall-hints')
+          ? Promise.resolve(
+              new Response(JSON.stringify({ ok: true, lines: [] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          : hang,
+      );
 
       await handlers['chat.message']!(
         { sessionID: 'flush-slow' } as never,
