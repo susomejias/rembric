@@ -20,7 +20,9 @@ function protocol(): ReturnType<typeof createSessionProtocol> {
 
 type FetchStub = { paths: string[]; bodies: string[]; stderr: string[] };
 
-function stubFetch(respond?: (url: string) => Response): FetchStub {
+function stubFetch(
+  respond?: (url: string, init?: RequestInit) => Response | Promise<Response>,
+): FetchStub {
   const stub: FetchStub = { paths: [], bodies: [], stderr: [] };
   vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
     stub.stderr.push(String(chunk));
@@ -31,7 +33,7 @@ function stubFetch(respond?: (url: string) => Response): FetchStub {
       const url = String(input);
       stub.paths.push(new URL(url).pathname);
       stub.bodies.push(String(init?.body));
-      return respond?.(url) ?? new Response('', { status: 200 });
+      return respond?.(url, init) ?? new Response('', { status: 200 });
     },
   );
   return stub;
@@ -164,5 +166,107 @@ describe('the shared core resumes every session it ensures', () => {
     await expect(protocol().ensureSession('s-404')).resolves.toBeUndefined();
     // Without this the assertion above would pass on a build that never resumes.
     expect(stub.stderr.join('')).toContain(`POST /api/${SLUG}/sessions/s-404/resume 404 body=nope`);
+  });
+});
+
+describe('the shared core proactive recall transport', () => {
+  async function knownCore(
+    respond?: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  ) {
+    const stub = stubFetch(respond);
+    const core = protocol();
+    await core.ensureSession('recall-known');
+    stub.paths.length = 0;
+    stub.bodies.length = 0;
+    return { core, stub };
+  }
+
+  it('returns non-empty server lines from the session-scoped recall endpoint', async () => {
+    const { core, stub } = await knownCore((url) =>
+      url.endsWith('/recall-hints')
+        ? new Response(JSON.stringify({ lines: ['src/auth.ts: auth handoff', 3] }), { status: 200 })
+        : new Response('', { status: 200 }),
+    );
+
+    await expect(core.recallHints('recall-known', 'fix src/auth.ts')).resolves.toEqual([
+      'src/auth.ts: auth handoff',
+    ]);
+    expect(stub.paths).toEqual([`/api/${SLUG}/sessions/recall-known/recall-hints`]);
+  });
+
+  it('redacts then truncates the prompt before it enters the JSON request body', async () => {
+    const { core, stub } = await knownCore(
+      () => new Response(JSON.stringify({ lines: [] }), { status: 200 }),
+    );
+    const raw = `head <PrIvAtE>secret</pRiVaTe>${'x'.repeat(600)}`;
+
+    await core.recallHints('recall-known', raw);
+
+    const prompt = (JSON.parse(stub.bodies[0]!) as { prompt: string }).prompt;
+    expect(prompt).toBe(`head [REDACTED]${'x'.repeat(600)}`.slice(0, 500));
+    expect(prompt).not.toContain('secret');
+    expect(prompt).toHaveLength(500);
+  });
+
+  it('returns [] without issuing a request when the protocol is disabled', async () => {
+    const stub = stubFetch();
+    const core = createSessionProtocol({
+      agent: 'resume-fixture-agent',
+      serverUrl: 'http://127.0.0.1:9',
+      apiToken: 'unused-fetch-is-stubbed',
+      slug: null,
+    });
+
+    await expect(core.recallHints('disabled-session', 'fix src/auth.ts')).resolves.toEqual([]);
+    expect(stub.paths).toEqual([]);
+  });
+
+  it('omits the request when the prompt or session registration is absent', async () => {
+    const stub = stubFetch();
+    const core = protocol();
+
+    await expect(core.recallHints('never-known', '')).resolves.toEqual([]);
+    await expect(core.recallHints('never-known', 'src/auth.ts')).resolves.toEqual([]);
+    expect(stub.paths).toEqual([]);
+  });
+
+  it('omits the request for a sub-agent session', async () => {
+    const stub = stubFetch();
+    const core = protocol();
+    core.markSubAgent('recall-subagent');
+
+    await expect(core.recallHints('recall-subagent', 'src/auth.ts')).resolves.toEqual([]);
+    expect(stub.paths).toEqual([]);
+  });
+
+  it('returns [] for non-2xx responses and malformed JSON', async () => {
+    for (const response of [
+      () => new Response('nope', { status: 503 }),
+      () => new Response('not-json', { status: 200 }),
+    ]) {
+      const { core, stub } = await knownCore((url) =>
+        url.endsWith('/recall-hints') ? response() : new Response('', { status: 200 }),
+      );
+
+      await expect(core.recallHints('recall-known', 'src/auth.ts', 1)).resolves.toEqual([]);
+      expect(stub.paths).toEqual([`/api/${SLUG}/sessions/recall-known/recall-hints`]);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('returns [] when the recall deadline aborts the request', async () => {
+    const { core, stub } = await knownCore((url, init) => {
+      if (!url.endsWith('/recall-hints')) return new Response('', { status: 200 });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('recall deadline', 'TimeoutError')),
+          { once: true },
+        );
+      });
+    });
+
+    await expect(core.recallHints('recall-known', 'src/auth.ts', 5)).resolves.toEqual([]);
+    expect(stub.paths).toEqual([`/api/${SLUG}/sessions/recall-known/recall-hints`]);
   });
 });

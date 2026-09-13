@@ -347,6 +347,26 @@ describe('RembricPlugin handlers', () => {
     }
   });
 
+  it('chat.message merges a non-empty server recall result into the host output', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/recall-hints')) {
+        return new Response(JSON.stringify({ lines: ['src/opencode-recall.ts: saved handoff'] }), {
+          status: 200,
+        });
+      }
+      return new Response('', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const output = { parts: [{ type: 'text', text: 'fix src/opencode-recall.ts' }], message: {} };
+
+    await handlers['chat.message']!({ sessionID: 's-recall-merge' } as never, output as never);
+
+    expect(output.parts.some((part) => part.text === 'src/opencode-recall.ts: saved handoff')).toBe(
+      true,
+    );
+  });
+
   it('chat.message emits the sessionId line + the session-opening line, once, on a newly created session', async () => {
     fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

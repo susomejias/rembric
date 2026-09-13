@@ -765,6 +765,24 @@ describe('session registration and nudges', () => {
     expect(second.message).toBeUndefined();
   });
 
+  it('merges a non-empty server recall result into the start-of-turn message', async () => {
+    const sessionId = 'pi-session-recall-merge';
+    const harness = await startedHarness(sessionId);
+    await harness.fire('before_agent_start', { prompt: 'seed this session' });
+    const saved = await callThroughExtension(toolNamed(harness, 'memory.save'), {
+      type: 'project',
+      title: 'Pi recall handoff',
+      content: 'The implementation lives in src/pi-recall-merge.ts.',
+    });
+    expect(saved.refused).toBe(false);
+
+    const result = (await harness.fire('before_agent_start', {
+      prompt: 'fix src/pi-recall-merge.ts',
+    })) as { message?: { content: string } };
+
+    expect(result.message?.content).toContain('src/pi-recall-merge.ts: Pi recall handoff');
+  });
+
   it('names only registered tools in every string it injects for the model', async () => {
     const sessionId = 'pi-session-guidance';
     const harness = await startedHarness(sessionId);
