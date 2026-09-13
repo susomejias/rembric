@@ -438,9 +438,10 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "SAVE: On each real fix/decision/discovery/config/pattern/preference, "
             "call memory.save(title≤100, content); evolving topic: topic_key, "
             "candidates[]→memory.judge.\n"
-            "RECALL: Starting/resuming, after /compact, or asked what did we do: "
-            "call memory.context (memory.search for keywords) if you lack prior "
-            "detail.\n"
+            "RECALL: before work in an area untouched this session, before diagnosing "
+            "a possibly-known error, before building something that may already exist "
+            "— or asked to recall: call memory.context (memory.search for keywords) "
+            "if you lack prior detail.\n"
             "SUMMARIZE: Before ending each working turn with real work, MUST call "
             "memory.session_summary({title≤100, summary≤10000}) — The `##` "
             "sections you send REPLACE; the ones you omit STAY. Current state "
@@ -494,7 +495,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
 
         opening_due = (
             session_id is not None
-            and self._session_created.get(session_id) is True
+            and bool(self._session_created.get(session_id))
             and session_id not in self._session_opening_emitted
         )
         pending_lines = self._pending_lines.pop(session_id, []) if session_id else []

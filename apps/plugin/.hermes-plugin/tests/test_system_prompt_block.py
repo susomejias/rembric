@@ -40,10 +40,16 @@ class SystemPromptBlockTest(unittest.TestCase):
         )
         self.assertNotIn("Goal · Accomplished · Decisions+why", block)
 
-    def test_includes_memory_context_post_compact_clause(self) -> None:
+    def test_includes_the_proactive_recall_wording(self) -> None:
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertIn("memory.context", block)
+        self.assertIn(
+            "RECALL: before work in an area untouched this session, before diagnosing "
+            "a possibly-known error, before building something that may already exist "
+            "— or asked to recall: call memory.context (memory.search for keywords) "
+            "if you lack prior detail.",
+            block,
+        )
 
     def test_includes_proactive_save_flow(self) -> None:
         provider = self.mod.RembricMemoryProvider()
