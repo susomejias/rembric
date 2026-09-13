@@ -62,6 +62,28 @@ The emitted line SHALL be represented in the shared nudge fixtures with a byte b
 - **THEN** it SHALL emit nothing on stdout and SHALL exit 0
 - **AND** the fixed-line hooks' output SHALL be unaffected by its presence or absence
 
+#### Scenario: The hints hook abandons the request within the turn-start budget
+
+- **GIVEN** a server that accepts the connection and never responds
+- **WHEN** `prompt-hints.sh` runs on a user prompt naming an indexed entity
+- **THEN** it SHALL abandon the request within the turn-start budget this capability publishes, not within the background-POST budget the shared helper defaults to
+- **AND** the elapsed time SHALL be asserted against that published number, because failing open is not sufficient on this path: the hook already exited 0 and emitted nothing while holding the user's turn for 3022 ms, measured, which is 15× the published budget
+- **AND** the budget SHALL be set at this call site, since the value is inherited from a shared helper that legitimately defaults to the longer background budget for every other caller
+
+#### Scenario: The hints hook redacts with the same semantics as every other transport
+
+- **WHEN** `prompt-hints.sh` processes a prompt whose `<private>` span is written with mixed-case tags
+- **THEN** the span SHALL be replaced before the prompt leaves the process, matching the shared redaction fixtures that pin the JS, bash and Python arms together
+- **AND** the hook SHALL reach that behaviour through the one canonical bash implementation rather than a local re-implementation, since a second implementation is what allowed the case-insensitivity the fixtures require to be lost on this path
+
+#### Scenario: The emitted request body is valid JSON at the truncation boundary
+
+- **GIVEN** a prompt whose 500-character window ends inside a character that JSON escaping expands
+- **WHEN** `prompt-hints.sh` builds the request body
+- **THEN** the body SHALL be valid JSON
+- **AND** the window SHALL be measured against the prompt rather than against its escaped form, so the amount of prompt sent does not vary with how much punctuation it contains
+- **AND** a control case one character shorter SHALL also be valid, so the assertion distinguishes a real boundary defect from a broken probe
+
 ### Requirement: The token budget MUST be stated per firing turn and amortised over the cadence window, in a pinned unit, and asserted in the shared fixtures
 
 Every token figure in this capability SHALL be measured with one pinned proxy: **UTF-8 bytes ÷ 4**, over the stored fixture string and therefore EXCLUDING any trailing newline the emitting script adds. Totals for a whole turn, where a script emits several lines, SHALL include one newline per emitted line — that is the only place the newline counts. `sessionIdTemplate` is measured rendered with a 36-character UUID session id.

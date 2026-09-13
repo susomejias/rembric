@@ -32,9 +32,13 @@ Clients SHALL call this endpoint at turn START, before the model responds, and m
 - **THEN** the entity recall hints for X SHALL be present in the model's context
 - **AND** they SHALL NOT appear only after the model's first response token (no one-turn delay)
 
-### Requirement: Entity recall lines MUST be filtered to active-learning memory types
+### Requirement: Entity recall lines MUST be filtered to active-learning memory types, and filtered before the row limit
 
 The server SHALL filter entity-matched memories to `type IN ('project', 'feedback', 'procedural')` before composing recall lines. Reference-type memories SHALL NOT be surfaced as proactive recall.
+
+**The filter SHALL be applied as a query predicate, not to an already-bounded page.** The entity lookup bounds its result with a row limit, so filtering afterwards makes the limit mean "the newest N rows of any type, minus the ineligible ones" — which returns nothing whenever the newest N happen to be ineligible, even though the entity has an eligible memory immediately behind them. The admitted type set SHALL therefore reach the query, so the limit bounds rows that already passed the filter.
+
+The server SHALL additionally read only `status = 'active'` rows on this path. The entity lookup's own default admits `superseded`, which is correct where a topic's history is the point and wrong for a hint: a `topic_key` supersede exists to make exactly one row the current take, so surfacing a superseded row beside its successor gives the model two answers and no way to tell which is live.
 
 #### Scenario: A file entity matches both a project memory and a reference memory
 
@@ -43,11 +47,29 @@ The server SHALL filter entity-matched memories to `type IN ('project', 'feedbac
 - **THEN** the recall line SHALL include the `project` memory's title
 - **AND** the recall line SHALL NOT include the `reference` memory's title
 
+#### Scenario: An eligible memory older than the newest matches still surfaces
+
+- **GIVEN** entity `config/deploy.yaml` linked to one `project` memory and to two `reference` memories, both created AFTER the project memory
+- **WHEN** the recall-hints endpoint extracts that entity
+- **THEN** the response SHALL contain a line naming the `project` memory's title
+- **AND** the eligible memory SHALL NOT be displaced by the newer ineligible ones, because the type filter ran before the row limit rather than after it
+
+#### Scenario: A superseded take is not surfaced beside its successor
+
+- **GIVEN** two memories saved under the same `topic_key`, both linked to entity `config/deploy.yaml`, so the earlier is `superseded` and the later is `active`
+- **WHEN** the recall-hints endpoint extracts that entity
+- **THEN** the recall line SHALL name the `active` memory's title
+- **AND** it SHALL NOT name the `superseded` memory's title
+
 ### Requirement: Entity recall lines MUST be deduped per session
 
-Each entity SHALL be surfaced at most once per session. The server SHALL maintain a per-session set of entities already recalled (transient, in-memory, same spirit as the session-nudges state); an entity in that set SHALL be skipped on subsequent turns even if the prompt mentions it again.
+Each entity SHALL be surfaced at most once per session. The server SHALL maintain a per-session set of entities already recalled; an entity in that set SHALL be skipped on subsequent turns even if the prompt mentions it again.
 
 Sessions without prior dedupe state SHALL get no lines from dedup — the first mention of any entity is surfaced normally.
+
+**The set SHALL be keyed on the entity's `(kind, value)` pair, not on the value alone.** The extractor admits the same literal under more than one kind, and suppressing every kind on the strength of one match hides a memory the prompt legitimately addressed.
+
+**The state is process-local and transient, and this change owns both of its bounds.** It SHALL NOT be stored on the session row: unlike the nudge clocks, which are columns because a cadence must survive a restart to stay honest, a lost dedupe set costs one repeated hint, which does not justify a migration on an append-only table. Being process-local means nothing reclaims it automatically, so the server SHALL release a session's set when that session ends or is soft-deleted, and SHALL bound the number of sessions retained, evicting the least recently used beyond that bound. A restart clears the state and each entity surfaces once more, which is accepted.
 
 #### Scenario: The same entity mentioned in two consecutive turns
 
@@ -63,9 +85,32 @@ Sessions without prior dedupe state SHALL get no lines from dedup — the first 
 - **THEN** turn 5's response SHALL contain a recall line for `src/utils/cache.ts` only
 - **AND** `src/auth/handler.ts` SHALL be skipped
 
+#### Scenario: The same literal under two kinds is deduped independently
+
+- **GIVEN** a session in which a literal was recalled under one entity kind
+- **WHEN** a later prompt admits that same literal under a different kind, with an eligible memory behind it
+- **THEN** the second kind's first appearance SHALL still be surfaced
+- **AND** suppressing it SHALL fail an assertion, because the key is the `(kind, value)` pair rather than the value
+
+#### Scenario: Dedupe state does not outlive its session
+
+- **GIVEN** a session that has recalled at least one entity
+- **WHEN** that session ends or is soft-deleted
+- **THEN** its dedupe set SHALL be released
+- **AND** a subsequent request naming the same entity under a NEW session SHALL surface it, since dedupe is per session
+
+#### Scenario: Retained dedupe state is bounded
+
+- **GIVEN** more distinct sessions have used recall than the retention bound admits
+- **WHEN** the bound is exceeded
+- **THEN** the least recently used session's set SHALL be evicted
+- **AND** the number of retained sets SHALL NOT exceed the bound, so a long-lived process cannot accumulate dedupe state without limit
+
 ### Requirement: Per-turn entity recall MUST be bounded
 
 The server SHALL return at most 3 entity recall lines per turn. Each line SHALL carry the inline titles of the top-2 matched memories for that entity. The total token cost of all entity recall lines SHALL NOT exceed approximately 200 tokens.
+
+**The line cap bounds the response; the lookup work behind it SHALL carry its own bound.** Extraction admits up to 250 entities from one text, and a prompt naming many indexed identifiers that all resolve to ineligible memories performs one indexed lookup per entity and produces no line at all, so the line cap never engages. The server SHALL therefore probe at most a fixed ceiling of distinct entities per request, in extraction order, and SHALL stop probing as soon as the line cap is reached.
 
 #### Scenario: A prompt mentions five entities
 
@@ -73,6 +118,13 @@ The server SHALL return at most 3 entity recall lines per turn. Each line SHALL 
 - **THEN** the response SHALL contain at most 3 entity recall lines
 - **AND** each line SHALL carry at most 2 memory titles
 - **AND** entities beyond the first 3 SHALL be silently dropped (they will surface on a later turn if the entity set shifts)
+
+#### Scenario: A prompt naming many indexed identifiers bounds the work, not only the answer
+
+- **WHEN** a prompt names more distinct indexed entities than the probe ceiling admits, and none of them has an eligible memory behind it
+- **THEN** the server SHALL perform at most the ceiling's worth of entity lookups
+- **AND** the response SHALL be an empty `lines` array
+- **AND** raising the number of named entities beyond the ceiling SHALL NOT raise the number of lookups performed
 
 ### Requirement: Server-side usage counters MUST track tool-call frequency
 
@@ -96,6 +148,32 @@ Counters SHALL be exposed on an internal debug surface (e.g. `GET /api/:slug/deb
 - **GIVEN** a token whose `memory.search` counter is 10
 - **WHEN** the server restarts
 - **THEN** the counter SHALL be 0
+
+### Requirement: The recall path MUST count its own firing
+
+The server SHALL count, per token, the recall-hints requests it served, how many of those returned at least one line, and how many lines it served in total. These SHALL be reported on the same admin-authorized debug surface as the tool-call counters, under the same authorization.
+
+Tool-call counters alone cannot answer the question this change exists to answer. They count what the model did, so a session in which recall never fired and one in which it fired on every turn produce the same numbers, and a flat `memory.search` count is then unreadable: it could mean the hints do not help, or it could mean they never appeared. The three recall numbers supply the missing denominator — exposure, the hit rate the entity approach actually achieves on real prompts, and the token cost being paid for it.
+
+#### Scenario: A prompt with no entities counts as a request that served nothing
+
+- **WHEN** the recall-hints endpoint answers a prompt from which no entity is extracted
+- **THEN** the request counter for that token SHALL increment
+- **AND** the non-empty-response counter SHALL NOT increment
+- **AND** the lines-served counter SHALL be unchanged
+
+#### Scenario: A request that returns lines counts all three
+
+- **WHEN** the recall-hints endpoint answers a prompt with two eligible matched entities
+- **THEN** the request counter SHALL increment by one
+- **AND** the non-empty-response counter SHALL increment by one
+- **AND** the lines-served counter SHALL increase by the number of lines actually returned
+
+#### Scenario: The recall counters are admin-only, like the tool counters
+
+- **WHEN** a non-admin token requests the debug surface
+- **THEN** the request SHALL be refused
+- **AND** no recall counter value SHALL appear in the response
 
 ### Requirement: The recall-hints endpoint SHALL be resilient to failure
 

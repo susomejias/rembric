@@ -45,3 +45,5 @@ Three gaps compound: (1) the `memory.search` tool description lists only reactiv
 - `apps/server/src/test/` — hints endpoint unit tests (entity extraction, dedup, no-persistence); zero-delay integration test (hint lines present in the SAME turn response to the model).
 
 **Invariants touched:** append-only (no prompt persistence — the hints endpoint extracts and discards the prompt within the request handler, never writes to any table); service-layer scope (entity extraction respects project scope via `projectScope()`); no new SQL outside `apps/server/src/db/` (entity tables already exist; dedupe state is in-memory/transient). Nudge text changes stay in sync with `nudge-fixtures.json` and `prompt-search.sh` conventions.
+
+**Incidental non-behavioural edits.** This change also carries the shell reformatting in `_api.sh`, the ternary inversions in `memory-tools.ts`, the OAuth `try/catch` in `http.ts`, and the Pi JSON helper. They are unrelated to proactive recall: the shell formatting is riskier to churn back, and the error-path wrappers change only a message, not a contract.

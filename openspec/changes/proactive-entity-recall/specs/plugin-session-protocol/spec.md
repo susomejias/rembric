@@ -119,3 +119,18 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **GIVEN** a core with no recorded prompt for the current turn
 - **WHEN** the client reaches the hints call site
 - **THEN** it SHALL NOT call the recall-hints endpoint
+
+#### Scenario: The core function is tested directly, not only through its call sites
+
+- **WHEN** the invariant set for this capability is evaluated
+- **THEN** a test SHALL call the core's `recallHints` entry point directly and assert its request path, its redacted and truncated body, its return value on a populated response, and its empty return on each failure mode it declares
+- **AND** the failure modes asserted SHALL include a non-2xx status, a timeout, a malformed body, an unregistered session, and a sub-agent session
+- **AND** a call-site test whose transport returns an empty body SHALL NOT count as coverage of this function, because every declared failure mode and the success path collapse to the same empty array through such a transport
+
+#### Scenario: Each client's merge of the returned lines is exercised with real content
+
+- **GIVEN** a client whose transport is configured to return a non-empty `lines` array for the recall-hints path
+- **WHEN** that client's turn-start handler runs
+- **THEN** the returned lines SHALL be observable in the artifact that client uses to reach the model
+- **AND** this SHALL be asserted for every client that carries this mechanism, since the merge branch is the one step the server's own tests cannot reach
+- **AND** a suite in which the transport always answers empty SHALL be treated as not covering this scenario at all, rather than as covering it trivially

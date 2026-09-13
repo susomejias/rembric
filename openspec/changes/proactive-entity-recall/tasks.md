@@ -59,3 +59,71 @@
 - [x] 6.6 **IMPLEMENTED:** Sync recall-hints endpoint — this was a previously considered alternative for future upgrade; it is now the primary transport (D1′), implemented as the `POST /sessions/:id/recall-hints` endpoint in phase 2.
 - [x] 6.7 **DEFERRED:** Database-persisted usage counters (promoted from in-memory if long-term analytics needed).
 - [x] 6.8 **DEFERRED:** Dashboard display of usage counters (optional follow-up).
+
+## 7. Correctness fixes found after apply (review + `sdd-verify` FAIL)
+
+Sources: three CRITICAL findings in `verify-report.md`, and four defects reproduced by direct probe
+during branch review. Every item here has executed evidence behind it, not a reading.
+
+- [x] 7.1 `findMemoriesByEntity` accepts the whole admitted type set (`types`, via `inArray`)
+      alongside the existing single `type`, so the predicate reaches SQL and `LIMIT` bounds rows
+      that already passed it (D4). Existing callers keep their current behaviour.
+- [x] 7.2 One shared service-layer entity-relevance function, consumed by BOTH `memory.context`'s
+      focus pass and the recall path, so the two cannot drift apart again. The admitted type set
+      and the status are PARAMETERS, not constants baked into the helper: `memory.context` keeps
+      its current behaviour exactly (every type, non-archived, its own limit) and recall passes the
+      learning types with `status: 'active'`. Folding recall's narrower filter into the shared
+      helper as a default would silently narrow the relevance channel of `memory.context`, which is
+      a regression, not a fix — assert `memory.context`'s existing behaviour is unchanged.
+- [x] 7.3 Recall passes `status: 'active'` (D4b) and the active-learning `types` set (D4).
+      Probe evidence: a `project` memory behind two newer `reference` memories returned no lines;
+      two rows under one `topic_key` returned the superseded take beside its successor.
+- [x] 7.4 Dedupe keyed on `(kind, value)`; released on session end and soft-delete; retained
+      sessions bounded with least-recently-used eviction (D3).
+- [x] 7.5 Bound the per-request entity probe (D5).
+- [x] 7.6 The recall-hints route authorizes `read`, not `write` — it persists nothing, and
+      `/memory/recall` next to it already authorizes `read`.
+- [x] 7.7 CRITICAL-1: restore the `sessionId` reinforcement clause to the `instructions.ts` BASE
+      block, dropped by commit `88fc639`. Measured room: 968/1000 unscoped, 906/1000 scoped, so no
+      component had to go. Remove the whitespace-only line the same rewrite introduced. Add one
+      separate assertion per enumerated component, including the clause that was lost unguarded.
+- [x] 7.8 CRITICAL-2: pin the bash hints request to the turn-start budget at its own call site.
+      Measured 3022 ms against an unresponsive server versus the 200 ms this change published.
+      Assert the elapsed bound, not merely that the hook exits 0.
+- [x] 7.9 CRITICAL-3: test the core `recallHints` directly (request path, redacted/truncated body,
+      populated response, and each declared failure mode), and exercise each carrying client's
+      merge with a transport that returns real lines. Today every such suite answers with an empty
+      body, so success and every failure mode collapse to the same empty array.
+- [x] 7.10 Bash hook: source the canonical redaction helper, apply the order redact → cut 500 →
+      escape, and delete the local awk block (D8). Probe evidence: a mixed-case `<private>` span
+      survived, and a 499-character prompt followed by a quote produced an unterminated JSON body
+      while a 498-character control stayed valid.
+- [x] 7.11 Recall counters: requests, non-empty responses, lines served — on the existing instance
+      and the existing admin-gated route (D6).
+- [x] 7.12 Propagate the recall wording to the Hermes system-prompt block, which
+      `hermes-agent-plugin` requires to stay in step with the server's instructions block. This is
+      the instructions text only; the per-turn hints channel for Hermes stays a Non-Goal.
+- [x] 7.13 Correct the stale headroom comment beside `SEARCH_DESCRIPTION` (says 1816/1900; the
+      CI-pinned measurement is 1873/1900) and the adjacent comment that attributes `confirmSwitch`
+      to `memory.save`'s description when it is documented in `project.use`'s.
+- [x] 7.14 Account for the edits that rode along without belonging to this change: the shell
+      reformatting in `_api.sh`, the ternary inversions in `memory-tools.ts`, the OAuth `try/catch`
+      in `http.ts`, and the Pi JSON helper. Name each in the proposal's Impact section as an
+      incidental non-behavioural edit, rather than reverting them: re-formatting a shell file back
+      is a larger and riskier diff than the one it would undo, and the two error-path wrappers
+      change only a message, not a contract. The reviewer's problem is an unexplained diff, and
+      naming them solves that at a fraction of the cost of churning them.
+- [x] 7.15 Every scenario added to the delta specs in this pass gets a test, each proven by
+      mutation (`scripts/mutate.mjs`), restoring each file byte-identically after the run. Five
+      guards reddened their named test: the `types` predicate, the `status` predicate, `probeMax`,
+      the `(kind, value)` dedupe key, and the hook's 200 ms pin. Not caught, and reported as such:
+      that same dedupe-key mutation does not redden the two-call dedupe test, which repeats one key
+      and so cannot observe its composition. The kind axis is covered by the test that surfaces the
+      same entity value under different kinds. The per-guard mapping and the exact failure messages
+      are in this commit's message.
+- [x] 7.16 Gates: `pnpm run typecheck`, `pnpm run lint`, the full suite, `openspec validate
+proactive-entity-recall --strict`, `pnpm run check:spec-provenance`, and the delta-freshness
+      check. Note for whoever runs the suite: `apps/plugin/mcp-bridge/bridge.test.ts` carries a
+      pre-existing teardown race that makes the process exit 1 on roughly two runs in three with
+      all 3070 named tests passing. It is untouched by this change; cross-check the named-test
+      count against the exit code rather than trusting either alone.
