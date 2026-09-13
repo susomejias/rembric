@@ -6,6 +6,8 @@ trap 'exit 0' ERR
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh
 source "${SCRIPT_DIR}/_api.sh"
+# shellcheck source=./_transcript.sh
+source "${SCRIPT_DIR}/_transcript.sh"
 
 INPUT=""
 if [ ! -t 0 ]; then
@@ -24,22 +26,16 @@ if [ -z "$SLUG" ] || [ -z "$SESSION_ID" ] || [ -z "$PROMPT" ]; then
   exit 0
 fi
 
-ESCAPED_PROMPT="$(rembric_json_escape "$PROMPT")"
-REDACTED_PROMPT="$(printf '%s' "$ESCAPED_PROMPT" |
-  awk '{
-    s = $0; out = ""
-    while ((i = index(s, "<private>")) > 0) {
-      out = out substr(s, 1, i - 1) "[REDACTED]"
-      s = substr(s, i + 9)
-      j = index(s, "</private>")
-      if (j == 0) { s = ""; break }
-      s = substr(s, j + 10)
-    }
-    print out s
-  }')"
+# Keep the ordering shared with transcript handling: redact raw text first
+# (case-insensitive, multiline, unclosed spans), bound what can leave the
+# process, then encode the bounded value for its JSON envelope.
+REDACTED_PROMPT="$(rembric_redact_private "$PROMPT")"
 REDACTED_PROMPT="${REDACTED_PROMPT:0:500}"
 [ -z "$REDACTED_PROMPT" ] && exit 0
+ESCAPED_PROMPT="$(rembric_json_escape "$REDACTED_PROMPT")"
 
-rembric_recall_hints "/api/${SLUG}/sessions/${SESSION_ID}/recall-hints" \
-  "{\"prompt\":\"${REDACTED_PROMPT}\"}"
+# This hook runs at turn start, so it alone gets the 200ms budget; all other
+# shared API calls retain `_api.sh`'s 3s default.
+REMBRIC_POST_MAX_TIME=0.2 rembric_recall_hints "/api/${SLUG}/sessions/${SESSION_ID}/recall-hints" \
+  "{\"prompt\":\"${ESCAPED_PROMPT}\"}"
 exit 0

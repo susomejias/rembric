@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,12 +19,18 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
   let capturedBody = '';
   let capturedPath = '';
   let respondWith: () => { status: number; body: string };
+  let leaveUnanswered = false;
+  let responseDelayMs = 0;
+  let heldResponses = new Set<ServerResponse>();
   let baseUrl = '';
   let projectDir = '';
 
   beforeEach(async () => {
     capturedBody = '';
     capturedPath = '';
+    leaveUnanswered = false;
+    responseDelayMs = 0;
+    heldResponses = new Set();
     respondWith = () => ({ status: 200, body: JSON.stringify({ ok: true, lines: [HINT] }) });
     hintServer = createServer((req, res) => {
       let body = '';
@@ -32,10 +38,18 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
       req.on('end', () => {
         capturedBody = body;
         capturedPath = req.url ?? '';
-        const { status, body: out } = respondWith();
-        res.statusCode = status;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(out);
+        if (leaveUnanswered) {
+          heldResponses.add(res);
+          return;
+        }
+        const respond = () => {
+          const { status, body: out } = respondWith();
+          res.statusCode = status;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(out);
+        };
+        if (responseDelayMs > 0) setTimeout(respond, responseDelayMs);
+        else respond();
       });
     });
     await new Promise<void>((resolve) => hintServer.listen(0, '127.0.0.1', resolve));
@@ -46,6 +60,7 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
   });
 
   afterEach(() => {
+    for (const response of heldResponses) response.destroy();
     hintServer.close();
     rmSync(projectDir, { recursive: true, force: true });
   });
@@ -91,17 +106,29 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     expect(stdout).toContain(HINT);
   });
 
-  it('redacts through end-of-text on an unclosed span and caps at 500 chars', async () => {
+  it('uses the canonical case-insensitive redaction before truncating and JSON escaping', async () => {
     await run(
       JSON.stringify({
         session_id: 's-2',
-        prompt: `head <private>tail flows on ${'x'.repeat(600)}`,
+        prompt: 'head <PRIVATE>secret\nstill private</pRiVaTe> after "quoted"',
+      }),
+      withServer(),
+    );
+    const parsed = JSON.parse(capturedBody) as { prompt: string };
+    expect(parsed.prompt).toBe('head [REDACTED] after "quoted"');
+    expect(parsed.prompt.length).toBeLessThanOrEqual(500);
+  });
+
+  it('redacts through end-of-text on an unclosed case-insensitive span', async () => {
+    await run(
+      JSON.stringify({
+        session_id: 's-2-unclosed',
+        prompt: `head <PrIvAtE>tail flows on ${'x'.repeat(600)}`,
       }),
       withServer(),
     );
     const parsed = JSON.parse(capturedBody) as { prompt: string };
     expect(parsed.prompt).toBe('head [REDACTED]');
-    expect(parsed.prompt.length).toBeLessThanOrEqual(500);
   });
 
   it('makes no request without server credentials, and still exits 0', async () => {
@@ -122,6 +149,25 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     );
     expect(stdout).not.toContain(HINT);
     expect(status).toBe(0);
+  });
+
+  it('uses the 200ms start-of-turn deadline instead of the shared 3s POST default', async () => {
+    // A 260ms response is deliberately over the published 200ms budget but far
+    // below the 1s process-overhead allowance. A larger timeout accepts HINT;
+    // timing only bounds the child lifetime, so scheduler overhead cannot make
+    // the deadline assertion flaky.
+    responseDelayMs = 260;
+    const started = performance.now();
+    const { stdout, status } = await run(
+      JSON.stringify({ session_id: 's-deadline', prompt: 'fix src/auth/handler.ts' }),
+      { ...withServer(), REMBRIC_POST_MAX_TIME: undefined },
+    );
+    const elapsed = performance.now() - started;
+
+    expect(capturedPath).toBe('/api/hint-test-proj/sessions/s-deadline/recall-hints');
+    expect(stdout).toBe('');
+    expect(status).toBe(0);
+    expect(elapsed).toBeLessThan(1_000);
   });
 
   it('skips the request entirely when the prompt is missing', async () => {
