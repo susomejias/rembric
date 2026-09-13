@@ -1260,7 +1260,7 @@ describe('createApiRouter', () => {
       type: 'project' | 'feedback' | 'procedural' | 'reference' | 'user';
       title: string;
       content: string;
-    }): void {
+    }) {
       const m = memory.save(input, projectScope(projectId));
       createRepositories(db.handle.db).entities.linkMemory(
         m.id,
@@ -1268,6 +1268,7 @@ describe('createApiRouter', () => {
         extractEntities(m.title, m.content),
         m.createdAt,
       );
+      return m;
     }
 
     it('returns empty lines for an empty prompt', async () => {
@@ -1470,6 +1471,258 @@ describe('createApiRouter', () => {
       for (const line of lines) {
         expect(line).not.toContain('API reference');
       }
+    });
+
+    it('surfaces an eligible memory behind two newer reference memories for the same entity', async () => {
+      seedEntityMemory({
+        type: 'project',
+        title: 'eligible handoff',
+        content: 'project work for src/recall-eligible.ts',
+      });
+      seedEntityMemory({
+        type: 'reference',
+        title: 'newer reference one',
+        content: 'reference for src/recall-eligible.ts',
+      });
+      seedEntityMemory({
+        type: 'reference',
+        title: 'newer reference two',
+        content: 'reference for src/recall-eligible.ts',
+      });
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-eligible-behind-references' },
+      });
+
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-eligible-behind-references/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: { prompt: 'fix src/recall-eligible.ts' },
+        },
+      );
+
+      expect(r.status).toBe(200);
+      expect(r.body.lines).toContain('src/recall-eligible.ts: eligible handoff');
+      expect((r.body.lines as string[]).join('\n')).not.toContain('newer reference');
+    });
+
+    it('excludes superseded memories from recall hints', async () => {
+      const stale = seedEntityMemory({
+        type: 'project',
+        title: 'stale implementation',
+        content: 'old implementation in src/recall-superseded.ts',
+      });
+      db.handle.raw.prepare("UPDATE memory SET status = 'superseded' WHERE id = ?").run(stale.id);
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-superseded' },
+      });
+
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-superseded/recall-hints`,
+        { token: adminToken.plaintext, body: { prompt: 'fix src/recall-superseded.ts' } },
+      );
+
+      expect(r.status).toBe(200);
+      expect(r.body.lines).toEqual([]);
+    });
+
+    it('treats the same entity value under different kinds as separate recall matches', async () => {
+      const entities = createRepositories(db.handle.db).entities;
+      const error = memory.save(
+        { type: 'project', title: 'error classification', content: 'classified failure' },
+        projectScope(projectId),
+      );
+      const environment = memory.save(
+        { type: 'project', title: 'environment declaration', content: 'configured variable' },
+        projectScope(projectId),
+      );
+      entities.linkMemory(
+        error.id,
+        projectId,
+        [{ kind: 'error_code', value: 'PERMISSION_DENIED' }],
+        error.createdAt,
+      );
+      entities.linkMemory(
+        environment.id,
+        projectId,
+        [{ kind: 'env_var', value: 'PERMISSION_DENIED' }],
+        environment.createdAt,
+      );
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-kind-value' },
+      });
+
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-kind-value/recall-hints`,
+        { token: adminToken.plaintext, body: { prompt: '$PERMISSION_DENIED' } },
+      );
+
+      expect(r.status).toBe(200);
+      expect((r.body.lines as string[]).join('\n')).toContain('error classification');
+      expect((r.body.lines as string[]).join('\n')).toContain('environment declaration');
+    });
+
+    it('releases recall dedupe state on end and soft-delete, so a resumed or restored session can recall again', async () => {
+      seedEntityMemory({
+        type: 'project',
+        title: 'releasable recall',
+        content: 'handoff for src/recall-release.ts',
+      });
+      const app = makeApp();
+      const recall = (id: string) =>
+        call(app, 'POST', `/${projectSlug}/sessions/${id}/recall-hints`, {
+          token: adminToken.plaintext,
+          body: { prompt: 'fix src/recall-release.ts' },
+        });
+
+      for (const id of ['sess-recall-end-release', 'sess-recall-delete-release']) {
+        await call(app, 'POST', `/${projectSlug}/sessions`, {
+          token: adminToken.plaintext,
+          body: { id },
+        });
+        expect((await recall(id)).body.lines).not.toEqual([]);
+      }
+
+      agentSessions.end('sess-recall-end-release', { tokenId: adminToken.id });
+      agentSessions.resume('sess-recall-end-release', { tokenId: adminToken.id });
+      expect((await recall('sess-recall-end-release')).body.lines).not.toEqual([]);
+
+      agentSessions.softDelete('sess-recall-delete-release', { adminBypass: true });
+      agentSessions.undelete('sess-recall-delete-release', { adminBypass: true });
+      expect((await recall('sess-recall-delete-release')).body.lines).not.toEqual([]);
+    });
+
+    it('refreshes a recall-dedupe session before evicting the least-recently-used one at the 500-session ceiling', async () => {
+      seedEntityMemory({
+        type: 'project',
+        title: 'LRU recall handoff',
+        content: 'details for src/recall-lru.ts',
+      });
+      const app = makeApp();
+      const recall = (id: string) =>
+        call(app, 'POST', `/${projectSlug}/sessions/${id}/recall-hints`, {
+          token: adminToken.plaintext,
+          body: { prompt: 'fix src/recall-lru.ts' },
+        });
+
+      for (let i = 0; i < 500; i += 1) {
+        const id = `sess-recall-lru-${i}`;
+        agentSessions.ensure({ id, tokenId: adminToken.id, projectId, agent: 'probe' });
+        expect((await recall(id)).body.lines).not.toEqual([]);
+      }
+
+      // Refresh session 0. FIFO would still evict it when the next session
+      // enters; LRU must retain its dedupe set and evict untouched session 1.
+      expect((await recall('sess-recall-lru-0')).body.lines).toEqual([]);
+      agentSessions.ensure({
+        id: 'sess-recall-lru-500',
+        tokenId: adminToken.id,
+        projectId,
+        agent: 'probe',
+      });
+      expect((await recall('sess-recall-lru-500')).body.lines).not.toEqual([]);
+
+      expect((await recall('sess-recall-lru-0')).body.lines).toEqual([]);
+      expect((await recall('sess-recall-lru-1')).body.lines).not.toEqual([]);
+    });
+
+    it('stops probing after 20 entities even when an eligible entity sits beyond them', async () => {
+      for (let i = 0; i < 20; i += 1) {
+        seedEntityMemory({
+          type: 'reference',
+          title: `reference probe ${i}`,
+          content: `reference only at src/recall-probe-${i}/mod.ts`,
+        });
+      }
+      seedEntityMemory({
+        type: 'project',
+        title: 'probe ceiling handoff',
+        content: 'eligible only at src/recall-probe-20/mod.ts',
+      });
+      const app = makeApp();
+      await call(app, 'POST', `/${projectSlug}/sessions`, {
+        token: adminToken.plaintext,
+        body: { id: 'sess-recall-probe-max' },
+      });
+
+      const r = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/sess-recall-probe-max/recall-hints`,
+        {
+          token: adminToken.plaintext,
+          body: {
+            prompt: Array.from({ length: 21 }, (_, i) => `src/recall-probe-${i}/mod.ts`).join(' '),
+          },
+        },
+      );
+
+      expect(r.status).toBe(200);
+      expect(r.body.lines).toEqual([]);
+    });
+
+    it('records recall debug counters while permitting a read-only session token to recall', async () => {
+      seedEntityMemory({
+        type: 'project',
+        title: 'read-only recall handoff',
+        content: 'details for src/recall-read-only.ts',
+      });
+      const readOnly = tokens.create({
+        name: 'recall-read-only',
+        project: projects.getById(projectId)!,
+        access: 'read',
+      });
+      const sessionId = 'sess-recall-read-only';
+      agentSessions.ensure({
+        id: sessionId,
+        tokenId: readOnly.token.id,
+        projectId,
+        agent: 'probe',
+      });
+      const counters = new UsageCounters();
+      const app = createApiRouter({
+        agentSessions,
+        memory,
+        tokens,
+        projects,
+        usageCounters: counters,
+      });
+
+      const recalled = await call(
+        app,
+        'POST',
+        `/${projectSlug}/sessions/${sessionId}/recall-hints`,
+        {
+          token: readOnly.plaintext,
+          body: { prompt: 'fix src/recall-read-only.ts' },
+        },
+      );
+      expect(recalled.status).toBe(200);
+      expect(recalled.body.lines).not.toEqual([]);
+
+      const debug = await call(app, 'GET', `/${projectSlug}/debug/counters`, {
+        token: adminToken.plaintext,
+      });
+      expect(debug.body.recall).toEqual({
+        [readOnly.token.id]: { requests: 1, nonEmpty: 1, linesServed: 1 },
+      });
+      const forbidden = await call(app, 'GET', `/${projectSlug}/debug/counters`, {
+        token: readOnly.plaintext,
+      });
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.body.recall).toBeUndefined();
     });
 
     it('does not persist the prompt to any table', async () => {

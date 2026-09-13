@@ -19,8 +19,23 @@ export type CountedTool = (typeof COUNTED_TOOLS)[number];
 /** `{ [tokenId]: { [tool]: count } }` — the wire shape of the debug endpoint. */
 export type CounterSnapshot = Record<string, Partial<Record<CountedTool, number>>>;
 
+/**
+ * The recall path's own firing counts (proactive-recall, D6). Tool-call
+ * counters alone cannot tell "recall never fired" apart from "recall fired
+ * every turn" — these three supply the missing denominator: exposure
+ * (`requests`), hit rate (`nonEmpty`), and token cost (`linesServed`).
+ */
+export interface RecallCounterCell {
+  requests: number;
+  nonEmpty: number;
+  linesServed: number;
+}
+
+export type RecallSnapshot = Record<string, RecallCounterCell>;
+
 export class UsageCounters {
   private readonly byToken = new Map<string, Map<CountedTool, number>>();
+  private readonly recallByToken = new Map<string, RecallCounterCell>();
 
   /** Increment one (token, tool) cell. Called only on a SUCCESSFUL tool call. */
   record(tokenId: string, tool: CountedTool): void {
@@ -44,5 +59,24 @@ export class UsageCounters {
   /** The count for one cell; exported for test/inspection symmetry. */
   get(tokenId: string, tool: CountedTool): number {
     return this.byToken.get(tokenId)?.get(tool) ?? 0;
+  }
+
+  /** Record one recall-hints request's outcome for `tokenId`. */
+  recordRecall(tokenId: string, linesServed: number): void {
+    let cell = this.recallByToken.get(tokenId);
+    if (!cell) {
+      cell = { requests: 0, nonEmpty: 0, linesServed: 0 };
+      this.recallByToken.set(tokenId, cell);
+    }
+    cell.requests += 1;
+    if (linesServed > 0) cell.nonEmpty += 1;
+    cell.linesServed += linesServed;
+  }
+
+  /** Read-only view for the admin debug surface, same authorization as `snapshot()`. */
+  recallSnapshot(): RecallSnapshot {
+    const out: RecallSnapshot = {};
+    for (const [tokenId, cell] of this.recallByToken) out[tokenId] = { ...cell };
+    return out;
   }
 }
